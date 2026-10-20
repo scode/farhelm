@@ -135,7 +135,7 @@ async function findSessionIdByTitle(
  * block the delete that would have worked anyway.
  */
 async function cleanupSession(request: APIRequestContext, id: string) {
-  const deleted = await request.delete(`/api/sessions/${id}`);
+  const deleted = await request.delete(`/api/sessions/${encodeURIComponent(id)}`);
   if (!deleted.ok() && deleted.status() !== 404) {
     throw new Error(
       `cleanup: deleting session ${id} failed (${deleted.status()}): ${await deleted.text()}`,

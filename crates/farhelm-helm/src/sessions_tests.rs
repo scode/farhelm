@@ -219,7 +219,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
         .await
         .unwrap();
     let session: SessionInfo = serde_json::from_slice(&body).unwrap();
-    assert_eq!(session.id, "sess-1");
+    assert_eq!(session.id, harness.local_session_ref("sess-1"));
     assert_eq!(session.cwd, "/canonical/home/project");
 
     let local = rest_harness::local_id(&harness.store).await;
@@ -357,7 +357,7 @@ async fn a_yolo_create_on_a_host_that_asks_is_refused_until_confirmed() {
         .await
         .unwrap();
     let session: SessionInfo = serde_json::from_slice(&body).unwrap();
-    assert_eq!(session.id, "sess-confirmed");
+    assert_eq!(session.id, harness.local_session_ref("sess-confirmed"));
 
     allow_yolo_here(&harness.store).await;
     let safe = harness
@@ -1028,7 +1028,7 @@ async fn stop_session_happy_path_returns_200_with_empty_object_body() {
 
     let request = axum::http::Request::builder()
         .method("POST")
-        .uri("/api/sessions/sess-1/stop")
+        .uri(harness.local_session_uri("/api/sessions/sess-1/stop"))
         .header("host", "127.0.0.1:7433")
         .body(axum::body::Body::empty())
         .unwrap();
@@ -1072,7 +1072,7 @@ async fn stop_session_unknown_id_returns_404_with_supervisor_message() {
 
     let request = axum::http::Request::builder()
         .method("POST")
-        .uri("/api/sessions/sess-missing/stop")
+        .uri(harness.local_session_uri("/api/sessions/sess-missing/stop"))
         .header("host", "127.0.0.1:7433")
         .body(axum::body::Body::empty())
         .unwrap();
@@ -1084,8 +1084,8 @@ async fn stop_session_unknown_id_returns_404_with_supervisor_message() {
         .unwrap();
     assert_eq!(
         String::from_utf8_lossy(&body),
-        "no such session: sess-missing",
-        "the helm's own refusal must name the id it could not place"
+        "no such session on this host entry",
+        "the helm must refuse absent membership on the selected entry"
     );
 
     observe.send(()).expect("start post-request observation");
@@ -1134,7 +1134,7 @@ async fn delete_session_happy_path_returns_200_with_the_archive_fact() {
 
         let request = axum::http::Request::builder()
             .method("DELETE")
-            .uri("/api/sessions/sess-1")
+            .uri(harness.local_session_uri("/api/sessions/sess-1"))
             .header("host", "127.0.0.1:7433")
             .body(axum::body::Body::empty())
             .unwrap();
@@ -1197,7 +1197,7 @@ async fn delete_session_passes_the_supervisors_notice_to_the_caller() {
     let harness = rest_harness::spliced_helm(client_side).await;
     let request = axum::http::Request::builder()
         .method("DELETE")
-        .uri("/api/sessions/sess-1")
+        .uri(harness.local_session_uri("/api/sessions/sess-1"))
         .header("host", "127.0.0.1:7433")
         .body(axum::body::Body::empty())
         .unwrap();
@@ -1272,7 +1272,7 @@ async fn delete_session_forwards_its_precondition() {
         let harness = rest_harness::spliced_helm(client_side).await;
         let request = axum::http::Request::builder()
             .method("DELETE")
-            .uri(uri)
+            .uri(harness.local_session_uri(uri))
             .header("host", "127.0.0.1:7433")
             .body(axum::body::Body::empty())
             .unwrap();
@@ -1299,7 +1299,7 @@ async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
 
     let request = axum::http::Request::builder()
         .method("DELETE")
-        .uri("/api/sessions/sess-missing")
+        .uri(harness.local_session_uri("/api/sessions/sess-missing"))
         .header("host", "127.0.0.1:7433")
         .body(axum::body::Body::empty())
         .unwrap();
@@ -1311,8 +1311,8 @@ async fn delete_session_unknown_id_returns_404_with_supervisor_message() {
         .unwrap();
     assert_eq!(
         String::from_utf8_lossy(&body),
-        "no such session: sess-missing",
-        "the helm's own refusal must name the id it could not place"
+        "no such session on this host entry",
+        "the helm must refuse absent membership on the selected entry"
     );
 
     observe.send(()).expect("start post-request observation");
@@ -1410,7 +1410,7 @@ async fn delete_session_drops_the_seen_and_notification_mark_rows() {
     let app = harness.router();
     let request = axum::http::Request::builder()
         .method("DELETE")
-        .uri("/api/sessions/sess-1")
+        .uri(harness.local_session_uri("/api/sessions/sess-1"))
         .header("host", "127.0.0.1:7433")
         .body(axum::body::Body::empty())
         .unwrap();
@@ -1459,7 +1459,7 @@ async fn mark_seen_route_records_and_clears_the_stamp() {
 
     let (status, body) = put_json(
         &harness,
-        "/api/sessions/sess-1/seen",
+        &harness.local_session_uri("/api/sessions/sess-1/seen"),
         serde_json::json!({ "seen_activity_at": 1_700_000_000 }),
     )
     .await;
@@ -1474,7 +1474,7 @@ async fn mark_seen_route_records_and_clears_the_stamp() {
 
     let (status, _) = put_json(
         &harness,
-        "/api/sessions/sess-1/seen",
+        &harness.local_session_uri("/api/sessions/sess-1/seen"),
         serde_json::json!({ "seen_activity_at": null }),
     )
     .await;
@@ -1499,7 +1499,7 @@ async fn pin_route_round_trip_changes_only_on_real_writes() {
         let before = harness.manager.events().revision();
         let (status, body) = put_json(
             &harness,
-            "/api/sessions/sess-1/pin",
+            &harness.local_session_uri("/api/sessions/sess-1/pin"),
             serde_json::json!({ "pinned": pinned }),
         )
         .await;
@@ -1507,15 +1507,21 @@ async fn pin_route_round_trip_changes_only_on_real_writes() {
         assert_eq!(harness.manager.events().revision() > before, changes);
         let (_, body) = get_json(&harness, "/api/sessions").await;
         assert_eq!(body["sessions"][0]["pinned"], pinned);
-        let (_, detail) = get_json(&harness, "/api/sessions/sess-1").await;
+        let (_, detail) =
+            get_json(&harness, &harness.local_session_uri("/api/sessions/sess-1")).await;
         assert_eq!(detail["pinned"], pinned);
     }
     let before = harness.manager.events().revision();
-    let (status, _) = put_json(&harness, "/api/sessions/sess-1/pin", serde_json::json!({})).await;
+    let (status, _) = put_json(
+        &harness,
+        &harness.local_session_uri("/api/sessions/sess-1/pin"),
+        serde_json::json!({}),
+    )
+    .await;
     assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
     let (status, _) = put_json(
         &harness,
-        "/api/sessions/absent/pin",
+        &harness.local_session_uri("/api/sessions/absent/pin"),
         serde_json::json!({ "pinned": true }),
     )
     .await;
@@ -1559,35 +1565,37 @@ async fn pin_route_succeeds_on_an_unreachable_host() {
         .await;
     let (status, _) = put_json(
         &harness,
-        "/api/sessions/owned-pin/pin",
+        &harness.session_uri(host, "/api/sessions/owned-pin/pin"),
         serde_json::json!({ "pinned": true }),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK);
-    let (_, body) = get_json(&harness, "/api/sessions/owned-pin").await;
+    let (_, body) = get_json(
+        &harness,
+        &harness.session_uri(host, "/api/sessions/owned-pin"),
+    )
+    .await;
     assert_eq!(body["stale"], true);
     assert_eq!(body["pinned"], true);
 }
 
-/// The existence check is the same helm-wide "no host has ever reported
-/// this id" lookup every other per-session route uses
-/// ([`super::resolve_owner`]) — a session nothing knows about is a 404
-/// whether or not any host is even connected.
+/// A syntactically valid reference to an unknown session on a known entry is
+/// a 404 even when the entry is connected. Full-ID admission must not hide
+/// the existence check this test covers.
 #[farhelm_testtrace::test]
 async fn mark_seen_route_unknown_id_returns_404() {
     let harness = rest_harness::idle_helm().await;
     let (status, body) = put_json(
         &harness,
-        "/api/sessions/sess-missing/seen",
+        &harness.local_session_uri("/api/sessions/sess-missing/seen"),
         serde_json::json!({ "seen_activity_at": 100 }),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
     assert_eq!(
         body,
-        serde_json::json!("no such session: sess-missing"),
-        "the refusal must name the id it could not place, like every \
-         other per-session 404"
+        serde_json::json!("no such session on this host entry"),
+        "the refusal must describe missing membership without exposing the entry UUID"
     );
 }
 
@@ -1606,7 +1614,7 @@ async fn mark_seen_route_bumps_on_change_and_not_on_a_repeat() {
     let before_first_mark = harness.manager.events().revision();
     let (status, _) = put_json(
         &harness,
-        "/api/sessions/sess-1/seen",
+        &harness.local_session_uri("/api/sessions/sess-1/seen"),
         serde_json::json!({ "seen_activity_at": 1_700_000_000 }),
     )
     .await;
@@ -1619,7 +1627,7 @@ async fn mark_seen_route_bumps_on_change_and_not_on_a_repeat() {
     let before_repeat = harness.manager.events().revision();
     let (status, _) = put_json(
         &harness,
-        "/api/sessions/sess-1/seen",
+        &harness.local_session_uri("/api/sessions/sess-1/seen"),
         serde_json::json!({ "seen_activity_at": 1_700_000_000 }),
     )
     .await;
@@ -1633,7 +1641,7 @@ async fn mark_seen_route_bumps_on_change_and_not_on_a_repeat() {
     let before_clear = harness.manager.events().revision();
     let (status, _) = put_json(
         &harness,
-        "/api/sessions/sess-1/seen",
+        &harness.local_session_uri("/api/sessions/sess-1/seen"),
         serde_json::json!({ "seen_activity_at": null }),
     )
     .await;
@@ -1646,7 +1654,7 @@ async fn mark_seen_route_bumps_on_change_and_not_on_a_repeat() {
     let before_repeat_clear = harness.manager.events().revision();
     let (status, _) = put_json(
         &harness,
-        "/api/sessions/sess-1/seen",
+        &harness.local_session_uri("/api/sessions/sess-1/seen"),
         serde_json::json!({ "seen_activity_at": null }),
     )
     .await;
@@ -1681,7 +1689,12 @@ async fn mark_seen_route_rejects_a_body_with_the_key_omitted() {
         .unwrap();
     let before = harness.manager.events().revision();
 
-    let (status, _) = put_json(&harness, "/api/sessions/sess-1/seen", serde_json::json!({})).await;
+    let (status, _) = put_json(
+        &harness,
+        &harness.local_session_uri("/api/sessions/sess-1/seen"),
+        serde_json::json!({}),
+    )
+    .await;
     assert_eq!(
         status,
         // axum 0.8's `JsonRejection::JsonDataError` for a body that parses
@@ -1737,7 +1750,7 @@ async fn mark_seen_route_succeeds_on_an_unreachable_host() {
     let before = harness.manager.events().revision();
     let (status, body) = put_json(
         &harness,
-        "/api/sessions/owned/seen",
+        &harness.session_uri(host, "/api/sessions/owned/seen"),
         serde_json::json!({ "seen_activity_at": 1_700_000_000 }),
     )
     .await;
@@ -1765,7 +1778,7 @@ async fn mark_seen_route_succeeds_on_an_unreachable_host() {
     let before_clear = harness.manager.events().revision();
     let (status, _) = put_json(
         &harness,
-        "/api/sessions/owned/seen",
+        &harness.session_uri(host, "/api/sessions/owned/seen"),
         serde_json::json!({ "seen_activity_at": null }),
     )
     .await;
@@ -1821,7 +1834,7 @@ async fn notification_routes_read_then_clear_through_the_listing() {
     let before = harness.manager.events().revision();
     let (status, body) = put_json(
         &harness,
-        "/api/sessions/sess-1/notifications/read",
+        &harness.local_session_uri("/api/sessions/sess-1/notifications/read"),
         serde_json::json!({ "through": 3 }),
     )
     .await;
@@ -1838,7 +1851,7 @@ async fn notification_routes_read_then_clear_through_the_listing() {
     let before_repeat = harness.manager.events().revision();
     let (status, _) = put_json(
         &harness,
-        "/api/sessions/sess-1/notifications/read",
+        &harness.local_session_uri("/api/sessions/sess-1/notifications/read"),
         serde_json::json!({ "through": 2 }),
     )
     .await;
@@ -1851,7 +1864,7 @@ async fn notification_routes_read_then_clear_through_the_listing() {
 
     let (status, _) = put_json(
         &harness,
-        "/api/sessions/sess-1/notifications/cleared",
+        &harness.local_session_uri("/api/sessions/sess-1/notifications/cleared"),
         serde_json::json!({ "through": 2 }),
     )
     .await;
@@ -1860,7 +1873,7 @@ async fn notification_routes_read_then_clear_through_the_listing() {
     assert_eq!(seqs(&listing), vec![3], "cleared entries leave the row");
     assert_eq!(listing["sessions"][0]["notifications_read_through"], 3);
 
-    let (_, single) = get_json(&harness, "/api/sessions/sess-1").await;
+    let (_, single) = get_json(&harness, &harness.local_session_uri("/api/sessions/sess-1")).await;
     assert_eq!(
         single["notifications"].as_array().map(Vec::len),
         Some(1),
@@ -1884,7 +1897,7 @@ async fn notification_marks_are_clamped_to_the_newest_known_entry() {
     let viewer_host = rest_harness::local_id(&harness.store).await;
     let (status, _) = put_json(
         &harness,
-        "/api/sessions/sess-1/notifications/cleared",
+        &harness.local_session_uri("/api/sessions/sess-1/notifications/cleared"),
         serde_json::json!({ "through": 99 }),
     )
     .await;
@@ -1902,7 +1915,7 @@ async fn notification_marks_are_clamped_to_the_newest_known_entry() {
     let before = harness.manager.events().revision();
     let (status, _) = put_json(
         &harness,
-        "/api/sessions/quiet/notifications/read",
+        &harness.local_session_uri("/api/sessions/quiet/notifications/read"),
         serde_json::json!({ "through": 5 }),
     )
     .await;
@@ -1929,16 +1942,20 @@ async fn notification_routes_refuse_unknown_ids_and_missing_marks() {
     for route in ["read", "cleared"] {
         let (status, body) = put_json(
             &harness,
-            &format!("/api/sessions/sess-missing/notifications/{route}"),
+            &harness
+                .local_session_uri(&format!("/api/sessions/sess-missing/notifications/{route}")),
             serde_json::json!({ "through": 1 }),
         )
         .await;
         assert_eq!(status, axum::http::StatusCode::NOT_FOUND, "{route}");
-        assert_eq!(body, serde_json::json!("no such session: sess-missing"));
+        assert_eq!(
+            body,
+            serde_json::json!("no such session on this host entry")
+        );
 
         let (status, _) = put_json(
             &harness,
-            &format!("/api/sessions/sess-1/notifications/{route}"),
+            &harness.local_session_uri(&format!("/api/sessions/sess-1/notifications/{route}")),
             serde_json::json!({}),
         )
         .await;
@@ -1976,7 +1993,7 @@ async fn notification_marks_land_while_the_host_is_down() {
     let before = harness.manager.events().revision();
     let (status, _) = put_json(
         &harness,
-        "/api/sessions/owned/notifications/cleared",
+        &harness.session_uri(host, "/api/sessions/owned/notifications/cleared"),
         serde_json::json!({ "through": 9 }),
     )
     .await;
@@ -2004,7 +2021,8 @@ async fn get_session_route_carries_seen_activity_at_when_live() {
     let harness =
         rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
 
-    let (status, detail) = get_json(&harness, "/api/sessions/sess-1").await;
+    let (status, detail) =
+        get_json(&harness, &harness.local_session_uri("/api/sessions/sess-1")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(
         detail["seen_activity_at"],
@@ -2021,7 +2039,8 @@ async fn get_session_route_carries_seen_activity_at_when_live() {
         )
         .await
         .unwrap();
-    let (status, detail) = get_json(&harness, "/api/sessions/sess-1").await;
+    let (status, detail) =
+        get_json(&harness, &harness.local_session_uri("/api/sessions/sess-1")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(detail["seen_activity_at"], 1_700_000_000);
 }
@@ -2055,7 +2074,8 @@ async fn get_session_route_carries_seen_activity_at_when_stale() {
         .await_state(host, |state| state.phase() == "unreachable-reprobing")
         .await;
 
-    let (status, detail) = get_json(&harness, "/api/sessions/owned").await;
+    let (status, detail) =
+        get_json(&harness, &harness.session_uri(host, "/api/sessions/owned")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(detail["stale"], true);
     assert_eq!(detail["seen_activity_at"], 1_700_000_000);
@@ -2119,7 +2139,7 @@ async fn delete_session_succeeds_even_when_clearing_the_seen_row_fails() {
     let app = harness.router();
     let request = axum::http::Request::builder()
         .method("DELETE")
-        .uri("/api/sessions/sess-1")
+        .uri(harness.local_session_uri("/api/sessions/sess-1"))
         .header("host", "127.0.0.1:7433")
         .body(axum::body::Body::empty())
         .unwrap();
@@ -2130,7 +2150,7 @@ async fn delete_session_succeeds_even_when_clearing_the_seen_row_fails() {
         "a local bookkeeping failure must not surface as a failed delete"
     );
 
-    let (status, _) = get_json(&harness, "/api/sessions/sess-1").await;
+    let (status, _) = get_json(&harness, &harness.local_session_uri("/api/sessions/sess-1")).await;
     assert_eq!(
         status,
         axum::http::StatusCode::NOT_FOUND,
@@ -2266,7 +2286,7 @@ async fn a_replace_dropped_after_its_create_still_deletes_the_source() {
     harness.await_refreshed(local).await;
     let request = axum::http::Request::builder()
         .method("POST")
-        .uri("/api/sessions/sess-1/replace")
+        .uri(harness.local_session_uri("/api/sessions/sess-1/replace"))
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
         .body(axum::body::Body::from("{}"))
@@ -2366,7 +2386,7 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
     harness.await_refreshed(local).await;
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/yolo-src/replace",
+        &harness.local_session_uri("/api/sessions/yolo-src/replace"),
         serde_json::json!({}),
     )
     .await;
@@ -2459,7 +2479,7 @@ async fn a_replace_reply_carries_the_source_deletes_notice() {
     harness.await_refreshed(local).await;
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/noted-src/replace",
+        &harness.local_session_uri("/api/sessions/noted-src/replace"),
         serde_json::json!({}),
     )
     .await;
@@ -2467,7 +2487,8 @@ async fn a_replace_reply_carries_the_source_deletes_notice() {
     peer.await.unwrap();
     let body: serde_json::Value = serde_json::from_str(&body).expect("a JSON reply");
     assert_eq!(
-        body["id"], "noted-new",
+        body["id"],
+        harness.local_session_ref("noted-new"),
         "the reply is still the new session"
     );
     assert_eq!(
@@ -2550,8 +2571,12 @@ async fn a_replace_forwards_its_source_delete_precondition() {
         });
 
         harness.await_refreshed(local).await;
-        let (status, reply) =
-            post_text(&harness, "/api/sessions/guarded-src/replace", body.clone()).await;
+        let (status, reply) = post_text(
+            &harness,
+            &harness.local_session_uri("/api/sessions/guarded-src/replace"),
+            body.clone(),
+        )
+        .await;
         assert_eq!(status, axum::http::StatusCode::OK, "{body}: {reply}");
         assert_eq!(peer.await.unwrap(), expected, "{body}");
     }
@@ -2727,7 +2752,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     );
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({}),
     )
     .await;
@@ -2769,7 +2794,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
         "replacement inherits the pin"
     );
     let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
-    assert_eq!(session.id, "sess-2");
+    assert_eq!(session.id, harness.local_session_ref("sess-2"));
     assert_eq!(session.cwd, "/sess-1");
     assert_eq!(session.title, "sess-1");
     assert_eq!(session.invocation, "agent");
@@ -2783,7 +2808,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     let (_, value) = get_json(&harness, "/api/sessions").await;
     assert_eq!(
         row_ids(&value),
-        vec!["sess-2"],
+        vec![harness.local_session_ref("sess-2")],
         "the old id must be gone and the new one routable at once, with no \
          wait for a refresh"
     );
@@ -2865,7 +2890,7 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
     let harness = rest_harness::spliced_helm(client_side).await;
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({"intent_key": "reused-key"}),
     )
     .await;
@@ -2878,7 +2903,7 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
     let (_, value) = get_json(&harness, "/api/sessions").await;
     assert_eq!(
         row_ids(&value),
-        vec!["sess-1"],
+        vec![harness.local_session_ref("sess-1")],
         "a rejected replay must leave the source exactly as it was — no delete was ever sent"
     );
 
@@ -2910,7 +2935,7 @@ async fn plain_replace_of_a_legacy_session_is_refused_with_its_remedy() {
     harness.await_refreshed(local).await;
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({}),
     )
     .await;
@@ -3025,7 +3050,7 @@ async fn replace_of_an_agent_launch_copies_its_stored_launch() {
     harness.await_refreshed(local).await;
     let (refused, headers, _) = post_text_headers(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({}),
     )
     .await;
@@ -3036,14 +3061,14 @@ async fn replace_of_an_agent_launch_copies_its_stored_launch() {
     );
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({"confirm_yolo":true}),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     assert_eq!(
         serde_json::from_str::<SessionInfo>(&body).unwrap().id,
-        "sess-2"
+        harness.local_session_ref("sess-2")
     );
     peer.await.unwrap();
 }
@@ -3083,7 +3108,7 @@ async fn a_create_refusal_leaves_the_source_listed() {
     let harness = rest_harness::spliced_helm(client_side).await;
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({}),
     )
     .await;
@@ -3091,7 +3116,7 @@ async fn a_create_refusal_leaves_the_source_listed() {
     assert!(body.contains("does not exist"), "{body}");
 
     let (_, value) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(row_ids(&value), vec!["sess-1"]);
+    assert_eq!(row_ids(&value), vec![harness.local_session_ref("sess-1")]);
 
     peer.await.unwrap();
 }
@@ -3189,7 +3214,7 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
     harness.await_refreshed(local).await;
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({}),
     )
     .await;
@@ -3214,7 +3239,10 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
     ids.sort();
     assert_eq!(
         ids,
-        vec!["sess-1".to_string(), "sess-2".to_string()],
+        vec![
+            harness.local_session_ref("sess-1"),
+            harness.local_session_ref("sess-2")
+        ],
         "both sessions must stay listed until the user removes the old one by hand"
     );
 
@@ -3316,12 +3344,9 @@ async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcom
 
     harness.await_refreshed(local).await;
     let kill_fleet = harness.fleet.clone();
+    let replace_uri = harness.local_session_uri("/api/sessions/sess-1/replace");
     let (status, body) = {
-        let post = post_text(
-            &harness,
-            "/api/sessions/sess-1/replace",
-            serde_json::json!({}),
-        );
+        let post = post_text(&harness, &replace_uri, serde_json::json!({}));
         let kill = async move {
             delete_seen_rx
                 .await
@@ -3377,7 +3402,7 @@ async fn replace_on_an_unreachable_host_is_refused_before_anything_is_created() 
 
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.session_uri(host, "/api/sessions/sess-1/replace"),
         serde_json::json!({}),
     )
     .await;
@@ -3387,7 +3412,7 @@ async fn replace_on_an_unreachable_host_is_refused_before_anything_is_created() 
     let (_, value) = get_json(&harness, "/api/sessions").await;
     assert_eq!(
         row_ids(&value),
-        vec!["sess-1"],
+        vec![harness.session_ref(host, "sess-1")],
         "nothing may be created while the source's host is unreachable"
     );
 }
@@ -3542,7 +3567,7 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
     harness.await_refreshed(local).await;
     let (status, headers, _) = post_text_headers(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({"intent_key": "replace-key"}),
     )
     .await;
@@ -3554,14 +3579,15 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
 
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({"intent_key": "replace-key"}),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
     assert_eq!(
-        session.id, "sess-2",
+        session.id,
+        harness.local_session_ref("sess-2"),
         "the retry must replay the same session"
     );
 
@@ -3573,7 +3599,7 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
     let (_, value) = get_json(&harness, "/api/sessions").await;
     assert_eq!(
         row_ids(&value),
-        vec!["sess-2"],
+        vec![harness.local_session_ref("sess-2")],
         "exactly one new session must exist once the retry succeeds"
     );
 
@@ -3695,7 +3721,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
     harness.await_refreshed(local).await;
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({
             "with": {
                 "cwd": "/replaced-with",
@@ -3707,7 +3733,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
-    assert_eq!(session.id, "sess-2");
+    assert_eq!(session.id, harness.local_session_ref("sess-2"));
     assert_eq!(session.cwd, "/replaced-with");
     assert_eq!(session.invocation, "new-agent --flag");
     assert_eq!(session.title, "replaced-with-title");
@@ -3716,7 +3742,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
     let (_, value) = get_json(&harness, "/api/sessions").await;
     assert_eq!(
         row_ids(&value),
-        vec!["sess-2"],
+        vec![harness.local_session_ref("sess-2")],
         "the source must be gone once the override's create and the delete both succeed"
     );
 
@@ -3825,7 +3851,7 @@ async fn a_replace_with_body_forwards_its_initial_prompt_to_the_create() {
     harness.await_refreshed(local).await;
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({
             "with": {
                 "cwd": "/replaced-with",
@@ -3838,7 +3864,7 @@ async fn a_replace_with_body_forwards_its_initial_prompt_to_the_create() {
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
-    assert_eq!(session.id, "sess-2");
+    assert_eq!(session.id, harness.local_session_ref("sess-2"));
 
     peer.await.unwrap();
 }
@@ -3872,7 +3898,7 @@ async fn a_replace_with_body_naming_another_host_is_refused_before_anything_is_c
 
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({
             "with": { "cwd": "/sess-1", "command": {"command": "agent", "yolo": false}, "host": other }
         }),
@@ -3887,7 +3913,7 @@ async fn a_replace_with_body_naming_another_host_is_refused_before_anything_is_c
     let (_, value) = get_json(&harness, "/api/sessions").await;
     assert_eq!(
         row_ids(&value),
-        vec!["sess-1"],
+        vec![harness.local_session_ref("sess-1")],
         "nothing may be created or removed while replace with names another host"
     );
 }
@@ -3929,7 +3955,7 @@ async fn a_replace_with_override_whose_create_fails_leaves_the_source_untouched(
     let harness = rest_harness::spliced_helm(client_side).await;
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({ "with": { "cwd": "/does-not-exist", "command": {"command": "agent", "yolo": false} } }),
     )
     .await;
@@ -3937,7 +3963,7 @@ async fn a_replace_with_override_whose_create_fails_leaves_the_source_untouched(
     assert!(body.contains("does not exist"), "{body}");
 
     let (_, value) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(row_ids(&value), vec!["sess-1"]);
+    assert_eq!(row_ids(&value), vec![harness.local_session_ref("sess-1")]);
 
     peer.await.unwrap();
 }
@@ -4045,7 +4071,7 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
     harness.await_refreshed(local).await;
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({
             "with": { "cwd": "/override-delete-fails", "command": {"command": "override-agent", "yolo": false} }
         }),
@@ -4069,7 +4095,10 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
     ids.sort();
     assert_eq!(
         ids,
-        vec!["sess-1".to_string(), "sess-2".to_string()],
+        vec![
+            harness.local_session_ref("sess-1"),
+            harness.local_session_ref("sess-2")
+        ],
         "both sessions must stay listed until the user removes the old one by hand"
     );
 
@@ -4096,7 +4125,7 @@ async fn a_replace_with_mismatched_intent_key_is_refused_as_a_bad_request() {
 
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/does-not-exist/replace",
+        &harness.local_session_uri("/api/sessions/does-not-exist/replace"),
         serde_json::json!({
             "intent_key": "top-level-key",
             "with": { "cwd": "/x", "command": {"command": "agent", "yolo": false}, "intent_key": "a-different-key" }
@@ -4130,7 +4159,7 @@ async fn a_replace_with_body_shape_problem_is_refused_before_routing() {
 
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/does-not-exist/replace",
+        &harness.local_session_uri("/api/sessions/does-not-exist/replace"),
         serde_json::json!({
             "with": {
                 "cwd": "/x",
@@ -4171,7 +4200,7 @@ async fn a_replace_with_stale_incarnation_is_refused_before_anything_is_created(
 
     let (status, precondition_headers, body) = post_text_headers(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({
             "with": { "cwd": "/sess-1", "command": {"command": "agent", "yolo": false}, "expected_incarnation": current - 1 }
         }),
@@ -4186,7 +4215,7 @@ async fn a_replace_with_stale_incarnation_is_refused_before_anything_is_created(
     let (_, value) = get_json(&harness, "/api/sessions").await;
     assert_eq!(
         row_ids(&value),
-        vec!["sess-1"],
+        vec![harness.local_session_ref("sess-1")],
         "nothing may be created or removed on a stale incarnation claim"
     );
 }
@@ -4254,7 +4283,7 @@ async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_befor
     let harness = rest_harness::spliced_helm(client_side).await;
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/replace",
+        &harness.local_session_uri("/api/sessions/sess-1/replace"),
         serde_json::json!({
             "intent_key": "reused-key",
             "with": { "cwd": "/sess-1", "command": {"command": "agent", "yolo": false}, "title": "sess-1" }
@@ -4270,7 +4299,7 @@ async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_befor
     let (_, value) = get_json(&harness, "/api/sessions").await;
     assert_eq!(
         row_ids(&value),
-        vec!["sess-1"],
+        vec![harness.local_session_ref("sess-1")],
         "a rejected replay must leave the source exactly as it was — no delete was ever sent"
     );
 
@@ -4323,7 +4352,7 @@ async fn list_sessions_returns_the_merged_listing_object_shape() {
     );
 
     let row = &value["sessions"][0];
-    assert_eq!(row["id"], "sess-1");
+    assert_eq!(row["id"], harness.local_session_ref("sess-1"));
     assert_eq!(
         row["title"], "sess-1",
         "the session's own fields stay at the row's top level"
@@ -4429,7 +4458,7 @@ async fn get_session_passes_a_non_empty_tabs_list_through() {
 
     let request = axum::http::Request::builder()
         .method("GET")
-        .uri("/api/sessions/sess-1")
+        .uri(harness.local_session_uri("/api/sessions/sess-1"))
         .header("host", "127.0.0.1:7433")
         .body(axum::body::Body::empty())
         .unwrap();
@@ -4492,7 +4521,7 @@ async fn get_session_carries_the_hosts_alias() {
 
     let request = axum::http::Request::builder()
         .method("GET")
-        .uri("/api/sessions/aliased-detail")
+        .uri(harness.local_session_uri("/api/sessions/aliased-detail"))
         .header("host", "127.0.0.1:7433")
         .body(axum::body::Body::empty())
         .unwrap();
@@ -4619,7 +4648,7 @@ async fn foreign_origin_is_refused_on_the_stop_route() {
 
     let request = axum::http::Request::builder()
         .method("POST")
-        .uri("/api/sessions/sess-1/stop")
+        .uri(harness.local_session_uri("/api/sessions/sess-1/stop"))
         .header("host", "127.0.0.1:7433")
         .header("origin", "http://evil.example")
         .body(axum::body::Body::empty())
@@ -4777,7 +4806,7 @@ async fn restart_session_passes_consent_through_and_returns_the_session() {
     let app = harness.router();
     let request = axum::http::Request::builder()
         .method("POST")
-        .uri("/api/sessions/sess-1/restart")
+        .uri(harness.local_session_uri("/api/sessions/sess-1/restart"))
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
         .body(axum::body::Body::from(
@@ -4791,7 +4820,7 @@ async fn restart_session_passes_consent_through_and_returns_the_session() {
         .await
         .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(value["id"], "sess-1");
+    assert_eq!(value["id"], harness.local_session_ref("sess-1"));
     assert_eq!(
         value["restart_offer"], "resume",
         "the reply carries the offer the session has NOW, which is what a client re-renders"
@@ -4854,7 +4883,7 @@ async fn restart_with_compiles_and_forwards_structured_launch_bundle() {
     allow_yolo_here(&harness.store).await;
     let request = axum::http::Request::builder()
         .method("POST")
-        .uri("/api/sessions/sess-1/restart")
+        .uri(harness.local_session_uri("/api/sessions/sess-1/restart"))
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
         .body(axum::body::Body::from(serde_json::json!({
@@ -5071,14 +5100,14 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
         let create = serde_json::json!({
             "cwd": "/destination", "launch": selection, "conversation": "named-target"
         });
-        let (route, body) = match surface {
+        let (route, body): (&str, _) = match surface {
             TrustComposeSurface::Create => ("/api/sessions", create),
             TrustComposeSurface::RestartWith => (
-                "/api/sessions/source/restart",
+                &harness.local_session_uri("/api/sessions/source/restart"),
                 serde_json::json!({"with": selection, "conversation": "named-target"}),
             ),
             TrustComposeSurface::ReplaceWith => (
-                "/api/sessions/source/replace",
+                &harness.local_session_uri("/api/sessions/source/replace"),
                 serde_json::json!({"with": create}),
             ),
         };
@@ -5168,7 +5197,7 @@ async fn restart_with_a_command_launch_forwards_it_and_refuses_bad_shapes() {
     let harness = rest_harness::spliced_helm(client_side).await;
     let (status, _, body) = post_json(
         &harness,
-        "/api/sessions/sess-1/restart",
+        &harness.local_session_uri("/api/sessions/sess-1/restart"),
         serde_json::json!({ "with_command": edited }),
     )
     .await;
@@ -5180,7 +5209,7 @@ async fn restart_with_a_command_launch_forwards_it_and_refuses_bad_shapes() {
     let harness = rest_harness::spliced_helm(client_side).await;
     let (status, _, body) = post_json(
         &harness,
-        "/api/sessions/sess-1/restart",
+        &harness.local_session_uri("/api/sessions/sess-1/restart"),
         serde_json::json!({
             "with": {"harness":"claude","model":null,"effort":null,"permissions":null,"workspace_trust":null},
             "with_command": edited,
@@ -5195,7 +5224,7 @@ async fn restart_with_a_command_launch_forwards_it_and_refuses_bad_shapes() {
     );
     let (status, headers, body) = post_json(
         &harness,
-        "/api/sessions/sess-1/restart",
+        &harness.local_session_uri("/api/sessions/sess-1/restart"),
         serde_json::json!({ "with_command": farhelm_proto::CommandLaunch { yolo: true, ..edited.clone() } }),
     )
     .await;
@@ -5247,7 +5276,7 @@ async fn bodies_naming_a_retired_launch_field_are_refused_by_name() {
         with[field] = value;
         let (status, _, body) = post_json(
             &harness,
-            "/api/sessions/sess-1/replace",
+            &harness.local_session_uri("/api/sessions/sess-1/replace"),
             serde_json::json!({ "with": with }),
         )
         .await;
@@ -5294,7 +5323,7 @@ async fn restart_with_an_invalid_selection_is_a_400_and_never_reaches_the_superv
     let harness = rest_harness::spliced_helm(client_side).await;
     let request = axum::http::Request::builder()
         .method("POST")
-        .uri("/api/sessions/sess-1/restart")
+        .uri(harness.local_session_uri("/api/sessions/sess-1/restart"))
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
         .body(axum::body::Body::from(
@@ -5350,7 +5379,7 @@ async fn restart_session_conflict_reaches_the_caller_as_409_with_its_message() {
     let app = harness.router();
     let request = axum::http::Request::builder()
         .method("POST")
-        .uri("/api/sessions/sess-1/restart")
+        .uri(harness.local_session_uri("/api/sessions/sess-1/restart"))
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
         .body(axum::body::Body::from(serde_json::json!({}).to_string()))
@@ -5379,7 +5408,8 @@ async fn restart_session_conflict_reaches_the_caller_as_409_with_its_message() {
 /// into subtly different assertions.
 ///
 /// The success body is checked as a FULL `SessionInfo`, field for
-/// field against the scripted reply, not just `id`/`title`: a route
+/// field against the scripted reply with its ID qualified by the reporting
+/// entry, not just `id`/`title`: a route
 /// that echoed a stale or partially-rebuilt session (the bug
 /// `SessionRenamed`'s own docs warn against — see
 /// `ControlMsg::SessionRenamed`) would still pass an id/title-only
@@ -5404,7 +5434,7 @@ async fn rename_session_forwards_the_title_verbatim() {
         // that echoed back a stale or default-filled `SessionInfo`
         // must fail the full-struct comparison below even if the
         // title alone looked right.
-        let expected_session = SessionInfo {
+        let mut expected_session = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -5457,10 +5487,11 @@ async fn rename_session_forwards_the_title_verbatim() {
         });
 
         let harness = rest_harness::spliced_helm(client_side).await;
+        expected_session.id = harness.local_session_ref(&expected_session.id);
         let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/rename")
+            .uri(harness.local_session_uri("/api/sessions/sess-1/rename"))
             .header("host", "127.0.0.1:7433")
             .header("content-type", "application/json")
             .body(axum::body::Body::from(
@@ -5480,8 +5511,8 @@ async fn rename_session_forwards_the_title_verbatim() {
         let got_session: SessionInfo = serde_json::from_slice(&body).unwrap();
         assert_eq!(
             got_session, expected_session,
-            "the success body must be the supervisor's FULL SessionInfo, not a partial \
-             echo, for title {title:?}"
+            "the success body must preserve the full supervisor reply under its entry, \
+             for title {title:?}"
         );
 
         peer.await.unwrap();
@@ -5524,7 +5555,7 @@ async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_acce
         let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/rename")
+            .uri(harness.local_session_uri("/api/sessions/sess-1/rename"))
             .header("host", "127.0.0.1:7433")
             .header("content-type", "application/json")
             .body(axum::body::Body::from(serde_json::json!({}).to_string()))
@@ -5617,7 +5648,7 @@ async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_acce
         let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/rename")
+            .uri(harness.local_session_uri("/api/sessions/sess-1/rename"))
             .header("host", "127.0.0.1:7433")
             .header("content-type", "application/json")
             .body(axum::body::Body::from(
@@ -5652,7 +5683,7 @@ async fn rename_session_unknown_id_returns_404_with_supervisor_message() {
     let app = harness.router();
     let request = axum::http::Request::builder()
         .method("POST")
-        .uri("/api/sessions/sess-missing/rename")
+        .uri(harness.local_session_uri("/api/sessions/sess-missing/rename"))
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
         .body(axum::body::Body::from(
@@ -5667,8 +5698,8 @@ async fn rename_session_unknown_id_returns_404_with_supervisor_message() {
         .unwrap();
     assert_eq!(
         String::from_utf8_lossy(&body),
-        "no such session: sess-missing",
-        "the helm's own refusal must name the id it could not place"
+        "no such session on this host entry",
+        "the helm must refuse absent membership on the selected entry"
     );
 
     observe.send(()).expect("start post-request observation");
@@ -5715,7 +5746,7 @@ async fn rename_session_invalid_title_returns_400_with_supervisor_message() {
     let app = harness.router();
     let request = axum::http::Request::builder()
         .method("POST")
-        .uri("/api/sessions/sess-1/rename")
+        .uri(harness.local_session_uri("/api/sessions/sess-1/rename"))
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
         .body(axum::body::Body::from(
@@ -5774,7 +5805,7 @@ async fn open_tab_happy_path_returns_200_with_tab() {
 
     let request = axum::http::Request::builder()
         .method("POST")
-        .uri("/api/sessions/sess-1/tabs")
+        .uri(harness.local_session_uri("/api/sessions/sess-1/tabs"))
         .header("host", "127.0.0.1:7433")
         .body(axum::body::Body::empty())
         .unwrap();
@@ -5833,7 +5864,7 @@ async fn close_tab_happy_path_returns_200_with_empty_object_body() {
 
     let request = axum::http::Request::builder()
         .method("DELETE")
-        .uri("/api/sessions/sess-1/tabs/tab-1")
+        .uri(harness.local_session_uri("/api/sessions/sess-1/tabs/tab-1"))
         .header("host", "127.0.0.1:7433")
         .body(axum::body::Body::empty())
         .unwrap();
@@ -5895,7 +5926,7 @@ async fn open_tab_error_reply_maps_to_404_with_the_supervisors_message() {
 
     let request = axum::http::Request::builder()
         .method("POST")
-        .uri("/api/sessions/sess-1/tabs")
+        .uri(harness.local_session_uri("/api/sessions/sess-1/tabs"))
         .header("host", "127.0.0.1:7433")
         .body(axum::body::Body::empty())
         .unwrap();
@@ -5956,7 +5987,7 @@ async fn close_tab_error_reply_maps_to_404_with_the_supervisors_message() {
 
     let request = axum::http::Request::builder()
         .method("DELETE")
-        .uri("/api/sessions/sess-1/tabs/tab-1")
+        .uri(harness.local_session_uri("/api/sessions/sess-1/tabs/tab-1"))
         .header("host", "127.0.0.1:7433")
         .body(axum::body::Body::empty())
         .unwrap();
@@ -6335,11 +6366,11 @@ async fn the_session_list_merges_every_host_into_one_creation_order() {
     assert_eq!(
         row_ids(&value),
         vec![
-            "beta-newest",
-            "alpha-new",
-            "local-mid",
-            "alpha-old",
-            "beta-oldest"
+            harness.session_ref(beta, "beta-newest"),
+            harness.session_ref(alpha, "alpha-new"),
+            harness.local_session_ref("local-mid"),
+            harness.session_ref(alpha, "alpha-old"),
+            harness.session_ref(beta, "beta-oldest")
         ],
         "the merge is creation-time descending across hosts, not host by host"
     );
@@ -6383,11 +6414,11 @@ async fn a_down_hosts_sessions_stay_listed_and_marked_stale() {
     assert_eq!(
         row_ids(&value),
         vec![
-            "beta-newest",
-            "alpha-new",
-            "local-mid",
-            "alpha-old",
-            "beta-oldest"
+            harness.session_ref(beta, "beta-newest"),
+            harness.session_ref(alpha, "alpha-new"),
+            harness.local_session_ref("local-mid"),
+            harness.session_ref(alpha, "alpha-old"),
+            harness.session_ref(beta, "beta-oldest")
         ],
         "a down host's rows keep their place in the merged order"
     );
@@ -6466,8 +6497,12 @@ async fn a_session_operation_routes_to_the_host_that_owns_it() {
     harness.await_refreshed(alpha).await;
     harness.await_refreshed(beta).await;
 
-    let (status, body) =
-        post_text(&harness, "/api/sessions/beta-1/stop", serde_json::json!({})).await;
+    let (status, body) = post_text(
+        &harness,
+        &harness.session_uri(beta, "/api/sessions/beta-1/stop"),
+        serde_json::json!({}),
+    )
+    .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
 
     beta_task.await.unwrap();
@@ -6555,8 +6590,12 @@ async fn every_non_connected_state_refuses_a_session_operation_naming_itself() {
             .await_state(host, |state| state.phase() == case.phase)
             .await;
 
-        let (status, body) =
-            post_text(&harness, "/api/sessions/owned/stop", serde_json::json!({})).await;
+        let (status, body) = post_text(
+            &harness,
+            &harness.session_uri(host, "/api/sessions/owned/stop"),
+            serde_json::json!({}),
+        )
+        .await;
         assert_eq!(
             status,
             axum::http::StatusCode::CONFLICT,
@@ -6576,7 +6615,7 @@ async fn every_non_connected_state_refuses_a_session_operation_naming_itself() {
         // Still listed, and still marked as what it is: refusing an
         // operation must not make the session disappear.
         let (_, value) = get_json(&harness, "/api/sessions").await;
-        assert_eq!(row_ids(&value), vec!["owned"]);
+        assert_eq!(row_ids(&value), vec![harness.session_ref(host, "owned")]);
         assert_eq!(value["sessions"][0]["stale"], true);
     }
 }
@@ -6808,7 +6847,7 @@ async fn a_create_defaults_to_the_local_host_and_honors_an_explicit_one() {
         let created: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(
             created["id"],
-            expected,
+            harness.session_ref(if explicit { remote } else { local }, expected),
             "a create with host {} must land on {expected}",
             if explicit { "named" } else { "omitted" }
         );
@@ -6936,7 +6975,8 @@ async fn a_terminal_socket_on_a_down_host_is_refused_with_the_hosts_state() {
         .await;
 
     let addr = harness.serve().await;
-    let mut ws = WsTestClient::connect(addr, "/api/sessions/owned/term").await;
+    let mut ws =
+        WsTestClient::connect(addr, &harness.session_uri(host, "/api/sessions/owned/term")).await;
     let (opcode, payload) = ws.recv().await.expect("a notice, not a bare close");
     assert_eq!(opcode, 1, "the refusal arrives as a text notice");
     let notice: serde_json::Value = serde_json::from_slice(&payload).unwrap();
@@ -7029,12 +7069,15 @@ async fn a_session_created_here_is_routable_before_any_refresh() {
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     let created: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(created["id"], "brand-new");
+    assert_eq!(created["id"], harness.local_session_ref("brand-new"));
 
     for (uri, request_body) in [
-        ("/api/sessions/brand-new/stop", serde_json::json!({})),
         (
-            "/api/sessions/brand-new/rename",
+            &harness.local_session_uri("/api/sessions/brand-new/stop"),
+            serde_json::json!({}),
+        ),
+        (
+            &harness.local_session_uri("/api/sessions/brand-new/rename"),
             serde_json::json!({ "title": "renamed" }),
         ),
     ] {
@@ -7116,7 +7159,7 @@ async fn an_identity_less_hosts_sessions_serve_while_connected_and_vanish_after(
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(
         row_ids(&value),
-        vec!["unbound-1"],
+        vec![harness.session_ref(host, "unbound-1")],
         "an identity-less host's sessions must appear in the merged list"
     );
     assert_eq!(value["total"], 1, "and must be counted in the total");
@@ -7158,7 +7201,7 @@ async fn an_identity_less_hosts_sessions_serve_while_connected_and_vanish_after(
 
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/unbound-1/stop",
+        &harness.session_uri(host, "/api/sessions/unbound-1/stop"),
         serde_json::json!({}),
     )
     .await;
@@ -7180,7 +7223,11 @@ async fn an_identity_less_hosts_sessions_serve_while_connected_and_vanish_after(
         "with no durable copy there is nothing to serve stale: {value}"
     );
     assert_eq!(value["total"], 0);
-    let (status, _) = get_json(&harness, "/api/sessions/unbound-1").await;
+    let (status, _) = get_json(
+        &harness,
+        &harness.session_uri(host, "/api/sessions/unbound-1"),
+    )
+    .await;
     assert_eq!(
         status,
         axum::http::StatusCode::NOT_FOUND,
@@ -7262,7 +7309,7 @@ async fn a_create_reply_naming_another_hosts_session_id_is_refused() {
         "the refusal must name the creating host and the colliding id: {body}"
     );
     let (_, value) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(row_ids(&value), vec!["shared"]);
+    assert_eq!(row_ids(&value), vec![harness.session_ref(owner, "shared")]);
     assert_eq!(
         value["sessions"][0]["host"], owner,
         "the owner's session keeps its host"
@@ -7270,24 +7317,12 @@ async fn a_create_reply_naming_another_hosts_session_id_is_refused() {
     creator_task.await.unwrap();
 }
 
-/// A hostile or buggy supervisor claiming another host's session id must
-/// not be able to steer an operation to the wrong machine — and while
-/// the claim STANDS, no operation goes anywhere at all.
+/// Entry-scoped routes cannot borrow membership from a different entry.
 ///
-/// Two rules, and the second is the one worth being explicit about.
-/// helm.db refuses the second claim outright, so the LIST is coherent:
-/// the first host keeps the session and the impostor's row is dropped.
-/// But a session two hosts both report is genuinely ambiguous, and the
-/// helm has no basis for deciding which of them the user meant — so
-/// ROUTING fails closed for as long as both keep reporting it, rather
-/// than quietly choosing the one that happened to cache first.
-///
-/// The contest is refresh STATE, not a remembered incident: when the
-/// impostor stops reporting the id, the next drain rebuilds its
-/// contested set without it and routing resumes with no intervention.
-/// That second half is asserted here because it is what makes the
-/// refusal a temporary, self-clearing condition rather than a session
-/// bricked by someone else's bug.
+/// The intermediate cache still keeps the first bare-ID claim and drops the
+/// second. That constraint makes the second entry's reference a 404, while
+/// the original entry remains independently routable. Refreshing away the
+/// claimant preserves that original reference; it never changes its owner.
 #[farhelm_testtrace::test]
 async fn a_second_host_claiming_a_session_id_never_steals_its_routing() {
     use farhelm_proto::ControlMsg;
@@ -7360,7 +7395,7 @@ async fn a_second_host_claiming_a_session_id_never_steals_its_routing() {
     let (_, value) = get_json(&harness, "/api/sessions").await;
     assert_eq!(
         row_ids(&value),
-        vec!["contested"],
+        vec![harness.session_ref(owner, "contested")],
         "the contested id appears exactly once, not once per claimant: {value}"
     );
     assert_eq!(
@@ -7368,24 +7403,31 @@ async fn a_second_host_claiming_a_session_id_never_steals_its_routing() {
         "the first claim holds; the later claimant's row is dropped"
     );
 
-    // While BOTH report it, there is no honest owner to route to.
+    // A full reference selects the cached entry even while another actor
+    // reports the same suffix. The claimant has no cached membership yet,
+    // so explicitly selecting it must refuse rather than fall back.
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/contested/stop",
+        &harness.session_uri(impostor, "/api/sessions/contested/stop"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND, "{body}");
+
+    let (status, body) = post_text(
+        &harness,
+        &harness.session_uri(owner, "/api/sessions/contested/stop"),
         serde_json::json!({}),
     )
     .await;
     assert_eq!(
         status,
-        axum::http::StatusCode::CONFLICT,
-        "a session two hosts both claim must not be routed to either: {body}"
+        axum::http::StatusCode::OK,
+        "the cached entry remains routable despite another entry's standing claim: {body}"
     );
-    assert!(
-        body.contains(&owner.to_string()) && body.contains(&impostor.to_string()),
-        "and the refusal must name both candidates so the user can fix it: {body}"
-    );
+    owner_task.await.unwrap();
 
-    // Observe the refusal while the impostor's original connection is live.
+    // Observe the entry-scoped refusal while the impostor's original connection is live.
     // The next phase deliberately closes it to refresh its claim; that EOF
     // cannot stand in for evidence that the refusal sent no request.
     observe.send(()).expect("start post-request observation");
@@ -7402,20 +7444,11 @@ async fn a_second_host_claiming_a_session_id_never_steals_its_routing() {
         .await_refreshed_as(impostor, "identity-impostor", 0)
         .await;
 
-    let (status, body) = post_text(
+    let (status, value) = get_json(
         &harness,
-        "/api/sessions/contested/stop",
-        serde_json::json!({}),
+        &harness.session_uri(owner, "/api/sessions/contested"),
     )
     .await;
-    assert_eq!(
-        status,
-        axum::http::StatusCode::OK,
-        "a contest clears itself when the claimant stops claiming: {body}"
-    );
-    owner_task.await.unwrap();
-
-    let (status, value) = get_json(&harness, "/api/sessions/contested").await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(
         value["host"], owner,
@@ -7423,17 +7456,15 @@ async fn a_second_host_claiming_a_session_id_never_steals_its_routing() {
     );
 }
 
-/// Every contested claimant must be compared with the cached owner, not
-/// merely the first claimant in host-id order. A cache handoff can leave an
-/// old contested observation in place until its next refresh; if that host
-/// is now the cached owner, a later claimant must still keep routing closed.
+/// Entry-scoped resolution must ignore another actor's standing collision.
 ///
-/// The fixture performs that handoff through the real cache API after two
-/// actors have reported their standing collision. It then proves both sides
-/// of the boundary: `[owner, other]` refuses the route, while the remaining
-/// sole self-claim is not itself ambiguous once the other actor refreshes.
+/// The intermediate cache still admits one host per bare suffix. Moving its
+/// row while actors retain old contested observations proves that routing
+/// follows the selected pair's current membership, never a global winner or
+/// the sorted order of those observations. Entries without membership get a
+/// 404 even though the same suffix exists elsewhere.
 #[farhelm_testtrace::test]
-async fn resolve_owner_rejects_a_later_contested_claimant_after_a_self_claim() {
+async fn resolve_owner_uses_only_selected_entry_after_a_cache_handoff() {
     let (builder, original_owner) = rest_harness::FleetBuilder::new()
         .await
         .ssh(
@@ -7512,20 +7543,32 @@ async fn resolve_owner_rejects_a_later_contested_claimant_after_a_self_claim() {
         "the cached owner must be the first sorted contested claimant"
     );
 
-    let err = resolve_owner(&harness.state, "contested-handoff")
+    let (owner, _) = resolve_owner(
+        &harness.state,
+        &store::SessionKey::new(cached_owner, "contested-handoff"),
+    )
+    .await
+    .expect("the selected entry owns the cached session");
+    assert_eq!(owner, cached_owner);
+    for absent in [original_owner, later_claimant] {
+        let err = resolve_owner(
+            &harness.state,
+            &store::SessionKey::new(absent, "contested-handoff"),
+        )
         .await
         .err()
-        .expect("a later different claimant must keep the route fail-closed");
-    assert!(
-        matches!(
-            err.downcast_ref::<store::HostStoreError>(),
-            Some(store::HostStoreError::SessionOwnerAmbiguous { session, first, second })
-                if session == "contested-handoff"
-                    && *first == cached_owner
-                    && *second == later_claimant
-        ),
-        "the refusal must preserve the sorted cache-owner and claimant pair: {err:#}"
-    );
+        .expect("another entry cannot borrow the cached owner's membership");
+        assert!(
+            matches!(
+                err.downcast_ref::<crate::client::SupervisorError>(),
+                Some(crate::client::SupervisorError {
+                    kind: farhelm_proto::ErrorKind::NotFound,
+                    ..
+                })
+            ),
+            "{err:#}"
+        );
+    }
 
     harness
         .fleet
@@ -7539,9 +7582,12 @@ async fn resolve_owner_rejects_a_later_contested_claimant_after_a_self_claim() {
         vec![cached_owner],
         "the remaining claimant is the cached owner itself"
     );
-    let (owner, _) = resolve_owner(&harness.state, "contested-handoff")
-        .await
-        .expect("a sole self-claim must remain routable");
+    let (owner, _) = resolve_owner(
+        &harness.state,
+        &store::SessionKey::new(cached_owner, "contested-handoff"),
+    )
+    .await
+    .expect("a sole self-claim must remain routable");
     assert_eq!(owner, cached_owner);
 }
 
@@ -7649,14 +7695,20 @@ async fn a_refresh_that_predates_a_create_cannot_erase_it() {
     ids.sort();
     assert_eq!(
         ids,
-        vec!["created-mid-drain", "pre-existing"],
+        vec![
+            harness.local_session_ref("created-mid-drain"),
+            harness.local_session_ref("pre-existing")
+        ],
         "a refresh built before the create must not erase it: {value}"
     );
 
     // And it is routable, which is the promise the create made.
-    let (host, _) = resolve_owner(&harness.state, "created-mid-drain")
-        .await
-        .expect("the created session must still have an owner");
+    let (host, _) = resolve_owner(
+        &harness.state,
+        &store::SessionKey::new(local, "created-mid-drain"),
+    )
+    .await
+    .expect("the created session must still have an owner");
     assert_eq!(host, local);
     let _ = successor.send(());
     peer.abort();
@@ -7713,7 +7765,11 @@ async fn a_supervisors_reply_order_is_accepted_and_resorted_per_request() {
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(
         row_ids(&value),
-        vec!["newest", "middle", "oldest"],
+        vec![
+            harness.local_session_ref("newest"),
+            harness.local_session_ref("middle"),
+            harness.local_session_ref("oldest")
+        ],
         "the helm sorts for itself; the peer's order neither fails the refresh nor leaks through"
     );
     assert_eq!(value["truncated"], false);
@@ -7746,7 +7802,7 @@ async fn an_identity_less_hosts_cap_flag_reaches_the_rest_reply() {
 
     let (status, value) = get_json(&harness, "/api/sessions").await;
     assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&value), vec!["memory-1"]);
+    assert_eq!(row_ids(&value), vec![harness.local_session_ref("memory-1")]);
     assert_eq!(
         value["truncated"], true,
         "the in-memory host's cap flag must reach the reply: {value}"
@@ -7783,7 +7839,10 @@ async fn a_capped_hosts_notice_survives_the_host_going_down_and_a_helm_restart()
 
     let (status, connected) = get_json(&harness, "/api/sessions").await;
     assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&connected), vec!["cut-survivor"]);
+    assert_eq!(
+        row_ids(&connected),
+        vec![harness.session_ref(host, "cut-survivor")]
+    );
     assert_eq!(
         connected["truncated"], true,
         "a supervisor's cut reaches the merged reply: {connected}"
@@ -7794,18 +7853,22 @@ async fn a_capped_hosts_notice_survives_the_host_going_down_and_a_helm_restart()
         .await_state(host, |state| state.phase() == "unreachable-reprobing")
         .await;
     let (_, down) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(row_ids(&down), vec!["cut-survivor"]);
+    assert_eq!(
+        row_ids(&down),
+        vec![harness.session_ref(host, "cut-survivor")]
+    );
     assert_eq!(
         down["truncated"], true,
         "the stale rows are still the cut rows, so the notice stays: {down}"
     );
 
+    let expected = harness.session_ref(host, "cut-survivor");
     let restarted = harness.restart_with(|fleet| fleet.take_down(host)).await;
     restarted
         .await_state(host, |state| state.phase() == "unreachable-reprobing")
         .await;
     let (_, after_restart) = get_json(&restarted, "/api/sessions").await;
-    assert_eq!(row_ids(&after_restart), vec!["cut-survivor"]);
+    assert_eq!(row_ids(&after_restart), vec![expected]);
     assert_eq!(
         after_restart["truncated"], true,
         "a helm restarted over the same helm.db must not present the cut list as whole: \
@@ -7838,7 +7901,7 @@ async fn the_stale_list_survives_a_helm_restart_from_helm_db_alone() {
     let first = builder.start().await;
     first.await_refreshed(host).await;
     let (_, before) = get_json(&first, "/api/sessions").await;
-    assert_eq!(row_ids(&before), vec!["survivor"]);
+    assert_eq!(row_ids(&before), vec![first.session_ref(host, "survivor")]);
 
     // A NEW helm over the same database, with the host now down — the
     // manager, its actors, and the router are all built from scratch.
@@ -7851,7 +7914,7 @@ async fn the_stale_list_survives_a_helm_restart_from_helm_db_alone() {
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(
         row_ids(&value),
-        vec!["survivor"],
+        vec![restarted.session_ref(host, "survivor")],
         "the stale list must come back from helm.db alone: {value}"
     );
     assert_eq!(value["sessions"][0]["stale"], true);
@@ -7859,7 +7922,7 @@ async fn the_stale_list_survives_a_helm_restart_from_helm_db_alone() {
 
     let (status, body) = post_text(
         &restarted,
-        "/api/sessions/survivor/stop",
+        &restarted.session_uri(host, "/api/sessions/survivor/stop"),
         serde_json::json!({}),
     )
     .await;
@@ -7953,7 +8016,7 @@ async fn a_session_created_on_an_identity_less_host_is_routable_at_once() {
 
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/unbound-new/stop",
+        &harness.session_uri(host, "/api/sessions/unbound-new/stop"),
         serde_json::json!({}),
     )
     .await;
@@ -7965,7 +8028,10 @@ async fn a_session_created_on_an_identity_less_host_is_routable_at_once() {
 
     // And it is in the list, in order, without waiting for a refresh.
     let (_, value) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(row_ids(&value), vec!["unbound-new"]);
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.session_ref(host, "unbound-new")]
+    );
     assert_eq!(value["total"], 1);
     peer.abort();
 }
@@ -8054,7 +8120,7 @@ async fn a_session_created_before_an_identity_less_hosts_first_refresh_is_routab
 
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/early-new/stop",
+        &harness.session_uri(host, "/api/sessions/early-new/stop"),
         serde_json::json!({}),
     )
     .await;
@@ -8064,7 +8130,10 @@ async fn a_session_created_before_an_identity_less_hosts_first_refresh_is_routab
         "a session created before the first refresh must route immediately: {body}"
     );
     let (_, value) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(row_ids(&value), vec!["early-new"]);
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.session_ref(host, "early-new")]
+    );
     drop(release_first_list);
     peer.abort();
 }
@@ -8075,7 +8144,7 @@ async fn a_session_created_before_an_identity_less_hosts_first_refresh_is_routab
 /// Within the cache the first claim already holds (SPEC_impl.md's duplicate
 /// id rule), but an identity-less host's rows come from memory and were
 /// appended to the merged list unchecked, so the session showed twice and
-/// `total` counted it twice, while routing refused both copies. The rule is
+/// `total` counted it twice. The rule is
 /// about keeping the LIST coherent, so it has to hold on both storage paths.
 #[farhelm_testtrace::test]
 async fn an_identity_less_duplicate_of_a_cached_id_is_listed_once() {
@@ -8108,13 +8177,18 @@ async fn an_identity_less_duplicate_of_a_cached_id_is_listed_once() {
     assert_eq!(status, axum::http::StatusCode::OK);
     let mut ids = row_ids(&value);
     ids.sort();
-    assert_eq!(ids, vec!["only-unbound", "shared-id"], "{value}");
+    let mut expected = vec![
+        harness.session_ref(unbound, "only-unbound"),
+        harness.local_session_ref("shared-id"),
+    ];
+    expected.sort();
+    assert_eq!(ids, expected, "{value}");
     assert_eq!(value["total"], 2, "the duplicate must not be counted twice");
     let shared = value["sessions"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|row| row["id"] == "shared-id")
+        .find(|row| row["id"] == harness.local_session_ref("shared-id"))
         .expect("the shared id is listed");
     assert_eq!(shared["host"], local, "the cached (first) claim holds");
 }
@@ -8197,7 +8271,7 @@ async fn a_reply_carrying_unknown_never_erases_a_known_status() {
 
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/restart",
+        &harness.local_session_uri("/api/sessions/sess-1/restart"),
         serde_json::json!({}),
     )
     .await;
@@ -8295,7 +8369,7 @@ async fn a_restart_that_cannot_improve_the_status_wakes_the_refresh() {
 
     let (status, body) = post_text(
         &harness,
-        "/api/sessions/sess-1/restart",
+        &harness.local_session_uri("/api/sessions/sess-1/restart"),
         serde_json::json!({}),
     )
     .await;
@@ -8377,7 +8451,8 @@ async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
         .await_state(host, |state| state.phase() == "unreachable-reprobing")
         .await;
 
-    let (status, value) = get_json(&harness, "/api/sessions/owned").await;
+    let (status, value) =
+        get_json(&harness, &harness.session_uri(host, "/api/sessions/owned")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(value["title"], "the work in progress");
     assert_eq!(value["cwd"], "/home/user/project");
@@ -8511,34 +8586,90 @@ async fn every_filter_dimension_narrows_the_list_on_its_own() {
 
     let (status, value) = get_json(&harness, &format!("/api/sessions?host={alpha}")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&value), vec!["alpha-waiting", "alpha-exited"]);
+    assert_eq!(
+        row_ids(&value),
+        vec![
+            harness.session_ref(alpha, "alpha-waiting"),
+            harness.session_ref(alpha, "alpha-exited")
+        ]
+    );
 
     // Substring, and case-insensitive: a user searching a path types a
     // fragment of it, not the whole thing.
     let (_, value) = get_json(&harness, "/api/sessions?directory=SRC/farhelm").await;
-    assert_eq!(row_ids(&value), vec!["local-running"]);
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.local_session_ref("local-running")]
+    );
 
     // Exact, on the state tag the wire uses.
     let (_, value) = get_json(&harness, "/api/sessions?status=waiting").await;
-    assert_eq!(row_ids(&value), vec!["alpha-waiting"]);
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.session_ref(alpha, "alpha-waiting")]
+    );
 
     // A status that carries a payload still filters by its tag alone —
     // `exited` selects the session whatever its exit code was.
     let (_, value) = get_json(&harness, "/api/sessions?status=exited").await;
-    assert_eq!(row_ids(&value), vec!["alpha-exited"]);
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.session_ref(alpha, "alpha-exited")]
+    );
 
     // Substring again, and case-insensitive again.
     let (_, value) = get_json(&harness, "/api/sessions?title=drain").await;
-    assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
+    assert_eq!(
+        row_ids(&value),
+        vec![
+            harness.local_session_ref("local-running"),
+            harness.session_ref(alpha, "alpha-exited")
+        ]
+    );
 
-    // Parent ids are opaque and exact; only direct children match.
-    let (_, value) = get_json(&harness, "/api/sessions?parent=root-session").await;
-    assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
+    // Each host reports the same bare parent, but these are different public references.
+    let local_parent = harness.local_session_ref("root-session");
+    let remote_parent = harness.session_ref(alpha, "root-session");
+    let (status, value) = get_json(&harness, &format!("/api/sessions?parent={local_parent}")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.local_session_ref("local-running")]
+    );
+    let (status, value) =
+        get_json(&harness, &format!("/api/sessions?parent={remote_parent}")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.session_ref(alpha, "alpha-exited")]
+    );
+    let (status, value) = get_json(
+        &harness,
+        &format!("/api/sessions?parent={local_parent}&host={alpha}"),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert!(
+        row_ids(&value).is_empty(),
+        "a host filter cannot move a parent's entry"
+    );
+    let (status, refusal) = get_json(&harness, "/api/sessions?parent=root-session").await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    assert!(
+        refusal.as_str().unwrap().contains("full session"),
+        "{refusal}"
+    );
 
     // And the local host, so the host filter is shown selecting rather
     // than merely excluding the other one.
     let (_, value) = get_json(&harness, &format!("/api/sessions?host={local}")).await;
-    assert_eq!(row_ids(&value), vec!["local-running", "local-idle"]);
+    assert_eq!(
+        row_ids(&value),
+        vec![
+            harness.local_session_ref("local-running"),
+            harness.local_session_ref("local-idle")
+        ]
+    );
 }
 
 /// Filters AND together, and the combination narrows further than
@@ -8552,7 +8683,13 @@ async fn combined_filters_narrow_rather_than_widen() {
     let (harness, _local, alpha) = filterable_fleet().await;
 
     let (_, value) = get_json(&harness, "/api/sessions?title=drain").await;
-    assert_eq!(row_ids(&value), vec!["local-running", "alpha-exited"]);
+    assert_eq!(
+        row_ids(&value),
+        vec![
+            harness.local_session_ref("local-running"),
+            harness.session_ref(alpha, "alpha-exited")
+        ]
+    );
 
     let (status, value) = get_json(
         &harness,
@@ -8560,7 +8697,10 @@ async fn combined_filters_narrow_rather_than_widen() {
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&value), vec!["alpha-exited"]);
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.session_ref(alpha, "alpha-exited")]
+    );
     assert_eq!(value["matching"], 1);
     assert_eq!(
         value["total"], 4,
@@ -8628,20 +8768,26 @@ async fn only_an_empty_filter_value_clears_it_and_whitespace_is_content() {
     // Searchable by text that only exists WITH its whitespace.
     let (status, value) = get_json(&harness, "/api/sessions?directory=my%20project").await;
     assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&value), vec!["spaced"]);
+    assert_eq!(row_ids(&value), vec![harness.local_session_ref("spaced")]);
     let (_, value) = get_json(&harness, "/api/sessions?title=the%20%20spacing").await;
-    assert_eq!(row_ids(&value), vec!["spaced"]);
+    assert_eq!(row_ids(&value), vec![harness.local_session_ref("spaced")]);
 
     // A lone space is a real search that matches only what contains one
     // — emphatically not a cleared filter.
     let (_, value) = get_json(&harness, "/api/sessions?title=%20").await;
-    assert_eq!(row_ids(&value), vec!["spaced"]);
+    assert_eq!(row_ids(&value), vec![harness.local_session_ref("spaced")]);
     assert_eq!(value["matching"], 1);
 
     // Clearing the only predicate restores the unfiltered response, which
     // omits the matching count rather than duplicating the fleet total.
     let (_, value) = get_json(&harness, "/api/sessions?title=").await;
-    assert_eq!(row_ids(&value), vec!["spaced", "plain"]);
+    assert_eq!(
+        row_ids(&value),
+        vec![
+            harness.local_session_ref("spaced"),
+            harness.local_session_ref("plain")
+        ]
+    );
     assert_eq!(value["total"], 2);
     assert!(value.get("matching").is_none());
 }
@@ -8689,7 +8835,10 @@ async fn a_filter_applies_to_an_identity_less_hosts_in_memory_rows() {
 
     let (status, value) = get_json(&harness, "/api/sessions?status=idle").await;
     assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&value), vec!["memory-idle"]);
+    assert_eq!(
+        row_ids(&value),
+        vec![harness.local_session_ref("memory-idle")]
+    );
     assert_eq!(value["matching"], 1);
     assert_eq!(
         value["total"], 2,
@@ -8751,7 +8900,7 @@ fn sortable_as(
 /// orders happened to coincide. Every leading component also TIES for one
 /// pair, so the shared creation-order tail is under test rather than merely
 /// present.
-async fn sortable_fleet() -> rest_harness::Harness {
+async fn sortable_fleet() -> (rest_harness::Harness, store::HostId) {
     let (builder, alpha) = rest_harness::FleetBuilder::new()
         .await
         .local(rest_harness::HostScript {
@@ -8783,7 +8932,7 @@ async fn sortable_fleet() -> rest_harness::Harness {
     for host in [local, alpha] {
         harness.await_refreshed(host).await;
     }
-    harness
+    (harness, alpha)
 }
 
 /// `?sort=` selects which of the three orders the merged list is served
@@ -8796,9 +8945,14 @@ async fn sortable_fleet() -> rest_harness::Harness {
 /// believed rather than noticed.
 #[farhelm_testtrace::test]
 async fn the_sort_parameter_selects_the_order_and_an_unknown_word_is_refused() {
-    let harness = sortable_fleet().await;
+    let (harness, alpha) = sortable_fleet().await;
 
-    let created = vec!["local-quiet", "local-busy", "alpha-busy", "alpha-legacy"];
+    let created = vec![
+        harness.local_session_ref("local-quiet"),
+        harness.local_session_ref("local-busy"),
+        harness.session_ref(alpha, "alpha-busy"),
+        harness.session_ref(alpha, "alpha-legacy"),
+    ];
     for uri in [
         // Absent, empty (a cleared control), and named: the default order is
         // what every client written before there was a choice keeps getting.
@@ -8815,7 +8969,12 @@ async fn the_sort_parameter_selects_the_order_and_an_unknown_word_is_refused() {
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(
         row_ids(&value),
-        vec!["local-busy", "alpha-busy", "local-quiet", "alpha-legacy"],
+        vec![
+            harness.local_session_ref("local-busy"),
+            harness.session_ref(alpha, "alpha-busy"),
+            harness.local_session_ref("local-quiet"),
+            harness.session_ref(alpha, "alpha-legacy")
+        ],
         "equal activity falls through to creation time descending, and a legacy 0 stamp sorts \
          by its own creation time rather than at the epoch"
     );
@@ -8824,7 +8983,12 @@ async fn the_sort_parameter_selects_the_order_and_an_unknown_word_is_refused() {
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(
         row_ids(&value),
-        vec!["local-busy", "alpha-busy", "alpha-legacy", "local-quiet"],
+        vec![
+            harness.local_session_ref("local-busy"),
+            harness.session_ref(alpha, "alpha-busy"),
+            harness.session_ref(alpha, "alpha-legacy"),
+            harness.local_session_ref("local-quiet")
+        ],
         "the title order folds case, so Alpha and alpha tie and split on the tail — and Ärger \
          sorts after zeta, which is the ordinal, locale-free collation this helm documents"
     );
@@ -8907,10 +9071,10 @@ async fn activity_groups_by_reported_status_while_other_orders_and_counts_ignore
     assert_eq!(
         row_ids(&value),
         vec![
-            "alpha-waiting",
-            "local-running",
-            "alpha-exited",
-            "local-idle"
+            harness.session_ref(alpha, "alpha-waiting"),
+            harness.local_session_ref("local-running"),
+            harness.session_ref(alpha, "alpha-exited"),
+            harness.local_session_ref("local-idle")
         ],
         "Waiting sorts with Running on its older key; the ended and idle rows follow in key \
          order despite holding the newest bursts"
@@ -8920,10 +9084,10 @@ async fn activity_groups_by_reported_status_while_other_orders_and_counts_ignore
     assert_eq!(
         row_ids(&value),
         vec![
-            "local-idle",
-            "local-running",
-            "alpha-waiting",
-            "alpha-exited"
+            harness.local_session_ref("local-idle"),
+            harness.local_session_ref("local-running"),
+            harness.session_ref(alpha, "alpha-waiting"),
+            harness.session_ref(alpha, "alpha-exited")
         ],
         "creation order follows creation time across the mixed statuses"
     );
@@ -8931,10 +9095,10 @@ async fn activity_groups_by_reported_status_while_other_orders_and_counts_ignore
     assert_eq!(
         row_ids(&value),
         vec![
-            "alpha-exited",
-            "alpha-waiting",
-            "local-running",
-            "local-idle"
+            harness.session_ref(alpha, "alpha-exited"),
+            harness.session_ref(alpha, "alpha-waiting"),
+            harness.local_session_ref("local-running"),
+            harness.local_session_ref("local-idle")
         ],
         "title order follows titles across the mixed statuses"
     );
@@ -8955,7 +9119,7 @@ async fn activity_groups_by_reported_status_while_other_orders_and_counts_ignore
     let (_, value) = get_json(&harness, "/api/sessions?sort=activity&status=running").await;
     assert_eq!(
         row_ids(&value),
-        vec!["local-running"],
+        vec![harness.local_session_ref("local-running")],
         "a status filter matches the reported status, not the group"
     );
     assert_eq!(value["matching"], 1);
@@ -9001,7 +9165,10 @@ async fn disconnecting_a_host_demotes_its_running_rows_through_real_stale_plumbi
     let (_, value) = get_json(&harness, "/api/sessions?sort=activity").await;
     assert_eq!(
         row_ids(&value),
-        vec!["alpha-running", "local-running"],
+        vec![
+            harness.session_ref(alpha, "alpha-running"),
+            harness.local_session_ref("local-running")
+        ],
         "while both hosts are connected, the newer burst leads"
     );
 
@@ -9014,7 +9181,10 @@ async fn disconnecting_a_host_demotes_its_running_rows_through_real_stale_plumbi
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(
         row_ids(&value),
-        vec!["local-running", "alpha-running"],
+        vec![
+            harness.local_session_ref("local-running"),
+            harness.session_ref(alpha, "alpha-running")
+        ],
         "the disconnected host's newer burst drops below the connected row"
     );
     let rows = value["sessions"].as_array().expect("sessions is an array");
@@ -9033,7 +9203,10 @@ async fn disconnecting_a_host_demotes_its_running_rows_through_real_stale_plumbi
     let (_, value) = get_json(&harness, "/api/sessions?sort=activity&status=running").await;
     assert_eq!(
         row_ids(&value),
-        vec!["local-running", "alpha-running"],
+        vec![
+            harness.local_session_ref("local-running"),
+            harness.session_ref(alpha, "alpha-running")
+        ],
         "a stale Running row still matches a Running filter — it sorts second, it is not filtered out"
     );
 }
@@ -9087,20 +9260,32 @@ async fn an_identity_less_hosts_rows_are_reordered_into_the_requested_order() {
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(
         row_ids(&value),
-        vec!["memory-quiet", "cached-mid", "memory-busy"],
+        vec![
+            harness.local_session_ref("memory-quiet"),
+            harness.session_ref(alpha, "cached-mid"),
+            harness.local_session_ref("memory-busy")
+        ],
         "creation order, for the contrast the other two are against"
     );
 
     let (_, value) = get_json(&harness, "/api/sessions?sort=activity").await;
     assert_eq!(
         row_ids(&value),
-        vec!["memory-busy", "cached-mid", "memory-quiet"],
+        vec![
+            harness.local_session_ref("memory-busy"),
+            harness.session_ref(alpha, "cached-mid"),
+            harness.local_session_ref("memory-quiet")
+        ],
         "the in-memory rows must land on either side of the cached one, once each"
     );
     let (_, value) = get_json(&harness, "/api/sessions?sort=title").await;
     assert_eq!(
         row_ids(&value),
-        vec!["memory-quiet", "memory-busy", "cached-mid"],
+        vec![
+            harness.local_session_ref("memory-quiet"),
+            harness.local_session_ref("memory-busy"),
+            harness.session_ref(alpha, "cached-mid")
+        ],
         "and the title order is a third sequence again: the cached row's own title puts it last, \
          behind two in-memory rows that neither of the other orders puts together"
     );
@@ -9315,7 +9500,7 @@ async fn fresh_rest_reconciliation_precedes_mutable_resolution_and_binds_install
     let (status, text) = post_text(&harness, "/api/sessions", body.clone()).await;
     assert_eq!(status, axum::http::StatusCode::OK, "{text}");
     let returned: farhelm_proto::SessionInfo = serde_json::from_str(&text).unwrap();
-    assert_eq!(returned.id, "recorded-session");
+    assert_eq!(returned.id, harness.local_session_ref("recorded-session"));
 
     body["intent_key"] = serde_json::json!("unknown-key");
     let (status, precondition_headers, text) =
@@ -9484,9 +9669,9 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                 } else {
                     request["command"] = serde_json::json!({"command": "claude", "yolo": false});
                 }
-                let (route, body) = if replacing {
+                let (route, body): (&str, _) = if replacing {
                     (
-                        "/api/sessions/sess-1/replace",
+                        &harness.local_session_uri("/api/sessions/sess-1/replace"),
                         serde_json::json!({"intent_key": "failed-local-resolution", "with": request}),
                     )
                 } else {
@@ -9718,9 +9903,9 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
                 "incarnation": claim.incarnation, "installation_identity": "local-identity"
             }}
         });
-        let (route, body) = if replacing {
+        let (route, body): (&str, _) = if replacing {
             (
-                "/api/sessions/sess-1/replace",
+                &harness.local_session_uri("/api/sessions/sess-1/replace"),
                 serde_json::json!({"intent_key": "concurrent-key", "with": request}),
             )
         } else {
@@ -9850,9 +10035,9 @@ async fn fresh_create_and_replace_refuse_a_contradictory_cwd() {
                 }}
             });
             request[selector] = value;
-            let (route, body) = if replacing {
+            let (route, body): (&str, _) = if replacing {
                 (
-                    "/api/sessions/sess-1/replace",
+                    &harness.local_session_uri("/api/sessions/sess-1/replace"),
                     serde_json::json!({"with": request}),
                 )
             } else {
@@ -10050,7 +10235,7 @@ async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
             }}
         }
     });
-    let route = "/api/sessions/sess-1/replace";
+    let route = &harness.local_session_uri("/api/sessions/sess-1/replace");
     for attempt in 0..2 {
         let (status, text) = post_text(&harness, route, body.clone()).await;
         assert_eq!(
@@ -10759,6 +10944,415 @@ async fn checkout_trash_routes_pass_host_results_and_fence_stale_deletion() {
                 assert_eq!(value["removed"], serde_json::json!(["recorded"]));
             }
         }
+    }
+    peer.await.unwrap();
+}
+
+/// Bare and malformed targets fail at REST ingress even when a bare target
+/// would be unambiguous. A live silent peer distinguishes admission refusal
+/// from a supervisor's own rejection or an unavailable fixture.
+#[farhelm_testtrace::test]
+async fn rest_session_routes_require_full_canonical_references() {
+    use tower::ServiceExt;
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (observe, peer) = silent_supervisor(peer_side);
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let local = rest_harness::local_id(&harness.store).await;
+    assert!(harness.manager.status(local).unwrap().client.is_some());
+    for target in [
+        "sess-1",
+        "not-a-uuid:sess-1",
+        "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA:sess-1",
+        "11111111-1111-4111-8111-111111111111:",
+    ] {
+        let (status, body) = get_json(&harness, &format!("/api/sessions/{target}")).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::BAD_REQUEST,
+            "{target}: {body}"
+        );
+        assert!(
+            body.as_str().unwrap().contains("full session"),
+            "{target}: {body}"
+        );
+    }
+    for suffix in ["stop", "restart", "rename", "replace", "tabs"] {
+        let (status, body) = post_text(
+            &harness,
+            &format!("/api/sessions/sess-1/{suffix}"),
+            if suffix == "rename" {
+                serde_json::json!({"title": "a title"})
+            } else {
+                serde_json::json!({})
+            },
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::BAD_REQUEST,
+            "{suffix}: {body}"
+        );
+        assert!(body.contains("full session"), "{suffix}: {body}");
+    }
+    for (suffix, body) in [
+        ("seen", serde_json::json!({"seen_activity_at": 100})),
+        ("pin", serde_json::json!({"pinned": true})),
+        ("notifications/read", serde_json::json!({"through": 1})),
+        ("notifications/cleared", serde_json::json!({"through": 1})),
+    ] {
+        let (status, body) =
+            put_json(&harness, &format!("/api/sessions/sess-1/{suffix}"), body).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::BAD_REQUEST,
+            "{suffix}: {body}"
+        );
+    }
+    for uri in ["/api/sessions/sess-1", "/api/sessions/sess-1/tabs/tab-1"] {
+        let response = harness
+            .router()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("DELETE")
+                    .uri(uri)
+                    .header("host", "127.0.0.1:7433")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::BAD_REQUEST,
+            "{uri}"
+        );
+    }
+    observe
+        .send(())
+        .expect("observe after all refused requests");
+    peer.await.unwrap();
+}
+
+/// The same bare suffix can be routable from a cached entry and an
+/// identity-less entry before cache uniqueness is retired. Each full reference
+/// must reach its own peer, and the unchanged supervisor wire receives bare IDs.
+#[farhelm_testtrace::test]
+async fn full_references_route_same_suffix_only_on_the_selected_entry() {
+    use crate::rest_harness::FakeSupervisor;
+    use farhelm_proto::ControlMsg;
+
+    /// A peer's distinct rename result proves which entry accepted the operation;
+    /// both peers deliberately recognize the same bare target.
+    async fn rename_once(peer: tokio::io::DuplexStream, title: &'static str) {
+        let mut peer = FakeSupervisor::accept(peer).await;
+        let request = peer.recv().await;
+        let ControlMsg::RenameSession {
+            req_id, session_id, ..
+        } = request
+        else {
+            panic!("expected RenameSession, got {request:?}");
+        };
+        assert_eq!(
+            session_id, "same-suffix",
+            "full references never cross the supervisor wire"
+        );
+        let mut info = rest_harness::session("same-suffix", 100);
+        info.title = title.to_string();
+        peer.send(&ControlMsg::SessionRenamed {
+            req_id,
+            session: info,
+        })
+        .await;
+    }
+
+    let (cached_client, cached_peer) = tokio::io::duplex(64 * 1024);
+    let cached = tokio::spawn(rename_once(cached_peer, "cached entry"));
+    let (live_client, live_peer) = tokio::io::duplex(64 * 1024);
+    let live = tokio::spawn(rename_once(live_peer, "identity-less entry"));
+    let (builder, remote) = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: Some("cached-install".to_string()),
+            sessions: vec![rest_harness::session("same-suffix", 100)],
+            peer: Some(cached_client),
+            ..Default::default()
+        })
+        .await
+        .ssh(
+            "user@identity-less",
+            rest_harness::HostScript {
+                identity: None,
+                sessions: vec![rest_harness::session("same-suffix", 100)],
+                peer: Some(live_client),
+                ..Default::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness.await_refreshed(local).await;
+    harness.await_refreshed(remote).await;
+    assert!(
+        harness
+            .store
+            .cached_sessions(remote)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        harness
+            .manager
+            .status(remote)
+            .unwrap()
+            .live_sessions
+            .unwrap()[0]
+            .id,
+        "same-suffix"
+    );
+    for (host, title) in [(local, "cached entry"), (remote, "identity-less entry")] {
+        let (status, body) = post_text(
+            &harness,
+            &harness.session_uri(host, "/api/sessions/same-suffix/rename"),
+            serde_json::json!({"title": "rename"}),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(body["id"], harness.session_ref(host, "same-suffix"));
+        assert_eq!(body["title"], title);
+    }
+    cached.await.unwrap();
+    live.await.unwrap();
+}
+
+/// Qualification treats every supervisor suffix as opaque, even when it
+/// resembles a full reference itself. List and detail must qualify all three
+/// session-reference fields with the reporting entry, without altering the
+/// supervisor's own rows or the URI's encoded segment and query.
+#[farhelm_testtrace::test]
+async fn session_views_qualify_prefix_looking_suffixes_and_related_references() {
+    const BARE: &str = "22222222-2222-4222-8222-222222222222:x";
+    let mut info = rest_harness::session(BARE, 100);
+    info.parent = Some("parent:tail".to_string());
+    info.working_copy = Some(farhelm_proto::WorkingCopyInfo {
+        id: "working-copy".to_string(),
+        repo: farhelm_proto::GithubRepo {
+            owner: "acme".to_string(),
+            name: "repo".to_string(),
+        },
+        canonical_path: "/work/repo".to_string(),
+        origin_session_id: BARE.to_string(),
+    });
+    let harness = rest_harness::helm_listing(vec![info]).await;
+    let local = rest_harness::local_id(&harness.store).await;
+    let encoded_uri = "/api/sessions/22222222-2222-4222-8222-222222222222%3Ax?unused=kept%3Ayes";
+    let uri = harness.local_session_uri(encoded_uri);
+    assert!(uri.ends_with("22222222-2222-4222-8222-222222222222%3Ax?unused=kept%3Ayes"));
+    let (status, detail) = get_json(&harness, &uri).await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{detail}");
+    let (status, listing) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    for row in [&detail, &listing["sessions"][0]] {
+        assert_eq!(row["id"], harness.session_ref(local, BARE));
+        assert_eq!(row["parent"], harness.session_ref(local, "parent:tail"));
+        assert_eq!(
+            row["working_copy"]["origin_session_id"],
+            harness.session_ref(local, BARE)
+        );
+        assert!(
+            row.get("entry_uuid").is_none(),
+            "private provenance is not an extra HTTP field"
+        );
+    }
+    let cached = harness.store.cached_sessions(local).await.unwrap();
+    assert_eq!(
+        cached[0].id, BARE,
+        "public projection must not rewrite supervisor cache rows"
+    );
+}
+
+/// Re-adding the same SSH destination creates a fresh entry. A full
+/// reference captured before removal must fail without dispatching to that
+/// new entry, even when it reports the identical bare session suffix.
+#[farhelm_testtrace::test]
+async fn removed_entry_reference_never_dispatches_to_its_replacement() {
+    use crate::rest_harness::FakeSupervisor;
+    use farhelm_proto::ControlMsg;
+
+    let (builder, old) = rest_harness::FleetBuilder::new()
+        .await
+        .ssh(
+            "user@readded",
+            rest_harness::HostScript {
+                identity: Some("old-install".to_string()),
+                sessions: vec![rest_harness::session("same-suffix", 100)],
+                ..Default::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    harness.await_refreshed(old).await;
+    let stale_uri = harness.session_uri(old, "/api/sessions/same-suffix/stop");
+    let stale_reference = harness.session_ref(old, "same-suffix");
+    harness.store.remove_ssh_host(old).await.unwrap();
+    harness.manager.sync_registry().await.unwrap();
+    assert!(
+        harness.manager.status(old).is_none(),
+        "the old actor must be gone before re-adding"
+    );
+
+    let new = harness
+        .store
+        .add_ssh_host("user@readded", None, None)
+        .await
+        .unwrap();
+    let (client, peer) = tokio::io::duplex(64 * 1024);
+    let (old_checked, permit_live_request) = tokio::sync::oneshot::channel();
+    let peer = tokio::spawn(async move {
+        let mut peer = FakeSupervisor::accept(peer).await;
+        tokio::select! {
+            request = peer.recv() => panic!("the stale reference reached the replacement: {request:?}"),
+            permit = permit_live_request => permit.expect("the stale request must finish first"),
+        }
+        let request = peer.recv().await;
+        let ControlMsg::StopSession { req_id, session_id } = request else {
+            panic!("expected StopSession, got {request:?}");
+        };
+        assert_eq!(session_id, "same-suffix");
+        peer.send(&ControlMsg::SessionStopped { req_id }).await;
+    });
+    harness.fleet.edit(new, |script| {
+        script.identity = Some("new-install".to_string());
+        script.sessions = vec![rest_harness::session("same-suffix", 200)];
+        script.peer = Some(client);
+    });
+    harness.manager.sync_registry().await.unwrap();
+    harness.await_refreshed(new).await;
+    assert_ne!(stale_reference, harness.session_ref(new, "same-suffix"));
+    assert!(harness.manager.status(new).unwrap().client.is_some());
+    let (status, body) = post_text(&harness, &stale_uri, serde_json::json!({})).await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND, "{body}");
+    old_checked
+        .send(())
+        .expect("the replacement peer is still waiting for its own request");
+    let (status, body) = post_text(
+        &harness,
+        &harness.session_uri(new, "/api/sessions/same-suffix/stop"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    peer.await.unwrap();
+}
+
+/// Every mutation returns the same public reference shape as list and detail.
+/// A response may carry parent and working-copy provenance even when the
+/// request does not, so qualifying only the addressed ID would leave stale
+/// bare references in otherwise successful create, rename, restart or replace
+/// replies. The scripted wire remains bare throughout all four operations.
+#[farhelm_testtrace::test]
+async fn mutation_replies_qualify_all_session_reference_fields() {
+    use crate::rest_harness::FakeSupervisor;
+    use farhelm_proto::ControlMsg;
+
+    let mut source = rest_harness::session("reply-source", 100);
+    source.parent = Some("reply-parent".to_string());
+    source.working_copy = Some(farhelm_proto::WorkingCopyInfo {
+        id: "working-copy".to_string(),
+        repo: farhelm_proto::GithubRepo {
+            owner: "acme".to_string(),
+            name: "repo".to_string(),
+        },
+        canonical_path: "/work/repo".to_string(),
+        origin_session_id: "reply-origin".to_string(),
+    });
+    let reply_source = source.clone();
+    let (client, peer) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let mut peer = FakeSupervisor::accept(peer).await;
+        for operation in ["create", "rename", "restart", "replace", "delete"] {
+            let request = peer.recv().await;
+            let mut session = reply_source.clone();
+            let reply = match (operation, request) {
+                ("create", ControlMsg::CreateSession { req_id, parent, .. }) => {
+                    assert!(parent.is_none());
+                    session.id = "reply-created".to_string();
+                    ControlMsg::SessionCreated { req_id, session }
+                }
+                (
+                    "rename",
+                    ControlMsg::RenameSession {
+                        req_id, session_id, ..
+                    },
+                ) => {
+                    assert_eq!(session_id, "reply-source");
+                    ControlMsg::SessionRenamed { req_id, session }
+                }
+                (
+                    "restart",
+                    ControlMsg::RestartSession {
+                        req_id, session_id, ..
+                    },
+                ) => {
+                    assert_eq!(session_id, "reply-source");
+                    ControlMsg::SessionRestarted { req_id, session }
+                }
+                ("replace", ControlMsg::CreateSession { req_id, .. }) => {
+                    session.id = "reply-replacement".to_string();
+                    ControlMsg::SessionCreated { req_id, session }
+                }
+                (
+                    "delete",
+                    ControlMsg::DeleteSession {
+                        req_id, session_id, ..
+                    },
+                ) => {
+                    assert_eq!(session_id, "reply-source");
+                    ControlMsg::SessionDeleted {
+                        req_id,
+                        archived: false,
+                        notice: None,
+                    }
+                }
+                (operation, request) => panic!("expected {operation}, got {request:?}"),
+            };
+            peer.send(&reply).await;
+        }
+    });
+    let harness = rest_harness::spliced_helm_listing(client, vec![source]).await;
+    for (uri, request, expected_id) in [
+        (
+            "/api/sessions".to_string(),
+            serde_json::json!({"cwd": "/work", "command": {"command": "agent", "yolo": false}}),
+            "reply-created",
+        ),
+        (
+            harness.local_session_uri("/api/sessions/reply-source/rename"),
+            serde_json::json!({"title": "renamed"}),
+            "reply-source",
+        ),
+        (
+            harness.local_session_uri("/api/sessions/reply-source/restart"),
+            serde_json::json!({}),
+            "reply-source",
+        ),
+        (
+            harness.local_session_uri("/api/sessions/reply-source/replace"),
+            serde_json::json!({}),
+            "reply-replacement",
+        ),
+    ] {
+        let (status, body) = post_text(&harness, &uri, request).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{uri}: {body}");
+        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(body["id"], harness.local_session_ref(expected_id));
+        assert_eq!(body["parent"], harness.local_session_ref("reply-parent"));
+        assert_eq!(
+            body["working_copy"]["origin_session_id"],
+            harness.local_session_ref("reply-origin")
+        );
     }
     peer.await.unwrap();
 }

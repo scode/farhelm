@@ -1,8 +1,11 @@
 ---
-kind: fixed
+kind: breaking
 ---
 
-Pins and read state stay with a session's host entry, so removing a host and adding it again starts them fresh. The
-upgrade also resets pins and read state that Farhelm cannot attribute to one host.
+Session commands and pending confirmations now stay bound to the host entry they named. Agent commands use full session
+IDs from `farhelm agent sessions`, and discovery JSON moves to schema version 7 with UUID host IDs.
 
-Read state includes the seen/unseen stamp and notification read/cleared marks.
+Old bare targets are refused except for the caller's exact own `$FARHELM_SESSION_ID`. Existing sessions and older
+supervisors keep working. Removing and re-adding a host starts its pins, seen state and notification marks fresh;
+the upgrade also clears viewer state and the last selection where Farhelm cannot attribute the old ID to one host.
+An approval card already waiting during the update may get no answer.

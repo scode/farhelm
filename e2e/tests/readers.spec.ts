@@ -118,7 +118,7 @@ test.describe("read ordering and recovery", () => {
     let stale = true;
     let sessionHost: number | undefined;
     await page.route(
-      (url) => url.pathname === `/api/sessions/${session.id}`,
+      (url) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}`,
       async (route: Route) => {
         if (route.request().method() !== "GET") {
           await route.continue();
@@ -256,7 +256,7 @@ test.describe("read ordering and recovery", () => {
     // which is what makes failing it a loss rather than a non-event.
     const settled = await holdMutation(
       page,
-      (url) => url.pathname === `/api/sessions/${session.id}/stop`,
+      (url) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}/stop`,
     );
 
     await openRowMenu(row(page, session.id));

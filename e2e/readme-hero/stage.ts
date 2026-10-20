@@ -41,6 +41,7 @@ interface HostView {
 }
 
 interface SessionRow {
+  /** Full helm reference; staging reuses the create reply and never reconstructs an owner. */
   id: string;
   title: string;
   cwd: string;
@@ -304,7 +305,7 @@ export async function stageFleet(
   const now = Math.floor(Date.now() / 1000);
   for (const session of scenario.sessions) {
     if (session.status !== "idle") continue;
-    const response = await request.put(`/api/sessions/${ids.get(session.title)}/seen`, {
+    const response = await request.put(`/api/sessions/${encodeURIComponent(ids.get(session.title)!)}/seen`, {
       data: { seen_activity_at: session.seen ? now - session.age : null },
     });
     expect(response.ok(), `seen ${session.title}`).toBeTruthy();

@@ -136,12 +136,13 @@ pub(crate) async fn open_url(
 }
 
 /// A remote supervisor names its own asking session, never a session on another host.
+/// The host/session pair keeps a matching suffix on another entry out of this lookup.
 /// Fleet routing alone cannot establish that trust boundary: the native terminal's
 /// user request may route any selected session, while an agent request has an origin.
 pub(crate) async fn tunnel_origin_matches(
     state: &AppState,
     origin: AgentOrigin,
-    session: &str,
+    session: &crate::store::SessionKey,
 ) -> anyhow::Result<bool> {
     let (claim, client) = crate::sessions::route_session(state, session).await?;
     Ok(claim.host == origin.host && client.connection_id() == origin.connection)

@@ -1410,7 +1410,7 @@ test("a-non-decision-detach-keeps-the-ladder-climbing", async ({ page, request }
           String(url).replace(
             /\/sessions\/[^/]+\/term(\/unowned)?\?/,
             (_m: string, unowned: string | undefined) =>
-              `/sessions/00000000-0000-4000-8000-00000000dead/term${unowned ?? ""}?`,
+              `/sessions/00000000-0000-4000-8000-00000000dead%3Amissing-session/term${unowned ?? ""}?`,
           ),
           protocols,
         );
@@ -2068,7 +2068,7 @@ try {
     (window as any).__lateEvidence = delivered;
     const Late: any = function (url: string, protocols?: any) {
       const ws = new Real(url, protocols);
-      if (new URL(url, location.href).pathname !== `/api/sessions/${sessionId}/term/unowned`) return ws;
+      if (new URL(url, location.href).pathname !== `/api/sessions/${encodeURIComponent(sessionId)}/term/unowned`) return ws;
       const ordinal = ++delivered.sockets;
       let handler: any = null;
       // One real attachment-proof frame is enough to exercise the guard.

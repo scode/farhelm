@@ -767,6 +767,50 @@ fn authenticated_router(router: axum::Router, secret: String) -> axum::Router {
 }
 
 impl Harness {
+    /// Build an expected public reference from the fixture's explicit host ownership.
+    ///
+    /// This deliberately uses plain formatting rather than the production projection:
+    /// a projection bug must change the actual response without changing its oracle.
+    /// Capture this value before removing a host; a later entry has a different UUID.
+    pub(crate) fn session_ref(&self, host: HostId, bare: &str) -> String {
+        let status = self
+            .manager
+            .status(host)
+            .expect("the fixture host has an actor");
+        format!("{}:{bare}", status.entry_uuid)
+    }
+
+    /// Qualify an already encoded session route while preserving its operation and query.
+    ///
+    /// Only the entry prefix is added. The supervisor's encoded session segment and
+    /// everything after it remain byte-for-byte fixture input, including escaped colons.
+    /// Callers still use the raw HTTP helpers to exercise malformed or bare references.
+    pub(crate) fn session_uri(&self, host: HostId, uri: &str) -> String {
+        let suffix = uri.strip_prefix("/api/sessions/").expect("a session route");
+        assert!(!suffix.is_empty(), "a session route has an id segment");
+        format!("/api/sessions/{}", self.session_ref(host, suffix))
+    }
+
+    /// The reserved local entry is the only implicit owner a fixture may select.
+    /// Remote fixtures must name their host explicitly, even when bare IDs are unique.
+    pub(crate) fn local_session_ref(&self, bare: &str) -> String {
+        let local = self
+            .manager
+            .snapshots()
+            .into_iter()
+            .find(|host| host.kind == crate::store::HostKind::Local)
+            .expect("the reserved local actor exists")
+            .id;
+        self.session_ref(local, bare)
+    }
+
+    /// Build a local session route without changing the fixture's encoded suffix.
+    pub(crate) fn local_session_uri(&self, uri: &str) -> String {
+        let suffix = uri.strip_prefix("/api/sessions/").expect("a session route");
+        assert!(!suffix.is_empty(), "a session route has an id segment");
+        format!("/api/sessions/{}", self.local_session_ref(suffix))
+    }
+
     /// The real router, middleware and all — what `tower::ServiceExt::oneshot`
     /// drives.
     pub(crate) fn router(&self) -> axum::Router {

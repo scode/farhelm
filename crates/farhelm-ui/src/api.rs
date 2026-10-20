@@ -12,7 +12,9 @@
 //! ordinary callers flatten both variants at the public boundary. Views render
 //! those messages directly per SPEC.md's "concrete, actionable errors";
 //! fresh-create retry policy consumes its typed outcome separately from the
-//! display text.
+//! display text. Request-derived diagnostic URLs hide session references so
+//! ordinary error lines do not expose host entry UUIDs; readable server
+//! refusal bodies retain their existing wording.
 //!
 //! `SessionListBody`/`SessionListing`, `SessionFilter`, and `POLL_INTERVAL_MS`
 //! live here too, even though none of them performs I/O directly: the first
@@ -57,7 +59,7 @@
 //! `tabs`, never from outside this crate — `main.rs` only ever reaches
 //! `App`/`ApiBase` (see `lib.rs`). Internal helpers (`client`, `send`, `send_save`,
 //! `encode_bytes`, `install_field`, `eval_minted_id`, and the two
-//! failure-text builders) stay private to this module.
+//! failure-text helpers) stay private to this module.
 
 #[cfg(test)]
 use crate::LaunchHarness;
@@ -1941,10 +1943,10 @@ fn send_inner_ordered(
         // reqwest's per-request timeout runs until the body has been read, so it
         // bounds the 401 body read below too.
         let (client, built) = request.timeout(timeout).build_split();
-        let built = built.map_err(|error| SendError::Request(error.to_string()))?;
+        let built = built.map_err(|error| SendError::Request(http_error_text(error)))?;
         let resp = execute_with_receipt(&client, built)
             .await
-            .map_err(|error| SendError::Request(error.to_string()))?;
+            .map_err(|error| SendError::Request(http_error_text(error)))?;
         // Called for its effect, in a statement of its own. Folding it into a
         // `.map()` reads as a transformation of the response and is not one —
         // the value is unchanged and the point is entirely the side effect.
@@ -1953,7 +1955,7 @@ fn send_inner_ordered(
             let body = resp
                 .text()
                 .await
-                .map_err(|error| SendError::Refused(error.to_string()))?;
+                .map_err(|error| SendError::Refused(http_error_text(error)))?;
             if device_auth_required(&body) {
                 // Stamp classification happens first. A bundle that disagrees
                 // with the helm cannot safely interpret even this marker, so the
@@ -2049,16 +2051,76 @@ pub(crate) async fn exchange_token(base: &str, token: &str) -> Result<String, St
 // preserved raw here, escaped and direction-isolated where displayed.
 // ---------------------------------------------------------------------
 
+/// Show which HTTP operation failed without exposing its full session reference.
+///
+/// This is presentation only: the actual request retains its opaque ID. A
+/// session path hides just its ID segment, preserving the authority, operation
+/// suffix and query. A list's parent filter is also a session reference; other
+/// query values and non-session endpoints keep their existing diagnostics.
+/// The known API builders always spell these route and query keys literally,
+/// while the values may be percent-encoded and must never be decoded here.
+fn diagnostic_url(url: &str) -> String {
+    let (path, query) = match url.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (url, None),
+    };
+    let mut display = match path.split_once("/api/sessions/") {
+        Some((base, session_and_suffix)) => {
+            let suffix = session_and_suffix
+                .find('/')
+                .map_or("", |at| &session_and_suffix[at..]);
+            format!("{base}/api/sessions/[session]{suffix}")
+        }
+        None => path.to_string(),
+    };
+    if let Some(query) = query {
+        display.push('?');
+        for (index, parameter) in query.split('&').enumerate() {
+            if index != 0 {
+                display.push('&');
+            }
+            if path.ends_with("/api/sessions")
+                && parameter
+                    .strip_prefix("parent=")
+                    .is_some_and(|value| !value.is_empty())
+            {
+                display.push_str("parent=[session]");
+            } else {
+                display.push_str(parameter);
+            }
+        }
+    }
+    display
+}
+
+/// Keep reqwest's failure reason while presenting session URLs consistently.
+///
+/// Send, response-body and JSON-decode errors can all retain the request URL.
+/// Remove that stored URL before formatting a session failure, then append the
+/// diagnostic form. Non-session failures retain reqwest's exact existing text;
+/// server-authored response bodies do not pass through this formatter.
+fn http_error_text(error: reqwest::Error) -> String {
+    if let Some(url) = error.url() {
+        let display = diagnostic_url(url.as_str());
+        if display != url.as_str() {
+            return format!("{} for {display}", error.without_url());
+        }
+    }
+    error.to_string()
+}
+
 /// The message a NON-SUCCESS status produces on a read: method, URL, status,
 /// and whatever the body said.
 ///
 /// Scoped to that one case, which is worth stating because the module's
 /// other two failure modes deliberately do NOT go through here and read
 /// differently as a result: a transport failure never got a status to
-/// report (`reqwest`'s own message stands alone), and a decode failure got a
-/// 2xx whose body this build could not read (serde's message stands alone).
+/// report, and a decode failure got a 2xx whose body this build could not
+/// read. Those retain their transport or decoder reason and any diagnostic
+/// URL without inventing a server refusal.
 /// Only a status the server chose has a method/URL/status triple worth
-/// printing.
+/// printing. Its diagnostic URL hides session references: ordinary GUI
+/// errors describe the operation without exposing the helm's entry UUID.
 ///
 /// A body-read failure INSIDE this path is reported WITH the
 /// method/URL/status that were already known rather than swallowed: turning
@@ -2066,9 +2128,15 @@ pub(crate) async fn exchange_token(base: &str, token: &str) -> Result<String, St
 /// strictly worse for a line the user is meant to act on.
 async fn read_failure(method: &str, url: &str, resp: reqwest::Response) -> String {
     let status = resp.status();
+    let url = diagnostic_url(url);
     let detail = match resp.text().await {
         Ok(detail) => detail,
-        Err(error) => return format!("{method} {url}: {status}: reading error response: {error}"),
+        Err(error) => {
+            return format!(
+                "{method} {url}: {status}: reading error response: {}",
+                http_error_text(error)
+            );
+        }
     };
     let detail = detail.trim();
     if detail.is_empty() {
@@ -2091,12 +2159,19 @@ async fn read_failure(method: &str, url: &str, resp: reqwest::Response) -> Strin
 ///
 /// The trim is the one liberty taken here, and it is also what decides the
 /// fallback: a refusal that carried no text at all would otherwise render as
-/// an empty line, so method/URL/status stand in.
+/// an empty line, so method/URL/status stand in, with session references
+/// hidden in that diagnostic URL. The server's readable body stays intact.
 async fn refusal_text(method: &str, url: &str, resp: reqwest::Response) -> String {
     let status = resp.status();
+    let url = diagnostic_url(url);
     let detail = match resp.text().await {
         Ok(detail) => detail,
-        Err(error) => return format!("{method} {url}: {status}: reading error response: {error}"),
+        Err(error) => {
+            return format!(
+                "{method} {url}: {status}: reading error response: {}",
+                http_error_text(error)
+            );
+        }
     };
     let detail = detail.trim();
     if detail.is_empty() {
@@ -2153,9 +2228,9 @@ fn matching_count(narrowed: bool, reported: Option<u64>, total: u64) -> Option<u
 /// the sidebar's sort control does.
 ///
 /// The message on failure is a `String`, not `reqwest::Error`, because it is
-/// rendered to the user directly (SPEC.md wants concrete errors) — the URL
-/// and status are folded into the message here rather than logged and
-/// dropped.
+/// rendered to the user directly (SPEC.md wants concrete errors) — the
+/// diagnostic URL and status stay in the message. Parent session references
+/// are hidden in that URL, as they are in per-session diagnostic paths.
 pub(crate) async fn fetch_sessions(
     base: &str,
     filter: &SessionFilter,
@@ -2176,7 +2251,7 @@ pub(crate) async fn fetch_sessions(
     let body = resp
         .json::<SessionListBody>()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(http_error_text)?;
     // BOTH predicates, because they answer different questions about the
     // same request and the listing carries both: what the banner says
     // happened, and what this reply is allowed to be evidence about. See
@@ -2295,7 +2370,7 @@ pub(crate) async fn create_session(
     }
     resp.json::<Session>()
         .await
-        .map_err(|e| CreateRefusal::from(e.to_string()))
+        .map_err(|e| CreateRefusal::from(http_error_text(e)))
 }
 
 /// A refused create, and whether the helm said the world moved under it.
@@ -2530,7 +2605,7 @@ async fn replace_reply(resp: reqwest::Response) -> Result<(Session, Option<Strin
     let mut body = resp
         .json::<serde_json::Value>()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(http_error_text)?;
     let notice = body
         .as_object_mut()
         .and_then(|fields| fields.remove("delete_notice"))
@@ -2821,12 +2896,9 @@ pub(crate) async fn mint_intent_key() -> Result<String, String> {
 /// as `create_session` — swallowing it into an empty string via
 /// `unwrap_or_default` would silently turn "we don't know why this
 /// failed" into "it failed for no stated reason", which is a strictly
-/// worse message for the per-session error line the caller renders. NOT
-/// covered by an automated test: Playwright's `route.fulfill` cannot
-/// truncate a body it is itself constructing, and this one straight-line
-/// read-error path did not seem worth standing up a raw socket server in
-/// the suite to reach — a regression here would show up as a generic
-/// reqwest error string rather than a wrong one, not a silent failure.
+/// worse message for the per-session error line the caller renders. The
+/// shared reader's truncated-body fixture covers this failure with a real
+/// HTTP response, keeping its status and diagnostic operation visible.
 pub(crate) async fn stop_session(base: &str, id: &str) -> Result<(), String> {
     let url = format!("{base}/api/sessions/{}/stop", encode_path_segment(id));
     let resp = send(client().post(&url)).await?;
@@ -2884,7 +2956,7 @@ pub(crate) async fn fetch_session(base: &str, id: &str) -> Result<Option<Session
     resp.json::<Session>()
         .await
         .map(Some)
-        .map_err(|e| e.to_string())
+        .map_err(http_error_text)
 }
 
 /// POST the restart endpoint for one session, returning the session's
@@ -2923,7 +2995,7 @@ pub(crate) async fn restart_session(
     }
     resp.json::<Session>()
         .await
-        .map_err(|e| ActionRefusal::from(e.to_string()))
+        .map_err(|e| ActionRefusal::from(http_error_text(e)))
 }
 
 /// Preserve the absent-versus-present override distinction on the restart
@@ -2979,7 +3051,7 @@ pub(crate) async fn rename_session(base: &str, id: &str, title: &str) -> Result<
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
-    resp.json::<Session>().await.map_err(|e| e.to_string())
+    resp.json::<Session>().await.map_err(http_error_text)
 }
 
 /// PUT the seen-state endpoint for one session: `Some(stamp)` marks it seen
@@ -3376,7 +3448,7 @@ pub(crate) async fn delete_session(
     if !resp.status().is_success() {
         return Err(refusal_text("DELETE", &url, resp).await);
     }
-    Ok(delete_reply(resp.text().await.map_err(|e| e.to_string())))
+    Ok(delete_reply(resp.text().await.map_err(http_error_text)))
 }
 
 /// Bare successes retain their old shape; only `archived: true` authorizes a
@@ -3495,7 +3567,7 @@ pub(crate) async fn open_tab(base: &str, session_id: &str) -> Result<Tab, String
     resp.json::<TabOpened>()
         .await
         .map(|opened| opened.tab)
-        .map_err(|e| e.to_string())
+        .map_err(http_error_text)
 }
 
 /// DELETE one terminal tab: kill its shell and everything it left behind
@@ -4494,7 +4566,7 @@ pub(crate) async fn fetch_tunnels(base: &str, session: &str) -> Result<SessionTu
     response
         .json()
         .await
-        .map_err(|error| format!("could not read open tunnels: {error}"))
+        .map_err(|error| format!("could not read open tunnels: {}", http_error_text(error)))
 }
 
 /// Open through the server's native capability; the response never needs a second opener.
@@ -4728,6 +4800,163 @@ mod http_contract_tests;
 
 #[cfg(test)]
 mod tests {
+    /// Diagnostic paths must hide opaque references without making an error
+    /// about the wrong operation. Percent-encoded slashes belong to the ID,
+    /// while a real slash starts the operation suffix. Parent queries carry
+    /// the same full references even though their path is only the list route.
+    #[farhelm_testtrace::test]
+    fn diagnostic_urls_hide_session_references_only() {
+        const FULL: &str = "11111111-1111-4111-8111-111111111111%3Asession%2Ftail";
+        for suffix in ["", "/replace", "/tabs/tab-1", "/tunnels/listener"] {
+            let url = format!("http://helm.invalid:7433/api/sessions/{FULL}{suffix}?flag=a%2Fb");
+            assert_eq!(
+                super::diagnostic_url(&url),
+                format!("http://helm.invalid:7433/api/sessions/[session]{suffix}?flag=a%2Fb")
+            );
+        }
+        assert_eq!(
+            super::diagnostic_url(&format!(
+                "http://helm.invalid/api/sessions?sort=title&parent={FULL}&host=7"
+            )),
+            "http://helm.invalid/api/sessions?sort=title&parent=[session]&host=7"
+        );
+        for url in [
+            "http://helm.invalid/api/sessions?sort=title&parent=&directory=a%20b",
+            "http://helm.invalid/api/hosts/7?parent=unrelated",
+            "http://helm.invalid/api/templates/session%2Fname",
+        ] {
+            assert_eq!(super::diagnostic_url(url), url);
+        }
+    }
+
+    /// Reqwest error metadata can independently carry the URL even when an
+    /// endpoint's explicit context is safe. Exercise the shared formatter on
+    /// a real error value without relying on a DNS failure or a live server.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[farhelm_testtrace::test]
+    fn reqwest_error_urls_follow_the_same_presentation_rule() {
+        let error = || reqwest::Client::new().get("http://[").build().unwrap_err();
+        let url: reqwest::Url = "http://helm.invalid/api/sessions/11111111-1111-4111-8111-111111111111%3Asession/restart".parse().unwrap();
+        let original = error().with_url(url.clone());
+        assert!(
+            original.to_string().contains("11111111-1111"),
+            "the fixture error must retain its URL"
+        );
+        let detail = super::http_error_text(error().with_url(url));
+        assert!(
+            detail.contains("builder error"),
+            "the failure cause remains useful: {detail}"
+        );
+        assert!(
+            detail.contains("/api/sessions/[session]/restart"),
+            "{detail}"
+        );
+        assert!(!detail.contains("11111111-1111"), "{detail}");
+        let ordinary: reqwest::Url = "http://helm.invalid/api/hosts/7".parse().unwrap();
+        assert_eq!(
+            super::http_error_text(error().with_url(ordinary.clone())),
+            error().with_url(ordinary).to_string()
+        );
+    }
+
+    /// Serve one bounded HTTP fixture so response readers see reqwest's real
+    /// status and body behavior. A deliberately larger declared body models
+    /// a transport ending mid-response; no sleep or process environment change
+    /// is needed to establish either fixture premise.
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn failure_response(
+        path: &str,
+        body: &str,
+        declared: usize,
+    ) -> (String, reqwest::Response) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let url = format!("http://{}{path}", listener.local_addr().unwrap());
+        let expected = format!("POST {path} HTTP/1.1\r\n");
+        let wire = format!(
+            "HTTP/1.1 409 Conflict\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n{body}"
+        );
+        let peer = tokio::spawn(async move {
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut bytes = [0; 1024];
+                while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                    let read = socket.read(&mut bytes).await.unwrap();
+                    assert!(read > 0, "the request ended before its headers");
+                    request.extend_from_slice(&bytes[..read]);
+                    assert!(
+                        request.len() <= 8192,
+                        "fixture request headers exceeded their bound"
+                    );
+                }
+                assert!(
+                    request.starts_with(expected.as_bytes()),
+                    "the fixture received a different operation"
+                );
+                socket.write_all(wire.as_bytes()).await.unwrap();
+                socket.shutdown().await.unwrap();
+            })
+            .await
+            .expect("the owned HTTP fixture must finish its one exchange");
+        });
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap()
+            .post(&url)
+            .send()
+            .await
+            .unwrap();
+        peer.await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::CONFLICT);
+        (url, response)
+    }
+
+    /// Both response failure shapes must retain actionable status and body
+    /// text while hiding only the request's session reference. Truncated bodies
+    /// must remain read failures, rather than being mistaken for empty refusals.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[farhelm_testtrace::test]
+    async fn response_failures_hide_request_references_and_preserve_refusals() {
+        let path = "/api/sessions/11111111-1111-4111-8111-111111111111%3Asession/replace";
+        for read in [true, false] {
+            for body in ["", "  working directory does not exist  "] {
+                let (url, response) = failure_response(path, body, body.len()).await;
+                let text = if read {
+                    super::read_failure("POST", &url, response).await
+                } else {
+                    super::refusal_text("POST", &url, response).await
+                };
+                assert!(!text.contains("11111111-1111"), "{text}");
+                if body.is_empty() || read {
+                    assert!(text.contains("409 Conflict"), "{text}");
+                    assert!(text.contains("/api/sessions/[session]/replace"), "{text}");
+                }
+                if !body.is_empty() {
+                    assert!(text.ends_with(body.trim()), "{text}");
+                    if !read {
+                        assert_eq!(text, body.trim());
+                    }
+                }
+            }
+            let (url, response) = failure_response(path, "short", 64).await;
+            let text = if read {
+                super::read_failure("POST", &url, response).await
+            } else {
+                super::refusal_text("POST", &url, response).await
+            };
+            assert!(!text.contains("11111111-1111"), "{text}");
+            assert!(
+                text.contains("409 Conflict") && text.contains("reading error response"),
+                "{text}"
+            );
+        }
+    }
+
     /// An older read must wait for its queued shortcut batch, then resume even
     /// when the writer continues with edits registered after that read.
     #[farhelm_testtrace::test]

@@ -133,7 +133,7 @@ test.describe("the M6.5 test debts", () => {
     const reads = await holdReads(page, (url) => url.pathname === "/api/sessions");
     const settled = await holdMutation(
       page,
-      (url) => url.pathname === `/api/sessions/${session.id}/stop`,
+      (url) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}/stop`,
     );
 
     // Read #1: a walk that reads the world as it is NOW — pre-stop, `running`
@@ -261,10 +261,10 @@ test.describe("the M6.5 test debts", () => {
     await expect(page.locator(".restart-primary")).toHaveAttribute("data-confirms", "false");
     await expect(page.locator(".refresh-stale")).toHaveCount(0);
 
-    const reads = await holdReads(page, (url) => url.pathname === `/api/sessions/${session.id}`);
+    const reads = await holdReads(page, (url) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}`);
     const finishRestart = await holdMutation(
       page,
-      (url) => url.pathname === `/api/sessions/${session.id}/restart`,
+      (url) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}/restart`,
     );
 
     // Read #1, dispatched before the restart: it belongs to the run the
@@ -369,14 +369,14 @@ test.describe("the M6.5 test debts", () => {
     await expect(page.locator(".restart-primary")).not.toHaveAttribute("aria-disabled", "true");
     await expect(page.locator(".restart-primary")).toHaveAttribute("data-confirms", "false");
 
-    const reads = await holdReads(page, (url) => url.pathname === `/api/sessions/${session.id}`);
+    const reads = await holdReads(page, (url) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}`);
     // The restart happens at once on the server; only the client's knowledge
     // of it is delayed, which is precisely the state the second bump is
     // written for and one a real supervisor passes through too fast to assert
     // in.
     const finishRestart = await holdMutation(
       page,
-      (url) => url.pathname === `/api/sessions/${session.id}/restart`,
+      (url) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}/restart`,
     );
 
     await page.locator(".restart-primary").click();

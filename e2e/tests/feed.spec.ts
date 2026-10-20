@@ -241,7 +241,7 @@ async function gateListingReads(page: Page): Promise<ListingGate> {
  */
 async function reportStale(page: Page, id: string) {
   await page.route(
-    (url) => url.pathname === `/api/sessions/${id}`,
+    (url) => url.pathname === `/api/sessions/${encodeURIComponent(id)}`,
     async (route: Route) => {
       if (route.request().method() !== "GET") {
         await route.continue();

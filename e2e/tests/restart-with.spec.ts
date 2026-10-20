@@ -99,7 +99,7 @@ test("restart with keeps gap focus and container Enter uses its enabled action",
  * the request whose refusal this test is meant to observe. */
 test("Restart with escapes and isolates peer refusal text", async ({ page }) => {
   await injectSession(page, BASELINE, "resume");
-  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`, async (route) => {
     await fulfillAsHelm(route, { status: 400, contentType: "text/plain", body: "refused \u202Ehost\u200B" });
   });
   const dialog = await openInjectedDialog(page);
@@ -178,7 +178,7 @@ async function injectSession(
  */
 async function acceptYoloRestart(page: Page): Promise<unknown[]> {
   const bodies: unknown[] = [];
-  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`, async (route) => {
     bodies.push(route.request().postDataJSON());
     await fulfillAsHelm(route, {
       status: 200,
@@ -337,7 +337,7 @@ test("restart with upgrades an older own-setting launch to guarded", async ({ pa
 test("a YOLO restart-with requires confirmation inside the dialog", async ({ page }) => {
   await injectSession(page, BASELINE, "resume");
   const bodies: any[] = [];
-  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`, async (route) => {
     const body = route.request().postDataJSON();
     bodies.push(body);
     if (!body.confirm_yolo) {
@@ -422,7 +422,7 @@ test("a YOLO restart-with requires confirmation inside the dialog", async ({ pag
 test("don't ask again from restart with keeps focus in the dialog and marks before restarting", async ({ page }) => {
   await injectSession(page, BASELINE, "resume");
   const restarts: any[] = [];
-  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`, async (route) => {
     const body = route.request().postDataJSON();
     restarts.push(body);
     if (!body.confirm_yolo) {
@@ -518,7 +518,7 @@ test("don't ask again from restart with keeps focus in the dialog and marks befo
 test("cancel and an answer to restart with's YOLO question in one burst restart nothing", async ({ page }) => {
   await injectSession(page, BASELINE, "resume");
   const restarts: any[] = [];
-  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`, async (route) => {
     const body = route.request().postDataJSON();
     restarts.push(body);
     if (!body.confirm_yolo) {
@@ -557,7 +557,7 @@ test("cancel and an answer to restart with's YOLO question in one burst restart 
   await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
   const confirmation = dialog.locator(".yolo-confirmation");
   const isRestart = (candidate: { request(): { method(): string }; url(): string }) =>
-    candidate.request().method() === "POST" && candidate.url().endsWith(`/api/sessions/${SESSION_ID}/restart`);
+    candidate.request().method() === "POST" && candidate.url().endsWith(`/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`);
   await Promise.all([page.waitForResponse(isRestart), dialog.locator(".restart-with-submit").click()]);
   await expect(confirmation).toBeVisible();
   await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
@@ -614,7 +614,7 @@ test("cancel and an answer to restart with's YOLO question in one burst restart 
 test("unavailable restart with stays visible and inert with a reason", async ({ page }) => {
   await injectSession(page, null, "resume");
   const bodies: unknown[] = [];
-  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`, async (route) => {
     bodies.push(route.request().postDataJSON());
     await route.abort();
   });
@@ -667,7 +667,7 @@ async function presentAsResumable(page: Page, id: string) {
     );
     await route.fulfill({ response, json: listing });
   });
-  await page.route((url) => url.pathname === `/api/sessions/${id}`, async (route) => {
+  await page.route((url) => url.pathname === `/api/sessions/${encodeURIComponent(id)}`, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
@@ -731,7 +731,7 @@ test("restart with keeps focus inside the dialog over a live terminal while pend
   await installTerminalFocusSpy(page);
   const gate = routeGate();
   const bodies: unknown[] = [];
-  await page.route(`**/api/sessions/${id}/restart`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(id)}/restart`, async (route) => {
     bodies.push(route.request().postDataJSON());
     await gate.wait();
     await fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: refusal });
@@ -1030,7 +1030,7 @@ test("restart with pulls stray focus back and still cancels on Escape", async ({
   await presentAsResumable(page, id);
   await installTerminalFocusSpy(page);
   const bodies: unknown[] = [];
-  await page.route(`**/api/sessions/${id}/restart`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(id)}/restart`, async (route) => {
     bodies.push(route.request().postDataJSON());
     await route.abort();
   });
@@ -1242,7 +1242,7 @@ test("restart with edits a command launch's command, resume command and YOLO ans
   const resume = "claude --resume {conversation} {farhelm_args}";
   await injectCommandSession(page, resume, "resume");
   const bodies: unknown[] = [];
-  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`, async (route) => {
     bodies.push(route.request().postDataJSON());
     await fulfillAsHelm(route, {
       status: 200,
@@ -1341,7 +1341,7 @@ test("a YOLO command restart-with asks inside the dialog, worded for an assertio
   const resume = "claude --resume {conversation} {farhelm_args}";
   await injectCommandSession(page, resume, "resume");
   const bodies: any[] = [];
-  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`, async (route) => {
     const body = route.request().postDataJSON();
     bodies.push(body);
     if (!body.confirm_yolo) {
@@ -1409,7 +1409,7 @@ async function installEnterCatalog(page: Page) {
  */
 async function refuseEnterRestarts(page: Page): Promise<unknown[]> {
   const bodies: unknown[] = [];
-  await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`, async (route) => {
     bodies.push(route.request().postDataJSON());
     await fulfillAsHelm(route, {
       status: 409,
@@ -1593,7 +1593,7 @@ for (const controlKind of ["effort", "model"] as const) {
     ] }));
     const gate = routeGate();
     const bodies: unknown[] = [];
-    await page.route(`**/api/sessions/${SESSION_ID}/restart`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`, async (route) => {
       bodies.push(route.request().postDataJSON());
       await gate.wait();
       await fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: "held Enter restart refused" });

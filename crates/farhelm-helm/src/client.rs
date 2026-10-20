@@ -367,8 +367,8 @@ pub enum SupervisorTransportError {
 /// before it is cached, projected, or printed.
 ///
 /// The ingress rule `manager::drain_sessions` applies to every id in a
-/// LISTING ([`crate::session_cache::session_id_problem`], one function for
-/// both), applied to the one id that never travels through a listing.
+/// LISTING ([`crate::session_cache::session_reference_problem`], one function for
+/// both), applied to replies that need not travel through a listing.
 /// Nothing before this point checks a `SessionCreated` reply's id at all,
 /// and the value goes on to three places that each assume it is well
 /// formed: the helm's own cache and REST paths, a REST body, and — through
@@ -377,7 +377,9 @@ pub enum SupervisorTransportError {
 ///
 /// Refused rather than sanitized. A truncated or scrubbed id is not the
 /// session's id, and every later use of it — stopping it, naming it as a
-/// parent — would address something that does not exist. A create whose
+/// parent — would address something that does not exist. Parent and checkout-origin
+/// references have the same admission rule, since they become full client references too.
+/// A create whose
 /// reply cannot be trusted is a create that failed, and the session it
 /// nonetheless started shows up in the next listing, where the same rules
 /// apply to it.
@@ -402,7 +404,8 @@ fn created_session(session: SessionInfo) -> anyhow::Result<SessionInfo> {
 /// host could answer "X renamed" with Y's details, planting Y's row on its
 /// own cache or, for a host with no identity, in memory with no cross-host
 /// check at all. Refused as a typed invalid reply, since the request itself
-/// was sent and may have taken effect.
+/// was sent and may have taken effect. The matching row's related references
+/// must also pass admission before any public projection can use it.
 fn same_session(
     session: SessionInfo,
     requested: &str,
@@ -418,7 +421,7 @@ fn same_session(
             },
         ));
     }
-    Ok(session)
+    created_session_from(session, request, reply)
 }
 
 /// [`created_session`]'s checks for a created session that arrives in some
@@ -433,7 +436,7 @@ fn created_session_from(
     request: &'static str,
     reply: &'static str,
 ) -> anyhow::Result<SessionInfo> {
-    if let Some(problem) = crate::session_cache::session_id_problem(&session.id) {
+    if let Some(problem) = crate::session_cache::session_reference_problem(&session) {
         return Err(anyhow::Error::new(
             SupervisorTransportError::SentInvalidReply {
                 request,

@@ -37,11 +37,11 @@ test("browser Delete chord shares header confirmation and restores terminal focu
   const binary: Buffer[] = [];
   const deletes: string[] = [];
   page.on("websocket", (socket) => {
-    if (new URL(socket.url()).pathname !== `/api/sessions/${session.id}/term`) return;
+    if (new URL(socket.url()).pathname !== `/api/sessions/${encodeURIComponent(session.id)}/term`) return;
     socket.on("framesent", ({ payload }) => { if (Buffer.isBuffer(payload)) binary.push(payload); });
   });
   page.on("request", (candidate) => {
-    if (candidate.method() === "DELETE" && new URL(candidate.url()).pathname === `/api/sessions/${session.id}`) {
+    if (candidate.method() === "DELETE" && new URL(candidate.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}`) {
       deletes.push(candidate.url());
     }
   });
@@ -92,7 +92,7 @@ test("browser Delete chord honors skipped confirmations and deletes the open ses
   const session = await createSession(request, { title: `delete-shortcut-direct-${Date.now()}` });
   const releaseDelete = routeGate();
   const deleteReached = routeGate();
-  const matches = (url: URL) => url.pathname === `/api/sessions/${session.id}`;
+  const matches = (url: URL) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}`;
   await page.route(matches, async (route) => {
     if (route.request().method() !== "DELETE") return route.fallback();
     deleteReached.release();
@@ -138,7 +138,7 @@ test("browser Delete chord yields to a visible modal and an ordinary text field"
   const session = await createSession(request, { title: `delete-shortcut-yields-${Date.now()}` });
   const deletes: string[] = [];
   page.on("request", (candidate) => {
-    if (candidate.method() === "DELETE" && new URL(candidate.url()).pathname === `/api/sessions/${session.id}`) {
+    if (candidate.method() === "DELETE" && new URL(candidate.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}`) {
       deletes.push(candidate.url());
     }
   });
@@ -216,10 +216,10 @@ test("browser Rename chord edits the filtered open session and returns live term
   const binary: Buffer[] = [];
   const submittedTitles: string[] = [];
   page.on("websocket", (socket) => {
-    if (new URL(socket.url()).pathname !== `/api/sessions/${session.id}/term`) return;
+    if (new URL(socket.url()).pathname !== `/api/sessions/${encodeURIComponent(session.id)}/term`) return;
     socket.on("framesent", ({ payload }) => { if (Buffer.isBuffer(payload)) binary.push(payload); });
   });
-  const isRename = (url: URL) => url.pathname === `/api/sessions/${session.id}/rename`;
+  const isRename = (url: URL) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}/rename`;
   page.on("request", (candidate) => {
     if (candidate.method() === "POST" && isRename(new URL(candidate.url()))) {
       submittedTitles.push(candidate.postDataJSON().title);
@@ -230,7 +230,7 @@ test("browser Rename chord edits the filtered open session and returns live term
     await expect(page.locator(".session-details .title")).toHaveText(initialTitle);
     // This API client does not patch the page's navigation snapshot. Wait
     // for the actual header refresh before hiding the row and opening Rename.
-    const externalRename = await request.post(`/api/sessions/${session.id}/rename`, { data: { title } });
+    const externalRename = await request.post(`/api/sessions/${encodeURIComponent(session.id)}/rename`, { data: { title } });
     expect(externalRename.ok(), await externalRename.text()).toBe(true);
     expect((await externalRename.json()).title).toBe(title);
     await expect(page.locator(".session-details .title")).toHaveText(shown);

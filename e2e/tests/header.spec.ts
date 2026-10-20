@@ -460,7 +460,7 @@ for (const field of ["folder", "command"] as const) {
   test(`copied ${field} warning survives a safe metadata refresh`, async ({ page, request }) => {
     const session = await createSession(request, { title: `copy-refresh-${field}-${Date.now()}` });
     try {
-      const response = await request.get(`/api/sessions/${session.id}`);
+      const response = await request.get(`/api/sessions/${encodeURIComponent(session.id)}`);
       expect(response.ok(), await response.text()).toBe(true);
       const snapshot = await response.json();
       const build = response.headers()["x-farhelm-build"];
@@ -468,7 +468,7 @@ for (const field of ["folder", "command"] as const) {
       const unsafeValue = field === "folder" ? "/tmp/\u202Ecopied-folder" : `${FAKE_AGENT_INVOCATION} # \u202Ecopied-command`;
       const safeValue = field === "folder" ? "/tmp/refreshed-folder" : `${FAKE_AGENT_INVOCATION} # refreshed-command`;
       let refreshed = false;
-      const metadata = (url: URL) => url.pathname === "/api/sessions" || url.pathname === `/api/sessions/${session.id}`;
+      const metadata = (url: URL) => url.pathname === "/api/sessions" || url.pathname === `/api/sessions/${encodeURIComponent(session.id)}`;
       await page.route(metadata, async (route) => {
         if (route.request().method() !== "GET") return route.fallback();
         // Only the displayed metadata changes. The owned process keeps its real
@@ -675,7 +675,7 @@ test("a committed delete shows its progress until the reply lands", async ({ pag
   // Each DELETE waits for the test to release it, then either passes through
   // or is refused the way the helm relays a supervisor conflict.
   let release: ((outcome: "refuse" | "continue") => void) | undefined;
-  const held = page.route(`**/api/sessions/${session.id}`, async (route) => {
+  const held = page.route(`**/api/sessions/${encodeURIComponent(session.id)}`, async (route) => {
     if (route.request().method() !== "DELETE") {
       await route.fallback();
       return;

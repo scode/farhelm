@@ -253,6 +253,7 @@ pub(crate) async fn github_repositories(
     };
     let claim = manager::SessionClaim {
         host: req.host,
+        entry_uuid: status.entry_uuid.clone(),
         incarnation: status.incarnation,
         identity,
     };
@@ -605,7 +606,7 @@ pub(crate) async fn launch_history(
 /// a user can see: typing a space would silently clear the filter. The cost
 /// of not trimming is a search for `"drain "` that finds nothing, which the
 /// user can see and fix.
-fn list_filter(q: &ListQuery) -> anyhow::Result<store::SessionFilter> {
+async fn list_filter(state: &AppState, q: &ListQuery) -> anyhow::Result<store::SessionFilter> {
     let present = |value: &Option<String>| -> Option<String> {
         value
             .as_deref()
@@ -617,6 +618,9 @@ fn list_filter(q: &ListQuery) -> anyhow::Result<store::SessionFilter> {
         filter = filter.host(host);
     }
     if let Some(parent) = present(&q.parent) {
+        // Parent identity includes its entry even when the suffix occurs on
+        // several hosts. An explicit host filter remains an independent AND.
+        let parent = resolve_session_ref(state, &parent).await?;
         filter = filter.parent(&parent);
     }
     if let Some(directory) = present(&q.directory) {
@@ -712,7 +716,7 @@ pub(crate) async fn list_sessions(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ListQuery>,
 ) -> impl IntoResponse {
-    let filter = match list_filter(&q) {
+    let filter = match list_filter(&state, &q).await {
         Ok(filter) => filter,
         Err(e) => return http_error(e),
     };
@@ -721,52 +725,99 @@ pub(crate) async fn list_sessions(
         Err(e) => return http_error(e),
     };
     match aggregate::session_list(&state.manager, &state.store, &filter, sort).await {
-        Ok(list) => axum::Json(list).into_response(),
+        Ok(mut list) => {
+            for row in &mut list.sessions {
+                row.info = match qualify_session_info(&row.entry_uuid, row.info.clone()) {
+                    Ok(info) => info,
+                    Err(error) => return http_error(error),
+                };
+            }
+            axum::Json(list).into_response()
+        }
         Err(e) => http_error(e),
     }
 }
 
-/// Find the live connection for the host that owns `session_id`, or refuse
-/// naming the state that host is actually in (PLAN_M6.md item 5).
+/// Resolve a public reference to its durable entry without guessing a fleet owner.
 ///
-/// The single owner-lookup path every session operation goes through. Two
-/// properties are the whole point:
+/// Syntax and registry membership are separate from session membership. A valid
+/// stale reference may name a removed entry; it must never fall back to a host
+/// that happens to report the same suffix. Agent callers apply their exact-own-
+/// bare-ID exception before this boundary parser.
+pub(crate) async fn resolve_session_ref(
+    state: &AppState,
+    reference: &str,
+) -> anyhow::Result<store::SessionKey> {
+    let reference: farhelm_proto::SessionRef = reference.parse().map_err(|error| {
+        invalid_request(format!(
+            "use a full session ID; {error}; reload Farhelm to refresh session references"
+        ))
+    })?;
+    let host = state
+        .store
+        .host_by_entry_uuid(reference.entry_uuid())
+        .await?
+        .ok_or_else(no_such_session)?;
+    Ok(store::SessionKey::new(host, reference.bare_id()))
+}
+
+/// A missing entry and a missing suffix have the same safe public refusal.
+/// The raw reference is omitted so ordinary GUI errors do not expose entry UUIDs.
+fn no_such_session() -> anyhow::Error {
+    anyhow::Error::new(SupervisorError {
+        origin: crate::client::ErrorOrigin::Helm,
+        kind: ErrorKind::NotFound,
+        message: "no such session on this host entry".to_string(),
+    })
+}
+
+/// Qualify only at the client boundary, with the entry that supplied the reply.
 ///
-/// - **The state and the client are read TOGETHER**, from one borrow of the
-///   actor's published status ([`manager::ConnectionManager::status`]). Two
-///   separate reads can straddle a transition and hand back a fresh
-///   `Connected` beside a `None` client, or a live-looking client beside a
-///   dead state — which is exactly how an operation gets routed onto a
-///   corpse.
-/// - **Every non-connected state refuses identically**, with the state
-///   named. Unreachable is not special; it is merely the common case. A
-///   skewed, mismatched, unverified, duplicate, or retired host refuses the
-///   same way, as does one whose first connection has not finished, because
-///   the alternative is a caller that handles the states it thought of and
-///   silently mis-handles the rest. Nothing queues — SPEC.md v1 refuses
-///   rather than deferring.
+/// Even a suffix resembling another full reference stays an opaque bare ID.
+/// Parent and checkout-origin references are entry-local supervisor metadata;
+/// they receive that same prefix. Internal records and supervisor requests remain bare.
+pub(crate) fn qualify_session_info(
+    entry_uuid: &str,
+    mut info: farhelm_proto::SessionInfo,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    let qualify = |id: &str| -> anyhow::Result<String> {
+        Ok(farhelm_proto::SessionRef::new(entry_uuid, id)?.to_string())
+    };
+    info.id = qualify(&info.id)?;
+    info.parent = info.parent.as_deref().map(qualify).transpose()?;
+    if let Some(copy) = &mut info.working_copy {
+        copy.origin_session_id = qualify(&copy.origin_session_id)?;
+    }
+    Ok(info)
+}
+
+/// Project a successful mutation using its captured entry, even after removal.
+/// The caller has already accepted and recorded the bare supervisor reply.
+fn session_reply(entry_uuid: &str, info: farhelm_proto::SessionInfo) -> axum::response::Response {
+    match qualify_session_info(entry_uuid, info) {
+        Ok(info) => axum::Json(info).into_response(),
+        Err(error) => http_error(error),
+    }
+}
+
+/// Route a pair only to its own entry and capture the exact connection used.
 ///
-/// A session nothing knows about is a 404. A session created HERE is
-/// routable immediately — `create_session` seeds it into its host's cache
-/// in the same handler — so that 404 means "no host has ever reported this
-/// id", not "you were too quick". A session created by another client on
-/// another host is the one case that waits, for up to one refresh interval,
-/// which is the price of a list that never fans out to N hosts per request.
+/// The client, installation identity, connection incarnation and entry UUID come
+/// from one status capture. A later retarget cannot attribute its reply to the
+/// replacement connection, and removal cannot erase the prefix of a successful reply.
+/// Every non-connected state refuses immediately; nothing queues for a host's return.
 pub(crate) async fn route_session(
     state: &AppState,
-    session_id: &str,
+    key: &store::SessionKey,
 ) -> anyhow::Result<(manager::SessionClaim, Arc<SupervisorClient>)> {
-    let (host, status) = resolve_owner(state, session_id).await?;
-    // The claim comes out of the SAME status this routed by, so an
-    // operation whose reply is recorded afterwards (restart, rename) files
-    // it against the connection it actually used — see
-    // `manager::SessionClaim`.
+    let (host, status) = resolve_owner(state, key).await?;
     let identity = match &status.state {
         manager::HostState::Connected { identity, .. } => identity.clone(),
         _ => None,
     };
     let claim = manager::SessionClaim {
         host,
+        entry_uuid: status.entry_uuid.clone(),
         incarnation: status.incarnation,
         identity,
     };
@@ -780,125 +831,37 @@ pub(crate) async fn route_session(
     Ok((claim, client))
 }
 
-/// Which host owns `session_id`, and that host's live status — read
-/// together, from the two places a session can be known.
+/// Find this pair's membership and its entry's coherent status, including stale rows.
 ///
-/// helm.db answers for every host that caches; the manager's in-memory
-/// lists answer for a connected host that reports no identity and has none
-/// on record, which therefore caches nothing (see
-/// [`manager::HostSnapshot::live_sessions`]). Both are consulted because
-/// either alone leaves a whole class of session unroutable: without the
-/// first, nothing survives a helm restart; without the second, an
-/// identity-less host reads as connected and empty while its sessions are
-/// unreachable.
-///
-/// The in-memory lookup and the status it returns come from ONE hold of the
-/// manager's actor map ([`manager::ConnectionManager::live_owner`]), not
-/// from a snapshot followed by a second call. Split across two reads, a
-/// reconnect landing in between pairs one install's session claim with the
-/// next install's client — the same hazard the status accessor exists to
-/// prevent for the cached case, and it deserves the same answer rather than
-/// a second, weaker one.
-///
-/// The lookup is deliberately independent of whether the session's cached
-/// METADATA still decodes: routing asks where to send an operation, not
-/// what the session is, so a poisoned `info_json` must not make a live
-/// session unreachable.
-///
-/// The cache consulted here holds at most `farhelm_proto::LIST_SESSIONS_CAP`
-/// rows per host, so a session older than everything under a capped host's
-/// cut resolves as not-found even though it still exists on the machine.
-/// Accepted by decision: SPEC.md's Session list section places a fleet past
-/// the cap outside what this product is built for, and the listing's
-/// "could not read to the end" notice is the whole of the answer to one.
-///
-/// FAILS CLOSED where two hosts claim one id, with the ambiguity named.
-/// helm.db makes that unconstructible within itself, but a host can report
-/// an id another host already caches, and picking one would mean a stop
-/// aimed at one machine landing on another. The evidence is refresh state
-/// (`contested_claimants`), so it appears only once the reporting host has
-/// refreshed: a create that hits the collision therefore fails itself and
-/// requests that refresh (`record_session`) rather than hand out an id this
-/// function would still route to the cached owner. A contested entry clears
-/// itself as soon as the fleet agrees again, so a collision that resolved
-/// needs no intervention.
+/// Cached membership is read independently of payload decoding: damaged display
+/// JSON must not make a live session unreachable. An identity-less host instead
+/// proves membership through the live list in this exact status capture. No other
+/// entry participates, so a peer cannot redirect routing by reporting the same ID.
+/// A second cache read refuses a cache purge across the status capture; a caller
+/// retries rather than pairing old membership with a replacement installation.
 pub(crate) async fn resolve_owner(
     state: &AppState,
-    session_id: &str,
+    key: &store::SessionKey,
 ) -> anyhow::Result<(store::HostId, manager::HostStatus)> {
-    // Contested claims come first, from live refresh state rather than a
-    // remembered incident: a host that STILL reports an id another host's
-    // cache holds is a standing disagreement, and there is no honest owner
-    // to route to while it stands. A claimant that stopped reporting the
-    // id, was removed, or had its cache purged by an adoption is simply not
-    // in this answer — the contest clears itself with the evidence that
-    // made it.
-    let contested = state.manager.contested_claimants(session_id);
-    let cached = state.store.host_of_session(session_id).await?;
-    // The list is sorted for stable reporting, not for authority: its first
-    // claimant can be the cached owner while a later claimant still makes
-    // the route unsafe. A sole self-claim remains harmless.
-    if let Some(owner) = cached
-        && let Some(claimant) = contested.into_iter().find(|claimant| *claimant != owner)
-    {
-        return Err(anyhow::Error::new(
-            store::HostStoreError::SessionOwnerAmbiguous {
-                session: session_id.to_string(),
-                first: owner.min(claimant),
-                second: owner.max(claimant),
-            },
-        ));
-    }
-
-    let live = state.manager.live_owner(session_id)?;
-    match (cached, live) {
-        (None, None) => Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::NotFound,
-            message: format!("no such session: {session_id}"),
-        })),
-        // The in-memory answer carries its own status from the same lock
-        // hold, so it is used as it stands rather than looked up again.
-        (None, Some((host, status))) => Ok((host, status)),
-        (Some(host), Some((live_host, _))) if host != live_host => Err(anyhow::Error::new(
-            store::HostStoreError::SessionOwnerAmbiguous {
-                session: session_id.to_string(),
-                first: host.min(live_host),
-                second: host.max(live_host),
-            },
-        )),
-        (Some(host), _) => {
-            let status = state.manager.status(host).ok_or_else(|| {
-                anyhow::Error::new(SupervisorError {
-                    origin: crate::client::ErrorOrigin::Helm,
-                    kind: ErrorKind::Conflict,
-                    message: format!(
-                        "session {session_id} lives on host {host}, which is no longer registered"
-                    ),
-                })
-            })?;
-            // RE-READ the cached owner after capturing the status, and
-            // refuse if it moved. An adoption landing between the two reads
-            // purges one host's cache and connects another, so the pair
-            // taken naively can be "host A owns it" beside "host B's live
-            // connection" — an operation sent to the wrong machine, with
-            // nothing about either read looking wrong. Refusing is the only
-            // safe answer available at this layer: the caller retries and
-            // gets a coherent pair.
-            let still = state.store.host_of_session(session_id).await?;
-            if still != Some(host) {
-                return Err(anyhow::Error::new(SupervisorError {
-                    origin: crate::client::ErrorOrigin::Helm,
-                    kind: ErrorKind::Conflict,
-                    message: format!(
-                        "session {session_id} changed hosts while this request was being routed; \
-                         retry it"
-                    ),
-                }));
-            }
-            Ok((host, status))
+    let cached = state.store.has_cached_session(key).await?;
+    let status = state.manager.status(key.host).ok_or_else(no_such_session)?;
+    if cached {
+        if !state.store.has_cached_session(key).await? {
+            return Err(anyhow::Error::new(SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
+                kind: ErrorKind::Conflict,
+                message: "the session changed while this request was being routed; retry it"
+                    .to_string(),
+            }));
         }
+    } else if !status
+        .live_sessions
+        .as_ref()
+        .is_some_and(|sessions| sessions.iter().any(|info| info.id == key.session_id))
+    {
+        return Err(no_such_session());
     }
+    Ok((key.host, status))
 }
 
 /// The refusal sentence a non-connected host produces, for a session
@@ -1305,6 +1268,7 @@ pub(crate) fn host_client(
     };
     let claim = manager::SessionClaim {
         host,
+        entry_uuid: status.entry_uuid.clone(),
         incarnation: status.incarnation,
         identity,
     };
@@ -1388,17 +1352,11 @@ fn create_target(
 /// creation contract rules out. Every such failure is self-healing within
 /// one refresh — the host has the session and will report it.
 ///
-/// AMBIGUITY IS THE EXCEPTION, and it is returned rather than swallowed:
-/// if the session id is already cached under a DIFFERENT host there is no
-/// honest owner. The collision is not remembered HERE — a contest is
-/// refresh state on the hosts that report it (`manager::ActorStatus::
-/// contested`), so it clears itself when they stop — and until the
-/// reporting host's next refresh marks the id contested, `resolve_owner`
-/// still sees only the cached owner and would route operations on this id
-/// to THAT host's session. So this asks for that refresh at once, and a
-/// create fails with the returned error rather than hand the caller an id
-/// whose operations would land on another machine. Replies to operations
-/// on an existing session ignore it: their id was already routed.
+/// The current cache's global bare-ID uniqueness refusal is still returned
+/// for creates, with a refresh requested for the claimant. Pair routing never
+/// substitutes the cached entry for this operation's entry; the refusal is
+/// the cache's publication constraint, not a claim that the reference can
+/// reach another host. Existing-session mutations keep their successful reply.
 pub(crate) async fn record_session(
     state: &AppState,
     claim: &manager::SessionClaim,
@@ -1419,8 +1377,8 @@ pub(crate) async fn record_session(
             session_id = session_id.as_str(),
             first,
             second,
-            "the host reported a session id another host already caches; refreshing it so the \
-             id is marked contested and routing refuses it"
+            "the host reported a session id another host already caches; refreshing its \
+             cache publication state"
         );
         state.manager.refresh_now(claim.host);
         return Err(error);
@@ -1555,7 +1513,7 @@ pub(crate) async fn create_session(
             )
             .await
             {
-                Ok(session) => axum::Json(session).into_response(),
+                Ok(session) => session_reply(&claim.entry_uuid, session),
                 Err(error) => http_error(error),
             };
         }
@@ -1622,7 +1580,7 @@ pub(crate) async fn create_session(
         )
         .await
         {
-            Ok(session) => axum::Json(session).into_response(),
+            Ok(session) => session_reply(&claim.entry_uuid, session),
             Err(e) => http_error(e),
         }
     })
@@ -1839,10 +1797,9 @@ async fn accept_created_session(
     if let Some(accept_result) = &accept_result {
         accept_result(&session)?;
     }
-    // A create whose id another host already caches fails here: the
-    // session exists on this host, but operations on its id could reach
-    // the other machine's session until the contest is visible (see
-    // `record_session`). The error names both hosts.
+    // The current cache still refuses a bare ID held by another entry.
+    // Public projection always retains this claim's prefix, independently
+    // of whether freshness permits the seed to land.
     record_session(state, claim, &session)
         .await
         .map_err(|error| {
@@ -2533,9 +2490,12 @@ pub(crate) fn invalid_request(message: String) -> anyhow::Error {
 /// exactly "route, then ask the owning supervisor to stop it", and nothing
 /// else — a stop's reply carries no fresh state to record, unlike rename,
 /// which is what keeps this helper simpler than [`do_rename_session`].
-pub(crate) async fn do_stop_session(state: &AppState, id: &str) -> anyhow::Result<()> {
-    let (_claim, client) = route_session(state, id).await?;
-    client.stop_session(id).await
+pub(crate) async fn do_stop_session(
+    state: &AppState,
+    key: &store::SessionKey,
+) -> anyhow::Result<()> {
+    let (_claim, client) = route_session(state, key).await?;
+    client.stop_session(&key.session_id).await
 }
 
 /// `POST /api/sessions/{id}/stop` — the recoverable operation the UI does
@@ -2549,7 +2509,11 @@ pub(crate) async fn stop_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
 ) -> impl IntoResponse {
-    match do_stop_session(&state, &id).await {
+    let key = match resolve_session_ref(&state, &id).await {
+        Ok(key) => key,
+        Err(error) => return http_error(error),
+    };
+    match do_stop_session(&state, &key).await {
         Ok(()) => axum::Json(serde_json::json!({})).into_response(),
         Err(e) => http_error(e),
     }
@@ -2602,6 +2566,11 @@ pub(crate) async fn get_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
 ) -> impl IntoResponse {
+    let key = match resolve_session_ref(&state, &id).await {
+        Ok(key) => key,
+        Err(error) => return http_error(error),
+    };
+    let id = &key.session_id;
     // The registry-identity join, same terms as the merged listing's (see
     // `aggregate::row_of`): helm.db is the identity authority, and the
     // snapshot cannot carry a fresh copy. Read BEFORE the owner/status
@@ -2616,7 +2585,7 @@ pub(crate) async fn get_session(
         Ok(rows) => rows,
         Err(e) => return http_error(e),
     };
-    let (host, status) = match resolve_owner(&state, &id).await {
+    let (host, status) = match resolve_owner(&state, &key).await {
         Ok(owner) => owner,
         Err(e) => return http_error(e),
     };
@@ -2626,11 +2595,7 @@ pub(crate) async fn get_session(
         .into_iter()
         .find(|snapshot| snapshot.id == host)
     else {
-        return http_error(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::NotFound,
-            message: format!("no such session: {id}"),
-        }));
+        return http_error(no_such_session());
     };
     let host_name = aggregate::host_display_name(
         snapshot.kind,
@@ -2644,7 +2609,6 @@ pub(crate) async fn get_session(
     // One-id seen-state read, same table and same reason as the listing's
     // own join (`aggregate::session_list_staged`): this route answers with
     // exactly the shape a listing row has, so it must carry the same field.
-    let key = store::SessionKey::new(host, &id);
     let seen_activity_at = match state.store.seen_activity(std::slice::from_ref(&key)).await {
         Ok(map) => map.get(&key).copied(),
         Err(e) => return http_error(e),
@@ -2670,7 +2634,7 @@ pub(crate) async fn get_session(
     // The client comes from the SAME status read that resolved the owner,
     // so "ask the host" and "say this row is live" cannot disagree.
     let Some(client) = status.client else {
-        let cached = match state.store.cached_session(host, &id).await {
+        let cached = match state.store.cached_session(host, id).await {
             Ok(cached) => cached,
             Err(e) => return http_error(e),
         };
@@ -2678,9 +2642,14 @@ pub(crate) async fn get_session(
             Some(mut info) => {
                 let notifications_read_through =
                     aggregate::apply_notification_marks(&mut info, marks);
+                let info = match qualify_session_info(&status.entry_uuid, info) {
+                    Ok(info) => info,
+                    Err(error) => return http_error(error),
+                };
                 axum::Json(aggregate::SessionRow {
                     info,
                     host,
+                    entry_uuid: status.entry_uuid.clone(),
                     host_identity,
                     host_name,
                     seen_activity_at,
@@ -2693,22 +2662,23 @@ pub(crate) async fn get_session(
             // The host is down and its cached copy is unreadable (or gone).
             // There is nothing to put behind the notice, and inventing a
             // placeholder would be worse than saying so.
-            None => http_error(anyhow::Error::new(SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::NotFound,
-                message: format!("no such session: {id}"),
-            })),
+            None => http_error(no_such_session()),
         };
     };
     match manager::drain_sessions(&client).await {
         Ok(drained) => {
-            match drained.sessions.into_iter().find(|s| s.id == id) {
+            match drained.sessions.into_iter().find(|s| s.id == *id) {
                 Some(mut info) => {
                     let notifications_read_through =
                         aggregate::apply_notification_marks(&mut info, marks);
+                    let info = match qualify_session_info(&status.entry_uuid, info) {
+                        Ok(info) => info,
+                        Err(error) => return http_error(error),
+                    };
                     axum::Json(aggregate::SessionRow {
                         info,
                         host,
+                        entry_uuid: status.entry_uuid.clone(),
                         host_identity,
                         host_name,
                         seen_activity_at,
@@ -2721,11 +2691,7 @@ pub(crate) async fn get_session(
                 // The host is up and says this session is gone: it was deleted
                 // between the last cache refresh and now, so 404 is the truth
                 // rather than the stale row.
-                None => http_error(anyhow::Error::new(SupervisorError {
-                    origin: crate::client::ErrorOrigin::Helm,
-                    kind: ErrorKind::NotFound,
-                    message: format!("no such session: {id}"),
-                })),
+                None => http_error(no_such_session()),
             }
         }
         Err(e) => http_error(e),
@@ -2783,6 +2749,10 @@ pub(crate) async fn restart_session(
     // Helm-owned for the reason `create_session` is: the relaunch is
     // followed by recording the session's new state.
     crate::run_owned(async move {
+        let key = match resolve_session_ref(&state, &id).await {
+            Ok(key) => key,
+            Err(error) => return http_error(error),
+        };
         let with = match (req.with, req.with_command) {
             (None, None) => None,
             (Some(selection), None) => Some(LaunchRequest::Agent { selection }),
@@ -2795,7 +2765,7 @@ pub(crate) async fn restart_session(
         };
         match do_restart_session_named(
             &state,
-            &id,
+            &key,
             req.stop_if_running,
             with,
             req.confirm_yolo,
@@ -2804,7 +2774,7 @@ pub(crate) async fn restart_session(
         )
         .await
         {
-            Ok((_claim, session)) => axum::Json(session).into_response(),
+            Ok((claim, session)) => session_reply(&claim.entry_uuid, session),
             Err(e) => http_error(e),
         }
     })
@@ -2823,7 +2793,7 @@ pub(crate) async fn restart_session(
 /// the claim that keeps a Restart with from landing in between.
 pub(crate) async fn do_restart_session(
     state: &AppState,
-    id: &str,
+    key: &store::SessionKey,
     stop_if_running: bool,
     with: Option<LaunchRequest>,
     confirm_yolo: bool,
@@ -2831,7 +2801,7 @@ pub(crate) async fn do_restart_session(
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
     do_restart_session_named(
         state,
-        id,
+        key,
         stop_if_running,
         with,
         confirm_yolo,
@@ -2847,13 +2817,14 @@ pub(crate) async fn do_restart_session(
 /// through the value-less wrapper, with their existing identity proof gates.
 async fn do_restart_session_named(
     state: &AppState,
-    id: &str,
+    key: &store::SessionKey,
     stop_if_running: bool,
     with: Option<LaunchRequest>,
     confirm_yolo: bool,
     expected_launch: Option<farhelm_proto::SessionLaunch>,
     conversation: Option<String>,
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
+    let id = key.session_id.as_str();
     // Resolved before routing: a malformed edit is the caller's to fix
     // wherever the session lives.
     let mut with = with.map(resolve_launch_request).transpose()?;
@@ -2865,7 +2836,7 @@ async fn do_restart_session_named(
         // again below after Settings has supplied the final trust choice.
         launches::named_start(launch, value.clone()).map_err(invalid_request)?;
     }
-    let (claim, client) = route_session(state, id).await?;
+    let (claim, client) = route_session(state, key).await?;
     if let Some(launch) = with.take() {
         with = Some(match launch.agent_selection() {
             Some(selection) if selection.harness.offers_workspace_trust() => {
@@ -2943,16 +2914,18 @@ pub(crate) struct RenameReq {
 /// Returns the [`manager::SessionClaim`] alongside the fresh
 /// `SessionInfo` so a caller that must name the OWNING HOST — the agent
 /// relay's reply needs it for `AgentSession::host` — is not forced to
-/// re-route just to learn what this call already knew; the REST handler
-/// below ignores it.
+/// re-route just to learn what this call already knew. The REST handler
+/// likewise uses its captured entry prefix when projecting the reply.
 pub(crate) async fn do_rename_session(
     state: &AppState,
-    id: &str,
+    key: &store::SessionKey,
     title: &str,
     expected_title: Option<&str>,
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
-    let (claim, client) = route_session(state, id).await?;
-    let session = client.rename_session(id, title, expected_title).await?;
+    let (claim, client) = route_session(state, key).await?;
+    let session = client
+        .rename_session(&key.session_id, title, expected_title)
+        .await?;
     // An ambiguity is logged and refreshed inside; this id was already
     // routed, so the reply stands.
     let _ = record_session(state, &claim, &session).await;
@@ -2978,8 +2951,12 @@ pub(crate) async fn rename_session(
     // Helm-owned for the reason `create_session` is: the rename is followed
     // by recording the session's new title.
     crate::run_owned(async move {
-        match do_rename_session(&state, &id, &req.title, None).await {
-            Ok((_claim, session)) => axum::Json(session).into_response(),
+        let key = match resolve_session_ref(&state, &id).await {
+            Ok(key) => key,
+            Err(error) => return http_error(error),
+        };
+        match do_rename_session(&state, &key, &req.title, None).await {
+            Ok((claim, session)) => session_reply(&claim.entry_uuid, session),
             Err(e) => http_error(e),
         }
     })
@@ -3040,11 +3017,15 @@ pub(crate) async fn delete_session(
     // Helm-owned for the reason `create_session` is: the delete is followed
     // by dropping the session's seen state and its cached row.
     crate::run_owned(async move {
+        let key = match resolve_session_ref(&state, &id).await {
+            Ok(key) => key,
+            Err(error) => return http_error(error),
+        };
         let guard = farhelm_proto::DeleteGuard::from_flags(
             query.only_if_nothing_alive,
             query.only_if_agent_ended,
         );
-        match do_delete_session(&state, &id, guard, None).await {
+        match do_delete_session(&state, &key, guard, None).await {
             Ok(outcome) => axum::Json(outcome).into_response(),
             Err(e) => http_error(e),
         }
@@ -3059,11 +3040,12 @@ pub(crate) async fn delete_session(
 /// rerouting after approval must not carry consent onto a replacement host.
 pub(crate) async fn do_delete_session(
     state: &AppState,
-    id: &str,
+    key: &store::SessionKey,
     guard: farhelm_proto::DeleteGuard,
     agent_connection: Option<u64>,
 ) -> anyhow::Result<farhelm_proto::SessionDeleteOutcome> {
-    let (claim, client) = route_session(state, id).await?;
+    let id = key.session_id.as_str();
+    let (claim, client) = route_session(state, key).await?;
     if agent_connection.is_some_and(|expected| expected != client.connection_id()) {
         return Err(anyhow::Error::new(SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
@@ -3071,7 +3053,7 @@ pub(crate) async fn do_delete_session(
             message: "the target host's connection changed while this delete waited for approval; nothing was deleted, retry to approve its current state".to_string(),
         }));
     }
-    let _deleting = state.approvals.deny_session(id);
+    let _deleting = state.approvals.deny_session(key);
     let outcome = client
         .delete_session_fenced(id, guard, agent_connection.is_some())
         .await?;
@@ -3088,7 +3070,10 @@ async fn forget_deleted_session(state: &AppState, claim: &manager::SessionClaim,
     // Creation and cache forgetting are one local transaction: a create cannot
     // publish after deletion closed the old listener but before ownership vanishes.
     let _tunnel_mutation = state.tunnels.mutation.lock().await;
-    state.tunnels.close_session_locked(id).await;
+    state
+        .tunnels
+        .close_session_locked(&store::SessionKey::new(claim.host, id))
+        .await;
     // The completed delete's claim owns this cleanup even if another host
     // now reports the same bare ID. Never resolve fleet ownership again here.
     let key = store::SessionKey::new(claim.host, id);
@@ -3178,11 +3163,14 @@ pub(crate) async fn mark_seen(
     // Helm-owned for the reason `create_session` is: the store write is
     // followed by the event that tells other open clients about it.
     crate::run_owned(async move {
-        let (host, _) = match resolve_owner(&state, &id).await {
+        let key = match resolve_session_ref(&state, &id).await {
+            Ok(key) => key,
+            Err(error) => return http_error(error),
+        };
+        match resolve_owner(&state, &key).await {
             Ok(owner) => owner,
             Err(e) => return http_error(e),
         };
-        let key = store::SessionKey::new(host, &id);
         let changed = match req.seen_activity_at {
             Some(activity_at) => state.store.mark_seen(&key, activity_at).await,
             None => state.store.clear_seen(&key).await,
@@ -3215,11 +3203,14 @@ pub(crate) async fn set_pin(
     axum::Json(req): axum::Json<SetPinReq>,
 ) -> impl IntoResponse {
     crate::run_owned(async move {
-        let (host, _) = match resolve_owner(&state, &id).await {
+        let key = match resolve_session_ref(&state, &id).await {
+            Ok(key) => key,
+            Err(error) => return http_error(error),
+        };
+        match resolve_owner(&state, &key).await {
             Ok(owner) => owner,
             Err(e) => return http_error(e),
         };
-        let key = store::SessionKey::new(host, &id);
         match state.store.set_pinned(&key, req.pinned).await {
             Ok(changed) => {
                 if changed {
@@ -3293,17 +3284,22 @@ async fn raise_notification_marks(
     // Helm-owned for the reason `create_session` is: the store write is
     // followed by the event that tells other open clients about it.
     crate::run_owned(async move {
-        let (host, status) = match resolve_owner(&state, &id).await {
+        let key = match resolve_session_ref(&state, &id).await {
+            Ok(key) => key,
+            Err(error) => return http_error(error),
+        };
+        let id = &key.session_id;
+        let (host, status) = match resolve_owner(&state, &key).await {
             Ok(owner) => owner,
             Err(e) => return http_error(e),
         };
         let live = status
             .live_sessions
             .as_ref()
-            .and_then(|live| live.iter().find(|info| info.id == id).cloned());
+            .and_then(|live| live.iter().find(|info| info.id == *id).cloned());
         let known = match live {
             Some(info) => Some(info),
-            None => match state.store.cached_session(host, &id).await {
+            None => match state.store.cached_session(host, id).await {
                 Ok(cached) => cached,
                 Err(e) => return http_error(e),
             },
@@ -3316,7 +3312,7 @@ async fn raise_notification_marks(
         let through = through.min(newest);
         match state
             .store
-            .raise_notification_marks(&store::SessionKey::new(host, &id), through, mark)
+            .raise_notification_marks(&key, through, mark)
             .await
         {
             Ok(changed) => {
@@ -3462,12 +3458,13 @@ pub(crate) struct ReplaceReq {
 /// still satisfy the accepted preview's current incarnation and revision.
 pub(crate) async fn do_replace_session(
     state: &AppState,
-    id: &str,
+    key: &store::SessionKey,
     intent_key: Option<String>,
     with: Option<CreateReq>,
     guard: farhelm_proto::DeleteGuard,
     confirm_yolo: bool,
 ) -> anyhow::Result<Replaced> {
+    let id = key.session_id.as_str();
     // A replace-with body may carry the confirmation itself (it is an
     // ordinary create body); either place counts.
     let confirm_yolo = confirm_yolo || with.as_ref().is_some_and(|with| with.confirm_yolo);
@@ -3531,7 +3528,7 @@ pub(crate) async fn do_replace_session(
                 .to_string(),
         }));
     }
-    let (claim, client) = route_session(state, id).await?;
+    let (claim, client) = route_session(state, key).await?;
     // "Replace with" keeps the source's own host — SPEC.md draws this line
     // explicitly, since clone already exists for "start this elsewhere".
     // Checked against the CLAIM (the connection this whole operation is
@@ -3783,7 +3780,9 @@ async fn finish_replacement(
     // As for an ordinary delete: requests the source has waiting for the
     // user, or on their way to a card, would otherwise hold the delete behind
     // their request fence. Held until the delete answers.
-    let _deleting = state.approvals.deny_session(id);
+    let _deleting = state
+        .approvals
+        .deny_session(&store::SessionKey::new(claim.host, id));
     // Preserve the user's pin before the destructive half of Replace. A
     // storage failure must not delete the only session that still has it.
     if state.store.inherit_pin(
@@ -3844,6 +3843,7 @@ async fn finish_replacement(
     };
     forget_deleted_session(state, claim, id).await;
     Ok(Replaced {
+        entry_uuid: claim.entry_uuid.clone(),
         session: created,
         delete_notice,
     })
@@ -3852,6 +3852,8 @@ async fn finish_replacement(
 /// A finished replace: the new session, and the notice the source's Delete
 /// carried, if any (see [`crate::client::SupervisorClient::delete_session_with`]).
 pub(crate) struct Replaced {
+    /// Successful replies retain the entry that performed both halves.
+    pub(crate) entry_uuid: String,
     pub(crate) session: farhelm_proto::SessionInfo,
     pub(crate) delete_notice: Option<String>,
 }
@@ -3871,9 +3873,13 @@ pub(crate) async fn replace_session(
     // request dropped in between used to leave both behind, the source
     // never deleted and usually no error shown.
     crate::run_owned(async move {
+        let key = match resolve_session_ref(&state, &id).await {
+            Ok(key) => key,
+            Err(error) => return http_error(error),
+        };
         match do_replace_session(
             &state,
-            &id,
+            &key,
             req.intent_key,
             req.with,
             farhelm_proto::DeleteGuard::from_flags(
@@ -3885,9 +3891,13 @@ pub(crate) async fn replace_session(
         .await
         {
             Ok(Replaced {
+                entry_uuid,
                 session,
                 delete_notice,
-            }) => replace_reply(&session, delete_notice).into_response(),
+            }) => match qualify_session_info(&entry_uuid, session) {
+                Ok(session) => replace_reply(&session, delete_notice),
+                Err(error) => http_error(error),
+            },
             Err(e) => http_error(e),
         }
     })
@@ -3932,11 +3942,15 @@ pub(crate) async fn open_tab(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
 ) -> impl IntoResponse {
-    let (_claim, client) = match route_session(&state, &id).await {
+    let key = match resolve_session_ref(&state, &id).await {
+        Ok(key) => key,
+        Err(error) => return http_error(error),
+    };
+    let (_claim, client) = match route_session(&state, &key).await {
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };
-    match client.open_tab(&id).await {
+    match client.open_tab(&key.session_id).await {
         Ok(tab) => axum::Json(serde_json::json!({ "tab": tab })).into_response(),
         Err(e) => http_error(e),
     }
@@ -3953,11 +3967,15 @@ pub(crate) async fn close_tab(
     State(state): State<Arc<AppState>>,
     AxPath((id, tab_id)): AxPath<(String, String)>,
 ) -> impl IntoResponse {
-    let (_claim, client) = match route_session(&state, &id).await {
+    let key = match resolve_session_ref(&state, &id).await {
+        Ok(key) => key,
+        Err(error) => return http_error(error),
+    };
+    let (_claim, client) = match route_session(&state, &key).await {
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };
-    match client.close_tab(&id, &tab_id).await {
+    match client.close_tab(&key.session_id, &tab_id).await {
         Ok(()) => axum::Json(serde_json::json!({})).into_response(),
         Err(e) => http_error(e),
     }

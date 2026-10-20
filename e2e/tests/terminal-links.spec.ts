@@ -69,7 +69,7 @@ for (const kind of ["web", "file"] as const) {
       invocation: gatedShellInvocation(`printf "\\033]8;;${target}\\007${text}\\033]8;;\\007\\n"`),
     });
     let downloads = 0;
-    page.on("request", (request) => { if (new URL(request.url()).pathname === `/api/sessions/${session.id}/files/download`) downloads++; });
+    page.on("request", (request) => { if (new URL(request.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}/files/download`) downloads++; });
     try {
       await page.goto("/");
       await attachSession(page, session.id);

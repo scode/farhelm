@@ -15,7 +15,7 @@
       "host": 2,
       "host_identity": "install-identity",
       "host_name": "buildbox",
-      "id": "fh-0123abcd",
+      "id": "11111111-1111-4111-8111-111111111111:fh-0123abcd",
       "invocation": "codex -m gpt-5 -c 'model_reasoning_effort=high' --yolo -c {codex:trusted-cwd}",
       "last_activity_at": 1700000100,
       "last_work_started_at": 1700000050000,
@@ -62,7 +62,7 @@
         }
       ],
       "notifications_read_through": 3,
-      "parent": "fh-89abcdef",
+      "parent": "11111111-1111-4111-8111-111111111111:fh-89abcdef",
       "restart_offer": "resume",
       "seen_activity_at": 1700000090,
       "stale": true,
@@ -79,7 +79,7 @@
       "working_copy": {
         "canonical_path": "/home/user/src/widgets",
         "id": "wc-1",
-        "origin_session_id": "fh-0123abcd",
+        "origin_session_id": "11111111-1111-4111-8111-111111111111:fh-0123abcd",
         "repo": {
           "name": "widgets",
           "owner": "octo"

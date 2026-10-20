@@ -43,11 +43,10 @@
 //! deleted after the write, so the reader has to tolerate a stale id
 //! regardless (the UI's auto-select falls back to the newest session), and
 //! a check here would only turn a race into a spurious refusal — but it IS
-//! capped at [`farhelm_proto::MAX_SESSION_ID_BYTES`], the same bound a
-//! session id honors on the supervisor wire: no real session can exceed
-//! it, and without the cap one authenticated request could park a
-//! megabyte-scale string in the row for every client to download and
-//! re-resolve on every load until someone cleared it by hand.
+//! checked as a full [`farhelm_proto::SessionRef`]. A bare ID has no host
+//! entry provenance and cannot be a selection in the public list. Syntax
+//! validation also bounds the shared value without requiring a session to
+//! exist at the instant this client writes it.
 //! Feedback contact uses the feedback submission's code-point cap. Refusals
 //! must never echo it, since clients log preference-write errors.
 //!
@@ -66,7 +65,7 @@ use crate::{AppState, SupervisorError, http_error};
 use axum::extract::State;
 use axum::response::IntoResponse;
 use farhelm_proto::feedback::FEEDBACK_CONTACT_MAX_CHARS;
-use farhelm_proto::{ErrorKind, MAX_SESSION_ID_BYTES};
+use farhelm_proto::{ErrorKind, SessionRef};
 use std::sync::Arc;
 
 /// `GET /api/preferences` — current preferences, with unset and retired fields omitted.
@@ -92,9 +91,8 @@ pub(crate) async fn get_preferences(State(state): State<Arc<AppState>>) -> impl 
 /// (axum's `Json` extractor answers a data error with 422, like every other
 /// JSON route here), which is what keeps a typo in a client from being an
 /// accepted no-op; a sort word this helm does not serve, or a
-/// `last_selected` longer than any session id can be
-/// ([`MAX_SESSION_ID_BYTES`]), a feedback contact beyond its code-point
-/// cap, or an unmatchable download-opening list is a 400. The list is
+/// `last_selected` that is not a full session reference, a feedback contact
+/// beyond its code-point cap, or an unmatchable download-opening list is a 400. The list is
 /// normalized before the sparse write, so the next read names exactly the
 /// types the helm checks. 204 on success: there is nothing
 /// to say back that the client did not just send.
@@ -191,14 +189,12 @@ pub(crate) async fn put_preferences(
         }));
     }
     if let Some(Some(selected)) = &patch.last_selected
-        && selected.len() > MAX_SESSION_ID_BYTES
+        && selected.parse::<SessionRef>().is_err()
     {
         return http_error(anyhow::Error::new(SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
-            message: format!(
-                "last_selected exceeds {MAX_SESSION_ID_BYTES} bytes; no session id is that long"
-            ),
+            message: "last_selected must be a full session ID; reload the session list".into(),
         }));
     }
     if let Some(Some(contact)) = &patch.feedback_contact
@@ -784,6 +780,53 @@ mod tests {
         );
     }
 
+    /// A remembered selection binds an entry without requiring it to remain
+    /// registered. Refused bare or malformed IDs must leave every field of the
+    /// patch untouched, while explicit null still clears only the selection.
+    #[farhelm_testtrace::test]
+    async fn selection_requires_full_syntax_but_allows_stale_references() {
+        let harness = rest_harness::idle_helm().await;
+        assert_eq!(read_raw(&harness).await, b"{}");
+        let stale = "0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:missing:session";
+        let reply = harness
+            .router()
+            .oneshot(put(serde_json::json!({
+                "last_selected": stale, "compact": true,
+            })))
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), StatusCode::NO_CONTENT);
+        assert_eq!(read(&harness).await.last_selected.as_deref(), Some(stale));
+        let before = read(&harness).await;
+        for invalid in [
+            "missing:session",
+            "0F8C2B1E-6D0E-4C51-9A8E-1E2F3A4B5C6D:session",
+            "0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:..",
+        ] {
+            let reply = harness
+                .router()
+                .oneshot(put(serde_json::json!({
+                    "last_selected": invalid, "compact": false,
+                })))
+                .await
+                .unwrap();
+            assert_eq!(reply.status(), StatusCode::BAD_REQUEST);
+            let body = axum::body::to_bytes(reply.into_body(), 4096).await.unwrap();
+            assert!(!String::from_utf8(body.to_vec()).unwrap().contains(invalid));
+            assert_eq!(read(&harness).await, before, "refusal is atomic");
+        }
+        let reply = harness
+            .router()
+            .oneshot(put(serde_json::json!({
+                "last_selected": null,
+            })))
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), StatusCode::NO_CONTENT);
+        assert_eq!(read(&harness).await.last_selected, None);
+        assert_eq!(read(&harness).await.compact, Some(true));
+    }
+
     /// The route pair is the whole contract every client is written
     /// against: a fresh helm answers an empty object, a sparse `PUT` lands
     /// only the field it names, a later `GET` reads the merged row back, a
@@ -816,7 +859,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         let response = harness
             .router()
-            .oneshot(put(serde_json::json!({ "last_selected": "session-7" })))
+            .oneshot(put(serde_json::json!({ "last_selected": "0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:session-7" })))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
@@ -846,7 +889,7 @@ mod tests {
             read(&harness).await,
             Preferences {
                 list_sort: Some("title".to_string()),
-                last_selected: Some("session-7".to_string()),
+                last_selected: Some("0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:session-7".to_string()),
                 compact: Some(true),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
@@ -987,17 +1030,19 @@ mod tests {
             "an explicit null clears the field it names and only that one"
         );
 
-        // The session-id size cap: a value at the wire's own limit is a
-        // legal (if strange) id and is stored; one byte past it cannot name
-        // any real session and is refused, leaving the row untouched.
-        let at_limit = "s".repeat(farhelm_proto::MAX_SESSION_ID_BYTES);
+        // A syntactically valid reference can be stale, including an entry
+        // this helm never registered. The shared selection has no existence gate.
+        let at_limit = format!(
+            "0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:{}",
+            "s".repeat(farhelm_proto::MAX_BARE_SESSION_ID_BYTES)
+        );
         let response = harness
             .router()
             .oneshot(put(serde_json::json!({ "last_selected": at_limit })))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        let over_limit = "s".repeat(farhelm_proto::MAX_SESSION_ID_BYTES + 1);
+        let over_limit = format!("{at_limit}s");
         let response = harness
             .router()
             .oneshot(put(serde_json::json!({ "last_selected": over_limit })))

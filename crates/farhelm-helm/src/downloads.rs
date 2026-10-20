@@ -5,7 +5,7 @@
 //! under one shared extension policy. Neither a hover nor a previous successful
 //! read reserves a file.
 
-use crate::sessions::route_session;
+use crate::sessions::{resolve_session_ref, route_session};
 use crate::{AppState, DownloadGuard, http_error};
 use axum::extract::{Path as AxPath, State};
 use axum::response::IntoResponse;
@@ -96,14 +96,16 @@ struct FileStatBody {
 
 /// Resolve and inspect without moving bytes. The normal session-owner route
 /// supplies the same disconnected-host refusal as other session operations.
+/// Public references select the host/session pair here; the supervisor receives only its suffix.
 pub(crate) async fn stat_file(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
     Json(request): Json<FileRequest>,
 ) -> axum::response::Response {
     let result = async {
-        let (claim, client) = route_session(&state, &id).await?;
-        let info = client.stat_file(&id, &request.path).await?;
+        let key = resolve_session_ref(&state, &id).await?;
+        let (claim, client) = route_session(&state, &key).await?;
+        let info = client.stat_file(&key.session_id, &request.path).await?;
         let host = state
             .manager
             .snapshots()
@@ -164,8 +166,9 @@ pub(crate) async fn download_file(
             .into_response();
     }
     let result = async {
-        let (_, client) = route_session(&state, &id).await?;
-        client.begin_download(&id, &request.path).await
+        let key = resolve_session_ref(&state, &id).await?;
+        let (_, client) = route_session(&state, &key).await?;
+        client.begin_download(&key.session_id, &request.path).await
     }
     .await;
     let download = match result {
@@ -371,6 +374,22 @@ async fn save_download(mut download: DownloadGuard, directory: PathBuf) -> anyho
 
 #[cfg(test)]
 mod tests {
+    /// Build this fixture's public reference from its registered entry, keeping wire IDs bare.
+    fn session_path(harness: &crate::rest_harness::Harness, path: &str) -> String {
+        let prefix = "/api/sessions/";
+        let Some(suffix) = path.strip_prefix(prefix) else {
+            return path.to_string();
+        };
+        let entry = harness
+            .manager
+            .snapshots()
+            .into_iter()
+            .find(|host| host.kind == crate::store::HostKind::Local)
+            .expect("the fixture has a local host")
+            .entry_uuid;
+        format!("{prefix}{entry}:{suffix}")
+    }
+
     use super::*;
     use crate::rest_harness::{FakeSupervisor, session, spliced_helm_listing};
     use axum::http::{Request, StatusCode};
@@ -461,6 +480,50 @@ mod tests {
             .unwrap()
     }
 
+    /// A stale browser's bare ID must fail locally, even while an identically named session
+    /// is routable. The silent peer distinguishes refusal from supervisor-side validation.
+    #[farhelm_testtrace::test]
+    async fn bare_file_targets_are_refused_before_supervisor_dispatch() {
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        let (observe, peer) = crate::rest_harness::silent_supervisor(server);
+        let h = spliced_helm_listing(client, vec![session("sess-1", 1)]).await;
+        let host = h
+            .manager
+            .snapshots()
+            .into_iter()
+            .find(|host| host.kind == crate::store::HostKind::Local)
+            .unwrap()
+            .id;
+        crate::sessions::route_session(&h.state, &crate::store::SessionKey::new(host, "sess-1"))
+            .await
+            .expect("premise: the matching bare suffix is routable");
+        for operation in ["stat", "download"] {
+            let response = h.router().oneshot(request(operation, false)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            assert!(
+                String::from_utf8(body.to_vec())
+                    .unwrap()
+                    .contains("full session ID")
+            );
+        }
+        observe.send(()).unwrap();
+        peer.await.unwrap();
+    }
+
+    /// Qualify only this fixture's selected request, leaving raw builders available for refusals.
+    fn qualified(
+        harness: &crate::rest_harness::Harness,
+        mut request: Request<Body>,
+    ) -> Request<Body> {
+        *request.uri_mut() = session_path(harness, &request.uri().to_string())
+            .parse()
+            .unwrap();
+        request
+    }
+
     /// Open metadata is deliberately smaller than the body: HTTP must neither
     /// truncate growth below the cap nor advertise the stale opening length.
     fn info() -> DownloadFileInfo {
@@ -542,7 +605,11 @@ mod tests {
             .await;
         });
         let h = spliced_helm_listing(client, vec![session("sess-1", 1)]).await;
-        let response = h.router().oneshot(request("stat", false)).await.unwrap();
+        let response = h
+            .router()
+            .oneshot(qualified(&h, request("stat", false)))
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body: serde_json::Value = serde_json::from_slice(
             &axum::body::to_bytes(response.into_body(), 4096)
@@ -569,7 +636,7 @@ mod tests {
         let h = spliced_helm_listing(client, vec![session("sess-1", 1)]).await;
         let response = h
             .router()
-            .oneshot(request("download", false))
+            .oneshot(qualified(&h, request("download", false)))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -604,7 +671,7 @@ mod tests {
         let h = spliced_helm_listing(client, vec![session("sess-1", 1)]).await;
         let response = h
             .router()
-            .oneshot(request("download", false))
+            .oneshot(qualified(&h, request("download", false)))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -624,7 +691,7 @@ mod tests {
         for operation in ["stat", "download"] {
             assert_eq!(
                 h.unauthenticated_router()
-                    .oneshot(request(operation, false))
+                    .oneshot(qualified(&h, request(operation, false)))
                     .await
                     .unwrap()
                     .status(),
@@ -633,14 +700,16 @@ mod tests {
         }
         assert_eq!(
             h.router()
-                .oneshot(request("download", true))
+                .oneshot(qualified(&h, request("download", true)))
                 .await
                 .unwrap()
                 .status(),
             StatusCode::NOT_FOUND
         );
         let mut missing = request("stat", false);
-        *missing.uri_mut() = "/api/sessions/missing/files/stat".parse().unwrap();
+        *missing.uri_mut() = session_path(&h, "/api/sessions/missing/files/stat")
+            .parse()
+            .unwrap();
         assert_eq!(
             h.router().oneshot(missing).await.unwrap().status(),
             StatusCode::NOT_FOUND
@@ -687,7 +756,11 @@ mod tests {
     async fn open_is_refused_before_transfer_without_native_save_and_opener() {
         let mut h = crate::rest_harness::idle_helm().await;
         for save in [false, true] {
-            let response = h.router().oneshot(open_request(save)).await.unwrap();
+            let response = h
+                .router()
+                .oneshot(qualified(&h, open_request(save)))
+                .await
+                .unwrap();
             assert_eq!(response.status(), StatusCode::NOT_FOUND);
             assert_eq!(
                 axum::body::to_bytes(response.into_body(), 4096)
@@ -699,7 +772,11 @@ mod tests {
         // An opener alone still cannot authorize opening without a native save.
         Arc::get_mut(&mut h.state).unwrap().file_opener =
             Some(Arc::new(|_| panic!("no saved file exists")));
-        let response = h.router().oneshot(open_request(false)).await.unwrap();
+        let response = h
+            .router()
+            .oneshot(qualified(&h, open_request(false)))
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         assert_eq!(
             axum::body::to_bytes(response.into_body(), 4096)
@@ -799,7 +876,7 @@ mod tests {
             }));
             let response = h
                 .router()
-                .oneshot(open_request_for(true, requested))
+                .oneshot(qualified(&h, open_request_for(true, requested)))
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
@@ -885,7 +962,11 @@ mod tests {
                 Arc::get_mut(&mut h.state).unwrap().file_opener =
                     Some(Arc::new(|_| panic!("stat never opens")));
             }
-            let response = h.router().oneshot(request("stat", false)).await.unwrap();
+            let response = h
+                .router()
+                .oneshot(qualified(&h, request("stat", false)))
+                .await
+                .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
             let body: serde_json::Value = serde_json::from_slice(
                 &axum::body::to_bytes(response.into_body(), 4096)
@@ -919,7 +1000,11 @@ mod tests {
             });
             let mut h = spliced_helm_listing(client, vec![session("sess-1", 1)]).await;
             Arc::get_mut(&mut h.state).unwrap().downloads_dir = Some(downloads.path().into());
-            let response = h.router().oneshot(request("download", true)).await.unwrap();
+            let response = h
+                .router()
+                .oneshot(qualified(&h, request("download", true)))
+                .await
+                .unwrap();
             if failure {
                 assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
             } else {
@@ -985,7 +1070,7 @@ mod tests {
         });
         let mut h = spliced_helm_listing(client, vec![session("sess-1", 1)]).await;
         Arc::get_mut(&mut h.state).unwrap().downloads_dir = Some(downloads.path().into());
-        let handler = tokio::spawn(h.router().oneshot(request("download", true)));
+        let handler = tokio::spawn(h.router().oneshot(qualified(&h, request("download", true))));
         tokio::time::timeout(std::time::Duration::from_secs(5), ready)
             .await
             .unwrap()

@@ -678,12 +678,12 @@ test("switching sessions before the first terminal is ready mounts the second se
     // Seeing the call return while Terminal is absent proves A entered the
     // pending retry path. The clock stays fixed through both selections.
     await expect.poll(() => page.evaluate(() => (window as any).__testLastMountPath))
-      .toBe(`/api/sessions/${idA}/term`);
+      .toBe(`/api/sessions/${encodeURIComponent(idA)}/term`);
     expect(await page.evaluate(() => !!(window as any).__farhelmIslands?.terminal)).toBe(false);
     // Direct switch — the keyed remount tears the shared view down.
     await page.locator(`[data-session-id="${idB}"]`).click();
     await expect.poll(() => page.evaluate(() => (window as any).__testLastMountPath))
-      .toBe(`/api/sessions/${idB}/term`);
+      .toBe(`/api/sessions/${encodeURIComponent(idB)}/term`);
 
     // Restore the withheld global, THEN advance the frozen clock: both
     // session A's original retry (if a regression left it running) and
@@ -698,14 +698,16 @@ test("switching sessions before the first terminal is ready mounts the second se
     // the constructed socket now, before any later replay or reconnect.
     await waitForIslandMounted(page, "terminal");
     const wsUrl = await page.evaluate(() => (window as any).__farhelmWs.url);
-    expect(wsUrl).toContain(idB);
+    // The public reference is raw in DOM state and encoded as one URL segment.
+    // Compare the mounted path exactly; lease and geometry query fields vary.
+    expect(new URL(wsUrl).pathname).toBe(`/api/sessions/${encodeURIComponent(idB)}/term`);
     await expect(page.locator(".session-details .title")).toHaveText(
       "regression-session-b",
     );
   } finally {
     await restoreMountGlobals().catch(() => {});
-    await request.post(`/api/sessions/${idB}/stop`).catch(() => {});
-    await request.delete(`/api/sessions/${idB}`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(idB)}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(idB)}`).catch(() => {});
   }
 });
 
@@ -755,7 +757,7 @@ test("terminal mounting waits for the clipboard naming helper", async ({ page, r
   await expect.poll(() => page.evaluate(() => (window as any).__testClipboardMountPath), {
     timeout: 20_000,
     message: "the requested terminal must check readiness while clipboard naming is withheld",
-  }).toBe(`/api/sessions/${sharedId}/term`);
+  }).toBe(`/api/sessions/${encodeURIComponent(sharedId)}/term`);
   expect(
     await page.evaluate(() => Boolean((window as any).__farhelmIslands?.terminal)),
     "the terminal must remain unmounted while its clipboard policy is unavailable",
@@ -1463,7 +1465,7 @@ test("a final detach banner is held while a delete is in flight and paints if it
   });
   let peerOpened = false;
   let clientMessage = false;
-  await page.routeWebSocket((url) => url.pathname === `/api/sessions/${bogusId}/term`, (socket) => {
+  await page.routeWebSocket((url) => url.pathname === `/api/sessions/${encodeURIComponent(bogusId)}/term`, (socket) => {
     peerOpened = true;
     // The initial resize is sent from onopen after terminal.js installs its
     // handlers. Sending during route setup can beat those handlers entirely.
@@ -1519,10 +1521,10 @@ test("a final detach banner is held while a delete is in flight and paints if it
 
 /**
  * A stale listing must retain its metadata and show calm recovery when the
- * supervisor refuses the terminal, rather than leaving an unexplained pane.
+ * helm refuses the terminal, rather than leaving an unexplained pane.
  *
  * Only the listing row is synthetic; the real attach must fail with the
- * missing session's identity before the recovery surface is accepted as
+ * missing session's routed refusal before the recovery surface is accepted as
  * evidence. This is an infrastructure refusal, not a final stall or takeover
  * decision, so it must not produce a red detach banner. Known interrupted
  * sessions have separate card coverage in terminal-restart.spec.ts.
@@ -1530,15 +1532,15 @@ test("a final detach banner is held while a delete is in flight and paints if it
 test("opening a stale session shows metadata and calm terminal recovery", async ({
   page,
 }) => {
-  // A well-formed but unknown UUID identifies this fixture's real refusal
-  // without colliding with any session in the shared stack.
-  const bogusId = "00000000-0000-0000-0000-000000000000";
+  // A well-formed reference to an absent entry exercises real routing refusal.
+  // The socket URL identifies the request; safe error text does not echo its UUID.
+  const bogusId = "00000000-0000-0000-0000-000000000000:missing-session";
   const title = `terminal-less-${Date.now()}`;
   const cwd = "/tmp/terminal-less-fixture";
   const invocation = "true";
   const detachReasons: string[] = [];
   page.on("websocket", (socket) => {
-    if (new URL(socket.url()).pathname !== `/api/sessions/${bogusId}/term`) return;
+    if (new URL(socket.url()).pathname !== `/api/sessions/${encodeURIComponent(bogusId)}/term`) return;
     socket.on("framereceived", ({ payload }) => {
       if (typeof payload !== "string") return;
       const frame = JSON.parse(payload);
@@ -1584,9 +1586,9 @@ test("opening a stale session shows metadata and calm terminal recovery", async 
 
   // A connected socket alone cannot prove that the server refused this
   // attach: wait for the real refusal before inspecting the recovery UI.
-  await expect.poll(() => detachReasons.some((reason) => reason.includes(bogusId)), {
+  await expect.poll(() => detachReasons.some((reason) => reason.includes("no such session on this host entry")), {
     timeout: 10_000,
-    message: "the supervisor refused this fixture's missing terminal",
+    message: "the helm refused this fixture's missing terminal",
   }).toBe(true);
   const recovery = page.locator("#term-connecting .session-unavailable-card");
   await expect(recovery).toBeVisible({ timeout: 10_000 });
@@ -1664,7 +1666,7 @@ test("stop and delete a session through the HTTP API", async ({ page, request })
     await attachSession(page, id);
     await waitForTermText(page, "FH_STOP_READY");
 
-    const stopped = await request.post(`/api/sessions/${id}/stop`);
+    const stopped = await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`);
     expect(stopped.status()).toBe(200);
     expect(await stopped.json()).toEqual({});
 
@@ -1682,7 +1684,7 @@ test("stop and delete a session through the HTTP API", async ({ page, request })
       )
       .toBe("exited");
 
-    const deleted = await request.delete(`/api/sessions/${id}`);
+    const deleted = await request.delete(`/api/sessions/${encodeURIComponent(id)}`);
     expect(deleted.status()).toBe(200);
     expect(await deleted.json()).toEqual({});
 
@@ -1702,7 +1704,7 @@ test("stop and delete a session through the HTTP API", async ({ page, request })
     // Best-effort: swallow everything, including a 404 for the (expected)
     // case where the happy path already deleted the session. This must
     // never throw over the top of a real assertion failure above.
-    await request.delete(`/api/sessions/${id}`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
 
@@ -1817,7 +1819,7 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     // The ended-session guard travels in the query; pathname matching keeps
     // the actual guarded DELETE inside this observation window.
     let deleteBArrived = false;
-    await page.route((url) => url.pathname === `/api/sessions/${idB}`, async (route) => {
+    await page.route((url) => url.pathname === `/api/sessions/${encodeURIComponent(idB)}`, async (route) => {
       if (route.request().method() !== "DELETE") {
         await route.continue();
         return;
@@ -1862,8 +1864,8 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     for (const title of [titleA, titleB]) {
       const id = await findSessionIdByTitle(request, title).catch(() => undefined);
       if (id) {
-        await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-        await request.delete(`/api/sessions/${id}`).catch(() => {});
+        await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+        await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
       }
     }
   }
@@ -1925,8 +1927,8 @@ test("create dialog surfaces a precondition failure, preserves the form, and cre
   } finally {
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
-      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-      await request.delete(`/api/sessions/${id}`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
 });
@@ -2005,8 +2007,8 @@ test("create dialog disables the submit control while a create is in flight", as
     release(false);
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
-      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-      await request.delete(`/api/sessions/${id}`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
 });
@@ -2090,8 +2092,8 @@ test("alive delete opens an inline confirming state with the is-still-running wo
   } finally {
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
-      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-      await request.delete(`/api/sessions/${id}`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
 });
@@ -2137,8 +2139,8 @@ test("confirming an inline delete prompt deletes the session with exactly one DE
   } finally {
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
-      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-      await request.delete(`/api/sessions/${id}`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
 });
@@ -2171,7 +2173,7 @@ test("exited session deletes immediately with no confirming state", async ({
   // Ended-session deletion adds a guard query. Match the resource pathname
   // so that query cannot bypass the hold that gives these assertions meaning.
   let deleteArrived = false;
-  await page.route((url) => url.pathname === `/api/sessions/${id}`, async (route) => {
+  await page.route((url) => url.pathname === `/api/sessions/${encodeURIComponent(id)}`, async (route) => {
     if (route.request().method() !== "DELETE") {
       await route.continue();
       return;
@@ -2203,7 +2205,7 @@ test("exited session deletes immediately with no confirming state", async ({
   } finally {
     // Route-draining teardown must not wait forever after an assertion fails.
     releaseDelete();
-    await request.delete(`/api/sessions/${id}`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
 
@@ -2261,8 +2263,8 @@ test("delete confirmation safely displays a title containing executable HTML wit
     await expect(row.locator(".session-title")).toHaveText(title);
     expect(await page.evaluate(() => (window as any).__pwned)).toBeUndefined();
   } finally {
-    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-    await request.delete(`/api/sessions/${id}`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
 
@@ -2374,8 +2376,8 @@ test("a legal multi-KB, unbroken title keeps the consequence text intact and cli
     inside("cancel", cancelBox!);
     expect(confirmBox!.y + confirmBox!.height).toBeLessThanOrEqual(cancelBox!.y + 1);
   } finally {
-    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-    await request.delete(`/api/sessions/${id}`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
 
@@ -2495,8 +2497,8 @@ test("an inline confirming state survives a listing refresh; cancel still works 
     await expect(row.locator(".session-row-delete")).toBeEnabled();
   } finally {
     await page.unroute(SESSION_LISTING);
-    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-    await request.delete(`/api/sessions/${id}`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
 
@@ -2586,8 +2588,8 @@ test("one row's confirming state does not affect another row's controls", async 
     await expect(rowA.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
   } finally {
     for (const id of [idA, idB]) {
-      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-      await request.delete(`/api/sessions/${id}`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
 });
@@ -2629,7 +2631,7 @@ test("an alive-to-exited status change under an open confirm prompt keeps confir
 
     // Stopped from "elsewhere" (the raw API, standing in for another
     // client) while this row's prompt sits open.
-    await request.post(`/api/sessions/${id}/stop`);
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`);
 
     // The stop bumps the helm's revision, so the real feed carries it here
     // without anything in this test playing helm: the re-read it triggers
@@ -2650,7 +2652,7 @@ test("an alive-to-exited status change under an open confirm prompt keeps confir
     await row.locator(".confirm-delete").click();
     await expect(row).toHaveCount(0, { timeout: 10_000 });
   } finally {
-    await request.delete(`/api/sessions/${id}`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
 
@@ -2739,8 +2741,8 @@ test("a failed listing read while confirming does not clear the confirming state
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE);
   } finally {
     await page.unroute(SESSION_LISTING);
-    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-    await request.delete(`/api/sessions/${id}`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
 
@@ -2881,7 +2883,7 @@ test("stale-session-view-with-no-status-renders-metadata-and-no-badge", async ({
       body: JSON.stringify(listing),
     });
   });
-  await page.route(`**/api/sessions/${sessionId}`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(sessionId)}`, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
@@ -2925,7 +2927,7 @@ for (const hostName of ["unlisted-remote", "remote-\u202Ename\nnext", undefined]
     await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {
       json: { sessions: [session], total: 1, matching: 1, truncated: false },
     }));
-    await page.route(`**/api/sessions/${sessionId}`, (route) => fulfillAsHelm(route, { json: session }));
+    await page.route(`**/api/sessions/${encodeURIComponent(sessionId)}`, (route) => fulfillAsHelm(route, { json: session }));
     await page.goto("/");
     const target = page.locator(`[data-session-id="${sessionId}"]`);
     await expect(target.locator(".session-title")).toHaveText(session.title);
@@ -2977,7 +2979,7 @@ test("deleting a session with unknown status confirms first, with wording that a
     });
   });
   let deleteRequests = 0;
-  await page.route(`**/api/sessions/${sessionId}`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(sessionId)}`, async (route) => {
     if (route.request().method() === "DELETE") {
       deleteRequests++;
     }
@@ -3077,8 +3079,8 @@ test("submitting the create form twice while one create is in flight produces ex
     release(false);
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
-      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-      await request.delete(`/api/sessions/${id}`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
 });
@@ -3110,7 +3112,7 @@ test("stop and delete failures surface in the row's own error line, without dist
       timeout: 10_000,
     });
 
-    await page.route(`**/api/sessions/${id}/stop`, (route) =>
+    await page.route(`**/api/sessions/${encodeURIComponent(id)}/stop`, (route) =>
       fulfillAsHelm(route, {
         status: 500,
         contentType: "text/plain",
@@ -3127,9 +3129,9 @@ test("stop and delete failures surface in the row's own error line, without dist
     // and the rest of the list keeps working normally.
     await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE);
     await expect(page.locator(".session-list")).toBeVisible();
-    await page.unroute(`**/api/sessions/${id}/stop`);
+    await page.unroute(`**/api/sessions/${encodeURIComponent(id)}/stop`);
 
-    await page.route(`**/api/sessions/${id}`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(id)}`, async (route) => {
       if (route.request().method() !== "DELETE") {
         await route.continue();
         return;
@@ -3150,10 +3152,10 @@ test("stop and delete failures surface in the row's own error line, without dist
     );
     // A failed delete must not vanish the row.
     await expect(row).toHaveCount(1);
-    await page.unroute(`**/api/sessions/${id}`);
+    await page.unroute(`**/api/sessions/${encodeURIComponent(id)}`);
   } finally {
-    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-    await request.delete(`/api/sessions/${id}`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
 
@@ -3192,7 +3194,7 @@ test("a failed action's error is keyed to its own session, not shared across row
     });
 
     // A's stop fails (route-intercepted); B's stop is real and succeeds.
-    await page.route(`**/api/sessions/${idA}/stop`, (route) =>
+    await page.route(`**/api/sessions/${encodeURIComponent(idA)}/stop`, (route) =>
       fulfillAsHelm(route, {
         status: 500,
         contentType: "text/plain",
@@ -3221,7 +3223,7 @@ test("a failed action's error is keyed to its own session, not shared across row
 
     // Retrying A (now unintercepted) must succeed and clear ONLY A's
     // error — B's (already-empty) state is untouched by this too.
-    await page.unroute(`**/api/sessions/${idA}/stop`);
+    await page.unroute(`**/api/sessions/${encodeURIComponent(idA)}/stop`);
     await openRowMenu(rowA);
     await rowA.locator(".session-row-stop").click();
     await expect(rowA.locator(".status-badge")).toHaveText(
@@ -3232,8 +3234,8 @@ test("a failed action's error is keyed to its own session, not shared across row
     await expect(rowB.locator(".action-error")).toHaveCount(0);
   } finally {
     for (const id of [idA, idB]) {
-      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-      await request.delete(`/api/sessions/${id}`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
 });
@@ -3276,7 +3278,7 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
   const stopHeld = new Promise<void>((resolve) => {
     releaseStop = resolve;
   });
-  await page.route(`**/api/sessions/${idA}/stop`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(idA)}/stop`, async (route) => {
     stopRequests++;
     await stopHeld;
     await route.continue();
@@ -3358,8 +3360,8 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
     // stop request parked on the held route.
     releaseStop();
     for (const id of [idA, idB]) {
-      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-      await request.delete(`/api/sessions/${id}`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
 });
@@ -3399,19 +3401,19 @@ test("rapid stop/delete clicks on the same row never let a confirmed delete sile
   const { id: idB } = await createdB.json();
 
   let stopRequestsA = 0;
-  await page.route(`**/api/sessions/${idA}/stop`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(idA)}/stop`, async (route) => {
     stopRequestsA++;
     await route.continue();
   });
   let deleteRequestsA = 0;
-  await page.route(`**/api/sessions/${idA}`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(idA)}`, async (route) => {
     if (route.request().method() === "DELETE") {
       deleteRequestsA++;
     }
     await route.continue();
   });
   let stopRequestsB = 0;
-  await page.route(`**/api/sessions/${idB}/stop`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(idB)}/stop`, async (route) => {
     stopRequestsB++;
     await route.continue();
   });
@@ -3468,8 +3470,8 @@ test("rapid stop/delete clicks on the same row never let a confirmed delete sile
     expect(stopRequestsB).toBe(1);
   } finally {
     for (const id of [idA, idB]) {
-      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-      await request.delete(`/api/sessions/${id}`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
 });
@@ -3498,7 +3500,7 @@ test("dispatching cancel and confirm in the same tick never deletes the session"
   const { id } = await created.json();
 
   let deleteRequests = 0;
-  await page.route(`**/api/sessions/${id}`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(id)}`, async (route) => {
     if (route.request().method() === "DELETE") {
       deleteRequests++;
     }
@@ -3529,8 +3531,8 @@ test("dispatching cancel and confirm in the same tick never deletes the session"
     await expect(row.locator(".session-row-delete")).toBeEnabled();
     expect(deleteRequests).toBe(0);
   } finally {
-    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-    await request.delete(`/api/sessions/${id}`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
 
@@ -3551,7 +3553,7 @@ test("the confirm prompt focuses delete; held Enter waits for a new press", asyn
   const { id } = await created.json();
 
   let deleteRequests = 0;
-  await page.route(`**/api/sessions/${id}`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(id)}`, async (route) => {
     if (route.request().method() === "DELETE") {
       deleteRequests++;
     }
@@ -3580,8 +3582,8 @@ test("the confirm prompt focuses delete; held Enter waits for a new press", asyn
     expect(deleteRequests).toBe(1);
   } finally {
     await page.keyboard.up("Enter");
-    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-    await request.delete(`/api/sessions/${id}`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
 
@@ -3640,8 +3642,8 @@ test("a blank title creates a session titled after the working directory's basen
     id = createdSession.id;
   } finally {
     if (id) {
-      await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-      await request.delete(`/api/sessions/${id}`).catch(() => {});
+      await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+      await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
     }
   }
 });
@@ -3677,7 +3679,7 @@ test("list refreshes an existing row from alive to exited, then drops it on dele
       timeout: 10_000,
     });
 
-    await request.post(`/api/sessions/${id}/stop`);
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`);
     // The exact exit code is NOT pinned here: `kill_process_tree`
     // (farhelm-supervisor/src/service.rs) sends SIGTERM, waits a grace
     // period, then RE-ENUMERATES the tree and SIGKILLs only whatever it
@@ -3706,13 +3708,13 @@ test("list refreshes an existing row from alive to exited, then drops it on dele
       { timeout: 10_000 },
     );
 
-    await request.delete(`/api/sessions/${id}`);
+    await request.delete(`/api/sessions/${encodeURIComponent(id)}`);
     await expect(row).toHaveCount(0, { timeout: 10_000 });
   } finally {
     // Best-effort cleanup for the case where an assertion above threw
     // before the happy-path delete ran; see the identical pattern (and
     // its rationale) on the HTTP-level test above.
-    await request.delete(`/api/sessions/${id}`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
 
@@ -3768,7 +3770,7 @@ test("an interrupted session shows its badge and deletes without confirming", as
   // `?only_if_nothing_alive=true`, and a URL glob ending at the id would
   // let that request through to the real helm, which has never heard of
   // this synthetic session.
-  await page.route((url) => url.pathname === `/api/sessions/${session.id}`, async (route) => {
+  await page.route((url) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}`, async (route) => {
     if (route.request().method() !== "DELETE") {
       await route.continue();
       return;
@@ -3851,7 +3853,7 @@ test("an error session shows its badge with detail and deletes without confirmin
   // `?only_if_nothing_alive=true`, and a URL glob ending at the id would
   // let that request through to the real helm, which has never heard of
   // this synthetic session.
-  await page.route((url) => url.pathname === `/api/sessions/${session.id}`, async (route) => {
+  await page.route((url) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}`, async (route) => {
     if (route.request().method() !== "DELETE") {
       await route.continue();
       return;
@@ -4404,8 +4406,8 @@ test("list polls and picks up a session created elsewhere", async ({
     // Best-effort: the session is long-running (`sleep 300`), so it must
     // be stopped and deleted regardless of whether the assertion above
     // passed, or it would sit in the list for every test after this one.
-    await request.post(`/api/sessions/${id}/stop`).catch(() => {});
-    await request.delete(`/api/sessions/${id}`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});
   }
 });
 

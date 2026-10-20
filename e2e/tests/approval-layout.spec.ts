@@ -301,7 +301,7 @@ test("a session without a terminal anchors approval below its top row", async ({
   await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {
     json: { sessions: [interrupted], total: 1, matching: 1, truncated: false },
   }));
-  await page.route(`**/api/sessions/${session!.id}`, (route) => fulfillAsHelm(route, { json: interrupted }));
+  await page.route(`**/api/sessions/${encodeURIComponent(session!.id)}`, (route) => fulfillAsHelm(route, { json: interrupted }));
   await stageApprovals(page, [launchRequest("no-terminal")]);
   await page.goto("/");
   const target = page.locator(`[data-session-id="${session!.id}"] .session-row-open`);

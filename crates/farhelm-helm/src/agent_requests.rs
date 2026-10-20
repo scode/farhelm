@@ -54,6 +54,10 @@
 //! an old wire shape can still be decoded and refused. The relay and this
 //! authoritative boundary both require `Some(id)`, including for a deliberate
 //! self-action (Delete refuses self). The id may name any session the helm knows, on any host.
+//! Public targets carry the helm-assigned host-entry UUID and the supervisor's
+//! opaque ID. Exact own-bare equality is the only exception, resolved on the
+//! authenticated origin. Operations retain that pair across approval waits;
+//! supervisors receive only its bare suffix.
 //! [`resolve_target`] logs both asking and target identities so an operator
 //! can distinguish a self-action from one reaching across the fleet.
 //!
@@ -128,8 +132,9 @@ use farhelm_proto::{
 use tracing::info;
 
 use crate::AppState;
-use crate::store::HostId;
 use crate::store::TemplateBindings;
+use crate::store::{HostId, SessionKey};
+use farhelm_proto::SessionRef;
 
 /// Which connection an upcall arrived on — the whole of what the helm
 /// knows about who is asking, beyond the session id the supervisor
@@ -374,6 +379,20 @@ impl AgentRequestHandler for HelmAgentRequests {
                 message,
             };
         }
+        // Capture the caller's entry from the same published connection used by
+        // the liveness check. Discovery must never recover an entry from a bare ID.
+        let Some(caller_status) = state.manager.status(origin.host).filter(|status| {
+            status
+                .client
+                .as_ref()
+                .is_some_and(|client| client.connection_id() == origin.connection)
+        }) else {
+            return AgentOutcome::Err {
+                kind: ErrorKind::Unavailable,
+                message: "the host connection was replaced; retry".to_string(),
+            };
+        };
+        let caller_entry_uuid = caller_status.entry_uuid;
         // Captured before `verb` is consumed by the dispatch below, for the
         // question only the failure arm asks: whether what was attempted
         // CHANGES something. See [`transport_outcome`].
@@ -388,10 +407,12 @@ impl AgentRequestHandler for HelmAgentRequests {
                             .map(|view| agent_host(view, origin.host))
                             .collect(),
                         complete: true,
-                        caller_host_id: origin.host.to_string(),
+                        caller_host_id: caller_entry_uuid.clone(),
                     })
             }
-            AgentVerb::Sessions {} => session_listing(&state, origin.host, session_id).await,
+            AgentVerb::Sessions {} => {
+                session_listing(&state, origin.host, session_id, &caller_entry_uuid).await
+            }
             AgentVerb::OpenUrl { url } => {
                 crate::browser::open_url(&state, origin, session_id, url).await
             }
@@ -400,13 +421,31 @@ impl AgentRequestHandler for HelmAgentRequests {
                 expected_title,
                 title,
             } => {
-                let target = resolve_target(target.expect("validated"), session_id, "rename");
+                let target = match resolve_target(
+                    &state,
+                    origin,
+                    target.expect("validated"),
+                    session_id,
+                    "rename",
+                )
+                .await
+                {
+                    Ok(target) => target,
+                    Err(error) => return outcome_of(Err(error), mutating),
+                };
                 let expected_title = expected_title.expect("validated");
-                if let Err(unroutable) = crate::sessions::route_session(&state, &target).await {
-                    return outcome_of(Err(unroutable), mutating);
-                }
+                let (target_claim, _) = match crate::sessions::route_session(&state, &target).await
+                {
+                    Ok(route) => route,
+                    Err(unroutable) => return outcome_of(Err(unroutable), mutating),
+                };
                 let action = ApprovalAction::Rename {
-                    target: crate::approvals::describe_session(&state, &target).await,
+                    target: crate::approvals::describe_session(
+                        &state,
+                        &target,
+                        &target_claim.entry_uuid,
+                    )
+                    .await,
                     title: title.clone(),
                 };
                 match approved(&state, origin, session_id, action).await {
@@ -424,12 +463,30 @@ impl AgentRequestHandler for HelmAgentRequests {
                 }
             }
             AgentVerb::Stop { session_id: target } => {
-                let target = resolve_target(target.expect("validated"), session_id, "stop");
-                if let Err(unroutable) = crate::sessions::route_session(&state, &target).await {
-                    return outcome_of(Err(unroutable), mutating);
-                }
+                let target = match resolve_target(
+                    &state,
+                    origin,
+                    target.expect("validated"),
+                    session_id,
+                    "stop",
+                )
+                .await
+                {
+                    Ok(target) => target,
+                    Err(error) => return outcome_of(Err(error), mutating),
+                };
+                let (target_claim, _) = match crate::sessions::route_session(&state, &target).await
+                {
+                    Ok(route) => route,
+                    Err(unroutable) => return outcome_of(Err(unroutable), mutating),
+                };
                 let action = ApprovalAction::Stop {
-                    target: crate::approvals::describe_session(&state, &target).await,
+                    target: crate::approvals::describe_session(
+                        &state,
+                        &target,
+                        &target_claim.entry_uuid,
+                    )
+                    .await,
                 };
                 match approved(&state, origin, session_id, action).await {
                     Ok(()) => crate::sessions::do_stop_session(&state, &target)
@@ -442,8 +499,19 @@ impl AgentRequestHandler for HelmAgentRequests {
                 session_id: target,
                 stop_if_running,
             } => {
-                let target = resolve_target(target.expect("validated"), session_id, "delete");
-                if target == session_id {
+                let target = match resolve_target(
+                    &state,
+                    origin,
+                    target.expect("validated"),
+                    session_id,
+                    "delete",
+                )
+                .await
+                {
+                    Ok(target) => target,
+                    Err(error) => return outcome_of(Err(error), mutating),
+                };
+                if target == SessionKey::new(origin.host, session_id) {
                     return outcome_of(Err(anyhow::Error::new(crate::SupervisorError {
                         origin: crate::client::ErrorOrigin::Helm,
                         kind: ErrorKind::InvalidRequest,
@@ -456,8 +524,19 @@ impl AgentRequestHandler for HelmAgentRequests {
                 session_id: target,
                 prompt,
             } => {
-                let target = resolve_target(target.expect("validated"), session_id, "prompt");
-                if target == session_id {
+                let target = match resolve_target(
+                    &state,
+                    origin,
+                    target.expect("validated"),
+                    session_id,
+                    "prompt",
+                )
+                .await
+                {
+                    Ok(target) => target,
+                    Err(error) => return outcome_of(Err(error), mutating),
+                };
+                if target == SessionKey::new(origin.host, session_id) {
                     return outcome_of(
                         Err(anyhow::Error::new(crate::SupervisorError {
                             origin: crate::client::ErrorOrigin::Helm,
@@ -473,10 +552,23 @@ impl AgentRequestHandler for HelmAgentRequests {
                 session_id: target,
                 stop_if_running,
             } => {
-                let target = resolve_target(target.expect("validated"), session_id, "restart");
-                if let Err(unroutable) = crate::sessions::route_session(&state, &target).await {
-                    return outcome_of(Err(unroutable), mutating);
-                }
+                let target = match resolve_target(
+                    &state,
+                    origin,
+                    target.expect("validated"),
+                    session_id,
+                    "restart",
+                )
+                .await
+                {
+                    Ok(target) => target,
+                    Err(error) => return outcome_of(Err(error), mutating),
+                };
+                let (target_claim, _) = match crate::sessions::route_session(&state, &target).await
+                {
+                    Ok(route) => route,
+                    Err(unroutable) => return outcome_of(Err(unroutable), mutating),
+                };
                 // A plain restart resumes the session's own stored launch, so
                 // the YOLO rule does not apply (SPEC.md); the card shows that
                 // launch, resume command included, as the cache knows it.
@@ -498,7 +590,12 @@ impl AgentRequestHandler for HelmAgentRequests {
                     );
                 };
                 let action = ApprovalAction::Restart {
-                    target: crate::approvals::describe_session(&state, &target).await,
+                    target: crate::approvals::describe_session(
+                        &state,
+                        &target,
+                        &target_claim.entry_uuid,
+                    )
+                    .await,
                     stop_if_running,
                     launch: Some(shown.clone()),
                 };
@@ -537,7 +634,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                     Err(refused) => Err(refused),
                 }
             }
-            AgentVerb::Templates {} => template_listing(&state, origin.host).await,
+            AgentVerb::Templates {} => template_listing(&state, &caller_entry_uuid).await,
             AgentVerb::TemplateCreate {
                 name,
                 fields,
@@ -895,37 +992,39 @@ fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
     }
 }
 
-/// Record the explicit session one lifecycle verb acts on.
+/// Bind an agent target to one entry before any card or asynchronous operation.
 ///
-/// The caller has already rejected the old omitted-target wire shape, so
-/// this function never substitutes `asking`. Keeping both values here is
-/// still necessary: an explicit self-action and a cross-fleet action need
-/// different identities in the audit record even though they share the same
-/// routing path.
-///
-/// Also where "which session asked to act on which" is logged, at `info`
-/// rather than left to be reconstructed from a `RenameSession` or
-/// `StopSession` line on whatever supervisor eventually
-/// answers: an operator reading the HELM's own log wants to see, in one
-/// place, that a session reached across the fleet (or renamed itself)
-/// before the request ever leaves this process — see the module's own docs
-/// for why no narrower authorization check accompanies it.
-///
-/// Both ids go through [`escape_for_log`] on the way into that line. The
-/// relay's own `validate_agent_verb` already refuses a target carrying a
-/// `Cc` control character, so this is not the only thing standing between a
-/// hostile id and the log — but it is the only one that covers the rest of
-/// Unicode's presentation-bending characters, and it is the only one at all
-/// for `asking`, which arrives from the supervisor's hello rather than from
-/// a validated verb field.
-fn resolve_target(target: String, asking: &str, verb: &str) -> String {
+/// Exact equality with the authenticated caller's bare ID wins even when that
+/// string resembles a full reference. Every other target must carry an entry
+/// UUID; a bare ID never triggers a fleet-wide ownership search. Audit the raw
+/// spelling, which also remains unchanged in create/clone request digests.
+async fn resolve_target(
+    state: &AppState,
+    origin: AgentOrigin,
+    target: String,
+    asking: &str,
+    verb: &str,
+) -> anyhow::Result<SessionKey> {
     info!(
         asking = escape_for_log(asking).as_str(),
         target = escape_for_log(&target).as_str(),
         verb,
         "an agent is acting on a session"
     );
-    target
+    if target == asking {
+        if farhelm_proto::session_ref::bare_session_id_problem(asking).is_some() {
+            return Err(crate::sessions::invalid_request(
+                "this session ID cannot be represented by the helm; run `farhelm agent sessions` for current full IDs".to_string(),
+            ));
+        }
+        return Ok(SessionKey::new(origin.host, asking));
+    }
+    if target.parse::<SessionRef>().is_err() {
+        return Err(crate::sessions::invalid_request(
+            "use a full session ID from `farhelm agent sessions`; only your own bare session ID is accepted".to_string(),
+        ));
+    }
+    crate::sessions::resolve_session_ref(state, &target).await
 }
 
 /// Render an id for the AUDIT LOG with everything that could forge the
@@ -1380,9 +1479,14 @@ async fn create_for_agent(
 ) -> anyhow::Result<AgentReply> {
     let CreateRequest { edits, intent_key } = request;
     let spawned = edits.spawn.is_some();
-    let parent = edits.spawn.as_ref().and_then(|spawn| spawn.parent.clone());
+    let parent = match edits.spawn.as_ref().and_then(|spawn| spawn.parent.clone()) {
+        Some(raw) => {
+            Some(resolve_target(state, origin, raw, asking_session, "spawn parent").await?)
+        }
+        None => None,
+    };
     if let Some(parent) = &parent
-        && parent != asking_session
+        && parent != &SessionKey::new(origin.host, asking_session)
     {
         return Err(anyhow::Error::new(crate::SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
@@ -1393,6 +1497,9 @@ async fn create_for_agent(
             ),
         }));
     }
+    // Fingerprints below still read the unmodified request. The supervisor
+    // receives only the resolved parent's bare suffix on this spawn's own entry.
+    let parent = parent.map(|key| key.session_id);
     // A key's record lives only on the host the first attempt reached, so a
     // retry has to reach that same host to be matched against it. A host
     // taken from a template could change between the attempt and its retry
@@ -2011,19 +2118,19 @@ async fn agent_prompt(
     state: &AppState,
     origin: AgentOrigin,
     asking: &str,
-    target: &str,
+    target: &SessionKey,
     prompt: &str,
 ) -> anyhow::Result<AgentReply> {
     let (claim, client) = crate::sessions::route_session(state, target).await?;
     let (shown, attached) = client
-        .prompt_target_info(target)
+        .prompt_target_info(&target.session_id)
         .await
         .context(ReadOnlyPhase("reading the session to prompt"))?;
     let snapshot =
         state.manager.snapshots().into_iter().find(|snapshot| {
             snapshot.id == claim.host && snapshot.incarnation == claim.incarnation
         });
-    let Some(snapshot) = snapshot.filter(|_| shown.id == target) else {
+    let Some(snapshot) = snapshot.filter(|_| shown.id == target.session_id) else {
         return Err(anyhow::Error::new(crate::SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::Unavailable,
@@ -2032,7 +2139,7 @@ async fn agent_prompt(
     };
     let action = ApprovalAction::Prompt {
         target: farhelm_proto::approvals::ApprovalSession {
-            id: target.to_string(),
+            id: SessionRef::new(&claim.entry_uuid, &target.session_id)?.to_string(),
             title: Some(shown.title),
             host_name: Some(crate::aggregate::host_display_name(
                 snapshot.kind,
@@ -2057,7 +2164,7 @@ async fn agent_prompt(
             message: "the target host's connection changed while this request waited for approval, so no prompt was sent; retry".to_string(),
         }));
     }
-    client.prompt_session(target, prompt).await?;
+    client.prompt_session(&target.session_id, prompt).await?;
     Ok(AgentReply::Prompted {})
 }
 
@@ -2068,15 +2175,15 @@ async fn agent_delete(
     state: &AppState,
     origin: AgentOrigin,
     asking: &str,
-    target: &str,
+    target: &SessionKey,
     stop_if_running: bool,
 ) -> anyhow::Result<AgentReply> {
-    let (_, client) = crate::sessions::route_session(state, target).await?;
+    let (claim, client) = crate::sessions::route_session(state, target).await?;
     let listing = client
         .list_sessions()
         .await
         .context(ReadOnlyPhase("reading the session to delete"))?;
-    let shown = listing.sessions.iter().find(|info| info.id == target).ok_or_else(|| {
+    let shown = listing.sessions.iter().find(|info| info.id == target.session_id).ok_or_else(|| {
         anyhow::Error::new(crate::SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::Unavailable,
@@ -2091,7 +2198,7 @@ async fn agent_delete(
         })
     })?;
     let action = ApprovalAction::Delete {
-        target: crate::approvals::describe_session(state, target).await,
+        target: crate::approvals::describe_session(state, target, &claim.entry_uuid).await,
         guard,
     };
     approved(state, origin, asking, action).await?;
@@ -2144,12 +2251,12 @@ async fn approved(
 }
 
 /// A session's stored launch as the helm's cache knows it, for a restart
-/// card. `None` when the cache does not know the session.
-async fn cached_launch(state: &AppState, session_id: &str) -> Option<farhelm_proto::SessionLaunch> {
-    let host = state.store.host_of_session(session_id).await.ok()??;
+/// card. Read only on the resolved entry, so another entry's equal suffix
+/// cannot supply the launch. `None` when the cache does not know the pair.
+async fn cached_launch(state: &AppState, key: &SessionKey) -> Option<farhelm_proto::SessionLaunch> {
     state
         .store
-        .cached_session(host, session_id)
+        .cached_session(key.host, &key.session_id)
         .await
         .ok()?
         .map(|info| info.launch)
@@ -2750,7 +2857,7 @@ fn template_or_shortcuts_changed() -> anyhow::Error {
 /// Host display names come from current install identities, and shortcut
 /// fields come from current fleet preferences; neither is saved in the
 /// template definition itself.
-async fn template_listing(state: &AppState, caller: HostId) -> anyhow::Result<AgentReply> {
+async fn template_listing(state: &AppState, caller_entry_uuid: &str) -> anyhow::Result<AgentReply> {
     let views = crate::hosts::host_views(state).await?;
     let templates = state.store.launch_templates().await?;
     let bindings = TemplateBindings::from_preferences(&state.store.preferences().await?);
@@ -2772,7 +2879,7 @@ async fn template_listing(state: &AppState, caller: HostId) -> anyhow::Result<Ag
                 listed
             })
             .collect(),
-        caller_host_id: caller.to_string(),
+        caller_host_id: caller_entry_uuid.to_string(),
     })
 }
 
@@ -2833,8 +2940,15 @@ async fn clone_for_agent(
             .digest()
         })
         .transpose()?;
-    let (source_claim, source_client) =
-        crate::sessions::route_session(state, &request.source_session_id).await?;
+    let source_key = resolve_target(
+        state,
+        origin,
+        request.source_session_id.clone(),
+        asking_session,
+        "clone",
+    )
+    .await?;
+    let (source_claim, source_client) = crate::sessions::route_session(state, &source_key).await?;
     // Marked as the read-only phase it is: this listing runs before any
     // create is dispatched, so a transport failure here is retry-safe and
     // must not inherit the clone's own outcome-unknown vocabulary. See
@@ -2844,7 +2958,7 @@ async fn clone_for_agent(
         .map_err(|error| error.context(ReadOnlyPhase("reading the session to clone")))?
         .sessions
         .into_iter()
-        .find(|session| session.id == request.source_session_id)
+        .find(|session| session.id == source_key.session_id)
         .ok_or_else(|| {
             anyhow::Error::new(crate::SupervisorError {
  origin: crate::client::ErrorOrigin::Helm,
@@ -2893,7 +3007,8 @@ async fn clone_for_agent(
             launch: mode.clone(),
             agent_wrapper_supplied,
             source: Some(
-                crate::approvals::describe_session(state, &request.source_session_id).await,
+                crate::approvals::describe_session(state, &source_key, &source_claim.entry_uuid)
+                    .await,
             ),
         },
     )
@@ -2903,7 +3018,7 @@ async fn clone_for_agent(
     // (which now includes the user's approval) without trusting the helm's
     // stale cache as source truth.
     let (confirmed_claim, confirmed_client) =
-        crate::sessions::route_session(state, &request.source_session_id).await?;
+        crate::sessions::route_session(state, &source_key).await?;
     if confirmed_claim != source_claim || !Arc::ptr_eq(&confirmed_client, &source_client) {
         return Err(anyhow::Error::new(crate::SupervisorError {
  origin: crate::client::ErrorOrigin::Helm,
@@ -2964,10 +3079,11 @@ async fn clone_for_agent(
                 // create this very refusal says did not happen. See
                 // `sessions::do_create_session`'s "Two phases".
                 accept_result: Some(Box::new({
-                    let asking = asking_session.to_string();
-                    let source = request.source_session_id.clone();
+                    let asking = SessionKey::new(origin.host, asking_session);
+                    let source = source_key.clone();
+                    let created_host = claim.host;
                     move |created: &farhelm_proto::SessionInfo| {
-                        reject_clone_replay(&asking, &source, created)
+                        reject_clone_replay(&asking, &source, created_host, created)
                     }
                 })),
                 // Never an agent's to give; see `dispatch_agent_create`.
@@ -2998,11 +3114,13 @@ async fn clone_for_agent(
 /// acceptance boundary so a refused replay cannot seed the helm cache or
 /// publish a fleet revision first.
 fn reject_clone_replay(
-    asking_session: &str,
-    source_session: &str,
+    asking_session: &SessionKey,
+    source_session: &SessionKey,
+    created_host: HostId,
     created: &farhelm_proto::SessionInfo,
 ) -> anyhow::Result<()> {
-    if created.id != asking_session && created.id != source_session {
+    let created_key = SessionKey::new(created_host, &created.id);
+    if &created_key != asking_session && &created_key != source_session {
         return Ok(());
     }
     // "this host" rather than the name, because `on_host` wraps this
@@ -3128,6 +3246,7 @@ fn agent_row_of_mutation(
     let row = crate::aggregate::SessionRow {
         info,
         host: claim.host,
+        entry_uuid: claim.entry_uuid.clone(),
         host_identity: None,
         // The row's own copy of the name is unused by the projection below,
         // which takes it as a parameter precisely so absence can be said
@@ -3164,6 +3283,7 @@ async fn session_listing(
     state: &AppState,
     asking_host: HostId,
     asking_session: &str,
+    caller_entry_uuid: &str,
 ) -> anyhow::Result<AgentReply> {
     let filter = crate::store::SessionFilter::default();
     let sort = crate::store::ListSort::default();
@@ -3173,6 +3293,11 @@ async fn session_listing(
     let mut spent = 0usize;
     let mut truncated = listing.truncated;
     for row in &listing.sessions {
+        // Old cache rows can predate the boundary's small ID limit. They must
+        // not escape under a second encoding or panic the whole discovery reply.
+        if SessionRef::new(&row.entry_uuid, &row.info.id).is_err() {
+            continue;
+        }
         let row = agent_session(
             row,
             Some(row.host_name.clone()),
@@ -3199,7 +3324,7 @@ async fn session_listing(
     Ok(AgentReply::Sessions {
         sessions,
         truncated,
-        caller_host_id: asking_host.to_string(),
+        caller_host_id: caller_entry_uuid.to_string(),
     })
 }
 
@@ -3211,7 +3336,7 @@ async fn session_listing(
 /// and the asking host's id.
 fn agent_host(view: &crate::hosts::HostView, asking: HostId) -> AgentHost {
     AgentHost {
-        id: view.id.to_string(),
+        id: view.entry_uuid.clone(),
         name: view.name.clone(),
         kind: view.kind.to_string(),
         // The helm's own stable phase label, not a re-derivation: the
@@ -3230,14 +3355,9 @@ fn agent_host(view: &crate::hosts::HostView, asking: HostId) -> AgentHost {
 /// string standing in for an unclassified status — are the parts a reader
 /// has to be able to check without standing up a fleet.
 ///
-/// `current` is matched on BOTH identities. Session ids are supervisor-
-/// minted and unique in practice, but the helm's merge already has a rule
-/// for the case where two hosts claim one id (the first cache owner keeps
-/// the row, the later claimant's is dropped and recorded as contested), and
-/// an id-only comparison would then mark the RETAINED row — belonging to
-/// the other host — as the asker's own. Requiring the host to match too
-/// makes that state produce no marker at all, which is the fail-closed
-/// answer the merge already chose.
+/// `current` compares the internal host/session pair before formatting. The
+/// same suffix reported by another entry never marks that row as the caller.
+/// Rows must have passed boundary ID admission before this pure projection.
 ///
 /// The host NAME is a parameter rather than read from `row.host_name`, and
 /// the redundancy is deliberate: `SessionRow` has no way to say "there is
@@ -3255,8 +3375,10 @@ fn agent_session(
     asking_session: &str,
 ) -> AgentSession {
     AgentSession {
-        id: row.info.id.clone(),
-        host_id: row.host.to_string(),
+        id: SessionRef::new(&row.entry_uuid, &row.info.id)
+            .expect("projection requires an admitted ID and a validated entry UUID")
+            .to_string(),
+        host_id: row.entry_uuid.clone(),
         host: host_name,
         title: row.info.title.clone(),
         cwd: row.info.cwd.clone(),
@@ -3471,9 +3593,150 @@ mod tests {
         assert!(validate_authoritative_verb(&clone(Some("/work"))).is_ok());
     }
 
+    const TEST_ENTRY: &str = "00000001-0000-4000-8000-000000000000";
+
+    /// Public references in tests come from the same actor snapshot as routing.
+    /// The helper also works for disconnected hosts, whose entries remain registered.
+    fn full_id(h: &Harness, host: HostId, bare: &str) -> String {
+        let status = h
+            .manager
+            .status(host)
+            .expect("premise: the entry has an actor");
+        SessionRef::new(&status.entry_uuid, bare)
+            .expect("fixture IDs are admitted")
+            .to_string()
+    }
+
+    /// Target parsing keeps equal suffixes separate and refuses remembered bare
+    /// IDs. The authenticated own-bare exception precedes even a valid full parse.
+    #[farhelm_testtrace::test]
+    async fn target_references_bind_the_entry_and_own_bare_equality_wins_first() {
+        let (h, local, remote) = two_host_fleet().await;
+        let origin = origin_of(&h, local);
+        for host in [local, remote] {
+            let target = resolve_target(
+                &h.state,
+                origin,
+                full_id(&h, host, "shared"),
+                "asker",
+                "stop",
+            )
+            .await
+            .unwrap();
+            assert_eq!(target, SessionKey::new(host, "shared"));
+        }
+        let error = resolve_target(&h.state, origin, "local-old".into(), "asker", "stop")
+            .await
+            .expect_err("a uniquely known bare target is still refused");
+        assert_eq!(crate::error_kind(&error), ErrorKind::InvalidRequest);
+        assert!(error.to_string().contains("farhelm agent sessions"));
+        let looks_full = full_id(&h, remote, "x");
+        assert!(
+            SessionRef::new(TEST_ENTRY, &looks_full).is_ok(),
+            "premise: full-looking bare ID fits admission"
+        );
+        let target = resolve_target(&h.state, origin, looks_full.clone(), &looks_full, "stop")
+            .await
+            .unwrap();
+        assert_eq!(target, SessionKey::new(local, looks_full));
+    }
+
+    /// Disabled prompts must refuse even full-self requests before liveness;
+    /// enabled prompts and Delete must reject that pair before any card or I/O.
+    #[farhelm_testtrace::test]
+    async fn full_self_targets_cannot_enter_delete_or_prompt_request_fences() {
+        let (h, local, _) = two_host_fleet().await;
+        let origin = origin_of(&h, local);
+        let target = full_id(&h, local, "local-live");
+        let disabled = HelmAgentRequests::for_state(&h.state)
+            .handle(
+                AgentOrigin {
+                    connection: origin.connection + 1,
+                    ..origin
+                },
+                "local-live",
+                AgentVerb::Prompt {
+                    session_id: Some(target.clone()),
+                    prompt: "text".into(),
+                },
+            )
+            .await;
+        assert!(
+            matches!(disabled, AgentOutcome::Err { kind: ErrorKind::Unauthorized, ref message }
+            if message == AGENT_PROMPTS_OFF_REFUSAL)
+        );
+        for verb in [
+            AgentVerb::Delete {
+                session_id: Some(target.clone()),
+                stop_if_running: true,
+            },
+            AgentVerb::Prompt {
+                session_id: Some(target),
+                prompt: "text".into(),
+            },
+        ] {
+            let outcome = tokio::time::timeout(
+                RESPONDER_JOIN_BUDGET,
+                HelmAgentRequests::with_prompts_enabled(&h.state).handle(
+                    origin,
+                    "local-live",
+                    verb,
+                ),
+            )
+            .await
+            .expect("self refusal must not wait for its own request fence");
+            assert!(
+                matches!(outcome, AgentOutcome::Err { kind: ErrorKind::InvalidRequest, ref message }
+                if message.contains("itself")),
+                "{outcome:?}"
+            );
+            assert!(h.state.approvals.list().is_empty());
+        }
+    }
+
+    /// Successful replies retain the operation's entry prefix when that entry
+    /// disappears. A full-looking peer suffix cannot choose the caller's entry.
+    #[farhelm_testtrace::test]
+    async fn removed_entry_mutation_replies_keep_the_claims_prefix_without_metadata() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let _seen = spawn_create_responder(peer, None);
+        let (h, local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        let (claim, _) = crate::sessions::host_client(&h.state, remote).unwrap();
+        let bare = full_id(&h, local, "x");
+        let expected = SessionRef::new(&claim.entry_uuid, &bare)
+            .unwrap()
+            .to_string();
+        h.store.remove_ssh_host(remote).await.unwrap();
+        h.manager.sync_registry().await.unwrap();
+        assert!(
+            h.manager.status(remote).is_none(),
+            "premise: the operation's entry is gone"
+        );
+        let info = session(&bare, 1);
+        for reply in [
+            agent_created_reply(&h.state, &claim, info.clone(), local, "asker"),
+            agent_restarted_reply(&h.state, &claim, info.clone(), local, "asker"),
+            agent_session_reply(&h.state, &claim, info, local, "asker"),
+        ] {
+            let row = match reply {
+                AgentReply::Created { session }
+                | AgentReply::Restarted { session }
+                | AgentReply::Session { session } => session,
+                other => panic!("a successful mutation row, got {other:?}"),
+            };
+            assert_eq!(row.id, expected);
+            assert_eq!(row.host_id, claim.entry_uuid);
+            assert!(row.stale);
+            assert_eq!(row.host, None);
+        }
+    }
+
+    /// A deterministic entry UUID keeps pure host-projection fixtures independent
+    /// of the registry while preserving a distinct identity for each host number.
     fn host_view(id: i64, name: &str, kind: &'static str, state: HostStateView) -> HostView {
         HostView {
             id,
+            entry_uuid: format!("{id:08x}-0000-4000-8000-000000000000"),
             kind,
             name: name.to_string(),
             destination: None,
@@ -3521,10 +3784,13 @@ mod tests {
         }
     }
 
+    /// One internal bare row with an independently supplied entry prefix. Tests
+    /// that move it to another host must change both fields as a snapshot would.
     fn session_row(info: SessionInfo, host_name: &str) -> crate::aggregate::SessionRow {
         crate::aggregate::SessionRow {
             info,
             host: 1,
+            entry_uuid: TEST_ENTRY.to_string(),
             host_identity: None,
             host_name: host_name.to_string(),
             seen_activity_at: None,
@@ -3901,13 +4167,18 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_discovery_distinguishes_duplicate_host_names() {
         let first = session_row(session_info("s1", SessionStatus::Idle), "builder");
-        let mut second = session_row(session_info("s2", SessionStatus::Idle), "builder");
+        let mut second = session_row(session_info("s1", SessionStatus::Idle), "builder");
         second.host = 2;
+        second.entry_uuid = "00000002-0000-4000-8000-000000000000".into();
         let first = serde_json::to_value(projected(&first, 1, "s1")).unwrap();
         let second = serde_json::to_value(projected(&second, 1, "s1")).unwrap();
         assert_eq!(first["host"], second["host"]);
-        assert_eq!(first["host_id"], "1");
-        assert_eq!(second["host_id"], "2");
+        assert_ne!(
+            first["id"], second["id"],
+            "equal suffixes retain separate entry identities"
+        );
+        assert_eq!(first["host_id"], TEST_ENTRY);
+        assert_eq!(second["host_id"], "00000002-0000-4000-8000-000000000000");
     }
 
     /// Spec: exactly the asking session's row is marked `current`, matched
@@ -4085,6 +4356,7 @@ mod tests {
         // reply carries the real name and asserts freshness.
         let fresh_claim = crate::manager::SessionClaim {
             host: local,
+            entry_uuid: h.manager.status(local).unwrap().entry_uuid,
             incarnation: live_incarnation,
             identity: None,
         };
@@ -4093,6 +4365,7 @@ mod tests {
         else {
             panic!("agent_session_reply always answers with a Session");
         };
+        assert_eq!(session.id, full_id(&h, local, "local-live"));
         assert_eq!(session.host.as_deref(), Some("this machine"));
         assert!(!session.stale);
 
@@ -4101,6 +4374,7 @@ mod tests {
         // than whatever now occupies the row, and marks itself stale.
         let retargeted_claim = crate::manager::SessionClaim {
             host: local,
+            entry_uuid: h.manager.status(local).unwrap().entry_uuid,
             incarnation: live_incarnation + 1,
             identity: None,
         };
@@ -4114,12 +4388,14 @@ mod tests {
             "no name it can vouch for is said as None, not as an empty name"
         );
         assert!(session.stale);
+        assert_eq!(session.id, full_id(&h, local, "local-live"));
 
         // A claim naming a host id that is not registered at all — the
         // shape a removed row leaves behind — is the same failure and gets
         // the same honest answer rather than a silently different one.
         let missing_host_claim = crate::manager::SessionClaim {
             host: local + 9999,
+            entry_uuid: h.manager.status(local).unwrap().entry_uuid,
             incarnation: live_incarnation,
             identity: None,
         };
@@ -4133,6 +4409,7 @@ mod tests {
             "no name it can vouch for is said as None, not as an empty name"
         );
         assert!(session.stale);
+        assert_eq!(session.id, full_id(&h, local, "local-live"));
     }
 
     /// Spec: `sessions` answered by the production handler carries the
@@ -4147,7 +4424,7 @@ mod tests {
     /// the fleet, would satisfy every one of them.
     #[farhelm_testtrace::test]
     async fn the_production_handler_lists_the_whole_fleet_with_its_flags() {
-        let (h, local, _remote) = two_host_fleet().await;
+        let (h, local, remote) = two_host_fleet().await;
         let handler = HelmAgentRequests::for_state(&h.state);
 
         let outcome = handler
@@ -4174,13 +4451,32 @@ mod tests {
             "remote-a",
             "remote-b",
         ] {
-            assert!(ids.contains(&expected), "{expected} missing from {ids:?}");
+            let host = if expected.starts_with("remote-") {
+                remote
+            } else {
+                local
+            };
+            let expected = full_id(&h, host, expected);
+            assert!(
+                ids.contains(&expected.as_str()),
+                "{expected} missing from {ids:?}"
+            );
         }
 
         let by_id = |id: &str| {
             sessions
                 .iter()
-                .find(|s| s.id == id)
+                .find(|s| {
+                    s.id == full_id(
+                        &h,
+                        if id.starts_with("remote-") {
+                            remote
+                        } else {
+                            local
+                        },
+                        id,
+                    )
+                })
                 .unwrap_or_else(|| panic!("{id} missing from {ids:?}"))
         };
         assert!(
@@ -4895,13 +5191,14 @@ mod tests {
             let _gui = h.manager.events().admit(1).unwrap();
             let handler = HelmAgentRequests::with_prompts_enabled(&h.state);
             let origin = origin_of(&h, local);
+            let target_id = full_id(&h, local, "target");
             let task = tokio::spawn(async move {
                 handler
                     .handle(
                         origin,
                         "asker",
                         AgentVerb::Prompt {
-                            session_id: Some("target".into()),
+                            session_id: Some(target_id.clone()),
                             prompt: PROMPT.into(),
                         },
                     )
@@ -4922,7 +5219,7 @@ mod tests {
             else {
                 panic!("prompt needs its own card kind");
             };
-            assert_eq!(target.id, "target");
+            assert_eq!(target.id, full_id(&h, local, "target"));
             assert_eq!(target.title.as_deref(), Some("fresh target title"));
             assert!(target.host_name.is_some());
             assert_eq!(launch, shown.launch);
@@ -4989,7 +5286,7 @@ mod tests {
                     origin_of(&h, local),
                     "asker",
                     AgentVerb::Prompt {
-                        session_id: Some("target".into()),
+                        session_id: Some(full_id(&h, local, "target")),
                         prompt: "exact message".into(),
                     },
                 )
@@ -5041,7 +5338,9 @@ mod tests {
         let (h, local) =
             spliced_local_fleet(client, vec![session("asker", 1), session("target", 2)]).await;
         let handler = HelmAgentRequests::with_prompts_enabled(&h.state);
+        let full_self = full_id(&h, local, "asker");
         for (target, prompt) in [
+            (Some(full_self.as_str()), "ok"),
             (None, "ok"),
             (Some(""), "ok"),
             (Some("bad\n"), "ok"),
@@ -5088,7 +5387,7 @@ mod tests {
                 origin_of(&h, local),
                 "asker",
                 AgentVerb::Prompt {
-                    session_id: Some("target".into()),
+                    session_id: Some(full_id(&h, local, "target")),
                     prompt: "ok".into(),
                 },
             )
@@ -5145,13 +5444,14 @@ mod tests {
         let _gui = h.manager.events().admit(1).unwrap();
         let handler = HelmAgentRequests::with_prompts_enabled(&h.state);
         let origin = origin_of(&h, local);
+        let target_id = full_id(&h, remote, "target");
         let task = tokio::spawn(async move {
             handler
                 .handle(
                     origin,
                     "asker",
                     AgentVerb::Prompt {
-                        session_id: Some("target".into()),
+                        session_id: Some(target_id.clone()),
                         prompt: "ok".into(),
                     },
                 )
@@ -5236,14 +5536,17 @@ mod tests {
             Some(local),
             "fixture premise: the target still routes"
         );
-        assert_eq!(cached_launch(&h.state, "target").await, None);
+        assert_eq!(
+            cached_launch(&h.state, &SessionKey::new(local, "target")).await,
+            None
+        );
 
         let outcome = HelmAgentRequests::for_state(&h.state)
             .handle(
                 origin_of(&h, local),
                 "asker",
                 AgentVerb::Restart {
-                    session_id: Some("target".to_string()),
+                    session_id: Some(full_id(&h, local, "target")),
                     stop_if_running: true,
                 },
             )
@@ -5306,7 +5609,7 @@ mod tests {
                 origin_of(&h, local),
                 "asker",
                 AgentVerb::Restart {
-                    session_id: Some("target".to_string()),
+                    session_id: Some(full_id(&h, local, "target")),
                     stop_if_running: true,
                 },
             ),
@@ -5389,7 +5692,7 @@ mod tests {
                 origin_of(&h, local),
                 "asker",
                 AgentVerb::Rename {
-                    session_id: Some("other".to_string()),
+                    session_id: Some(full_id(&h, local, "other")),
                     expected_title: Some("old title".to_string()),
                     title: "new title".to_string(),
                 },
@@ -5401,7 +5704,7 @@ mod tests {
             AgentOutcome::Ok {
                 reply: AgentReply::Session { session },
             } => {
-                assert_eq!(session.id, "other");
+                assert_eq!(session.id, full_id(&h, local, "other"));
                 assert_eq!(session.title, "new title");
                 assert!(
                     !session.current,
@@ -5515,7 +5818,7 @@ mod tests {
             AgentOutcome::Ok {
                 reply: AgentReply::Session { session },
             } => {
-                assert_eq!(session.id, "asker");
+                assert_eq!(session.id, full_id(&h, local, "asker"));
                 assert_eq!(session.title, "explicitly self-renamed");
                 assert!(
                     session.current,
@@ -5718,13 +6021,14 @@ mod tests {
         let _gui = h.state.manager.events().admit(1).unwrap();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
+        let target_id = full_id(&h, local, "target");
         let task = tokio::spawn(async move {
             handler
                 .handle(
                     origin,
                     "asker",
                     AgentVerb::Delete {
-                        session_id: Some("target".into()),
+                        session_id: Some(target_id.clone()),
                         stop_if_running: true,
                     },
                 )
@@ -5807,13 +6111,14 @@ mod tests {
                 spliced_local_fleet(client_side, vec![session("asker", 1), target]).await;
             let handler = HelmAgentRequests::for_state(&h.state);
             let origin = origin_of(&h, local);
+            let target_id = full_id(&h, local, "target");
             let task = tokio::spawn(async move {
                 handler
                     .handle(
                         origin,
                         "asker",
                         AgentVerb::Delete {
-                            session_id: Some("target".into()),
+                            session_id: Some(target_id.clone()),
                             stop_if_running: false,
                         },
                     )
@@ -5895,13 +6200,14 @@ mod tests {
         let previous_connection = before.client.unwrap().connection_id();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
+        let target_id = full_id(&h, remote, "target");
         let task = tokio::spawn(async move {
             handler
                 .handle(
                     origin,
                     "asker",
                     AgentVerb::Delete {
-                        session_id: Some("target".into()),
+                        session_id: Some(target_id.clone()),
                         stop_if_running: true,
                     },
                 )
@@ -5946,7 +6252,7 @@ mod tests {
                     origin_of(&h, local),
                     "local-live",
                     AgentVerb::Delete {
-                        session_id: Some(target.into()),
+                        session_id: Some(full_id(&h, local, target)),
                         stop_if_running: consent,
                     },
                 )
@@ -6035,7 +6341,7 @@ mod tests {
                 origin_of(&h, local),
                 "asker",
                 AgentVerb::Stop {
-                    session_id: Some("other".to_string()),
+                    session_id: Some(full_id(&h, local, "other")),
                 },
             )
             .await;
@@ -6065,7 +6371,7 @@ mod tests {
     /// clears on its own once the host reconnects.
     #[farhelm_testtrace::test]
     async fn a_lifecycle_verb_on_a_disconnected_hosts_session_is_a_conflict() {
-        let (h, local, _remote) = two_host_fleet().await;
+        let (h, local, remote) = two_host_fleet().await;
         let handler = HelmAgentRequests::for_state(&h.state);
 
         // `remote-a` is cached from before `two_host_fleet` took the
@@ -6077,7 +6383,7 @@ mod tests {
                 origin_of(&h, local),
                 "local-live",
                 AgentVerb::Stop {
-                    session_id: Some("remote-a".to_string()),
+                    session_id: Some(full_id(&h, remote, "remote-a")),
                 },
             )
             .await;
@@ -6131,6 +6437,19 @@ mod tests {
         let local = local_id(&harness.store).await;
         harness.await_refreshed(local).await;
 
+        assert!(
+            harness.manager.status(local).unwrap().client.is_some(),
+            "premise: the target entry is connected, so this is a membership refusal"
+        );
+        assert!(
+            !harness
+                .store
+                .has_cached_session(&SessionKey::new(local, "ghost"))
+                .await
+                .unwrap(),
+            "premise: the selected entry has no such session"
+        );
+
         let handler = HelmAgentRequests::for_state(&harness.state);
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(10),
@@ -6138,7 +6457,7 @@ mod tests {
                 origin_of(&harness, local),
                 "asker",
                 AgentVerb::Stop {
-                    session_id: Some("ghost".to_string()),
+                    session_id: Some(full_id(&harness, local, "ghost")),
                 },
             ),
         )
@@ -6151,10 +6470,9 @@ mod tests {
         match outcome {
             AgentOutcome::Err { kind, message } => {
                 assert_eq!(kind, ErrorKind::NotFound);
-                assert!(
-                    message.contains("ghost"),
-                    "the refusal must name the id it could not place: {message}"
-                );
+                // Public routing failures identify the missing entry-bound
+                // session without echoing an opaque reference into GUI errors.
+                assert_eq!(message, "no such session on this host entry");
             }
             other => panic!("expected a NotFound refusal, got {other:?}"),
         }
@@ -7009,7 +7327,7 @@ mod tests {
         let mut foreign = spawn(Vec::new());
         if let AgentVerb::Create { spawn, .. } = &mut foreign {
             *spawn = Some(farhelm_proto::SpawnPlacement {
-                parent: Some("someone-else".to_string()),
+                parent: Some(full_id(&h, remote, "someone-else")),
                 ..Default::default()
             });
         }
@@ -7306,7 +7624,7 @@ mod tests {
                     origin_of(&h, local),
                     "asker",
                     AgentVerb::Clone {
-                        source_session_id: Some("source".to_string()),
+                        source_session_id: Some(full_id(&h, local, "source")),
                         host: Some("user@builder".to_string()),
                         cwd: None,
                         title: None,
@@ -7333,7 +7651,7 @@ mod tests {
                     origin_of(&h, local),
                     "asker",
                     AgentVerb::Clone {
-                        source_session_id: Some("source".to_string()),
+                        source_session_id: Some(full_id(&h, local, "source")),
                         host: Some("user@builder".to_string()),
                         cwd: None,
                         title: None,
@@ -7414,13 +7732,14 @@ mod tests {
         let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
+        let target_id = full_id(&h, local, "source");
         let task = tokio::spawn(async move {
             handler
                 .handle(
                     origin,
                     "asker",
                     AgentVerb::Clone {
-                        source_session_id: Some("source".to_string()),
+                        source_session_id: Some(target_id.clone()),
                         host: Some("user@builder".to_string()),
                         cwd: None,
                         title: None,
@@ -7440,7 +7759,10 @@ mod tests {
             } => {
                 assert_eq!(verb, LaunchVerb::Clone);
                 assert_eq!(card_launch, launch);
-                assert_eq!(source.expect("the clone names its source").id, "source");
+                assert_eq!(
+                    source.expect("the clone names its source").id,
+                    full_id(&h, local, "source")
+                );
             }
             other => panic!("a forced cloned-wrapper card, got {other:?}"),
         }
@@ -7525,7 +7847,7 @@ mod tests {
                     origin_of(&h, local),
                     "asker",
                     AgentVerb::Clone {
-                        source_session_id: Some("source".into()),
+                        source_session_id: Some(full_id(&h, local, "source")),
                         host: Some("user@builder".into()),
                         cwd: Some("/target-directory".into()),
                         title: None,
@@ -7601,13 +7923,14 @@ mod tests {
         let _gui = h.manager.events().admit(1).unwrap();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
+        let target_id = full_id(&h, local, "source");
         let task = tokio::spawn(async move {
             handler
                 .handle(
                     origin,
                     "asker",
                     AgentVerb::Clone {
-                        source_session_id: Some("source".into()),
+                        source_session_id: Some(target_id.clone()),
                         host: Some("user@builder".into()),
                         cwd: Some("/target-directory".into()),
                         title: None,
@@ -7727,7 +8050,7 @@ mod tests {
                 origin_of(&h, local),
                 "asker",
                 AgentVerb::Clone {
-                    source_session_id: Some("source".into()),
+                    source_session_id: Some(full_id(&h, local, "source")),
                     host: Some("user@builder".into()),
                     cwd: Some("/target-directory".into()),
                     title: None,
@@ -7785,7 +8108,7 @@ mod tests {
         let (h, local, _remote) = creating_fleet(client_side, vec![source("sh", "before")]).await;
         let handler = HelmAgentRequests::for_state(&h.state);
         let clone = |title: Option<&str>| AgentVerb::Clone {
-            source_session_id: Some("source".to_string()),
+            source_session_id: Some(full_id(&h, local, "source")),
             host: Some("user@builder".to_string()),
             cwd: None,
             title: title.map(str::to_string),
@@ -7832,14 +8155,13 @@ mod tests {
         );
     }
 
-    /// A clone refuses a source row whose owner changes after the live read.
+    /// A clone refuses when its selected source pair disappears during the live read.
     ///
     /// The held list reply is a snapshot from the original owner. While it is
-    /// in flight, the manager's ordinary fenced cache APIs move the source to
-    /// the destination host, and a fresh routing lookup proves that the move
-    /// is visible before the old reply is released. Accepting that reply would
-    /// let stale source state cross the ownership boundary and create a child
-    /// on a host the source did not belong to when dispatch began.
+    /// in flight, the original entry loses that member and the destination
+    /// starts reporting the same bare suffix. The new pair is routable before
+    /// the old reply is released. A clone must recheck its original pair and
+    /// refuse, rather than treating the other entry's session as the source.
     #[farhelm_testtrace::test]
     async fn clone_refuses_when_the_source_owner_changes_after_its_live_read() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
@@ -7852,9 +8174,10 @@ mod tests {
         };
         let (h, local, remote) =
             creating_fleet(client_side, vec![source.clone(), session("asker", 2)]).await;
-        let (old_claim, _) = crate::sessions::route_session(&h.state, "source")
-            .await
-            .expect("the source starts on the asking host");
+        let (old_claim, _) =
+            crate::sessions::route_session(&h.state, &SessionKey::new(local, "source"))
+                .await
+                .expect("the source starts on the asking host");
         assert_eq!(old_claim.host, local, "the fixture starts with one owner");
         let (new_claim, _) = crate::sessions::host_client(&h.state, remote)
             .expect("the destination host is connected");
@@ -7865,13 +8188,14 @@ mod tests {
         let release_old_read = h.fleet.hold_next_list(local);
         let state = Arc::clone(&h.state);
         let origin = origin_of(&h, local);
+        let target_id = full_id(&h, local, "source");
         let clone = tokio::spawn(async move {
             HelmAgentRequests::for_state(&state)
                 .handle(
                     origin,
                     "asker",
                     AgentVerb::Clone {
-                        source_session_id: Some("source".to_string()),
+                        source_session_id: Some(target_id.clone()),
                         host: Some("user@builder".to_string()),
                         cwd: None,
                         title: None,
@@ -7891,12 +8215,24 @@ mod tests {
             .remember_session(&new_claim, &source)
             .await
             .expect("publish the new ownership claim");
-        let (moved_claim, _) = crate::sessions::route_session(&h.state, "source")
-            .await
-            .expect("the moved source is routable");
+        let (moved_claim, _) =
+            crate::sessions::route_session(&h.state, &SessionKey::new(remote, "source"))
+                .await
+                .expect("the moved source is routable");
         assert_eq!(
             moved_claim.host, remote,
             "the owner changes before the stale read completes"
+        );
+        assert!(
+            !h.store
+                .has_cached_session(&SessionKey::new(local, "source"))
+                .await
+                .unwrap(),
+            "premise: the original source pair disappeared before its stale read is released"
+        );
+        assert!(
+            seen.lock().expect("seen mutex").is_empty(),
+            "premise: no create was dispatched while the source read waited"
         );
 
         release_old_read
@@ -7905,11 +8241,8 @@ mod tests {
         let outcome = clone.await.expect("the clone task must not panic");
         match outcome {
             AgentOutcome::Err { kind, message } => {
-                assert_eq!(kind, ErrorKind::Conflict);
-                assert!(
-                    message.contains("owner changed") && message.contains("discovery"),
-                    "the refusal must explain the stale selection and remedy: {message}"
-                );
+                assert_eq!(kind, ErrorKind::NotFound);
+                assert_eq!(message, "no such session on this host entry");
             }
             other => panic!("an owner-changing clone must be refused, got {other:?}"),
         }
@@ -8011,6 +8344,181 @@ mod tests {
                 }
             }
         });
+    }
+
+    /// An identityless peer takes the in-memory create path, but its reply
+    /// still names only its own entry. Prefix-like suffixes are opaque data.
+    #[farhelm_testtrace::test]
+    async fn identityless_create_cannot_select_another_entry_with_its_reply_id() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let (suffix_tx, suffix_rx) = tokio::sync::oneshot::channel::<String>();
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CreateSession { req_id, .. } = request else {
+                panic!("{request:?}");
+            };
+            let suffix = suffix_rx.await.unwrap();
+            writer
+                .write_control(&ControlMsg::SessionCreated {
+                    req_id,
+                    session: session(&suffix, 10),
+                })
+                .await
+                .unwrap();
+        });
+        let (builder, remote) = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                identity: Some("identity-local".into()),
+                sessions: vec![session("asker", 1)],
+                ..HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@builder",
+                HostScript {
+                    identity: None,
+                    peer: Some(client_side),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let h = builder.start().await;
+        let local = local_id(&h.store).await;
+        h.await_refreshed(local).await;
+        h.await_refreshed(remote).await;
+        trust_without_asking(&h).await;
+        let (creating_claim, _) = crate::sessions::host_client(&h.state, remote).unwrap();
+        assert!(
+            creating_claim.identity.is_none(),
+            "premise: no installation identity"
+        );
+        let suffix = full_id(&h, local, "x");
+        suffix_tx.send(suffix.clone()).unwrap();
+        let outcome = HelmAgentRequests::for_state(&h.state)
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                command_create("user@builder", "/srv/work", "agent", None, None),
+            )
+            .await;
+        join_responder(responder, &outcome).await;
+        let AgentOutcome::Ok {
+            reply: AgentReply::Created { session: created },
+        } = outcome
+        else {
+            panic!("identityless create must succeed with an entry-bound reply: {outcome:?}");
+        };
+        let parsed: SessionRef = created.id.parse().unwrap();
+        assert_eq!(
+            parsed.entry_uuid(),
+            h.manager.status(remote).unwrap().entry_uuid
+        );
+        assert_eq!(parsed.bare_id(), suffix);
+        assert_ne!(
+            created.id, suffix,
+            "the peer cannot return the caller entry's full ID directly"
+        );
+    }
+
+    /// Removing and recreating a destination while Stop waits cannot redirect
+    /// the existing card, even when the replacement advertises the same suffix.
+    #[farhelm_testtrace::test]
+    async fn a_waiting_stop_never_reaches_a_removed_entries_replacement() {
+        let (builder, remote) = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                identity: Some("identity-local".into()),
+                sessions: vec![session("asker", 1)],
+                ..HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@builder",
+                HostScript {
+                    identity: Some("identity-original".into()),
+                    sessions: vec![session("target", 2)],
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let h = builder.start().await;
+        let local = local_id(&h.store).await;
+        h.await_refreshed(local).await;
+        h.await_refreshed(remote).await;
+        let target = full_id(&h, remote, "target");
+        let _gui = h.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let selected = target.clone();
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "asker",
+                    AgentVerb::Stop {
+                        session_id: Some(selected),
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        assert!(
+            matches!(card.action, ApprovalAction::Stop { target: ref shown } if shown.id == target)
+        );
+        h.store.remove_ssh_host(remote).await.unwrap();
+        h.manager.sync_registry().await.unwrap();
+        let replacement = h
+            .store
+            .add_ssh_host("user@builder", None, None)
+            .await
+            .unwrap();
+        h.fleet.edit(replacement, |script| {
+            script.identity = Some("identity-replacement".into());
+            script.sessions = vec![session("target", 3)];
+        });
+        h.manager.sync_registry().await.unwrap();
+        h.await_refreshed(replacement).await;
+        assert_ne!(replacement, remote, "premise: a fresh registry entry");
+        assert_ne!(
+            full_id(&h, replacement, "target"),
+            target,
+            "premise: the same suffix has a new prefix"
+        );
+        assert!(
+            crate::sessions::route_session(&h.state, &SessionKey::new(replacement, "target"))
+                .await
+                .is_ok(),
+            "premise: the replacement session is routable under its own pair"
+        );
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let outcome = tokio::time::timeout(RESPONDER_JOIN_BUDGET, task).await
+            .expect("a removed pair must refuse before dispatch; this standalone peer never answers StopSession").unwrap();
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Err {
+                    kind: ErrorKind::NotFound,
+                    ..
+                }
+            ),
+            "{outcome:?}"
+        );
+        assert!(
+            h.manager.status(replacement).unwrap().client.is_some(),
+            "premise: replacement remains connected"
+        );
     }
 
     /// Spec: a target that answers a create with a `SessionCreated` whose id
@@ -8153,12 +8661,29 @@ mod tests {
     fn clone_replay_refuses_both_source_and_caller_ids() {
         for replayed in ["caller", "source"] {
             let row = session(replayed, 1);
-            let error = reject_clone_replay("caller", "source", &row)
-                .expect_err("an existing participant is not a new child");
+            let error = reject_clone_replay(
+                &SessionKey::new(1, "caller"),
+                &SessionKey::new(1, "source"),
+                1,
+                &row,
+            )
+            .expect_err("an existing participant is not a new child");
             assert_eq!(crate::error_kind(&error), ErrorKind::Conflict);
         }
-        reject_clone_replay("caller", "source", &session("child", 1))
-            .expect("an unrelated child is a valid clone result");
+        reject_clone_replay(
+            &SessionKey::new(1, "caller"),
+            &SessionKey::new(1, "source"),
+            1,
+            &session("child", 1),
+        )
+        .expect("an unrelated child is a valid clone result");
+        reject_clone_replay(
+            &SessionKey::new(1, "caller"),
+            &SessionKey::new(1, "source"),
+            2,
+            &session("caller", 1),
+        )
+        .expect("the same suffix on another entry is a different session");
     }
 
     /// Spec: a clone whose target replays the ASKING session — because the
@@ -8376,7 +8901,7 @@ mod tests {
                 origin_of(&h, local),
                 "asker",
                 AgentVerb::Clone {
-                    source_session_id: Some("source".to_string()),
+                    source_session_id: Some(full_id(&h, local, "source")),
                     host: Some("user@builder".to_string()),
                     cwd: None,
                     title: None,
@@ -8903,7 +9428,7 @@ mod tests {
             );
             let request = if cloning {
                 AgentVerb::Clone {
-                    source_session_id: Some("source".into()),
+                    source_session_id: Some(full_id(&h, local, "source")),
                     host: Some("user@builder".into()),
                     cwd: Some(selected),
                     title: None,
@@ -9012,7 +9537,7 @@ mod tests {
             }
             other => panic!("a launch card, got {other:?}"),
         }
-        assert_eq!(card.session.id, "asker");
+        assert_eq!(card.session.id, full_id(&h, local, "asker"));
         assert!(
             seen.lock().unwrap().is_empty(),
             "nothing is sent while it waits"
@@ -9409,7 +9934,7 @@ mod tests {
             }
             (creates, lookups)
         });
-        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        let (h, local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
         h.store
             .set_commands_without_asking(local, false)
             .await
@@ -9460,7 +9985,7 @@ mod tests {
         else {
             panic!("approved create: {first:?}")
         };
-        assert_eq!(child.id, "numbered-child");
+        assert_eq!(child.id, full_id(&h, remote, "numbered-child"));
         assert_eq!(child.title, "review-2");
         assert_eq!(child.cwd, "/checkouts/project-review-2");
         let replay = tokio::time::timeout(
@@ -9707,7 +10232,8 @@ mod tests {
             tokio::spawn(async move { asking.handle(second_origin, "asker", create()).await });
         let card = await_card(&h, &second).await;
         assert_eq!(
-            card.session.id, "asker",
+            card.session.id,
+            full_id(&h, second_origin.host, "asker"),
             "the hostile host repeats the claimed session ID"
         );
         assert_eq!(
@@ -9843,7 +10369,7 @@ mod tests {
                 origin,
                 "local-live",
                 AgentVerb::Stop {
-                    session_id: Some("ghost".to_string()),
+                    session_id: Some(full_id(&h, local, "ghost")),
                 },
             )
             .await
@@ -9854,13 +10380,14 @@ mod tests {
         assert!(h.state.approvals.list().is_empty());
 
         let asking = Arc::clone(&handler);
+        let target_id = full_id(&h, local, "local-old");
         let task = tokio::spawn(async move {
             asking
                 .handle(
                     origin,
                     "local-live",
                     AgentVerb::Stop {
-                        session_id: Some("local-old".to_string()),
+                        session_id: Some(target_id.clone()),
                     },
                 )
                 .await
@@ -9868,7 +10395,7 @@ mod tests {
         let card = await_card(&h, &task).await;
         match card.action {
             ApprovalAction::Stop { target } => {
-                assert_eq!(target.id, "local-old");
+                assert_eq!(target.id, full_id(&h, local, "local-old"));
                 assert!(target.title.is_some(), "the cache knows the target");
             }
             other => panic!("a stop card, got {other:?}"),

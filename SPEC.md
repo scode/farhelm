@@ -2287,6 +2287,27 @@ scoping applies to the idempotency keys of `farhelm agent create` and `farhelm a
 environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential; other Farhelm-specific variables are
 illustrative, not contract. (The user's login-shell environment is separately guaranteed; see Durability.)
 
+Session references handed to clients and agents are full IDs: the host entry's helm-assigned UUID in canonical
+36-character lowercase form, a colon, and the supervisor's opaque session ID. The separator is at that fixed position;
+the suffix may itself contain colons. Create, clone and spawn print full IDs, and list, detail and mutation replies use
+them for the session, its optional parent and its checkout's origin session. Agent discovery uses the entry UUID as its
+host ID, and its JSON envelope is schema version 7 with a full `caller.session_id`. The own-session `*` marker compares
+the entry and session together; the own-host marker compares the entry. Acting host selectors still use display names as
+described below.
+
+Every session route requires the full ID, including terminal attachment, files, tunnels and viewer metadata. A bare ID
+from a stale browser tab is refused with a reload remedy. Agents must also use full targets, except that exact equality
+with their authenticated own bare `$FARHELM_SESSION_ID` is accepted on their requesting entry. That equality wins even
+when the bare string resembles a full ID. Every other bare target is refused with a pointer to `farhelm agent sessions`.
+Full self-Delete and self-Prompt are refused by comparing both entry and session, just like their bare self spellings.
+The credential and helm-to-supervisor protocol stay bare; older supervisors keep working without an update for this.
+
+The helm accepts bare session IDs up to 40 UTF-8 bytes, allowing the supervisor's 36-byte UUID and a small margin; a
+full ID is at most 77 bytes. Empty, control-containing and dot-segment bare IDs are refused. This also applies to parent
+and checkout-origin IDs and to previously cached rows before public display. Supervisors mint ordinary UUIDs; longer
+values can only come from a foreign or hand-edited database. A host cannot choose another entry's prefix by reporting a
+full-looking suffix: the helm always adds the reporting entry's prefix.
+
 A session can also ASK, not only create. `farhelm agent <verb>`, run inside a session with the same injected credential
 spawn uses, reaches the helm rather than the session's own supervisor: the supervisor forwards the question to the helm
 currently attached to that session and relays the answer back, because a session has no way to reach the helm's machine
@@ -2456,6 +2477,10 @@ new requests and are asked about like one; when one carries the first request's 
 the session the first approval created rather than creating another. A host's sessions can keep only a few cards waiting
 at a time; a misbehaving host that keeps asking is answered by denying its cards or removing the host, and that nuisance
 is accepted.
+
+A waiting card's session targets and GUI Delete and Replace confirmations keep the full reference they showed. Removing
+and re-adding a host creates a new entry UUID, so an old confirmation cannot reach it even if it reports the same bare
+session ID. Retargeting or adopting behind the same entry preserves its UUID and the existing same-entry rules.
 
 On a host that asks before YOLO launches, an agent may only start what runs the way the user already approved. The helm
 refuses, without asking, an agent's create, clone or spawn (`--inherit-agent` included) whose launch is YOLO, and any of
@@ -3202,14 +3227,11 @@ from the explicitly permitted operations above and the exceptions below. Supervi
 ordinary failures; they need not defend their availability against hostile processes with the same local account
 authority. Choose proportionate remedies rather than assuming a quota or scheduling architecture is required.
 
-Session ownership is one deliberate exception. When a host reports a session id that another host already owns, the helm
-cannot tell which of the two is telling the truth, so it refuses to route any operation on that session (terminal, stop,
-restart, rename, delete, Replace, uploads, detail) and says which two hosts claim it, rather than guess. A misbehaving
-host can therefore make other hosts' sessions unreachable through Farhelm for as long as it keeps claiming their ids;
-their agents keep running. That loss of access is the accepted response, because the alternative is a silent misroute:
-after a host's cache is cleared by removing and re-adding it or by adoption, whichever host lists an id first would own
-it, so a hostile host could quietly receive the terminal input, uploads, and stops meant for the real one. Removing the
-misbehaving host is the remedy; the refusal clears on the next refresh after it stops claiming the ids.
+A session reference binds the host entry's helm-assigned UUID and the supervisor's session ID. Nothing a host reports
+can choose or reuse another entry's prefix, and a reference never reaches a different host entry. The helm resolves the
+entry first and checks membership only there. Its current cache still retains only the first entry reporting a bare ID,
+omitting a later cached claimant until the first withdraws it; that display limitation cannot redirect an operation on
+either full reference. An identity-less entry's live membership is likewise checked only on that entry.
 
 Confirmed 2026-10-01: removing the host is the general remedy for a misbehaving host whose effect is limited to what the
 helm and the GUI show. A host may crowd or clutter those views so that other sessions are hard to reach, for example by
@@ -3416,6 +3438,13 @@ During feature design, agents must alert the maintainer to potential loss of dat
 path before proceeding. Compatibility is decided per feature; this is not blanket permission for destructive migrations
 or ordinary runtime data loss. Revisit broader compatibility as the project matures, and record future breaking
 transitions when there is an expectation of users beyond the maintainer.
+
+The entry-bound session identity migration is accepted as one-way. Pins, seen state, notification marks and the shared
+last selection survive only where migration can attribute their old bare ID to one cached entry; unattributable state
+starts fresh. Agent IDs remembered before this update are refused except for the exact own-bare exception, with
+`farhelm agent sessions` as the remedy. Agent host IDs and the meaning of discovery's caller and own-row markers change
+with schema version 7. An approval card waiting during the update may get no answer. Existing sessions keep running, and
+supervisors from older releases remain compatible through their normal update path.
 
 Until upgrade epochs exist (TODO.md), no change may break the upgrade path of the desktop app, the helm, or the
 supervisor. An installation of any stable release from v0.23.0 on, the first one the in-app updater and get.farhelm.io

@@ -74,7 +74,7 @@ test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precon
   try {
     await patchPreferences(request, { skip_session_confirmations: skip });
     if (skip) {
-      const tab = await request.post(`/api/sessions/${session.id}/tabs`);
+      const tab = await request.post(`/api/sessions/${encodeURIComponent(session.id)}/tabs`);
       expect(tab.ok(), await tab.text()).toBe(true);
     }
     await stopSession(request, session.id);
@@ -108,7 +108,7 @@ test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precon
     await openRowMenu(row);
 
     const deleteUrls: string[] = [];
-    const matchesSession = (url: URL) => url.pathname === `/api/sessions/${session.id}`;
+    const matchesSession = (url: URL) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}`;
     const refuse = async (route: Route) => {
       if (route.request().method() !== "DELETE") {
         await route.fallback();
@@ -184,7 +184,7 @@ async function confirmDriftedPrompt(
   await expect(consequence).toContainText("still running");
 
   if (options.openTab) {
-    const opened = await request.post(`/api/sessions/${sessionId}/tabs`);
+    const opened = await request.post(`/api/sessions/${encodeURIComponent(sessionId)}/tabs`);
     expect(opened.ok(), `opening a tab: ${await opened.text()}`).toBe(true);
   }
   await stopSession(request, sessionId);
@@ -202,7 +202,7 @@ async function confirmDriftedPrompt(
   await expect(consequence).toHaveText(options.expectWording, { timeout: 20_000 });
 
   const deleteUrls: URL[] = [];
-  const matchesSession = (url: URL) => url.pathname === `/api/sessions/${sessionId}`;
+  const matchesSession = (url: URL) => url.pathname === `/api/sessions/${encodeURIComponent(sessionId)}`;
   const answer = async (route: Route) => {
     if (route.request().method() !== "DELETE") {
       await route.fallback();

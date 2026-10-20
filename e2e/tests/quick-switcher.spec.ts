@@ -211,7 +211,7 @@ test("a busy pick leaves navigation and the host filter untouched", async ({ pag
     await waitForTermText(page, "FAKE-AGENT READY");
     await page.locator(".filter-host").selectOption(String(local));
     const row = page.locator(`[data-session-id="${first.id}"]`);
-    await page.route(`**/api/sessions/${first.id}/stop`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(first.id)}/stop`, async (route) => {
       requested = true;
       await gate.wait();
       await route.fulfill({ status: 503, body: "fixture operation refused" });

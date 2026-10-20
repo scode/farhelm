@@ -229,7 +229,7 @@ test("a font fetch that never completes delays mount until the settle deadline, 
     expect(first.regularPending).toBe(true);
     expect(Number.isFinite(first.startedAt)).toBe(true);
     expect(Number.isFinite(first.firstConstructionAt)).toBe(true);
-    expect(new URL(first.firstPath, page.url()).pathname).toBe(`/api/sessions/${session.id}/term`);
+    expect(new URL(first.firstPath, page.url()).pathname).toBe(`/api/sessions/${encodeURIComponent(session.id)}/term`);
     // Permit 10 ms of timer/observation resolution uncertainty. This checks
     // the minimum budget from its origin, not the precise callback order.
     expect(first.firstConstructionAt - first.startedAt).toBeGreaterThanOrEqual(first.budgetMs - 10);

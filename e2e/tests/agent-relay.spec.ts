@@ -187,10 +187,10 @@ async function openRelayTerminal(page: Page, id: string): Promise<void> {
   await waitForFlatText(page, "INSTRUCTIONS:ok");
 }
 
-/** The session id a `CLONED:` marker carries, once one appears. */
+/** The full reference printed by the real clone CLI. Both UUIDs come from this fixture's real stack. */
 async function clonedId(page: Page, timeout = 30_000): Promise<string> {
   await waitForFlatText(page, "CLONED:", timeout);
-  const match = (await flatTermText(page)).match(/CLONED:([0-9a-fA-F-]{36})/);
+  const match = (await flatTermText(page)).match(/CLONED:([0-9a-f-]{36}:[0-9a-f-]{36})/);
   expect(match, "the CLONED marker must carry a session id").toBeTruthy();
   return match![1];
 }

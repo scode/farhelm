@@ -32,7 +32,8 @@ const HOST_LIST_JSON: &str = include_str!("../http-contract/host-list.json");
 
 /// A `GET /api/sessions` body whose single row sets every field the wire
 /// carries, including the helm's own row fields beside the flattened
-/// `SessionInfo`.
+/// `SessionInfo`. These are public references, written out independently of
+/// the production projection so the shared fixture also pins the boundary.
 fn session_list_body() -> SessionListBody {
     let repo = GithubRepo {
         owner: "octo".to_string(),
@@ -56,8 +57,8 @@ fn session_list_body() -> SessionListBody {
         claude_trust_prompt: false,
         workspace_trust_prompt: false,
         agent_kind: farhelm_proto::AgentKind::Codex,
-        id: "fh-0123abcd".to_string(),
-        parent: Some("fh-89abcdef".to_string()),
+        id: "11111111-1111-4111-8111-111111111111:fh-0123abcd".to_string(),
+        parent: Some("11111111-1111-4111-8111-111111111111:fh-89abcdef".to_string()),
         title: "Fix the widget".to_string(),
         created_at: 1_700_000_000,
         last_activity_at: 1_700_000_100,
@@ -78,7 +79,7 @@ fn session_list_body() -> SessionListBody {
             id: "wc-1".to_string(),
             repo,
             canonical_path: "/home/user/src/widgets".to_string(),
-            origin_session_id: "fh-0123abcd".to_string(),
+            origin_session_id: "11111111-1111-4111-8111-111111111111:fh-0123abcd".to_string(),
         }),
         notifications: vec![farhelm_proto::SessionNotification {
             seq: 4,
@@ -91,6 +92,7 @@ fn session_list_body() -> SessionListBody {
         sessions: vec![SessionRow {
             info,
             host: 2,
+            entry_uuid: "11111111-1111-4111-8111-111111111111".to_string(),
             host_identity: Some("install-identity".to_string()),
             host_name: "buildbox".to_string(),
             stale: true,
@@ -109,6 +111,7 @@ fn session_list_body() -> SessionListBody {
 fn host_list_body() -> serde_json::Value {
     let host = |id: i64, kind: &'static str, state: HostStateView| HostView {
         id,
+        entry_uuid: "11111111-1111-4111-8111-111111111111".to_string(),
         kind,
         destination: (kind == "ssh").then(|| format!("user@host{id}")),
         alias: (kind == "ssh").then(|| format!("alias{id}")),

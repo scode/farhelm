@@ -9,7 +9,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { cleanupSession, commandLaunch, createSession, FAKE_AGENT, listHosts, localHostId, openRowMenu, patchPreferences, setLocalYoloWithoutAsking } from "./helpers/fleet";
+import { cleanupSession, commandLaunch, createSession, FAKE_AGENT, listHosts, localHostId, openRowMenu, patchPreferences, setLocalYoloWithoutAsking, supervisorSessionId } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 import { answerCard, setLocalCommandsWithoutAsking } from "./helpers/approvals";
 
@@ -408,16 +408,16 @@ async function assertLive(page: Page, id: string) {
 
 /** Read durable membership independently from an admission response. */
 async function sessionState(request: APIRequestContext, id: string) {
-  const response = await request.get(`/api/sessions/${id}`);
+  const response = await request.get(`/api/sessions/${encodeURIComponent(id)}`);
   expect(response.ok(), await response.text()).toBe(true);
   return response.json();
 }
 
 /** A test action must succeed; unlike cleanup, an absent source is a failure. */
 async function deleteSession(request: APIRequestContext, id: string) {
-  const response = await request.delete(`/api/sessions/${id}`);
+  const response = await request.delete(`/api/sessions/${encodeURIComponent(id)}`);
   expect(response.ok(), await response.text()).toBe(true);
-  expect((await request.get(`/api/sessions/${id}`)).status()).toBe(404);
+  expect((await request.get(`/api/sessions/${encodeURIComponent(id)}`)).status()).toBe(404);
 }
 
 /** Own the source and destination until all sessions have released them.
@@ -638,7 +638,7 @@ async function assertCheckout(
   page: Page, request: APIRequestContext, fixture: Awaited<ReturnType<typeof checkoutFixture>>,
   id: string, cwd: string, structured: boolean,
 ) {
-  const response = await request.get(`/api/sessions/${id}`);
+  const response = await request.get(`/api/sessions/${encodeURIComponent(id)}`);
   expect(response.ok(), await response.text()).toBe(true);
   const session = await response.json();
   expect(session.cwd).toBe(cwd);
@@ -646,7 +646,7 @@ async function assertCheckout(
   expect(session.working_copy).toBeTruthy();
   await attachSession(page, id);
   await waitForTermText(page, "CHECKOUT-HOOK-READY", 20_000);
-  if (structured) await waitForTermText(page, `STRUCTURED-LAUNCH-GENERATION:${id}:1`, 20_000);
+  if (structured) await waitForTermText(page, `STRUCTURED-LAUNCH-GENERATION:${supervisorSessionId(id)}:1`, 20_000);
   await waitForTermText(page, "FAKE-AGENT READY", 20_000);
   // A banner can be replayed from a dead terminal. This attachment must
   // also receive a fresh agent response before preparation counts as live.
@@ -932,7 +932,7 @@ test("borrowers retain the checkout until the final stopped session is deleted",
       expect((await fs.readdir(fixture.root)).sort()).toEqual([path.basename(origin.cwd), "unmanaged"].sort());
     }
     await assertLive(page, nested.id);
-    const stopped = await request.post(`/api/sessions/${nested.id}/stop`);
+    const stopped = await request.post(`/api/sessions/${encodeURIComponent(nested.id)}/stop`);
     expect(stopped.ok(), await stopped.text()).toBe(true);
     const retained = await sessionState(request, nested.id);
     expect(retained.working_copy).toEqual(original.working_copy);
@@ -969,14 +969,14 @@ test("replacement preserves borrowers and archives only the released checkout", 
   const ids: string[] = [];
   /** Keep actual response IDs for cleanup, then prove the old ID is gone. */
   async function replace(source: string, withBody?: Record<string, unknown>) {
-    const response = await request.post(`/api/sessions/${source}/replace`, {
+    const response = await request.post(`/api/sessions/${encodeURIComponent(source)}/replace`, {
       data: { intent_key: `replace-${source}`, ...(withBody ? { with: withBody } : {}) },
     });
     expect(response.ok(), await response.text()).toBe(true);
     const successor = await response.json();
     ids.push(successor.id);
     expect(successor.id).not.toBe(source);
-    expect((await request.get(`/api/sessions/${source}`)).status()).toBe(404);
+    expect((await request.get(`/api/sessions/${encodeURIComponent(source)}`)).status()).toBe(404);
     return successor;
   }
   try {
@@ -1356,7 +1356,7 @@ test("replace with into a managed checkout of the source's repository gets the n
     await expect(replaceForm.getByLabel("name (optional)", { exact: true })).toHaveAttribute("placeholder", `${fixture.repoName}-2`);
     await expect(replaceForm.locator(".create-session-submit")).toBeEnabled();
     const [response] = await Promise.all([
-      page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith(`/api/sessions/${origin.id}/replace`)),
+      page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith(`/api/sessions/${encodeURIComponent(origin.id)}/replace`)),
       replaceForm.locator(".create-session-submit").click(),
     ]);
     expect(response.ok(), await response.text()).toBe(true);
@@ -1366,7 +1366,7 @@ test("replace with into a managed checkout of the source's repository gets the n
     await page.goto("/");
     const state = await assertCheckout(page, request, fixture, successor.id, second, false);
     expect(state.title).toBe(`${fixture.repoName}-2`);
-    expect((await request.get(`/api/sessions/${origin.id}`)).status()).toBe(404);
+    expect((await request.get(`/api/sessions/${encodeURIComponent(origin.id)}`)).status()).toBe(404);
   } finally {
     for (const id of ids.reverse()) await cleanupSession(request, id);
     await fixture.close(request);
@@ -1422,7 +1422,7 @@ async function uiDelete(page: Page, id: string): Promise<{archived?: boolean}> {
   await openRowMenu(row);
   await row.locator(".session-row-delete").click();
   const [response] = await Promise.all([
-    page.waitForResponse(r => r.request().method() === "DELETE" && new URL(r.url()).pathname === `/api/sessions/${id}`),
+    page.waitForResponse(r => r.request().method() === "DELETE" && new URL(r.url()).pathname === `/api/sessions/${encodeURIComponent(id)}`),
     row.locator(".confirm-delete").click(),
   ]);
   expect(response.ok(), await response.text()).toBe(true);

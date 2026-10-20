@@ -43,13 +43,20 @@ async fn direct_client(state: &std::path::Path) -> std::sync::Arc<SupervisorClie
 }
 
 /// The tab ids the helm's cached listing shows for `session`, or `None` while
-/// it does not list the session at all.
-fn listed_tabs(listing: &serde_json::Value, session: &str) -> Option<Vec<String>> {
+/// it does not list the session at all. The direct-client ID remains bare; compare it
+/// only within the host entry captured from fixture readiness.
+fn listed_tabs(listing: &serde_json::Value, host: i64, session: &str) -> Option<Vec<String>> {
     let row = listing["sessions"]
         .as_array()
         .expect("sessions is an array")
         .iter()
-        .find(|row| row["id"] == session)?;
+        .find(|row| {
+            row["host"] == host
+                && row["id"]
+                    .as_str()
+                    .and_then(|id| id.parse::<farhelm_proto::SessionRef>().ok())
+                    .is_some_and(|reference| reference.bare_id() == session)
+        })?;
     Some(
         row["tabs"]
             .as_array()
@@ -75,6 +82,7 @@ fn listed_tabs(listing: &serde_json::Value, session: &str) -> Option<Vec<String>
 async fn until_helm_lists(
     client: &reqwest::Client,
     base: &str,
+    host: i64,
     session: &str,
     what: &str,
     wanted: impl Fn(&Option<Vec<String>>) -> bool,
@@ -90,7 +98,7 @@ async fn until_helm_lists(
         },
         HINTED_WITHIN_SECS,
         &format!("the helm showing {what} with its poll an hour away"),
-        |(listing, _hosts)| wanted(&listed_tabs(listing, session)),
+        |(listing, _hosts)| wanted(&listed_tabs(listing, host, session)),
     )
     .await;
 }
@@ -122,7 +130,7 @@ async fn supervisor_side_changes_reach_the_helm_without_its_poll() {
     // made meanwhile could reach the listing through that refresh instead
     // of a hint.
     let hosts_url = format!("{}/api/hosts", helm.base);
-    wait_for_listing_with(
+    let hosts = wait_for_listing_with(
         || async { Ok(get_json(&client, &hosts_url).await) },
         REAL_STACK_SETTLE.as_secs(),
         "fixture premise: the helm connected to its local supervisor and finished its first refresh",
@@ -140,6 +148,15 @@ async fn supervisor_side_changes_reach_the_helm_without_its_poll() {
     )
     .await;
 
+    let host = hosts["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["kind"] == "local")
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+
     let direct = direct_client(supervisor.state.path()).await;
     let work = farhelm_teststate::tempdir().expect("work dir");
     let session = direct
@@ -155,6 +172,7 @@ async fn supervisor_side_changes_reach_the_helm_without_its_poll() {
     until_helm_lists(
         &client,
         &helm.base,
+        host,
         &session.id,
         "the new session",
         |seen| seen.is_some(),
@@ -165,9 +183,14 @@ async fn supervisor_side_changes_reach_the_helm_without_its_poll() {
         .open_tab(&session.id)
         .await
         .expect("open a tab through the direct connection");
-    until_helm_lists(&client, &helm.base, &session.id, "the opened tab", |seen| {
-        seen.as_ref().is_some_and(|tabs| tabs.contains(&tab.id))
-    })
+    until_helm_lists(
+        &client,
+        &helm.base,
+        host,
+        &session.id,
+        "the opened tab",
+        |seen| seen.as_ref().is_some_and(|tabs| tabs.contains(&tab.id)),
+    )
     .await;
 
     let (channel, replay, mut rx) = direct
@@ -186,6 +209,7 @@ async fn supervisor_side_changes_reach_the_helm_without_its_poll() {
     until_helm_lists(
         &client,
         &helm.base,
+        host,
         &session.id,
         "the exited tab gone",
         |seen| seen.as_ref().is_some_and(|tabs| !tabs.contains(&tab.id)),

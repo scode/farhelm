@@ -135,9 +135,8 @@ pub(crate) fn host_display_name(
     }
 }
 
-/// One row of the merged list: a session exactly as its supervisor
-/// reported it, plus the three facts that only exist once more than one
-/// host is in play.
+/// One internal merged row, retaining the supervisor's bare references and
+/// the host-entry provenance required to qualify them at a client boundary.
 ///
 /// `SessionInfo` is FLATTENED rather than nested, which is the whole
 /// compatibility story for the UI that predates this PR: every field it
@@ -150,7 +149,9 @@ pub(crate) fn host_display_name(
 /// to reach a client: activity age and stable work ordering arrive as raw
 /// sibling fields without a second request or a row shape of their own.
 ///
-/// What travels is exactly what the supervisor reported, zeroes included.
+/// Session references stay bare while filtering and sorting; REST and agent
+/// projections add this row's captured entry prefix only when building output.
+/// Other fields retain what the supervisor reported, zeroes included.
 /// `?sort=activity` groups by connected Running/Waiting first and then
 /// applies `effective_work_started_at`, whose zero fallback is creation in
 /// milliseconds; row age applies `effective_activity`, whose zero fallback
@@ -167,6 +168,10 @@ pub(crate) struct SessionRow {
     /// client hands back to `POST /api/sessions` to create alongside it,
     /// and the join key into `GET /api/hosts`.
     pub(crate) host: HostId,
+    /// Boundary projections use the entry from this same snapshot. Keeping it
+    /// private to serialization avoids a second lookup after removal or retarget.
+    #[serde(skip)]
+    pub(crate) entry_uuid: String,
     /// The install identity the REGISTRY held for that host when the reply
     /// was being built (`HostView::identity`'s value), denormalized onto
     /// the row so a client can bind "the session the user is looking at"
@@ -319,6 +324,7 @@ fn row_of(
         info,
         notifications_read_through,
         host: host.id,
+        entry_uuid: host.entry_uuid.clone(),
         host_identity: identity.map(str::to_string),
         host_name: host_display_name(
             host.kind,
@@ -688,6 +694,7 @@ mod tests {
                 notifications: Vec::new(),
             },
             host,
+            entry_uuid: format!("00000000-0000-4000-8000-{host:012x}"),
             host_identity: None,
             host_name: "this machine".to_string(),
             seen_activity_at: None,

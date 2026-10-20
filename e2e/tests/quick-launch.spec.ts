@@ -454,7 +454,7 @@ test("hidden preparation isolates keys and a queued Replace with requires Launch
   await page.route("**/api/sessions**", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     bodies.push(route.request().postDataJSON());
-    expect(new URL(route.request().url()).pathname).toBe(`/api/sessions/${source.id}/replace`);
+    expect(new URL(route.request().url()).pathname).toBe(`/api/sessions/${encodeURIComponent(source.id)}/replace`);
     await fulfillQuickFixture(route, request, 409, "replacement fixture refusal");
   });
   try {
@@ -940,11 +940,11 @@ for (const [mac, numbered] of [[false, false], [true, false], [false, true], [tr
       const probe = `quick-live-${Date.now()}`;
       await echoAfterNaming(page, session.id, probe);
       const expectedTitle = numbered && !mac ? changed : `${name}-session`;
-      const stored = await request.get(`/api/sessions/${session.id}`);
+      const stored = await request.get(`/api/sessions/${encodeURIComponent(session.id)}`);
       expect(stored.ok(), await stored.text()).toBe(true);
       expect((await stored.json()).title).toBe(expectedTitle);
       expect(renames).toEqual(numbered && !mac
-        ? [{ path: `/api/sessions/${session.id}/rename`, body: { title: changed } }]
+        ? [{ path: `/api/sessions/${encodeURIComponent(session.id)}/rename`, body: { title: changed } }]
         : []);
       expect(bodies).toHaveLength(1);
       expect(Buffer.concat(binary).toString()).toBe(`${probe}\r`);
@@ -1012,8 +1012,8 @@ test("repeated naming selects the title and returns focus after immediate Enter 
     await expect(field).toHaveValue(title);
     await page.locator(".rename-dialog .rename-submit").click();
     await echoAfterNaming(page, created[1], `saved-name-${Date.now()}`);
-    expect(renames).toEqual([{ path: `/api/sessions/${created[1]}/rename`, body: { title } }]);
-    const stored = await request.get(`/api/sessions/${created[1]}`);
+    expect(renames).toEqual([{ path: `/api/sessions/${encodeURIComponent(created[1])}/rename`, body: { title } }]);
+    const stored = await request.get(`/api/sessions/${encodeURIComponent(created[1])}`);
     expect(stored.ok(), await stored.text()).toBe(true);
     expect((await stored.json()).title).toBe(title);
   } catch (error) {
@@ -1050,7 +1050,7 @@ test("the naming preference off launches directly into the terminal", async ({ p
     await chord(page);
     await expect.poll(() => created.length).toBe(1);
     await echoAfterNaming(page, created[0], `naming-off-${Date.now()}`);
-    const stored = await request.get(`/api/sessions/${created[0]}`);
+    const stored = await request.get(`/api/sessions/${encodeURIComponent(created[0])}`);
     expect(stored.ok(), await stored.text()).toBe(true);
     expect((await stored.json()).title).toBe(`${name}-session`);
   } catch (error) {

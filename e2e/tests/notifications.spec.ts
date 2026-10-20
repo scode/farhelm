@@ -54,7 +54,7 @@ async function serveNotifications(page: Page, id: string, stub: NotificationStub
     (url) => /^\/api\/sessions\/[^/]+\/notifications\/(read|cleared)$/.test(url.pathname),
     async (route: Route) => {
       const which = route.request().url().endsWith("/cleared") ? "cleared" : "read";
-      const session = new URL(route.request().url()).pathname.split("/")[3];
+      const session = decodeURIComponent(new URL(route.request().url()).pathname.split("/")[3]);
       const through = (route.request().postDataJSON() as { through: number }).through;
       stub.writes.push({ session, route: which, through });
       if (session === id) {
@@ -167,7 +167,7 @@ test.describe("session notifications", () => {
     const stub = new NotificationStub([{ seq: 1, at: NOW, text: "retry this mark" }]);
     await serveNotifications(page, session.id, stub);
     let attempts = 0;
-    await page.route(`**/api/sessions/${session.id}/notifications/read`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/notifications/read`, async (route) => {
       attempts++;
       if (attempts === 1) {
         const response = await route.fetch();
@@ -205,7 +205,7 @@ test.describe("session notifications", () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const marks: number[] = [];
-    await page.route(`**/api/sessions/${session.id}/notifications/read`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/notifications/read`, async (route) => {
       const through = route.request().postDataJSON().through as number;
       marks.push(through);
       const response = await route.fetch();
@@ -229,7 +229,7 @@ test.describe("session notifications", () => {
       feed.notify(1);
       await bell.click();
       await expect(page.locator('.session-bell-entry[data-notification-seq="2"]')).toHaveClass(/\bnew\b/);
-      const newer = page.waitForResponse((response) => response.url().endsWith(`/api/sessions/${session.id}/notifications/read`) && response.request().postDataJSON().through === 2);
+      const newer = page.waitForResponse((response) => response.url().endsWith(`/api/sessions/${encodeURIComponent(session.id)}/notifications/read`) && response.request().postDataJSON().through === 2);
       await bell.click();
       expect((await newer).ok()).toBe(true);
       const failed = page.waitForEvent("console", (message) => message.text().includes("could not mark the session's notifications read"));

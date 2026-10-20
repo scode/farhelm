@@ -28,6 +28,10 @@ use mock_supervisor::{finish_server, mock_supervisor_frames};
 /// The session every test here runs as.
 const SESSION: &str = "session-1";
 
+/// Distinct entry identities let tests distinguish equal bare IDs on different hosts.
+const CALLER_ENTRY: &str = "11111111-1111-4111-8111-111111111111";
+const OTHER_ENTRY: &str = "22222222-2222-4222-8222-222222222222";
+
 /// [`mock_supervisor::mock_supervisor`] for this file's session.
 fn mock_supervisor(
     socket: &std::path::Path,
@@ -290,9 +294,9 @@ fn hosts_json_has_the_exact_discovery_envelope() {
             req_id,
             outcome: AgentOutcome::Ok {
                 reply: AgentReply::Hosts {
-                    caller_host_id: "host-local".to_string(),
+                    caller_host_id: "11111111-1111-4111-8111-111111111111".to_string(),
                     hosts: vec![AgentHost {
-                        id: "host-local".to_string(),
+                        id: "11111111-1111-4111-8111-111111111111".to_string(),
                         name: "this machine".to_string(),
                         kind: "local".to_string(),
                         state: "connected".to_string(),
@@ -312,13 +316,13 @@ fn hosts_json_has_the_exact_discovery_envelope() {
     assert_eq!(
         value,
         serde_json::json!({
-            "schema_version": 6,
-            "caller": {"session_id": "session-1", "host_id": "host-local"},
+            "schema_version": 7,
+            "caller": {"session_id": "11111111-1111-4111-8111-111111111111:session-1", "host_id": "11111111-1111-4111-8111-111111111111"},
             "reply": {
                 "reply": "hosts",
-                "caller_host_id": "host-local",
+                "caller_host_id": "11111111-1111-4111-8111-111111111111",
                 "hosts": [{
-                    "id": "host-local",
+                    "id": "11111111-1111-4111-8111-111111111111",
                     "name": "this machine",
                     "kind": "local",
                     "state": "connected",
@@ -328,6 +332,337 @@ fn hosts_json_has_the_exact_discovery_envelope() {
             }
         })
     );
+}
+
+/// Session discovery must expose full row and caller IDs while retaining the bare
+/// authenticated request. Comparing the whole envelope catches a schema bump that
+/// only fixes hosts or templates, or accidentally reuses an unrelated row as caller.
+#[farhelm_testtrace::test]
+fn sessions_json_has_the_exact_entry_bound_discovery_envelope() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, owner) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id,
+            session_id,
+            request,
+        } = request
+        else {
+            panic!("expected an authenticated agent request, got {request:?}");
+        };
+        assert_eq!(session_id, SESSION);
+        assert_eq!(request, AgentVerb::Sessions {});
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Sessions {
+                    caller_host_id: CALLER_ENTRY.to_string(),
+                    sessions: vec![AgentSession {
+                        id: format!("{OTHER_ENTRY}:other:session"),
+                        host_id: OTHER_ENTRY.to_string(),
+                        host: Some("builder".to_string()),
+                        title: "review".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "codex".to_string(),
+                        status: "idle".to_string(),
+                        current: false,
+                        restart_offer: farhelm_proto::RestartOffer::Resume,
+                        stale: true,
+                    }],
+                    truncated: true,
+                },
+            },
+        })
+    });
+    let output = output_with_timeout(agent_command_with_args(&socket, &["sessions", "--json"]));
+    finish_server(done, owner);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).expect("JSON envelope"),
+        serde_json::json!({
+            "schema_version": 7,
+            "caller": {"session_id": format!("{CALLER_ENTRY}:{SESSION}"), "host_id": CALLER_ENTRY},
+            "reply": {
+                "reply": "sessions",
+                "caller_host_id": CALLER_ENTRY,
+                "sessions": [{
+                    "id": format!("{OTHER_ENTRY}:other:session"),
+                    "host_id": OTHER_ENTRY,
+                    "host": "builder",
+                    "title": "review",
+                    "cwd": "/w",
+                    "agent": "codex",
+                    "status": "idle",
+                    "current": false,
+                    "restart_offer": "resume",
+                    "stale": true
+                }],
+                "truncated": true
+            }
+        })
+    );
+}
+
+/// Human discovery must print reusable full selectors, including the longest
+/// admitted ID, and keep the reply's own-row marker when the credential is bare.
+/// A 48-character description clamp would silently turn UUID:UUID into a target
+/// that no command can resolve, so both the normal and maximum lengths matter.
+#[farhelm_testtrace::test]
+fn sessions_table_keeps_full_selectors_and_the_callers_marker() {
+    const BARE_UUID: &str = "33333333-3333-4333-8333-333333333333";
+    let own = format!("{CALLER_ENTRY}:{BARE_UUID}");
+    let longest = format!("{OTHER_ENTRY}:{}", "x".repeat(40));
+    assert_eq!(own.len(), 73);
+    assert_eq!(
+        longest.len(),
+        farhelm_proto::session_ref::MAX_FULL_SESSION_ID_BYTES
+    );
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let expected_own = own.clone();
+    let expected_longest = longest.clone();
+    let (done, owner) = mock_supervisor::mock_supervisor(&socket, BARE_UUID, move |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("expected an agent request, got {request:?}");
+        };
+        assert_eq!(request, AgentVerb::Sessions {});
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Sessions {
+                    caller_host_id: CALLER_ENTRY.to_string(),
+                    sessions: [
+                        (expected_own.clone(), CALLER_ENTRY, true),
+                        (expected_longest.clone(), OTHER_ENTRY, false),
+                    ]
+                    .into_iter()
+                    .map(|(id, entry, current)| AgentSession {
+                        id,
+                        host_id: entry.to_string(),
+                        host: Some("builder".to_string()),
+                        title: "review".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "codex".to_string(),
+                        status: "idle".to_string(),
+                        current,
+                        restart_offer: farhelm_proto::RestartOffer::Resume,
+                        stale: false,
+                    })
+                    .collect(),
+                    truncated: false,
+                },
+            },
+        })
+    });
+    let mut command = agent_command_with_args(&socket, &["sessions"]);
+    command.env("FARHELM_SESSION_ID", BARE_UUID);
+    let output = output_with_timeout(command);
+    finish_server(done, owner);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let table = String::from_utf8(output.stdout).unwrap();
+    let rows: Vec<_> = table.lines().collect();
+    assert_eq!(rows.len(), 3, "{table}");
+    let marked: Vec<_> = rows[1].split_whitespace().take(2).collect();
+    assert_eq!(marked, ["*", own.as_str()], "{table}");
+    assert_eq!(
+        rows[2].split_whitespace().next(),
+        Some(longest.as_str()),
+        "{table}"
+    );
+}
+
+/// Observe stderr at mutation receipt, while the mock still owns the reply.
+///
+/// A final-output assertion alone would also pass if the CLI warned after restart
+/// had already been dispatched. Private files expose that earlier boundary without
+/// a pipe reader or a sleep. The child has a ten-second deadline and is killed and
+/// reaped on expiry; the mock owner cancels pending accepts on assertion unwind.
+async fn assert_restart_warning_at_dispatch(
+    asking: &'static str,
+    target: String,
+    discover: bool,
+    warn: bool,
+) {
+    const WARNING: &str = "warning: restarting this session can interrupt the invoking CLI; \
+        acknowledgement can be lost, and resumed task continuation is not guaranteed\n";
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let stderr_path = temp.path().join("stderr");
+    let stdout_path = temp.path().join("stdout");
+    let stderr = std::fs::File::create(&stderr_path).unwrap();
+    let stdout = std::fs::File::create(&stdout_path).unwrap();
+    let observed_stderr = stderr_path.clone();
+    let expected_target = target.clone();
+    let mut received = 0;
+    let (done, owner) = mock_supervisor::mock_supervisor_frames_sequence(
+        &socket,
+        asking,
+        if discover { 2 } else { 1 },
+        move |request| {
+            let ControlMsg::AgentRequest {
+                req_id,
+                session_id,
+                request,
+            } = request
+            else {
+                panic!("expected an authenticated agent request, got {request:?}");
+            };
+            assert_eq!(session_id, asking, "wire authentication must remain bare");
+            let reply = if discover && received == 0 {
+                assert_eq!(
+                    request,
+                    AgentVerb::Hosts {},
+                    "discovery must precede mutation"
+                );
+                assert_eq!(std::fs::read_to_string(&observed_stderr).unwrap(), "");
+                AgentReply::Hosts {
+                    caller_host_id: CALLER_ENTRY.to_string(),
+                    hosts: Vec::new(),
+                    complete: false,
+                }
+            } else {
+                assert_eq!(
+                    request,
+                    AgentVerb::Restart {
+                        session_id: Some(expected_target.clone()),
+                        stop_if_running: true,
+                    }
+                );
+                assert_eq!(
+                    std::fs::read_to_string(&observed_stderr).unwrap(),
+                    if warn { WARNING } else { "" },
+                    "the self warning must exist before the destructive request arrives",
+                );
+                AgentReply::Restarted {
+                    session: AgentSession {
+                        id: expected_target.clone(),
+                        host_id: if warn { CALLER_ENTRY } else { OTHER_ENTRY }.to_string(),
+                        host: Some("builder".to_string()),
+                        title: "review".to_string(),
+                        cwd: "/w".to_string(),
+                        agent: "codex".to_string(),
+                        status: "running".to_string(),
+                        current: warn,
+                        restart_offer: farhelm_proto::RestartOffer::Resume,
+                        stale: false,
+                    },
+                }
+            };
+            received += 1;
+            Some(Frame::control(&ControlMsg::AgentResponse {
+                req_id,
+                outcome: AgentOutcome::Ok { reply },
+            }))
+        },
+    );
+    let mut child = {
+        let mut command = agent_command_with_args(
+            &socket,
+            &["restart", "--session", &target, "--stop-if-running"],
+        );
+        command.env("FARHELM_SESSION_ID", asking);
+        let mut command = tokio::process::Command::from(command);
+        command
+            .kill_on_drop(true)
+            .stdin(std::process::Stdio::null())
+            .stdout(stdout)
+            .stderr(stderr);
+        command.spawn().expect("spawn restart CLI")
+    };
+    let status = match tokio::time::timeout(Duration::from_secs(10), child.wait()).await {
+        Ok(status) => status.expect("wait for restart CLI"),
+        Err(_) => {
+            child
+                .kill()
+                .await
+                .expect("kill and reap timed-out restart CLI");
+            panic!("restart CLI exceeded its deadline");
+        }
+    };
+    finish_server(done, owner);
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "{}",
+        std::fs::read_to_string(&stderr_path).unwrap()
+    );
+    assert_eq!(
+        std::fs::read_to_string(stdout_path).unwrap(),
+        format!("restarted {target}\n")
+    );
+    assert_eq!(
+        std::fs::read_to_string(stderr_path).unwrap(),
+        if warn { WARNING } else { "" }
+    );
+}
+
+/// A full self target must be identified from the caller entry and warned about
+/// before restart can tear down the invoking CLI. Equal suffixes on another entry
+/// must still dispatch the requested target without claiming the caller will die.
+#[farhelm_testtrace::test]
+async fn full_self_restart_warns_before_dispatch_but_a_foreign_equal_suffix_does_not() {
+    assert_restart_warning_at_dispatch(SESSION, format!("{CALLER_ENTRY}:{SESSION}"), true, true)
+        .await;
+    assert_restart_warning_at_dispatch(SESSION, format!("{OTHER_ENTRY}:{SESSION}"), true, false)
+        .await;
+}
+
+/// Exact own-bare equality wins before full-reference parsing, even for an opaque
+/// bare ID that looks qualified. An unrelated suffix needs no discovery request;
+/// these single-request mocks fail if either path accidentally consults the helm.
+#[farhelm_testtrace::test]
+async fn bare_self_and_unrelated_restart_targets_do_not_discover() {
+    const LOOKS_QUALIFIED: &str = "22222222-2222-4222-8222-222222222222:id";
+    assert_restart_warning_at_dispatch(SESSION, SESSION.to_string(), false, true).await;
+    assert_restart_warning_at_dispatch(LOOKS_QUALIFIED, LOOKS_QUALIFIED.to_string(), false, true)
+        .await;
+    assert_restart_warning_at_dispatch(SESSION, format!("{OTHER_ENTRY}:unrelated"), false, false)
+        .await;
+}
+
+/// An entry-discovery refusal must end the possible self restart before any
+/// mutation goes out. Reporting a lost mutation here would invent uncertainty:
+/// this CLI has sent only the read-only Hosts request the mock asserts below.
+#[farhelm_testtrace::test]
+fn full_self_restart_discovery_refusal_does_not_claim_a_mutation() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, owner) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("expected an agent request, got {request:?}");
+        };
+        assert_eq!(request, AgentVerb::Hosts {});
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Err {
+                kind: ErrorKind::Unavailable,
+                message: "no helm is attached to this session".to_string(),
+            },
+        })
+    });
+    let target = format!("{CALLER_ENTRY}:{SESSION}");
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["restart", "--session", &target],
+    ));
+    finish_server(done, owner);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("no helm is attached to this session"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("outcome is unknown"), "{stderr}");
+    assert!(!stderr.contains("warning: restarting"), "{stderr}");
 }
 
 /// Spec: `farhelm agent templates --json` sends the `Templates` verb and
@@ -349,7 +684,7 @@ fn templates_json_and_table_list_what_each_template_sets() {
     ] {
         let reply = move || {
             Some(AgentReply::Templates {
-                caller_host_id: "host-local".to_string(),
+                caller_host_id: "11111111-1111-4111-8111-111111111111".to_string(),
                 templates: vec![farhelm_proto::AgentTemplate {
                     name: "my-codex".to_string(),
                     fields: farhelm_proto::launcher::TemplateFields {
@@ -409,11 +744,11 @@ fn templates_json_and_table_list_what_each_template_sets() {
         assert_eq!(
             value,
             serde_json::json!({
-                "schema_version": 6,
-                "caller": {"session_id": "session-1", "host_id": "host-local"},
+                "schema_version": 7,
+                "caller": {"session_id": "11111111-1111-4111-8111-111111111111:session-1", "host_id": "11111111-1111-4111-8111-111111111111"},
                 "reply": {
                     "reply": "templates",
-                    "caller_host_id": "host-local",
+                    "caller_host_id": "11111111-1111-4111-8111-111111111111",
                     "templates": [{
                         "name": "my-codex",
                         "fields": expected_fields,

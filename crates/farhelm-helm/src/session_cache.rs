@@ -17,20 +17,10 @@
 use farhelm_proto::{SessionInfo, SessionStatus};
 use std::cmp::Reverse;
 
-/// Longest session id this helm will accept from a peer.
-///
-/// Not a guess at what a supervisor mints (a UUID, 36 bytes) but a bound on
-/// what this side can still WORK with. A session id is embedded verbatim in
-/// REST paths and query strings (`/api/sessions/{id}`, the `parent` filter),
-/// so an id anywhere near the frame limit names a session no client could
-/// ever address, because the request head is refused before any handler
-/// sees it.
-///
-/// A kibibyte is two orders of magnitude above every id any farhelm
-/// supervisor has ever minted and still leaves a URL comfortably inside
-/// any HTTP head limit. The value comes from `farhelm-proto` so this
-/// ingestion check cannot drift from the handshake's auth-session check.
-pub const MAX_SESSION_ID_BYTES: usize = farhelm_proto::MAX_SESSION_ID_BYTES;
+/// Longest bare ID the helm accepts, leaving room for its entry prefix.
+/// The supervisor wire keeps its older, larger allowance; public references
+/// use the shared UUID-sized bound instead.
+pub const MAX_SESSION_ID_BYTES: usize = farhelm_proto::MAX_BARE_SESSION_ID_BYTES;
 
 /// What is wrong with a session id a peer sent, or `None` for one this helm
 /// can record and address.
@@ -38,12 +28,12 @@ pub const MAX_SESSION_ID_BYTES: usize = farhelm_proto::MAX_SESSION_ID_BYTES;
 /// The one rule every peer ingress applies: a listing
 /// (`manager::drain_sessions`), a create's reply
 /// (`client::created_session_from`), and a mutation reply before either
-/// cache records it ([`ensure_recordable_id`]). A supervisor mints UUIDs,
+/// cache records it ([`ensure_recordable_session`]). A supervisor mints UUIDs,
 /// so anything this refuses comes from a broken or hostile peer, and each
 /// clause is about what the id goes on to do on this side:
 ///
 /// - empty: no REST path or `parent` filter can name it;
-/// - past [`MAX_SESSION_ID_BYTES`]: no request head could carry it;
+/// - past [`MAX_SESSION_ID_BYTES`]: outside the helm's UUID-sized ID contract;
 /// - a control character: the agent relay prints ids on a CLI's stdout,
 ///   where a newline forges a second line and an ESC reaches a terminal;
 /// - `.` or `..`: the browser percent-encodes an id into a path segment,
@@ -54,27 +44,36 @@ pub const MAX_SESSION_ID_BYTES: usize = farhelm_proto::MAX_SESSION_ID_BYTES;
 /// nothing on this side needs it, and it would refuse ids from any
 /// supervisor that ever minted something else.
 pub fn session_id_problem(id: &str) -> Option<&'static str> {
-    if id.is_empty() {
-        Some("the session id is empty")
-    } else if id.len() > MAX_SESSION_ID_BYTES {
-        Some("the session id is past the ingress cap")
-    } else if id.chars().any(char::is_control) {
-        Some("the session id contains control characters")
-    } else if id == "." || id == ".." {
-        Some("the session id is a dot segment")
-    } else {
-        None
-    }
+    farhelm_proto::bare_session_id_problem(id)
 }
 
-/// Refuse a mutation's reply whose session id breaks
-/// [`session_id_problem`]'s rule, before either cache records it.
-pub fn ensure_recordable_id(id: &str) -> anyhow::Result<()> {
-    if let Some(problem) = session_id_problem(id) {
-        anyhow::bail!(
-            "{problem} ({} bytes); this helm cannot record or address it",
-            id.len()
-        );
+/// Why a row's references cannot all be qualified at the helm boundary.
+/// Parent and working-copy origin are bare supervisor metadata, even when their
+/// spelling resembles a full reference. They follow the same admission rule as
+/// the row ID so every accepted row can be projected without inventing an encoding.
+/// Static reasons let wire callers retain their typed invalid-reply error without
+/// echoing any peer-supplied ID into a client error.
+pub fn session_reference_problem(info: &SessionInfo) -> Option<&'static str> {
+    if let Some(problem) = session_id_problem(&info.id) {
+        return Some(problem);
+    }
+    if let Some(parent) = &info.parent
+        && session_id_problem(parent).is_some()
+    {
+        return Some("the session parent is not an admissible bare session id");
+    }
+    if let Some(copy) = &info.working_copy
+        && session_id_problem(&copy.origin_session_id).is_some()
+    {
+        return Some("the working-copy origin is not an admissible bare session id");
+    }
+    None
+}
+
+/// Refuse a row before either cache records references the public boundary cannot carry.
+pub fn ensure_recordable_session(info: &SessionInfo) -> anyhow::Result<()> {
+    if let Some(problem) = session_reference_problem(info) {
+        anyhow::bail!("{problem}; this helm cannot record or address its session references");
     }
     Ok(())
 }
@@ -234,11 +233,18 @@ mod tests {
         assert_eq!(merged_status(&running, exited.clone()), exited);
     }
 
-    /// Spec: the id bound admits exactly [`MAX_SESSION_ID_BYTES`] bytes.
+    /// The helm's small byte bound must agree with public reference parsing,
+    /// including multibyte suffixes; the supervisor relay's larger cap is unrelated.
     #[farhelm_testtrace::test]
     fn the_id_bound_is_inclusive() {
-        assert!(ensure_recordable_id(&"x".repeat(MAX_SESSION_ID_BYTES)).is_ok());
-        assert!(ensure_recordable_id(&"x".repeat(MAX_SESSION_ID_BYTES + 1)).is_err());
+        assert!(session_id_problem(&"x".repeat(MAX_SESSION_ID_BYTES)).is_none());
+        assert!(session_id_problem(&"x".repeat(MAX_SESSION_ID_BYTES + 1)).is_some());
+        assert!(session_id_problem(&"é".repeat(MAX_SESSION_ID_BYTES / 2)).is_none());
+        assert!(session_id_problem(&"é".repeat(MAX_SESSION_ID_BYTES / 2 + 1)).is_some());
+        assert_eq!(
+            MAX_SESSION_ID_BYTES,
+            farhelm_proto::MAX_BARE_SESSION_ID_BYTES
+        );
     }
 
     /// Why: list and create ingress used to apply different id rules, and
@@ -249,10 +255,10 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_id_rule_refuses_only_unaddressable_shapes() {
         for bad in ["", ".", "..", "a\nb", "a\u{1b}b"] {
-            assert!(ensure_recordable_id(bad).is_err(), "{bad:?}");
+            assert!(session_id_problem(bad).is_some(), "{bad:?}");
         }
         for good in ["...", ".x", "a.b", "0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d"] {
-            assert!(ensure_recordable_id(good).is_ok(), "{good:?}");
+            assert!(session_id_problem(good).is_none(), "{good:?}");
         }
     }
 }

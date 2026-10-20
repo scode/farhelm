@@ -70,7 +70,7 @@ pub use crate::transport::{
 
 use crate::client::{SessionListing, SupervisorClient, SupervisorError};
 use crate::session_cache::{
-    creation_order, ensure_recordable_id, eviction_victim, merge_cached_session, merged_status,
+    creation_order, ensure_recordable_session, eviction_victim, merge_cached_session, merged_status,
 };
 use crate::store::{
     CacheReplacement, DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow,
@@ -613,6 +613,9 @@ impl HostState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HostSnapshot {
     pub id: HostId,
+    /// Stable entry identity from the same registry row as this snapshot's state.
+    /// It survives connection replacement and never comes from the supervisor.
+    pub entry_uuid: String,
     pub kind: HostKind,
     /// `None` for the reserved local row, always `Some` for an ssh row.
     pub destination: Option<String>,
@@ -722,9 +725,10 @@ pub fn peer_text_capped(text: &str, cap: usize) -> String {
 /// What is checked is what this side goes on to BUILD ON, and every
 /// refusal is an ordinary failed refresh that keeps the previous cache
 /// (see [`HostActor::refresh_once`]): a session id that breaks
-/// [`crate::session_cache::session_id_problem`]'s rule (empty, past
+/// [`crate::session_cache::session_reference_problem`]'s rule (empty, past
 /// [`crate::session_cache::MAX_SESSION_ID_BYTES`], carrying a control
-/// character, or a dot segment: nothing could address it safely), an id
+/// character, or a dot segment: nothing could address it safely), including
+/// parent and checkout-origin IDs that the helm must qualify in client replies; an id
 /// listed twice (a list that contradicts itself has no single truth to
 /// cache), and a reply longer than the cap the protocol fixes (a peer
 /// ignoring the one bound on what this side retains). Order is NOT checked: the
@@ -750,7 +754,7 @@ pub async fn drain_sessions(client: &SupervisorClient) -> anyhow::Result<Session
         // same rule a create's reply gets. One bad row refuses the whole
         // list: dropping just that row would make the cache read the
         // session as ended.
-        if let Some(problem) = crate::session_cache::session_id_problem(&entry.id) {
+        if let Some(problem) = crate::session_cache::session_reference_problem(entry) {
             anyhow::bail!(
                 "the host reported an unusable session id ({problem}, {} bytes); refusing a \
                  list this side could not address",
@@ -1189,6 +1193,9 @@ struct ActorMap {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionClaim {
     pub host: HostId,
+    /// Captured before dispatch so a successful reply can retain its entry prefix
+    /// even if removal makes a later registry lookup impossible.
+    pub entry_uuid: String,
     /// Which connection this claim was made on — a manager-wide token that
     /// is never reused (see [`ActorStatus::incarnation`]).
     pub incarnation: u64,
@@ -1209,6 +1216,8 @@ pub struct SessionClaim {
 /// refuse the operation, or route onto a corpse.
 #[derive(Clone)]
 pub struct HostStatus {
+    /// The entry behind this exact state/client capture, independent of installation.
+    pub entry_uuid: String,
     pub state: HostState,
     /// `None` in every state except [`HostState::Connected`]. Not an error
     /// case to paper over: it is the "refuse with the host's state named"
@@ -1869,6 +1878,7 @@ impl ConnectionManager {
                 let published = handle.status.borrow();
                 HostSnapshot {
                     id: handle.row.id,
+                    entry_uuid: handle.row.entry_uuid.clone(),
                     kind: handle.row.kind,
                     destination: handle.row.destination.clone(),
                     alias: handle.row.alias.clone(),
@@ -1898,8 +1908,10 @@ impl ConnectionManager {
     /// `None` means no actor is running for that id.
     pub fn status(&self, host: HostId) -> Option<HostStatus> {
         let map = self.actors.lock().expect("actor map mutex poisoned");
-        let published = map.actors.get(&host)?.status.borrow();
+        let handle = map.actors.get(&host)?;
+        let published = handle.status.borrow();
         Some(HostStatus {
+            entry_uuid: handle.row.entry_uuid.clone(),
             state: published.state.clone(),
             client: published.client.clone(),
             live_sessions: published.live_sessions.clone(),
@@ -1969,9 +1981,10 @@ impl ConnectionManager {
     /// actor, or its published generation has moved on. The alternative is
     /// worse than a missed write, which merely costs one refresh interval.
     ///
-    /// Refuses an id [`ensure_recordable_id`] refuses (empty, past
+    /// Refuses references [`ensure_recordable_session`] refuses (empty, past
     /// [`crate::session_cache::MAX_SESSION_ID_BYTES`], a control character,
-    /// a dot segment) before either cache path can publish it. The mutation
+    /// a dot segment), including parent and checkout-origin references, before
+    /// either cache path can publish it. The mutation
     /// caller records this best-effort failure separately, so refusing a
     /// local seed does not revise the remote mutation's successful result.
     ///
@@ -1983,7 +1996,7 @@ impl ConnectionManager {
         claim: &SessionClaim,
         session: &SessionInfo,
     ) -> anyhow::Result<()> {
-        ensure_recordable_id(&session.id)?;
+        ensure_recordable_session(session)?;
         let (status, cache_lock, seed_epoch) = {
             let map = self.actors.lock().expect("actor map mutex poisoned");
             let Some(handle) = map.actors.get(&claim.host) else {
@@ -2431,6 +2444,7 @@ impl ConnectionManager {
                         *id,
                         live,
                         HostStatus {
+                            entry_uuid: handle.row.entry_uuid.clone(),
                             state: published.state.clone(),
                             client: published.client.clone(),
                             live_sessions: published.live_sessions.clone(),
@@ -6017,6 +6031,7 @@ mod tests {
 
         let claim = SessionClaim {
             host,
+            entry_uuid: fixture.manager.status(host).expect("connected").entry_uuid,
             incarnation: fixture.manager.status(host).expect("connected").incarnation,
             identity: None,
         };
@@ -6125,6 +6140,7 @@ mod tests {
         );
         let claim = SessionClaim {
             host,
+            entry_uuid: fixture.manager.status(host).expect("connected").entry_uuid,
             incarnation: fixture.manager.status(host).expect("connected").incarnation,
             identity: None,
         };
@@ -6133,7 +6149,7 @@ mod tests {
             .manager
             .remember_session(&claim, &session(&boundary_id, 200))
             .await
-            .expect("the protocol-sized id remains addressable");
+            .expect("the helm-sized id remains addressable");
 
         let overlong_id = "x".repeat(MAX_SESSION_ID_BYTES + 1);
         fixture
@@ -6217,6 +6233,7 @@ mod tests {
         assert!(!status.list_truncated, "a full-cap drain is not a cut");
         let claim = SessionClaim {
             host,
+            entry_uuid: status.entry_uuid.clone(),
             incarnation: status.incarnation,
             identity: None,
         };
@@ -7091,6 +7108,7 @@ mod tests {
         let current = fixture.manager.status(host).expect("connected host");
         let claim = SessionClaim {
             host,
+            entry_uuid: current.entry_uuid.clone(),
             incarnation: current.incarnation,
             identity: Some("discarding-peer".to_string()),
         };
@@ -7169,6 +7187,7 @@ mod tests {
         );
         let claim = SessionClaim {
             host,
+            entry_uuid: current.entry_uuid.clone(),
             incarnation: current.incarnation,
             identity: Some("early-peer".to_string()),
         };
@@ -7401,6 +7420,7 @@ mod tests {
         assert!(current.client.is_some());
         let claim = SessionClaim {
             host,
+            entry_uuid: current.entry_uuid.clone(),
             incarnation: current.incarnation,
             identity: Some("delete-peer".to_string()),
         };

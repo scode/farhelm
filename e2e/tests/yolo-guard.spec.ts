@@ -394,7 +394,7 @@ async function headerReplaceKeepsAnswer(page: Page, request: APIRequestContext, 
     const [refused] = await Promise.all([
       page.waitForResponse(
         (candidate) =>
-          candidate.request().method() === "POST" && candidate.url().endsWith(`/api/sessions/${sourceId}/replace`),
+          candidate.request().method() === "POST" && candidate.url().endsWith(`/api/sessions/${encodeURIComponent(sourceId)}/replace`),
       ),
       header.locator(".header-replace-confirm .btn-danger").click(),
     ]);
@@ -404,7 +404,7 @@ async function headerReplaceKeepsAnswer(page: Page, request: APIRequestContext, 
 
     // While the question is open, the session comes back to life from
     // outside the prompt, through a restart that resumes it.
-    const restarted = await request.post(`/api/sessions/${sourceId}/restart`, { data: {} });
+    const restarted = await request.post(`/api/sessions/${encodeURIComponent(sourceId)}/restart`, { data: {} });
     expect(restarted.ok(), `restarting the source: ${await restarted.text()}`).toBe(true);
     // And this page has seen it: code that re-read the session when the
     // answer arrived would now find it alive and send no precondition.
@@ -412,7 +412,7 @@ async function headerReplaceKeepsAnswer(page: Page, request: APIRequestContext, 
 
     const [answered] = await Promise.all([
       page.waitForRequest(
-        (candidate) => candidate.method() === "POST" && candidate.url().endsWith(`/api/sessions/${sourceId}/replace`),
+        (candidate) => candidate.method() === "POST" && candidate.url().endsWith(`/api/sessions/${encodeURIComponent(sourceId)}/replace`),
       ),
       confirmation.locator(answer).click(),
     ]);
@@ -496,7 +496,7 @@ async function sidebarReplaceKeepsAnswer(page: Page, request: APIRequestContext,
     const [refused] = await Promise.all([
       page.waitForResponse(
         (candidate) =>
-          candidate.request().method() === "POST" && candidate.url().endsWith(`/api/sessions/${sourceId}/replace`),
+          candidate.request().method() === "POST" && candidate.url().endsWith(`/api/sessions/${encodeURIComponent(sourceId)}/replace`),
       ),
       sourceRow.locator(".confirm-replace").click(),
     ]);
@@ -506,7 +506,7 @@ async function sidebarReplaceKeepsAnswer(page: Page, request: APIRequestContext,
 
     // While the question is open, the session comes back to life from
     // outside the prompt, through a restart that resumes it.
-    const restarted = await request.post(`/api/sessions/${sourceId}/restart`, { data: {} });
+    const restarted = await request.post(`/api/sessions/${encodeURIComponent(sourceId)}/restart`, { data: {} });
     expect(restarted.ok(), `restarting the source: ${await restarted.text()}`).toBe(true);
     // And the list has shown it: code that looked the row up again when the
     // answer arrived would now find it alive and send no precondition.
@@ -514,7 +514,7 @@ async function sidebarReplaceKeepsAnswer(page: Page, request: APIRequestContext,
 
     const [answered] = await Promise.all([
       page.waitForRequest(
-        (candidate) => candidate.method() === "POST" && candidate.url().endsWith(`/api/sessions/${sourceId}/replace`),
+        (candidate) => candidate.method() === "POST" && candidate.url().endsWith(`/api/sessions/${encodeURIComponent(sourceId)}/replace`),
       ),
       confirmation.locator(answer).click(),
     ]);
@@ -586,7 +586,7 @@ test("a skipped header replace still asks the YOLO question", async ({ page, req
     await stopSession(request, sourceId);
     const replacePosts: string[] = [];
     page.on("request", (candidate) => {
-      if (candidate.method() === "POST" && candidate.url().endsWith(`/api/sessions/${sourceId}/replace`)) {
+      if (candidate.method() === "POST" && candidate.url().endsWith(`/api/sessions/${encodeURIComponent(sourceId)}/replace`)) {
         replacePosts.push(candidate.postData() ?? "{}");
       }
     });
@@ -597,7 +597,7 @@ test("a skipped header replace still asks the YOLO question", async ({ page, req
     const [refused] = await Promise.all([
       page.waitForResponse(
         (candidate) =>
-          candidate.request().method() === "POST" && candidate.url().endsWith(`/api/sessions/${sourceId}/replace`),
+          candidate.request().method() === "POST" && candidate.url().endsWith(`/api/sessions/${encodeURIComponent(sourceId)}/replace`),
       ),
       page.locator(".header-replace-anchor .header-replace").click(),
     ]);

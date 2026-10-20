@@ -63,7 +63,9 @@ use farhelm_proto::approvals::{
 use tokio::sync::oneshot;
 
 use crate::agent_requests::AgentOrigin;
+use crate::store::SessionKey;
 use crate::{AppState, http_error};
+use farhelm_proto::SessionRef;
 
 /// The refusal when no GUI is connected to ask in.
 pub(crate) const NO_GUI_REFUSAL: &str = "no Farhelm window is open to ask the user for approval, \
@@ -108,8 +110,9 @@ struct Entry {
     identity: Option<String>,
     /// The asking session, for [`Approvals::deny_session`]. Kept beside the
     /// view rather than read back out of it so the lookup does not depend on
-    /// the card's shape.
-    asking_session: String,
+    /// the card's shape. The origin's entry is part of the key: another host
+    /// may authenticate the same bare suffix without sharing this request.
+    asking_session: SessionKey,
     answer: oneshot::Sender<Verdict>,
 }
 
@@ -133,7 +136,7 @@ struct Inner {
     /// Sessions with a delete in flight, counted because two deletes of one
     /// session can overlap. A request from one of them is refused rather than
     /// carded (see [`Approvals::deny_session`]).
-    deleting: HashMap<String, usize>,
+    deleting: HashMap<SessionKey, usize>,
 }
 
 impl Approvals {
@@ -167,7 +170,10 @@ impl Approvals {
 
     /// The origin and recorded identity of the entry `id`, if it is still
     /// waiting, without settling it.
-    fn origin_of(&self, id: &str) -> Option<(AgentOrigin, Option<String>, ApprovalAction, String)> {
+    fn origin_of(
+        &self,
+        id: &str,
+    ) -> Option<(AgentOrigin, Option<String>, ApprovalAction, SessionKey)> {
         self.lock()
             .pending
             .values()
@@ -182,7 +188,7 @@ impl Approvals {
             })
     }
 
-    /// Deny every request `session_id` has waiting, and refuse new ones, for
+    /// Deny every request from `key` waiting, and refuse new ones, for
     /// as long as the returned mark lives: the caller holds it across the
     /// delete it is about to send.
     ///
@@ -194,14 +200,14 @@ impl Approvals {
     /// reading a clone's source), which would then put up a card and hold the
     /// delete for the whole wait; the mark is what makes that request refuse
     /// at once instead.
-    pub(crate) fn deny_session(&self, session_id: &str) -> DeleteMark<'_> {
+    pub(crate) fn deny_session(&self, key: &SessionKey) -> DeleteMark<'_> {
         let settled: Vec<Entry> = {
             let mut inner = self.lock();
-            *inner.deleting.entry(session_id.to_string()).or_default() += 1;
+            *inner.deleting.entry(key.clone()).or_default() += 1;
             let seqs: Vec<u64> = inner
                 .pending
                 .iter()
-                .filter(|(_, entry)| entry.asking_session == session_id)
+                .filter(|(_, entry)| &entry.asking_session == key)
                 .map(|(seq, _)| *seq)
                 .collect();
             seqs.into_iter()
@@ -213,7 +219,7 @@ impl Approvals {
         }
         DeleteMark {
             approvals: self,
-            session_id: session_id.to_string(),
+            key: key.clone(),
         }
     }
 
@@ -231,16 +237,16 @@ impl Approvals {
 #[must_use = "the mark refuses the session's new requests only while it is held"]
 pub(crate) struct DeleteMark<'a> {
     approvals: &'a Approvals,
-    session_id: String,
+    key: SessionKey,
 }
 
 impl Drop for DeleteMark<'_> {
     fn drop(&mut self) {
         let mut inner = self.approvals.lock();
-        if let Some(count) = inner.deleting.get_mut(&self.session_id) {
+        if let Some(count) = inner.deleting.get_mut(&self.key) {
             *count -= 1;
             if *count == 0 {
-                inner.deleting.remove(&self.session_id);
+                inner.deleting.remove(&self.key);
             }
         }
     }
@@ -332,6 +338,10 @@ pub(crate) async fn ask_with_answer(
     let Some(row) = hosts.iter().find(|row| row.id == origin.host) else {
         return Err(crate::sessions::no_such_host(origin.host));
     };
+    // The key carries the authenticated origin, never an owner inferred from
+    // the asking suffix. Equal suffixes on other entries are unrelated cards.
+    let asking_key = SessionKey::new(origin.host, asking_session);
+    let asking_full_id = SessionRef::new(&row.entry_uuid, asking_session)?.to_string();
     let direct_allow = action.requires_direct_allow();
     match &mut action {
         ApprovalAction::OpenUrl {
@@ -377,7 +387,7 @@ pub(crate) async fn ask_with_answer(
     let mut changes = state.manager.events().subscribe();
     let seq = {
         let mut inner = state.approvals.lock();
-        if inner.deleting.contains_key(asking_session) {
+        if inner.deleting.contains_key(&asking_key) {
             return Err(refusal(
                 ErrorKind::Unauthorized,
                 DELETING_REFUSAL.to_string(),
@@ -393,7 +403,7 @@ pub(crate) async fn ask_with_answer(
                     host_id: origin.host,
                     host_name: host_name.clone(),
                     session: ApprovalSession {
-                        id: asking_session.to_string(),
+                        id: asking_full_id,
                         title,
                         host_name: Some(host_name),
                     },
@@ -402,7 +412,7 @@ pub(crate) async fn ask_with_answer(
                 },
                 origin,
                 identity: row.host_identity.clone(),
-                asking_session: asking_session.to_string(),
+                asking_session: asking_key,
                 answer: tx,
             },
         );
@@ -498,24 +508,28 @@ async fn asking_session_title(
         .map(|info| info.title)
 }
 
-/// Describe a TARGET session for a card from what the helm's cache knows:
-/// its title and the host the helm's routing places it on. Best effort: an
-/// unknown session, or a failed read, gives a card with only the id, which is
-/// still the truth the user needs.
-pub(crate) async fn describe_session(state: &AppState, session_id: &str) -> ApprovalSession {
+/// Describe the already resolved target without searching for its bare ID.
+///
+/// The route's captured UUID remains truthful after entry removal. Cache and
+/// registry reads only enrich the card; disappearance must not substitute a
+/// different entry or erase the identity the user is being asked to approve.
+pub(crate) async fn describe_session(
+    state: &AppState,
+    key: &SessionKey,
+    entry_uuid: &str,
+) -> ApprovalSession {
     let mut described = ApprovalSession {
-        id: session_id.to_string(),
+        id: SessionRef::new(entry_uuid, &key.session_id)
+            .expect("a routed target has an admitted ID and validated entry UUID")
+            .to_string(),
         title: None,
         host_name: None,
     };
-    let Ok(Some(host)) = state.store.host_of_session(session_id).await else {
-        return described;
-    };
-    if let Ok(Some(info)) = state.store.cached_session(host, session_id).await {
+    if let Ok(Some(info)) = state.store.cached_session(key.host, &key.session_id).await {
         described.title = Some(info.title);
     }
     if let Ok(rows) = state.store.list_hosts().await
-        && let Some(row) = rows.iter().find(|row| row.id == host)
+        && let Some(row) = rows.iter().find(|row| row.id == key.host)
     {
         described.host_name = Some(crate::aggregate::host_display_name(
             row.kind,
@@ -791,10 +805,24 @@ mod tests {
         live_origin(harness, host)
     }
 
+    /// Capture a complete display ID without a bare fleet lookup.
+    fn full_id(harness: &rest_harness::Harness, host: crate::store::HostId, bare: &str) -> String {
+        SessionRef::new(
+            &harness
+                .manager
+                .status(host)
+                .expect("premise: entry actor exists")
+                .entry_uuid,
+            bare,
+        )
+        .expect("fixture IDs are admitted")
+        .to_string()
+    }
+
     fn stop_action() -> ApprovalAction {
         ApprovalAction::Stop {
             target: ApprovalSession {
-                id: "target".to_string(),
+                id: "00000001-0000-4000-8000-000000000000:target".to_string(),
                 title: None,
                 host_name: None,
             },
@@ -832,7 +860,7 @@ mod tests {
                     .approvals
                     .list()
                     .into_iter()
-                    .find(|card| card.session.id == asking)
+                    .find(|card| card.session.id == full_id(harness, origin.host, asking))
                 {
                     return card.id;
                 }
@@ -936,29 +964,47 @@ mod tests {
         harness.await_refreshed(local).await;
         let _gui = harness.state.manager.events().admit(1).unwrap();
         let origin = live_origin(&harness, remote);
+        assert!(
+            crate::browser::tunnel_origin_matches(
+                &harness.state,
+                origin,
+                &SessionKey::new(remote, "remote-session")
+            )
+            .await
+            .unwrap(),
+            "premise: the real remote session belongs to this connection"
+        );
         assert_eq!(
             harness.store.preferences().await.unwrap().tunnel_consent,
             None
         );
-        for action in [
-            stop_action(),
-            ApprovalAction::OpenUrl {
-                url: "https://example.test/".into(),
-                local_network: false,
-                preapproved: false,
-                tunnel_available: true,
-            },
-            ApprovalAction::OpenUrl {
-                url: "http://localhost:5173/".into(),
-                local_network: true,
-                preapproved: false,
-                tunnel_available: true,
-            },
+        for (action, reason) in [
+            (stop_action(), "this request cannot open through a tunnel"),
+            (
+                ApprovalAction::OpenUrl {
+                    url: "https://example.test/".into(),
+                    local_network: false,
+                    preapproved: false,
+                    tunnel_available: true,
+                },
+                "this request cannot open through a tunnel",
+            ),
+            (
+                ApprovalAction::OpenUrl {
+                    url: "http://localhost:5173/".into(),
+                    local_network: true,
+                    preapproved: false,
+                    tunnel_available: true,
+                },
+                "allow tunnels in Farhelm before opening this link",
+            ),
         ] {
             let (task, id) = waiting_for_action(&harness, origin, "remote-session", action).await;
-            assert_eq!(
-                answer(&harness, &id, "tunnel_and_open").await.0,
-                axum::http::StatusCode::CONFLICT
+            let (status, body) = answer(&harness, &id, "tunnel_and_open").await;
+            assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+            assert!(
+                body.contains(reason),
+                "this case must reach its own eligibility/consent refusal: {body}"
             );
             assert!(
                 harness
@@ -993,7 +1039,38 @@ mod tests {
             .0,
             axum::http::StatusCode::NO_CONTENT
         );
-        for asking_origin in [origin, live_origin(&harness, local)] {
+        // With full references, the forged remote asking pair is absent on
+        // that entry. It must stay absent: borrowing local membership would
+        // turn a host's claim about its own sessions into fleet authority.
+        assert!(
+            crate::sessions::route_session(
+                &harness.state,
+                &SessionKey::new(local, "local-session")
+            )
+            .await
+            .is_ok(),
+            "premise: the local entry really owns the suffix"
+        );
+        let foreign_pair = crate::sessions::route_session(
+            &harness.state,
+            &SessionKey::new(remote, "local-session"),
+        )
+        .await
+        .err()
+        .expect("premise: the requesting remote entry does not own this suffix");
+        assert_eq!(crate::error_kind(&foreign_pair), ErrorKind::NotFound);
+        for (asking_origin, expected_status, reason) in [
+            (
+                origin,
+                axum::http::StatusCode::NOT_FOUND,
+                "no such session on this host entry",
+            ),
+            (
+                live_origin(&harness, local),
+                axum::http::StatusCode::CONFLICT,
+                "this request cannot open through a tunnel",
+            ),
+        ] {
             let (task, id) = waiting_for_action(
                 &harness,
                 asking_origin,
@@ -1006,9 +1083,11 @@ mod tests {
                 },
             )
             .await;
-            assert_eq!(
-                answer(&harness, &id, "tunnel_and_open").await.0,
-                axum::http::StatusCode::CONFLICT
+            let (status, body) = answer(&harness, &id, "tunnel_and_open").await;
+            assert_eq!(status, expected_status, "{body}");
+            assert!(
+                body.contains(reason),
+                "the original entry decides which eligibility check refuses: {body}"
             );
             assert!(
                 harness
@@ -1580,7 +1659,7 @@ mod tests {
         let card = &listed.approvals[0];
         assert_eq!(card.id, id);
         assert_eq!(card.host_id, origin.host);
-        assert_eq!(card.session.id, "sess-1");
+        assert_eq!(card.session.id, full_id(&harness, origin.host, "sess-1"));
         assert!(
             card.session.title.is_some(),
             "the origin host caches sess-1: {body}"
@@ -1746,7 +1825,10 @@ mod tests {
         let origin = local_origin(&harness).await;
         let (doomed, _) = waiting(&harness, origin, "doomed").await;
         let (other, _) = waiting(&harness, origin, "other").await;
-        let mark = harness.state.approvals.deny_session("doomed");
+        let mark = harness
+            .state
+            .approvals
+            .deny_session(&SessionKey::new(origin.host, "doomed"));
         let refused = refusal_of(ended(doomed).await);
         assert_eq!(refused.message, DELETING_REFUSAL);
         let refused = refusal_of(ask(&harness.state, origin, "doomed", stop_action()).await);
@@ -1757,11 +1839,73 @@ mod tests {
         );
         let left = harness.state.approvals.list();
         assert_eq!(left.len(), 1);
-        assert_eq!(left[0].session.id, "other");
+        assert_eq!(left[0].session.id, full_id(&harness, origin.host, "other"));
         drop(mark);
         let (again, _) = waiting(&harness, origin, "doomed").await;
         again.abort();
         other.abort();
+    }
+
+    /// Deletion counters and pending-card ownership distinguish entries even
+    /// when two authenticated supervisors claim the same asking suffix.
+    #[farhelm_testtrace::test]
+    async fn deleting_one_entry_does_not_deny_another_entries_equal_suffix() {
+        let (builder, remote) = rest_harness::FleetBuilder::new()
+            .await
+            .local(rest_harness::HostScript {
+                identity: Some("identity-local".into()),
+                sessions: vec![rest_harness::session("local", 1)],
+                ..rest_harness::HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@builder",
+                rest_harness::HostScript {
+                    identity: Some("identity-remote".into()),
+                    sessions: vec![rest_harness::session("remote", 2)],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        let local = rest_harness::local_id(&harness.store).await;
+        harness.await_refreshed(local).await;
+        harness.await_refreshed(remote).await;
+        let _gui = harness.manager.events().admit(1).unwrap();
+        let local_origin = live_origin(&harness, local);
+        let remote_origin = live_origin(&harness, remote);
+        let (local_wait, _) = waiting(&harness, local_origin, "shared").await;
+        let (remote_wait, remote_card) = waiting(&harness, remote_origin, "shared").await;
+        assert_eq!(
+            harness.state.approvals.list().len(),
+            2,
+            "premise: both entries have a waiting card"
+        );
+        let _deleting = harness
+            .state
+            .approvals
+            .deny_session(&SessionKey::new(local, "shared"));
+        assert_eq!(
+            refusal_of(ended(local_wait).await).message,
+            DELETING_REFUSAL
+        );
+        let pending = harness.state.approvals.list();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, remote_card);
+        assert_eq!(pending[0].session.id, full_id(&harness, remote, "shared"));
+        assert!(
+            !remote_wait.is_finished(),
+            "the other entry's request still awaits its own answer"
+        );
+        assert_eq!(
+            answer(&harness, &remote_card, "deny").await.0,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        assert!(
+            refusal_of(ended(remote_wait).await)
+                .message
+                .contains("declined")
+        );
     }
 
     /// Spec: a card's id is a fresh random value, so it cannot name a request
@@ -1843,13 +1987,14 @@ mod tests {
         let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
         let origin = local_origin(&harness).await;
         let (task, _) = waiting(&harness, origin, "sess-1").await;
+        let target_uri = format!("/api/sessions/{}", full_id(&harness, origin.host, "sess-1"));
         let router = harness.router();
         let delete = tokio::spawn(async move {
             router
                 .oneshot(
                     axum::http::Request::builder()
                         .method("DELETE")
-                        .uri("/api/sessions/sess-1")
+                        .uri(target_uri)
                         .header("host", "127.0.0.1:7433")
                         .body(axum::body::Body::empty())
                         .unwrap(),

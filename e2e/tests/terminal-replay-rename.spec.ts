@@ -50,7 +50,7 @@ test("rename exposes peer title and refusal characters and seeds an escaped draf
   const title = `rename-peer-${Date.now()}\u202Etitle\u200B`;
   const shown = title.replace("\u202E", "<U+202E>").replace("\u200B", "<U+200B>");
   const session = await createTabSession(request, title);
-  await page.route(`**/api/sessions/${session.id}/rename`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/rename`, async (route) => {
     await fulfillAsHelm(route, { status: 400, contentType: "text/plain", body: "refused \u202Ehost\u200B" });
   });
   try {
@@ -73,7 +73,7 @@ test("rename exposes peer title and refusal characters and seeds an escaped draf
     await expect(error).toHaveAttribute("dir", "ltr");
     expect(await error.evaluate((node) => getComputedStyle(node).unicodeBidi)).toBe("isolate");
     await expect(draft).toHaveValue(`${title}-edited`);
-    const response = await request.get(`/api/sessions/${session.id}`);
+    const response = await request.get(`/api/sessions/${encodeURIComponent(session.id)}`);
     expect(response.ok()).toBe(true);
     expect((await response.json()).title).toBe(title);
   } finally {
@@ -350,7 +350,7 @@ async function starveAfterFirstTerminalSocketFromNextLoad(
   await page.addInitScript(
     ({ sessionId, blockMs }) => {
       const Real = window.WebSocket;
-      const prefix = `/api/sessions/${sessionId}/term`;
+      const prefix = `/api/sessions/${encodeURIComponent(sessionId)}/term`;
       let spent = false;
       class Starving extends Real {
         constructor(url: string | URL, protocols?: string | string[]) {
@@ -904,7 +904,7 @@ test("rename-from-list: the row takes the new title and keeps it across re-reads
     // The server's own answer, not this view's: the supervisor serves its
     // listing from the in-memory session map, so a store-only rename would
     // fail exactly here.
-    const listed = await (await request.get(`/api/sessions/${id}`)).json();
+    const listed = await (await request.get(`/api/sessions/${encodeURIComponent(id)}`)).json();
     expect(listed.title).toBe(renamed);
 
     // And the re-read listing agrees — see `afterTwoReads` for why two.
@@ -933,7 +933,7 @@ test("held rename success keeps dialog focus and returns it after unmount", asyn
   const release = new Promise<void>((resolve) => { releaseRename = resolve; });
   let markEntered!: () => void;
   const entered = new Promise<void>((resolve) => { markEntered = resolve; });
-  await page.route(`**/api/sessions/${session.id}/rename`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/rename`, async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     markEntered();
     await release;
@@ -970,7 +970,7 @@ test("held rename success keeps dialog focus and returns it after unmount", asyn
     await expect(source.locator(".session-row-menu-panel")).toHaveCount(0);
   } finally {
     releaseRename();
-    await page.unroute(`**/api/sessions/${session.id}/rename`);
+    await page.unroute(`**/api/sessions/${encodeURIComponent(session.id)}/rename`);
     await cleanupSession(request, session.id);
   }
 });
@@ -991,7 +991,7 @@ test("held rename success preserves an unrelated focus destination", async ({ pa
   const release = new Promise<void>((resolve) => { releaseRename = resolve; });
   let markEntered!: () => void;
   const entered = new Promise<void>((resolve) => { markEntered = resolve; });
-  await page.route(`**/api/sessions/${session.id}/rename`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/rename`, async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     markEntered();
     await release;
@@ -1024,7 +1024,7 @@ test("held rename success preserves an unrelated focus destination", async ({ pa
     await expect(source.locator(".session-row-menu-panel")).toHaveCount(0);
   } finally {
     releaseRename();
-    await page.unroute(`**/api/sessions/${session.id}/rename`);
+    await page.unroute(`**/api/sessions/${encodeURIComponent(session.id)}/rename`);
     await cleanupSession(request, session.id);
   }
 });
@@ -1047,7 +1047,7 @@ test("held rename refusal keeps local error, draft, focus, and retry", async ({ 
   const release = new Promise<void>((resolve) => { releaseRename = resolve; });
   let markEntered!: () => void;
   const entered = new Promise<void>((resolve) => { markEntered = resolve; });
-  const routePattern = `**/api/sessions/${session.id}/rename`;
+  const routePattern = `**/api/sessions/${encodeURIComponent(session.id)}/rename`;
   await page.route(routePattern, async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     markEntered();
@@ -1146,7 +1146,7 @@ test("rename-refused: a control-character title shows the supervisor's words and
     // the title is one keystroke rather than a retype.
     await expect(dialog.locator(".rename-input")).toHaveValue(refused);
     // Nothing about the session moved: not on the server...
-    const fetched = await (await request.get(`/api/sessions/${id}`)).json();
+    const fetched = await (await request.get(`/api/sessions/${encodeURIComponent(id)}`)).json();
     expect(fetched.title).toBe(title);
     // ...and not in the list, which still shows the old name once the
     // field is closed.
@@ -1210,7 +1210,7 @@ test("rename-refused-pasted-newline: a multi-line title reaches the supervisor i
     // The header still shows the real title while the refusal stands.
     await expect(page.locator(".session-details .title")).toHaveText(title);
     await expect(field).toHaveValue(pasted);
-    const fetched = await (await request.get(`/api/sessions/${id}`)).json();
+    const fetched = await (await request.get(`/api/sessions/${encodeURIComponent(id)}`)).json();
     expect(fetched.title).toBe(title);
   } finally {
     if (id) await cleanupSession(request, id);
@@ -1794,7 +1794,7 @@ test("rename survives a real committed row reorder without moving its textarea",
     await expect(source.locator(".session-title")).toHaveText(expected);
     await expect(page.locator(".rename-dialog")).toHaveCount(0);
     await expect(source.locator(".session-row-menu-panel")).toHaveCount(0);
-    expect((await (await request.get(`/api/sessions/${first.id}`)).json()).title).toBe(expected);
+    expect((await (await request.get(`/api/sessions/${encodeURIComponent(first.id)}`)).json()).title).toBe(expected);
 
     await openRowMenu(source);
     await source.locator(".session-row-rename").click();
@@ -1879,7 +1879,7 @@ test("reveal-does-not-steal-focus: a rename field being typed into keeps focus a
 function observeQuestionInput(page: Page, id: string): Buffer[] {
   const binary: Buffer[] = [];
   page.on("websocket", (socket) => {
-    if (new URL(socket.url()).pathname !== `/api/sessions/${id}/term`) return;
+    if (new URL(socket.url()).pathname !== `/api/sessions/${encodeURIComponent(id)}/term`) return;
     socket.on("framesent", ({ payload }) => { if (Buffer.isBuffer(payload)) binary.push(payload); });
   });
   return binary;

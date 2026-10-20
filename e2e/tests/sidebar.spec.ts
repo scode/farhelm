@@ -210,7 +210,7 @@ test("external deletion disables rename without discarding its draft", async ({ 
     const dialog = page.locator(".rename-dialog");
     await dialog.locator(".rename-input").fill(draft);
 
-    const deleted = await request.delete(`/api/sessions/${session.id}`);
+    const deleted = await request.delete(`/api/sessions/${encodeURIComponent(session.id)}`);
     expect(deleted.ok(), await deleted.text()).toBeTruthy();
     await expect(target).toHaveCount(0, { timeout: 20_000 });
     await expect(dialog.locator(".rename-unavailable")).toBeVisible();
@@ -1015,7 +1015,7 @@ test("selecting a session leaves the sidebar and the session view visible side b
     // directly. Going through the normal stop-then-delete helper waits for
     // a terminal attachment this test deliberately pinned away from source.
     await page.close();
-    const deleted = await request.delete(`/api/sessions/${session.id}`);
+    const deleted = await request.delete(`/api/sessions/${encodeURIComponent(session.id)}`);
     expect(deleted.ok() || deleted.status() === 404, "the owned clone source must be removed").toBeTruthy();
   }
 });
@@ -1380,7 +1380,7 @@ test("an unanswered view operation disables row selection until it completes", a
     // Resumable: an unavailable Restart would send no request to hold.
     a = await createResumableSession(request, { title: `busy-a-${Date.now()}`, cwd: "/tmp" });
     b = await createSession(request, { title: `busy-b-${Date.now()}`, cwd: "/tmp", invocation: "sleep 300" });
-    await page.route(`**/api/sessions/${a.id}/restart`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(a.id)}/restart`, async (route) => {
       await restartHeld;
       await route.continue();
     });
@@ -1414,7 +1414,7 @@ test("an unanswered view operation disables row selection until it completes", a
   } finally {
     releaseRestart();
     await cleanupOwnedSteps(bodyFailed, [
-      ["restart route", () => a && page.unroute(`**/api/sessions/${a.id}/restart`)],
+      ["restart route", () => a && page.unroute(`**/api/sessions/${encodeURIComponent(a.id)}/restart`)],
       ["session A", () => a && cleanupSession(request, a.id)],
       ["session B", () => b && cleanupSession(request, b.id)],
     ]);
@@ -2117,7 +2117,7 @@ test("a reopened busy menu stays navigable while refusing to act", async ({ page
   });
   let stopRequests = 0;
   try {
-    await page.route(`**/api/sessions/${session.id}/stop`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/stop`, async (route) => {
       stopRequests++;
       await held;
       // Swallowed on purpose: by the time the gate opens the test may
@@ -2207,7 +2207,7 @@ test("a reopened busy menu stays navigable while refusing to act", async ({ page
     expect(stopRequests).toBe(1);
   } finally {
     release();
-    await page.unroute(`**/api/sessions/${session.id}/stop`).catch(() => {});
+    await page.unroute(`**/api/sessions/${encodeURIComponent(session.id)}/stop`).catch(() => {});
     await cleanupSession(request, session.id);
   }
 });
@@ -2823,7 +2823,8 @@ test("compact hides the second line and persists across client seeds", async ({
     await expect(target.locator(".session-row-meta")).toHaveCount(0);
     const cardId = await target.locator(".session-row-open").getAttribute("data-tooltip-card");
     expect(cardId, "compact rows point to their summary card").toBeTruthy();
-    await expect(page.locator(`#${cardId} .session-summary-path`)).toHaveText(session.cwd);
+    // Full session ids contain a colon, which a `#id` selector would read as a pseudo-class.
+    await expect(page.locator(`[id="${cardId}"] .session-summary-path`)).toHaveText(session.cwd);
     await expect(target.locator(".session-row-open")).not.toHaveAttribute("data-tooltip", /./);
     // Compact mode keeps the first-line local-execution cue visible.
     await expect(target.locator(".host-kind-icon[data-glyph='laptop']")).toBeVisible();
@@ -3882,7 +3883,7 @@ test("auto-select remembers the last click, falls back to newest, and attaches",
     // A stale remembered id — a session that no longer exists — falls
     // back to the newest-created session.
     await patchPreferences(request, {
-      last_selected: "00000000-0000-0000-0000-000000000000",
+      last_selected: "00000000-0000-0000-0000-000000000000:missing-session",
     });
     await page.reload();
     await expect(page.locator(".session-details .title")).toContainText("policy-newer-", {
@@ -4476,7 +4477,7 @@ test("a retained refusal stays inside a bottom-row menu's scrolling panel", asyn
     const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
     expect(stamp, "the live helm must stamp its replies").toBeTruthy();
     const refusal = Array.from({ length: 120 }, (_, i) => `refusal-sentinel-${i}`).join(" ");
-    await page.route(`**/api/sessions/${targetId}/stop`, (route) =>
+    await page.route(`**/api/sessions/${encodeURIComponent(targetId)}/stop`, (route) =>
       route.fulfill({
         status: 500,
         headers: { "x-farhelm-build": stamp, "content-type": "text/plain" },
@@ -7942,7 +7943,7 @@ test("a manual mark-unread on the open session sticks", async ({ page, request }
     // the selection.
     let automaticMarks = 0;
     page.on("request", (candidate) => {
-      if (candidate.method() === "PUT" && new URL(candidate.url()).pathname === `/api/sessions/${session.id}/seen` &&
+      if (candidate.method() === "PUT" && new URL(candidate.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}/seen` &&
         candidate.postDataJSON().seen_activity_at !== null) automaticMarks += 1;
     });
     await openRowMenu(target);
@@ -7950,7 +7951,7 @@ test("a manual mark-unread on the open session sticks", async ({ page, request }
     await expect(markSeenItem).toHaveText("mark unread");
     const [cleared] = await Promise.all([
       page.waitForResponse((candidate) =>
-        candidate.request().method() === "PUT" && new URL(candidate.url()).pathname === `/api/sessions/${session.id}/seen` &&
+        candidate.request().method() === "PUT" && new URL(candidate.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}/seen` &&
         candidate.request().postDataJSON().seen_activity_at === null
       ),
       markSeenItem.click(),
@@ -7976,7 +7977,7 @@ test("a manual mark-unread on the open session sticks", async ({ page, request }
     // title is the oracle that current (and its auto-mark effect) consumed
     // this post-clear refresh, even if the listing answered much earlier.
     const laterDetail = page.waitForResponse(async (candidate) =>
-      candidate.request().method() === "GET" && new URL(candidate.url()).pathname === `/api/sessions/${session.id}` &&
+      candidate.request().method() === "GET" && new URL(candidate.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}` &&
       candidate.ok() && (await candidate.json()).title === refreshedTitle
     );
     await renameSession(request, session.id, refreshedTitle);
@@ -8024,14 +8025,14 @@ test("a manual read toggle reverses under a build mismatch", async ({ page, requ
     await openRowMenu(target);
     const toggle = target.locator(".session-row-mark-seen");
     await expect(toggle).toHaveText("mark read");
-    const read = page.waitForResponse((reply) => reply.url().endsWith(`/api/sessions/${session.id}/seen`) &&
+    const read = page.waitForResponse((reply) => reply.url().endsWith(`/api/sessions/${encodeURIComponent(session.id)}/seen`) &&
       reply.request().method() === "PUT" && reply.request().postDataJSON().seen_activity_at !== null);
     await toggle.click();
     expect((await read).ok()).toBe(true);
     await expect(target.getByRole("menu")).toHaveCount(0);
     await openRowMenu(target);
     await expect(toggle).toHaveText("mark unread");
-    const unread = page.waitForResponse((reply) => reply.url().endsWith(`/api/sessions/${session.id}/seen`) &&
+    const unread = page.waitForResponse((reply) => reply.url().endsWith(`/api/sessions/${encodeURIComponent(session.id)}/seen`) &&
       reply.request().method() === "PUT" && reply.request().postDataJSON().seen_activity_at === null);
     await toggle.click();
     expect((await unread).ok()).toBe(true);
@@ -8161,7 +8162,7 @@ test("a failed manual mark closes on acceptance and preserves a newer menu", asy
     await openRowMenu(target);
     const markRead = target.getByRole("menuitem", { name: "mark read" });
     await expect(markRead).toBeVisible({ timeout: 45_000 });
-    await page.route(`**/api/sessions/${session.id}/seen`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/seen`, async (route) => {
       seenRequests++;
       await seenHeld;
       await route.fulfill({

@@ -45,6 +45,7 @@ import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
 import { cleanupSession, waitForTermText } from "./helpers/term";
+import { supervisorSessionId } from "./helpers/fleet";
 import {
   addTab,
   createTabSession,
@@ -516,7 +517,7 @@ test("a file dropped on the agent terminal uploads and inserts its host path at 
     );
     const hostPath = match[1];
     expect(hostPath, "the path must live under this session's own attachments directory")
-      .toContain(`/attachments/${id}/`);
+      .toContain(`/attachments/${supervisorSessionId(id)}/`);
     expect(hostPath.endsWith(name), `dropped files keep their name: ${hostPath}`).toBe(true);
     expect(fs.readFileSync(hostPath, "utf8")).toBe(body);
 
@@ -569,7 +570,7 @@ test("a file dropped on a tab inserts its path in that tab, leaving the agent te
       new RegExp(`(${hostPathEnding("from-tab\\.txt")})`),
     );
     const hostPath = match[1];
-    expect(hostPath).toContain(`/attachments/${id}/`);
+    expect(hostPath).toContain(`/attachments/${supervisorSessionId(id)}/`);
     expect(fs.readFileSync(hostPath, "utf8")).toBe(body);
 
     expect(
@@ -617,7 +618,7 @@ test("a pasted image is uploaded under a generated name and its path inserted", 
       new RegExp(`(${hostPathEnding("pasted-\\d+(?:-\\d+)?\\.png")})`),
     );
     const hostPath = match[1];
-    expect(hostPath).toContain(`/attachments/${id}/`);
+    expect(hostPath).toContain(`/attachments/${supervisorSessionId(id)}/`);
     // The counter is per page and this is the page's first paste, so the
     // name is `pasted-1.png`; the optional numeric suffix is the
     // supervisor's collision resolution, which nothing here should hit but
@@ -918,7 +919,7 @@ test("typing stays live during an upload, and the path lands at the cursor posit
       "terminal",
       new RegExp(`PRE:LIVE\\S*?(${hostPathEnding(`${stamp}\\.txt`)})`),
     );
-    expect(match[1]).toContain(`/attachments/${id}/`);
+    expect(match[1]).toContain(`/attachments/${supervisorSessionId(id)}/`);
     expect(fs.readFileSync(match[1], "utf8")).toBe(body);
     // The indicator goes away on its own once nothing is in flight.
     await expect(busy).toHaveCount(0);
@@ -963,7 +964,7 @@ test("two dropped files insert both paths, each its own word", async ({ page, re
       ),
     );
     for (const [hostPath, expected] of [[match[1], "first body"], [match[2], "second body"]]) {
-      expect(hostPath).toContain(`/attachments/${id}/`);
+      expect(hostPath).toContain(`/attachments/${supervisorSessionId(id)}/`);
       expect(fs.readFileSync(hostPath, "utf8")).toBe(expected);
     }
   } finally {
@@ -1021,7 +1022,7 @@ test("a clipboard payload of two real files uploads both, each under its own nam
       ),
     );
     for (const [hostPath, expected] of [[match[1], "document body"], [match[2], "picture body"]]) {
-      expect(hostPath).toContain(`/attachments/${id}/`);
+      expect(hostPath).toContain(`/attachments/${supervisorSessionId(id)}/`);
       expect(fs.readFileSync(hostPath, "utf8")).toBe(expected);
     }
     const captured = await lastClipboardFacts(page);

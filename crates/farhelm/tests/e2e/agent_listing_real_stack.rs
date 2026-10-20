@@ -46,6 +46,16 @@ use farhelm_proto::{
     SessionStatus,
 };
 
+/// Convert a fixture's full REST identity only at a supervisor, store or tmux boundary.
+/// These callers already know the owning supervisor; bare input is a fixture bug, not a lookup hint.
+pub(crate) fn bare_session_id(reference: &str) -> String {
+    reference
+        .parse::<farhelm_proto::SessionRef>()
+        .expect("the helm returned a full session reference")
+        .bare_id()
+        .to_string()
+}
+
 /// Open the helm's terminal WebSocket for `session`, and hold it.
 ///
 /// Hand-rolled down to the upgrade request because no WebSocket client is a
@@ -115,14 +125,16 @@ async fn hold_gui_socket(helm: &HelmProcess, secret: &str, path: &str) -> tokio:
 /// racing the launch shim, which consumes and deletes its spec file as soon
 /// as it has read it.
 ///
+/// `session` is the full REST reference; the credential store remains supervisor-local.
 /// Polled rather than read once: the store is a live database another
 /// process is writing, and a create that has returned over HTTP may still
 /// be a moment away from being readable by a second connection.
 pub(crate) async fn session_token(state_dir: &std::path::Path, session: &str) -> String {
+    let session = bare_session_id(session);
     let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
     loop {
         if let Ok(store) = SessionStore::open(&state_dir.join("supervisor.db"), false).await
-            && let Ok(Some(token)) = store.session_token(session).await
+            && let Ok(Some(token)) = store.session_token(&session).await
         {
             return token;
         }
@@ -142,7 +154,9 @@ pub(crate) async fn session_token(state_dir: &std::path::Path, session: &str) ->
 /// [`agent_command_args`]'s success-or-panic contract. The shared builder
 /// also supplies the deadline-bounded attachment probe, so both paths use
 /// the same identity and the three environment variables injected by the
-/// production launch shim. Only the child environment is changed.
+/// production launch shim. The supplied full reference is stripped for that
+/// child credential; public verb targets in `args` remain full. Only the child
+/// environment is changed.
 ///
 /// Takes a whole ARGV slice rather than a single verb word, because the
 /// lifecycle verbs need two or three elements (a title positional, a
@@ -174,7 +188,10 @@ fn agent_command_builder(
     command
         .arg("agent")
         .args(args)
-        .env(farhelm_supervisor::launch::SESSION_ID_ENV_VAR, session)
+        .env(
+            farhelm_supervisor::launch::SESSION_ID_ENV_VAR,
+            bare_session_id(session),
+        )
         .env(farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR, token)
         .env(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR, socket);
     command
@@ -629,7 +646,33 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
         "the marked row must be the asking session: {sessions:?}"
     );
 
-    // `helm`, `supervisor` and `work` are deliberately still alive here:
+    let json = agent_command_args(&["sessions", "--json"], &session_id, &token, &socket).await;
+    let envelope: serde_json::Value = serde_json::from_str(&json).expect("discovery JSON envelope");
+    let reference: farhelm_proto::SessionRef = session_id.parse().expect("created full reference");
+    assert_eq!(envelope["schema_version"], 7);
+    assert_eq!(envelope["caller"]["session_id"], session_id);
+    assert_eq!(envelope["caller"]["host_id"], reference.entry_uuid());
+    assert_eq!(envelope["reply"]["caller_host_id"], reference.entry_uuid());
+    let own = envelope["reply"]["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["current"] == true)
+        .expect("the asking session is marked in JSON");
+    assert_eq!(own["id"], session_id);
+    assert_eq!(own["host_id"], reference.entry_uuid());
+    let hosts = agent_command_args(&["hosts", "--json"], &session_id, &token, &socket).await;
+    let hosts: serde_json::Value = serde_json::from_str(&hosts).expect("hosts JSON envelope");
+    assert_eq!(hosts["schema_version"], 7);
+    let own_host = hosts["reply"]["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["current"] == true)
+        .expect("the asking host is marked in JSON");
+    assert_eq!(own_host["id"], reference.entry_uuid());
+
+    // The helm, supervisor and work directory are deliberately still alive here:
     // they hold the processes, the tmux server, and the directories both
     // are still using. See `merged_hosts` for why an explicit drop would
     // only invite someone to reorder them.
@@ -777,7 +820,11 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
     // not a readiness oracle. The shared post-exec marker proves the fake
     // agent ran before Stop; otherwise stopping the wrapper legitimately
     // records "never started" rather than the exit this test must exercise.
-    wait_for_agent_ready(&supervisor.state.path().join("tmux.sock"), &target_id).await;
+    wait_for_agent_ready(
+        &supervisor.state.path().join("tmux.sock"),
+        &bare_session_id(&target_id),
+    )
+    .await;
 
     // `stop`, with an explicit `--session` naming the
     // TARGET — see the module docs for why acting on a different session
@@ -1071,9 +1118,12 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
                 "--cwd",
                 &created_cwd,
                 "--parent",
-                &asker_id,
+                &bare_session_id(&asker_id),
             ])
-            .env(farhelm_supervisor::launch::SESSION_ID_ENV_VAR, &asker_id)
+            .env(
+                farhelm_supervisor::launch::SESSION_ID_ENV_VAR,
+                bare_session_id(&asker_id),
+            )
             .env(farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR, &token)
             .env(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR, &socket);
         command
@@ -1191,7 +1241,8 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
     );
     let parent: SessionInfo = serde_json::from_str(&body).expect("structured create JSON");
     assert_eq!(parent.launch.agent_selection(), Some(&selection.clone()));
-    let parent_argv = observed_argv_in_state(supervisor.state.path(), &parent.id, 1).await;
+    let parent_argv =
+        observed_argv_in_state(supervisor.state.path(), &bare_session_id(&parent.id), 1).await;
     assert!(
         parent_argv.contains("gpt-6-astra"),
         "the structured parent must reach the owned fake executable: {parent_argv}"
@@ -1227,7 +1278,8 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
     let child = get_json(&client, &format!("{}/api/sessions/{child_id}", helm.base)).await;
     assert_eq!(child["launch"]["kind"], "agent");
     assert_eq!(child["launch"]["selection"], serde_json::json!(selection));
-    let argv = observed_argv_in_state(supervisor.state.path(), &child_id, 2).await;
+    let argv =
+        observed_argv_in_state(supervisor.state.path(), &bare_session_id(&child_id), 2).await;
     assert!(
         argv.contains("gpt-6-astra"),
         "clone argv lost model: {argv}"
@@ -1243,7 +1295,7 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
     let stored = SessionStore::open(&supervisor.state.path().join("supervisor.db"), false)
         .await
         .expect("open supervisor store")
-        .session(&child_id)
+        .session(&bare_session_id(&child_id))
         .await
         .expect("read structured child")
         .expect("agent clone remains stored");
@@ -1263,8 +1315,12 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
     let replacement: SessionInfo = serde_json::from_str(&body).expect("replace JSON");
     assert_ne!(replacement.id, child_id, "replace must mint a new session");
     assert_eq!(replacement.launch, stored.launch);
-    let replacement_argv =
-        observed_argv_in_state(supervisor.state.path(), &replacement.id, 3).await;
+    let replacement_argv = observed_argv_in_state(
+        supervisor.state.path(),
+        &bare_session_id(&replacement.id),
+        3,
+    )
+    .await;
     assert!(
         replacement_argv.contains("gpt-6-astra")
             && replacement_argv.contains("model_reasoning_effort=high")
@@ -1281,7 +1337,7 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
         SessionStore::open(&supervisor.state.path().join("supervisor.db"), false)
             .await
             .expect("reopen replacement store")
-            .session(&replacement.id)
+            .session(&bare_session_id(&replacement.id))
             .await
             .expect("read replacement")
             .expect("replacement remains stored");

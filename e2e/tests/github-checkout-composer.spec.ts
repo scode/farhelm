@@ -618,7 +618,7 @@ test("a fresh-checkout replace-with retry carries the precondition shown at that
       await fulfill(route, { json: previewFor(route.request().postDataJSON(), host, 1) });
     });
     const replaces: { only_if_nothing_alive: boolean; only_if_agent_ended: boolean; with: unknown }[] = [];
-    await page.route(`**/api/sessions/${source.id}/replace`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(source.id)}/replace`, async (route) => {
       replaces.push(route.request().postDataJSON());
       if (replaces.length === 1) await route.abort("failed");
       else await fulfill(route, { status: 409, json: { error: "fixture unresolved conflict" } });
@@ -691,7 +691,7 @@ for (const action of ["clone", "replace-with"] as const) {
       // Clone creates and Replace with replaces; both are refused before any
       // allocation so the test can launch twice from one dialog.
       const launches: Record<string, unknown>[] = [];
-      const endpoint = action === "clone" ? "**/api/sessions" : `**/api/sessions/${source.id}/replace`;
+      const endpoint = action === "clone" ? "**/api/sessions" : `**/api/sessions/${encodeURIComponent(source.id)}/replace`;
       await page.route(endpoint, async (route) => {
         if (route.request().method() !== "POST") return route.continue();
         const body = route.request().postDataJSON();

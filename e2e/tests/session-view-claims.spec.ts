@@ -135,9 +135,9 @@ test("an in-flight Restart's claim is released when another client deletes the s
     await expect(restart).not.toHaveAttribute("aria-disabled", "true");
     // An idle agent restarts at once, without a prompt.
     await expect(restart).toHaveAttribute("data-confirms", "false", { timeout: 15_000 });
-    release = await holdMutation(page, (url) => url.pathname === `/api/sessions/${source.id}/restart`);
+    release = await holdMutation(page, (url) => url.pathname === `/api/sessions/${encodeURIComponent(source.id)}/restart`);
     const sent = page.waitForRequest(
-      (candidate) => candidate.method() === "POST" && candidate.url().endsWith(`/api/sessions/${source.id}/restart`),
+      (candidate) => candidate.method() === "POST" && candidate.url().endsWith(`/api/sessions/${encodeURIComponent(source.id)}/restart`),
     );
     await restart.click();
     await sent;

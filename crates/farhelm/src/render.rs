@@ -79,7 +79,7 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
                     host.state.clone(),
                 ]
             }));
-            // NAME (column 1) is printed WHOLE, exempt from the clamp every
+            // NAME (column 2) is printed WHOLE, exempt from the clamp every
             // other non-final column takes, because this column is not a
             // description of a host — it is the SELECTOR for one. `create`
             // and `clone` take `--host <NAME>` and match it exactly, so a
@@ -88,9 +88,8 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
             // amplification argument does not transfer here either: host
             // names are operator-registered ssh destinations, one per
             // machine in a fleet, not the per-session user text
-            // `MAX_CELL_WIDTH` was written for. The sessions table below
-            // keeps the clamp on every one of its columns for exactly that
-            // reason.
+            // `MAX_CELL_WIDTH` was written for. Session descriptions below
+            // keep that clamp; their bounded ID selector is exempt too.
             Ok(aligned(&rows, &[1, 2]))
         }
         AgentReply::Sessions { sessions, .. } => {
@@ -116,7 +115,11 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
                     restart_offer_cell(session.restart_offer).to_string(),
                 ]
             }));
-            Ok(aligned(&rows, &[]))
+            // A full ID is the exact --session selector, ordinarily 73 bytes
+            // for UUID:UUID. Cutting it at the descriptive-cell width would
+            // make discovery print an ID no acting verb could use. The helm's
+            // 77-byte full-ID cap bounds the extra padding across the table.
+            Ok(aligned(&rows, &[1]))
         }
         AgentReply::Templates { templates, .. } => {
             let mut rows = vec![vec!["NAME".to_string(), "SETS".to_string()]];
@@ -318,9 +321,10 @@ fn marker(current: bool) -> String {
 /// other row — turning a valid, bounded reply into hundreds of megabytes
 /// before a single byte is printed.
 ///
-/// Forty-eight is chosen to fit the values that actually matter whole —
-/// session ids, host names, ordinary titles, most working directories — on
-/// a terminal that can still show the columns after it.
+/// Forty-eight keeps ordinary titles and most working directories readable
+/// on a terminal that can still show the columns after them. Selector columns
+/// opt out because a shortened host name, template name or full session ID
+/// cannot be handed back to an acting verb.
 const MAX_CELL_WIDTH: usize = 48;
 
 /// Pad every column to its widest cell, one row per line, with every cell
@@ -724,7 +728,7 @@ mod tests {
         }
     }
 
-    /// Spec: a non-final column is cut to [`MAX_CELL_WIDTH`] with a `…`.
+    /// Spec: a non-final descriptive column is cut to [`MAX_CELL_WIDTH`] with a `…`.
     ///
     /// This is a resource bound, not a cosmetic one. Alignment pads every
     /// cell of a column to the widest one in it, and session titles, paths
@@ -732,7 +736,7 @@ mod tests {
     /// create-time cap — so one long value in a middle column multiplies by
     /// the row count into an output far larger than the reply that produced
     /// it. The final restart-offer vocabulary needs no arbitrary-text
-    /// width exception.
+    /// width exception. Full session IDs are bounded selectors and print whole.
     #[farhelm_testtrace::test]
     fn non_final_columns_are_clamped() {
         let long = "x".repeat(MAX_CELL_WIDTH * 3);

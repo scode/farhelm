@@ -79,7 +79,7 @@ for (const surface of ["sidebar", "header"] as const) {
     const source = await createSession(request, { title: `replace-retry-${surface}-${Date.now()}` });
     let replacementId: string | undefined;
     const keys: string[] = [];
-    const endpoint = `**/api/sessions/${source.id}/replace`;
+    const endpoint = `**/api/sessions/${encodeURIComponent(source.id)}/replace`;
     try {
       await page.route(endpoint, async (route) => {
         keys.push(route.request().postDataJSON().intent_key);
@@ -124,7 +124,7 @@ for (const surface of ["sidebar", "header"] as const) {
       await replace.click();
       const [response] = await Promise.all([
         page.waitForResponse((response) => response.request().method() === "POST"
-          && response.url().endsWith(`/api/sessions/${source.id}/replace`)),
+          && response.url().endsWith(`/api/sessions/${encodeURIComponent(source.id)}/replace`)),
         confirm.click(),
       ]);
       expect(response.ok()).toBe(true);
@@ -160,7 +160,7 @@ for (const surface of ["sidebar", "header"] as const) {
     fs.mkdirSync(cwd);
     const title = `replace-refused-${surface}-${Date.now()}`;
     const source = await createSession(request, { title, cwd });
-    const endpoint = `**/api/sessions/${source.id}/replace`;
+    const endpoint = `**/api/sessions/${encodeURIComponent(source.id)}/replace`;
     const keys: string[] = [];
     try {
       await waitForListedState(request, source.id, "live");
@@ -182,7 +182,7 @@ for (const surface of ["sidebar", "header"] as const) {
       };
       const [refusal] = await Promise.all([
         page.waitForResponse((response) => response.request().method() === "POST"
-          && response.url().endsWith(`/api/sessions/${source.id}/replace`)),
+          && response.url().endsWith(`/api/sessions/${encodeURIComponent(source.id)}/replace`)),
         submit(),
       ]);
       expect(refusal.ok()).toBe(false);
@@ -198,7 +198,7 @@ for (const surface of ["sidebar", "header"] as const) {
       expect(fs.statSync(cwd).isDirectory(), "the refusal's cause is repaired before retry").toBe(true);
       const [success] = await Promise.all([
         page.waitForResponse((response) => response.request().method() === "POST"
-          && response.url().endsWith(`/api/sessions/${source.id}/replace`)),
+          && response.url().endsWith(`/api/sessions/${encodeURIComponent(source.id)}/replace`)),
         submit(),
       ]);
       expect(success.ok(), await success.text()).toBe(true);
@@ -227,7 +227,7 @@ for (const first of ["sidebar", "header"] as const) {
   test(`plain Replace shares a committed retry across controls (${first} first)`, async ({ page, request }) => {
     const title = `replace-shared-${first}-${Date.now()}`;
     const source = await createSession(request, { title });
-    const endpoint = `**/api/sessions/${source.id}/replace`;
+    const endpoint = `**/api/sessions/${encodeURIComponent(source.id)}/replace`;
     const keys: string[] = [];
     let bodyFailed = false;
     try {
@@ -276,7 +276,7 @@ for (const first of ["sidebar", "header"] as const) {
       await expect(sourceRow).toHaveAttribute("data-session-selected", "true");
       await waitForSessionRevealed(page, source.id);
       const response = page.waitForResponse((reply) => reply.request().method() === "POST"
-        && reply.url().endsWith(`/api/sessions/${source.id}/replace`));
+        && reply.url().endsWith(`/api/sessions/${encodeURIComponent(source.id)}/replace`));
       if (first === "header") await confirmSidebarReplace(sourceRow);
       else {
         await page.locator(".header-replace").click();
@@ -324,8 +324,8 @@ for (const surface of ["sidebar", "header"] as const) {
   test(`plain Replace keeps a newer same-source key after old ${surface} YOLO cancellation`, async ({ page, request }) => {
     const source = await createSession(request, { title: `replace-return-${surface}-${Date.now()}` });
     const other = await createSession(request, { title: `replace-between-${surface}-${Date.now()}` });
-    const sourceEndpoint = `**/api/sessions/${source.id}/replace`;
-    const otherEndpoint = `**/api/sessions/${other.id}/replace`;
+    const sourceEndpoint = `**/api/sessions/${encodeURIComponent(source.id)}/replace`;
+    const otherEndpoint = `**/api/sessions/${encodeURIComponent(other.id)}/replace`;
     const keys: string[] = [];
     let bodyFailed = false;
     try {
@@ -408,8 +408,8 @@ for (const olderAction of ["late refusal", "YOLO cancellation"] as const) {
       }
       older = await createSession(request, { title: `replace-older-${Date.now()}` });
       newer = await createSession(request, { title: `replace-newer-${Date.now()}` });
-      const olderEndpoint = `**/api/sessions/${older.id}/replace`;
-      const newerEndpoint = `**/api/sessions/${newer.id}/replace`;
+      const olderEndpoint = `**/api/sessions/${encodeURIComponent(older.id)}/replace`;
+      const newerEndpoint = `**/api/sessions/${encodeURIComponent(newer.id)}/replace`;
       await page.route(olderEndpoint, async (route) => {
         olderDispatched = true;
         if (olderAction === "late refusal") {
@@ -485,7 +485,7 @@ for (const olderAction of ["late refusal", "YOLO cancellation"] as const) {
 test("plain Replace gets a fresh sidebar key after cancelling header Replace with", async ({ page, request }) => {
   expect(helmBuild(), "controlled refusals use the live helm's nonempty build stamp").not.toBe("");
   const source = await createSession(request, { title: `replace-with-abandons-${Date.now()}` });
-  const endpoint = `**/api/sessions/${source.id}/replace`;
+  const endpoint = `**/api/sessions/${encodeURIComponent(source.id)}/replace`;
   const keys: string[] = [];
   try {
     await page.route(endpoint, async (route) => {
@@ -572,7 +572,7 @@ test("replacing a live session creates a fresh row in its place, selected, with 
       page.waitForResponse(
         (r) =>
           r.request().method() === "POST"
-          && r.url().endsWith(`/api/sessions/${source.id}/replace`),
+          && r.url().endsWith(`/api/sessions/${encodeURIComponent(source.id)}/replace`),
       ),
       page.keyboard.press("Enter"),
     ]);
@@ -652,7 +652,7 @@ test("cancelling a replace confirmation leaves the session untouched", async ({ 
   page.on("request", (req) => {
     if (
       req.method() === "POST"
-      && req.url().endsWith(`/api/sessions/${session.id}/replace`)
+      && req.url().endsWith(`/api/sessions/${encodeURIComponent(session.id)}/replace`)
     ) {
       replaceRequests.push(req.url());
     }
@@ -737,7 +737,7 @@ test("opening replace-with focuses search before any typing or mode click", asyn
     const countPosts = (issued: import("@playwright/test").Request) => {
       if (issued.method() !== "POST") return;
       const pathname = new URL(issued.url()).pathname;
-      if (pathname === "/api/sessions" || pathname === `/api/sessions/${source.id}/replace`) {
+      if (pathname === "/api/sessions" || pathname === `/api/sessions/${encodeURIComponent(source.id)}/replace`) {
         posts.push(pathname);
       }
     };
@@ -810,7 +810,7 @@ test("opening replace-with from the keyboard focuses search before any typing", 
     const countPosts = (issued: import("@playwright/test").Request) => {
       if (issued.method() !== "POST") return;
       const pathname = new URL(issued.url()).pathname;
-      if (pathname === "/api/sessions" || pathname === `/api/sessions/${sourceId}/replace`) {
+      if (pathname === "/api/sessions" || pathname === `/api/sessions/${encodeURIComponent(sourceId)}/replace`) {
         posts.push(pathname);
       }
     };
@@ -938,7 +938,7 @@ test("replace with pre-fills clone's form from the source, and editing the harne
     // /api/sessions/{id}/replace` rather than `POST /api/sessions`.
     const [response] = await Promise.all([
       page.waitForResponse(
-        (r) => r.request().method() === "POST" && r.url().endsWith(`/api/sessions/${sourceId}/replace`),
+        (r) => r.request().method() === "POST" && r.url().endsWith(`/api/sessions/${encodeURIComponent(sourceId)}/replace`),
       ),
       search.press("Enter"),
     ]);
@@ -983,7 +983,7 @@ test("cancelling a replace-with composer leaves the source untouched and creates
   page.on("request", (req) => {
     if (req.method() !== "POST") return;
     const url = new URL(req.url());
-    if (url.pathname === "/api/sessions" || url.pathname === `/api/sessions/${session.id}/replace`) {
+    if (url.pathname === "/api/sessions" || url.pathname === `/api/sessions/${encodeURIComponent(session.id)}/replace`) {
       posts.push(url.pathname);
     }
   });
@@ -1035,7 +1035,7 @@ async function openReplaceWith(page: Page, sourceId: string, badge: RegExp) {
 async function pressReplace(page: Page, form: Locator, sourceId: string) {
   const [response] = await Promise.all([
     page.waitForResponse(
-      (r) => r.request().method() === "POST" && r.url().endsWith(`/api/sessions/${sourceId}/replace`),
+      (r) => r.request().method() === "POST" && r.url().endsWith(`/api/sessions/${encodeURIComponent(sourceId)}/replace`),
     ),
     form.locator(".create-session-submit").click(),
   ]);
@@ -1134,7 +1134,7 @@ test("replace with keeps a source restarted while its launcher showed nothing al
     // afterwards can carry the restarted state into the launcher.
     await waitForFeedReadersSettled(page);
 
-    const restarted = await request.post(`/api/sessions/${source.id}/restart`, { data: {} });
+    const restarted = await request.post(`/api/sessions/${encodeURIComponent(source.id)}/restart`, { data: {} });
     expect(restarted.ok(), `restarting the source: ${await restarted.text()}`).toBe(true);
     await waitForListedState(request, source.id, "live");
     // Premise: the launcher still shows the state it opened on.
@@ -1190,7 +1190,7 @@ test("replace with's warning follows a source restarted while the launcher is op
     await expect(warning).toBeEmpty();
     await expect(form.locator(".create-session-submit")).not.toHaveAttribute("aria-describedby", /./);
 
-    const restarted = await request.post(`/api/sessions/${source.id}/restart`, { data: {} });
+    const restarted = await request.post(`/api/sessions/${encodeURIComponent(source.id)}/restart`, { data: {} });
     expect(restarted.ok(), `restarting the source: ${await restarted.text()}`).toBe(true);
     await waitForListedState(request, source.id, "live");
     feed.notify(2);

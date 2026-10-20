@@ -228,7 +228,7 @@ for (const key of ["Enter", "Escape"]) {
       await endComposition(field, key, key === "Enter" ? 13 : 27);
       await expect(dialog).toBeVisible();
       await expect(field).toHaveValue("unfinished rename composition");
-      const response = await request.get(`/api/sessions/${session.id}`);
+      const response = await request.get(`/api/sessions/${encodeURIComponent(session.id)}`);
       expect(response.ok()).toBe(true);
       expect((await response.json()).title).toBe(session.title);
       const finalName = `${session.title}-final`;
