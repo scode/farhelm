@@ -159,7 +159,8 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
 /// `--effort high`), so a row reads as the flags it stands for; a field the
 /// template resets is shown as `default`. The quick-launch mark and number
 /// key follow the fields because they select a template rather than set a
-/// launch field. Free text (a model, host name,
+/// launch field. Wrapper and custom-permission words retain shell argument
+/// boundaries inside a quoted value. Free text (a model, host name,
 /// folder, repository or title) is quoted, because the parts are joined
 /// with commas and a title such as `x, yolo` would otherwise read as the
 /// template asserting YOLO. Historical trust is omitted because applying the
@@ -203,7 +204,15 @@ pub(crate) fn template_sets_cell(template: &farhelm_proto::AgentTemplate) -> Str
     if let Some(permissions) = &fields.permissions {
         parts.push(format!(
             "permissions {}",
-            reset(permissions, |permission| permission.wire_word().to_string())
+            reset(permissions, |permission| {
+                if *permission == farhelm_proto::LaunchPermission::Custom
+                    && let Some(words) = &fields.permission_flags
+                {
+                    format!("custom {}", quoted(&shell_words::join(words)))
+                } else {
+                    permission.wire_word().to_string()
+                }
+            })
         ));
     }
     if let Some(wrapper) = &fields.wrapper_prefix {
@@ -522,7 +531,8 @@ mod tests {
     /// order with the values the flags take, `default` for a reset, the
     /// command texts only as set, a host that no longer resolves as such,
     /// and free text quoted; session names carry their effective base/fixed
-    /// policy, and a template setting nothing says so.
+    /// policy, and a template setting nothing says so. Custom permission words
+    /// must expose argument boundaries rather than just advertising the mode.
     ///
     /// Why: this cell is the only place an agent reads what a template will
     /// do, including its YOLO answer, so a title like `x, yolo` must not
@@ -548,14 +558,26 @@ mod tests {
                     agent: Some(farhelm_proto::LaunchHarness::OpenCode),
                     model: Some(Some("big".to_string())),
                     effort: Some(None),
+                    permissions: Some(Some(farhelm_proto::LaunchPermission::Guarded)),
                     host: Some("identity-gone".to_string()),
                     name: Some("x, yolo".to_string()),
                     ..Default::default()
                 },
                 None,
             ),
-            "agent open_code, model \"big\", effort default, host (no longer registered), \
+            "agent open_code, model \"big\", effort default, permissions guarded, host (no longer registered), \
              title \"x, yolo\" (base name)"
+        );
+        assert_eq!(
+            cell(
+                TemplateFields {
+                    permissions: Some(Some(farhelm_proto::LaunchPermission::Custom)),
+                    permission_flags: Some(vec!["--allow".into(), "two words".into()]),
+                    ..Default::default()
+                },
+                None,
+            ),
+            "permissions custom \"--allow 'two words'\""
         );
         assert_eq!(
             cell(
