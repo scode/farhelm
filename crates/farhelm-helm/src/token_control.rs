@@ -70,8 +70,8 @@ struct OwnershipBusy;
 /// Exclusive ownership of token-control decisions for one state directory.
 ///
 /// A serving helm claims this with [`claim_serving_ownership`] before it
-/// opens (and migrates) `helm.db`, and keeps it for its lifetime inside the
-/// [`ControlGuard`] that [`serve`] returns.
+/// opens (and migrates) `helm.db`. The helm's runtime owner keeps it until
+/// runtime teardown finishes, including work that outlives [`ControlGuard`].
 pub(crate) struct OwnershipLock {
     file: File,
 }
@@ -89,7 +89,6 @@ pub(crate) struct ControlGuard {
     task: tokio::task::JoinHandle<anyhow::Result<()>>,
     path: PathBuf,
     socket_identity: (u64, u64),
-    _ownership: OwnershipLock,
 }
 
 impl ControlGuard {
@@ -160,11 +159,11 @@ async fn claim_serving_ownership_observed(
 
 /// Start the serving helm's local token-control endpoint.
 ///
-/// `ownership` is the claim from [`claim_serving_ownership`]; the returned
-/// guard keeps it for as long as the endpoint serves.
+/// `ownership` proves the caller already holds the directory claim. Its owner
+/// must retain it through serving and runtime teardown, beyond this endpoint.
 pub(crate) async fn serve(
     state_dir: &Path,
-    ownership: OwnershipLock,
+    _ownership: &OwnershipLock,
     auth: AuthState,
 ) -> anyhow::Result<ControlGuard> {
     let path = state_dir.join(SOCKET_NAME);
@@ -204,7 +203,6 @@ pub(crate) async fn serve(
         task,
         path,
         socket_identity,
-        _ownership: ownership,
     })
 }
 
@@ -509,7 +507,7 @@ fn state_dir_or_default(state_dir: Option<PathBuf>) -> anyhow::Result<PathBuf> {
 /// Serving helms retain the returned flock for their lifetime. CLI callers
 /// treat [`OwnershipBusy`] as a reason to re-probe the socket, never as a
 /// lock they can wait to acquire while that helm remains alive.
-async fn acquire_ownership(state_dir: PathBuf) -> anyhow::Result<OwnershipLock> {
+pub(crate) async fn acquire_ownership(state_dir: PathBuf) -> anyhow::Result<OwnershipLock> {
     tokio::task::spawn_blocking(move || {
         let path = state_dir.join(LOCK_NAME);
         let file = OpenOptions::new()
@@ -611,9 +609,13 @@ mod tests {
 
     /// Claim the directory and start the endpoint, as a serving helm's
     /// startup does in two separate steps.
-    async fn serve_owned(state_dir: &Path, auth: AuthState) -> anyhow::Result<ControlGuard> {
+    async fn serve_owned(
+        state_dir: &Path,
+        auth: AuthState,
+    ) -> anyhow::Result<(ControlGuard, OwnershipLock)> {
         let ownership = claim_serving_ownership(state_dir).await?;
-        serve(state_dir, ownership, auth).await
+        let control = serve(state_dir, &ownership, auth).await?;
+        Ok((control, ownership))
     }
 
     /// Descriptor exhaustion must keep token control alive, but the four
@@ -664,7 +666,7 @@ mod tests {
         auth.mint_device().await.unwrap();
         let socket = auth.socket_session();
         let ownership = claim_serving_ownership(dir.path()).await.unwrap();
-        let _guard = serve(dir.path(), ownership, auth).await.unwrap();
+        let _guard = serve(dir.path(), &ownership, auth).await.unwrap();
 
         let after = rotate(Some(dir.path().to_path_buf())).await.unwrap();
         assert_ne!(after, before);
@@ -762,7 +764,7 @@ mod tests {
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
         let auth = AuthState::new(store);
         let ownership = claim_serving_ownership(dir.path()).await.unwrap();
-        let _guard = serve(dir.path(), ownership, auth).await.unwrap();
+        let _guard = serve(dir.path(), &ownership, auth).await.unwrap();
 
         let error = match claim_serving_ownership(dir.path()).await {
             Ok(_) => panic!("the existing listener must keep the control path"),

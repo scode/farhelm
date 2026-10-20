@@ -40,6 +40,9 @@ covered by each operation's own recovery rules. Nor does it prevent an accepted 
 an explicit cancel, such as a Delete interrupting an upload, is part of the action's own logic, not a side effect of a
 connection closing.
 
+The helm owns its runtime and retains its state-directory claim until that runtime has dropped, including on unwind, so
+a successor cannot share its state with blocking work still finishing during teardown.
+
 ## Transactional database representations
 
 A database may store multiple materialized representations of the same information, such as a session's full JSON record

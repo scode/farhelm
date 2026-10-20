@@ -1924,8 +1924,10 @@ mod embedded_ui_tests {
 /// Returns only on a fatal error. There is no graceful-shutdown path, and
 /// none is needed: SPEC.md's whole durability promise is that killing the
 /// helm does nothing to any session.
-pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
-    run_with_ready(args, None, None, None, None, None, ServingMode::Standalone).await
+/// Owns and drains its runtime before releasing the state-directory claim,
+/// including during panic unwind. Call from outside a tokio runtime.
+pub fn run(args: HelmArgs) -> anyhow::Result<()> {
+    run_with_ready(args, None, None, None, None, None, ServingMode::Standalone)
 }
 
 /// What an embedded helm hands the desktop process that owns it once every
@@ -1963,7 +1965,9 @@ pub struct EmbeddedReady {
 /// window's account, including dispatch of an allowlisted completed save to its
 /// default app. An absent Downloads capability leaves saves and opening refused;
 /// it never asks the webview to save in its place.
-pub async fn run_embedded(
+/// This synchronous entry point owns its runtime; the desktop thread returns
+/// only after runtime teardown, with state ownership retained throughout it.
+pub fn run_embedded(
     args: HelmArgs,
     clipboard_sink: Option<ClipboardSink>,
     link_opener: Option<LinkOpener>,
@@ -1980,7 +1984,6 @@ pub async fn run_embedded(
         Some(shutdown),
         ServingMode::Embedded,
     )
-    .await
 }
 
 /// Shared process and embedded-app serving path. There is deliberately one
@@ -1990,7 +1993,7 @@ pub async fn run_embedded(
 /// Native clipboard and Downloads saves belong to the embedded window's user.
 /// A server helm's browser may run on another machine, so its startup always
 /// supplies `None` for both capabilities; no CLI flag enables either one.
-async fn run_with_ready(
+fn run_with_ready(
     args: HelmArgs,
     clipboard_sink: Option<ClipboardSink>,
     link_opener: Option<LinkOpener>,
@@ -1998,6 +2001,46 @@ async fn run_with_ready(
     ready: Option<std::sync::mpsc::Sender<EmbeddedReady>>,
     shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
     mode: ServingMode,
+) -> anyhow::Result<()> {
+    // Reverse declaration order is the shutdown contract, including unwind:
+    // runtime drop joins started blocking work before the claim can be released.
+    // The public entry points own this runtime; callers cannot drop it later.
+    let mut ownership = None;
+    let runtime = tokio::runtime::Runtime::new().context("starting helm runtime")?;
+    runtime.block_on(serve_with_ready(
+        args,
+        clipboard_sink,
+        link_opener,
+        downloads,
+        ready,
+        shutdown,
+        mode,
+        &mut ownership,
+    ))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// One test's post-claim work, installed only on its dedicated helm thread.
+    /// Thread locality prevents another helm fixture from consuming the seam.
+    static HELM_RUNTIME_TEST_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Serve inside the owning runtime, publishing the claim to its outer scope.
+/// The control endpoint ends with serving; ownership also covers runtime drain.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the claim slot belongs outside this async serving lifetime"
+)]
+async fn serve_with_ready(
+    args: HelmArgs,
+    clipboard_sink: Option<ClipboardSink>,
+    link_opener: Option<LinkOpener>,
+    downloads: Option<NativeDownloads>,
+    ready: Option<std::sync::mpsc::Sender<EmbeddedReady>>,
+    shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
+    mode: ServingMode,
+    ownership: &mut Option<token_control::OwnershipLock>,
 ) -> anyhow::Result<()> {
     let state_dir = match args.state_dir.clone() {
         Some(dir) => dir,
@@ -2022,7 +2065,13 @@ async fn run_with_ready(
         .local_addr()
         .context("reading bound helm address")?;
 
-    let ownership = token_control::claim_serving_ownership(&state_dir).await?;
+    *ownership = Some(token_control::claim_serving_ownership(&state_dir).await?);
+    #[cfg(test)]
+    HELM_RUNTIME_TEST_HOOK.with_borrow_mut(|hook| {
+        if let Some(hook) = hook.take() {
+            hook();
+        }
+    });
     let store = store::HelmStore::open(&state_dir.join("helm.db")).await?;
     if let Some(path) = args.ensure_hosts.as_deref() {
         ensure::ingest(&store, path).await?;
@@ -2075,7 +2124,8 @@ async fn run_with_ready(
     // a restart. With the flock held, an offline rotation is impossible and
     // a live one goes through this process's control socket, which updates
     // the same cache.
-    let mut token_control = token_control::serve(&state_dir, ownership, state.auth.clone()).await?;
+    let mut token_control =
+        token_control::serve(&state_dir, ownership.as_ref().unwrap(), state.auth.clone()).await?;
     // First run owns token creation. Browser serving must never begin with a
     // database whose bootstrap secret exists only after somebody invokes the
     // separate `token show` command.
@@ -2551,11 +2601,20 @@ mod tests {
 
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(10),
-            crate::run(crate::HelmArgs {
-                port: 0,
-                state_dir: Some(dir.path().to_path_buf()),
-                ..base_args()
-            }),
+            crate::serve_with_ready(
+                crate::HelmArgs {
+                    port: 0,
+                    state_dir: Some(dir.path().to_path_buf()),
+                    ..base_args()
+                },
+                None,
+                None,
+                None,
+                None,
+                None,
+                crate::ServingMode::Standalone,
+                &mut None,
+            ),
         )
         .await
         .expect("a refused helm must return rather than serve");
@@ -2568,6 +2627,110 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(after, 29, "the refused helm must not migrate helm.db");
+    }
+
+    /// A successor must stay excluded after serving ends while the old runtime
+    /// joins blocking work. Socket removal proves serving ended; the worker's
+    /// entered/release channels prove that runtime drain still has work to join.
+    /// Releasing it then permits a new claim, so a leaked lock cannot pass.
+    #[farhelm_testtrace::test]
+    async fn helm_ownership_outlives_runtime_drain() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        };
+        use std::time::Duration;
+        let dir = Arc::new(tempfile::tempdir().unwrap());
+        let helm_dir = dir.clone();
+        let state_dir = dir.path().to_path_buf();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let parked = Arc::new(AtomicBool::new(false));
+        let worker_parked = parked.clone();
+        let helm = std::thread::spawn(move || {
+            // Keep fixture state alive through runtime drop even if the test
+            // unwinds before its explicit release and join.
+            let _helm_dir = helm_dir;
+            crate::HELM_RUNTIME_TEST_HOOK.with_borrow_mut(|hook| {
+                *hook = Some(Box::new(move || {
+                    tokio::task::spawn_blocking(move || {
+                        worker_parked.store(true, Ordering::SeqCst);
+                        entered_tx.send(()).unwrap();
+                        // Timeout and sender drop both release cleanup on assertion failure.
+                        let result = release_rx.recv_timeout(Duration::from_secs(30));
+                        worker_parked.store(false, Ordering::SeqCst);
+                        assert!(
+                            !matches!(result, Err(mpsc::RecvTimeoutError::Timeout)),
+                            "test never released worker"
+                        );
+                    });
+                }))
+            });
+            crate::run_embedded(
+                crate::HelmArgs {
+                    port: 0,
+                    state_dir: Some(state_dir),
+                    ..base_args()
+                },
+                None,
+                None,
+                None,
+                ready_tx,
+                shutdown_rx,
+            )
+        });
+        entered_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("worker started on owned runtime");
+        ready_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("real helm serving dependencies ready");
+        assert!(parked.load(Ordering::SeqCst));
+        assert!(dir.path().join("helm-token.sock").exists());
+        shutdown_tx.send(()).unwrap();
+        wait_for_control_endpoint_removal(dir.path()).await;
+        assert!(
+            parked.load(Ordering::SeqCst),
+            "fixture worker must still be parked after serving ends"
+        );
+        let busy = crate::token_control::acquire_ownership(dir.path().to_path_buf()).await;
+        let refused = busy.is_err();
+        let message = busy
+            .err()
+            .map(|error| format!("{error:#}"))
+            .unwrap_or_default();
+        // Always release and join before reporting a failed exclusion assertion.
+        release_tx.send(()).unwrap();
+        helm.join().expect("helm thread did not panic").unwrap();
+        assert!(
+            refused,
+            "a successor acquired ownership while old work was parked"
+        );
+        assert!(
+            message.contains("another process owns token control"),
+            "{message}"
+        );
+        assert!(!parked.load(Ordering::SeqCst));
+        let _successor = crate::token_control::acquire_ownership(dir.path().to_path_buf())
+            .await
+            .expect("ownership is released after runtime drain finishes");
+    }
+
+    /// Observe ControlGuard teardown rather than assuming a shutdown send ran.
+    /// This bounds only the fixture's readiness wait, while its owned worker
+    /// remains parked and gives timeout diagnostics the premise they need.
+    async fn wait_for_control_endpoint_removal(state_dir: &std::path::Path) {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while state_dir.join("helm-token.sock").exists() {
+                // sleep-ok: poll the owned control endpoint's teardown before probing the still-draining runtime's lock.
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("serving must remove its control endpoint before the drain assertion");
     }
 
     /// Spec (D18): `--payload-dir` wins over `--release-base-url` when both

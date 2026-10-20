@@ -16033,7 +16033,12 @@
   action", says the helm's state-directory claim outlives all work started on its runtime. Size gate: if the change
   exceeds about 300 lines of diff (code, tests and docs, not counting this ledger, the queue removal and the changelog
   fragment), block and bring it back to the user. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-lock-outlives-work.md`.
+- Execution: the helm retains its state-directory claim until its owned runtime finishes teardown, including on panic
+  unwind. The CLI and desktop use the same lifetime boundary. A temporary-helm regression parks runtime work, confirms
+  that serving ended, verifies a successor is refused, then releases the worker and verifies a new claim succeeds. Token
+  rotation can fail during this drain after the control socket closes; ordinary desktop Quit is unchanged. Change
+  `vlnrrkollknpuzrkzwlzmpvpvsynrzzn`, bookmark `plan/helm-lock-outlives-work/01-lock-outlives-runtime`,
+  https://github.com/scode/farhelm/pull/2383/changes.
 
 ## cancelled-startup-loses-archive-location.md
 

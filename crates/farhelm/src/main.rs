@@ -1306,7 +1306,7 @@ fn main() -> anyhow::Result<()> {
             command: HelmCmd::Run(args),
         } => {
             init_tracing();
-            runtime()?.block_on(farhelm_helm::run(args))
+            farhelm_helm::run(args)
         }
         Cmd::Helm {
             command: HelmCmd::Setup(options),
