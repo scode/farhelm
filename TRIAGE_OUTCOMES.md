@@ -16605,7 +16605,11 @@
   one is about 8 lines.
 - Completion criteria: `stop_probe` bounds its stderr wait like the existing bounded join, with a test. Gate: if it
   needs more than about 15 lines of non-test code, discard instead. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/planning-probe-bound.md`.
+- Execution: implemented in change `xnuzoyqunzprrnrmmsymyvksuvvsvqtq`, bookmark
+  `plan/planning-probe-bound/01-bound-probe-cleanup`. Probe cleanup uses the existing two-second stderr bound and
+  cancels an unfinished reader. The non-test source diff is 13 lines including comments, within the 15-line gate;
+  focused regressions cover an open stream and completed diagnostics. No real SSH trigger is claimed. PR:
+  https://github.com/scode/farhelm/pull/2415/changes.
 
 ## download-eof-cancellation-retains-route.md
 
