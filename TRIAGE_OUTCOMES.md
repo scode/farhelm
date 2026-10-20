@@ -16804,7 +16804,9 @@
 - Completion criteria: SPEC.md says a hover summary may clip very long values or rows in a short window, which the
   session view shows in full, replacing the promise of the full directory there. No code change. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
+- Execution: complete in change `rwnrqkozyqwxtpluyzvtzqmxtsppzxqx`, bookmark
+  `plan/spec-scope-clarifications/04-hover-summary-scope`,
+  [PR #2418](https://github.com/scode/farhelm/pull/2418/changes).
 
 ## update-check-replacement-loses-focus.md
 
