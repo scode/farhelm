@@ -40,6 +40,7 @@ import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
 import { localHostId, openHostMenu, openRowMenu, patchPreferences, resetPreferences } from "./helpers/fleet";
 import { addTab, installTerminalSuiteHooks, openTerminal, sharedSessionRow } from "./helpers/terminal-suite";
+import { openSettings, selectSettingsSection, type SettingsSection } from "./helpers/settings";
 
 installTerminalSuiteHooks();
 
@@ -319,12 +320,37 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await feedback.locator(".feedback-cancel").click();
   await expect(feedback).toHaveCount(0);
 
-  await page.locator(".app-settings-toggle").click();
-  await expect(page.locator(".app-settings-dialog")).toBeVisible();
-  await expectCovered(page, "settings dialog", ".app-settings-dialog", 3);
-  await expectTextFieldsCovered(page, "settings dialog", ".app-settings-dialog", 1);
+  const settings = await openSettings(page);
+  await expectCovered(page, "settings section list", 'nav[aria-label="settings sections"]', 6);
+  // Hidden panels remain mounted but have no painted controls. Visit each
+  // pane so header buttons cannot satisfy a missing section's sweep premise.
+  const settingsSections: [SettingsSection, number][] = [
+    ["sessions", 3], ["hosts", 2], ["terminal", 3],
+    ["checkouts", 2], ["agent trust", 7], ["notifications", 5],
+  ];
+  for (const [section, minimum] of settingsSections) {
+    await selectSettingsSection(page, section);
+    const root = `.app-settings-panel[aria-label="${section}"]`;
+    await expectCovered(page, `settings ${section}`, root, minimum);
+    if (section === "checkouts" || section === "notifications") {
+      await expectTextFieldsCovered(page, `settings ${section}`, root, section === "checkouts" ? 2 : 3);
+    }
+  }
+  // The phone adds a back control and a list-only state. Audit both without
+  // changing the viewport used by the rest of this dialog walk.
+  const settingsViewport = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 800 });
+  const back = settings.getByRole("button", { name: "‹ settings", exact: true });
+  await expect(back).toBeVisible();
+  await expectCovered(page, "settings phone pane", ".app-settings-dialog", 3);
+  await back.click();
+  await expect(settings.getByRole("navigation", { name: "settings sections", exact: true })).toBeVisible();
+  await expectCovered(page, "settings phone section list", 'nav[aria-label="settings sections"]', 6);
+  await selectSettingsSection(page, "sessions");
+  await expectCovered(page, "settings phone sessions", '.app-settings-panel[aria-label="sessions"]', 3);
   await page.locator(".app-settings-close").click();
   await expect(page.locator(".app-settings-dialog")).toHaveCount(0);
+  if (settingsViewport) await page.setViewportSize(settingsViewport);
 
   await page.getByRole("button", { name: "templates", exact: true }).click();
   const templates = page.locator('.templates-dialog[role="dialog"]');

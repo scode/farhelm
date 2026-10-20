@@ -3257,6 +3257,67 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 .app-settings-dialog[aria-label="settings"] .app-settings-choice > span { min-width: 0; }
 .app-settings-dialog[aria-label="settings"] .host-settings-mark svg { width: 28px; height: 28px; }
+
+/* Settings shares the host-dialog frame with unrelated modals. Scope its wider
+   two-column body here; the frame still owns the only scrollport and both exits. */
+.app-settings-dialog[aria-label="settings"] { width: min(760px, 100%); }
+.app-settings-dialog[aria-label="settings"] > .host-settings-body {
+  grid-template-columns: 148px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.app-settings-dialog[aria-label="settings"] .app-settings-navigation {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding-right: 18px;
+  border-right: 1px solid var(--border-dialog);
+}
+.app-settings-dialog[aria-label="settings"] .app-settings-navigation button {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.app-settings-dialog[aria-label="settings"] .app-settings-navigation button:hover { background: var(--control-hover-bg); }
+.app-settings-dialog[aria-label="settings"] .app-settings-navigation button[aria-pressed="true"] {
+  background: var(--accent-fill);
+  border-color: var(--accent-edge);
+  box-shadow: inset 3px 0 var(--accent);
+}
+.app-settings-dialog[aria-label="settings"] .app-settings-content { display: grid; gap: 14px; min-width: 0; }
+/* A hidden panel keeps its component state and JS-owned controls. Explicitly
+   override the shared section grid so hidden cannot accidentally become visible. */
+.app-settings-dialog[aria-label="settings"] .app-settings-panel[hidden] { display: none; }
+.app-settings-dialog[aria-label="settings"] .app-settings-panel { border: 0; padding: 0; }
+.app-settings-dialog[aria-label="settings"] .app-settings-back {
+  display: none;
+  justify-self: start;
+  border: 1px solid var(--border-dialog);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--fg-0);
+  font: inherit;
+  cursor: pointer;
+}
+/* Like Templates, a phone shows the picker or the current pane. Both stay in
+   the tree: changing the available width must not discard an unsaved field. */
+@media (max-width: 620px) {
+  .app-settings-dialog[aria-label="settings"] > .host-settings-body { grid-template-columns: minmax(0, 1fr); }
+  .app-settings-dialog[aria-label="settings"] .app-settings-navigation { display: none; border: 0; padding: 0; }
+  .app-settings-dialog[aria-label="settings"] .app-settings-back { display: block; }
+  .app-settings-dialog[aria-label="settings"] .app-settings-sections-open > .app-settings-navigation { display: grid; }
+  .app-settings-dialog[aria-label="settings"] .app-settings-sections-open > .app-settings-content { display: none; }
+}
 /* The folder field is shared by Settings and inline checkout setup; the
    command field is Settings-only. Both keep independent explicit saves and
    layout independent of the launcher's label/form direction rules. */

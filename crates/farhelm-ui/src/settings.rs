@@ -22,6 +22,10 @@
 //! The desktop download-opening list uses an acknowledged save too: the helm
 //! decides what opens, while this dialog warns about listed types it does not
 //! recognize as safe.
+//!
+//! Section changes hide mounted panels rather than replacing their component
+//! trees. Explicit-save fields keep their drafts and pending work, and the sound
+//! asset can initialize its device-owned inputs before their panel is visible.
 
 use dioxus::prelude::*;
 
@@ -34,6 +38,39 @@ use crate::list::SharedPreferences;
 use crate::{ApiBase, modal_isolation};
 
 const DIALOG_SELECTOR: &str = r#".app-settings-dialog[role="dialog"]"#;
+
+/// Navigation and panel IDs share these closed keys; app follows updater availability.
+const SETTINGS_SECTIONS: [(&str, &str); 7] = [
+    ("sessions", "sessions"),
+    ("hosts", "hosts"),
+    ("terminal", "terminal"),
+    ("checkouts", "checkouts"),
+    ("agent-trust", "agent trust"),
+    ("notifications", "notifications"),
+    ("app", "app"),
+];
+
+/// Hand focus to the newly revealed content after a section or narrow back click.
+///
+/// The narrow layout hides the activating button, so leaving focus there would
+/// strand keyboard users in hidden content. Headings are programmatic targets,
+/// not extra Tab stops; the list uses the same ordinary buttons on every engine.
+fn focus_settings_content(section_list: bool) {
+    let target = if section_list {
+        ".app-settings-navigation button[aria-pressed=\"true\"]"
+    } else {
+        ".app-settings-panel:not([hidden]) > h3"
+    };
+    let target = serde_json::to_string(target).expect("a string always serializes");
+    document::eval(&format!(
+        r#"requestAnimationFrame(() => {{
+            const dialog = document.querySelector('{DIALOG_SELECTOR}');
+            if (!dialog) return;
+            dialog.querySelector('.host-settings-body').scrollTop = 0;
+            dialog.querySelector({target})?.focus({{ preventScroll: true }});
+        }});"#
+    ));
+}
 
 /// Undo modal isolation before focusing the gear, which is inert while open.
 /// The frame lets the closing render remove the dialog before focus returns.
@@ -57,7 +94,7 @@ fn restore_automatic_checkbox(in_force: bool) {
     ));
 }
 
-/// Expose session/host choices, terminal link ownership, sounds and checkout settings.
+/// Group settings without giving a section change any save or discard semantics.
 ///
 /// Writes use the ordinary preference queue. Restoring session confirmations
 /// reports a failed save because a reload could otherwise silently restore the
@@ -70,6 +107,7 @@ fn restore_automatic_checkbox(in_force: bool) {
 /// updating the shared preference; its warnings follow the unsaved draft.
 /// Only the grouped body scrolls; both dismissal paths stay outside it and
 /// share the caller's close callback and focus-return lifecycle.
+/// Every mount starts in sessions, except the existing trust-band entry points.
 #[component]
 pub(crate) fn SettingsDialog(
     on_close: EventHandler<()>,
@@ -110,6 +148,18 @@ pub(crate) fn SettingsDialog(
     } else {
         focus_workspace_trust.map(|agent| format!("#checkout-{}-trust", agent.key()))
     };
+    let opens_trust = trust_focus.is_some();
+    let mut selected = use_signal(move || {
+        if opens_trust {
+            "agent-trust"
+        } else {
+            "sessions"
+        }
+    });
+    // Narrow windows start on the selected pane, not the section picker. This
+    // affects presentation only: neither back nor selection unmounts a panel.
+    let mut sections_open = use_signal(|| false);
+    let has_updater = updater.is_some();
 
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
@@ -122,7 +172,7 @@ pub(crate) fn SettingsDialog(
                 onmounted: move |_| {
                     install_dialog_with_selector(
                         DIALOG_SELECTOR,
-                        trust_focus.as_deref().unwrap_or("input"),
+                        trust_focus.as_deref().unwrap_or("#settings-sessions input"),
                         Some(".app-settings-close"),
                         None,
                     );
@@ -130,7 +180,11 @@ pub(crate) fn SettingsDialog(
                         // The shared dialog focus helper deliberately prevents
                         // scrolling. A band's entry point promises its setting
                         // and explanation, so bring that section into view.
-                        document::eval(&format!("requestAnimationFrame(() => document.querySelector('{selector}')?.scrollIntoView({{block: 'start'}}))"));
+                        document::eval(
+                            &format!(
+                                "requestAnimationFrame(() => document.querySelector('{selector}')?.scrollIntoView({{block: 'start'}}))",
+                            ),
+                        );
                     }
                 },
                 onkeydown: move |event: KeyboardEvent| {
@@ -148,243 +202,338 @@ pub(crate) fn SettingsDialog(
                     dismiss_tooltip: "close settings; unsaved fields are discarded",
                     on_dismiss: move |_| on_close.call(()),
                 }
-                div { class: "host-settings-body",
-                    section { class: "host-settings-section", aria_label: "sessions",
-                        h3 { class: "host-settings-section-title", "sessions" }
-                        label {
-                            class: "app-settings-choice",
-                            "data-tooltip": "delete, replace, restart and close terminal tabs on the first click",
-                            span { "skip session confirmations" }
-                            input {
-                                r#type: "checkbox",
-                                class: "host-settings-switch",
-                                checked: skip_sessions,
-                                aria_describedby: "session-confirmations-help",
-                                onchange: move |event| {
-                                    let skip = event.checked();
-                                    preferences.0.write().skip_session_confirmations = Some(skip);
-                                    let generation = session_generation() + 1;
-                                    session_generation.set(generation);
-                                    session_error.set(false);
-                                    if skip {
-                                        store_preference(&session_base, PreferenceValue::SessionConfirmations(true));
-                                    } else {
-                                        let completion = restore_session_confirmations(&session_base);
-                                        spawn(async move {
-                                            let saved = completion.await;
-                                            if session_generation() == generation {
-                                                session_error.set(!saved);
-                                            }
-                                        });
-                                    }
+                div { class: if sections_open() { "host-settings-body app-settings-sections-open" } else { "host-settings-body" },
+                    nav {
+                        class: "app-settings-navigation",
+                        aria_label: "settings sections",
+                        for (key, label) in SETTINGS_SECTIONS.iter().copied().filter(|(key, _)| *key != "app" || has_updater) {
+                            button {
+                                key: "{key}",
+                                r#type: "button",
+                                aria_pressed: selected() == key,
+                                aria_controls: "settings-{key}",
+                                "data-tooltip": "show {label} settings",
+                                onclick: move |_| {
+                                    selected.set(key);
+                                    sections_open.set(false);
+                                    focus_settings_content(false);
                                 },
-                            }
-                        }
-                        p { id: "session-confirmations-help", class: "host-settings-help",
-                            "Delete, replace, restart and close terminal tabs on the first click. YOLO, host and trash confirmations still follow their own rules. This choice applies to this helm; other open clients pick it up when they reload."
-                        }
-                        if session_error() {
-                            p { class: "host-settings-help app-settings-error", role: "alert",
-                                "Confirmations may still be off for this helm. Try again."
-                            }
-                        }
-                        label {
-                            class: "app-settings-choice",
-                            "data-tooltip": "offer to name a quick-launched session while its agent starts",
-                            span { "name sessions on quick launch" }
-                            input {
-                                r#type: "checkbox",
-                                class: "host-settings-switch",
-                                checked: name_quick_launches,
-                                aria_describedby: "quick-launch-naming-help",
-                                onchange: move |event| {
-                                    preferences.0.write().name_session_on_quick_launch = Some(event.checked());
-                                    store_preference(
-                                        &naming_base,
-                                        PreferenceValue::NameSessionOnQuickLaunch(event.checked()),
-                                    );
-                                },
-                            }
-                        }
-                        p { id: "quick-launch-naming-help", class: "host-settings-help",
-                            "Offer to name a quick-launched session while its agent starts. Enter keeps its default name. This choice applies to this helm; other open clients pick it up when they reload."
-                        }
-                        label {
-                            class: "app-settings-choice",
-                            "data-tooltip": "color each terminal's frame to match its host icon",
-                            span { "color terminal frames by host" }
-                            input {
-                                r#type: "checkbox",
-                                class: "host-settings-switch",
-                                checked: color_frames,
-                                aria_describedby: "terminal-frame-color-help",
-                                onchange: move |event| {
-                                    let color = event.checked();
-                                    preferences.0.write().color_terminal_frames = Some(color);
-                                    store_preference(&frame_base, PreferenceValue::ColorTerminalFrames(color));
-                                },
-                            }
-                        }
-                        p { id: "terminal-frame-color-help", class: "host-settings-help",
-                            "Match the thin frame around every session's terminal to its host icon color. The terminal background stays the same. This choice applies to this helm; other open clients pick it up when they reload."
-                        }
-                    }
-                    section { class: "host-settings-section", aria_label: "hosts",
-                        h3 { class: "host-settings-section-title", "hosts" }
-                        p { class: "host-settings-help",
-                            "The host choices apply to every host on this helm. Other open clients pick them up when they reload."
-                        }
-                        div {
-                            label {
-                                class: "app-settings-choice",
-                                "data-tooltip": "set up a new host as soon as it has been checked, without showing the plan first",
-                                span { "set up new hosts without asking" }
-                                input {
-                                    r#type: "checkbox",
-                                    class: "host-settings-switch",
-                                    checked: setup,
-                                    aria_describedby: "host-setup-preference-help",
-                                    onchange: move |event| {
-                                        preferences.0.write().skip_host_setup_confirmation = Some(event.checked());
-                                        store_preference(
-                                            &setup_base,
-                                            PreferenceValue::HostSetupConfirmation(event.checked()),
-                                        );
-                                    },
-                                }
-                            }
-                            p {
-                                id: "host-setup-preference-help",
-                                class: "host-settings-help",
-                                if setup {
-                                    "Farhelm sets up a new host as soon as it has checked it, without asking."
-                                } else {
-                                    "Farhelm shows what setup will change on a new host and asks before doing it."
-                                }
-                            }
-                        }
-                        div {
-                            label {
-                                class: "app-settings-choice",
-                                "data-tooltip": "forget a host as soon as you choose remove, without asking; its sessions keep running",
-                                span { "remove hosts without asking" }
-                                input {
-                                    r#type: "checkbox",
-                                    class: "host-settings-switch",
-                                    checked: remove,
-                                    aria_describedby: "host-remove-preference-help",
-                                    onchange: move |event| {
-                                        preferences.0.write().skip_host_remove_confirmation = Some(event.checked());
-                                        store_preference(
-                                            &base,
-                                            PreferenceValue::HostRemoveConfirmation(event.checked()),
-                                        );
-                                    },
-                                }
-                            }
-                            p {
-                                id: "host-remove-preference-help",
-                                class: "host-settings-help",
-                                if remove {
-                                    "Farhelm forgets a host as soon as you choose remove. Its sessions keep running."
-                                } else {
-                                    "Farhelm asks before forgetting a host. Its sessions keep running."
-                                }
+                                "{label}"
                             }
                         }
                     }
-                    section {
-                        class: "host-settings-section",
-                        aria_label: "terminal links",
-                        h3 { class: "host-settings-section-title", "terminal links" }
-                        p { class: "host-settings-help",
-                            "Clicking a web link in a terminal: this choice applies to every client of this helm. Other open clients pick it up when they reload. This web-link choice does not change file downloads."
+                    div { class: "app-settings-content",
+                        button {
+                            r#type: "button",
+                            class: "app-settings-back",
+                            "data-tooltip": "choose a settings section",
+                            onclick: move |_| {
+                                sections_open.set(true);
+                                focus_settings_content(true);
+                            },
+                            "‹ settings"
                         }
-                        TerminalLinkChoice {
-                            value: TerminalLinkClick::Intercept,
-                            label: "open in Farhelm, don't pass the click on",
-                            help: "Farhelm opens the link once. The program does not receive that click or a drag starting there.",
-                        }
-                        TerminalLinkChoice {
-                            value: TerminalLinkClick::Both,
-                            label: "open in Farhelm and also pass the click on",
-                            help: "Use this when the program needs link clicks. A program that opens links itself may open a second tab.",
-                        }
-                        TerminalLinkChoice {
-                            value: TerminalLinkClick::Program,
-                            label: "pass the click on only",
-                            help: "Let the program handle links. Farhelm does not open them; without mouse reporting, clicking a link does nothing.",
-                        }
-                        NativeTunnelSettings {}
-                        NativeOpenExtensionsSettings {}
-                    }
-                    section {
-                        class: "host-settings-section",
-                        aria_label: "managed checkouts",
-                        h3 { class: "host-settings-section-title", "managed checkouts" }
-                        crate::checkout_root::CheckoutRootField {
-                            note: "Managed checkouts are cloned into this folder on every host. ~ means each host's own home folder. A missing folder is created on first use. A host given its own folder from the command line keeps that folder. Save an empty field to clear it.",
-                            on_saved: move |_| {},
-                        }
-                        crate::checkout_post_clone::CheckoutPostCloneField {}
-                        crate::claude_trust::ClaudeTrustSettings {}
-                        crate::workspace_trust::WorkspaceTrustSettings { agent: crate::workspace_trust::TrustAgent::Codex }
-                        crate::workspace_trust::WorkspaceTrustSettings { agent: crate::workspace_trust::TrustAgent::Muse }
-                        crate::workspace_trust::WorkspaceTrustSettings { agent: crate::workspace_trust::TrustAgent::Pi }
-                    }
-                    crate::sounds::SoundSettings {}
-                    crate::ntfy_settings::NtfySettings {}
-                    if let Some(updater) = updater {
                         section {
-                            class: "host-settings-section",
-                            aria_label: "updates",
-                            h3 { class: "host-settings-section-title", "updates" }
+                            id: "settings-sessions",
+                            class: "host-settings-section app-settings-panel",
+                            aria_label: "sessions",
+                            hidden: selected() != "sessions",
+                            h3 {
+                                class: "host-settings-section-title",
+                                tabindex: "-1",
+                                "sessions"
+                            }
+                            label {
+                                class: "app-settings-choice",
+                                "data-tooltip": "delete, replace, restart and close terminal tabs on the first click",
+                                span { "skip session confirmations" }
+                                input {
+                                    r#type: "checkbox",
+                                    class: "host-settings-switch",
+                                    checked: skip_sessions,
+                                    aria_describedby: "session-confirmations-help",
+                                    onchange: move |event| {
+                                        let skip = event.checked();
+                                        preferences.0.write().skip_session_confirmations = Some(skip);
+                                        let generation = session_generation() + 1;
+                                        session_generation.set(generation);
+                                        session_error.set(false);
+                                        if skip {
+                                            store_preference(&session_base, PreferenceValue::SessionConfirmations(true));
+                                        } else {
+                                            let completion = restore_session_confirmations(&session_base);
+                                            spawn(async move {
+                                                let saved = completion.await;
+                                                if session_generation() == generation {
+                                                    session_error.set(!saved);
+                                                }
+                                            });
+                                        }
+                                    },
+                                }
+                            }
+                            p {
+                                id: "session-confirmations-help",
+                                class: "host-settings-help",
+                                "Delete, replace, restart and close terminal tabs on the first click. YOLO, host and trash confirmations still follow their own rules. This choice applies to this helm; other open clients pick it up when they reload."
+                            }
+                            if session_error() {
+                                p {
+                                    class: "host-settings-help app-settings-error",
+                                    role: "alert",
+                                    "Confirmations may still be off for this helm. Try again."
+                                }
+                            }
+                            label {
+                                class: "app-settings-choice",
+                                "data-tooltip": "offer to name a quick-launched session while its agent starts",
+                                span { "name sessions on quick launch" }
+                                input {
+                                    r#type: "checkbox",
+                                    class: "host-settings-switch",
+                                    checked: name_quick_launches,
+                                    aria_describedby: "quick-launch-naming-help",
+                                    onchange: move |event| {
+                                        preferences.0.write().name_session_on_quick_launch = Some(event.checked());
+                                        store_preference(
+                                            &naming_base,
+                                            PreferenceValue::NameSessionOnQuickLaunch(event.checked()),
+                                        );
+                                    },
+                                }
+                            }
+                            p {
+                                id: "quick-launch-naming-help",
+                                class: "host-settings-help",
+                                "Offer to name a quick-launched session while its agent starts. Enter keeps its default name. This choice applies to this helm; other open clients pick it up when they reload."
+                            }
+                            label {
+                                class: "app-settings-choice",
+                                "data-tooltip": "color each terminal's frame to match its host icon",
+                                span { "color terminal frames by host" }
+                                input {
+                                    r#type: "checkbox",
+                                    class: "host-settings-switch",
+                                    checked: color_frames,
+                                    aria_describedby: "terminal-frame-color-help",
+                                    onchange: move |event| {
+                                        let color = event.checked();
+                                        preferences.0.write().color_terminal_frames = Some(color);
+                                        store_preference(&frame_base, PreferenceValue::ColorTerminalFrames(color));
+                                    },
+                                }
+                            }
+                            p {
+                                id: "terminal-frame-color-help",
+                                class: "host-settings-help",
+                                "Match the thin frame around every session's terminal to its host icon color. The terminal background stays the same. This choice applies to this helm; other open clients pick it up when they reload."
+                            }
+                        }
+                        section {
+                            id: "settings-hosts",
+                            class: "host-settings-section app-settings-panel",
+                            aria_label: "hosts",
+                            hidden: selected() != "hosts",
+                            h3 {
+                                class: "host-settings-section-title",
+                                tabindex: "-1",
+                                "hosts"
+                            }
                             p { class: "host-settings-help",
-                                "This one belongs to this Farhelm app on this Mac."
+                                "The host choices apply to every host on this helm. Other open clients pick them up when they reload."
                             }
                             div {
                                 label {
                                     class: "app-settings-choice",
-                                    "data-tooltip": "install updates automatically: check for a new Farhelm release when the app starts and about once a day, and install it in the background",
-                                    span { "install updates automatically" }
+                                    "data-tooltip": "set up a new host as soon as it has been checked, without showing the plan first",
+                                    span { "set up new hosts without asking" }
                                     input {
                                         r#type: "checkbox",
                                         class: "host-settings-switch",
-                                        checked: automatic(),
-                                        aria_describedby: "automatic-updates-help",
-                                        // Only a saved choice is shown as the choice: on
-                                        // a failed write the box returns to the setting
-                                        // still in force, with the reason beside it.
+                                        checked: setup,
+                                        aria_describedby: "host-setup-preference-help",
                                         onchange: move |event| {
-                                            match updater.set_automatic_updates(event.checked()) {
-                                                Ok(()) => {
-                                                    automatic.set(event.checked());
-                                                    automatic_error.set(None);
-                                                }
-                                                Err(reason) => {
-                                                    let in_force = updater.automatic_updates();
-                                                    automatic.set(in_force);
-                                                    automatic_error.set(Some(reason));
-                                                    restore_automatic_checkbox(in_force);
-                                                }
-                                            }
+                                            preferences.0.write().skip_host_setup_confirmation = Some(event.checked());
+                                            store_preference(
+                                                &setup_base,
+                                                PreferenceValue::HostSetupConfirmation(event.checked()),
+                                            );
                                         },
                                     }
                                 }
                                 p {
-                                    id: "automatic-updates-help",
+                                    id: "host-setup-preference-help",
                                     class: "host-settings-help",
-                                    if automatic() {
-                                        "Farhelm checks for a new release when it starts and about once a day, and installs it in the background. Restarting Farhelm finishes the update."
+                                    if setup {
+                                        "Farhelm sets up a new host as soon as it has checked it, without asking."
                                     } else {
-                                        "Farhelm installs a new release only when you check for updates from the ? menu or this machine's update item, or run the installer yourself."
+                                        "Farhelm shows what setup will change on a new host and asks before doing it."
                                     }
                                 }
-                                if let Some(reason) = automatic_error() {
+                            }
+                            div {
+                                label {
+                                    class: "app-settings-choice",
+                                    "data-tooltip": "forget a host as soon as you choose remove, without asking; its sessions keep running",
+                                    span { "remove hosts without asking" }
+                                    input {
+                                        r#type: "checkbox",
+                                        class: "host-settings-switch",
+                                        checked: remove,
+                                        aria_describedby: "host-remove-preference-help",
+                                        onchange: move |event| {
+                                            preferences.0.write().skip_host_remove_confirmation = Some(event.checked());
+                                            store_preference(
+                                                &base,
+                                                PreferenceValue::HostRemoveConfirmation(event.checked()),
+                                            );
+                                        },
+                                    }
+                                }
+                                p {
+                                    id: "host-remove-preference-help",
+                                    class: "host-settings-help",
+                                    if remove {
+                                        "Farhelm forgets a host as soon as you choose remove. Its sessions keep running."
+                                    } else {
+                                        "Farhelm asks before forgetting a host. Its sessions keep running."
+                                    }
+                                }
+                            }
+                        }
+                        section {
+                            id: "settings-terminal",
+                            class: "host-settings-section app-settings-panel",
+                            aria_label: "terminal",
+                            hidden: selected() != "terminal",
+                            h3 {
+                                class: "host-settings-section-title",
+                                tabindex: "-1",
+                                "terminal"
+                            }
+                            p { class: "host-settings-help",
+                                "Clicking a web link in a terminal: this choice applies to every client of this helm. Other open clients pick it up when they reload. This web-link choice does not change file downloads."
+                            }
+                            TerminalLinkChoice {
+                                value: TerminalLinkClick::Intercept,
+                                label: "open in Farhelm, don't pass the click on",
+                                help: "Farhelm opens the link once. The program does not receive that click or a drag starting there.",
+                            }
+                            TerminalLinkChoice {
+                                value: TerminalLinkClick::Both,
+                                label: "open in Farhelm and also pass the click on",
+                                help: "Use this when the program needs link clicks. A program that opens links itself may open a second tab.",
+                            }
+                            TerminalLinkChoice {
+                                value: TerminalLinkClick::Program,
+                                label: "pass the click on only",
+                                help: "Let the program handle links. Farhelm does not open them; without mouse reporting, clicking a link does nothing.",
+                            }
+                            NativeTunnelSettings {}
+                            NativeOpenExtensionsSettings {}
+                        }
+                        section {
+                            id: "settings-checkouts",
+                            class: "host-settings-section app-settings-panel",
+                            aria_label: "checkouts",
+                            hidden: selected() != "checkouts",
+                            h3 {
+                                class: "host-settings-section-title",
+                                tabindex: "-1",
+                                "checkouts"
+                            }
+                            crate::checkout_root::CheckoutRootField {
+                                note: "Managed checkouts are cloned into this folder on every host. ~ means each host's own home folder. A missing folder is created on first use. A host given its own folder from the command line keeps that folder. Save an empty field to clear it.",
+                                on_saved: move |_| {},
+                            }
+                            crate::checkout_post_clone::CheckoutPostCloneField {}
+                        }
+                        section {
+                            id: "settings-agent-trust",
+                            class: "host-settings-section app-settings-panel",
+                            aria_label: "agent trust",
+                            hidden: selected() != "agent-trust",
+                            h3 {
+                                class: "host-settings-section-title",
+                                tabindex: "-1",
+                                "agent trust"
+                            }
+                            crate::claude_trust::ClaudeTrustSettings {}
+                            crate::workspace_trust::WorkspaceTrustSettings { agent: crate::workspace_trust::TrustAgent::Codex }
+                            crate::workspace_trust::WorkspaceTrustSettings { agent: crate::workspace_trust::TrustAgent::Muse }
+                            crate::workspace_trust::WorkspaceTrustSettings { agent: crate::workspace_trust::TrustAgent::Pi }
+                        }
+                        section {
+                            id: "settings-notifications",
+                            class: "host-settings-section app-settings-panel",
+                            aria_label: "notifications",
+                            hidden: selected() != "notifications",
+                            h3 {
+                                class: "host-settings-section-title",
+                                tabindex: "-1",
+                                "notifications"
+                            }
+                            crate::sounds::SoundSettings {}
+                            crate::ntfy_settings::NtfySettings {}
+                        }
+                        if let Some(updater) = updater {
+                            section {
+                                id: "settings-app",
+                                class: "host-settings-section app-settings-panel",
+                                aria_label: "app",
+                                hidden: selected() != "app",
+                                h3 {
+                                    class: "host-settings-section-title",
+                                    tabindex: "-1",
+                                    "app"
+                                }
+                                p { class: "host-settings-help",
+                                    "This one belongs to this Farhelm app on this Mac."
+                                }
+                                div {
+                                    label {
+                                        class: "app-settings-choice",
+                                        "data-tooltip": "install updates automatically: check for a new Farhelm release when the app starts and about once a day, and install it in the background",
+                                        span { "install updates automatically" }
+                                        input {
+                                            r#type: "checkbox",
+                                            class: "host-settings-switch",
+                                            checked: automatic(),
+                                            aria_describedby: "automatic-updates-help",
+                                            // Only a saved choice is shown as the choice: on
+                                            // a failed write the box returns to the setting
+                                            // still in force, with the reason beside it.
+                                            onchange: move |event| {
+                                                match updater.set_automatic_updates(event.checked()) {
+                                                    Ok(()) => {
+                                                        automatic.set(event.checked());
+                                                        automatic_error.set(None);
+                                                    }
+                                                    Err(reason) => {
+                                                        let in_force = updater.automatic_updates();
+                                                        automatic.set(in_force);
+                                                        automatic_error.set(Some(reason));
+                                                        restore_automatic_checkbox(in_force);
+                                                    }
+                                                }
+                                            },
+                                        }
+                                    }
                                     p {
-                                        class: "host-settings-help app-settings-error",
-                                        role: "alert",
-                                        "{reason}"
+                                        id: "automatic-updates-help",
+                                        class: "host-settings-help",
+                                        if automatic() {
+                                            "Farhelm checks for a new release when it starts and about once a day, and installs it in the background. Restarting Farhelm finishes the update."
+                                        } else {
+                                            "Farhelm installs a new release only when you check for updates from the ? menu or this machine's update item, or run the installer yourself."
+                                        }
+                                    }
+                                    if let Some(reason) = automatic_error() {
+                                        p {
+                                            class: "host-settings-help app-settings-error",
+                                            role: "alert",
+                                            "{reason}"
+                                        }
                                     }
                                 }
                             }
@@ -419,7 +568,9 @@ pub(crate) fn SettingsDialog(
 fn NativeTunnelSettings() -> Element {
     #[cfg(native_desktop)]
     {
-        rsx! { crate::tunnels::TunnelSettings {} }
+        rsx! {
+            crate::tunnels::TunnelSettings {}
+        }
     }
     #[cfg(not(native_desktop))]
     {
@@ -432,7 +583,9 @@ fn NativeTunnelSettings() -> Element {
 fn NativeOpenExtensionsSettings() -> Element {
     #[cfg(native_desktop)]
     {
-        rsx! { OpenExtensionsSettings {} }
+        rsx! {
+            OpenExtensionsSettings {}
+        }
     }
     #[cfg(not(native_desktop))]
     {
@@ -505,13 +658,21 @@ fn OpenExtensionsSettings() -> Element {
 
     rsx! {
         div { class: "open-extensions-field",
-            label { r#for: "open-extensions-input", class: "open-extensions-label",
+            label {
+                r#for: "open-extensions-input",
+                class: "open-extensions-label",
                 "file types to open with {modifier}-click"
             }
             input {
-                id: "open-extensions-input", r#type: "text", value: "{draft}",
-                readonly: saving(), aria_disabled: saving(),
-                autocomplete: "off", spellcheck: "false", autocorrect: "off", autocapitalize: "none",
+                id: "open-extensions-input",
+                r#type: "text",
+                value: "{draft}",
+                readonly: saving(),
+                aria_disabled: saving(),
+                autocomplete: "off",
+                spellcheck: "false",
+                autocorrect: "off",
+                autocapitalize: "none",
                 aria_describedby: "open-extensions-help",
                 oninput: move |event| {
                     if !saving() {
@@ -530,12 +691,18 @@ fn OpenExtensionsSettings() -> Element {
                 "Comma-separated final extensions. A leading dot is optional. Save an empty field to stop opening downloaded files; downloads still save. This choice applies to this helm."
             }
             for (extension, kind) in warnings {
-                div { class: "open-extensions-warning", role: "alert", key: "{extension}",
+                div {
+                    class: "open-extensions-warning",
+                    role: "alert",
+                    key: "{extension}",
                     p { class: "open-extensions-warning-heading",
                         span { aria_hidden: "true", "⚠" }
                         " {extension}: "
-                        if kind == WarningKind::Html { "an agent-written page may run in your browser" }
-                        else { "no protection from the default app" }
+                        if kind == WarningKind::Html {
+                            "an agent-written page may run in your browser"
+                        } else {
+                            "no protection from the default app"
+                        }
                     }
                     p {
                         if kind == WarningKind::Html {
@@ -547,10 +714,14 @@ fn OpenExtensionsSettings() -> Element {
                 }
             }
             button {
-                r#type: "button", class: "btn btn-neutral", aria_disabled: saving(),
+                r#type: "button",
+                class: "btn btn-neutral",
+                aria_disabled: saving(),
                 "data-tooltip": "save the file types this helm may open",
                 onclick: move |_| {
-                    if saving() { return; }
+                    if saving() {
+                        return;
+                    }
                     let value = match OpenExtensions::parse(&draft()) {
                         Ok(list) => list.normalized(),
                         Err(reason) => {
@@ -570,7 +741,9 @@ fn OpenExtensionsSettings() -> Element {
                             // when this one closed during the write.
                             preferences.0.write().open_extensions = Some(value.clone());
                         }
-                        if !mounted.get() { return; }
+                        if !mounted.get() {
+                            return;
+                        }
                         saving.set(false);
                         if result.is_ok() {
                             draft.set(value);
@@ -578,12 +751,20 @@ fn OpenExtensionsSettings() -> Element {
                         outcome.set(Some(result));
                     });
                 },
-                if saving() { "saving…" } else { "save file types" }
+                if saving() {
+                    "saving…"
+                } else {
+                    "save file types"
+                }
             }
             if let Some(result) = outcome() {
                 match result {
-                    Ok(()) => rsx! { p { class: "checkout-root-success", role: "status", "file types saved" } },
-                    Err(reason) => rsx! { p { class: "checkout-root-error", role: "alert", "{reason}" } },
+                    Ok(()) => rsx! {
+                        p { class: "checkout-root-success", role: "status", "file types saved" }
+                    },
+                    Err(reason) => rsx! {
+                        p { class: "checkout-root-error", role: "alert", "{reason}" }
+                    },
                 }
             }
         }
@@ -657,9 +838,7 @@ fn TerminalLinkChoice(
     let help_id = format!("terminal-link-{}-help", value.key());
     rsx! {
         div {
-            label {
-                class: "app-settings-choice",
-                "data-tooltip": help,
+            label { class: "app-settings-choice", "data-tooltip": help,
                 span { "{label}" }
                 input {
                     r#type: "radio",

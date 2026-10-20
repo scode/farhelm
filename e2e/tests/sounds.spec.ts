@@ -3,6 +3,7 @@
 // without depending on hardware, vendor agents or heuristic status timing.
 import { expect, newObservedContext, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { openSettings, selectSettingsSection } from "./helpers/settings";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import { cleanupSession, createSession, listHosts, localHostId, observeFeedReaders, pinAutoSelect, readFeedReaders, resetPreferences, stubFeed, waitForFeedReadersSettled } from "./helpers/fleet";
 
@@ -105,7 +106,8 @@ test.describe("device sounds", () => {
   });
 
   /** A hidden session stays quiet, revealing it seeds history, and approvals
-   * still ring outside that view. Settings apply before event priority.
+   * still ring outside that view. Local switches survive Settings navigation
+   * and reload, and apply before event priority.
    */
   test("status sounds follow the current view while approvals ignore its filter", async ({ page, request }, testInfo) => {
     const f = await fixture(page, request, created);
@@ -136,7 +138,7 @@ test.describe("device sounds", () => {
     await applied(page, f.session.id, "waiting");
     expect(await starts(page)).toEqual([...bell, ...bell]);
 
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page, "notifications");
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     await expect(dialog.getByRole("checkbox", { name: "session waiting", exact: true })).toBeChecked();
     await expect(dialog.getByRole("checkbox", { name: "approval request", exact: true })).toBeChecked();
@@ -144,6 +146,12 @@ test.describe("device sounds", () => {
     await dialog.screenshot({ path: testInfo.outputPath("sound-settings.png") });
     await dialog.getByRole("checkbox", { name: "session waiting", exact: true }).uncheck();
     await dialog.getByRole("checkbox", { name: "turn finished", exact: true }).check();
+    // Navigation rerenders Settings while JS owns these checked properties.
+    // Returning must preserve the local choice instead of restoring defaults.
+    await selectSettingsSection(page, "sessions");
+    await selectSettingsSection(page, "notifications");
+    await expect(dialog.getByRole("checkbox", { name: "session waiting", exact: true })).not.toBeChecked();
+    await expect(dialog.getByRole("checkbox", { name: "turn finished", exact: true })).toBeChecked();
     await dialog.getByRole("button", { name: "close", exact: true }).click();
     await page.locator(".filter-host").selectOption(String(f.remote.id));
     await applied(page, f.session.id, null);
@@ -162,7 +170,7 @@ test.describe("device sounds", () => {
     await f.feed.waitForConnection(2);
     await applied(page, f.session.id, "idle", "sound-approval");
     expect(await starts(page)).toEqual([]);
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page, "notifications");
     await expect(dialog.getByRole("checkbox", { name: "session waiting", exact: true })).not.toBeChecked();
     await expect(dialog.getByRole("checkbox", { name: "turn finished", exact: true })).toBeChecked();
   });

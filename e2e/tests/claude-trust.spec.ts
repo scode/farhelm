@@ -2,6 +2,7 @@ import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { cleanupSession, createSession, patchPreferences, readPreferences, resetPreferences } from "./helpers/fleet";
 import { attachSession } from "./helpers/term";
+import { openSettings, selectSettingsSection } from "./helpers/settings";
 
 /** The real setting and preference routes must survive reload and reach another
  * client. Only the sampled dialog flag and managed association are seeded: no
@@ -67,18 +68,34 @@ test("Claude trust hint preserves the terminal and opens the opt-in caveats", as
     expect(after.height).toBeLessThan(before.height);
     await testInfo.attach("trust-hint", { body: await page.locator(".app-main").screenshot(), contentType: "image/png" });
 
-    await band.getByRole("button", { name: "Settings and caveats", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     const field = dialog.locator("#checkout-claude-trust");
     const toggle = field.getByRole("checkbox", { name: 'answer Claude\'s "trust this folder?" for new checkouts', exact: true });
-    await expect(field).toBeFocused();
-    await expect(toggle).toBeEnabled();
-    await expect(toggle).not.toBeChecked();
-    expect(await toggle.evaluate((element) => {
-      const box = element.getBoundingClientRect();
-      const body = element.closest(".host-settings-body")!.getBoundingClientRect();
-      return box.top >= body.top && box.bottom <= body.bottom;
-    }), "settings opens scrolled to the opt-in").toBe(true);
+    // Exercise the band's own entry point at each layout. Selecting trust
+    // through the gear helper here would hide a broken initial selection.
+    for (const width of [390, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      await band.getByRole("button", { name: "Settings and caveats", exact: true }).click();
+      await expect(dialog.locator('.app-settings-panel[aria-label="agent trust"]')).toBeVisible();
+      await expect(dialog.locator('.app-settings-panel[aria-label="sessions"]')).toBeHidden();
+      await expect(field).toBeFocused();
+      await expect(toggle).toBeEnabled();
+      await expect(toggle).not.toBeChecked();
+      expect(await toggle.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const body = element.closest(".host-settings-body")!.getBoundingClientRect();
+        return box.top >= body.top && box.bottom <= body.bottom;
+      }), "settings opens scrolled to the opt-in").toBe(true);
+      if (width === 390) {
+        await expect(dialog.getByRole("button", { name: "‹ settings", exact: true })).toBeVisible();
+        await expect(dialog.getByRole("navigation", { name: "settings sections", exact: true })).toBeHidden();
+        await dialog.getByRole("button", { name: "close", exact: true }).click();
+        await openSettings(page);
+        await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
+        await expect(dialog.locator('.app-settings-panel[aria-label="agent trust"]')).toBeHidden();
+        await dialog.getByRole("button", { name: "close", exact: true }).click();
+      }
+    }
     await expect(field).toContainText("How this works, and why it's off by default");
     await expect(field).toContainText("Claude session exiting at the same instant");
     await testInfo.attach("trust-caveats", { body: await dialog.screenshot(), contentType: "image/png" });
@@ -99,7 +116,9 @@ test("Claude trust hint preserves the terminal and opens the opt-in caveats", as
     await dialog.getByRole("button", { name: "close", exact: true }).click();
     await expect(band).toHaveCount(0);
     await page.reload();
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page);
+    await expect(dialog.locator('.app-settings-panel[aria-label="sessions"]')).toBeVisible();
+    await selectSettingsSection(page, "agent trust");
     await expect(toggle).toBeChecked();
     await toggle.uncheck();
     await expect.poll(async () => (await (await request.get("/api/checkout-claude-trust")).json()).enabled).toBe(false);
@@ -132,7 +151,7 @@ test("Claude trust hint preserves the terminal and opens the opt-in caveats", as
     await expect(other.locator(".claude-trust-surface")).toHaveAttribute("data-enabled", "false");
     await expect(other.locator(".claude-trust-surface")).toHaveAttribute("data-hint-dismissed", "true");
     await expect(other.locator(".claude-trust-band")).toHaveCount(0);
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page, "agent trust");
     await field.getByRole("checkbox", { name: "show the hint when Claude asks about a managed checkout", exact: true }).check();
     await dialog.getByRole("button", { name: "close", exact: true }).click();
     await expect(band).toBeVisible();

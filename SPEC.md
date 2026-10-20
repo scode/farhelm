@@ -906,23 +906,23 @@ the source's actual directory; a managed checkout then requires an explicit repo
 setup, or a template that sets one. `farhelm agent clone` keeps its existing-directory behavior.
 
 The helm owns a working-copy root and optional post-clone command, globally with per-host overrides. There is no default
-root. The all-hosts checkout folder and post-clone command can be set or cleared in Settings or with the command line;
-per-host overrides remain command-line only. Settings saves each field explicitly, shows a refused value's reason, and
-clears it when an all-whitespace field is saved. The command field preserves all other spacing and newlines. An
-explicitly disabled command displays as an empty field, but opening Settings never rewrites any stored value.
-Browser-readable configuration replies may contain the all-hosts folder and command, never host overrides. A missing
-root and its parents are created on the target host at the first checkout, using the ordinary umask; configuration,
-discovery and preview create nothing. Existing symlink ancestors resolve to their canonical directory, while unresolved
-`..` in a missing suffix and dangling symlinks are refused. A root whose resolution changed since preview is still
-refused. `~` expands there, using the supervisor's captured home. Clearing an override restores inheritance; an empty
-hook override disables the inherited hook. Configuration changes affect new attempts, not an already accepted attempt or
-its retries.
+root. The all-hosts checkout folder and post-clone command can be set or cleared under **checkouts** in Settings or with
+the command line; per-host overrides remain command-line only. Settings saves each field explicitly, shows a refused
+value's reason, and clears it when an all-whitespace field is saved. The command field preserves all other spacing and
+newlines. An explicitly disabled command displays as an empty field, but opening Settings never rewrites any stored
+value. Browser-readable configuration replies may contain the all-hosts folder and command, never host overrides. A
+missing root and its parents are created on the target host at the first checkout, using the ordinary umask;
+configuration, discovery and preview create nothing. Existing symlink ancestors resolve to their canonical directory,
+while unresolved `..` in a missing suffix and dangling symlinks are refused. A root whose resolution changed since
+preview is still refused. `~` expands there, using the supervisor's captured home. Clearing an override restores
+inheritance; an empty hook override disables the inherited hook. Configuration changes affect new attempts, not an
+already accepted attempt or its retries.
 
-Settings also offers an off-by-default, all-hosts choice to answer Claude's "trust this folder?" for new managed
-checkouts, including agent-requested checkouts and checkouts initially started with another agent. It never applies to a
-directory the user selects themselves. After clone and the post-clone command succeed, immediately before the agent
-starts, Farhelm marks that checkout trusted in Claude's own configuration on that host. Turning it on affects future
-checkouts only, and changing it does not invalidate an already displayed path preview.
+Settings offers an off-by-default, all-hosts choice under **agent trust** to answer Claude's "trust this folder?" for
+new managed checkouts, including agent-requested checkouts and checkouts initially started with another agent. It never
+applies to a directory the user selects themselves. After clone and the post-clone command succeed, immediately before
+the agent starts, Farhelm marks that checkout trusted in Claude's own configuration on that host. Turning it on affects
+future checkouts only, and changing it does not invalidate an already displayed path preview.
 
 The help leads with the mechanism: Claude has no supported switch, so Farhelm edits its settings file (normally
 `~/.claude.json`), which also holds sign-in, settings and per-directory state. It changes only that directory's trust
@@ -937,15 +937,15 @@ repository hooks and commands just as answering Yes does. The mechanism is expli
 While Claude's trust question is visible in the agent terminal of a managed checkout, the setting is off, and the hint
 has not been dismissed, an informational band appears above the terminal, below its tabs. It takes layout space rather
 than covering the question, is announced without taking focus, and explains that answering automatically would require
-editing Claude's own settings with caveats. Settings and caveats opens Settings at the switch; Don't show again stores a
-shared dismissal, reversible beside the switch. × hides only the current occurrence, until the question leaves the
-screen. The normal invalidation feed updates the hint band in other clients; Settings reads the current shared values
-when opened.
+editing Claude's own settings with caveats. Settings and caveats opens **agent trust** in Settings at Claude's switch;
+Don't show again stores a shared dismissal, reversible beside the switch. × hides only the current occurrence, until the
+question leaves the screen. The normal invalidation feed updates the hint band in other clients; Settings reads the
+current shared values when opened.
 
-The same Settings section offers separate off-by-default, all-hosts trust switches for Codex, Muse and Pi. Each applies
-only when Farhelm composes an agent launch into a managed checkout, including a checkout an agent requests and an
-existing managed checkout selected for New, Clone, Restart with or Replace with. An inherited spawn recomputes trust for
-its destination under the same rule as clone, rather than retaining its parent's trust choice. Codex receives a
+The **agent trust** section also offers separate off-by-default, all-hosts trust switches for Codex, Muse and Pi. Each
+applies only when Farhelm composes an agent launch into a managed checkout, including a checkout an agent requests and
+an existing managed checkout selected for New, Clone, Restart with or Replace with. An inherited spawn recomputes trust
+for its destination under the same rule as clone, rather than retaining its parent's trust choice. Codex receives a
 per-launch trusted directory override, Muse receives `--trust-workspace`, and Pi receives `--approve` for project
 settings and extensions. These switches never edit the agent's saved configuration. Their help states that the
 repository's hooks, settings and commands may then run as if the user had approved them. Ordinary user-selected
@@ -956,10 +956,10 @@ refuse the reused key.
 
 Codex and Muse show the same nonmodal discovery hint while their recognized trust question is current in a managed
 checkout's agent terminal, their switch is off, and their own hint has not been dismissed. The hint names the agent,
-offers Settings at its switch and Don't show again, and has an occurrence-only ×. Each shared dismissal is independent
-and reversible beside its switch. Failed settings reads never count as an off switch. Pi has a switch but no hint band:
-its project-resource approval is not currently recognized as a trust question. Older stored session snapshots default
-the new hint evidence to absent; the legacy Claude hint remains Claude-only.
+offers Settings at its switch in **agent trust** and Don't show again, and has an occurrence-only ×. Each shared
+dismissal is independent and reversible beside its switch. Failed settings reads never count as an off switch. Pi has a
+switch but no hint band: its project-resource approval is not currently recognized as a trust question. Older stored
+session snapshots default the new hint evidence to absent; the legacy Claude hint remains Claude-only.
 
 When the selected host has no checkout folder in effect, the launcher's managed-checkout destination offers the same
 explicit-save field, explaining that it sets the folder for every host and can be changed later in Settings. Refusal
@@ -1330,49 +1330,56 @@ types, and whether host setup or host removal confirmation should be skipped aft
 client that has already loaded its preferences keeps its previous behavior until it reloads, except that automatic
 session selection rereads the shared visits immediately before choosing, template shortcuts read their bindings on each
 invocation and the desktop helm reads the current file-opening list for each hover and open request. The gear
-immediately to the right of the sidebar version opens a settings dialog with an off-by-default **skip session
-confirmations** switch under **sessions**. Its help names Delete, Replace, Restart and tab Close and excludes YOLO, host
-and trash questions (see Lifecycle operations). Beside it, **name sessions on quick launch** is on by default, including
-when the helm has never stored a choice. Turning it off disables the naming prompt for quick launches. Beside it,
-**color terminal frames by host** starts off and colors every session's thin terminal frame to match its host icon when
-turned on. The dialog also has the host switches `set up new hosts without asking` and `remove hosts without asking`, on
-when the respective confirmation is skipped. Turning one off restores that confirmation; turning one on makes the same
-choice as the host dialog's permanent answer. Changes take effect immediately in the current client. Each switch
-explains the current behavior, and each host dialog's permanent answer points to the gear as the place to undo it. A
-separate **terminal links** section chooses whether web links open in Farhelm without passing the click on (the
-default), open in Farhelm and also pass the click on, or only pass the click on. The latter two choices explain the risk
-of a second browser tab and that a program without mouse reporting cannot act on a click. This choice covers every
-client of the helm and takes effect in every mounted terminal of the current client immediately; other open clients pick
-it up when they reload, like the host choices. In the desktop app, the **terminal links** section also has a free-form,
-comma-separated **file types to open with Cmd-click** field (Ctrl-click outside macOS). It defaults to `md, txt, json`;
-saving an empty list disables opening while downloads still save. This field requires an explicit, acknowledged save,
-but its value lives in the shared preference row. The dialog shows one prominent warning beside the field for each
-listed type outside `md`, `txt`, `json` and `log`; HTML-like types have a browser-specific warning, and all other
-unrecognized types have a generic warning. The warnings follow the draft as typed, including when another entry is
-malformed. A refused save leaves the draft and current helm policy unchanged and shows the reason inline. Sounds has
-three device switches (see Status). A separate **ntfy alerts** section has an off-by-default switch, server URL (default
-`https://ntfy.sh`), topic, optional access token, and priority (min, low, default, high, urgent; default default). These
-are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear
-inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing it.
-Changing to another server clears a saved token unless a new one is entered, and the form says so before saving. **Send
-test** uses the saved configuration, even while disabled, and reports success or failure inline. The dialog also holds
-the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone command field (see
-[Managed checkouts](#managed-checkouts)). The folder's help explains expansion on each host, first-use folder creation,
-and that command-line host overrides keep their folder. The command's help explains that it runs in each new checkout on
-its host, after cloning and before the agent starts, that changes affect future checkouts only, and that command-line
-host overrides keep their command. The installed desktop app's dialog also has a switch for installing updates
-automatically (see [Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of
-that app installation, kept with the app rather than by the helm, and a browser never shows it. The two host
-confirmation choices apply to every host and client of this helm; existing controls with a natural place in the main UI
-stay there. No client keeps its own copy: every client reads the helm's preference once after authenticating and writes
-it on change, so a browser tab and the desktop app open in the same order and on the same session. Per-client
-persistence — browser storage, a desktop state file, anything that lets two clients remember different answers — is not
-wanted for these shared preferences, including welcome-card dismissal (sidebar width, terminal text size and sound
-switches, by contrast, are deliberately per device; see Session list, Terminal experience and Status). A client that
-asks the helm for no particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent
-reference usable by the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking
-is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record
-the asking session.
+immediately to the right of the sidebar version opens a settings dialog. Its left sidebar lists **sessions**, **hosts**,
+**terminal**, **checkouts**, **agent trust** and **notifications**, followed by **app** only in a desktop app whose
+updater is active. One selected section appears beside the list, with a matching heading; notifications keeps **sounds**
+and **ntfy alerts** sub-headings. The header and footer stay pinned while the body scrolls. At 620px wide and below, the
+dialog shows either the selected section or the list; **‹ settings** returns to the list. The gear always opens sessions
+and focuses its first switch, including at phone width. Trust hints instead open agent trust at the relevant switch and
+scroll its block into view. Section buttons follow the platform's normal Tab rules. Switching sections preserves unsaved
+fields, outcome lines and pending saves; closing discards unsaved fields. Escape and either close control return focus
+to the gear. Sessions has an off-by-default **skip session confirmations** switch. Its help names Delete, Replace,
+Restart and tab Close and excludes YOLO, host and trash questions (see Lifecycle operations). Beside it, **name sessions
+on quick launch** is on by default, including when the helm has never stored a choice. Turning it off disables the
+naming prompt for quick launches. Beside it, **color terminal frames by host** starts off and colors every session's
+thin terminal frame to match its host icon when turned on. The **hosts** section has the switches
+`set up new hosts without asking` and `remove hosts without asking`, on when the respective confirmation is skipped.
+Turning one off restores that confirmation; turning one on makes the same choice as the host dialog's permanent answer.
+Changes take effect immediately in the current client. Each switch explains the current behavior, and each host dialog's
+permanent answer points to the gear as the place to undo it. The **terminal** section chooses whether web links open in
+Farhelm without passing the click on (the default), open in Farhelm and also pass the click on, or only pass the click
+on. The latter two choices explain the risk of a second browser tab and that a program without mouse reporting cannot
+act on a click. This choice covers every client of the helm and takes effect in every mounted terminal of the current
+client immediately; other open clients pick it up when they reload, like the host choices. In the desktop app, the
+**terminal** section also has tunnel consent and a free-form, comma-separated **file types to open with Cmd-click**
+field (Ctrl-click outside macOS). It defaults to `md, txt, json`; saving an empty list disables opening while downloads
+still save. This field requires an explicit, acknowledged save, but its value lives in the shared preference row. The
+dialog shows one prominent warning beside the field for each listed type outside `md`, `txt`, `json` and `log`;
+HTML-like types have a browser-specific warning, and all other unrecognized types have a generic warning. The warnings
+follow the draft as typed, including when another entry is malformed. A refused save leaves the draft and current helm
+policy unchanged and shows the reason inline. Under **notifications**, sounds has three device switches (see Status),
+and **ntfy alerts** has an off-by-default switch, server URL (default `https://ntfy.sh`), topic, optional access token,
+and priority (min, low, default, high, urgent; default default). These are explicitly saved helm configuration, shared
+by every client, outside the preference row. Save refusals appear inline. The stored token is never returned: the form
+shows whether one exists and allows replacing or clearing it. Changing to another server clears a saved token unless a
+new one is entered, and the form says so before saving. **Send test** uses the saved configuration, even while disabled,
+and reports success or failure inline. The **checkouts** section holds the explicitly saved all-hosts checkout folder
+and, below it, a monospace multi-line post-clone command field (see [Managed checkouts](#managed-checkouts)). The
+folder's help explains expansion on each host, first-use folder creation, and that command-line host overrides keep
+their folder. The command's help explains that it runs in each new checkout on its host, after cloning and before the
+agent starts, that changes affect future checkouts only, and that command-line host overrides keep their command. The
+installed desktop app's dialog also has an **app** section with a switch for installing updates automatically (see
+[Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of that app
+installation, kept with the app rather than by the helm, and a browser never shows it. The two host confirmation choices
+apply to every host and client of this helm; existing controls with a natural place in the main UI stay there. No client
+keeps its own copy: every client reads the helm's preference once after authenticating and writes it on change, so a
+browser tab and the desktop app open in the same order and on the same session. Per-client persistence — browser
+storage, a desktop state file, anything that lets two clients remember different answers — is not wanted for these
+shared preferences, including welcome-card dismissal (sidebar width, terminal text size and sound switches, by contrast,
+are deliberately per device; see Session list, Terminal experience and Status). A client that asks the helm for no
+particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by
+the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
+`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 240px and 600px, with 340px as the default. Double-click
 the edge to reset it, or focus the separator and use Left and Right to step by 10px. Its width is remembered per device,
@@ -1539,13 +1546,13 @@ special case.
 ### Status
 
 Each client can play distinct sounds when a session starts waiting, when a new agent approval request arrives, and when
-an agent goes from running to idle. Only Claude and Codex report Waiting today. Settings has a Sounds section with one
-switch per event, remembered per device: waiting and approval default on, turn finished off. The open session stays
-quiet while its window is active; initial page-load or sign-in state makes no sound. Status sounds follow the sidebar's
-current host selector and filters; changing that view silently records its existing statuses. New approval requests
-sound regardless of those filters, because their cards are always shown. Each observation plays only its most urgent
-enabled, non-quiet event: approval, waiting, then turn finished. Browser playback needs a prior user gesture; blocked
-playback is discarded, never queued. Every open client makes its own sounds.
+an agent goes from running to idle. Only Claude and Codex report Waiting today. Settings has sounds controls under
+**notifications**, with one switch per event, remembered per device: waiting and approval default on, turn finished off.
+The open session stays quiet while its window is active; initial page-load or sign-in state makes no sound. Status
+sounds follow the sidebar's current host selector and filters; changing that view silently records its existing
+statuses. New approval requests sound regardless of those filters, because their cards are always shown. Each
+observation plays only its most urgent enabled, non-quiet event: approval, waiting, then turn finished. Browser playback
+needs a prior user gesture; blocked playback is discarded, never queued. Every open client makes its own sounds.
 
 Each session shows one of: **running** (agent actively working), **waiting** (a detected pending question or approval
 directed at the user), **idle** (agent alive and at rest, no pending ask), **exited** (process ended), **interrupted**
@@ -1832,10 +1839,10 @@ whatever the agent renders is what you see. There is no composer, no message abs
   state, but nothing else in Farhelm may stall because of it.
 - Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a
   program has mouse reporting on. Small pointer jitter still counts as a click.
-- Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind, unless
-  **terminal links** in settings is set to pass the click on only. By default, a primary-button press on a web link
-  Farhelm would open is withheld from a program with mouse reporting active, together with its release and any drag
-  starting there, so programs that open links themselves cannot open a second browser tab from that same click. The
+- Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind, unless the
+  **terminal** settings section's link choice is set to pass the click on only. By default, a primary-button press on a
+  web link Farhelm would open is withheld from a program with mouse reporting active, together with its release and any
+  drag starting there, so programs that open links themselves cannot open a second browser tab from that same click. The
   forcing modifier still selects locally. A withheld press dismisses the drag-copy notice and never raises it. File
   links, other buttons, the wheel and all other mouse gestures keep their existing behavior. The alternative settings
   either let Farhelm open the link and also send the click to the program (which may open it again), or leave the click
