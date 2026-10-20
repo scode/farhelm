@@ -524,7 +524,8 @@ An unavailable session uses one accent card over the terminal scrim, sharing Del
 retry counts and escaped peer diagnostics stay in smaller print. The remedy is preserved verbatim. A pending registry
 read says checking, a failed read names that failure, and a connected host under a stale session says refreshing. The
 browser's reconnect card uses the same CSS with its own counter and neutral retry button. Recoverable detach notices
-never paint the red banner; takeover, stall and terminal refusals still do.
+never paint the red banner; takeover, stall and terminal refusals still do. A session-owned resize observer gives the
+card the viewport when less than 80px of terminal height remains, so conditional chrome cannot hide its explanation.
 
 The session view remembers whether it has offered terminals. Staleness retains those islands and makes their panes and
 tab strip inert; a freshly opened stale view offers no terminals. The existing recovery snapshot's xterm element moves

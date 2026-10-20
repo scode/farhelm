@@ -7035,13 +7035,19 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   inset: 0;
   z-index: 2;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   background: var(--scrim);
   padding: 20px;
   pointer-events: auto;
+  overflow: auto;
 }
 .session-unavailable-card {
+  /* Auto margins center a fitting card but leave oversized content at the
+     scroll origin, where both the explanation and its last line are reachable. */
+  margin: auto;
+  flex-shrink: 0;
+  box-sizing: border-box;
   max-width: min(42rem, 100%);
   padding: 14px 20px;
   background: var(--bg-2);
@@ -7049,6 +7055,14 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-menu);
   overflow-wrap: anywhere;
+}
+/* Measured terminal space, including conditional notices, decides whether
+   the outage needs the viewport to leave a readable scrollport. */
+.outage-viewport .session-unavailable-overlay,
+.outage-viewport .terminal-connecting.terminal-reconnecting {
+  position: fixed;
+  z-index: 6;
+  padding: 4px;
 }
 .session-unavailable-heading {
   display: flex;
