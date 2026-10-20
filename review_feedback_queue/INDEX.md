@@ -72,9 +72,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`automatic-notification-dismissal-loses-focus.md`](automatic-notification-dismissal-loses-focus.md) — Automatic
   notification-list dismissal has no focus handoff to its session bell.
 
-- [`ssh-help-close-loses-replaced-opener-focus.md`](ssh-help-close-loses-replaced-opener-focus.md) — Closing SSH help
-  after a setup offer replaces its opener can lose immediate keyboard focus.
-
 - [`notification-popup-drifts-after-local-delete.md`](notification-popup-drifts-after-local-delete.md) — A notification
   popup can remain at its former position after a session above it is deleted.
 

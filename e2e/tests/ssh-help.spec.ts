@@ -7,6 +7,8 @@ import { randomUUID } from "node:crypto";
 import { Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import { resetPreferences } from "./helpers/fleet";
+import { requireHelmBuild } from "./helpers/helm-build";
+import { routeGate } from "./helpers/route-gate";
 
 test.beforeEach(async ({ request }) => {
   await resetPreferences(request);
@@ -126,4 +128,40 @@ test("add host opens ssh help for its draft without losing the form", async ({ p
   expect((await hosts.json()).hosts.some((host: { destination?: string }) => host.destination === destination)).toBe(false);
   await page.keyboard.press("Escape");
   await expect(form).toHaveCount(0);
+});
+
+/** A slow probe may replace the hidden parent's opener with a setup offer.
+ * Help closure must hand focus to its live Cancel without consuming a key. */
+test("ssh help returns focus when a setup offer replaced its opener", async ({ page, request }) => {
+  const build = requireHelmBuild(await request.get("/api/hosts"), "held SSH help probe");
+  const gate = routeGate();
+  let probing = false;
+  await page.route("**/api/hosts/probe", async (route) => {
+    probing = true;
+    await gate.wait();
+    await route.fulfill({ headers: { "x-farhelm-build": build }, json: { result: "provisionable", probe_id: "help-held-plan", confirmation: "install the fixture supervisor" } });
+  });
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: "add host", exact: true }).click();
+    const form = page.locator(".host-add-dialog");
+    await form.locator(".add-host-ssh").fill(`help-${randomUUID()}.invalid`);
+    await form.locator(".add-host-submit").click();
+    await expect.poll(() => probing).toBe(true);
+    await form.locator(".add-host-ssh-help").click();
+    const help = page.locator(".ssh-help-dialog");
+    await expect(help.locator(".ssh-help-close")).toBeFocused();
+    await expect(form).toBeHidden();
+    gate.release();
+    await expect(form.locator(".add-host-ssh-help")).toHaveCount(0);
+    await expect(form.locator(".add-host-cancel")).toHaveCount(1);
+    await help.locator(".ssh-help-close").click();
+    await expect(help).toHaveCount(0);
+    await expect(form.locator(".add-host-cancel")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(form).toHaveCount(0);
+  } finally {
+    gate.release();
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  }
 });
