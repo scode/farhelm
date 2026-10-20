@@ -18,6 +18,11 @@ from typing import Callable
 from test_run_nextest import read_regular
 
 VERSION = "1.64.0"
+# The browser suite runs one independent stack per worker (e2e/stack-slots.ts,
+# STACK_COUNT), so the worker count is part of the runner policy this module
+# pins and verifies, not a tunable. test-playwright-report.py checks that the
+# two values agree; change them together.
+WORKERS = 1
 TERMINATION_GRACE = 60.0
 GRACEFUL_SIGNAL = signal.SIGINT
 ARGV_LIMIT = 128
@@ -153,7 +158,7 @@ def prepare(run_dir: pathlib.Path, checkout: pathlib.Path, argv: list[str], env:
         raise ValueError("Playwright version probe did not identify pinned tools")
     command = [
         os.fspath(node_path), os.fspath(cli), "test", "--config", os.fspath(config),
-        "--workers=1", "--retries=0", "--repeat-each=1", "--forbid-only",
+        f"--workers={WORKERS}", "--retries=0", "--repeat-each=1", "--forbid-only",
         "--fail-on-flaky-tests", "--max-failures=0", "--update-snapshots=none",
         f"--reporter=line,json,{reporter}", "--output", os.fspath(run_dir / ARTIFACTS), *selected,
     ]
@@ -162,7 +167,7 @@ def prepare(run_dir: pathlib.Path, checkout: pathlib.Path, argv: list[str], env:
         "owned_environment_names": ["PLAYWRIGHT_JSON_OUTPUT_FILE", "FARHELM_PLAYWRIGHT_POLICY_FILE"],
         "hashes": hashes, "version_probes": {name: item.evidence() for name, item in probes.items()},
         "selected_policy": {
-            "workers": 1, "retries": 0, "repeat_each": 1,
+            "workers": WORKERS, "retries": 0, "repeat_each": 1,
             "forbid_only": True, "fail_on_flaky_tests": True,
         },
         "report": {
@@ -229,7 +234,7 @@ def _projects(config, policy, run_dir):
     if config.get("shard") is not None:
         raise ValueError("unexpected sharding")
     for document in (config, policy):
-        if (_integer(document.get("workers"), "invalid workers") != 1
+        if (_integer(document.get("workers"), "invalid workers") != WORKERS
                 or document.get("forbidOnly") is not True
                 or document.get("failOnFlakyTests") is not True):
             raise ValueError("inconsistent runner policy")

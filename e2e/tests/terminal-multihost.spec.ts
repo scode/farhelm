@@ -69,6 +69,7 @@ import {
   rowByTitle,
   sharedSessionRow,
 } from "./helpers/terminal-suite";
+import { currentStackSlot } from "../stack-slots";
 
 /**
  * Read a visible fixture row's session id for a readiness oracle.
@@ -126,7 +127,7 @@ type StackInfo = {
  * otherwise fail one assertion at a time with no hint of the cause.
  */
 function stackInfo(): StackInfo {
-  const at = path.resolve(__dirname, "../.stack-info.json");
+  const at = currentStackSlot().stackInfoPath;
   if (!fs.existsSync(at)) {
     throw new Error(
       `${at} is missing: start-stack.sh publishes it before the helm starts, so the stack under test is not the one this suite expects`,

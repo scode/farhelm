@@ -7,9 +7,10 @@ import { Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import { patchPreferences, readPreferences, resetPreferences } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
-import { AUTH_STORAGE_STATE_PATH, DEVICE_SECRET_KEY } from "./helpers/device-auth";
+import { DEVICE_SECRET_KEY } from "./helpers/device-auth";
 import { requireHelmBuild } from "./helpers/helm-build";
 import { waitForReplayReveal } from "./helpers/terminal-readiness";
+import { currentStackSlot } from "../stack-slots";
 
 const GET_STARTED_URL = "https://farhelm.io/docs/get-started/first-session/";
 let helmBuild: string;
@@ -57,7 +58,7 @@ for (const dismissal of ["got it", "close", "Escape"] as const) {
     await page.reload();
     await expect(page.locator(".new-session-button")).toBeVisible();
     await expect(dialog).toHaveCount(0);
-    const other = await browser.newContext({ storageState: AUTH_STORAGE_STATE_PATH });
+    const other = await browser.newContext({ storageState: currentStackSlot().authStatePath });
     try {
       const seed = await other.storageState();
       expect(seed.origins.flatMap(origin => origin.localStorage.map(item => item.name)),

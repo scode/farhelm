@@ -10,12 +10,12 @@ import { chmod, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
-  AUTH_STORAGE_STATE_PATH,
   DEVICE_SECRET_KEY,
   refreshHarnessAuthorization,
   requireProductPageAuth,
 } from "./helpers/device-auth";
 import { stackScratchDir } from "./helpers/scratch";
+import { currentStackSlot } from "../stack-slots";
 
 const run = promisify(execFile);
 
@@ -33,14 +33,14 @@ async function persistCredential(
   secret: string,
   cookies: Awaited<ReturnType<BrowserContext["storageState"]>>["cookies"],
 ) {
-  await writeFile(AUTH_STORAGE_STATE_PATH, JSON.stringify({
+  await writeFile(currentStackSlot().authStatePath, JSON.stringify({
     cookies,
     origins: [{
       origin: new URL(baseURL).origin,
       localStorage: [{ name: DEVICE_SECRET_KEY, value: secret }],
     }],
   }), { mode: 0o600 });
-  await chmod(AUTH_STORAGE_STATE_PATH, 0o600);
+  await chmod(currentStackSlot().authStatePath, 0o600);
   credentialPersisted = true;
 }
 
@@ -86,7 +86,7 @@ interface StackInfo {
 
 async function stackInfo(): Promise<StackInfo> {
   return JSON.parse(
-    await readFile(path.join(__dirname, "..", ".stack-info.json"), "utf8"),
+    await readFile(currentStackSlot().stackInfoPath, "utf8"),
   ) as StackInfo;
 }
 
@@ -213,7 +213,7 @@ test("a mismatched build stamp beats a 401 without raising the token prompt", as
   baseURL,
 }) => {
   const context = await newObservedContext(browser, timeline, {
-    storageState: AUTH_STORAGE_STATE_PATH,
+    storageState: currentStackSlot().authStatePath,
   });
   const page = await context.newPage();
   await page.route("**/api/sessions**", async (route) => {
@@ -236,7 +236,7 @@ test("a same-build supervisor 401 does not invalidate the device", async ({
   baseURL,
 }) => {
   const context = await newObservedContext(browser, timeline, {
-    storageState: AUTH_STORAGE_STATE_PATH,
+    storageState: currentStackSlot().authStatePath,
   });
   const probe = await context.request.get(baseURL!);
   const build = probe.headers()["x-farhelm-build"];

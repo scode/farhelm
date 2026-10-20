@@ -31,6 +31,16 @@ import { execFileSync } from "node:child_process";
 /** Environment handoff of the chosen port from the runner to workers and the stack script. */
 export const STACK_PORT_ENV = "FARHELM_E2E_PORT";
 
+/** Environment handoff of the browser suite's per-slot ports, comma-separated in slot order.
+ *
+ * The suite boots one stack per worker slot (`stack-slots.ts`), so it needs
+ * several ports chosen together, published once by the runner and read back
+ * by every worker for the same reason as the single port above. Each stack
+ * script still receives its own port through {@link STACK_PORT_ENV}; this
+ * variable is only the runner-to-worker handoff.
+ */
+export const STACK_PORTS_ENV = "FARHELM_E2E_STACK_PORTS";
+
 /** Resolve the stack's helm port once per run, honoring an explicit override.
  *
  * Returns the port already published in the environment when there is one
@@ -44,35 +54,69 @@ export const STACK_PORT_ENV = "FARHELM_E2E_PORT";
 export function harnessStackPort(): number {
   const published = process.env[STACK_PORT_ENV];
   if (published !== undefined && published !== "") {
-    if (!/^[0-9]{1,5}$/.test(published)) {
-      throw new Error(`${STACK_PORT_ENV} must be a TCP port number, got ${JSON.stringify(published)}`);
-    }
-    const port = Number(published);
-    if (port < 1 || port > 65535) {
-      throw new Error(`${STACK_PORT_ENV} is out of range: ${port}`);
-    }
-    return port;
+    return parsePort(published, STACK_PORT_ENV);
   }
-  const port = freeLoopbackPort();
+  const [port] = freeLoopbackPorts(1);
   process.env[STACK_PORT_ENV] = String(port);
   return port;
 }
 
-/** Ask the kernel for a currently free loopback port, synchronously.
+/** Resolve `count` distinct helm ports once per run, one per stack slot.
+ *
+ * The multi-stack counterpart of {@link harnessStackPort}, with the same
+ * contract: the first evaluation in a run asks the kernel and publishes the
+ * answer through {@link STACK_PORTS_ENV}, and every later evaluation (each
+ * worker re-imports the config) reads the published list back. An explicit
+ * override must name exactly `count` distinct valid ports; anything else is
+ * refused rather than padded or truncated, since a slot without its own port
+ * would point a worker at another slot's stack.
+ */
+export function harnessStackPorts(count: number): number[] {
+  const published = process.env[STACK_PORTS_ENV];
+  if (published !== undefined && published !== "") {
+    const ports = published.split(",").map((value) => parsePort(value, STACK_PORTS_ENV));
+    if (ports.length !== count || new Set(ports).size !== count) {
+      throw new Error(`${STACK_PORTS_ENV} must list ${count} distinct ports, got ${JSON.stringify(published)}`);
+    }
+    return ports;
+  }
+  const ports = freeLoopbackPorts(count);
+  process.env[STACK_PORTS_ENV] = ports.join(",");
+  return ports;
+}
+
+/** Validate one port number from the environment before it can reach an argv or a URL. */
+function parsePort(value: string, variable: string): number {
+  if (!/^[0-9]{1,5}$/.test(value)) {
+    throw new Error(`${variable} must hold TCP port numbers, got ${JSON.stringify(value)}`);
+  }
+  const port = Number(value);
+  if (port < 1 || port > 65535) {
+    throw new Error(`${variable} is out of range: ${port}`);
+  }
+  return port;
+}
+
+/** Ask the kernel for `count` currently free loopback ports, synchronously.
  *
  * Node has no synchronous listen, and Playwright does not await an async
  * config export (it reads `module.default` as a plain object), so the probe
- * runs in a child node process whose only output is the port it was given.
- * The child releases the port before exiting; see the module comment for why
- * that window is accepted.
+ * runs in a child node process whose only output is the ports it was given.
+ * All of the child's listeners are open at once, which is what makes the
+ * ports distinct; it releases them before exiting. See the module comment for
+ * why the pick-then-bind window is accepted.
  */
-function freeLoopbackPort(): number {
+function freeLoopbackPorts(count: number): number[] {
   const probe =
-    'const s = require("net").createServer();' +
-    's.listen(0, "127.0.0.1", () => { process.stdout.write(String(s.address().port)); s.close(); });';
-  const output = execFileSync(process.execPath, ["-e", probe], { encoding: "utf8" }).trim();
-  if (!/^[0-9]{1,5}$/.test(output)) {
-    throw new Error(`free-port probe printed ${JSON.stringify(output)} instead of a port`);
+    'const net = require("net"); const n = Number(process.argv[1]); const servers = [];' +
+    'const done = () => { if (servers.length < n) return;' +
+    '  process.stdout.write(servers.map((s) => s.address().port).join(",")); servers.forEach((s) => s.close()); };' +
+    'for (let i = 0; i < n; i++) { const s = net.createServer(); servers.push(s); }' +
+    'let listening = 0; servers.forEach((s) => s.listen(0, "127.0.0.1", () => { if (++listening === n) done(); }));';
+  const output = execFileSync(process.execPath, ["-e", probe, String(count)], { encoding: "utf8" }).trim();
+  const ports = output.split(",");
+  if (ports.length !== count || ports.some((port) => !/^[0-9]{1,5}$/.test(port))) {
+    throw new Error(`free-port probe printed ${JSON.stringify(output)} instead of ${count} ports`);
   }
-  return Number(output);
+  return ports.map(Number);
 }

@@ -23,6 +23,7 @@ import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { currentStackSlot } from "../stack-slots";
 
 type LocalHost = {
   id: number; identity: string; incarnation: number; state: { phase: string }; kind: string;
@@ -176,7 +177,7 @@ test("repository keyboard navigation keeps the active suggestion visible through
  * proves the field follows effective host configuration, not the global GET. */
 test("inline checkout folder setup refreshes discovery and preview and respects host overrides", async ({ page, request }, testInfo) => {
   const host = await localHost(request);
-  const stack = JSON.parse(await readFile(path.join(__dirname, "..", ".stack-info.json"), "utf8")) as {
+  const stack = JSON.parse(await readFile(currentStackSlot().stackInfoPath, "utf8")) as {
     farhelm: string; state: string;
   };
   const run = promisify(execFile);
@@ -382,7 +383,7 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
  */
 test("managed checkout setup notes use ordinary helper styling", async ({ page, request }, testInfo) => {
   const host = await localHost(request);
-  const stack = JSON.parse(await readFile(path.join(__dirname, "..", ".stack-info.json"), "utf8")) as {
+  const stack = JSON.parse(await readFile(currentStackSlot().stackInfoPath, "utf8")) as {
     farhelm: string; state: string;
   };
   const result = await promisify(execFile)(stack.farhelm,
@@ -1059,7 +1060,7 @@ for (const { feedUnavailable, ambiguous } of [
     await observeFeedReaders(page);
     const unavailableFeed = feedUnavailable ? await stubFeed(page) : undefined;
     const host = await localHost(request);
-    const stack = JSON.parse(await readFile(path.join(__dirname, "..", ".stack-info.json"), "utf8")) as {
+    const stack = JSON.parse(await readFile(currentStackSlot().stackInfoPath, "utf8")) as {
       farhelm: string; state: string;
     };
     const run = promisify(execFile);

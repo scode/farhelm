@@ -23,12 +23,13 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { currentStackSlot } from "../../stack-slots";
 
 /** The running stack's own state directory, from the handoff file
  * start-stack.sh publishes before the helm starts serving. Read lazily —
  * at module-load time the file may not exist yet. */
 function stackStateDir(): string {
-  const raw = fs.readFileSync(path.resolve(__dirname, "../../.stack-info.json"), "utf8");
+  const raw = fs.readFileSync(currentStackSlot().stackInfoPath, "utf8");
   const state = (JSON.parse(raw) as { state?: unknown }).state;
   if (typeof state !== "string" || state.length === 0) {
     throw new Error("stack-info.json is missing the stack state directory");
