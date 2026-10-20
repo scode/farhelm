@@ -4832,6 +4832,7 @@ mod tests {
     fn a_skew_remedy_names_the_side_that_is_behind() {
         let row = |id, kind, destination: Option<&str>| HostRow {
             id,
+            entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
             kind,
             destination: destination.map(str::to_string),
             alias: None,
@@ -11008,6 +11009,7 @@ mod tests {
 
         let local = HostRow {
             id: 1,
+            entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
             kind: HostKind::Local,
             destination: None,
             alias: None,
@@ -11066,6 +11068,7 @@ mod tests {
     fn a_remote_rows_refused_dial_is_never_the_local_supervisor_hint() {
         let remote = HostRow {
             id: 2,
+            entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
             kind: HostKind::Ssh,
             destination: Some("remote.example".to_string()),
             alias: None,

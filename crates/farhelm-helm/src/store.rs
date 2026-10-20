@@ -329,7 +329,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 61;
+const SCHEMA_VERSION: i64 = 62;
 
 /// Distinguish host row IDs in this registry from the same IDs in a recovered
 /// or independently created registry. The row is minted with the schema and
@@ -652,6 +652,9 @@ impl HostKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostRow {
     pub id: HostId,
+    /// Helm-assigned identity of this registry entry, in canonical lowercase UUID form.
+    /// Retargeting and adopting an installation preserve it; removal and re-addition do not.
+    pub entry_uuid: String,
     pub kind: HostKind,
     pub destination: Option<String>,
     /// An optional user-facing label. When present it replaces the derived
@@ -713,6 +716,7 @@ type RawHostRow = (
     Option<String>,
     bool,
     bool,
+    Option<String>,
 );
 
 /// The independent browser permissions a host may receive.
@@ -2042,6 +2046,9 @@ pub struct HelmStore {
 /// - 60: per-agent remembered wrapper prefixes, initially empty.
 /// - 61: nullable desktop download-opening extensions. Unset admits the
 ///   default document types even for an upgraded helm; empty admits none.
+/// - 62: a helm-assigned UUID on each host entry, independent of the installation
+///   it currently reaches. Existing entries receive one without rebuilding hosts
+///   or disturbing the foreign-key rows that belong to them.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2131,12 +2138,18 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  -- Their final position matches the swap's appended columns.
                  icon TEXT,
                  color TEXT,
+                 -- Nullable so the same column can be appended to populated hosts
+                 -- without rebuilding it (which would cascade its dependent rows).
+                 -- The migration and all registry writers supply a canonical UUID;
+                 -- registry readers refuse missing or malformed values.
+                 entry_uuid TEXT,
                  CHECK (
                      (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
                           AND remote_state_dir IS NULL)
                      OR (kind = 'ssh' AND destination IS NOT NULL)
                  )
              ) STRICT;
+             CREATE UNIQUE INDEX hosts_entry_uuid ON hosts (entry_uuid);
              -- At most one local row: a partial unique index over a
              -- constant per-row value ('local') collapses to \"unique among
              -- rows where kind = 'local'\", i.e. at most one such row can
@@ -2361,7 +2374,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 61;",
+              PRAGMA user_version = 62;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3688,6 +3701,44 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
             .context("migrating helm.db to schema version 61")?;
         version = 61;
     }
+    if version == 61 {
+        // Never rebuild hosts: deleting the old table would cascade its cache and
+        // history. Mint only while adding the column, under this migration's write
+        // lock. A fixture that merely rewound user_version already has entry IDs;
+        // preserve and validate those rather than silently changing their meaning.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('hosts') WHERE name = 'entry_uuid'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch("ALTER TABLE hosts ADD COLUMN entry_uuid TEXT;")?;
+            let hosts = {
+                let mut statement = tx.prepare("SELECT id FROM hosts")?;
+                statement
+                    .query_map([], |row| row.get::<_, HostId>(0))?
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+            for host in hosts {
+                tx.execute(
+                    "UPDATE hosts SET entry_uuid = ?2 WHERE id = ?1",
+                    rusqlite::params![host, uuid::Uuid::new_v4().to_string()],
+                )?;
+            }
+        }
+        {
+            let mut statement = tx.prepare("SELECT entry_uuid FROM hosts")?;
+            for entry_uuid in statement.query_map([], |row| row.get::<_, Option<String>>(0))? {
+                decode_entry_uuid(entry_uuid?)?;
+            }
+        }
+        tx.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS hosts_entry_uuid ON hosts (entry_uuid);
+             PRAGMA user_version = 62;",
+        )
+        .context("migrating helm.db to schema version 62")?;
+        version = 62;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -3802,18 +3853,41 @@ fn migrate_cached_sessions_to_launch_kinds(tx: &rusqlite::Transaction<'_>) -> an
 /// calls, in this process or any other — exactly the invariant `open`'s own
 /// docs promise: the local row always exists after `open` returns, with no
 /// caller ever needing to check for it first.
+///
+/// The candidate UUID is discarded when another open already inserted the row,
+/// so concurrent and repeated opens keep the winning entry's identity.
 fn ensure_local_row(conn: &Connection) -> anyhow::Result<()> {
     conn.execute(
         concat!(
-            "INSERT INTO hosts (kind) VALUES ('",
+            "INSERT INTO hosts (kind, entry_uuid) VALUES ('",
             host_kind_sql!(local),
-            "') ON CONFLICT (kind) WHERE kind = '",
+            "', ?1) ON CONFLICT (kind) WHERE kind = '",
             host_kind_sql!(local),
             "' DO NOTHING"
         ),
-        [],
+        [uuid::Uuid::new_v4().to_string()],
     )
     .context("minting the reserved local host row")?;
+    Ok(())
+}
+
+/// Refuse a missing or noncanonical entry identity instead of inventing a new one.
+///
+/// An entry UUID binds references to a durable host entry. Repairing it during a
+/// read would invalidate those references, and accepting alternative UUID spellings
+/// would give one entry multiple public names.
+fn decode_entry_uuid(value: Option<String>) -> anyhow::Result<String> {
+    let value = value.context("host entry UUID is missing")?;
+    require_canonical_entry_uuid(&value)?;
+    Ok(value)
+}
+
+/// Keep both stored identities and lookup keys in the one canonical UUID spelling.
+fn require_canonical_entry_uuid(value: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        farhelm_proto::session_ref::is_entry_uuid(value),
+        "host entry UUID is not canonical lowercase UUID text"
+    );
     Ok(())
 }
 
@@ -5263,7 +5337,7 @@ impl HelmStore {
                 .prepare(
                     "SELECT id, kind, destination, alias, remote_farhelm, remote_state_dir, \
                      host_identity, cache_truncated, yolo_without_asking, commands_without_asking, icon, color, \
-                     links_without_asking, local_links_without_asking \
+                     links_without_asking, local_links_without_asking, entry_uuid \
                      FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
@@ -5284,6 +5358,7 @@ impl HelmStore {
                                 r.get(11)?,
                                 r.get(12)?,
                                 r.get(13)?,
+                                r.get(14)?,
                             ))
                         })
                         .context("querying hosts")?
@@ -5306,10 +5381,12 @@ impl HelmStore {
                                 color,
                                 links_without_asking,
                                 local_links_without_asking,
+                                entry_uuid,
                             )| {
                                 Ok(HostRow {
                                     id,
                                     kind: HostKind::from_column(&kind)?,
+                                    entry_uuid: decode_entry_uuid(entry_uuid)?,
                                     destination,
                                     alias,
                                     remote_farhelm,
@@ -5330,6 +5407,43 @@ impl HelmStore {
                         .collect()
                 },
             )
+            .await
+    }
+
+    /// Return the stable entry UUID, or None after the entry has been removed.
+    /// Missing or malformed stored UUIDs are registry corruption, not absent hosts.
+    pub async fn entry_uuid_of(&self, host: HostId) -> anyhow::Result<Option<String>> {
+        self.conn
+            .call("read host entry UUID task panicked", move |conn| {
+                let value: Option<Option<String>> = conn
+                    .query_row(
+                        "SELECT entry_uuid FROM hosts WHERE id = ?1",
+                        [host],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .context("reading host entry UUID")?;
+                value.map(decode_entry_uuid).transpose()
+            })
+            .await
+    }
+
+    /// Resolve a canonical entry UUID only within this registry.
+    /// A removed entry stays absent even if its destination is registered again;
+    /// noncanonical lookup keys are refused rather than normalized into an alias.
+    pub async fn host_by_entry_uuid(&self, entry_uuid: &str) -> anyhow::Result<Option<HostId>> {
+        require_canonical_entry_uuid(entry_uuid)?;
+        let entry_uuid = entry_uuid.to_string();
+        self.conn
+            .call("resolve host entry UUID task panicked", move |conn| {
+                conn.query_row(
+                    "SELECT id FROM hosts WHERE entry_uuid = ?1",
+                    [entry_uuid],
+                    |row| row.get(0),
+                )
+                .optional()
+                .context("resolving host entry UUID")
+            })
             .await
     }
 
@@ -5372,6 +5486,8 @@ impl HelmStore {
     /// in the SSH destination index catches the local row — and
     /// `resolve_host` would then correctly refuse the ambiguous name,
     /// silently breaking it as an agent target.
+    ///
+    /// Each inserted row receives a fresh helm-assigned entry UUID.
     pub async fn add_ssh_host(
         &self,
         destination: &str,
@@ -5405,14 +5521,14 @@ impl HelmStore {
                     // for a decode step to choose between. See
                     // `host_kind_sql!` for why it is spliced, not bound.
                     concat!(
-                        "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir) \
+                        "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, entry_uuid) \
                          VALUES ('",
                         host_kind_sql!(ssh),
-                        "', ?1, ?2, ?3) ON CONFLICT (destination) WHERE kind = '",
+                        "', ?1, ?2, ?3, ?4) ON CONFLICT (destination) WHERE kind = '",
                         host_kind_sql!(ssh),
                         "' DO NOTHING"
                     ),
-                    rusqlite::params![destination, remote_farhelm, remote_state_dir],
+                    rusqlite::params![destination, remote_farhelm, remote_state_dir, uuid::Uuid::new_v4().to_string()],
                 )
                 .context("inserting ssh host")?;
             if inserted == 0 {
@@ -5436,7 +5552,8 @@ impl HelmStore {
     /// discovery must not turn a retarget race into silent adoption. The
     /// boolean reports whether this transaction inserted the row, so a
     /// caller whose live-registry reconciliation fails can roll back only
-    /// the row it owns rather than deleting a concurrent registration.
+    /// the row it owns rather than deleting a concurrent registration. A new row
+    /// gets a fresh entry UUID; convergence keeps the existing entry UUID.
     ///
     /// A genuinely NEW destination matching another host's explicit alias
     /// or unaliased local display name is refused as
@@ -5545,11 +5662,11 @@ impl HelmStore {
                         tx.execute(
                     concat!(
                         "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, \
-                         host_identity) VALUES ('",
+                         host_identity, entry_uuid) VALUES ('",
                         host_kind_sql!(ssh),
-                        "', ?1, ?2, ?3, ?4)"
+                        "', ?1, ?2, ?3, ?4, ?5)"
                     ),
-                    rusqlite::params![destination, remote_farhelm, remote_state_dir, host_identity],
+                    rusqlite::params![destination, remote_farhelm, remote_state_dir, host_identity, uuid::Uuid::new_v4().to_string()],
                 )
                 .context("inserting the discovered ssh host")?;
                         (tx.last_insert_rowid(), true)
@@ -5577,8 +5694,8 @@ impl HelmStore {
     ///
     /// ADDITIVE, never corrective: a destination already in the registry is
     /// left exactly as it is, including its `remote_farhelm`,
-    /// `remote_state_dir`, and its learned identity. helm.db is the durable
-    /// authority and `/api/hosts` is how it is edited; a startup file that
+    /// `remote_state_dir`, its learned identity, and its entry UUID. helm.db is
+    /// the durable authority and `/api/hosts` is how it is edited; a startup file that
     /// overwrote user edits on every boot would make the two fight, and the
     /// interactive one would lose. Returns the ids actually created, in
     /// input order, so a caller can log what it added rather than what it
@@ -5686,17 +5803,18 @@ impl HelmStore {
                         let inserted = tx
                     .execute(
                         concat!(
-                            "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir) \
+                            "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, entry_uuid) \
                              VALUES ('",
                             host_kind_sql!(ssh),
-                            "', ?1, ?2, ?3) ON CONFLICT (destination) WHERE kind = '",
+                            "', ?1, ?2, ?3, ?4) ON CONFLICT (destination) WHERE kind = '",
                             host_kind_sql!(ssh),
                             "' DO NOTHING"
                         ),
                         rusqlite::params![
                             entry.destination,
                             entry.remote_farhelm,
-                            entry.remote_state_dir
+                            entry.remote_state_dir,
+                            uuid::Uuid::new_v4().to_string()
                         ],
                     )
                     .with_context(|| {
@@ -8347,7 +8465,9 @@ mod tests {
     }
 
     /// An existing schema-27 installation must retain ordinary history
-    /// when repo intent is added; fresh and migrated DDL must agree.
+    /// when repo intent is added; fresh and migrated DDL must agree. Later
+    /// columns are removed from the fixture so the ladder assigns their real
+    /// positions, including entry UUIDs that did not exist in schema 27.
     #[tokio::test]
     async fn schema_28_preserves_history_without_inventing_repo_intent() {
         let (dir, store) = fresh_store().await;
@@ -8397,6 +8517,8 @@ mod tests {
                  -- migrations append their columns after these and change schema order.
                  ALTER TABLE hosts DROP COLUMN links_without_asking;
                  ALTER TABLE hosts DROP COLUMN local_links_without_asking;
+                 DROP INDEX hosts_entry_uuid;
+                 ALTER TABLE hosts DROP COLUMN entry_uuid;
                  PRAGMA user_version = 27;",
             )
             .unwrap();
@@ -8412,6 +8534,7 @@ mod tests {
                 conn.prepare("SELECT remembered_workspace_trust FROM preferences")
                     .is_err()
             );
+            assert!(conn.prepare("SELECT entry_uuid FROM hosts").is_err());
         }
         drop(store);
         let migrated = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
@@ -8427,6 +8550,8 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(schema_objects(&migrated.conn.lock()), schema);
+        require_canonical_entry_uuid(&migrated.entry_uuid_of(host).await.unwrap().unwrap())
+            .expect("the historical host receives an entry identity");
     }
 
     /// A replay of a successful structured create is the same session, not a
@@ -11426,6 +11551,292 @@ mod tests {
         assert_eq!(hosts.len(), 1, "exactly one row after a fresh open");
         assert_eq!(hosts[0].kind, HostKind::Local);
         assert_eq!(hosts[0].destination, None);
+        require_canonical_entry_uuid(&hosts[0].entry_uuid).expect("canonical local entry UUID");
+    }
+
+    /// Every registration path gives a distinct entry its own UUID. Configuration
+    /// and installation changes keep that identity, while removal ends its lifetime
+    /// even if the same destination is registered again.
+    #[farhelm_testtrace::test]
+    async fn host_entry_uuids_follow_the_entry_lifetime() {
+        let (dir, store) = fresh_store().await;
+        let local = store.list_hosts().await.unwrap()[0].id;
+        let added = host_with_identity(&store, "added@host", "identity-before").await;
+        let reported_identity = "abcdefab-1234-4000-8000-123456789abc";
+        let (probed, inserted) = store
+            .register_probed_ssh_host("probed@host", None, None, Some(reported_identity))
+            .await
+            .unwrap();
+        assert!(inserted);
+        let ensured = store
+            .ensure_ssh_hosts(vec![EnsureHost {
+                destination: "ensured@host".to_string(),
+                remote_farhelm: None,
+                remote_state_dir: None,
+            }])
+            .await
+            .unwrap();
+        assert_eq!(ensured.len(), 1);
+        let before = store.list_hosts().await.unwrap();
+        assert_eq!(before.len(), 4);
+        let unique: std::collections::HashSet<_> =
+            before.iter().map(|row| &row.entry_uuid).collect();
+        assert_eq!(
+            unique.len(),
+            before.len(),
+            "every creation path mints its own identity"
+        );
+        for row in &before {
+            require_canonical_entry_uuid(&row.entry_uuid).unwrap();
+            assert_ne!(
+                row.entry_uuid, reported_identity,
+                "the reported installation identity is not the entry identity"
+            );
+            assert_eq!(
+                store.entry_uuid_of(row.id).await.unwrap().as_ref(),
+                Some(&row.entry_uuid)
+            );
+            assert_eq!(
+                store.host_by_entry_uuid(&row.entry_uuid).await.unwrap(),
+                Some(row.id)
+            );
+        }
+
+        assert_eq!(
+            store
+                .register_probed_ssh_host(
+                    "probed@host",
+                    Some("farhelm-remote"),
+                    None,
+                    Some(reported_identity),
+                )
+                .await
+                .unwrap(),
+            (probed, false)
+        );
+        assert!(
+            store
+                .ensure_ssh_hosts(vec![EnsureHost {
+                    destination: "ensured@host".to_string(),
+                    remote_farhelm: Some("another-farhelm".to_string()),
+                    remote_state_dir: None,
+                }])
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        store
+            .update_ssh_destination(added, "retargeted@host")
+            .await
+            .unwrap();
+        store
+            .adopt_identity(
+                added,
+                &dialed_as(&store, added).await,
+                "identity-before",
+                "identity-after",
+            )
+            .await
+            .unwrap();
+        for row in &before {
+            assert_eq!(
+                store.entry_uuid_of(row.id).await.unwrap().as_ref(),
+                Some(&row.entry_uuid)
+            );
+        }
+        let path = dir.path().join("helm.db");
+        drop(store);
+        let store = HelmStore::open(&path).await.expect("reopen");
+        for row in &before {
+            assert_eq!(
+                store.entry_uuid_of(row.id).await.unwrap().as_ref(),
+                Some(&row.entry_uuid)
+            );
+        }
+        assert_eq!(store.list_hosts().await.unwrap()[0].id, local);
+
+        let old_uuid = store.entry_uuid_of(probed).await.unwrap().unwrap();
+        store.remove_ssh_host(probed).await.unwrap();
+        let replacement = store.add_ssh_host("probed@host", None, None).await.unwrap();
+        assert_ne!(replacement, probed);
+        assert_ne!(
+            store.entry_uuid_of(replacement).await.unwrap().unwrap(),
+            old_uuid
+        );
+        assert_eq!(store.entry_uuid_of(probed).await.unwrap(), None);
+        assert_eq!(store.host_by_entry_uuid(&old_uuid).await.unwrap(), None);
+    }
+
+    /// Adding the entry column must preserve host-owned rows: rebuilding hosts
+    /// would silently delete them through their foreign keys. A repeated migration
+    /// over a rewound current fixture must also keep the IDs already assigned.
+    #[farhelm_testtrace::test]
+    async fn schema_62_backfills_entry_uuids_without_rebuilding_hosts() {
+        let (dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "migrated@host", "identity-kept").await;
+        store
+            .replace_host_sessions(host, "identity-kept", vec![session("kept", 123)], false)
+            .await
+            .unwrap();
+        assert_eq!(store.cached_sessions(host).await.unwrap().len(), 1);
+        let path = dir.path().join("helm.db");
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "DROP INDEX hosts_entry_uuid;
+                 ALTER TABLE hosts DROP COLUMN entry_uuid;
+                 PRAGMA user_version = 61;",
+            )
+            .expect("restore schema 61 without entry UUIDs");
+            let columns: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM pragma_table_info('hosts') WHERE name = 'entry_uuid'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(columns, 0, "the migration must genuinely add the column");
+        }
+        let store = HelmStore::open(&path).await.expect("migrate schema 61");
+        let rows = store.list_hosts().await.unwrap();
+        assert_eq!(rows.len(), 2, "the original local and SSH entries survive");
+        assert_ne!(rows[0].entry_uuid, rows[1].entry_uuid);
+        for row in &rows {
+            require_canonical_entry_uuid(&row.entry_uuid).unwrap();
+        }
+        let cached = store.cached_sessions(host).await.unwrap();
+        assert_eq!(cached.len(), 1);
+        assert_eq!(
+            cached[0].id, "kept",
+            "host-owned cache must survive the migration"
+        );
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.pragma_update(None, "user_version", 61).unwrap();
+        }
+        let reopened = HelmStore::open(&path)
+            .await
+            .expect("rewound current fixture");
+        assert_eq!(
+            reopened.list_hosts().await.unwrap(),
+            rows,
+            "rewinding only the version cannot remint entry IDs"
+        );
+    }
+
+    /// A failure halfway through backfill must roll back both DDL and data so a
+    /// subsequent open can retry the same migration, with no partial identities.
+    #[farhelm_testtrace::test]
+    async fn schema_62_backfill_failure_rolls_back_the_column_and_version() {
+        let (dir, store) = fresh_store().await;
+        let host = store
+            .add_ssh_host("rollback@host", None, None)
+            .await
+            .unwrap();
+        let path = dir.path().join("helm.db");
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "DROP INDEX hosts_entry_uuid;
+                 ALTER TABLE hosts DROP COLUMN entry_uuid;
+                 PRAGMA user_version = 61;
+                 CREATE TRIGGER fail_entry_backfill BEFORE UPDATE ON hosts
+                 WHEN OLD.kind = 'ssh' BEGIN
+                     SELECT RAISE(ABORT, 'forced entry backfill failure');
+                 END;",
+            )
+            .unwrap();
+        }
+        let Err(error) = HelmStore::open(&path).await else {
+            panic!("backfill must fail");
+        };
+        assert!(format!("{error:#}").contains("forced entry backfill failure"));
+        {
+            let conn = Connection::open(&path).unwrap();
+            let version: i64 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, 61);
+            let columns: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM pragma_table_info('hosts') WHERE name = 'entry_uuid'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                columns, 0,
+                "the failed transaction must roll back ALTER TABLE too"
+            );
+            conn.execute_batch("DROP TRIGGER fail_entry_backfill;")
+                .unwrap();
+        }
+        let store = HelmStore::open(&path).await.expect("retry migration");
+        assert!(store.entry_uuid_of(host).await.unwrap().is_some());
+    }
+
+    /// Registry reads must expose damaged identity data, never repair it into a
+    /// different entry. The unique index independently refuses identity reuse.
+    #[farhelm_testtrace::test]
+    async fn host_entry_uuid_reads_refuse_corruption_and_sql_refuses_duplicates() {
+        let (_dir, store) = fresh_store().await;
+        let local = store.list_hosts().await.unwrap()[0].clone();
+        let remote = store.add_ssh_host("unique@host", None, None).await.unwrap();
+        {
+            let conn = store.conn.lock();
+            conn.execute(
+                "UPDATE hosts SET entry_uuid = ?2 WHERE id = ?1",
+                rusqlite::params![remote, local.entry_uuid],
+            )
+            .expect_err("the unique index must bind independently of the API");
+        }
+        for damaged in [
+            None,
+            Some("not-a-uuid"),
+            Some("ABCDEFAB-1234-4000-8000-123456789ABC"),
+            Some("abcdefab123440008000123456789abc"),
+        ] {
+            {
+                let conn = store.conn.lock();
+                conn.execute(
+                    "UPDATE hosts SET entry_uuid = ?2 WHERE id = ?1",
+                    rusqlite::params![remote, damaged],
+                )
+                .unwrap();
+            }
+            assert!(
+                store.list_hosts().await.is_err(),
+                "invalid UUID {damaged:?} must fail registry reads"
+            );
+            assert!(
+                store.entry_uuid_of(remote).await.is_err(),
+                "corruption must differ from a missing entry"
+            );
+            let retained: Option<String> = store
+                .conn
+                .lock()
+                .query_row(
+                    "SELECT entry_uuid FROM hosts WHERE id = ?1",
+                    [remote],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                retained.as_deref(),
+                damaged,
+                "a read must never mint a replacement"
+            );
+        }
+        for invalid in [
+            "",
+            "ABCDEFAB-1234-4000-8000-123456789ABC",
+            "abcdefab123440008000123456789abc",
+        ] {
+            assert!(store.host_by_entry_uuid(invalid).await.is_err());
+        }
     }
 
     /// The archive-removal migration strips only the retired member from
@@ -12265,9 +12676,9 @@ mod tests {
             host
         };
 
-        // Build this fixture at the raw SQLite boundary. Reversing only the
-        // four history tables makes it an exact schema-22 predecessor while
-        // leaving the current registry row as the migration must find it.
+        // Restore the old history tables and remove columns added after schema
+        // 22. The host row itself survives; its entry UUID is assigned only when
+        // this historical fixture reaches schema 62, just as on a real upgrade.
         {
             let conn = Connection::open(&path).expect("reopen raw schema-22 fixture");
             // Schema 36 drops the profile tables, so a file claiming a
@@ -12351,9 +12762,12 @@ mod tests {
                  -- migration 45 must append browser permissions after the older columns.
                  ALTER TABLE hosts DROP COLUMN links_without_asking;
                  ALTER TABLE hosts DROP COLUMN local_links_without_asking;
+                 DROP INDEX hosts_entry_uuid;
+                 ALTER TABLE hosts DROP COLUMN entry_uuid;
                  PRAGMA user_version = 22;",
             )
             .expect("replace current history with the schema-22 shape");
+            assert!(conn.prepare("SELECT entry_uuid FROM hosts").is_err());
             conn.execute(
                 "INSERT INTO create_history_sessions (host_id, host_identity, session_id, creation_seq)
                  VALUES (?1, 'identity-kept', 'old-admission', 1)",
@@ -12399,6 +12813,8 @@ mod tests {
             .expect("schema migration must not delete the host registry row");
         assert_eq!(retained.destination.as_deref(), Some("schema-22@host"));
         assert_eq!(retained.host_identity.as_deref(), Some("identity-kept"));
+        require_canonical_entry_uuid(&retained.entry_uuid)
+            .expect("the retained historical host receives an entry identity");
         let version: i64 = migrated
             .conn
             .lock()
@@ -13441,7 +13857,7 @@ mod tests {
     /// it needs its own conditional shape regardless. What this test
     /// verifies, on every run regardless of how the two opens happened to
     /// interleave: two `HelmStore`s legitimately opened against the same
-    /// file both see exactly one local row.
+    /// file both see exactly one local row with the same stable entry UUID.
     #[farhelm_testtrace::test]
     async fn concurrent_double_open_mints_exactly_one_local_row() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -13460,6 +13876,11 @@ mod tests {
                 "two racing opens must converge on exactly one local row"
             );
         }
+        assert_eq!(
+            hosts_a[0].entry_uuid, hosts_b[0].entry_uuid,
+            "both opens must retain the winning local entry UUID"
+        );
+        require_canonical_entry_uuid(&hosts_a[0].entry_uuid).unwrap();
     }
 
     /// SPEC.md: the local host is always present, never removable. Refusing

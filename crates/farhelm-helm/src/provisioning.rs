@@ -893,6 +893,7 @@ mod tests {
         for value in [".", "/", ".."] {
             let row = HostRow {
                 id: 1,
+                entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
                 kind: HostKind::Ssh,
                 destination: Some("user@host".to_string()),
                 alias: None,
@@ -955,6 +956,7 @@ mod tests {
         };
         let row = HostRow {
             id: 1,
+            entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
             kind: HostKind::Ssh,
             destination: Some("user@host".to_string()),
             alias: None,
@@ -1190,6 +1192,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let row = HostRow {
             id: 1,
+            entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
             kind: HostKind::Ssh,
             destination: Some("user@host".to_string()),
             alias: None,
