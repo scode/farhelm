@@ -25,9 +25,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`native-download-quit-leaves-partial-files.md`](native-download-quit-leaves-partial-files.md) — Desktop Quit leaves
   hidden partial downloads with no recovery owner.
 
-- [`template-screenshot-implies-deletion-needs-save.md`](template-screenshot-implies-deletion-needs-save.md) — A reader
-  could delete a saved template and close the dialog believing the deletion was never committed.
-
 - [`notification-test-cleanup-skips-preference-restoration.md`](notification-test-cleanup-skips-preference-restoration.md)
   — A failed notification fixture cleanup can skip later session releases and shared preference restoration.
 
@@ -76,9 +73,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`release-review-links-allow-page-script.md`](release-review-links-allow-page-script.md) — Draft Markdown links can
   inject release-review page script; attacker exposure and consequential harm remain unverified.
-
-- [`draft-release-note-promises-update-confirmation.md`](draft-release-note-promises-update-confirmation.md) — Finalized
-  v0.30.0 notes promise an Update confirmation although clicking Update starts it without asking.
 
 - [`terminal-focus-tests-arm-cleanup-late.md`](terminal-focus-tests-arm-cleanup-late.md) — A focus-observer setup
   failure can leave a new regression test's live session outside its cleanup scope.

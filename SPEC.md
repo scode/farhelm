@@ -17,6 +17,10 @@ path. Qualifications for other agents and hosts belong in the guides; a claim th
 defect in the introduction. The maintainer's principle is: "The overview is meant to be short and a hook. We cannot be
 lawyers and make it 100 pages of caveats. don't change anything, just fix spec."
 
+Published release notes and their screenshots are the historical record and stay as published, except for an absolutely
+catastrophically major mistake with huge user impact. The maintainer's principle is: "We don't change unless it's an
+absolutely catastrophically major mistake with huge user impact."
+
 ## Concepts
 
 - **Host**: a machine that runs sessions. The local Mac is a host; each remote Linux machine is a host. Every host runs
