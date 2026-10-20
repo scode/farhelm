@@ -16448,7 +16448,11 @@
 - Completion criteria: a redraw under a resting pointer keeps a refused web link's explanation raised until the pointer
   leaves the link, as for file links; the existing browser test is extended to redraw the row. Size gate: about 100
   lines, as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/terminal-link-and-copy-fixes.md`.
+- Execution: implemented in change `poywlsupqwrmxlswmooruslstzwumlkk`, bookmark
+  `plan/terminal-link-and-copy-fixes/02-keep-web-refusal-raised`. Web hover leave defers lowering until the next task;
+  only the same target, displayed cells and text reclaim the raised explanation. The covered OSC browser regression now
+  observes an actual redraw re-hover under a resting pointer before checking notice stacking. Counted code/test/doc
+  diff: 58 lines, within the 100-line gate. PR: https://github.com/scode/farhelm/pull/2392/changes.
 
 ## repository-discovery-inherits-bare-git-config.md
 

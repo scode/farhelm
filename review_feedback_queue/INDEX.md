@@ -145,9 +145,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`draft-release-note-promises-update-confirmation.md`](draft-release-note-promises-update-confirmation.md) — Finalized
   v0.30.0 notes promise an Update confirmation although clicking Update starts it without asking.
 
-- [`web-link-redraw-lowers-refusal.md`](web-link-redraw-lowers-refusal.md) — Terminal output can hide a refused web
-  link's explanation while the pointer stays on the link; click admission remains safe.
-
 - [`terminal-focus-tests-arm-cleanup-late.md`](terminal-focus-tests-arm-cleanup-late.md) — A focus-observer setup
   failure can leave a new regression test's live session outside its cleanup scope.
 

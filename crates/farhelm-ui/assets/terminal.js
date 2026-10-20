@@ -3618,6 +3618,21 @@
         // Both link providers identify the web target currently under the pointer.
         // A file hover never qualifies for withholding program input.
         let hoveredWebLink = false;
+        let webHoverIdentity = null;
+        let webLeaveTimer = null;
+        // xterm leaves and synchronously re-enters links on row redraw. Only
+        // the same target, cells and displayed text may keep a raised refusal;
+        // a real departure or replacement returns it to ordinary stacking.
+        const noteWebHover = (uri, range, text) => {
+          // File hovers own their own reclaim logic; leave it intact when
+          // there is no preceding web hover to retire.
+          if (!uri && webHoverIdentity === null && webLeaveTimer === null) return;
+          const identity = uri && range && text !== null ? JSON.stringify([uri, range, text]) : null;
+          if (webLeaveTimer !== null) clearTimeout(webLeaveTimer);
+          webLeaveTimer = null;
+          if (identity === null || identity !== webHoverIdentity) fileLinks.lowerRefusal();
+          webHoverIdentity = identity;
+        };
         const linkClickMode = () => window.farhelmTerminalLinkClickMode || 'intercept';
         const nativeLinks = typeof window[WEBVIEW_DEVICE_SECRET] === 'string';
         const tunnelState = () => nativeLinks ? window.farhelmTunnelSessions?.[spec.sessionId] : null;
@@ -3634,7 +3649,12 @@
           fileLinks.admitDisclosure(term.element.querySelector(':scope > .terminal-link-target:not(.terminal-file-target)'), true);
         const hideWebLinkTarget = () => {
           window.farhelmTerminalLinks.hideLinkTarget(term.element);
-          fileLinks.lowerRefusal();
+          if (webLeaveTimer !== null) clearTimeout(webLeaveTimer);
+          webLeaveTimer = setTimeout(() => {
+            webLeaveTimer = null;
+            webHoverIdentity = null;
+            fileLinks.lowerRefusal();
+          }, 0);
         };
         // OSC and prose links share all policy, including the exact release
         // token. Peer data crosses the Rust channel as values, never source.
@@ -3731,6 +3751,7 @@
               const target = window.farhelmTerminalFiles.oscTarget(uri);
               hoveredWebLink = target?.kind === 'web';
               const links = window.farhelmTerminalLinks;
+              noteWebHover(target?.kind === 'web' ? uri : null, range, links.linkRangeText(term, range));
               // OSC labels can change without changing target or cell range.
               // Keep evidence only while the same displayed text remains there.
               if (target?.kind === 'file') fileLinks.hover(event, target.path, null, range, links.linkRowText(term, range));
@@ -3740,10 +3761,8 @@
               }
             },
             leave() {
-              // An OSC file hover lowers its refusal through the addon's
-              // deferred leave, which a redraw's synchronous re-hover can
-              // reclaim. Lowering it here as well would let every repaint of
-              // the link drop the explanation beneath the hover and cards.
+              // File and web refusals both defer lowering so a synchronous
+              // redraw can reclaim the same hover before the next task.
               const web = hoveredWebLink;
               hoveredWebLink = false;
               fileLinks.leave();
@@ -3818,8 +3837,9 @@
             // terminal-links.js for the full four-check rationale).
             activateWebLink(event, uri);
           }, {
-            hover(event, uri) {
+            hover(event, uri, range) {
               hoveredWebLink = window.farhelmTerminalLinks.isPlainWebUrl(uri);
+              noteWebHover(uri, range, window.farhelmTerminalLinks.linkRangeText(term, range));
               const hint = tunnelHint(uri);
               if (hint) window.farhelmTerminalLinks.showLinkTarget(event, uri, term.element, null, false, hint);
             },
@@ -4789,6 +4809,7 @@
         // stop deferred work from reaching a disposed instance.
         disposeDeferred = () => {
           alive = false;
+          if (webLeaveTimer !== null) clearTimeout(webLeaveTimer);
           clearIdleTimer();
           clearHeartbeat();
           // A held banner and its observer die with the mount; see their
