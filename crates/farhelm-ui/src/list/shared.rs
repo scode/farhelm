@@ -976,8 +976,8 @@ pub(super) mod tests {
             remote_farhelm: None,
             remote_state_dir: None,
             state: crate::HostPhase::IdentityMismatch {
-                recorded: "install-7".to_string(),
-                reported: "install-8".to_string(),
+                recorded: "install-7".into(),
+                reported: "install-8".into(),
             },
             incarnation: 3,
             yolo_without_asking: false,
@@ -1113,8 +1113,8 @@ pub(super) mod tests {
             remote_farhelm: None,
             remote_state_dir: None,
             state: crate::HostPhase::Connected {
-                identity: Some(format!("install-{id}")),
-                build_version: "test".to_string(),
+                identity: Some(format!("install-{id}").into()),
+                build_version: "test".into(),
                 old_version: false,
                 newer_version: false,
                 refresh: crate::RefreshHealth::Pending,

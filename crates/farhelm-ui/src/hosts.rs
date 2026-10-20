@@ -240,7 +240,9 @@ pub(crate) fn name_duplicate_twins(hosts: &mut [Host]) {
             twin, twin_name, ..
         } = &mut host.state
         {
-            *twin_name = names.get(twin).cloned();
+            // Keep the displayed spelling here: details historically escape this
+            // already escaped name again, unlike an ordinary decoded peer name.
+            *twin_name = names.get(twin).map(Into::into);
         }
     }
 }
@@ -333,7 +335,7 @@ pub(crate) fn too_new_title(state: &HostPhase) -> Option<String> {
         } => Some(format!(
             "this host runs farhelm {}, which is newer than this helm's {} (both speak protocol \
              {}); update the helm",
-            display_peer(build_version),
+            build_version.escaped(),
             crate::skew::CLIENT_BUILD,
             farhelm_proto::PROTOCOL_VERSION,
         )),
@@ -346,8 +348,8 @@ pub(crate) fn too_new_title(state: &HostPhase) -> Option<String> {
         } if peer_protocol > our_protocol => Some(format!(
             "this host runs farhelm {} (protocol {peer_protocol}), which is newer than this \
              helm's {} (protocol {our_protocol}); update the helm",
-            display_peer(peer_build),
-            display_peer(our_build),
+            peer_build.escaped(),
+            our_build.escaped(),
         )),
         _ => None,
     }
@@ -386,7 +388,7 @@ fn host_update_title(state: &HostPhase) -> Option<String> {
             ..
         } => Some(format!(
             "this host runs farhelm {}; this helm runs {}; update optional; click to update this host to the helm's version",
-            display_peer(build_version),
+            build_version.escaped(),
             crate::skew::CLIENT_BUILD,
         )),
         HostPhase::VersionSkew {
@@ -397,8 +399,8 @@ fn host_update_title(state: &HostPhase) -> Option<String> {
             ..
         } if peer_protocol < our_protocol => Some(format!(
             "this host runs farhelm {} (protocol {peer_protocol}); this helm runs {} (protocol {our_protocol}); update required; click to update this host to the helm's version",
-            display_peer(peer_build),
-            display_peer(our_build),
+            peer_build.escaped(),
+            our_build.escaped(),
         )),
         _ => None,
     }
@@ -610,7 +612,7 @@ fn available_remote_updates(
 /// verb outright. See the module docs.
 pub(crate) fn adoptable(state: &HostPhase) -> Option<&str> {
     match state {
-        HostPhase::IdentityMismatch { reported, .. } => Some(reported.as_str()),
+        HostPhase::IdentityMismatch { reported, .. } => Some(reported.raw()),
         _ => None,
     }
 }
@@ -670,7 +672,7 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
         // no classification this side could invent would beat it — so it is
         // carried unaltered, and made unable to lay out the row around it.
         HostPhase::Unreachable { last_error, .. } => {
-            if last_error.trim().is_empty() {
+            if last_error.raw().trim().is_empty() {
                 vec![DetailPart::text("the host did not answer")]
             } else {
                 vec![DetailPart::peer(last_error)]
@@ -689,6 +691,8 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
             match identity {
                 Some(identity) => {
                     parts.push(DetailPart::text("; identity "));
+                    // Connected evidence keeps ordinary peer presentation.
+                    // Identity comparison prompts below use the stricter form.
                     parts.push(DetailPart::peer(identity));
                 }
                 None => parts.push(DetailPart::text("; no identity reported")),
@@ -712,11 +716,13 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
             DetailPart::peer(our_build),
             DetailPart::text(")"),
         ],
+        // Keep identity preformatting before PeerLine's ordinary escape pass:
+        // these comparison surfaces already used both layers in this order.
         HostPhase::IdentityMismatch { recorded, reported } => vec![
             DetailPart::text("recorded as install "),
-            DetailPart::peer(display_identity(recorded)),
+            DetailPart::peer(recorded.identity()),
             DetailPart::text("; the destination now reports "),
-            DetailPart::peer(display_identity(reported)),
+            DetailPart::peer(reported.identity()),
             DetailPart::text(", so nothing is connected until this is decided"),
         ],
         HostPhase::IdentityUnverified { recorded } => vec![
@@ -724,7 +730,7 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
                 "the host answered without an identity, so this helm cannot confirm it is still \
                  the install recorded as ",
             ),
-            DetailPart::peer(display_identity(recorded)),
+            DetailPart::peer(recorded.identity()),
         ],
         HostPhase::Duplicate {
             twin,
@@ -733,7 +739,7 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
         } => {
             let mut parts = vec![
                 DetailPart::text("this entry reaches install "),
-                DetailPart::peer(display_identity(identity)),
+                DetailPart::peer(identity.identity()),
             ];
             match twin_name {
                 Some(name) => {
@@ -751,7 +757,7 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
             parts
         }
         HostPhase::Retired { reason } => {
-            if reason.trim().is_empty() {
+            if reason.raw().trim().is_empty() {
                 vec![DetailPart::text(
                     "no connection actor is running for this entry",
                 )]
@@ -827,7 +833,7 @@ pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
         // reported nothing at all — an empty `last_error` — because a remedy
         // slot with nothing in it would be worse than an approximate one.
         HostPhase::Unreachable { cause, last_error } if cause == LOCAL_SUPERVISOR_NOT_RUNNING => {
-            if last_error.trim().is_empty() {
+            if last_error.raw().trim().is_empty() {
                 Some(vec![DetailPart::text(
                     "start a supervisor on this machine with `farhelm supervisor run`, passing \
                      the same `--state-dir` this helm was started with if it has one",
@@ -844,7 +850,7 @@ pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
         | HostPhase::Connected { .. }
         | HostPhase::Unrecognized => None,
         HostPhase::VersionSkew { remediation, .. } => {
-            (!remediation.trim().is_empty()).then(|| vec![DetailPart::peer(remediation)])
+            (!remediation.raw().trim().is_empty()).then(|| vec![DetailPart::peer(remediation)])
         }
         HostPhase::IdentityMismatch { .. } => Some(vec![DetailPart::text(
             "adopt the identity the host reports, or fix the destination; adopting resets this \
@@ -4751,13 +4757,13 @@ mod tests {
         owner.name = "build box".into();
         let mut duplicate = host(HostPhase::Duplicate {
             twin: 7,
-            identity: "shared-install".to_string(),
+            identity: "shared-install".into(),
             twin_name: None,
         });
         duplicate.id = 8;
         let mut orphan = host(HostPhase::Duplicate {
             twin: 99,
-            identity: "other-install".to_string(),
+            identity: "other-install".into(),
             twin_name: None,
         });
         orphan.id = 9;
@@ -4775,6 +4781,83 @@ mod tests {
         assert!(orphan_detail.contains("host 99"), "{orphan_detail}");
     }
 
+    /// A duplicate's name is a display snapshot, not another decoded field.
+    /// Keeping the skipped field and its already escaped spelling matters:
+    /// decoding a supplied name or storing raw bytes would change this layer's
+    /// contract even if ordinary host names happened to render identically.
+    #[farhelm_testtrace::test]
+    fn duplicate_names_keep_the_existing_preescaped_snapshot() {
+        let state: HostPhase = serde_json::from_value(serde_json::json!({
+            "phase": "duplicate",
+            "twin": 7,
+            "identity": "shared-install",
+            "twin_name": "not supplied by the helm",
+        }))
+        .unwrap();
+        assert!(matches!(
+            &state,
+            HostPhase::Duplicate {
+                twin_name: None,
+                ..
+            }
+        ));
+
+        let raw_name = "build\u{202e}box\u{200b}";
+        let mut owner = host(HostPhase::Unrecognized);
+        owner.id = 7;
+        owner.name = raw_name.into();
+        let mut hosts = vec![owner, host(state)];
+        name_duplicate_twins(&mut hosts);
+
+        let HostPhase::Duplicate {
+            twin_name: Some(name),
+            ..
+        } = &hosts[1].state
+        else {
+            panic!("the matching entry must supply the display snapshot");
+        };
+        let shown_name = gui_host_name(raw_name, false);
+        assert_ne!(shown_name, raw_name);
+        assert_eq!(name.raw(), shown_name);
+        assert!(detail_text(&state_detail(&hosts[1].state)).contains(&display_peer(&shown_name)));
+        assert!(
+            detail_text(&state_remedy(&hosts[1].state).unwrap())
+                .contains(&display_peer(&shown_name))
+        );
+    }
+
+    /// Connected evidence uses ordinary peer text, while mismatch evidence
+    /// uses identity comparison spelling and adoption sends the original bytes.
+    /// A space, variation selector and literal escape marker distinguish those
+    /// contracts, so this catches an accessor swap that plain UUIDs would hide.
+    #[farhelm_testtrace::test]
+    fn phase_identity_presentations_keep_their_existing_contracts() {
+        let raw = "install <U+0020>\u{fe0f}\u{202e}";
+        let connected: HostPhase = serde_json::from_value(serde_json::json!({
+            "phase": "connected",
+            "identity": raw,
+            "build_version": "build\u{200b}",
+            "refresh": { "status": "failed", "error": "refresh\u{202e}" },
+        }))
+        .unwrap();
+        let detail = detail_text(&state_detail(&connected));
+        assert!(detail.contains(&format!("identity {};", display_peer(raw))));
+        assert!(detail.contains("build<U+200B>"));
+        assert!(detail.contains("refresh<U+202E>"));
+        assert_ne!(display_peer(raw), display_identity(raw));
+
+        let mismatch: HostPhase = serde_json::from_value(serde_json::json!({
+            "phase": "identity-mismatch",
+            "recorded": "old install",
+            "reported": raw,
+        }))
+        .unwrap();
+        assert_eq!(adoptable(&mismatch), Some(raw));
+        assert!(
+            detail_text(&state_detail(&mismatch)).contains(&display_peer(&display_identity(raw)))
+        );
+    }
+
     /// Every phase, with a UNIQUE sentinel in each of its fields, so the
     /// tables below can prove not just that something rendered but that the
     /// RIGHT field rendered in the right place.
@@ -4782,40 +4865,40 @@ mod tests {
         vec![
             HostPhase::Connecting {
                 attempt: 3,
-                last_error: Some("sentinel-connecting-error".to_string()),
+                last_error: Some("sentinel-connecting-error".into()),
             },
             HostPhase::Unreachable {
                 cause: "transport-failure".to_string(),
-                last_error: "sentinel-unreachable-error".to_string(),
+                last_error: "sentinel-unreachable-error".into(),
             },
             HostPhase::Connected {
-                identity: Some("sentinel-connected-identity".to_string()),
-                build_version: "sentinel-connected-build".to_string(),
+                identity: Some("sentinel-connected-identity".into()),
+                build_version: "sentinel-connected-build".into(),
                 old_version: false,
                 newer_version: false,
                 refresh: RefreshHealth::Ok { sessions: 4 },
             },
             HostPhase::VersionSkew {
                 peer_protocol: 9,
-                peer_build: "sentinel-peer-build".to_string(),
+                peer_build: "sentinel-peer-build".into(),
                 our_protocol: 8,
-                our_build: "sentinel-our-build".to_string(),
-                remediation: "sentinel-remediation".to_string(),
+                our_build: "sentinel-our-build".into(),
+                remediation: "sentinel-remediation".into(),
             },
             HostPhase::IdentityMismatch {
-                recorded: "sentinel-recorded".to_string(),
-                reported: "sentinel-reported".to_string(),
+                recorded: "sentinel-recorded".into(),
+                reported: "sentinel-reported".into(),
             },
             HostPhase::IdentityUnverified {
-                recorded: "sentinel-unverified-recorded".to_string(),
+                recorded: "sentinel-unverified-recorded".into(),
             },
             HostPhase::Duplicate {
                 twin: 42,
-                identity: "sentinel-duplicate-identity".to_string(),
+                identity: "sentinel-duplicate-identity".into(),
                 twin_name: None,
             },
             HostPhase::Retired {
-                reason: "sentinel-retired-reason".to_string(),
+                reason: "sentinel-retired-reason".into(),
             },
             HostPhase::Unrecognized,
         ]
@@ -4861,21 +4944,21 @@ mod tests {
             (
                 HostPhase::Connecting {
                     attempt: 3,
-                    last_error: Some("sentinel-connecting-error".to_string()),
+                    last_error: Some("sentinel-connecting-error".into()),
                 },
                 vec!["3", "sentinel-connecting-error"],
             ),
             (
                 HostPhase::Unreachable {
                     cause: "transport-failure".to_string(),
-                    last_error: "sentinel-unreachable-error".to_string(),
+                    last_error: "sentinel-unreachable-error".into(),
                 },
                 vec!["sentinel-unreachable-error"],
             ),
             (
                 HostPhase::Connected {
-                    identity: Some("sentinel-connected-identity".to_string()),
-                    build_version: "sentinel-connected-build".to_string(),
+                    identity: Some("sentinel-connected-identity".into()),
+                    build_version: "sentinel-connected-build".into(),
                     old_version: false,
                     newer_version: false,
                     refresh: RefreshHealth::Ok { sessions: 4 },
@@ -4889,10 +4972,10 @@ mod tests {
             (
                 HostPhase::VersionSkew {
                     peer_protocol: 9,
-                    peer_build: "sentinel-peer-build".to_string(),
+                    peer_build: "sentinel-peer-build".into(),
                     our_protocol: 8,
-                    our_build: "sentinel-our-build".to_string(),
-                    remediation: "sentinel-remediation".to_string(),
+                    our_build: "sentinel-our-build".into(),
+                    remediation: "sentinel-remediation".into(),
                 },
                 // Both protocols and both builds: without all four a user
                 // cannot see which side is behind.
@@ -4900,21 +4983,21 @@ mod tests {
             ),
             (
                 HostPhase::IdentityMismatch {
-                    recorded: "sentinel-recorded".to_string(),
-                    reported: "sentinel-reported".to_string(),
+                    recorded: "sentinel-recorded".into(),
+                    reported: "sentinel-reported".into(),
                 },
                 vec!["sentinel-recorded", "sentinel-reported"],
             ),
             (
                 HostPhase::IdentityUnverified {
-                    recorded: "sentinel-unverified-recorded".to_string(),
+                    recorded: "sentinel-unverified-recorded".into(),
                 },
                 vec!["sentinel-unverified-recorded"],
             ),
             (
                 HostPhase::Duplicate {
                     twin: 42,
-                    identity: "sentinel-duplicate-identity".to_string(),
+                    identity: "sentinel-duplicate-identity".into(),
                     twin_name: None,
                 },
                 vec!["42", "sentinel-duplicate-identity"],
@@ -4922,14 +5005,14 @@ mod tests {
             (
                 HostPhase::Duplicate {
                     twin: 42,
-                    identity: "sentinel-duplicate-identity".to_string(),
-                    twin_name: Some("sentinel-twin-name".to_string()),
+                    identity: "sentinel-duplicate-identity".into(),
+                    twin_name: Some("sentinel-twin-name".into()),
                 },
                 vec!["sentinel-twin-name", "sentinel-duplicate-identity"],
             ),
             (
                 HostPhase::Retired {
-                    reason: "sentinel-retired-reason".to_string(),
+                    reason: "sentinel-retired-reason".into(),
                 },
                 vec!["sentinel-retired-reason"],
             ),
@@ -5230,8 +5313,8 @@ mod tests {
     fn the_adopted_identity_is_raw_while_its_label_is_escaped() {
         let raw = "id-\u{202E}safe";
         let state = HostPhase::IdentityMismatch {
-            recorded: "id-old".to_string(),
-            reported: raw.to_string(),
+            recorded: "id-old".into(),
+            reported: raw.into(),
         };
         assert_eq!(
             adoptable(&state),
@@ -5277,8 +5360,8 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_mismatch_evidence_keeps_each_identity_in_its_own_run() {
         let parts = state_detail(&HostPhase::IdentityMismatch {
-            recorded: "id-old".to_string(),
-            reported: "id-new".to_string(),
+            recorded: "id-old".into(),
+            reported: "id-new".into(),
         });
         let peers: Vec<&str> = parts
             .iter()
@@ -5326,7 +5409,7 @@ mod tests {
                         /srv/state`: Connection refused (os error 111)";
         let down = HostPhase::Unreachable {
             cause: LOCAL_SUPERVISOR_NOT_RUNNING.to_string(),
-            last_error: reported.to_string(),
+            last_error: reported.into(),
         };
         let hint =
             detail_text(&state_remedy(&down).expect("the one unreachable cause with a remedy"));
@@ -5351,7 +5434,7 @@ mod tests {
         let silent = detail_text(
             &state_remedy(&HostPhase::Unreachable {
                 cause: LOCAL_SUPERVISOR_NOT_RUNNING.to_string(),
-                last_error: String::new(),
+                last_error: "".into(),
             })
             .expect("a remedy is offered even with no reported error"),
         );
@@ -5363,7 +5446,7 @@ mod tests {
         assert!(
             state_remedy(&HostPhase::Unreachable {
                 cause: "transport-failure".to_string(),
-                last_error: "connection refused".to_string(),
+                last_error: "connection refused".into(),
             })
             .is_none(),
             "an ordinary unreachable host re-probes forever on its own, so there is nothing to ask \
@@ -5386,10 +5469,10 @@ mod tests {
     fn the_skew_remedy_is_the_helms_own_sentence() {
         let remedy = state_remedy(&HostPhase::VersionSkew {
             peer_protocol: 9,
-            peer_build: "0.2.0".to_string(),
+            peer_build: "0.2.0".into(),
             our_protocol: 8,
-            our_build: "0.1.0".to_string(),
-            remediation: "update this helm to at least 0.2.0".to_string(),
+            our_build: "0.1.0".into(),
+            remediation: "update this helm to at least 0.2.0".into(),
         })
         .expect("a skew always has a remediation to print");
         assert_eq!(
@@ -5417,7 +5500,7 @@ mod tests {
 
         read.record(Ok(vec![host(HostPhase::Connected {
             identity: None,
-            build_version: "0.1.0".to_string(),
+            build_version: "0.1.0".into(),
             old_version: false,
             newer_version: false,
             refresh: RefreshHealth::Pending,
@@ -5468,7 +5551,7 @@ mod tests {
         assert_eq!(read.lookup(Some(1)), HostLookup::Pending);
 
         read.record(Ok(vec![host(HostPhase::Retired {
-            reason: "gone".to_string(),
+            reason: "gone".into(),
         })]));
         assert!(matches!(read.lookup(Some(1)), HostLookup::Known(_)));
         assert_eq!(
@@ -5496,10 +5579,10 @@ mod tests {
     fn the_stale_notice_identifies_the_host_and_carries_its_remedy() {
         let skewed = host(HostPhase::VersionSkew {
             peer_protocol: 7,
-            peer_build: "0.2.0".to_string(),
+            peer_build: "0.2.0".into(),
             our_protocol: 8,
-            our_build: "0.1.0".to_string(),
-            remediation: "update the host's farhelm binary".to_string(),
+            our_build: "0.1.0".into(),
+            remediation: "update the host's farhelm binary".into(),
         });
         let notice = stale_session_notice("user@box", HostLookup::Known(&skewed));
         assert_eq!(notice.cause, "host needs update");
@@ -5567,7 +5650,7 @@ mod tests {
         }
         let local = host(HostPhase::Unreachable {
             cause: LOCAL_SUPERVISOR_NOT_RUNNING.to_string(),
-            last_error: "start the matching supervisor".to_string(),
+            last_error: "start the matching supervisor".into(),
         });
         let notice = stale_session_notice("local", HostLookup::Known(&local));
         assert_eq!(notice.cause, "waiting for supervisor");
@@ -5596,7 +5679,7 @@ mod tests {
     fn old_connected_hosts_have_advisory_display_without_skew_classification() {
         let old = HostPhase::Connected {
             identity: None,
-            build_version: "0.13.0".to_string(),
+            build_version: "0.13.0".into(),
             old_version: true,
             newer_version: false,
             refresh: RefreshHealth::Pending,
@@ -5608,7 +5691,7 @@ mod tests {
 
         let current = HostPhase::Connected {
             identity: None,
-            build_version: "0.14.0-rc.2".to_string(),
+            build_version: "0.14.0-rc.2".into(),
             old_version: false,
             newer_version: false,
             refresh: RefreshHealth::Pending,
@@ -5618,10 +5701,10 @@ mod tests {
 
         let skew = HostPhase::VersionSkew {
             peer_protocol: 1,
-            peer_build: "0.13.0".to_string(),
+            peer_build: "0.13.0".into(),
             our_protocol: 2,
-            our_build: "0.14.0-rc.2".to_string(),
-            remediation: "update".to_string(),
+            our_build: "0.14.0-rc.2".into(),
+            remediation: "update".into(),
         };
         assert_eq!(phase_display_label(&skew), "needs update");
         assert_eq!(phase_class(&skew), "needs-attention");
@@ -5811,7 +5894,7 @@ mod tests {
     fn a_newer_host_reads_too_new_with_both_versions_on_hover() {
         let connected = HostPhase::Connected {
             identity: None,
-            build_version: "9.0.0".to_string(),
+            build_version: "9.0.0".into(),
             old_version: false,
             newer_version: true,
             refresh: RefreshHealth::Pending,
@@ -5829,10 +5912,10 @@ mod tests {
 
         let skew = HostPhase::VersionSkew {
             peer_protocol: 3,
-            peer_build: "9.0.0".to_string(),
+            peer_build: "9.0.0".into(),
             our_protocol: 2,
-            our_build: "0.14.0".to_string(),
-            remediation: "update this helm".to_string(),
+            our_build: "0.14.0".into(),
+            remediation: "update this helm".into(),
         };
         assert!(runs_newer_version(&skew));
         assert_eq!(phase_display_label(&skew), "too new");
@@ -5854,11 +5937,11 @@ mod tests {
     fn a_connected_hosts_detail_reports_its_refresh_health() {
         let failing = detail_text(&state_detail(&HostPhase::Connected {
             identity: None,
-            build_version: "0.1.0".to_string(),
+            build_version: "0.1.0".into(),
             old_version: false,
             newer_version: false,
             refresh: RefreshHealth::Failed {
-                error: "list timed out".to_string(),
+                error: "list timed out".into(),
             },
         }));
         assert!(
@@ -5871,8 +5954,8 @@ mod tests {
         );
 
         let pending = detail_text(&state_detail(&HostPhase::Connected {
-            identity: Some("id".to_string()),
-            build_version: "0.1.0".to_string(),
+            identity: Some("id".into()),
+            build_version: "0.1.0".into(),
             old_version: false,
             newer_version: false,
             refresh: RefreshHealth::Pending,
@@ -5928,8 +6011,8 @@ mod tests {
             remote_farhelm: None,
             remote_state_dir: None,
             state: HostPhase::Connected {
-                identity: Some("stable".to_string()),
-                build_version: "0.1.0".to_string(),
+                identity: Some("stable".into()),
+                build_version: "0.1.0".into(),
                 old_version: false,
                 newer_version: false,
                 refresh: RefreshHealth::Ok { sessions: 0 },
@@ -5986,8 +6069,8 @@ mod tests {
         let current = row_specimen(1);
         let mut newer = row_specimen(2);
         newer.state = HostPhase::Connected {
-            identity: Some("stable".to_string()),
-            build_version: "9.0.0".to_string(),
+            identity: Some("stable".into()),
+            build_version: "9.0.0".into(),
             old_version: false,
             newer_version: true,
             refresh: RefreshHealth::Ok { sessions: 0 },

@@ -151,41 +151,41 @@ fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
         *phases[1],
         HostPhase::Connecting {
             attempt: 2,
-            last_error: Some("connection refused".to_string()),
+            last_error: Some("connection refused".into()),
         }
     );
     assert_eq!(
         *phases[2],
         HostPhase::Unreachable {
             cause: "transport-failure".to_string(),
-            last_error: "timed out".to_string(),
+            last_error: "timed out".into(),
         }
     );
     assert_eq!(
         *phases[4],
         HostPhase::IdentityMismatch {
-            recorded: "old".to_string(),
-            reported: "new".to_string(),
+            recorded: "old".into(),
+            reported: "new".into(),
         }
     );
     assert_eq!(
         *phases[5],
         HostPhase::IdentityUnverified {
-            recorded: "old".to_string(),
+            recorded: "old".into(),
         }
     );
     assert_eq!(
         *phases[6],
         HostPhase::Duplicate {
             twin: 2,
-            identity: "identity2".to_string(),
+            identity: "identity2".into(),
             twin_name: None,
         }
     );
     assert_eq!(
         *phases[7],
         HostPhase::Retired {
-            reason: "removed".to_string(),
+            reason: "removed".into(),
         }
     );
     let local = &listing.hosts[0];
@@ -221,8 +221,8 @@ fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
     assert_eq!(
         *phases[0],
         HostPhase::Connected {
-            identity: Some("identity1".to_string()),
-            build_version: "0.16.0".to_string(),
+            identity: Some("identity1".into()),
+            build_version: "0.16.0".into(),
             old_version: false,
             newer_version: false,
             refresh: RefreshHealth::Ok { sessions: 3 },
@@ -232,21 +232,21 @@ fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
         *phases[3],
         HostPhase::VersionSkew {
             peer_protocol: 28,
-            peer_build: "0.15.0".to_string(),
+            peer_build: "0.15.0".into(),
             our_protocol: 29,
-            our_build: "0.16.0".to_string(),
-            remediation: "Update the host.".to_string(),
+            our_build: "0.16.0".into(),
+            remediation: "Update the host.".into(),
         }
     );
     assert_eq!(
         *phases[8],
         HostPhase::Connected {
             identity: None,
-            build_version: "0.15.0".to_string(),
+            build_version: "0.15.0".into(),
             old_version: true,
             newer_version: false,
             refresh: RefreshHealth::Failed {
-                error: "list failed".to_string(),
+                error: "list failed".into(),
             },
         }
     );
@@ -254,7 +254,7 @@ fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
         *phases[9],
         HostPhase::Connected {
             identity: None,
-            build_version: "0.16.0".to_string(),
+            build_version: "0.16.0".into(),
             old_version: false,
             newer_version: false,
             refresh: RefreshHealth::Pending,
