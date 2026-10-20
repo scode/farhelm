@@ -370,7 +370,10 @@ fn MenuActionIcon(action: MenuAction) -> Element {
 ///   trailing slash) has nothing for `~` to stand in for — folding it would
 ///   erase the one thing the path says rather than shorten it, so it stays
 ///   absolute.
-pub(crate) fn abbreviate_home(cwd: &str) -> String {
+pub(crate) fn abbreviate_home(cwd: &crate::peer::PeerText) -> String {
+    // Folding is a path operation on original bytes. The caller escapes the
+    // result, retaining the sidebar's separate rule that an empty path is blank.
+    let cwd = cwd.raw();
     for prefix in ["/home/", "/Users/"] {
         let Some(rest) = cwd.strip_prefix(prefix) else {
             continue;
@@ -558,7 +561,7 @@ fn launch_badge(session: &Session) -> AgentBadge {
     description.push_str(" — ");
     description.push_str(permission_description(permission));
     description.push_str(" — ");
-    description.push_str(&display_peer(&session.invocation));
+    description.push_str(&session.invocation.escaped());
     AgentBadge {
         harness,
         permission,
@@ -636,7 +639,10 @@ fn kind_glyph(kind: crate::SessionAgentKind) -> HarnessGlyph {
 /// display only, never a classification. A string that does not split, or
 /// names no program, shows trimmed as it is, and a program token ending in
 /// `/` keeps the whole token.
-fn command_basename(invocation: &str) -> String {
+fn command_basename(invocation: &crate::peer::PeerText) -> String {
+    // Escaping before shell parsing would change token boundaries and quoted
+    // program names. The returned summary still goes through a Peer detail run.
+    let invocation = invocation.raw();
     let trimmed = invocation.trim();
     let Ok(argv) = shell_words::split(invocation) else {
         return trimmed.to_string();
@@ -1796,7 +1802,7 @@ pub(super) fn SessionRow(
                     // only other compact rows add the folder here; otherwise
                     // screen readers would hear the same path twice.
                     if compact && session.working_copy.is_none() {
-                        span { class: "visually-hidden", "{display_peer(&session.cwd)}" }
+                        span { class: "visually-hidden", "{session.cwd.escaped()}" }
                     }
                 }
                 // The notification bell, a sibling of the open button laid
@@ -2606,9 +2612,9 @@ pub(super) fn row_specimen(id: &str) -> Session {
         workspace_trust_prompt: false,
         id: id.to_string(),
         title: "stable".into(),
-        cwd: "/tmp".to_string(),
+        cwd: "/tmp".into(),
         canonical_cwd: None,
-        invocation: "agent".to_string(),
+        invocation: "agent".into(),
         agent_kind: crate::SessionAgentKind::Unrecognized,
         launch: None,
         status: SessionStatus::Exited { exit_code: Some(0) },
@@ -2710,7 +2716,7 @@ mod tests {
                 wrapper_prefix: None,
                 workspace_trust: None,
             }),
-            invocation: "unrelated-command".to_string(),
+            invocation: "unrelated-command".into(),
             ..row_specimen("structured")
         };
         assert_eq!(
@@ -2719,7 +2725,7 @@ mod tests {
         );
 
         let legacy = Session {
-            invocation: "codex --yolo".to_string(),
+            invocation: "codex --yolo".into(),
             ..row_specimen("legacy")
         };
         assert_eq!(
@@ -2807,7 +2813,7 @@ mod tests {
             let (confirming, confirming_replace) = PROMPT.with(std::cell::Cell::get);
             let session = Session {
                 title: TITLE.with(std::cell::Cell::get).into(),
-                cwd: CWD.with(std::cell::Cell::get).to_string(),
+                cwd: CWD.with(std::cell::Cell::get).into(),
                 ..row_specimen("spoofed")
             };
             rsx! {
@@ -3506,8 +3512,8 @@ mod tests {
     /// folded cases — see the exclusions test below for why.
     #[farhelm_testtrace::test]
     fn a_home_prefix_folds_only_when_it_names_an_account() {
-        assert_eq!(abbreviate_home("/home/alice/src/api"), "~/src/api");
-        assert_eq!(abbreviate_home("/Users/alice/src/api"), "~/src/api");
+        assert_eq!(abbreviate_home(&"/home/alice/src/api".into()), "~/src/api");
+        assert_eq!(abbreviate_home(&"/Users/alice/src/api".into()), "~/src/api");
 
         for untouched in [
             "/home",
@@ -3520,7 +3526,7 @@ mod tests {
             "",
         ] {
             assert_eq!(
-                abbreviate_home(untouched),
+                abbreviate_home(&untouched.into()),
                 untouched,
                 "{untouched} names no home directory and must be left alone"
             );
@@ -3546,17 +3552,17 @@ mod tests {
             "/Users/alice/./src",
         ] {
             assert_eq!(
-                abbreviate_home(dotted),
+                abbreviate_home(&dotted.into()),
                 dotted,
                 "{dotted} does not resolve under the home the shape match would claim"
             );
         }
         assert_eq!(
-            abbreviate_home("/Users/Shared/notes"),
+            abbreviate_home(&"/Users/Shared/notes".into()),
             "/Users/Shared/notes"
         );
-        assert_eq!(abbreviate_home("/home/alice"), "/home/alice");
-        assert_eq!(abbreviate_home("/home/alice/"), "/home/alice/");
+        assert_eq!(abbreviate_home(&"/home/alice".into()), "/home/alice");
+        assert_eq!(abbreviate_home(&"/home/alice/".into()), "/home/alice/");
     }
 
     /// An agent launch carrying `selection`, as a session row holds one.
@@ -3583,7 +3589,7 @@ mod tests {
                 wrapper_prefix: None,
                 workspace_trust: None,
             }),
-            invocation: "unknown-command --anything".to_string(),
+            invocation: "unknown-command --anything".into(),
             ..row_specimen("structured-agent-badge")
         };
         let badge = agent_badge(&session);
@@ -3612,7 +3618,7 @@ mod tests {
                 wrapper_prefix: None,
                 workspace_trust: None,
             }),
-            invocation: "goose session".to_string(),
+            invocation: "goose session".into(),
             ..row_specimen("structured-goose-badge")
         };
         assert_eq!(
@@ -3631,7 +3637,7 @@ mod tests {
                 wrapper_prefix: None,
                 workspace_trust: None,
             }),
-            invocation: "pi --provider openrouter".to_string(),
+            invocation: "pi --provider openrouter".into(),
             ..row_specimen("structured-pi-badge")
         };
         assert_eq!(agent_badge(&pi).permission, PermissionGlyph::Yolo);
@@ -3771,7 +3777,7 @@ mod tests {
     fn the_basename_survives_every_shell_quoting_shape() {
         // A backslash-escaped space in an otherwise unquoted path.
         assert_eq!(
-            command_basename("/opt/with\\ space/bin/claude --dangerously-skip-permissions"),
+            command_basename(&"/opt/with\\ space/bin/claude --dangerously-skip-permissions".into()),
             "claude"
         );
         // Adjacent quoted and unquoted fragments glue into ONE argv[0] —
@@ -3782,7 +3788,7 @@ mod tests {
         // from the wrong first token, so this fixture only passes if the
         // space was actually consumed as part of the same argv[0].
         assert_eq!(
-            command_basename("\"/opt/with space\"/bin/codex --yolo"),
+            command_basename(&"\"/opt/with space\"/bin/codex --yolo".into()),
             "codex"
         );
         // The whole path quoted, once with double quotes and once with
@@ -3794,22 +3800,25 @@ mod tests {
         // the true basename ("farhelm"), so only a parse that actually
         // consumed the space as part of argv[0] recovers the right answer.
         assert_eq!(
-            command_basename("\"/opt/with space/bin/farhelm\" internal fake-agent"),
+            command_basename(&"\"/opt/with space/bin/farhelm\" internal fake-agent".into()),
             "farhelm"
         );
         assert_eq!(
-            command_basename("'/opt/with space/bin/farhelm' internal fake-agent"),
+            command_basename(&"'/opt/with space/bin/farhelm' internal fake-agent".into()),
             "farhelm"
         );
         // A quoted flag after the program.
-        assert_eq!(command_basename("codex \"--yolo\""), "codex");
+        assert_eq!(command_basename(&"codex \"--yolo\"".into()), "codex");
         // `#` starts a real POSIX comment at a word boundary — this parser
         // is not a hand-rolled stand-in, it is the genuine article — so
         // everything from it to the end of the string vanishes from argv
         // entirely rather than surviving as a literal trailing token.
-        assert_eq!(command_basename("sleep 300 #not-a-comment"), "sleep");
+        assert_eq!(
+            command_basename(&"sleep 300 #not-a-comment".into()),
+            "sleep"
+        );
         // Single quotes behave exactly like double quotes for this parser.
-        assert_eq!(command_basename("'codex' --full-auto"), "codex");
+        assert_eq!(command_basename(&"'codex' --full-auto".into()), "codex");
     }
 
     /// Degenerate invocations render something rather than panicking or
@@ -3822,15 +3831,15 @@ mod tests {
     /// it was given.
     #[farhelm_testtrace::test]
     fn a_degenerate_invocation_falls_back_to_what_it_was_given() {
-        assert_eq!(command_basename(""), "");
-        assert_eq!(command_basename("   "), "");
+        assert_eq!(command_basename(&"".into()), "");
+        assert_eq!(command_basename(&"   ".into()), "");
         assert_eq!(
-            command_basename("/usr/bin/"),
+            command_basename(&"/usr/bin/".into()),
             "/usr/bin/",
             "a token with no basename to take stands as it is"
         );
         assert_eq!(
-            command_basename("\"unbalanced --yolo"),
+            command_basename(&"\"unbalanced --yolo".into()),
             "\"unbalanced --yolo",
             "an unclosed quote is something shell_words itself cannot resolve, so this falls \
              back to the trimmed raw text rather than guessing at structure that was never there"

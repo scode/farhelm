@@ -122,9 +122,9 @@ fn session_matches(sessions: &[Session], query: &str) -> Vec<SessionMatch> {
         let title = matching_positions(session.title.raw(), query);
         let host = session
             .host_name
-            .as_deref()
-            .and_then(|host| matching_positions(host, query));
-        let cwd = matching_positions(&session.cwd, query);
+            .as_ref()
+            .and_then(|host| matching_positions(host.raw(), query));
+        let cwd = matching_positions(session.cwd.raw(), query);
         if title.is_none() && host.is_none() && cwd.is_none() {
             continue;
         }
@@ -138,7 +138,7 @@ fn session_matches(sessions: &[Session], query: &str) -> Vec<SessionMatch> {
                 .and_then(|_| matching_positions(&display_peer(host_name(session)), query))
                 .unwrap_or_default(),
             cwd: cwd
-                .and_then(|_| matching_positions(&display_peer(&session.cwd), query))
+                .and_then(|_| matching_positions(&session.cwd.escaped(), query))
                 .unwrap_or_default(),
         };
         if title_matched {
@@ -151,9 +151,15 @@ fn session_matches(sessions: &[Session], query: &str) -> Vec<SessionMatch> {
     title_matches
 }
 
-/// Use the listing's denormalized host name, including unreachable hosts.
+/// Keep the listing's raw host spelling, including unreachable hosts.
+/// The renderer and highlight generation share this fallback; callers must
+/// still choose an escaped spelling before showing the returned text.
 fn host_name(session: &Session) -> &str {
-    session.host_name.as_deref().unwrap_or("unknown host")
+    session
+        .host_name
+        .as_ref()
+        .map(crate::peer::PeerText::raw)
+        .unwrap_or("unknown host")
 }
 
 /// Name the stored launch's agent without guessing from command text.
@@ -210,10 +216,10 @@ fn highlight_runs(text: &str, positions: &[usize]) -> Vec<(bool, String)> {
 
 /// Highlight escaped display text while isolating the whole peer value.
 #[component]
-fn MatchedText(text: String, positions: Vec<usize>) -> Element {
+fn MatchedText(text: crate::peer::PeerText, positions: Vec<usize>) -> Element {
     rsx! {
         bdi {
-            for (marked, value) in highlight_runs(&display_peer(&text), &positions) {
+            for (marked, value) in highlight_runs(&text.escaped(), &positions) {
                 if marked { mark { "{value}" } } else { "{value}" }
             }
         }
@@ -456,13 +462,13 @@ pub(super) fn QuickSwitcher(
                                         }
                                         // MatchedText owns escaping and isolation; matching above
                                         // still uses the original title rather than its display spelling.
-                                        span { class: "quick-switcher-title", MatchedText { text: listing.sessions[matched.index].title.raw().to_owned(), positions: matched.title.clone() } }
+                                        span { class: "quick-switcher-title", MatchedText { text: listing.sessions[matched.index].title.clone(), positions: matched.title.clone() } }
                                         span { class: "quick-switcher-agent", "{agent_label(&listing.sessions[matched.index])}" }
                                         span { class: "quick-switcher-host",
                                             if let Some(host) = host {
                                                 HostMark { icon: host.icon, color: host.color, local: host.kind.is_this_machine() }
                                             }
-                                            MatchedText { text: host_name(&listing.sessions[matched.index]).to_string(), positions: matched.host.clone() }
+                                            MatchedText { text: crate::peer::PeerText::from(host_name(&listing.sessions[matched.index])), positions: matched.host.clone() }
                                         }
                                         span { class: "quick-switcher-cwd", MatchedText { text: listing.sessions[matched.index].cwd.clone(), positions: matched.cwd.clone() } }
                                     }

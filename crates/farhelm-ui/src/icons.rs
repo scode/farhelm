@@ -104,17 +104,16 @@ pub(crate) fn BranchIcon() -> Element {
 #[component]
 pub(crate) fn ManagedCheckoutMark(
     checkout: crate::github_checkout::WorkingCopyInfo,
-    cwd: String,
+    cwd: crate::peer::PeerText,
     #[props(default = false)] show_repository: bool,
 ) -> Element {
     let repo = crate::peer::display_peer(&checkout.repo.identifier());
     let path = checkout.canonical_path.escaped();
     let mut description = format!(" at {path}.");
-    if cwd != checkout.canonical_path.raw() {
-        description.push_str(&format!(
-            " Session folder: {}.",
-            crate::peer::display_peer(&cwd)
-        ));
+    // Membership compares original path spellings, including symlink aliases;
+    // only the explanation shown to the user takes an escaped spelling.
+    if cwd.raw() != checkout.canonical_path.raw() {
+        description.push_str(&format!(" Session folder: {}.", cwd.escaped()));
     }
     description.push_str(" Farhelm made the checkout folder for its first session. When the last session using it is deleted, the checkout moves to the trash.");
     let tooltip = format!("managed checkout of {repo}{description}");

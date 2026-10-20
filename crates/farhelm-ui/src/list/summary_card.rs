@@ -134,7 +134,7 @@ pub(super) fn SessionSummarySource(
                             PeerLine { class: "session-summary-value".to_string(), parts: checkout }
                         }
                     }
-                    if !session.cwd.is_empty() {
+                    if !session.cwd.raw().is_empty() {
                         div { class: "session-summary-row",
                             span { class: "session-summary-label", "directory" }
                             PeerLine {

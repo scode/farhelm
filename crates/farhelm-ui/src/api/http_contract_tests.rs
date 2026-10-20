@@ -56,10 +56,13 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
     };
     assert_eq!(row.id, "11111111-1111-4111-8111-111111111111:fh-0123abcd");
     assert_eq!(row.title.raw(), "Fix the widget");
-    assert_eq!(row.cwd, "~/src/widgets");
-    assert_eq!(row.canonical_cwd.as_deref(), Some("/home/user/src/widgets"));
+    assert_eq!(row.cwd.raw(), "~/src/widgets");
     assert_eq!(
-        row.invocation,
+        row.canonical_cwd.as_ref().map(crate::peer::PeerText::raw),
+        Some("/home/user/src/widgets")
+    );
+    assert_eq!(
+        row.invocation.raw(),
         "codex -m gpt-5 -c 'model_reasoning_effort=high' --yolo -c {codex:trusted-cwd}"
     );
     assert_eq!(
@@ -85,11 +88,11 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
     assert_eq!(row.tabs.len(), 1);
     assert_eq!(row.tabs[0].id, "tab-1");
     assert_eq!(row.host, Some(2));
+    assert_eq!(row.host_identity, Some(Some("install-identity".into())));
     assert_eq!(
-        row.host_identity,
-        Some(Some("install-identity".to_string()))
+        row.host_name.as_ref().map(crate::peer::PeerText::raw),
+        Some("buildbox")
     );
-    assert_eq!(row.host_name.as_deref(), Some("buildbox"));
     assert!(row.stale);
     assert!(row.pinned);
     assert_eq!(row.seen_activity_at, Some(Some(1_700_000_090)));

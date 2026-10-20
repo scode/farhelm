@@ -361,14 +361,18 @@ pub struct Session {
     /// Peer-authored label. Presentation must choose escaping; operational
     /// adapters such as rename retain its exact raw bytes.
     pub title: peer::PeerText,
-    pub cwd: String,
+    /// Submitted folder spelling. Fold it before display, but keep raw bytes
+    /// for destination inheritance and clipboard copies.
+    pub cwd: peer::PeerText,
     /// The supervisor's accepted directory identity, kept apart from the
     /// submitted spelling in `cwd`. The list UI does not render it, but the
     /// HTTP mirror retains the fact so later consumers cannot mistake a
     /// symlink or `~` spelling for the resolved path.
     #[serde(default)]
-    pub canonical_cwd: Option<String>,
-    pub invocation: String,
+    pub canonical_cwd: Option<peer::PeerText>,
+    /// Stored command line. Parsing and clone seeds use its original spelling;
+    /// showing it requires an explicit presentation choice.
+    pub invocation: peer::PeerText,
     /// Which agent this session runs, decoded tolerantly (see
     /// [`SessionAgentKind`]). The session view reads it for per-kind
     /// terminal guidance; a helm that predates the field yields
@@ -500,11 +504,11 @@ pub struct Session {
     /// deserializer is what preserves the distinction: plain
     /// `Option<Option<_>>` folds `null` into the outer `None`.
     #[serde(default, deserialize_with = "double_option")]
-    pub host_identity: Option<Option<String>>,
+    pub host_identity: Option<Option<peer::PeerText>>,
     /// The host's display name as the helm renders it, denormalized onto
     /// the row so a list can name every session's host without a second
     /// request. `None` for the same reason `host` is.
-    pub host_name: Option<String>,
+    pub host_name: Option<peer::PeerText>,
     /// Whether this row is the helm's LAST-KNOWN knowledge rather than a
     /// live report — true for every session of a host in any non-connected
     /// state.
@@ -2335,6 +2339,47 @@ mod tests {
         assert_eq!(decoded.annotation, None);
     }
 
+    /// Session metadata stays raw after decoding, even when its display spelling
+    /// differs. These values feed clipboard copies, clone seeds and installation
+    /// comparisons, so choosing presentation must not rewrite their wire bytes.
+    #[farhelm_testtrace::test]
+    fn session_metadata_retains_raw_bytes_through_decode_and_presentation() {
+        for raw in [
+            "",
+            "   ",
+            "/home/account\u{202e}/work\u{200b}",
+            "'agent\u{202e}' --flag",
+        ] {
+            let body = serde_json::json!({
+                "id": "s1",
+                "title": "demo",
+                "cwd": raw,
+                "canonical_cwd": raw,
+                "invocation": raw,
+                "host": 7,
+                "host_identity": raw,
+                "host_name": raw,
+            });
+            let decoded: Session = serde_json::from_value(body).unwrap();
+            for text in [
+                &decoded.cwd,
+                decoded.canonical_cwd.as_ref().unwrap(),
+                &decoded.invocation,
+                decoded.host_identity.as_ref().unwrap().as_ref().unwrap(),
+                decoded.host_name.as_ref().unwrap(),
+            ] {
+                assert_eq!(text.raw(), raw);
+                assert_eq!(text.escaped(), peer::display_peer(raw));
+                assert_eq!(serde_json::to_value(text).unwrap(), serde_json::json!(raw));
+            }
+            assert_eq!(
+                format!("{:?}:{:?}", decoded.host, decoded.host_identity),
+                format!("{:?}:{:?}", Some(7), Some(Some(raw))),
+                "the tunnel listener ownership key retains its former String spelling"
+            );
+        }
+    }
+
     /// Checkout provenance and membership are separate wire facts: an origin
     /// has both, a borrower only membership, and an older server neither.
     /// The UI mirror must retain these facts without rewriting the actual cwd.
@@ -2364,7 +2409,7 @@ mod tests {
         assert_eq!(association.repo.identifier(), "acme/bar");
         assert_eq!(association.canonical_path.raw(), "/work/bar-1");
         assert_eq!(association.origin_session_id.raw(), "origin");
-        assert_eq!(borrower.cwd, "/work/bar-1/subdir");
+        assert_eq!(borrower.cwd.raw(), "/work/bar-1/subdir");
 
         body["id"] = serde_json::json!("origin");
         body["cwd"] = serde_json::json!("/work/bar-1");
@@ -2372,7 +2417,7 @@ mod tests {
         let origin: Session = serde_json::from_value(body).unwrap();
         assert_eq!(origin.github_repo.unwrap().identifier(), "acme/bar");
         assert_eq!(origin.working_copy.unwrap(), association);
-        assert_eq!(origin.cwd, "/work/bar-1");
+        assert_eq!(origin.cwd.raw(), "/work/bar-1");
     }
 
     /// `host_identity`'s three wire shapes decode to three DISTINCT values:
@@ -2406,7 +2451,7 @@ mod tests {
         assert_eq!(null.host_identity, Some(None));
         let present: Session =
             serde_json::from_value(body(Some(serde_json::json!("install-a")))).unwrap();
-        assert_eq!(present.host_identity, Some(Some("install-a".to_string())));
+        assert_eq!(present.host_identity, Some(Some("install-a".into())));
     }
 
     /// `Session::seen_activity_at`'s three wire shapes (review TEST-2),
@@ -2628,7 +2673,10 @@ mod tests {
         });
         let decoded: Session = serde_json::from_value(list_row).unwrap();
         assert_eq!(decoded.host, Some(7));
-        assert_eq!(decoded.host_name.as_deref(), Some("user@box"));
+        assert_eq!(
+            decoded.host_name.as_ref().map(peer::PeerText::raw),
+            Some("user@box")
+        );
         assert!(decoded.stale);
     }
 
@@ -2854,9 +2902,9 @@ mod tests {
             workspace_trust_prompt: false,
             id: "s1".to_string(),
             title: "demo".into(),
-            cwd: "/tmp".to_string(),
+            cwd: "/tmp".into(),
             canonical_cwd: None,
-            invocation: "agent".to_string(),
+            invocation: "agent".into(),
             agent_kind: SessionAgentKind::Unrecognized,
             launch: None,
             status: SessionStatus::Running,
@@ -2923,9 +2971,9 @@ mod tests {
             workspace_trust_prompt: false,
             id: "s1".to_string(),
             title: "demo".into(),
-            cwd: "/tmp".to_string(),
+            cwd: "/tmp".into(),
             canonical_cwd: None,
-            invocation: "agent".to_string(),
+            invocation: "agent".into(),
             agent_kind: SessionAgentKind::Unrecognized,
             launch: None,
             status: SessionStatus::Idle,

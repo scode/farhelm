@@ -435,9 +435,14 @@ pub(crate) fn RestartWithDialog(
         }
     });
     let choice_primary = EventHandler::new(move |()| primary.call((false, false)));
-    let host = session.host_name.as_deref().unwrap_or("unknown host");
+    // The context renderer below escapes this raw fallback/name once.
+    let host = session
+        .host_name
+        .as_ref()
+        .map(crate::peer::PeerText::raw)
+        .unwrap_or("unknown host");
     let title = session.title.escaped();
-    let folder = display_peer(&session.cwd);
+    let folder = session.cwd.escaped();
     let harness = crate::launch_composer::harness_label(baseline.harness).to_ascii_lowercase();
 
     let apply_option = Callback::<ModelOption>::new({
