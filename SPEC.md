@@ -802,11 +802,13 @@ agent choice is independent of that destination:
   setup; complete it below", whether one or several templates were queued. A YOLO question uses the same fallback. The
   banner follows the number-key banner's expiry and dismissal rules. Bindings refresh when the prefix starts; Enter
   captures the names currently shown in the pill. Enter with nothing queued cancels without opening anything. A
-  non-modal status pill floats over the bottom of the terminal area, or the main area with no session open, naming
-  queued templates and saying "Enter launch · Esc cancel". Before any key it says "Launch sequence: press number keys to
-  queue templates, Enter to launch, Esc to cancel." There is no timeout. Escape cancels and is consumed; a click,
-  switching windows or opening a dialog cancels. Any other key cancels and reaches its normal target; Meta, Control and
-  Shift on their own do not cancel. Repeated held keys add nothing and never launch again.
+  non-modal amber status pill is centered over the terminal area, or the main area with no session open, naming queued
+  templates and saying "Enter launch · Esc cancel". Before any key it says "Launch sequence: press number keys to queue
+  templates, Enter to launch, Esc to cancel." While the launcher is open, the pill stays at the bottom of the main area
+  so it does not cover the launcher. It is larger, with a soft amber halo and a short fade/scale entrance that is
+  disabled for reduced motion; it never loops or takes pointer input. There is no timeout. Escape cancels and is
+  consumed; a click, switching windows or opening a dialog cancels. Any other key cancels and reaches its normal target;
+  Meta, Control and Shift on their own do not cancel. Repeated held keys add nothing and never launch again.
 - Recent setups: the helm remembers bounded successful agent-launch combinations and used folders per target-install
   identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the

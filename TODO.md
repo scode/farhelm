@@ -168,20 +168,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   through. Overhaul it with more structure, such as tabs, so related settings are grouped and any one of them is easy to
   find. The grouping and layout are TBD. Plan: `plans/queue/structured-settings-dialog.md`.
 
-- **Tidy the launch-sequence hints.** The "cannot launch on its own" banner also appears for ⚡ alone with an incomplete
-  template, and for a one-template sequence, where it tells the user to use the prefix they just used; SPEC.md describes
-  it only for a single number key. If a sequence that includes ⚡ fails because a number is unbound, Templates also
-  shows the "Mark a template with ⚡" hint even when one is marked. Templates can call a template launchable when the
-  launch check does not, for example a template set to run a command that names an agent but leaves the command empty;
-  its number key then shows the "cannot launch on its own" banner. The Templates help paragraph does not yet mention
-  partial-template keys or sequences. Found while landing the quick-launch sequences (#2220, #2225, #2228). Plan:
-  `plans/queue/launch-sequences.md`.
-
-- **Make the launch-sequence pill obvious.** After Cmd+X (Ctrl+Shift+X off the Mac) starts a quick-launch sequence, the
-  status pill that floats over the bottom of the terminal area is easy to miss. Make it more prominent, probably by
-  placing it in the middle of the terminal area instead of at the bottom and giving it a more noticeable color. Details
-  TBD. Plan: `plans/queue/launch-sequences.md`.
-
 - **Stop rapid menu arrow presses from pulling focus back.** In the desktop app, a focus move already sent to the page
   cannot be recalled, so a rapid arrow press whose request was already on its way can still pull focus back after the
   user moved it: Down twice, click the fourth item, Down can still end on the fourth item when the second press's focus
