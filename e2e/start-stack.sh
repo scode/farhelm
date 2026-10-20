@@ -169,6 +169,11 @@ checkout_git_config="$state/checkout-git-config"
 # run entirely. Set-then-trap is the ordering that makes that
 # unconstructible rather than unlikely.
 remote_state="$state/remote"
+# Where terminal-multihost.spec.ts records a replacement "remote" supervisor
+# it starts after taking the original down. The replacement is detached from
+# the worker that started it, because it serves every later project on this
+# stack, so this script is the only thing left to reap it.
+remote_replacement_pid="$remote_state/replacement-supervisor.pid"
 # The provisioning specs keep every shipped HTTP boundary and replace only
 # host-side execution. This private directory is the explicit control plane
 # for that E2E-only backend: tests atomically replace config.json and inspect
@@ -266,6 +271,21 @@ cleanup() {
   kill "${helm_pid:-}" 2>/dev/null
   kill "${sup_pid:-}" 2>/dev/null
   kill "${remote_sup_pid:-}" 2>/dev/null
+  # Signalled only after confirming the recorded pid still runs a supervisor
+  # on THIS stack's remote state dir: a stale file's pid may have been reused
+  # by an unrelated process.
+  if [ -f "$remote_replacement_pid" ]; then
+    replacement=""
+    read -r replacement <"$remote_replacement_pid" 2>/dev/null
+    case "$replacement" in
+      '' | *[!0-9]*) ;;
+      *)
+        case "$(ps -p "$replacement" -o args= 2>/dev/null)" in
+          *" supervisor run --state-dir $remote_state "*) kill "$replacement" 2>/dev/null ;;
+        esac
+        ;;
+    esac
+  fi
   rm -f "$stack_info"
   rm -f "$auth_state"
   # The tmux servers daemonize out of this process group, so killing a
@@ -374,8 +394,14 @@ printf 'boot-1\n' >"$remote_boot_id_file" || exit 1
 # The sidebar's remote-browse fixture reads this process's debug receipt. It
 # distinguishes supervisor routing on localhost, where both supervisors can
 # otherwise read the same absolute paths; it does not claim namespace isolation.
-RUST_LOG="${RUST_LOG:-},farhelm_supervisor::service::handlers=debug" "$bin" supervisor run --state-dir "$remote_state" --boot-id-file "$remote_boot_id_file" \
-  >"$state/remote-supervisor.log" 2>&1 9>&- &
+#
+# The log path and filter are published below too: a replacement supervisor
+# the multihost spec starts must append to the same file with the same filter,
+# or the receipt this fixture reads would vanish after the first replacement.
+remote_supervisor_log="$state/remote-supervisor.log"
+remote_supervisor_rust_log="${RUST_LOG:-},farhelm_supervisor::service::handlers=debug"
+RUST_LOG="$remote_supervisor_rust_log" "$bin" supervisor run --state-dir "$remote_state" --boot-id-file "$remote_boot_id_file" \
+  >"$remote_supervisor_log" 2>&1 9>&- &
 remote_sup_pid=$!
 
 # Give both supervisors a moment to bind their sockets before the helm
@@ -431,8 +457,11 @@ print(json.dumps({
     "checkout_git_config": sys.argv[7],
     "structured_home": sys.argv[8],
     "fixtures": sys.argv[9],
+    "remote_replacement_pidfile": sys.argv[10],
+    "remote_supervisor_log": sys.argv[11],
+    "remote_supervisor_rust_log": sys.argv[12],
 }))
-' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" "$remote_boot_id_file" "$checkout_git_config" "$structured_home" "$fixtures" >"$stack_info" || exit 1
+' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" "$remote_boot_id_file" "$checkout_git_config" "$structured_home" "$fixtures" "$remote_replacement_pid" "$remote_supervisor_log" "$remote_supervisor_rust_log" >"$stack_info" || exit 1
 
 # Mint before the helm starts so its first protected request sees the same
 # durable token the harness CLI printed. It is captured only long enough to
