@@ -25,7 +25,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `test-hygiene-oct19.md` — Fix a macOS path comparison in checkout tests and three browser-test cleanups that stop early or arm late (4 triage outcomes). (after `host-entry-session-ids.md`)
 - [complete] `triage-discards-oct19.md` — Close the four findings discarded in the 2026-10-19 triage, in one PR (4 triage outcomes).
 - [pending] `structured-settings-dialog.md` — Restructure the Settings dialog into a sidebar of seven sections, like the Templates dialog (1 TODO entry).
-- [in-flight d7fc89] `host-settings-focus.md` — Keep keyboard focus inside host settings and SSH help when a save ends or SSH help's commands arrive (1 TODO entry).
+- [complete] `host-settings-focus.md` — Keep keyboard focus inside host settings and SSH help when a save ends or SSH help's commands arrive (1 TODO entry).
 - [in-flight 92ccb6] `launch-sequences.md` — Accurate quick-launch banners, one launchability rule for templates, and a centered amber launch-sequence pill (2 TODO entries).
 - [in-flight 0e34cf] `menu-arrow-focus-race.md` — Drop a desktop menu focus move that would land after the user moved focus elsewhere (1 TODO entry).
 - [pending] `launcher-enter-feedback.md` — Make Enter in the session launcher always launch, pick a visible row, or say why not (1 TODO entry).
