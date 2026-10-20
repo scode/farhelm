@@ -18,7 +18,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `repository-discovery-git-config.md` — Make repository suggestions ignore an inherited GIT_CONFIG, as the test fixture already does (1 triage outcome).
 - [complete] `spec-scope-clarifications.md` — Write the introduction-is-a-hook and published-notes principles and three scope statements into the spec, with no code change (8 triage outcomes).
 - [complete] `tooling-checks-oct19.md` — Fix the release-review page's link escaping and two instruction-checker gaps (3 triage outcomes).
-- [pending] `test-hygiene-oct19.md` — Fix a macOS path comparison in checkout tests and three browser-test cleanups that stop early or arm late (4 triage outcomes). (after `host-entry-session-ids.md`)
+- [in-flight 7c2a54] `test-hygiene-oct19.md` — Fix a macOS path comparison in checkout tests and three browser-test cleanups that stop early or arm late (4 triage outcomes). (after `host-entry-session-ids.md`)
 - [complete] `triage-discards-oct19.md` — Close the four findings discarded in the 2026-10-19 triage, in one PR (4 triage outcomes).
 - [pending] `structured-settings-dialog.md` — Restructure the Settings dialog into a sidebar of seven sections, like the Templates dialog (1 TODO entry).
 - [complete] `host-settings-focus.md` — Keep keyboard focus inside host settings and SSH help when a save ends or SSH help's commands arrive (1 TODO entry).
