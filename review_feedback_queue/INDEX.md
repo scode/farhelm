@@ -19,9 +19,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`agent-checkout-test-compares-lexical-tmp.md`](agent-checkout-test-compares-lexical-tmp.md) — New agent checkout
   tests compare canonical destinations with lexical /tmp paths and fail on macOS.
 
-- [`template-discovery-fails-permanently-once-reply-exceeds.md`](template-discovery-fails-permanently-once-reply-exceeds.md)
-  — A large valid template catalog permanently disables agent discovery.
-
 - [`native-download-quit-leaves-partial-files.md`](native-download-quit-leaves-partial-files.md) — Desktop Quit leaves
   hidden partial downloads with no recovery owner.
 

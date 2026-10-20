@@ -12301,7 +12301,9 @@
   exceeds one reply frame (about 8 MiB, roughly 130 templates near the per-field cap) is outside the supported scale and
   agent template listing may then fail until templates are removed; the GUI is unaffected. No code change. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
+- Execution: complete in change `trtzwrmztxzuouvsuqlwwxpwtxtpuyww`, bookmark
+  `plan/spec-scope-clarifications/03-template-catalog-scale`,
+  [PR #2416](https://github.com/scode/farhelm/pull/2416/changes).
 
 ## dropping-upload-guard-outside-tokio-runtime-skips.md
 

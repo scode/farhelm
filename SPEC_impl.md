@@ -2016,6 +2016,10 @@ this listing is readable with any one attached session's credential, and its rea
 read, so nothing from the command line may cross this wire at all. Even the program's basename is not safe: a leading
 `NAME=secret` assignment is the first word.
 
+A template catalog whose agent listing exceeds one reply frame (8 MiB, roughly 130 templates near the per-field cap) is
+outside the supported scale. Agent template listing may then fail until templates are removed; the GUI's template
+listing is unaffected by that frame limit.
+
 The session list is served WHOLE on this wire (protocol 14). `ListSessions` carries nothing but its request id, and
 `SessionList` answers with every session the supervisor has, cut at `LIST_SESSIONS_CAP` (a few hundred rows, one
 constant in farhelm-proto that every layer reads) with `truncated` set when the cut applied. There is no cursor, no page
