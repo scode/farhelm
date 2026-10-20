@@ -1981,12 +1981,13 @@ without a prefix. Rows show the template name, summary and its ⚡ or number sho
 highlighted template through the fresh quick-launch path; clicking a row does the same. A name exactly equal to the
 trimmed query (case-sensitively) is highlighted over an earlier substring match, and Enter starts it; arrowing to
 another row changes that choice. With no match, Enter does nothing. A partial template opens New with its choices
-applied. A template renamed or deleted since the list opened shows a preparation error in New. The chord never reaches
-the terminal's program and does nothing while any modal is open, including New, Clone, Replace with and hidden
-quick-launch preparation, or before sign-in and preference loading finish. Chrome, Edge and Firefox document
-Ctrl+Shift+J as a browser console shortcut on Windows and Linux; Firefox documents Cmd+J as Downloads on macOS. Those
-browsers may keep their own action. Browser shortcut lists do not establish whether the page receives the key; the
-desktop app is the guaranteed target.
+applied. A pick uses the template currently holding that name, including a template edited or recreated since the list
+opened; a name missing from the current catalog shows a preparation error in New. The chord never reaches the terminal's
+program and does nothing while any modal is open, including New, Clone, Replace with and hidden quick-launch
+preparation, or before sign-in and preference loading finish. Chrome, Edge and Firefox document Ctrl+Shift+J as a
+browser console shortcut on Windows and Linux; Firefox documents Cmd+J as Downloads on macOS. Those browsers may keep
+their own action. Browser shortcut lists do not establish whether the page receives the key; the desktop app is the
+guaranteed target.
 
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size
