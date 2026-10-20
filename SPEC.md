@@ -3035,10 +3035,10 @@ host must not gain unauthorized execution or access to secrets on the helm's mac
 Existing redaction promises remain requirements even where the sender already has local account authority.
 
 Confirmed 2026-10-10: text a host supplied that the GUI shows outside a terminal is escaped so invisible and
-direction-changing characters are visible, wherever it appears and however it reached the helm (a model name saved into
-a template from a cloned session, for example). Identity labels the user compares, such as installation ids in the adopt
-prompt, also show spaces visibly, so two different identities never look alike. Terminal output is not part of this
-rule; it is the remote program's own display.
+direction-changing characters are visible, including in accessible names, wherever it appears and however it reached the
+helm (a model name saved into a template from a cloned session, for example). Identity labels the user compares, such as
+installation ids in the adopt prompt, also show spaces visibly, so two different identities never look alike. Terminal
+output is not part of this rule; it is the remote program's own display.
 
 Clicking a disclosed file path in a terminal transfers that file from the session's host to the user's machine. Any file
 the session's Unix account can read is in reach; the hover shows the host, resolved path and size before the click can
