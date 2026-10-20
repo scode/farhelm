@@ -7222,27 +7222,17 @@ impl Supervisor {
         Ok(session)
     }
 
-    /// Inspect an accepted checkout or resume it against an exact inspected
-    /// snapshot. The intent admission guard spans the fingerprint comparison,
-    /// any approval recording, and the launch-capable recovery below.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "wire admission inputs remain explicit"
-    )]
-    pub(crate) async fn reconcile_github_checkout_checked(
-        &self,
-        intent_key: String,
+    /// Reject malformed reconciliation before wire admission or create locks.
+    /// The transport identity cap is distinct from the serialized refusal
+    /// budget, checked later only when an unknown key is durably refused.
+    pub(crate) fn validate_github_checkout_reconciliation(
+        intent_key: &str,
         client_identity: &str,
-        cols: u16,
-        rows: u16,
         refuse_unknown: bool,
         inspect_only: bool,
         expected_fingerprint: Option<&str>,
         approve_wrapper_recovery: bool,
-    ) -> anyhow::Result<(
-        Option<SessionInfo>,
-        Option<farhelm_proto::GithubCheckoutRecovery>,
-    )> {
+    ) -> anyhow::Result<()> {
         if intent_key.is_empty()
             || intent_key.len() > 512
             || client_identity.is_empty()
@@ -7262,6 +7252,75 @@ impl Supervisor {
             )
             .into());
         }
+        Ok(())
+    }
+
+    /// Inspect or recover through the same cheap validation as wire callers.
+    /// Core tests retain this checked entry point without acquiring a wire-
+    /// management permit; only connection admission owns that budget. The
+    /// production wire path validates before taking that permit instead.
+    #[cfg(test)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "wire admission inputs remain explicit"
+    )]
+    pub(crate) async fn reconcile_github_checkout_checked(
+        &self,
+        intent_key: String,
+        client_identity: &str,
+        cols: u16,
+        rows: u16,
+        refuse_unknown: bool,
+        inspect_only: bool,
+        expected_fingerprint: Option<&str>,
+        approve_wrapper_recovery: bool,
+    ) -> anyhow::Result<(
+        Option<SessionInfo>,
+        Option<farhelm_proto::GithubCheckoutRecovery>,
+    )> {
+        Self::validate_github_checkout_reconciliation(
+            &intent_key,
+            client_identity,
+            refuse_unknown,
+            inspect_only,
+            expected_fingerprint,
+            approve_wrapper_recovery,
+        )?;
+        self.reconcile_github_checkout_validated(
+            intent_key,
+            client_identity,
+            cols,
+            rows,
+            refuse_unknown,
+            inspect_only,
+            expected_fingerprint,
+            approve_wrapper_recovery,
+        )
+        .await
+    }
+
+    /// Reconcile after the caller applied the shared cheap validator.
+    /// Intent then directory admission span identity comparison, approval
+    /// recording and launch recovery. The wire task owns these waits; a
+    /// connection can cancel only its reply waiter after accepting this work.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "wire admission inputs remain explicit"
+    )]
+    pub(crate) async fn reconcile_github_checkout_validated(
+        &self,
+        intent_key: String,
+        client_identity: &str,
+        cols: u16,
+        rows: u16,
+        refuse_unknown: bool,
+        inspect_only: bool,
+        expected_fingerprint: Option<&str>,
+        approve_wrapper_recovery: bool,
+    ) -> anyhow::Result<(
+        Option<SessionInfo>,
+        Option<farhelm_proto::GithubCheckoutRecovery>,
+    )> {
         let guards = self.admit_create(Some(&intent_key)).await?;
         let mut reservation = self.store.reservation(&intent_key).await?;
         if reservation.is_none() && expected_fingerprint.is_some() {

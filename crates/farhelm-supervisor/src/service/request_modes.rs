@@ -38,11 +38,6 @@ pub(crate) enum ExecutionClass {
     /// a contested tab lifecycle claim is refused without waiting. Spawning
     /// the whole handler would race later data, resize, detach or abort frames.
     InlineChannel,
-    /// Reconcile inline, acquiring intent then directory admission.
-    /// This records the existing reader stall that the later fix removes; it
-    /// is not permission for new requests to adopt the same wait. There is no
-    /// general management permit on that wire path today.
-    InlineCreate,
     /// Run the checkout preview's ordinarily brief filesystem and store scan
     /// inline, without taking directory admission. SPEC.md's slow-host policy
     /// accepts this scan delaying that host's terminal I/O; this is distinct
@@ -210,7 +205,7 @@ declare_execution_classes! {
             request_fingerprint: None,
             github_checkout: None,
         };
-        ReconcileGithubCheckout => InlineCreate => |c| ControlMsg::ReconcileGithubCheckout {
+        ReconcileGithubCheckout => OwnedMutation => |c| ControlMsg::ReconcileGithubCheckout {
             req_id: c.req_id,
             intent_key: c.intent_key.into(),
             client_identity: "conformance request".into(),

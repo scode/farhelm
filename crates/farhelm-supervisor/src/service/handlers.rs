@@ -2753,32 +2753,57 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             expected_fingerprint,
             approve_wrapper_recovery,
         } => {
-            match sup
-                .reconcile_github_checkout_checked(
-                    intent_key,
-                    &client_identity,
-                    cols,
-                    rows,
-                    refuse_unknown,
-                    inspect_only,
-                    expected_fingerprint.as_deref(),
-                    approve_wrapper_recovery,
-                )
-                .await
-            {
-                Ok((session, snapshot)) => {
-                    send_reply(
-                        ctx.tx,
-                        &ControlMsg::GithubCheckoutReconciled {
-                            req_id,
-                            session,
-                            snapshot: snapshot.map(Box::new),
-                        },
+            if let Err(error) = Supervisor::validate_github_checkout_reconciliation(
+                &intent_key,
+                &client_identity,
+                refuse_unknown,
+                inspect_only,
+                expected_fingerprint.as_deref(),
+                approve_wrapper_recovery,
+            ) {
+                reply_failure(ctx.tx, req_id, &error).await;
+                return;
+            }
+            let Some(permit) = admit_or_refuse(&sup.admission, ctx.tx, req_id).await else {
+                return;
+            };
+            // Reconciliation can refuse a key durably or recover an accepted
+            // launch. Its intent/directory waits and reply therefore belong to
+            // the supervisor, just as an accepted create does. The reader owns
+            // only the panic waiter and stays available for following frames.
+            let sup = Arc::clone(sup);
+            let tx = ctx.tx.clone();
+            let mutation = tokio::spawn(async move {
+                let _permit = permit;
+                match sup
+                    .reconcile_github_checkout_validated(
+                        intent_key,
+                        &client_identity,
+                        cols,
+                        rows,
+                        refuse_unknown,
+                        inspect_only,
+                        expected_fingerprint.as_deref(),
+                        approve_wrapper_recovery,
                     )
                     .await
+                {
+                    Ok((session, snapshot)) => {
+                        send_reply(
+                            &tx,
+                            &ControlMsg::GithubCheckoutReconciled {
+                                req_id,
+                                session,
+                                snapshot: snapshot.map(Box::new),
+                            },
+                        )
+                        .await
+                    }
+                    Err(error) => reply_failure(&tx, req_id, &error).await,
                 }
-                Err(error) => reply_failure(ctx.tx, req_id, &error).await,
-            }
+            });
+            ctx.tasks
+                .spawn(forward_owned_request_panic(mutation, ctx.panics.clone()));
         }
         ControlMsg::GithubRepoSearch {
             req_id,
@@ -5246,6 +5271,369 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    /// A wire-accepted refusal must survive cancellation of its reply waiter.
+    /// Actual Pending intent acquisition proves acceptance preceded cancellation;
+    /// a later same-key lookup is the FIFO barrier proving durable settlement
+    /// without sleeping or observing an empty queue as a completion signal.
+    #[farhelm_testtrace::test]
+    async fn an_accepted_checkout_refusal_survives_its_connection_waiter() {
+        let state = StateDir::new();
+        let key = uuid::Uuid::new_v4().to_string();
+        let identity = "refusal request";
+        let waiting = Arc::new(tokio::sync::Notify::new());
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                faults: super::super::core::FaultHooks {
+                    create_intent_waiting: Some(Arc::new({
+                        let waiting = Arc::clone(&waiting);
+                        let key = key.clone();
+                        move |observed| {
+                            assert_eq!(observed, key);
+                            waiting.notify_one();
+                        }
+                    })),
+                    ..super::super::core::FaultHooks::default()
+                },
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        assert!(sup.store.reservation(&key).await.unwrap().is_none());
+        assert!(sup.store.load_all().await.unwrap().is_empty());
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        assert!(!state.path().join("checkout-preparation").exists());
+        let held = sup.intent_locks_for_test().claim(&key).await;
+        // Keep the state and blocker outside this assertion task. Even a failed
+        // assertion releases the blocker and settles owned work before teardown.
+        let observed =
+            tokio::spawn({
+                let sup = Arc::clone(&sup);
+                let waiting = Arc::clone(&waiting);
+                let key = key.clone();
+                async move {
+                    tokio::time::timeout(BUSY_HOST_WAIT, async {
+                    let (mut tasks, replies) = dispatch_for_test(&sup,
+                        ControlMsg::ReconcileGithubCheckout {
+                            req_id: 91,
+                            intent_key: key.clone(),
+                            client_identity: identity.into(),
+                            cols: 80,
+                            rows: 24,
+                            refuse_unknown: true,
+                            inspect_only: false,
+                            expected_fingerprint: None,
+                            approve_wrapper_recovery: false,
+                        },
+                    ).await;
+                    waiting.notified().await;
+                    assert!(sup.intent_locks_for_test().claimed_for_test(&key));
+                    assert_eq!(sup.admission.available_permits(), HANDLER_ADMISSION_PERMITS - 1);
+                    assert!(sup.store.reservation(&key).await.unwrap().is_none());
+                    tasks.abort_all();
+                    while let Some(joined) = tasks.join_next().await {
+                        assert!(joined.unwrap_err().is_cancelled());
+                    }
+                    drop(replies);
+                    assert_eq!(sup.admission.available_permits(), HANDLER_ADMISSION_PERMITS - 1,
+                        "cancelling only the waiter must not release the owned operation's permit");
+                }).await.expect("the accepted refusal must reach and survive waiter cancellation");
+                }
+            })
+            .await;
+        drop(held);
+        let settled = tokio::time::timeout(
+            BUSY_HOST_WAIT,
+            sup.reconcile_github_checkout(key.clone(), identity, 80, 24, false),
+        )
+        .await;
+        let all_slots = tokio::time::timeout(
+            BUSY_HOST_WAIT,
+            sup.admission.acquire_many(HANDLER_ADMISSION_PERMITS as u32),
+        )
+        .await;
+        if let Err(error) = observed {
+            drop(all_slots);
+            eprintln!(
+                "refusal ownership cleanup: intent held={}, management slots free={}",
+                sup.intent_locks_for_test().claimed_for_test(&key),
+                sup.admission.available_permits()
+            );
+            if error.is_panic() {
+                std::panic::resume_unwind(error.into_panic());
+            }
+            panic!("the ownership observation was cancelled: {error}");
+        }
+        let error = settled
+            .expect("same-key lookup must follow the owned refusal")
+            .expect_err("accepted refusal must spend the key despite the lost reply");
+        assert_eq!(error_kind(&error), ErrorKind::CheckoutConflict);
+        drop(
+            all_slots
+                .expect("owned work must return every admission permit")
+                .expect("admission remains open"),
+        );
+        let recorded = sup.store.reservation(&key).await.unwrap().unwrap();
+        assert_eq!(recorded.dedup_scope, DedupScope::Permanent);
+        assert!(matches!(
+            recorded.outcome,
+            crate::store::ReservationOutcome::Failed {
+                kind: ErrorKind::CheckoutConflict,
+                ..
+            }
+        ));
+        for refuse_unknown in [false, true] {
+            let replay = sup
+                .reconcile_github_checkout(key.clone(), identity, 80, 24, refuse_unknown)
+                .await
+                .expect_err("the same identity must recover the durable refusal");
+            assert_eq!(error_kind(&replay), ErrorKind::CheckoutConflict);
+            assert_eq!(
+                sup.store.reservation(&key).await.unwrap().unwrap(),
+                recorded
+            );
+        }
+        let other = sup
+            .reconcile_github_checkout(key.clone(), "another request", 80, 24, false)
+            .await
+            .expect_err("the refusal remains bound to its original identity");
+        assert_eq!(error_kind(&other), ErrorKind::Conflict);
+        assert_eq!(
+            sup.store.reservation(&key).await.unwrap().unwrap(),
+            recorded
+        );
+        assert!(sup.store.load_all().await.unwrap().is_empty());
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        assert!(!state.path().join("checkout-preparation").exists());
+    }
+
+    /// Shape errors keep their existing precedence over a busy host. A valid
+    /// request must instead refuse general admission without recording a key;
+    /// these refusals cannot establish durable non-acceptance of an older try.
+    #[farhelm_testtrace::test]
+    async fn reconciliation_shape_refusals_precede_busy_admission() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let held = Arc::clone(&sup.admission)
+            .acquire_many_owned(HANDLER_ADMISSION_PERMITS as u32)
+            .await
+            .expect("admission remains open");
+        assert_eq!(sup.admission.available_permits(), 0);
+        for (key, inspect_only, refuse_unknown, kind, expected) in [
+            (
+                "",
+                false,
+                false,
+                ErrorKind::InvalidRequest,
+                "fresh reconciliation requires a nonempty key of at most 512 bytes and a nonempty request identity of at most 512 KiB",
+            ),
+            (
+                "invalid-combination",
+                true,
+                true,
+                ErrorKind::InvalidRequest,
+                "checkout inspection cannot refuse or approve, and recovery approval needs an inspected fingerprint",
+            ),
+            (
+                "valid-but-busy",
+                false,
+                false,
+                ErrorKind::Unavailable,
+                farhelm_proto::HOST_BUSY_REFUSAL,
+            ),
+        ] {
+            let (mut tasks, mut replies) = dispatch_for_test(
+                &sup,
+                ControlMsg::ReconcileGithubCheckout {
+                    req_id: 92,
+                    intent_key: key.into(),
+                    client_identity: "request".into(),
+                    cols: 80,
+                    rows: 24,
+                    refuse_unknown,
+                    inspect_only,
+                    expected_fingerprint: None,
+                    approve_wrapper_recovery: false,
+                },
+            )
+            .await;
+            let frame = tokio::time::timeout(BUSY_HOST_WAIT, replies.recv())
+                .await
+                .expect("a validation or admission refusal must be immediate")
+                .expect("the request must reply");
+            assert_eq!(
+                parse_control(&frame).unwrap(),
+                ControlMsg::Error {
+                    req_id: 92,
+                    kind,
+                    message: expected.into(),
+                    create_unaccepted: false,
+                }
+            );
+            assert!(
+                tasks.is_empty(),
+                "a refused request must start no owned operation"
+            );
+            assert!(tasks.join_next().await.is_none());
+            assert!(sup.store.reservation(key).await.unwrap().is_none());
+            assert_eq!(sup.admission.available_permits(), 0);
+        }
+        assert!(sup.store.load_all().await.unwrap().is_empty());
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        drop(held);
+    }
+
+    /// Intent serialization is allowed to delay reconciliation, but the same
+    /// real connection must still apply a following cheap control frame.
+    #[farhelm_testtrace::test]
+    async fn reconciliation_intent_wait_keeps_the_reader_moving() {
+        reconciliation_wait_keeps_the_reader_moving(true).await;
+    }
+
+    /// Directory admission may be held by a long Delete. An admitted lookup
+    /// must wait in its owned task while the reader continues serving frames.
+    #[farhelm_testtrace::test]
+    async fn reconciliation_directory_wait_keeps_the_reader_moving() {
+        reconciliation_wait_keeps_the_reader_moving(false).await;
+    }
+
+    /// Observe the actual Pending acquisition with admission free, avoiding
+    /// the busy-refusal shortcut exercised by the all-held conformance pass.
+    /// Retain state, peer and blockers outside assertion tasks so either
+    /// outcome releases the operation and settles its connection before unwind.
+    async fn reconciliation_wait_keeps_the_reader_moving(wait_on_intent: bool) {
+        let state = StateDir::new();
+        let key = uuid::Uuid::new_v4().to_string();
+        let waiting = Arc::new(tokio::sync::Notify::new());
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                faults: super::super::core::FaultHooks {
+                    create_intent_waiting: Some(Arc::new({
+                        let waiting = Arc::clone(&waiting);
+                        let key = key.clone();
+                        move |observed| {
+                            assert_eq!(observed, key);
+                            waiting.notify_one();
+                        }
+                    })),
+                    create_directory_waiting: Some(Arc::new({
+                        let waiting = Arc::clone(&waiting);
+                        move || waiting.notify_one()
+                    })),
+                    ..super::super::core::FaultHooks::default()
+                },
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        assert_eq!(sup.admission.available_permits(), HANDLER_ADMISSION_PERMITS);
+        assert!(sup.store.reservation(&key).await.unwrap().is_none());
+        assert!(sup.store.load_all().await.unwrap().is_empty());
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        let peer = Arc::new(tokio::sync::Mutex::new(CreatePeer::new(&sup).await));
+        let held_intent = if wait_on_intent {
+            Some(sup.intent_locks_for_test().claim(&key).await)
+        } else {
+            None
+        };
+        let held_directory = if wait_on_intent {
+            None
+        } else {
+            Some(Arc::clone(&sup.working_copy_operations).lock_owned().await)
+        };
+        let observed = tokio::spawn({
+            let peer = Arc::clone(&peer);
+            let sup = Arc::clone(&sup);
+            let key = key.clone();
+            async move {
+                let mut peer = peer.lock().await;
+                peer.send(&ControlMsg::ReconcileGithubCheckout {
+                    req_id: 93,
+                    intent_key: key.clone(),
+                    client_identity: "lookup request".into(),
+                    cols: 80,
+                    rows: 24,
+                    refuse_unknown: false,
+                    inspect_only: false,
+                    expected_fingerprint: None,
+                    approve_wrapper_recovery: false,
+                }).await;
+                tokio::time::timeout(CREATE_REQUEST_WAIT, waiting.notified()).await
+                    .unwrap_or_else(|_| panic!(
+                        "reconciliation did not reach its held {} gate; general slots free={}, intent held={}, directory held={}",
+                        if wait_on_intent { "intent" } else { "directory" },
+                        sup.admission.available_permits(),
+                        sup.intent_locks_for_test().claimed_for_test(&key),
+                        sup.working_copy_operations.try_lock().is_err(),
+                    ));
+                assert_eq!(sup.admission.available_permits(), HANDLER_ADMISSION_PERMITS - 1);
+                assert!(sup.store.reservation(&key).await.unwrap().is_none());
+                peer.send(&ControlMsg::SetBrowserForwarding { req_id: 94, enabled: false }).await;
+                assert_eq!(peer.reply(94).await, ControlMsg::BrowserForwardingSet { req_id: 94 });
+                if wait_on_intent {
+                    assert!(sup.intent_locks_for_test().claimed_for_test(&key));
+                } else {
+                    assert!(sup.working_copy_operations.try_lock().is_err());
+                }
+                assert!(sup.store.reservation(&key).await.unwrap().is_none());
+                assert!(sup.store.load_all().await.unwrap().is_empty());
+                assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+            }
+        }).await;
+        drop(held_intent);
+        drop(held_directory);
+        let settled = tokio::spawn({
+            let peer = Arc::clone(&peer);
+            let sup = Arc::clone(&sup);
+            let key = key.clone();
+            async move {
+                assert_eq!(
+                    peer.lock().await.reply(93).await,
+                    ControlMsg::GithubCheckoutReconciled {
+                        req_id: 93,
+                        session: None,
+                        snapshot: None
+                    }
+                );
+                let all_slots = tokio::time::timeout(
+                    CREATE_REQUEST_WAIT,
+                    sup.admission.acquire_many(HANDLER_ADMISSION_PERMITS as u32),
+                )
+                .await
+                .expect("the completed lookup must release its management permit")
+                .expect("admission remains open");
+                drop(all_slots);
+                assert!(sup.store.reservation(&key).await.unwrap().is_none());
+                assert!(sup.store.load_all().await.unwrap().is_empty());
+                assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+            }
+        })
+        .await;
+        let closed = tokio::spawn({
+            let peer = Arc::clone(&peer);
+            async move { peer.lock().await.finish().await }
+        })
+        .await;
+        if let Err(error) = observed {
+            eprintln!("reconciliation cleanup: settlement={settled:?}, connection={closed:?}");
+            if error.is_panic() {
+                std::panic::resume_unwind(error.into_panic());
+            }
+            panic!("the reader-progress observation was cancelled: {error}");
+        }
+        settled.expect("the released reconciliation must settle without mutation");
+        closed.expect("the owned fixture connection must settle");
     }
 
     /// Disconnect cleanup owns only the reply waiter, so an accepted prompt
@@ -10039,18 +10427,12 @@ mod tests {
         ConformanceContext, ExecutionClass, conformance_requests, execution_class,
     };
 
-    /// Reconciliation remains inline until its separate fix PR.
-    /// A new InlineCreate declaration is exercised unless it is named here; the
-    /// class itself is never used as an implicit exemption from conformance.
-    const KNOWN_INLINE_STALLS: &[&str] = &["ReconcileGithubCheckout"];
-
     /// Select the declaration's promises without executing anything by its class.
     /// The match is exhaustive so a new mode requires an explicit test decision.
     fn requires_reader_progress(class: ExecutionClass) -> bool {
         match class {
             ExecutionClass::InlineControl
             | ExecutionClass::InlineChannel
-            | ExecutionClass::InlineCreate
             | ExecutionClass::ConnectionTask
             | ExecutionClass::AdmittedConnectionTask
             | ExecutionClass::ListingTask
@@ -10101,23 +10483,13 @@ mod tests {
     /// Every request promising reader progress must pass while management,
     /// lifecycle, intent, directory, agent-request and listing admission are held.
     /// A following post-replay echo on the same real connection distinguishes a
-    /// worker's wait from an inline wait. The remaining reconciliation stall stays
-    /// named until its fix removes it from KNOWN_INLINE_STALLS.
+    /// worker's wait from an inline wait. Every declared reader-progress promise
+    /// is exercised; no request has an exception from this contention check.
     #[farhelm_testtrace::test]
     async fn declared_nonblocking_requests_process_the_following_frame_under_contention() {
         let declared = declared_progress_cases();
-        for exception in KNOWN_INLINE_STALLS {
-            assert_eq!(
-                declared
-                    .iter()
-                    .find(|(name, _)| name == exception)
-                    .map(|(_, class)| *class),
-                Some(ExecutionClass::InlineCreate),
-                "remove stale known-stall exception {exception} when its execution changes",
-            );
-        }
         for (name, class) in declared {
-            if !requires_reader_progress(class) || KNOWN_INLINE_STALLS.contains(&name) {
+            if !requires_reader_progress(class) {
                 continue;
             }
             let shared = Arc::new(tokio::sync::Mutex::new(BusyHost::new().await));
