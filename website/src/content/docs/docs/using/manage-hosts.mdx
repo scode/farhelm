@@ -104,25 +104,30 @@ a refusal opens a short dialog instead.
 
 <Screenshot
   name="manage-hosts/app-settings"
-  alt="The settings dialog opened from the gear at the top of the sidebar, with its host questions, terminal links, checkout folder, and post-clone command explained."
+  alt="The Settings dialog with hosts selected, showing the section list and the switches for asking before setting up or removing hosts."
 />
 
-The gear beside the version number at the top of the sidebar opens these settings. Turning on **set up new hosts without
-asking** or **remove hosts without asking** skips that question; turn it off to be asked again. These two apply to every
-host, and other open Farhelm windows pick up a change when they reload. **checkout folder** and **post-clone command**
-are covered in [Start a session](/docs/using/start-a-session/#start-from-a-managed-checkout), **terminal links** in
-[Read the session list](/docs/using/session-list/#terminal-links), and the sounds on the same page under [Sounds when an
-agent needs you](/docs/using/session-list/#sounds-when-an-agent-needs-you). In the Farhelm app on your Mac the dialog
-has one more section, **updates**, with **install updates automatically**, which is about updating Farhelm itself; see
-[Turn automatic updates off](/docs/using/update-and-uninstall/#turn-automatic-updates-off). The rest of the dialog is
-covered with the feature it belongs to: **name sessions on quick launch** in
-[Launch templates](/docs/using/launch-templates/#quick-launch), the managed-checkout trust switches in
-[Start a session](/docs/using/start-a-session/#trust-in-managed-checkouts), **ntfy alerts** in
-[Read the session list](/docs/using/session-list/#ntfy-alerts), and, in the Mac app, tunnels in
-[Work in a session](/docs/using/work-in-a-session/#open-a-remote-localhost-link).
+The gear beside the version number at the top of the sidebar opens Settings at **sessions**. Choose **hosts** in its
+section list for these two questions. Turning on **set up new hosts without asking** or **remove hosts without asking**
+skips that question; turn it off to be asked again. These two apply to every host, and other open Farhelm windows pick up
+a change when they reload.
 
-The separate **skip session confirmations** switch covers [session actions and shell-tab
-close](/docs/using/stop-restart-resume/#stop-or-delete), without changing these host choices or YOLO and trash questions.
+Choose a section to see its settings. Unsaved fields keep what you typed while you switch sections; closing Settings
+discards those drafts. At phone width, **‹ settings** returns to the section list.
+
+**sessions** holds **color terminal frames by host**, **name sessions on quick launch** (covered in
+[Launch templates](/docs/using/launch-templates/#quick-launch)), and **skip session confirmations**, which covers
+[session actions and shell-tab close](/docs/using/stop-restart-resume/#stop-or-delete) without changing these host
+choices or YOLO and trash questions. **terminal** holds the [terminal link choices](/docs/using/session-list/#terminal-links)
+and, in the desktop app, file types to open with a modifier-click and
+[tunnels](/docs/using/work-in-a-session/#open-a-remote-localhost-link). **checkouts** holds **checkout folder** and
+**post-clone command**, while **agent trust** holds the managed-checkout trust switches; both are covered in
+[Start a session](/docs/using/start-a-session/#start-from-a-managed-checkout).
+
+**notifications** groups [sounds](/docs/using/session-list/#sounds-when-an-agent-needs-you) and
+[ntfy alerts](/docs/using/session-list/#ntfy-alerts). In the installed Farhelm app on your Mac, **app** holds **install
+updates automatically**, which is about updating Farhelm itself; see
+[Turn automatic updates off](/docs/using/update-and-uninstall/#turn-automatic-updates-off).
 
 ## See more about each host
 
