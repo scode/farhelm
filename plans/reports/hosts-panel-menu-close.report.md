@@ -65,3 +65,48 @@ that sidebar scrolling could not explain the menu closing; the final regression 
 the negative control confirms the new panel observer is necessary. The reviewer inspected the strengthened fixture. The
 commit title and body passed a separate fresh cold read. A separate documentation pass covered both source files, the
 regression, outcome ledger, feedback index and changelog fragment.
+
+### Landing
+
+Landed as #2379, unchanged from what the report describes. It was the third of four plans in this landing round, after
+host-entry-session-ids and helm-lock-outlives-work and before template-list-current-labels.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the PR's base, main gained host-entry-session-ids in this round (sessions identified by their host entry),
+helm-lock-outlives-work (the helm keeps its state-folder lock through shutdown), and documentation and plan bookkeeping.
+A fresh-context reviewer and I read them against this plan: host-entry-session-ids changes no host-panel code, host IDs
+in the UI stay the same numbers, and this plan's new browser test uses host IDs only; the helm change is not in the UI.
+template-list-current-labels, landing next, changes only the Cmd-J list. The only conflicts were in the review feedback
+queue's index, where each plan removes its own entries; all removals are kept. The landed code is identical to what the
+landing's checks below tested.
+
+#### Fixes made during the landing
+
+None.
+
+#### Possible follow-ups
+
+- As the report says, any change in the hosts panel's height now closes an open host or session menu. Browser tests that
+  open a session row's menu without first waiting for the host rows to settle could become flaky because of this. None
+  failed for this reason in the full browser run here.
+
+#### Checks
+
+Run now, on the four plans of this round stacked together on main:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, `dprint check` on every changed file, and
+  `python3 releasing/check-changelog.py format`: all passed.
+- The whole Rust workspace through the test recorder with pinned nextest and tmux, four slots and no retries, run
+  `7067248e-06f2-4bd7-90ff-63250d8fff42`: every UI test passed (its four failures were host-entry-session-ids' outdated
+  helm tests, fixed in that plan; the whole helm library then passed in run `cbf11585-1556-4055-ba01-7041b35a4f28`). The
+  UI library built with desktop support: 714 passed, run `1560df43-83f8-4586-87cf-c71d56f481fc`. `node --test` in the
+  UI's JavaScript test directory: 311 passed, run `5f9b15b4-5549-46ed-8f7a-3528415256fa`.
+- The full browser suite (`npx playwright test`) on Chromium and WebKit, one worker, no retries, run
+  `8214f916-6dda-4c7a-9d91-35ed24e150e8`: the host provisioning file with this plan's new test passed, and none of the
+  run's failures involved menus closing: all were host-entry-session-ids' tests that still expected the old session IDs,
+  fixed and rerun there.
+- Skipped: the native Mac app (not runnable here).
+
+Nothing in the executor's report became untrue at landing.

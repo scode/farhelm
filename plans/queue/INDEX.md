@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing 2e4f05] `hosts-panel-menu-close.md` — Close open sidebar menus when the hosts panel changes height, so a failing expanded setup cannot leave a menu beside the wrong row (1 triage outcome).
 - [complete] `template-list-current-labels.md` — Reword the Cmd-J spec so a pick follows the name's current template, and refresh the list's shortcut labels when it opens (2 triage outcomes).
 - [complete] `launcher-retry-identity.md` — Make every launcher keep a retry's identity until it succeeds or the helm settles it, so retries neither replay a settled refusal nor start duplicate sessions (3 triage outcomes).
 - [complete] `launcher-composer-drafts.md` — Keep what the user typed in the launcher and checkout-folder fields: custom flags, compatible effort, the inline checkout-folder draft, and an unedited folder name (4 triage outcomes).
