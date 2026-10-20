@@ -17209,7 +17209,11 @@
   `github-checkouts.spec.ts` stay out of scope. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/test-hygiene-oct19.md`.
+- Execution: implemented in change `vrrzrqttrownoosrkkmmrsyykmuvnozz`, bookmark
+  `plan/test-hygiene-oct19/03-independent-shortcut-cleanup`. Only the eight named cleanup blocks now attempt every owned
+  release independently and preserve body errors. Session lists are read after route draining, including late create
+  replies. The code and documentation diff totals 99 lines, within the 100-line gate.
+  [PR #2434](https://github.com/scode/farhelm/pull/2434/changes).
 
 ## terminal-focus-tests-arm-cleanup-late.md
 

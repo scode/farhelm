@@ -16,9 +16,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`shortcut-tests-skip-owned-cleanup.md`](shortcut-tests-skip-owned-cleanup.md) — Early cleanup failures in shortcut
-  and naming tests skip remaining owned resources or shared checkout configuration restoration.
-
 - [`terminal-focus-tests-arm-cleanup-late.md`](terminal-focus-tests-arm-cleanup-late.md) — A focus-observer setup
   failure can leave a new regression test's live session outside its cleanup scope.
 
