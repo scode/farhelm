@@ -147,8 +147,9 @@ macro_rules! declare_execution_classes {
 ///
 /// Publish `session_id` in memory and in the store, use an existing writable
 /// UTF-8 `cwd` and regular `file_path`, and supply a declared launch that passes
-/// cheap create validation. `channel` must be unused on the tested connection
-/// and must differ from its progress oracle's channel. A held lifecycle claim
+/// cheap create validation. Allocating requests need an unused `channel`;
+/// channel controls need their matching live route prepared by the caller.
+/// It must differ from the progress oracle's channel. A held lifecycle claim
 /// lets the tab-attach representative reach its contested-claim refusal even
 /// before `tab_id` resolves; tests exercising successful attach must seed it.
 /// `relay_port` belongs to the fixture's loopback listener, allocated by the

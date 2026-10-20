@@ -9083,45 +9083,70 @@ mod tests {
     /// session exists; the Stops only ever reach its lifecycle claim.
     const BUSY_STOP_TARGET: &str = "busy-host-stop-target";
 
-    /// A host whose management slots are all held, seen through one real
-    /// helm connection: the fixture the busy-host tests share.
+    /// Bound a frozen reader or cleanup without relying on elapsed time for readiness.
+    const BUSY_HOST_WAIT: Duration = Duration::from_secs(20);
+
+    /// One real multiplexed connection with a post-replay echo oracle and all
+    /// management slots held by Stops parked on their own lifecycle claim.
     ///
-    /// The bug these tests pin is the connection's single read loop waiting
-    /// for a management slot, which freezes every keystroke queued behind
-    /// the waiting request. Only a real `handle_connection` has that loop,
-    /// and only real terminal input shows whether it is still moving, so the
-    /// fixture drives both over an in-memory duplex: a pane running `cat` is
-    /// attached on channel 1, and typing into it echoes back.
-    ///
-    /// The slots are held by eight real Stops sent on the same connection,
-    /// for a session id whose lifecycle claim the fixture holds. Each Stop
-    /// takes its slot, spawns, and parks on that claim, which is the shape
-    /// the triage found (management operations sitting out a slow teardown)
-    /// with no timing in it. [`BusyHost::release`] drops the claim and lets
-    /// them finish, as not-found refusals since the session does not exist.
+    /// The connection task and state remain owned outside assertion tasks. A
+    /// failed assertion therefore cannot drop the fixture before async teardown
+    /// releases the waits, drains the connection and settles its owned server.
     struct BusyHost {
         sup: Arc<Supervisor>,
         reader: FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
         writer: FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
-        /// The claim the eight Stops park on; `None` once released.
+        server: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
         stop_claim: Option<super::super::core::KeyedGuard>,
-        /// Control replies read while waiting for something else, kept so a
-        /// later [`BusyHost::reply`] still finds them.
         replies: Vec<ControlMsg>,
-        /// Everything the attached `cat` pane has written on channel 1.
         echoed: Vec<u8>,
+        replay_complete: bool,
+        // Channel 2 belongs to the candidate, never the independent echo oracle.
+        secondary_replayed: bool,
+        secondary_bytes: u64,
+        /// Optional contention keys included in failures while their guards live.
+        contention: Option<(String, String)>,
+        // This guard kills only this fixture's tmux server. It remains live until
+        // the owned connection and its output clients have been settled.
         _state: StateDir,
     }
 
-    /// How long any one observation in the busy-host tests may take. A
-    /// healthy run answers in milliseconds; the bound only turns a frozen
-    /// read loop into a failure instead of a parked suite.
-    const BUSY_HOST_WAIT: Duration = Duration::from_secs(20);
+    /// These tests emit a handful of short echoes and control replies. A runaway
+    /// peer should fail with bounded retained state rather than grow this fixture
+    /// indefinitely while an otherwise healthy stream defeats a timeout.
+    const BUSY_HOST_ECHO_LIMIT: usize = 64 * 1024;
+    const BUSY_HOST_REPLY_LIMIT: usize = 128;
 
     impl BusyHost {
-        /// Build the fixture: the attached `cat` session, then all eight
-        /// management slots held by parked Stops.
+        /// Establish post-replay typing, then saturate admission with real Stops.
+        /// Setup assertions run with a separately retained fixture owner so their
+        /// failure still closes and joins the connection before StateDir cleanup.
         async fn new() -> Self {
+            let shared = Arc::new(tokio::sync::Mutex::new(Self::uninitialized().await));
+            let setup = tokio::spawn({
+                let shared = Arc::clone(&shared);
+                async move { shared.lock().await.initialize().await }
+            })
+            .await;
+            if let Err(error) = setup {
+                let closed = shared.lock().await.finish().await;
+                if let Err(cleanup) = closed {
+                    eprintln!("busy-host setup cleanup also failed: {cleanup:#}");
+                }
+                if error.is_panic() {
+                    std::panic::resume_unwind(error.into_panic());
+                }
+                panic!("busy-host setup task was cancelled: {error}");
+            }
+            Arc::try_unwrap(shared)
+                .unwrap_or_else(|_| panic!("the settled setup must release its fixture reference"))
+                .into_inner()
+        }
+
+        /// Construct resource ownership before protocol assertions can fail.
+        /// Before the connection is spawned, StateDir alone owns the real tmux
+        /// server; after spawn, there is no await before storing its JoinHandle.
+        async fn uninitialized() -> Self {
             let state = StateDir::new();
             let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
                 .await
@@ -9134,135 +9159,240 @@ mod tests {
                 .await
                 .expect("fixture premise: a tmux pane running cat");
             let mut entry = entry_with(Some(Terminal { tmux_name, pane }), LastOutcome::Running);
-            entry.info.id = id.clone();
+            entry.info.id = id;
             sup.sessions
                 .lock()
                 .await
-                .insert(id.clone(), Arc::new(entry));
-
+                .insert(entry.info.id.clone(), Arc::new(entry));
             let (client_side, server_side) = tokio::io::duplex(1 << 20);
             let server_sup = Arc::clone(&sup);
-            tokio::spawn(async move {
-                let _ = super::super::connection::handle_connection(server_sup, server_side).await;
+            let server = tokio::spawn(async move {
+                super::super::connection::handle_connection(server_sup, server_side).await
             });
             let (read_half, write_half) = tokio::io::split(client_side);
-            let mut host = BusyHost {
+            Self {
                 sup,
                 reader: FrameReader::new(read_half),
                 writer: FrameWriter::new(write_half),
+                server: Some(server),
                 stop_claim: None,
                 replies: Vec::new(),
                 echoed: Vec::new(),
+                replay_complete: false,
+                secondary_replayed: false,
+                secondary_bytes: 0,
+                contention: None,
                 _state: state,
+            }
+        }
+
+        /// Use this fixture's own post-replay attachment as the live typing oracle.
+        /// The echoed marker cannot be stale snapshot content because it is sent
+        /// only after this attachment's ReplayComplete boundary has arrived.
+        async fn initialize(&mut self) {
+            tokio::time::timeout(
+                BUSY_HOST_WAIT,
+                farhelm_proto::io::handshake(&mut self.reader, &mut self.writer, "helm"),
+            )
+            .await
+            .expect("the owned supervisor must answer its handshake")
+            .expect("handshake");
+            let id = {
+                let sessions = self.sup.sessions.lock().await;
+                assert_eq!(
+                    sessions.len(),
+                    1,
+                    "the echo session is the only initial session"
+                );
+                sessions.keys().next().unwrap().clone()
             };
-            farhelm_proto::io::handshake(&mut host.reader, &mut host.writer, "helm")
-                .await
-                .expect("handshake");
-            host.send(ControlMsg::Attach {
+            self.send(ControlMsg::Attach {
                 req_id: 1,
                 session_id: id,
                 channel: 1,
                 cols: 80,
                 rows: 24,
                 terminal: TerminalSelector::default(),
-                lease: "busy-host".to_string(),
+                lease: "busy-host".into(),
                 if_unowned: false,
             })
             .await;
-            let attached = host.reply(1).await;
+            let attached = self.reply(1).await;
             assert!(
                 matches!(attached, ControlMsg::Attached { channel: 1, .. }),
-                "fixture premise: the cat pane attaches, got {attached:?}"
+                "fixture premise: the cat pane attaches, got {attached:?}",
             );
-            host.type_and_see_echo("before-saturation").await;
-
-            host.stop_claim = Some(host.sup.lifecycle_locks.claim(BUSY_STOP_TARGET).await);
+            let replayed = tokio::time::timeout(BUSY_HOST_WAIT, async {
+                while !self.replay_complete {
+                    self.read_one("the echo attachment's initial ReplayComplete")
+                        .await;
+                }
+            })
+            .await;
+            assert!(
+                replayed.is_ok(),
+                "initial replay did not settle: {}",
+                self.premises()
+            );
+            self.type_and_see_echo("before-saturation").await;
+            self.stop_claim = Some(self.sup.lifecycle_locks.claim(BUSY_STOP_TARGET).await);
             for req_id in 1001..1001 + HANDLER_ADMISSION_PERMITS as u64 {
-                host.send(ControlMsg::StopSession {
+                self.send(ControlMsg::StopSession {
                     req_id,
-                    session_id: BUSY_STOP_TARGET.to_string(),
+                    session_id: BUSY_STOP_TARGET.into(),
                 })
                 .await;
             }
             tokio::time::timeout(
                 BUSY_HOST_WAIT,
-                host.sup.lifecycle_locks.claims_reached_for_test(
+                self.sup.lifecycle_locks.claims_reached_for_test(
                     BUSY_STOP_TARGET,
                     1 + HANDLER_ADMISSION_PERMITS as u64,
                 ),
             )
             .await
-            .expect("fixture premise: every Stop reaches the held lifecycle claim");
-            assert_eq!(
-                host.sup.admission.available_permits(),
-                0,
-                "fixture premise: the parked Stops hold every management slot"
-            );
-            host
+            .expect("every parked Stop must reach the fixture's held lifecycle claim");
+            assert_eq!(self.sup.admission.available_permits(), 0);
         }
 
+        /// Report live contention premises without acquiring any of their guards.
+        fn premises(&self) -> String {
+            let gates = match &self.contention {
+                Some((target, intent)) => format!(
+                    "; target lifecycle held={}, intent held={}, target request fence held={}, directory held={}",
+                    self.sup.lifecycle_locks.claimed_for_test(target),
+                    self.sup.intent_locks_for_test().claimed_for_test(intent),
+                    self.sup.agent_request_locks.claimed_for_test(target),
+                    self.sup.working_copy_operations.try_lock().is_err(),
+                ),
+                None => String::new(),
+            };
+            format!(
+                "management slots free={}, list slots free={}, parked-Stop claim held={}, candidate replay={}, candidate bytes={}{}",
+                self.sup.admission.available_permits(),
+                self.sup.list_admission.available_permits(),
+                self.sup.lifecycle_locks.claimed_for_test(BUSY_STOP_TARGET),
+                self.secondary_replayed,
+                self.secondary_bytes,
+                gates,
+            )
+        }
+
+        /// Refuse to write after the owned connection task has already ended.
+        /// A subsequent I/O error still reports a race after this observation;
+        /// the check avoids treating a known-dead fixture as a live peer.
+        fn assert_peer_alive(&self) {
+            assert!(
+                self.server
+                    .as_ref()
+                    .is_some_and(|server| !server.is_finished()),
+                "the owned supervisor connection ended before input: {}",
+                self.premises(),
+            );
+        }
+
+        /// Send a small control frame only while the owned connection is alive;
+        /// its bounded write also turns a wedged reader into a fixture failure.
         async fn send(&mut self, message: ControlMsg) {
-            self.writer
-                .write_control(&message)
+            self.assert_peer_alive();
+            tokio::time::timeout(BUSY_HOST_WAIT, self.writer.write_control(&message))
                 .await
+                .expect("writing a small control frame must not park the fixture")
                 .expect("write a control frame to the supervisor");
         }
 
-        /// Read one frame, filing it as a control reply or as `cat` output.
+        /// File one frame while bounding retained output and keeping replay state.
+        /// Callers also bound their whole observation, so a continuous stream of
+        /// unrelated frames cannot reset the failure deadline indefinitely.
         async fn read_one(&mut self, what: &str) {
             let frame = tokio::time::timeout(BUSY_HOST_WAIT, self.reader.read_frame())
                 .await
-                .unwrap_or_else(|_| {
-                    panic!(
-                        "the supervisor went silent waiting for {what} ({} of \
-                         {HANDLER_ADMISSION_PERMITS} management slots free; the fixture holds \
-                         them all until release)",
-                        self.sup.admission.available_permits()
-                    )
-                })
+                .unwrap_or_else(|_| panic!("silent while waiting for {what}: {}", self.premises()))
                 .expect("read a frame")
-                .unwrap_or_else(|| panic!("the connection closed waiting for {what}"));
+                .unwrap_or_else(|| {
+                    panic!("connection closed waiting for {what}: {}", self.premises())
+                });
             match frame.kind {
-                FrameKind::Data if frame.channel == 1 => self.echoed.extend_from_slice(&frame.body),
-                FrameKind::Data => {}
-                FrameKind::Control => self
-                    .replies
-                    .push(parse_control(&frame).expect("decode a control frame")),
-            }
-        }
-
-        /// The reply to `req_id`, read off the connection if it has not
-        /// already arrived.
-        async fn reply(&mut self, req_id: u64) -> ControlMsg {
-            loop {
-                if let Some(at) = self
-                    .replies
-                    .iter()
-                    .position(|reply| reply.reply_req_id() == Some(req_id))
-                {
-                    return self.replies.remove(at);
+                FrameKind::Data if frame.channel == 1 => {
+                    assert!(self.echoed.len() + frame.body.len() <= BUSY_HOST_ECHO_LIMIT);
+                    self.echoed.extend_from_slice(&frame.body);
                 }
-                self.read_one(&format!("the reply to request {req_id}"))
-                    .await;
+                FrameKind::Data if frame.channel == 2 => {
+                    self.secondary_bytes = self
+                        .secondary_bytes
+                        .checked_add(frame.body.len() as u64)
+                        .expect("candidate route byte count must not overflow");
+                    assert!(
+                        self.secondary_bytes <= farhelm_proto::UPLOAD_WINDOW_BYTES,
+                        "candidate route exceeded its initial credit: {}",
+                        self.premises(),
+                    );
+                }
+                FrameKind::Data => {}
+                FrameKind::Control => {
+                    let message = parse_control(&frame).expect("decode a control frame");
+                    if matches!(message, ControlMsg::ReplayComplete { channel: 1 }) {
+                        self.replay_complete = true;
+                    }
+                    if matches!(message, ControlMsg::ReplayComplete { channel: 2 }) {
+                        self.secondary_replayed = true;
+                    }
+                    assert!(self.replies.len() < BUSY_HOST_REPLY_LIMIT);
+                    self.replies.push(message);
+                }
             }
         }
 
-        /// Type `marker` into the attached pane and wait for its echo: the
-        /// proof that this connection's read loop is still dispatching input.
+        /// Correlate one reply under a total deadline while preserving other replies.
+        async fn reply(&mut self, req_id: u64) -> ControlMsg {
+            let result = tokio::time::timeout(BUSY_HOST_WAIT, async {
+                loop {
+                    if let Some(at) = self
+                        .replies
+                        .iter()
+                        .position(|reply| reply.reply_req_id() == Some(req_id))
+                    {
+                        return self.replies.remove(at);
+                    }
+                    self.read_one(&format!("the reply to request {req_id}"))
+                        .await;
+                }
+            })
+            .await;
+            result.unwrap_or_else(|_| panic!("no reply to {req_id}: {}", self.premises()))
+        }
+
+        /// Prove a following Data frame reached this fixture's post-replay pane.
+        /// Markers must be unique within this fixture so earlier echo cannot pass
+        /// a later observation. The progress channel is always channel 1.
         async fn type_and_see_echo(&mut self, marker: &str) {
-            self.writer
-                .write_frame(&Frame::data(1, format!("{marker}\r").into_bytes()))
-                .await
-                .expect("write terminal input");
-            while !String::from_utf8_lossy(&self.echoed).contains(marker) {
-                self.read_one(&format!("the echo of {marker:?}")).await;
-            }
+            assert!(
+                self.replay_complete,
+                "typing must follow this attachment's replay"
+            );
+            self.assert_peer_alive();
+            assert!(!String::from_utf8_lossy(&self.echoed).contains(marker));
+            let result = tokio::time::timeout(BUSY_HOST_WAIT, async {
+                self.writer
+                    .write_frame(&Frame::data(1, format!("{marker}\r").into_bytes()))
+                    .await
+                    .expect("write terminal input");
+                while !String::from_utf8_lossy(&self.echoed).contains(marker) {
+                    self.read_one(&format!("the echo of {marker:?}")).await;
+                }
+            })
+            .await;
+            assert!(result.is_ok(), "no echo of {marker:?}: {}", self.premises());
         }
 
-        /// Let the parked Stops finish, and check they did so cleanly: each
-        /// answers not-found and gives its slot back.
-        async fn release(&mut self) {
-            drop(self.stop_claim.take());
+        /// Release only management saturation, keeping the connection and echo
+        /// oracle available for a later admitted-contention observation. Repeated
+        /// calls are harmless once these Stops have already been collected.
+        async fn release_slots(&mut self) {
+            let Some(claim) = self.stop_claim.take() else {
+                return;
+            };
+            drop(claim);
             for req_id in 1001..1001 + HANDLER_ADMISSION_PERMITS as u64 {
                 let reply = self.reply(req_id).await;
                 assert!(
@@ -9273,21 +9403,523 @@ mod tests {
                             ..
                         }
                     ),
-                    "a parked Stop must finish once released, got {reply:?}"
+                    "a released saturation Stop must return NotFound, got {reply:?}",
                 );
             }
-            // Every slot back at once is the observable: a Stop that
-            // replied but leaked its permit would leave this waiting.
-            let all_slots = tokio::time::timeout(
+            let permits = tokio::time::timeout(
                 BUSY_HOST_WAIT,
                 self.sup
                     .admission
                     .acquire_many(HANDLER_ADMISSION_PERMITS as u32),
             )
             .await
-            .expect("the released Stops must give their management slots back")
-            .expect("admission semaphore is never closed");
-            drop(all_slots);
+            .expect("all released management permits must return")
+            .expect("admission remains open");
+            drop(permits);
+        }
+
+        /// Finish the fixture after checking that its parked Stops settled.
+        /// Conformance callers first release the target's independent gates; none
+        /// of the saturation Stops names that target or the echo session.
+        async fn release(&mut self) {
+            self.release_slots().await;
+            self.finish()
+                .await
+                .expect("the released fixture connection must settle");
+        }
+
+        /// Close input while continuing to drain output, then join the owned
+        /// connection and settle its terminal clients before StateDir is dropped.
+        /// This also runs after an assertion task panics. If graceful settlement
+        /// fails, abort and await the owned task before reporting that failure.
+        async fn finish(&mut self) -> anyhow::Result<()> {
+            use anyhow::Context as _;
+            drop(self.stop_claim.take());
+            let Some(mut server) = self.server.take() else {
+                return Ok(());
+            };
+            let mut joined = false;
+            let drained = tokio::time::timeout(BUSY_HOST_WAIT, async {
+                self.writer
+                    .shutdown()
+                    .await
+                    .context("closing the fixture's input")?;
+                loop {
+                    tokio::select! {
+                        result = &mut server => {
+                            joined = true;
+                            return result.context("joining the fixture connection")?;
+                        }
+                        frame = self.reader.read_frame() => {
+                            if frame.context("draining the fixture connection")?.is_none() {
+                                let result = (&mut server).await;
+                                joined = true;
+                                return result.context("joining after output EOF")?;
+                            }
+                        }
+                    }
+                }
+            })
+            .await;
+            if !joined {
+                server.abort();
+                let _ = server.await;
+            }
+            let output_closed = self.sup.shutdown_output_clients(BUSY_HOST_WAIT).await;
+            let result =
+                drained.context("fixture connection did not settle before its cleanup deadline")?;
+            result?;
+            anyhow::ensure!(output_closed, "fixture terminal clients did not settle");
+            Ok(())
+        }
+    }
+
+    impl Drop for BusyHost {
+        /// Last-resort cleanup for cancellation outside the awaited test path.
+        /// Normal setup failures and body failures call finish and join first;
+        /// StateDir still kills only this fixture's tmux server after this guard.
+        fn drop(&mut self) {
+            if let Some(server) = &self.server {
+                server.abort();
+            }
+        }
+    }
+
+    // Classification-selected contention cases.
+
+    use super::super::request_modes::{
+        ConformanceContext, ExecutionClass, conformance_requests, execution_class,
+    };
+
+    /// These are the two existing inline stalls, pending their separate fix PRs.
+    /// A new InlineCreate declaration is exercised unless it is named here; the
+    /// class itself is never used as an implicit exemption from conformance.
+    const KNOWN_INLINE_STALLS: &[&str] = &["CreateSession", "ReconcileGithubCheckout"];
+
+    /// Select the declaration's promises without executing anything by its class.
+    /// The match is exhaustive so a new mode requires an explicit test decision.
+    fn requires_reader_progress(class: ExecutionClass) -> bool {
+        match class {
+            ExecutionClass::InlineControl
+            | ExecutionClass::InlineChannel
+            | ExecutionClass::InlineCreate
+            | ExecutionClass::ConnectionTask
+            | ExecutionClass::AdmittedConnectionTask
+            | ExecutionClass::ListingTask
+            | ExecutionClass::OwnedMutation
+            | ExecutionClass::OwnedDelete
+            | ExecutionClass::RenameHandoff => true,
+            // Preview's brief scan is accepted inline by SPEC.md. The restricted
+            // relay deliberately serializes its dedicated connection; its full-
+            // authority denial cannot prove the restricted path is nonblocking.
+            ExecutionClass::InlinePreview | ExecutionClass::RestrictedRelay => false,
+            ExecutionClass::NotRequest => false,
+        }
+    }
+
+    /// Enumerate declarations only; these scalar placeholders are never sent.
+    /// Each selected message is reconstructed from a fresh real fixture below,
+    /// so no channel reserved by an earlier request can short-circuit its branch.
+    fn declared_progress_cases() -> Vec<(&'static str, ExecutionClass)> {
+        let launch = farhelm_proto::SessionLaunch::plain_command("true");
+        conformance_requests(&ConformanceContext {
+            session_id: "enumeration-only",
+            cwd: ".",
+            file_path: "enumeration-only",
+            tab_id: "enumeration-only",
+            launch: &launch,
+            channel: 2,
+            req_id: 2,
+            intent_key: "enumeration-only",
+            relay_port: std::num::NonZeroU16::MIN,
+        })
+        .into_iter()
+        .map(|message| (message.variant_name(), execution_class(&message)))
+        .collect()
+    }
+
+    /// All blockers remain owned by the parent while its observation task runs.
+    /// These probes make a marker timeout report the actual fixture premise,
+    /// rather than infer contention from an empty reply queue or elapsed time.
+    fn assert_conformance_gates(sup: &Supervisor, target: &str, intent: &str) {
+        assert_eq!(sup.admission.available_permits(), 0);
+        assert_eq!(sup.list_admission.available_permits(), 0);
+        assert!(sup.lifecycle_locks.claimed_for_test(target));
+        assert!(sup.intent_locks_for_test().claimed_for_test(intent));
+        assert!(sup.agent_request_locks.claimed_for_test(target));
+        assert!(sup.working_copy_operations.try_lock().is_err());
+    }
+
+    /// Every request promising reader progress must pass while management,
+    /// lifecycle, intent, directory, agent-request and listing admission are held.
+    /// A following post-replay echo on the same real connection distinguishes a
+    /// worker's wait from an inline wait. The two known create stalls remain named
+    /// until their individual fixes remove them from KNOWN_INLINE_STALLS.
+    #[farhelm_testtrace::test]
+    async fn declared_nonblocking_requests_process_the_following_frame_under_contention() {
+        let declared = declared_progress_cases();
+        for exception in KNOWN_INLINE_STALLS {
+            assert_eq!(
+                declared
+                    .iter()
+                    .find(|(name, _)| name == exception)
+                    .map(|(_, class)| *class),
+                Some(ExecutionClass::InlineCreate),
+                "remove stale known-stall exception {exception} when its execution changes",
+            );
+        }
+        for (name, class) in declared {
+            if !requires_reader_progress(class) || KNOWN_INLINE_STALLS.contains(&name) {
+                continue;
+            }
+            let shared = Arc::new(tokio::sync::Mutex::new(BusyHost::new().await));
+            let sup = Arc::clone(&shared.lock().await.sup);
+            let target = uuid::Uuid::new_v4().to_string();
+            let intent = uuid::Uuid::new_v4().to_string();
+            let prepared = tokio::spawn({
+                let shared = Arc::clone(&shared);
+                let sup = Arc::clone(&sup);
+                let target = target.clone();
+                let intent = intent.clone();
+                async move {
+                    let cwd = shared.lock().await._state.path().join("conformance");
+                    std::fs::create_dir(&cwd).expect("create the fixture's own cwd");
+                    let file = cwd.join("download.txt");
+                    let download_size = farhelm_proto::UPLOAD_WINDOW_BYTES
+                        + farhelm_proto::UPLOAD_CHUNK_BYTES as u64;
+                    std::fs::File::create(&file)
+                        .expect("create fixture download")
+                        .set_len(download_size)
+                        .expect("size the sparse fixture download past initial credit");
+                    assert_eq!(std::fs::metadata(&file).unwrap().len(), download_size);
+                    let launch = farhelm_proto::SessionLaunch::plain_command("true");
+                    let _auth =
+                        authenticated_parent_with(&sup, &cwd, &target, launch.clone()).await;
+                    let terminal_control =
+                        matches!(name, "Detach" | "Resize" | "PauseOutput" | "ResumeOutput");
+                    let terminal = if terminal_control {
+                        let tmux_name = format!("fh-{target}");
+                        let pane = sup
+                            .tmux
+                            .create_session(
+                                &tmux_name,
+                                cwd.to_str().unwrap(),
+                                80,
+                                24,
+                                &[],
+                                &["cat".into()],
+                            )
+                            .await
+                            .expect("target terminal control needs its own live cat pane");
+                        Some(Terminal { tmux_name, pane })
+                    } else {
+                        None
+                    };
+                    let outcome = if terminal_control {
+                        LastOutcome::Running
+                    } else {
+                        LastOutcome::Exited {
+                            exit_code: None,
+                            annotation: None,
+                        }
+                    };
+                    let mut entry = entry_with(terminal, outcome);
+                    entry.info.id = target.clone();
+                    entry.info.cwd = cwd.to_str().expect("fixture cwd is UTF-8").into();
+                    entry.info.launch = launch.clone();
+                    entry.info.title = "conformance".into();
+                    sup.sessions
+                        .lock()
+                        .await
+                        .insert(target.clone(), Arc::new(entry));
+                    assert!(sup.store.session(&target).await.unwrap().is_some());
+                    assert!(sup.sessions.lock().await.contains_key(&target));
+                    assert!(file.is_file());
+                    // A listening socket is enough for the relay's connect; no detached
+                    // accept loop is needed. Its listener stays owned through cleanup.
+                    let listener =
+                        tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                            .await
+                            .expect("fixture loopback listener");
+                    let port =
+                        std::num::NonZeroU16::new(listener.local_addr().unwrap().port()).unwrap();
+                    let message = conformance_requests(&ConformanceContext {
+                        session_id: &target,
+                        cwd: cwd.to_str().unwrap(),
+                        file_path: file.to_str().unwrap(),
+                        tab_id: "conformance-tab",
+                        launch: &launch,
+                        channel: 2,
+                        req_id: 2,
+                        intent_key: &intent,
+                        relay_port: port,
+                    })
+                    .into_iter()
+                    .find(|message| message.variant_name() == name)
+                    .expect("the selected declaration supplies its representative");
+                    assert_eq!(execution_class(&message), class);
+                    if terminal_control {
+                        let mut host = shared.lock().await;
+                        host.send(ControlMsg::Attach {
+                            req_id: 10,
+                            session_id: target.clone(),
+                            channel: 2,
+                            cols: 80,
+                            rows: 24,
+                            terminal: TerminalSelector::Agent,
+                            lease: "conformance-target".into(),
+                            if_unowned: false,
+                        })
+                        .await;
+                        let attached = host.reply(10).await;
+                        assert!(
+                            matches!(attached, ControlMsg::Attached { channel: 2, .. }),
+                            "target terminal must attach: {attached:?}"
+                        );
+                        let replayed = tokio::time::timeout(BUSY_HOST_WAIT, async {
+                            while !host.secondary_replayed {
+                                host.read_one("target channel 2 ReplayComplete").await;
+                            }
+                        })
+                        .await;
+                        assert!(
+                            replayed.is_ok(),
+                            "target replay did not settle: {}",
+                            host.premises()
+                        );
+                        if matches!(&message, ControlMsg::ResumeOutput { .. }) {
+                            host.send(ControlMsg::PauseOutput { channel: 2 }).await;
+                            // The independent echo proves the preceding pause was dispatched.
+                            host.type_and_see_echo("target-paused-before-resume").await;
+                        }
+                    }
+                    (message, listener)
+                }
+            })
+            .await;
+            let (message, listener) = match prepared {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    let closed = shared.lock().await.finish().await;
+                    if let Err(cleanup) = closed {
+                        eprintln!("{name} preparation cleanup also failed: {cleanup:#}");
+                    }
+                    if error.is_panic() {
+                        std::panic::resume_unwind(error.into_panic());
+                    }
+                    panic!("{name} preparation was cancelled: {error}");
+                }
+            };
+            let lifecycle = sup.lifecycle_locks.claim(&target).await;
+            let intent_guard = sup.intent_locks_for_test().claim(&intent).await;
+            let directory = Arc::clone(&sup.working_copy_operations).lock_owned().await;
+            let agent_fence = sup.agent_request_locks.claim(&target).await;
+            let lists = Arc::clone(&sup.list_admission)
+                .acquire_many_owned(LIST_ADMISSION_PERMITS as u32)
+                .await
+                .expect("listing admission remains open");
+            shared.lock().await.contention = Some((target.clone(), intent.clone()));
+            let relay_port = listener.local_addr().unwrap().port();
+            let observed = tokio::spawn({
+                let shared = Arc::clone(&shared);
+                let sup = Arc::clone(&sup);
+                let target = target.clone();
+                let intent = intent.clone();
+                async move {
+                    let mut host = shared.lock().await;
+                    assert_conformance_gates(&sup, &target, &intent);
+                    // Controls need a live route: an absent route would skip
+                    // exactly the branch whose shared waits this test guards.
+                    match &message {
+                        ControlMsg::Detach { .. }
+                        | ControlMsg::Resize { .. }
+                        | ControlMsg::PauseOutput { .. }
+                        | ControlMsg::ResumeOutput { .. } => {
+                            assert!(host.secondary_replayed);
+                            let attachments = sup.attachments.lock().await;
+                            let key = AttachmentKey::new(&target, TerminalId::Agent);
+                            let attachment = attachments
+                                .get(&key)
+                                .expect("terminal control needs its target attachment");
+                            assert_eq!(attachment.channel, 2);
+                            assert!(
+                                !attachment.forwarder.is_finished(),
+                                "target output owner must still be live"
+                            );
+                            assert_eq!(
+                                attachment.pause.borrow().is_some(),
+                                matches!(&message, ControlMsg::ResumeOutput { .. }),
+                                "resume must start paused; other controls start live"
+                            );
+                        }
+                        ControlMsg::CommitUpload { .. } | ControlMsg::AbortUpload { .. } => {
+                            host.send(ControlMsg::BeginUpload {
+                                req_id: 10,
+                                session_id: target.clone(),
+                                channel: 2,
+                                filename: "conformance-pending.txt".into(),
+                                size: 0,
+                            })
+                            .await;
+                            tokio::time::timeout(
+                                BUSY_HOST_WAIT,
+                                sup.lifecycle_locks.claims_reached_for_test(&target, 2),
+                            )
+                            .await
+                            .expect("registered live upload must reach held target lifecycle");
+                            assert_eq!(
+                                sup.uploads
+                                    .lock()
+                                    .await
+                                    .values()
+                                    .filter(|upload| upload.session == target)
+                                    .count(),
+                                1,
+                                "pending upload must remain registered under the held claim"
+                            );
+                            // Staging is blocked, but inline begin has already installed its route.
+                        }
+                        ControlMsg::DownloadAck { .. } | ControlMsg::AbortDownload { .. } => {
+                            let path = {
+                                let sessions = sup.sessions.lock().await;
+                                std::path::Path::new(&sessions.get(&target).unwrap().info.cwd)
+                                    .join("download.txt")
+                                    .to_str()
+                                    .unwrap()
+                                    .to_owned()
+                            };
+                            host.send(ControlMsg::BeginDownload {
+                                req_id: 10,
+                                session_id: target.clone(),
+                                path,
+                                channel: 2,
+                            })
+                            .await;
+                            let started = host.reply(10).await;
+                            assert!(
+                                matches!(started, ControlMsg::DownloadStarted { channel: 2, .. }),
+                                "download control needs a live producer: {started:?}"
+                            );
+                            let credited = tokio::time::timeout(BUSY_HOST_WAIT, async {
+                                while host.secondary_bytes < farhelm_proto::UPLOAD_WINDOW_BYTES {
+                                    assert!(
+                                        !host.replies.iter().any(|reply| matches!(
+                                            reply,
+                                            ControlMsg::DownloadEnded { channel: 2, .. }
+                                        )),
+                                        "download ended before its credit-wait premise"
+                                    );
+                                    host.read_one("the candidate download's initial credit window")
+                                        .await;
+                                }
+                            })
+                            .await;
+                            assert!(
+                                credited.is_ok(),
+                                "download did not reach its credit boundary: {}",
+                                host.premises()
+                            );
+                            assert_eq!(host.secondary_bytes, farhelm_proto::UPLOAD_WINDOW_BYTES);
+                            // The file exceeds the window; draining without ACK grants no credit.
+                        }
+                        ControlMsg::TcpRelayAck { .. } | ControlMsg::CloseTcpRelay { .. } => {
+                            host.send(ControlMsg::BeginTcpRelay {
+                                req_id: 10,
+                                session_id: target.clone(),
+                                channel: 2,
+                                address: Some(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
+                                port: relay_port,
+                            })
+                            .await;
+                            let started = host.reply(10).await;
+                            assert!(
+                                matches!(started, ControlMsg::TcpRelayStarted { channel: 2, .. }),
+                                "relay control needs an established TCP route: {started:?}"
+                            );
+                        }
+                        ControlMsg::SetBrowserForwarding { .. } => {}
+                        other => assert_ne!(
+                            execution_class(other),
+                            ExecutionClass::InlineControl,
+                            "choose live-route setup for new control {}",
+                            other.variant_name()
+                        ),
+                    }
+                    assert_conformance_gates(&sup, &target, &intent);
+                    host.send(message).await;
+                    host.type_and_see_echo(&format!("following-{name}")).await;
+                    // Confirm the representatives whose target branch could
+                    // otherwise be bypassed by a missing row or a malformed route.
+                    if name == "Attach" {
+                        let reply = host.reply(2).await;
+                        assert!(matches!(reply, ControlMsg::Error {
+                        kind: ErrorKind::Conflict, ref message, ..
+                    } if message.contains("being stopped or deleted")));
+                    }
+                    if name == "BeginUpload" {
+                        tokio::time::timeout(
+                            BUSY_HOST_WAIT,
+                            sup.lifecycle_locks.claims_reached_for_test(&target, 2),
+                        )
+                        .await
+                        .expect("the registered upload must reach the held lifecycle claim");
+                    }
+                    if name == "DeleteSession" {
+                        tokio::time::timeout(
+                            BUSY_HOST_WAIT,
+                            sup.agent_request_locks.claims_reached_for_test(&target, 2),
+                        )
+                        .await
+                        .expect("the owned Delete must reach the held request fence");
+                    }
+                    assert_conformance_gates(&sup, &target, &intent);
+                }
+            })
+            .await;
+
+            // The observation can panic without dropping either its fixture or
+            // the held gates. Cleanup is separately joined before propagating that
+            // panic, so failures retain live diagnostics and settle owned work.
+            let cleaned = tokio::spawn({
+                let shared = Arc::clone(&shared);
+                let sup = Arc::clone(&sup);
+                let target = target.clone();
+                async move {
+                    tokio::time::timeout(
+                        BUSY_HOST_WAIT,
+                        super::super::uploads::abort_session_uploads(
+                            &sup,
+                            &target,
+                            "conformance fixture cleanup",
+                        ),
+                    )
+                    .await
+                    .expect("fixture uploads must settle while its lifecycle claim is held");
+                    drop(lifecycle);
+                    drop(intent_guard);
+                    drop(directory);
+                    drop(agent_fence);
+                    drop(lists);
+                    shared.lock().await.release().await;
+                }
+            })
+            .await;
+            let closed = shared.lock().await.finish().await;
+            drop(listener);
+            if let Err(error) = &cleaned {
+                eprintln!("{name} cleanup failed: {error}");
+            }
+            if let Err(error) = &closed {
+                eprintln!("{name} connection close failed: {error:#}");
+            }
+            if let Err(error) = observed {
+                if error.is_panic() {
+                    std::panic::resume_unwind(error.into_panic());
+                }
+                panic!("{name} observation was cancelled: {error}");
+            }
+            cleaned.expect("the conformance fixture's gate cleanup must settle");
+            closed.expect("the conformance fixture's connection must settle");
         }
     }
 
