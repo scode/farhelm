@@ -955,6 +955,9 @@ enum Runs {
 /// shows the start command and the resume command a later restart runs,
 /// because a plain restart is not checked against the YOLO rule again; a
 /// restart's card shows only the resume command, which is all a restart runs.
+/// Describe the launch snapshot the user is approving, on Start and Restart.
+/// Settings must not reinterpret these rows: a plain Restart retains its
+/// stored choices even when the settings for newly composed launches changed.
 fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
     let start_label = "command";
     let resume_text = |argv: &[String]| {
@@ -992,6 +995,16 @@ fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
             ));
             if let Some(words) = &selection.permission_flags {
                 rows.push(CardRow::Value("permission flags", shell_words::join(words)));
+            }
+            if let Some(trusted) = selection.workspace_trust {
+                rows.push(CardRow::Note(
+                    "workspace trust",
+                    if trusted {
+                        "trusted by Settings in a managed checkout; repository hooks, settings and commands can run without asking"
+                    } else {
+                        "not trusted"
+                    },
+                ));
             }
             if runs == Runs::Start {
                 rows.push(CardRow::Block(start_label, launch.display_command()));
@@ -1439,6 +1452,74 @@ mod tests {
             "Guarded · Claude auto mode"
         );
         assert_eq!(permissions_of(None), "Not classified · agent's own setting");
+    }
+
+    /// Launch and Restart must explain stored trust without asking the user
+    /// to interpret command flags. Explicit false remains visible for older
+    /// launches; unset choices, including Claude's separate settings edit,
+    /// carry no launch-trust claim on either card.
+    #[test]
+    fn launch_and_restart_cards_explain_stored_workspace_trust() {
+        use farhelm_proto::{LaunchHarness, LaunchSelection};
+        for &harness in LaunchHarness::ALL {
+            let choices: &[Option<bool>] = if harness.offers_workspace_trust() {
+                &[Some(true), Some(false), None]
+            } else {
+                &[None]
+            };
+            for &workspace_trust in choices {
+                let launch = SessionLaunch::Agent {
+                    selection: LaunchSelection {
+                        harness,
+                        model: None,
+                        effort: None,
+                        permissions: None,
+                        permission_flags: None,
+                        wrapper_prefix: None,
+                        workspace_trust,
+                    },
+                    start: vec!["agent".into()],
+                    resume: None,
+                };
+                for action in [
+                    ApprovalAction::Launch {
+                        verb: LaunchVerb::Create,
+                        host_name: "host".into(),
+                        cwd: "/work".into(),
+                        repo: None,
+                        title: None,
+                        launch: launch.clone(),
+                        source: None,
+                    },
+                    ApprovalAction::Restart {
+                        target: ApprovalSession {
+                            id: "session".into(),
+                            title: None,
+                            host_name: None,
+                        },
+                        stop_if_running: false,
+                        launch: Some(launch.clone()),
+                    },
+                ] {
+                    let rows = action_rows(&action);
+                    let notes: Vec<_> = rows
+                        .iter()
+                        .filter_map(|row| match row {
+                            CardRow::Note("workspace trust", text) => Some(*text),
+                            _ => None,
+                        })
+                        .collect();
+                    let expected: &[&str] = match workspace_trust {
+                        Some(true) => &[
+                            "trusted by Settings in a managed checkout; repository hooks, settings and commands can run without asking",
+                        ],
+                        Some(false) => &["not trusted"],
+                        None => &[],
+                    };
+                    assert_eq!(notes, expected, "{harness:?}: {rows:?}");
+                }
+            }
+        }
     }
 
     /// Spec: a restart card shows the resume command the restart runs, for a

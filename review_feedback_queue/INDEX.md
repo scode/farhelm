@@ -63,9 +63,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`reused-checkout-path-grants-trust.md`](reused-checkout-path-grants-trust.md) — Replacing a managed checkout at its
   recorded path can make ordinary content appear eligible for automatic trust.
 
-- [`agent-approval-omits-workspace-trust.md`](agent-approval-omits-workspace-trust.md) — Agent launch approval cards no
-  longer explain the effective managed-checkout trust choice in plain language.
-
 - [`summary-card-omits-observed-yolo.md`](summary-card-omits-observed-yolo.md) — The main session summary can still say
   guarded after YOLO is observed; consequential reliance remains unverified.
 

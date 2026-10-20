@@ -16107,7 +16107,10 @@
   asking) or a stored "not trusted"; no line when unset; unit tests. Claude is out of scope. SPEC.md may add trust to
   what a launch card shows. Complexity gate: if not cheap, discard instead. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/workspace-trust-destination.md`.
+- Execution: change `lymxyozuxkqovvsmslqmovswowmpznzr`, bookmark
+  `plan/workspace-trust-destination/02-approval-trust-note`. The cheap-fix gate held: both card kinds use the stored
+  optional choice in their existing shared row builder. Draft PR
+  [#2353](https://github.com/scode/farhelm/pull/2353/changes).
 
 ## tunnel-port-can-divert-local-traffic.md
 
