@@ -28,11 +28,15 @@ import { harnessStackPorts } from "./stack-port";
 
 /** How many stacks, and therefore Playwright workers, the browser suite runs.
  *
- * Picked rather than measured. `scripts/test_run_playwright.py` pins the
- * recorder's worker count to the same value and its tests check that the two
- * agree, so changing it here is the whole change.
+ * Picked rather than measured: the maintainer chose three to start with, to
+ * get the suite running in parallel rather than to find an optimum, on a
+ * machine whose CPU other agents share. Each stack is a helm, two
+ * supervisors and their tmux servers, and each worker drives its own browser,
+ * so the suite's CPU and memory use grow with this number.
+ * `scripts/test_run_playwright.py` pins the recorder's worker count to the
+ * same value and its tests check that the two agree; change both together.
  */
-export const STACK_COUNT = 1;
+export const STACK_COUNT = 3;
 
 /** What a worker needs to reach one slot's stack. */
 export interface StackSlot {

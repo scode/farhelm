@@ -23,7 +23,7 @@ finally:
     sys.dont_write_bytecode = _previous_bytecode_setting
     del _previous_bytecode_setting
 
-CONCURRENCY = "1 Playwright worker; chromium and webkit; retries 0; repeat-each 1"
+CONCURRENCY = "3 Playwright workers, one stack each; chromium and webkit; retries 0; repeat-each 1"
 
 
 def parse_args(argv):

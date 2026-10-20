@@ -125,12 +125,14 @@ first-class:
 - Flake loop: add `--repeat-each=20`. Playwright restarts nothing between repeats, so this also probes state leakage
   between iterations of the same test.
 
-Every run, however narrow, boots the real stack once (`start-stack.sh` via the config's `webServer`, a few seconds) and
-needs the prerequisites built first: `cargo build` and the `dx build` web bundle, per AGENTS.md's merge-gate paragraph.
-That cost is per-invocation, not per-test, so a `--repeat-each=20` loop pays it once. The stack resolves `tmux` through
-PATH and the supervisor refuses a below-floor version, so on a machine whose distro tmux sits below the floor the same
-prefix as the Rust suite applies: `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" npx playwright test ...` — without
-it, every test fails with a 409 "host 1 is connecting" from a supervisor that never came up.
+Every run, however narrow, boots the real stacks once: one per worker slot, three in all (`start-stack.sh` via the
+config's `webServer` entries, a few seconds), even when the selection is a single test that only one worker will run.
+Playwright spreads the selection's (engine, spec file) projects over up to three workers. Every run also needs the
+prerequisites built first: `cargo build` and the `dx build` web bundle, per AGENTS.md's merge-gate paragraph. That cost
+is per-invocation, not per-test, so a `--repeat-each=20` loop pays it once. The stack resolves `tmux` through PATH and
+the supervisor refuses a below-floor version, so on a machine whose distro tmux sits below the floor the same prefix as
+the Rust suite applies: `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" npx playwright test ...` — without it, every
+test fails with a 409 "host 1 is connecting" from a supervisor that never came up.
 
 Engine choice: chromium is the faster iteration engine; webkit is the desktop stand-in, so a report that smells
 desktop-family (see `docs/desktop-web-triage.md`) should reproduce on `webkit-<spec>` before anyone blames shared code.
