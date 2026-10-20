@@ -227,6 +227,11 @@ pub fn run() -> anyhow::Result<()> {
                         .attach(window);
                 })
                 .with_custom_event_handler(move |event, _| {
+                    // Tao sends this before hard exit, including AppKit's Cmd-Q;
+                    // the bootstrap's destructor cannot reclaim these partial saves.
+                    if matches!(event, dioxus::desktop::tao::event::Event::LoopDestroyed) {
+                        farhelm_helm::cleanup_native_downloads();
+                    }
                     event_tracker
                         .lock()
                         .expect("window tracker poisoned")

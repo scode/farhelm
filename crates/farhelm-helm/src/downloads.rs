@@ -15,7 +15,33 @@ use farhelm_proto::open_extensions::OpenExtensions;
 use farhelm_supervisor::files::{RealFs, StagedStream};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
+
+/// Weak owners bound tracking to live saves without delaying their ordinary cleanup.
+/// None closes admission before Quit removes directories; creation holds the same lock.
+struct NativeStaging(Mutex<Option<Vec<Weak<tempfile::TempDir>>>>);
+static NATIVE_STAGING: NativeStaging = NativeStaging(Mutex::new(Some(Vec::new())));
+
+impl NativeStaging {
+    /// Remove this process's partial saves even though hard exit skips their destructors.
+    /// No transfer is awaited, and a completed publication outside staging survives.
+    fn cleanup(&self) {
+        for directory in self.0.lock().unwrap().take().unwrap_or_default() {
+            if let Some(directory) = directory.upgrade()
+                && let Err(error) = std::fs::remove_dir_all(directory.path())
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!(%error, "could not remove download staging on quit");
+            }
+        }
+    }
+}
+
+/// Call from the desktop's LoopDestroyed event, before the event loop exits.
+/// Crashes and force-quits cannot run this process-local cleanup.
+pub fn cleanup_native_downloads() {
+    NATIVE_STAGING.cleanup();
+}
 
 /// Open only the completed save supplied by the helm, never a caller's path.
 /// The native shell owns platform dispatch; tests inject an observer instead.
@@ -282,9 +308,10 @@ fn candidates(name: String) -> impl Iterator<Item = String> {
 /// One owner keeps the stream and its private directory together through
 /// blocking work. File teardown precedes directory teardown, including when
 /// an async save is cancelled while a chunk write is still in progress.
+/// Quit may briefly upgrade the directory's weak registration to remove it.
 struct SaveFiles {
     file: StagedStream,
-    directory: tempfile::TempDir,
+    directory: Arc<tempfile::TempDir>,
 }
 
 /// Async ownership must not turn a failed transfer into synchronous filesystem
@@ -295,13 +322,21 @@ struct NativeSave(Option<SaveFiles>);
 impl NativeSave {
     /// Request private permissions at creation rather than relying on umask.
     /// The temp directory shares the publication filesystem for atomic links.
-    fn create(directory: PathBuf) -> anyhow::Result<Self> {
+    fn create(directory: PathBuf, registry: &NativeStaging) -> anyhow::Result<Self> {
         use std::os::unix::fs::PermissionsExt;
+        let mut owners = registry.0.lock().unwrap();
+        let owners = owners
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("the app is quitting"))?;
         std::fs::create_dir_all(&directory)?;
-        let staging = tempfile::Builder::new()
-            .prefix(".farhelm-download-")
-            .permissions(std::fs::Permissions::from_mode(0o700))
-            .tempdir_in(&directory)?;
+        let staging = Arc::new(
+            tempfile::Builder::new()
+                .prefix(".farhelm-download-")
+                .permissions(std::fs::Permissions::from_mode(0o700))
+                .tempdir_in(&directory)?,
+        );
+        owners.retain(|owner| owner.strong_count() > 0);
+        owners.push(Arc::downgrade(&staging));
         let file = StagedStream::create(staging.path(), &directory, "download", &RealFs)?;
         Ok(Self(Some(SaveFiles {
             file,
@@ -331,7 +366,7 @@ impl NativeSave {
         let files = self.0.take().unwrap();
         tokio::task::spawn_blocking(move || {
             let stream = files.file.abandon(&RealFs);
-            let directory = files.directory.close();
+            let directory = std::fs::remove_dir_all(files.directory.path());
             stream?;
             directory?;
             Ok::<_, anyhow::Error>(())
@@ -354,7 +389,9 @@ impl Drop for NativeSave {
 /// partially received file is published under a user-visible save name.
 async fn save_download(mut download: DownloadGuard, directory: PathBuf) -> anyhow::Result<PathBuf> {
     let name = basename(&download.info.path)?;
-    let mut save = tokio::task::spawn_blocking(move || NativeSave::create(directory)).await??;
+    let mut save =
+        tokio::task::spawn_blocking(move || NativeSave::create(directory, &NATIVE_STAGING))
+            .await??;
     loop {
         match download.recv().await {
             Ok(Some(bytes)) => {
@@ -374,6 +411,39 @@ async fn save_download(mut download: DownloadGuard, directory: PathBuf) -> anyho
 
 #[cfg(test)]
 mod tests {
+    /// Quit removes live partial bytes without waiting for Drop, closes admission,
+    /// and leaves completed saves and another owner's staging untouched.
+    #[farhelm_testtrace::test]
+    async fn quit_cleans_only_owned_staging_and_refuses_new_saves() {
+        let downloads = tempfile::tempdir().unwrap();
+        let registry = NativeStaging(Mutex::new(Some(Vec::new())));
+        let other = NativeStaging(Mutex::new(Some(Vec::new())));
+        let create = |registry| NativeSave::create(downloads.path().into(), registry).unwrap();
+        let save = create(&registry).write_chunk(b"partial".to_vec()).unwrap();
+        let staging = save.0.as_ref().unwrap().directory.path().to_path_buf();
+        let partial = std::fs::read_dir(&staging)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert_eq!(std::fs::read(partial).unwrap(), b"partial");
+        let foreign = create(&other).write_chunk(b"other".to_vec()).unwrap();
+        let foreign_path = foreign.0.as_ref().unwrap().directory.path().to_path_buf();
+        let published = create(&registry)
+            .write_chunk(b"complete".to_vec())
+            .unwrap()
+            .publish("saved.txt".into())
+            .unwrap();
+        registry.cleanup();
+        assert!(!staging.exists());
+        assert!(foreign_path.exists());
+        assert_eq!(std::fs::read(published).unwrap(), b"complete");
+        assert!(NativeSave::create(downloads.path().join("new"), &registry).is_err());
+        assert!(!downloads.path().join("new").exists());
+        foreign.cleanup().await.unwrap();
+    }
+
     /// Build this fixture's public reference from its registered entry, keeping wire IDs bare.
     fn session_path(harness: &crate::rest_harness::Harness, path: &str) -> String {
         let prefix = "/api/sessions/";

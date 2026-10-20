@@ -16571,10 +16571,13 @@
   interruption leaves no partial file, and "Desktop Quit" (around 2960) keeps ordinary cleanup of interrupted work.
 - Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each" (question 1), after the session pointed out
   that the fix is a small new sweep at the next launch.
-- Completion criteria: leftover staging directories from an earlier run are removed (at the next launch, or by an
-  equivalent owner), without touching a save another running instance still owns; a test. Size gate: about 100 lines, as
-  above. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/download-staging-sweep.md`.
+- Decision update, 2026-10-20: clean this process's active staging on normal Quit and refuse new saves once quitting; no
+  startup sweep or inter-process locking. Earlier-build, crash and force-quit leftovers remain, per the plan's answer.
+- Completion criteria: normal Quit removes this process's live staging without waiting for transfers; new saves are
+  refused once quitting; a test. Size gate: about 100 lines, as above. Remove the feedback file and its index entry.
+- Execution: implemented in change `vrkyxsolwuzuqqotqomwvslzonvrvutk`, bookmark
+  `plan/download-staging-sweep/01-quit-cleanup`, [PR #2440](https://github.com/scode/farhelm/pull/2440/changes). The
+  code, test and implementation note total 99 lines, within the gate.
 
 ## tab-attach-blocks-host-reader-during-stop.md
 
