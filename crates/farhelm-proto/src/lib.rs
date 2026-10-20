@@ -145,6 +145,11 @@ pub mod launcher;
 pub mod session_launch;
 pub use session_launch::{CommandLaunch, LaunchKind, LaunchRequest, SessionLaunch};
 
+/// Entry-bound session references at the helm's client boundary. Supervisor messages
+/// continue carrying bare IDs; this module adds no wire fields or protocol change.
+pub mod session_ref;
+pub use session_ref::{SessionRef, SessionRefError};
+
 /// Owned GitHub checkouts: validated repo identity, deterministic naming,
 /// and the preview/create payload shapes (see the module's own docs).
 pub mod github_checkout;

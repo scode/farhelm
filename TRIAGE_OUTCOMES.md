@@ -16261,7 +16261,10 @@
     the moment of the update may get no answer.
   - SPEC.md and SPEC_impl.md state the principle and the rules above; the agent instructions describe full IDs.
   - Remove this feedback file and `create-reply-foreign-id-bypasses-cache-refusal.md`, with their index entries.
-- Execution: planned in `plans/queue/host-entry-session-ids.md`.
+- Execution: in progress. Entry-identity foundation in change `ytoksxyppxmkmmvyssxslqnqwtnmwqnz`, bookmark
+  `plan/host-entry-session-ids/01-entry-identities`, draft [#2366](https://github.com/scode/farhelm/pull/2366/changes).
+  Paired viewer state and public session routing remain to be implemented under `plans/queue/host-entry-session-ids.md`;
+  both feedback files remain until the redesign is complete.
 
 ## summary-card-omits-observed-yolo.md
 

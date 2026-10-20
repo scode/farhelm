@@ -3190,6 +3190,12 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   is what pins the local row's NULL destination/remote-field shape, while separate partial unique indexes enforce at
   most one local row, uniqueness of an SSH row's destination among SSH rows, and — see below — at most one row claiming
   any given host identity.
+- Each host registry entry also has a helm-minted canonical UUID (`hosts.entry_uuid`, schema 62), independent of the
+  supervisor's reported installation identity. The local entry and every new SSH entry receive one; a registration that
+  converges on an existing row, an edit, a retarget and an adoption preserve it. Removing an entry and adding it again
+  mints a different UUID. Migration backfills existing entries in the same transaction as the schema change and adds a
+  unique index. It appends the column without rebuilding `hosts`, whose deletion would cascade into host-owned state.
+  Reads refuse a missing or noncanonical UUID instead of inventing a replacement identity.
 - A host alias is nullable display data: when set it replaces the derived SSH destination or local `this machine` label.
   Input is trimmed; an empty result clears the alias. Nonempty aliases reject control characters and are limited to 64
   Unicode characters. The browser mirrors these syntax checks, while the helm owns collision checks and remains the

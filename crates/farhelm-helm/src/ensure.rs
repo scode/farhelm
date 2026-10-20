@@ -251,6 +251,7 @@ mod tests {
         let row = |destination: &str, farhelm: Option<&str>, state_dir: Option<&str>| {
             crate::store::HostRow {
                 id: 7,
+                entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
                 kind: HostKind::Ssh,
                 destination: Some(destination.to_string()),
                 alias: None,
