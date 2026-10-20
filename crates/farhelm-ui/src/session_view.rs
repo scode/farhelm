@@ -90,7 +90,7 @@ fn NativeTunnelStrip(session: Session) -> Element {
         // PeerText's Debug deliberately matches String. This ownership key is
         // comparison data, so typed metadata must not change listener lifetime.
         let owner = format!("{:?}:{:?}", session.host, session.host_identity);
-        rsx! { crate::tunnels::TunnelStrip { key: "{owner}", session: session.id } }
+        rsx! { crate::tunnels::TunnelStrip { key: "{owner}", session: session.id.raw().to_owned() } }
     }
     #[cfg(not(native_desktop))]
     {
@@ -476,7 +476,8 @@ fn admit_detail(
 /// no change to the parent's value, yet the view's copy must follow it.
 fn followed_title(selected: Option<&Session>, shown: &Session) -> Option<crate::peer::PeerText> {
     let selected = selected?;
-    (selected.id == shown.id && selected.title != shown.title).then(|| selected.title.clone())
+    (selected.id.raw() == shown.id.raw() && selected.title != shown.title)
+        .then(|| selected.title.clone())
 }
 
 /// A Replace the helm refused as a YOLO launch, waiting on the user's answer
@@ -688,7 +689,7 @@ pub(crate) fn SessionView(
     // same operation from the sidebar, header or interrupted card. Cancelling
     // this source must leave a newer row's unresolved intent alone.
     let mut replace_key = use_context::<crate::list::ReplaceIntent>().0;
-    let replace_source_id = use_signal(|| session.id.clone());
+    let replace_source_id = use_signal(|| session.id.raw().to_owned());
     let mut cancel_replace_intent = move || {
         if replace_key
             .peek()
@@ -721,7 +722,7 @@ pub(crate) fn SessionView(
     let mut yolo_questions = use_context::<crate::list::ReplaceYoloQuestions>().0;
     use_drop(move || {
         if let Some(pending) = replace_yolo.peek().as_ref() {
-            yolo_questions.write().remove(&pending.source.id);
+            yolo_questions.write().remove(pending.source.id.raw());
         }
     });
     // One synchronously claimed token covers the restart prompt as well as
@@ -1006,7 +1007,9 @@ pub(crate) fn SessionView(
     // session, the view said so, and retrying the same question in a loop
     // would not change the answer.
     let detail_base = base.clone();
-    let detail_id = session.id.clone();
+    // Keep the reader's captured routing token separate from display spelling.
+    // The same raw reference owns this view's terminal and mutation callbacks.
+    let detail_id = session.id.raw().to_owned();
     let read_detail = move || {
         let base = detail_base.clone();
         let id = detail_id.clone();
@@ -1183,7 +1186,7 @@ pub(crate) fn SessionView(
         let Some(selected) = selection.as_ref() else {
             return;
         };
-        if selected.id != current.peek().id {
+        if selected.id.raw() != current.peek().id.raw() {
             return;
         }
         if !*selection_followed.peek() {
@@ -1208,13 +1211,13 @@ pub(crate) fn SessionView(
         if !selection
             .peek()
             .as_ref()
-            .is_some_and(|selected| selected.id == shown.id)
+            .is_some_and(|selected| selected.id.raw() == shown.id.raw())
         {
             return;
         }
         // This signal feeds the list's String-based rename editor; retain its
         // raw seed rather than publishing the escaped display spelling.
-        let title = Some((shown.id.clone(), shown.title.raw().to_owned()));
+        let title = Some((shown.id.raw().to_owned(), shown.title.raw().to_owned()));
         if *open_session_title.peek() != title {
             open_session_title.set(title);
         }
@@ -1303,7 +1306,11 @@ pub(crate) fn SessionView(
     let mark_key = use_memo(move || {
         let session = current.read();
         let eligible = seen_effect_eligible(&session);
-        (session.id.clone(), session.effective_activity(), eligible)
+        (
+            session.id.raw().to_owned(),
+            session.effective_activity(),
+            eligible,
+        )
     });
     let mark_seen_base = base.clone();
     use_effect(move || {
@@ -1366,7 +1373,7 @@ pub(crate) fn SessionView(
         let shown = current.peek();
         serde_json::json!({
             "role": "session",
-            "id": shown.id,
+            "id": shown.id.raw(),
             "acted_on": feed_acted_on.peek().to_string(),
             "stale": shown.stale,
             "host_absent": matches!(host_read.peek().lookup(shown.host), HostLookup::Absent),
@@ -1425,7 +1432,7 @@ pub(crate) fn SessionView(
             restart_with_error.set(None);
             restart_epoch += 1;
             let base = restart_base.clone();
-            let id = current.read().id.clone();
+            let id = current.read().id.raw().to_owned();
             // Cloned per click: the spawned task owns what it captures, and this
             // closure runs again for the next restart.
             let refresh_after_restart = refresh_after_restart.clone();
@@ -1565,7 +1572,7 @@ pub(crate) fn SessionView(
 
     let replace_base = base.clone();
     let replace_preferences = preferences;
-    let replace_session_id = session.id.clone();
+    let replace_session_id = session.id.raw().to_owned();
     // A Replace deletes its source, whose notice the session list shows.
     let delete_notice = use_context::<crate::list::DeleteNotice>();
     // Takes the lifecycle claim its confirmation handed over; the task owns
@@ -1647,7 +1654,7 @@ pub(crate) fn SessionView(
                     header_refresh.set(true);
                     delete_notice.publish(notice);
                     let new_session = crate::list::with_source_host(new_session, &source);
-                    crate::list::remember_selection(&base, preferences, &new_session.id);
+                    crate::list::remember_selection(&base, preferences, new_session.id.raw());
                     on_replaced.call(new_session);
                 }
                 Err(error)
@@ -1699,7 +1706,7 @@ pub(crate) fn SessionView(
     // duplicated. The in-flight flag here only guards re-entry and
     // disables the button.
     let add_base = base.clone();
-    let add_session_id = session.id.clone();
+    let add_session_id = session.id.raw().to_owned();
     let on_add_tab = move |_| {
         if lifecycle.busy_now() {
             return;
@@ -1750,7 +1757,7 @@ pub(crate) fn SessionView(
 
     // One tab-close request path, whether the question was answered or skipped.
     let close_base = base.clone();
-    let close_session_id = session.id.clone();
+    let close_session_id = session.id.raw().to_owned();
     let mut do_close_tab = move |tab_id: String| {
         // Re-entry guard on the per-tab in-flight set, mirroring
         // `ListView`'s `RowPhase::Pending`: `insert` returning `false` means a close
@@ -1849,7 +1856,7 @@ pub(crate) fn SessionView(
     // changes only. Correctness does not depend on that (`sync()` is
     // idempotent), but a `document::eval` every 3 seconds forever would be
     // pure waste.
-    let spec_session_id = session.id.clone();
+    let spec_session_id = session.id.raw().to_owned();
     let terminal_specs = use_memo(move || {
         let lease = lease.read().clone()?;
         let session = current.read();
@@ -1939,7 +1946,7 @@ pub(crate) fn SessionView(
     // the session id alone, so no read can ever change it, and the body
     // re-runs on every reply the feed brings. Without the memo this would
     // serialize the same ~1KB of JSON forever, for nothing.
-    let policy_session_id = session.id.clone();
+    let policy_session_id = session.id.raw().to_owned();
     let attach_policy = use_memo(move || attachment_policy(&policy_session_id).to_string());
     // The auto-reconnect policy (PLAN_M6.md item 7), handed across the same
     // boundary and for the same reason as the one above: the ladder, the
@@ -2157,7 +2164,7 @@ pub(crate) fn SessionView(
     let direct_header_source = shown.clone();
     let direct_card_source = shown.clone();
     let replace_prompt_guard = header_delete_guard;
-    let header_deleting = deleting.read().contains(&shown.id);
+    let header_deleting = deleting.read().contains(shown.id.raw());
     let with_reason = restart_with_reason(&shown);
     let restart_with_description = with_reason.clone().unwrap_or_else(|| {
         "resume this session's conversation with changed launch settings".to_string()
@@ -2588,7 +2595,7 @@ pub(crate) fn SessionView(
                             disabled: lifecycle.busy(),
                             "aria-expanded": "{confirming_header_delete.is_open()}",
                             onclick: {
-                                let id = shown.id.clone();
+                                let id = shown.id.raw().to_owned();
                                 move |_| {
                                     if let Some(claim) = lifecycle.claim_guard() {
                                         if skip_session_confirmations {
@@ -2629,7 +2636,7 @@ pub(crate) fn SessionView(
                                     onkeydown: crate::guard_confirmation_enter,
                                     onmounted: move |_| crate::focus_confirmation(".header-delete-confirm-submit", ".header-delete-confirm .btn-neutral"),
                                     onclick: {
-                                        let id = shown.id.clone();
+                                        let id = shown.id.raw().to_owned();
                                         move |_| {
                                             let Some(claim) = confirming_header_delete.take(&()) else {
                                                 return;
@@ -2780,7 +2787,7 @@ pub(crate) fn SessionView(
                         };
                         if let Some(claim) = lifecycle.claim_guard() {
                             replace_yolo.set(None);
-                            yolo_questions.write().remove(&pending.source.id);
+                            yolo_questions.write().remove(pending.source.id.raw());
                             replace_yolo_error.set(None);
                             yolo_confirm_replace(
                                 claim,
@@ -2819,9 +2826,9 @@ pub(crate) fn SessionView(
                         let pending = replace_yolo.peek().clone();
                         replace_yolo.set(None);
                         if let Some(pending) = pending {
-                            yolo_questions.write().remove(&pending.source.id);
+                            yolo_questions.write().remove(pending.source.id.raw());
                             let owns_key = replace_key.peek().as_ref().is_some_and(|(source, key)| {
-                                source == &pending.source.id && key.as_ref() == Some(&pending.key)
+                                source == pending.source.id.raw() && key.as_ref() == Some(&pending.key)
                             });
                             if owns_key {
                                 replace_key.set(None);
@@ -4126,7 +4133,7 @@ mod tests {
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
-            id: "sess".to_string(),
+            id: "sess".into(),
             title: "sess".into(),
             cwd: "/tmp".into(),
             canonical_cwd: None,
@@ -4636,7 +4643,7 @@ mod tests {
                 screen_yolo: false,
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,
-                id: id.to_string(),
+                id: id.into(),
                 title: title.into(),
                 cwd: "/tmp".into(),
                 canonical_cwd: None,
@@ -4695,7 +4702,7 @@ mod tests {
                 screen_yolo: false,
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,
-                id: "sess".to_string(),
+                id: "sess".into(),
                 title: "sess".into(),
                 cwd: "/tmp".into(),
                 canonical_cwd: None,
@@ -4792,7 +4799,7 @@ mod tests {
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
-            id: "sess".to_string(),
+            id: "sess".into(),
             title: "sess".into(),
             cwd: "/tmp".into(),
             canonical_cwd: None,
@@ -4867,7 +4874,7 @@ mod tests {
                 screen_yolo: false,
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,
-                id: "sess".to_string(),
+                id: "sess".into(),
                 title: "t".into(),
                 cwd: "/tmp".into(),
                 canonical_cwd: None,
@@ -4943,7 +4950,7 @@ mod tests {
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
-            id: "sess".to_string(),
+            id: "sess".into(),
             title: "t".into(),
             cwd: "/tmp".into(),
             canonical_cwd: None,

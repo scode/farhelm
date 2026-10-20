@@ -51,6 +51,8 @@ impl StatusScope {
 }
 
 /// Exit details and other row data cannot raise attention; only status edges do.
+/// History keys retain raw session references so a presentation spelling cannot
+/// merge separate sessions or manufacture a status transition.
 fn status_words(listing: &SessionListing) -> BTreeMap<String, String> {
     listing
         .sessions
@@ -62,7 +64,7 @@ fn status_words(listing: &SessionListing) -> BTreeMap<String, String> {
                 SessionStatus::Idle => "idle",
                 _ => "other",
             };
-            (session.id.clone(), word.to_string())
+            (session.id.raw().to_owned(), word.to_string())
         })
         .collect()
 }

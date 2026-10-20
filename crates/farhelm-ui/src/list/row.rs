@@ -1011,7 +1011,9 @@ pub(super) fn SessionRow(
         unseen,
     );
     let card_badge = badge.clone();
-    let card_id = format!("session-summary-{}", session.id);
+    // This names the hidden summary source, not visible text. Its raw identity
+    // must match SessionSummarySource even for a presentation-unsafe suffix.
+    let card_id = format!("session-summary-{}", session.id.raw());
     let card_session = session.clone();
     let menu_state = badge
         .as_ref()
@@ -1068,24 +1070,26 @@ pub(super) fn SessionRow(
     // helm has already dropped the cleared ones.
     let has_bell = !session.notifications.is_empty();
     let bell_toggle_target = (
-        session.id.clone(),
+        session.id.raw().to_owned(),
         session.notifications_read_through,
         session.newest_notification_seq().unwrap_or(0),
     );
-    let bell_close_id = session.id.clone();
-    let bell_clear_id = session.id.clone();
-    let stop_id = session.id.clone();
+    // Event handlers and menu-focus selectors share the exact routing token.
+    // These owned strings are operation inputs, not presentation products.
+    let bell_close_id = session.id.raw().to_owned();
+    let bell_clear_id = session.id.raw().to_owned();
+    let stop_id = session.id.raw().to_owned();
     let delete_target = DeleteTarget::for_session(&session);
     let clone_target = session.clone();
     let replace_with_target = session.clone();
     let replace_target = session.clone();
-    let confirm_id = session.id.clone();
-    let cancel_id = session.id.clone();
+    let confirm_id = session.id.raw().to_owned();
+    let cancel_id = session.id.raw().to_owned();
     let confirm_replace_source = session.clone();
-    let cancel_replace_id = session.id.clone();
+    let cancel_replace_id = session.id.raw().to_owned();
     // The editor owns a local String seed so unchanged submission can preserve
     // the title even when its editable spelling contains visible escape markers.
-    let rename_start = (session.id.clone(), session.title.raw().to_owned());
+    let rename_start = (session.id.raw().to_owned(), session.title.raw().to_owned());
     // The toggle is offered on a LIVE row (running, waiting, idle — SPEC.md;
     // an ended session has no dot and no meaningful unseen state) whose helm
     // answered the seen-state question at all (`unseen.is_some()`); staleness
@@ -1114,7 +1118,7 @@ pub(super) fn SessionRow(
     // (`None`) when marking unread, or the row's current effective activity
     // (`Some`) when marking read — `api::mark_seen`'s own contract.
     let mark_seen_target = (
-        session.id.clone(),
+        session.id.raw().to_owned(),
         (unseen == Some(true)).then(|| session.effective_activity()),
     );
     // A second clone for the dot's own click closure below: the menu
@@ -1122,7 +1126,7 @@ pub(super) fn SessionRow(
     // in the same render, and each needs to own a copy of the target
     // rather than fight the other for the one original.
     let dot_mark_seen_target = mark_seen_target.clone();
-    let menu_id = session.id.clone();
+    let menu_id = session.id.raw().to_owned();
     // This render's item list is also the source of every focus position,
     // so the rendered and navigable menus cannot disagree.
     let menu_order = session_menu_order(controls);
@@ -1152,17 +1156,17 @@ pub(super) fn SessionRow(
     // through the same `on_menu_toggle` a click uses, and each closure
     // owns what it captures — the same reason the click handlers above
     // each hold their own clone.
-    let toggle_key_id = session.id.clone();
-    let rename_key_id = session.id.clone();
-    let mark_seen_key_id = session.id.clone();
-    let pin_key_id = session.id.clone();
-    let pin_target = (session.id.clone(), !session.pinned);
+    let toggle_key_id = session.id.raw().to_owned();
+    let rename_key_id = session.id.raw().to_owned();
+    let mark_seen_key_id = session.id.raw().to_owned();
+    let pin_key_id = session.id.raw().to_owned();
+    let pin_target = (session.id.raw().to_owned(), !session.pinned);
     let pin_label = pin_menu_label(session.pinned);
-    let clone_key_id = session.id.clone();
-    let replace_with_key_id = session.id.clone();
-    let replace_key_id = session.id.clone();
-    let stop_key_id = session.id.clone();
-    let delete_key_id = session.id.clone();
+    let clone_key_id = session.id.raw().to_owned();
+    let replace_with_key_id = session.id.raw().to_owned();
+    let replace_key_id = session.id.raw().to_owned();
+    let stop_key_id = session.id.raw().to_owned();
+    let delete_key_id = session.id.raw().to_owned();
     // The toggle's own `MountedData`, captured once via `onmounted` below,
     // and where the panel believes its own screen position currently is
     // (`PanelPlacement` — its own doc has the state machine) — both
@@ -1385,7 +1389,7 @@ pub(super) fn SessionRow(
     // `menu_panel::reconcile_menu_focus`'s own doc for why a length check
     // misses a withdrawal from the middle of the list. Removing MarkSeen
     // shifts the surviving actions even when focus stays within the new bounds.
-    let withdrawal_close_id = session.id.clone();
+    let withdrawal_close_id = session.id.raw().to_owned();
     use_effect(use_reactive(&offers_mark_seen, move |offers_mark_seen| {
         let order = session_menu_order(row_control_visibility(offers_mark_seen));
         let mut focused_position = *menu_focus.peek();
@@ -1452,7 +1456,7 @@ pub(super) fn SessionRow(
     //
     // The row's own id, owned by this effect: the teardown runs after the
     // render whose `session` prop it would otherwise have to borrow.
-    let dismiss_id = session.id.clone();
+    let dismiss_id = session.id.raw().to_owned();
     // Focus goes back to the toggle only when it was still INSIDE the
     // menu at the moment it closed (`menu_focus`, whose own doc explains
     // how `focusout` makes that distinction reliable): reclaiming it
@@ -1529,7 +1533,8 @@ pub(super) fn SessionRow(
     rsx! {
         div {
             class: row_class,
-            "data-session-id": "{session.id}",
+            // Browser selectors and menu focus use the raw routing identity.
+            "data-session-id": "{session.id.raw()}",
             "data-session-stale": "{session.stale}",
             "data-session-pinned": "{session.pinned}",
             "data-session-selected": "{selected}",
@@ -1810,7 +1815,7 @@ pub(super) fn SessionRow(
                 // doc. Only on rows whose session has notifications left.
                 if has_bell {
                     NotificationBell {
-                        session_id: session.id.clone(),
+                        session_id: session.id.raw().to_owned(),
                         title: session.title.clone(),
                         notifications: session.notifications.clone(),
                         unread: session.unread_notifications(),
@@ -2604,13 +2609,15 @@ fn pin_menu_label(pinned: bool) -> &'static str {
 /// One session as the row render tests below need it: real enough for
 /// `SessionRow` to render, stable so that reconstructing it every
 /// parent render compares equal and memoization is what is measured.
+/// The id is peer text in the reply mirror; fixtures preserve its input bytes
+/// so selector and callback tests exercise the same identity boundary.
 #[cfg(test)]
 pub(super) fn row_specimen(id: &str) -> Session {
     Session {
         screen_yolo: false,
         claude_trust_prompt: false,
         workspace_trust_prompt: false,
-        id: id.to_string(),
+        id: id.into(),
         title: "stable".into(),
         cwd: "/tmp".into(),
         canonical_cwd: None,

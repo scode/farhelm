@@ -37,9 +37,11 @@ pub(super) struct DeleteTarget {
 
 impl DeleteTarget {
     /// The fields `on_delete` decides from, taken from the row's session.
+    /// The local operation target keeps the exact raw reference for routing;
+    /// a visible spelling would address a different session.
     pub(super) fn for_session(session: &Session) -> Self {
         Self {
-            id: session.id.clone(),
+            id: session.id.raw().to_owned(),
             status: session.status.clone(),
             tabs: session.tabs.len(),
         }
@@ -896,7 +898,7 @@ pub(super) mod tests {
         let filled = with_source_host(row_specimen("new"), &source);
         assert_eq!(
             (
-                filled.id.as_str(),
+                filled.id.raw(),
                 filled.host,
                 filled.host_identity,
                 filled.host_name
