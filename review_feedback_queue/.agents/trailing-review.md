@@ -47,3 +47,12 @@ triage, fixes, or execution of triage outcomes.
 
 Report the exact range reviewed, any coverage gaps, the findings recorded or extended, and whether the checkpoint update
 is pending in a draft PR or has reached `main`.
+
+End the final response with the total number of new queue items and a summary grouped by priority bucket, in order:
+`highest`, `high`, `other`. Show each bucket's count, including zero, and give a short user-facing TLDR for every new
+item under its bucket. Count only newly recorded items; describe extensions to existing items separately before this
+summary. Preserve material uncertainty in each TLDR so a conditional lead does not read as a confirmed bug.
+
+Put the review-result draft PR's diff link immediately after the grouped summary, as the final element of the response.
+If no draft PR was created, end with that fact and the reason instead; do not imply that an interrupted review completed
+or create a PR when there were no new commits to review.

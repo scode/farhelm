@@ -24,3 +24,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`selection-history-plan-forgets-upgrade-selection.md`](selection-history-plan-forgets-upgrade-selection.md) — The
   visit-history plan's empty upgrade history conflicts with restoring the existing remembered session.
+
+- [`download-interruption-promise-omits-crash-exception.md`](download-interruption-promise-omits-crash-exception.md) —
+  The product's partial-download cleanup promise omits the newly accepted crash and force-quit exception.

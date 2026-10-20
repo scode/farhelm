@@ -1,10 +1,45 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `738598601c142e9e184ee7f0427e8995b2d89e0f`
+Last reviewed commit: `5c6e49937b1e779be2a5445059637aadf3757356`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
+
+## Review through 5c6e4993
+
+Reviewed range: `738598601c142e9e184ee7f0427e8995b2d89e0f..5c6e49937b1e779be2a5445059637aadf3757356`, nine commits. The
+tip and checkpoint came from fetched `origin/main`; the checkpoint was verified as an ancestor. A separate same-model
+adversarial reviewer read every individual patch, including deletions and intermediate changes:
+
+| Commit     | Content                                     |
+| ---------- | ------------------------------------------- |
+| `db4173ee` | Test-hygiene delivery report and plan state |
+| `2b185f71` | Launcher-retry landing state                |
+| `b38bb6f1` | Cleanup-on-quit implementation policy       |
+| `dced7ab4` | Revised download-cleanup decision and state |
+| `9dfd4674` | Menu-focus delivery report and plan state   |
+| `ab2d2e02` | Download-cleanup claim                      |
+| `18a544c1` | Previous trailing-review result             |
+| `ce701878` | Download-cleanup delivery report and state  |
+| `5c6e4993` | Session-selection delivery report and state |
+
+One likely `other` finding was retained: the product specification's unqualified promise of no partial download after
+interruption does not state the new implementation policy's explicit crash and force-quit exception. The record keeps
+the interpretation caveat and the accepted policy; it asks for synchronized wording, not broader cleanup. No existing
+finding was extended or removed. No proposed exclusion with possible security or user-work-loss consequences required an
+independent audit.
+
+All nine patches are accounted for, with no unread assigned patch content. Surrounding specification and coverage
+sources were inspected selectively. The revised download decision supersedes the old sweep outline. The selection report
+describes preserving the known upgrade selection, while its older plan finding remains queued until the draft fix lands.
+The implementation PRs described by these reports are outside this main-branch review range. Historical private runtime
+evidence and the previous review's provenance were not independently authenticated.
+
+This was a static review. No product runtime, browser, native Mac or vendor-agent tests were run, and no prior runtime
+results were reused as current passes. Validation covers changed Markdown formatting, whitespace, queue/index
+consistency and instruction pointers. No fixes or triage outcomes were executed. The review-result PR stays a draft for
+separate manual merging; this proposed checkpoint has not advanced on main.
 
 ## Review through 73859860
 
