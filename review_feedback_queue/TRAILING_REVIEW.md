@@ -1,10 +1,74 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `bf0935f02fc8fbfc26ab54e1b9fb8e7e6bf5c441`
+Last reviewed commit: `738598601c142e9e184ee7f0427e8995b2d89e0f`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
+
+## Review through 73859860
+
+Reviewed range: `bf0935f02fc8fbfc26ab54e1b9fb8e7e6bf5c441..738598601c142e9e184ee7f0427e8995b2d89e0f`, 94 commits. The
+tip and checkpoint came from fetched `origin/main`, and the checkpoint was verified as an ancestor. Fifteen separate
+same-model adversarial reviewers read every assigned individual patch, including deletions and intermediate changes.
+Large identity and planning patches were divided by path; their combined assignments cover the complete commits.
+
+| Ordered commits         | Count | Main content                                                      |
+| ----------------------- | ----: | ----------------------------------------------------------------- |
+| 1–19, except 4          |    18 | Planning, triage, reports and previous review records             |
+| 4 and 20                |     2 | Launch working directory and archive destination guard            |
+| 21–41, except 32        |    20 | Triage, plan creation, instruction changes and reports            |
+| 42–70                   |    29 | Plan claims and delivery reports                                  |
+| 71–72                   |     2 | Host-entry identity and viewer-state migration                    |
+| 73                      |     1 | Public session references, commands, UI, CLI and test adaptations |
+| 74                      |     1 | Entry-local session cache and retirement of global ID collisions  |
+| 32 and 75–94, except 78 |    20 | Summary, approval identities, menus, template labels and reports  |
+| 78                      |     1 | Helm ownership through runtime shutdown                           |
+
+All 94 commits are accounted for; no assigned patch content remains unread. Surrounding code and coverage sources were
+inspected selectively, not exhaustively across the repository. Historical private test evidence, published screenshots,
+original maintainer conversations and vendor behavior were not independently authenticated.
+
+Four new records were retained. One is provisionally `highest`: overlapping archive recovery with the same journaled
+destination can still change that destination after a late `AlreadyExists` response, leaving retained files outside the
+trash listing. The conditional mechanism is confirmed; no affected supported filesystem or loss of file bytes was
+established. The independent audit refuted the ordinary Linux v6.12 missing-source schedule but could not settle every
+supported macOS/filesystem path. The accepted value guard does not explicitly accept this residual harm, so the record
+preserves that uncertainty instead of declaring a reproduced product failure.
+
+Three records are `other`: host removal strands local tunnel listeners behind a now-unresolvable entry reference;
+session-menu focus return can immediately dismiss a newly opened notification list; and an unimplemented visit-history
+plan requires empty upgrade history while relying on that history to restore an existing remembered selection. Tunnel
+cleanup is confirmed by source inspection; notification event ordering is likely but unverified; the selection record is
+a plan inconsistency, not an existing runtime regression. Each record keeps its possible coverage and verification
+limits. No existing finding was extended or removed.
+
+Four fresh independent auditors checked all proposed exclusions with possible security or user-work consequences. They
+agreed to the narrow source refutations for entry-prefix spoofing, cross-entry routing, full-self protection,
+removed/re-added entries, launch directory enforcement, changed-destination journal guards and runtime ownership. They
+also agreed to exact recorded acceptance for same-entry adoption, identityless tunnel limitations, the queued-launch
+pre-redraw residual, current-name template resolution and labels becoming stale while a template list stays open.
+Observed-YOLO summaries and the reported approval-ID escape collisions are fixed in the inspected source; these are not
+blanket permission-detection or universal visual-distinguishability guarantees.
+
+The remaining exclusions preserve exact duplicates and instruction boundaries: introduction recovery wording, template
+deletion artwork and release-review links remain in existing records; future download sweeps and background checkout
+work have no implemented unsafe mechanism; planning port fallback and resource watchdogs do not authorize touching
+unowned processes or the live installation. The uninstall exclusions rely on the exact recorded decisions. An old
+installer receipt alone does not prove an intervening upgrade, so this review does not independently claim that every
+legacy-receipt scenario matches the upgrade filter. None of these conclusions accepts a broader security, bricking or
+user-work-loss consequence.
+
+A second fetch found main at `2b185f712c06361cd55212ad28d9fa89979b52f5`, with the same checkpoint and no queue changes.
+Its two intervening commits deliver a test-hygiene report and begin another plan's landing. Their complete changes were
+inspected for interaction with these records, which rebased cleanly onto that main. They are outside the reviewed range;
+this checkpoint advances only to the pinned tip.
+
+This was a static review. No product runtime, browser, native Mac or vendor-agent tests were run, and no prior runtime
+results were reused as current passes. The result changes only feedback records, their index and this checkpoint; no
+fixes or triage outcomes were executed. Validation covers Markdown formatting, whitespace, queue/index consistency,
+commit assignment and instruction pointers. The review-result PR stays a draft for separate manual merging; this
+proposed checkpoint has not advanced on main.
 
 ## Review through bf0935f0
 
