@@ -2837,6 +2837,44 @@ test("a progress read failure during an update recovers on retry demand alone", 
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
 });
 
+/** An already-expanded failure adds text without changing disclosure state.
+ * A menu below it must close rather than keep acting beside a different row. */
+test("expanded setup failure closes the menu below it", async ({ page, request }, testInfo) => {
+  // Keep both hosts in view: a scroll caused by growth would exercise the
+  // existing scroll-close path instead of the panel's resize observer.
+  await page.setViewportSize({ width: 1280, height: 1600 });
+  const first = destination(testInfo, "height-failure");
+  const second = destination(testInfo, "height-menu");
+  await configureBackend({ targets: { [target(first)]: { hold_actions: true } } });
+  const one = await startAdd(request, first);
+  const two = await startAdd(request, second);
+  await waitForProgress(request, two.host_id, "completed");
+  await page.goto("/");
+  await openHostsPanel(page);
+  const rowOne = page.locator(`[data-host-id="${one.host_id}"]`);
+  const rowTwo = page.locator(`[data-host-id="${two.host_id}"]`);
+  await expect(rowOne.locator(".provisioning-run")).toHaveAttribute("data-provisioning-status", "running");
+  await expect(rowOne.locator(".host-detail")).toBeVisible();
+  const panel = page.locator(".hosts-panel");
+  const sidebar = page.locator(".app-sidebar");
+  const scrollTop = await sidebar.evaluate((node) => node.scrollTop);
+  const height = await panel.evaluate((node) => node.getBoundingClientRect().height);
+  await openHostMenu(rowTwo);
+  await expect(rowTwo.locator(".host-row-menu-panel")).toBeVisible();
+  expect(await panel.evaluate((node) => node.getBoundingClientRect().height)).toBe(height);
+
+  await configureBackend({ targets: { [target(first)]: {
+    fail_action: "attach-supervisor",
+    message: "attachment failed after setup was already expanded",
+  } } });
+  await waitForProgress(request, one.host_id, "failed");
+  await expect(rowOne.locator(".provisioning-run-message")).toContainText("attachment failed");
+  await expect.poll(() => panel.evaluate((node) => node.getBoundingClientRect().height)).toBeGreaterThan(height);
+  expect(await sidebar.evaluate((node) => node.scrollTop)).toBe(scrollTop);
+  await expect(rowTwo.locator(".host-row-menu-panel")).toHaveCount(0);
+  await expect(rowTwo.locator(".host-row-menu")).toHaveAttribute("aria-expanded", "false");
+});
+
 test("two provisioning-busy rows reconcile independently", async ({
   page,
   request,

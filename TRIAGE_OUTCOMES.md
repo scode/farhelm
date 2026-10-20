@@ -16343,7 +16343,10 @@
 - Superseded 2026-10-19 (scheduling): the user replaced the time-based complexity gate above with a size gate of about
   150 lines of diff (code, tests and docs, not counting this ledger, the queue removal and the changelog fragment); over
   that, block and bring it back to the user.
-- Execution: planned in `plans/queue/hosts-panel-menu-close.md`.
+- Execution: complete in change `stlwlvypptzntrnutsutsvoqqttvokzq`, bookmark
+  `plan/hosts-panel-menu-close/01-close-on-panel-resize`, draft
+  [#2379](https://github.com/scode/farhelm/pull/2379/changes). The scheduling decision replaced the time-based gate with
+  a 150-line size gate; the code and test use 63 lines.
 
 ## template-list-can-launch-recreated-name.md
 

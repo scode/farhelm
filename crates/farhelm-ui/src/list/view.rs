@@ -1023,6 +1023,10 @@ pub(crate) fn ListView(
     use_context_provider(|| super::templates::TemplatesRevision(templates_revision));
     let provisioning_trace_shapes = use_signal(HashMap::<HostId, ProvisioningTraceShape>::new);
     let provisioning_auto_details = use_signal(HashSet::<HostId>::new);
+    // The panel can grow without changing its rows' logical shape: an
+    // expanded setup failure adds text in place. Observe its rendered size
+    // so fixed menus cannot remain beside a different row after that reflow.
+    let mut hosts_panel_layout_epoch = use_signal(|| 0_u64);
     // A shape signature for the always-mounted host list. A memo prevents
     // ordinary phase-only polls and progress-step churn from closing fixed
     // surfaces while still catching every rendered trace transition, every
@@ -1073,10 +1077,11 @@ pub(crate) fn ListView(
     //   instead. The permanent host selector does not create a floating
     //   surface or move a row, so it needs no participation here.
     //
-    // The three dependencies are deliberate: `layout_epoch` aggregates
+    // The dependencies are deliberate: `layout_epoch` aggregates
     // ancestor scroll and resize events, `show_create` covers the create
     // form, and `hosts_list_shape` covers host count/read-state, collapsed
     // provisioning-trace transitions, and automatic-disclosure transitions.
+    // `hosts_panel_layout_epoch` catches rendered host-row growth as well.
     // The initial run is a no-op because both row-menu signals start empty.
     //
     // NOT exhaustive. A session row above the open one changing height in
@@ -1091,23 +1096,17 @@ pub(crate) fn ListView(
     // - a detail line that is already shown wrapping onto more or fewer
     //   lines because its text changed (a new exit annotation, say);
     // - a listing that carries a row with a refusal line across the open
-    //   row, in either direction, while the open row keeps its index;
-    // - a host row's own optional lines (error, warning, update progress,
-    //   or its detail text while host details are shown) growing or
-    //   shrinking. Host rows sit above the session list, so this moves an
-    //   open session menu as well as an open host menu below that row.
+    //   row, in either direction, while the open row keeps its index.
     //
     // `commit_listing`'s reconciliation is SESSION-only. The hosts list has
     // no reorder guard, on the judgment that a small, largely id-ordered
     // registry reordering under an open host menu is rare enough to accept
-    // rather than duplicate that machinery for a second row kind; the host
-    // rows' optional lines above are left for the same reason, since
-    // covering them would need that comparison for rows with several
-    // independent optional lines rather than the session row's one.
+    // rather than duplicate that machinery for a second row kind.
     use_effect(move || {
         layout_epoch();
         show_create();
         hosts_list_shape();
+        hosts_panel_layout_epoch();
         if menu_open.peek().is_some() {
             menu_open.set(None);
         }
@@ -3892,6 +3891,7 @@ pub(crate) fn ListView(
             provisioning_auto_details,
             host_menu_open,
             session_menu_open: menu_open,
+            on_resize: move |_| hosts_panel_layout_epoch += 1,
             on_changed: refresh_hosts,
             on_appearance_committed: move |(id, icon, color)| {
                 // This successful write is newer than every GET already in
