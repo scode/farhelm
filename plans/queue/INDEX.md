@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `helm-lock-outlives-work.md` — Keep the helm's state-directory lock until every task on its runtime has finished, so a successor cannot claim the directory while old install work still writes the release cache (1 triage outcome).
 - [complete] `hosts-panel-menu-close.md` — Close open sidebar menus when the hosts panel changes height, so a failing expanded setup cannot leave a menu beside the wrong row (1 triage outcome).
 - [complete] `template-list-current-labels.md` — Reword the Cmd-J spec so a pick follows the name's current template, and refresh the list's shortcut labels when it opens (2 triage outcomes).
-- [pending] `launcher-retry-identity.md` — Make every launcher keep a retry's identity until it succeeds or the helm settles it, so retries neither replay a settled refusal nor start duplicate sessions (3 triage outcomes).
+- [in-flight 40ba65] `launcher-retry-identity.md` — Make every launcher keep a retry's identity until it succeeds or the helm settles it, so retries neither replay a settled refusal nor start duplicate sessions (3 triage outcomes).
 - [pending] `launcher-composer-drafts.md` — Keep what the user typed in the launcher and checkout-folder fields: custom flags, compatible effort, the inline checkout-folder draft, and an unedited folder name (4 triage outcomes).
 - [pending] `terminal-link-and-copy-fixes.md` — Fix six terminal link, hover and copy problems, from unescaped host errors to hovers on frozen snapshots (6 triage outcomes).
 - [pending] `transfer-leftover-cleanup.md` — Release a cancelled download's route and a cancelled upload's admission entry, if each fix is super cheap (2 triage outcomes).
