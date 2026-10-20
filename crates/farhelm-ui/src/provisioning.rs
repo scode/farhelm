@@ -3148,6 +3148,7 @@ pub(crate) fn ProvisioningPanel(
 
             if let Some(plan) = offer {
                 if plan.operation == ProvisioningOperation::Add {
+                    crate::modal_isolation::HostModal { key: "{plan.probe_id}",
                     div { class: "host-settings-backdrop", role: "presentation",
                         div {
                             class: "host-settings-dialog host-add-dialog host-dialog-framed",
@@ -3197,7 +3198,9 @@ pub(crate) fn ProvisioningPanel(
                             }
                         }
                     }
+                    }
                 } else if plan.operation == ProvisioningOperation::Uninstall {
+                    crate::modal_isolation::HostModal { key: "{plan.probe_id}",
                     // A removal the user has to read before agreeing to,
                     // so it gets the same modal treatment as setup, with
                     // the destructive confirm in the danger tier. Cancel
@@ -3233,6 +3236,7 @@ pub(crate) fn ProvisioningPanel(
                                 },
                             }
                         }
+                    }
                     }
                 } else {
                     PlanConfirmation {

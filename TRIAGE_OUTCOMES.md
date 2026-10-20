@@ -16858,7 +16858,10 @@
   time, by guards or stack-aware isolation, the executor's choice); a browser test. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or the changelog fragment); over it, discard.
   Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/app-dialog-focus.md`.
+- Execution: complete in change `kykxmmknloqoolwxooltlqopxyrssoqk`, bookmark
+  `plan/app-dialog-focus/03-deferred-host-dialogs`; [PR #2408](https://github.com/scode/farhelm/pull/2408/changes). Host
+  confirmations and refusals wait for the current modal owner, with atomic admission between hosts; 100 counted lines,
+  within the gate.
 
 ## replace-yolo-questions-remain-separate.md
 
