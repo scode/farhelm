@@ -2460,7 +2460,10 @@ labelled data, never in a way that could pass for Farhelm's own wording. Link ca
 data. The card offers Allow, Always allow from the requesting host, and Deny (Open and Dismiss for a preapproved web
 link). Always allow turns that host's setting on and then approves the request; if turning the setting on fails, nothing
 is approved and the card stays up with the reason. It approves only the request it was answered on: other cards already
-waiting from that host stay until they are answered.
+waiting from that host stay until they are answered. Asking, target and clone-source session IDs occupy full-width
+identity rows: the complete entry-prefixed ID is shown with spaces, formatting characters and literal escape notation
+spelled distinctly. Each row offers Copy for the complete raw ID, including characters shown as escapes. Answering the
+card still uses its approval ID.
 
 If no Farhelm window is open to show the card (no GUI is connected to the helm), a request that needs approval is
 refused at once, with a message saying there is no Farhelm window to ask in and to open Farhelm and retry. Otherwise it
