@@ -70,13 +70,15 @@
    * `trackingAtPress` and `forced` describe the press, not the release:
    * a program can change mouse tracking during the gesture. An unforced
    * press under tracking cannot select locally, even if old text remains.
+   * Only a primary-button press starts local selection; another button can
+   * leave old text visible and must not turn it into a new copy request.
    *
-   * @param {{hasSelection: boolean, selectionText: string, trackingAtPress: boolean, forced: boolean}} state
+   * @param {{button: number, hasSelection: boolean, selectionText: string, trackingAtPress: boolean, forced: boolean}} state
    * @returns {boolean} true to write `selectionText` to the clipboard now
    */
   function copySelectionOnMouseUp(state) {
     return !!(
-      state && (!state.trackingAtPress || state.forced) && state.hasSelection && state.selectionText
+      state && state.button === 0 && (!state.trackingAtPress || state.forced) && state.hasSelection && state.selectionText
     );
   }
 
