@@ -25,9 +25,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`template-table-omits-custom-permission-flags.md`](template-table-omits-custom-permission-flags.md) — The default
   template table omits the words that its custom permission setting applies.
 
-- [`stale-template-dialog-undoes-agent-shortcut.md`](stale-template-dialog-undoes-agent-shortcut.md) — An open Templates
-  dialog can overwrite an approved agent shortcut move with its old bindings.
-
 - [`shortcut-tests-skip-owned-cleanup.md`](shortcut-tests-skip-owned-cleanup.md) — Early cleanup failures in shortcut
   and naming tests skip remaining owned resources or shared checkout configuration restoration.
 

@@ -16997,7 +16997,10 @@
   gains the principle above. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or the changelog fragment); over it, block and bring it back. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/template-editor-and-listing.md`.
+- Execution: complete in change `nrovylroxrqsmtunsrmklxzmkmylnupl`, bookmark
+  `plan/template-editor-and-listing/02-fresh-shortcuts`. Shortcut edits read current bindings with the existing
+  local-write overlay; the spec states the GUI/agent write principle. Size: 100 code/test/spec lines, within the gate.
+  PR: https://github.com/scode/farhelm/pull/2431/changes.
 
 ## checkout-config-refresh-erases-setup-draft.md
 
