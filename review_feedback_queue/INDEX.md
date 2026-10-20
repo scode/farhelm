@@ -16,9 +16,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`notification-test-cleanup-skips-preference-restoration.md`](notification-test-cleanup-skips-preference-restoration.md)
-  — A failed notification fixture cleanup can skip later session releases and shared preference restoration.
-
 - [`shortcut-tests-skip-owned-cleanup.md`](shortcut-tests-skip-owned-cleanup.md) — Early cleanup failures in shortcut
   and naming tests skip remaining owned resources or shared checkout configuration restoration.
 

@@ -17190,7 +17190,11 @@
 - Completion criteria: the cleanup steps run independently (reusing `cleanupOwnedSteps`), so a failure in one does not
   skip the others. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal
   or the changelog fragment); over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/test-hygiene-oct19.md`.
+- Execution: implemented in change `rptrmpnvsrqqurmkmquzmlkwkspyvwtv`, bookmark
+  `plan/test-hygiene-oct19/02-independent-notification-cleanup`. Route removal, each owned session and preference
+  restoration are independent steps; controlled failures exercise the actual hook's orchestration and preserve a pending
+  body exception. The code, tests and documentation total 67 lines, within the 100-line gate.
+  [PR #2432](https://github.com/scode/farhelm/pull/2432/changes).
 
 ## shortcut-tests-skip-owned-cleanup.md
 
