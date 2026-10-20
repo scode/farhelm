@@ -158,6 +158,10 @@ pub(crate) struct ConnectionCtx<'a> {
     /// Routes and retained reservations share one allocation policy.
     pub(crate) channels: &'a mut ConnectionChannels,
     pub(crate) tasks: &'a mut tokio::task::JoinSet<()>,
+    /// Only newly detached work whose old inline panic unwound this reader
+    /// uses this handoff. Its waiter preserves that panic policy rather than
+    /// inventing a protocol Error or letting the common task reaper hide it.
+    pub(crate) panics: &'a mpsc::Sender<Box<dyn std::any::Any + Send + 'static>>,
 }
 
 /// Serve one admitted protocol connection.
@@ -319,6 +323,11 @@ where
     // on or clean up after.
     let mut tasks: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
 
+    // One payload is enough: the reader can resume only its first pending
+    // unwind. Keep the sender here so an empty channel never becomes a new
+    // shutdown event when no owned request currently has a waiter.
+    let (panics, mut pending_panic) = mpsc::channel(1);
+
     let result: anyhow::Result<()> = async {
         loop {
             // Reap whatever spawned handler tasks have already finished
@@ -332,6 +341,11 @@ where
             // writing after it has stopped reading our replies.
             let frame = tokio::select! {
                 frame = reader.read_frame() => frame?,
+                payload = pending_panic.recv() => {
+                    std::panic::resume_unwind(payload.expect(
+                        "the connection retains its own panic sender",
+                    ));
+                }
                 error = &mut writer_failed_rx => {
                     let detail = error.unwrap_or_else(|_| "writer task exited".to_string());
                     return Err(anyhow::anyhow!("frame write to client failed: {detail}"));
@@ -648,6 +662,7 @@ where
                                     priority: &priority_tx,
                                     channels: &mut channels,
                                     tasks: &mut tasks,
+                                    panics: &panics,
                                 };
                                 handle_control(&sup, msg, ctx).await
                             }
@@ -2881,6 +2896,7 @@ mod tests {
                 &sup,
                 ControlMsg::ListSessions { req_id },
                 ConnectionCtx {
+                    panics: &mpsc::channel(1).0,
                     tx: &tx,
                     priority: &tx,
                     channels: &mut channels,

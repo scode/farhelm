@@ -6320,6 +6320,7 @@ mod tests {
                 &sup,
                 ControlMsg::ListSessions { req_id: 1 },
                 ConnectionCtx {
+                    panics: &mpsc::channel(1).0,
                     tx: &tx,
                     priority: &tx,
                     channels: &mut channels,

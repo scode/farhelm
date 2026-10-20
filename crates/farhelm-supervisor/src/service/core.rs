@@ -16192,6 +16192,16 @@ pub(crate) mod tests {
     use farhelm_proto::{ControlMsg, Frame, LaunchHarness};
     use tokio::sync::mpsc;
 
+    /// Wire creates now leave dispatch before their owned task replies.
+    /// Preserve the existing state/replay assertions while bounding a missing
+    /// reply, instead of racing task scheduling with an immediate queue probe.
+    async fn received_create_frame(replies: &mut mpsc::Receiver<Frame>) -> Frame {
+        tokio::time::timeout(Duration::from_secs(10), replies.recv())
+            .await
+            .expect("owned create reply must arrive")
+            .expect("owned create retains the reply sender")
+    }
+
     /// The accept loop must distinguish retryable peer races from failures
     /// that can persist while the kernel keeps readiness asserted, including
     /// the raw descriptor-exhaustion error used by the operating system.
@@ -25546,6 +25556,7 @@ exit 0
                 session_id: "s1".to_string(),
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -25667,6 +25678,7 @@ exit 0
                 session_id: "s1".into(),
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -26430,6 +26442,7 @@ exit 0
                 request_fingerprint: None,
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -26438,7 +26451,7 @@ exit 0
         )
         .await;
 
-        let reply = rx.try_recv().expect("a reply must have been sent");
+        let reply = received_create_frame(&mut rx).await;
         let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
         assert!(
             matches!(decoded, ControlMsg::Error { .. }),
@@ -27629,8 +27642,8 @@ exit 0
             key_lives_with_session: false,
             request_fingerprint: None,
         };
-        let reply = |rx: &mut mpsc::Receiver<Frame>| {
-            let frame = rx.try_recv().expect("a reply must have been sent");
+        let reply = async |rx: &mut mpsc::Receiver<Frame>| {
+            let frame = received_create_frame(rx).await;
             serde_json::from_slice::<ControlMsg>(&frame.body).expect("decode")
         };
 
@@ -27643,6 +27656,7 @@ exit 0
             &sup,
             request(1, false),
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -27655,7 +27669,7 @@ exit 0
             kind: first_kind,
             create_unaccepted: true,
             ..
-        } = reply(&mut rx)
+        } = reply(&mut rx).await
         else {
             panic!("the create must fail while launch/ is unwritable");
         };
@@ -27689,6 +27703,7 @@ exit 0
             &sup,
             request(2, false),
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -27701,7 +27716,7 @@ exit 0
             kind,
             create_unaccepted: true,
             ..
-        } = reply(&mut rx)
+        } = reply(&mut rx).await
         else {
             panic!("a replayed failure must still be an error");
         };
@@ -27719,6 +27734,7 @@ exit 0
             &sup,
             request(3, true),
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -27731,7 +27747,7 @@ exit 0
             kind,
             create_unaccepted: false,
             ..
-        } = reply(&mut rx)
+        } = reply(&mut rx).await
         else {
             panic!("a key reused for a different request must be refused");
         };
@@ -27912,6 +27928,7 @@ exit 0
                 &sup,
                 msg,
                 ConnectionCtx {
+                    panics: &mpsc::channel(1).0,
                     tx: &tx,
                     priority: &tx,
                     channels: &mut channels,
@@ -27919,7 +27936,7 @@ exit 0
                 },
             )
             .await;
-            let frame = rx.try_recv().expect("a reply must have been sent");
+            let frame = received_create_frame(&mut rx).await;
             serde_json::from_slice::<ControlMsg>(&frame.body).expect("decode")
         };
 
@@ -28592,6 +28609,7 @@ exit 0
                     request_fingerprint: None,
                 },
                 ConnectionCtx {
+                    panics: &mpsc::channel(1).0,
                     tx: &tx,
                     priority: &tx,
                     channels: &mut channels,
@@ -28599,7 +28617,7 @@ exit 0
                 },
             )
             .await;
-            let frame = rx.try_recv().expect("a reply must have been sent");
+            let frame = received_create_frame(&mut rx).await;
             let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
             let ControlMsg::Error { kind, message, .. } = decoded else {
                 panic!("a title with a control character must be refused: {decoded:?} ({title:?})");
@@ -28644,6 +28662,7 @@ exit 0
                 request_fingerprint: None,
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -28651,7 +28670,7 @@ exit 0
             },
         )
         .await;
-        let frame = rx.try_recv().expect("a reply must have been sent");
+        let frame = received_create_frame(&mut rx).await;
         let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
         assert!(
             matches!(decoded, ControlMsg::SessionCreated { .. }),
@@ -28707,6 +28726,7 @@ exit 0
                 request_fingerprint: None,
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -28714,7 +28734,7 @@ exit 0
             },
         )
         .await;
-        let frame = rx.try_recv().expect("a reply must have been sent");
+        let frame = received_create_frame(&mut rx).await;
         let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
         let ControlMsg::SessionCreated { session, .. } = decoded else {
             panic!("a legal directory must remain usable as a cwd: {decoded:?}");
@@ -28785,8 +28805,8 @@ exit 0
             key_lives_with_session: false,
             request_fingerprint: None,
         };
-        let reply = |rx: &mut mpsc::Receiver<Frame>| {
-            let frame = rx.try_recv().expect("a reply must have been sent");
+        let reply = async |rx: &mut mpsc::Receiver<Frame>| {
+            let frame = received_create_frame(rx).await;
             serde_json::from_slice::<ControlMsg>(&frame.body).expect("decode")
         };
 
@@ -28794,6 +28814,7 @@ exit 0
             &sup,
             request(1, "bad \u{1b} title"),
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -28805,7 +28826,7 @@ exit 0
             message: first_message,
             kind: first_kind,
             ..
-        } = reply(&mut rx)
+        } = reply(&mut rx).await
         else {
             panic!("a control character in an explicit title must be refused");
         };
@@ -28821,6 +28842,7 @@ exit 0
             &sup,
             request(2, "bad \u{1b} title"),
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -28828,7 +28850,7 @@ exit 0
             },
         )
         .await;
-        let ControlMsg::Error { message, kind, .. } = reply(&mut rx) else {
+        let ControlMsg::Error { message, kind, .. } = reply(&mut rx).await else {
             panic!("a replayed failure must still be an error");
         };
         assert_eq!(message, first_message, "the replay must be the same answer");
@@ -28840,6 +28862,7 @@ exit 0
             &sup,
             request(3, "good title"),
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -28847,7 +28870,7 @@ exit 0
             },
         )
         .await;
-        let ControlMsg::Error { message, kind, .. } = reply(&mut rx) else {
+        let ControlMsg::Error { message, kind, .. } = reply(&mut rx).await else {
             panic!("a key reused for a different request must be refused");
         };
         assert_eq!(
@@ -34350,6 +34373,7 @@ exit 0
                     session_id: row.id.clone(),
                 },
                 ConnectionCtx {
+                    panics: &mpsc::channel(1).0,
                     tx: &tx,
                     priority: &tx,
                     channels: &mut channels,

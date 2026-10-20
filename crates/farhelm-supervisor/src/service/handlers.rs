@@ -290,9 +290,16 @@ fn is_request_digest(digest: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+/// Admit a shaped create, then let the supervisor own every shared wait and
+/// durable step. Shape refusals remain inline and precede a busy refusal;
+/// intent and directory admission still precede the combined field cap.
+/// Keeping the permit and the existing reply tail on the owned task means
+/// disconnect cleanup can abandon its waiter without interrupting a launch.
 async fn handle_create_session(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,
+    tasks: &mut tokio::task::JoinSet<()>,
+    panics: &mpsc::Sender<Box<dyn std::any::Any + Send + 'static>>,
     req_id: u64,
     request: CreateRequest,
     admission: CreateAdmission,
@@ -376,137 +383,165 @@ async fn handle_create_session(
         reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
         return;
     }
-    let guards = match sup.admit_create(intent_key.as_deref()).await {
-        Ok(guards) => guards,
-        Err(error) => {
-            reply_failure(tx, req_id, &error).await;
+    let Some(permit) = admit_or_refuse(&sup.admission, tx, req_id).await else {
+        return;
+    };
+    let owned_sup = Arc::clone(sup);
+    let owned_tx = tx.clone();
+    let mutation = tokio::spawn(async move {
+        let _permit = permit;
+        let sup = &owned_sup;
+        let tx = &owned_tx;
+        let guards = match sup.admit_create(intent_key.as_deref()).await {
+            Ok(guards) => guards,
+            Err(error) => {
+                reply_failure(tx, req_id, &error).await;
+                return;
+            }
+        };
+        // Every refusal from here on releases `guards` before replying:
+        // `send_reply` may wait on a full writer queue, and the guards include
+        // the host-wide create mutex. A client that stops reading must not freeze
+        // every other create.
+        // One accounting for every caller-supplied field the supervisor can
+        // copy into a durable fingerprint. Interactive rows are permanent, so
+        // omitting parent or any part of the launch would leave an
+        // unbounded write path through a cap the other fields cannot dodge.
+        // SPEC.md's 64 KiB create bound counts the whole launch (command,
+        // resume command, and the rest), as the JSON it is stored and
+        // fingerprinted as. The resume command's element count is bounded
+        // separately: ten thousand EMPTY elements cost almost no bytes and are
+        // still nothing a resume command could legitimately be.
+        let mode_bytes = mode.field_bytes();
+        let template_elements = mode
+            .resume_argv()
+            .ok()
+            .flatten()
+            .map_or(0, |resume| resume.len());
+        let field_len = parent.as_deref().map_or(0, str::len)
+            + cwd.len()
+            + mode_bytes
+            + named_start.as_ref().map_or(0, |named| {
+                serde_json::to_vec(named)
+                    .expect("named start serializes")
+                    .len()
+            })
+            + prompt.as_deref().map_or(0, str::len)
+            + checkout_bytes
+            + title.as_deref().map_or(0, str::len);
+        let refusal = if field_len > CREATE_FIELD_CAP {
+            Some(format!(
+                "parent, cwd, launch, title, initial prompt, and checkout fields together are {field_len} bytes, \
+                 exceeding the {CREATE_FIELD_CAP}-byte limit"
+            ))
+        } else if template_elements > RESUME_TEMPLATE_ELEMENT_CAP {
+            // Bounded separately from the byte total because the two
+            // are independent: a template of ten thousand EMPTY
+            // elements costs almost no bytes and is still nothing a
+            // resume invocation could legitimately be.
+            Some(format!(
+                "resume command has {template_elements} elements, exceeding the \
+                 {RESUME_TEMPLATE_ELEMENT_CAP}-element limit"
+            ))
+        } else {
+            None
+        };
+        if let Some(message) = refusal {
+            drop(guards);
+            reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
             return;
         }
-    };
-    // Every refusal from here on releases `guards` before replying:
-    // `send_reply` may wait on a full writer queue, and the guards include
-    // the host-wide create mutex. A client that stops reading must not freeze
-    // every other create.
-    // One accounting for every caller-supplied field the supervisor can
-    // copy into a durable fingerprint. Interactive rows are permanent, so
-    // omitting parent or any part of the launch would leave an
-    // unbounded write path through a cap the other fields cannot dodge.
-    // SPEC.md's 64 KiB create bound counts the whole launch (command,
-    // resume command, and the rest), as the JSON it is stored and
-    // fingerprinted as. The resume command's element count is bounded
-    // separately: ten thousand EMPTY elements cost almost no bytes and are
-    // still nothing a resume command could legitimately be.
-    let mode_bytes = mode.field_bytes();
-    let template_elements = mode
-        .resume_argv()
-        .ok()
-        .flatten()
-        .map_or(0, |resume| resume.len());
-    let field_len = parent.as_deref().map_or(0, str::len)
-        + cwd.len()
-        + mode_bytes
-        + named_start.as_ref().map_or(0, |named| {
-            serde_json::to_vec(named)
-                .expect("named start serializes")
-                .len()
-        })
-        + prompt.as_deref().map_or(0, str::len)
-        + checkout_bytes
-        + title.as_deref().map_or(0, str::len);
-    let refusal = if field_len > CREATE_FIELD_CAP {
-        Some(format!(
-            "parent, cwd, launch, title, initial prompt, and checkout fields together are {field_len} bytes, \
-             exceeding the {CREATE_FIELD_CAP}-byte limit"
-        ))
-    } else if template_elements > RESUME_TEMPLATE_ELEMENT_CAP {
-        // Bounded separately from the byte total because the two
-        // are independent: a template of ten thousand EMPTY
-        // elements costs almost no bytes and is still nothing a
-        // resume invocation could legitimately be.
-        Some(format!(
-            "resume command has {template_elements} elements, exceeding the \
-             {RESUME_TEMPLATE_ELEMENT_CAP}-element limit"
-        ))
-    } else {
-        None
-    };
-    if let Some(message) = refusal {
-        drop(guards);
-        reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
-        return;
-    }
-    // The fingerprint binds the resolved bundle, so a retry that would
-    // launch something different changes the fingerprint instead of
-    // replaying a launch shaped by stale data. A fresh-checkout create binds
-    // the helm's resolved checkout intent beside it (R1.4's versioned
-    // discriminant, now `github_checkout_v4`). An agent's create binds the
-    // request the agent sent instead (`agent_request_fingerprint`), so a
-    // retry of that request replays even when what it names was edited.
-    let idempotency = intent_key.map(|intent_key| IntentClaim {
-        intent_key,
-        fingerprint: match request_fingerprint.as_deref() {
-            Some(digest) => super::core::agent_create_fingerprint(digest, prompt.as_deref()),
-            None if named_start.is_some() => super::core::named_create_fingerprint(
-                parent.as_deref(),
-                &cwd,
-                &mode,
-                title.as_deref(),
-                named_start.as_ref().expect("named branch"),
-                prompt.as_deref(),
-            ),
-            None => create_fingerprint(
-                github_checkout.as_ref(),
-                parent.as_deref(),
-                &cwd,
-                &mode,
-                title.as_deref(),
-                prompt.as_deref(),
-            ),
-        },
-        dedup_scope: admission.dedup_scope(),
-    });
-    let refusal_claim = idempotency.clone();
-    match sup
-        .create_session_admitted(
-            CreateInputs {
-                prompt,
-                named_start,
-                cwd: &cwd,
-                parent,
-                github_checkout,
-                launch: mode,
-                title,
-                cols,
-                rows,
+        // The fingerprint binds the resolved bundle, so a retry that would
+        // launch something different changes the fingerprint instead of
+        // replaying a launch shaped by stale data. A fresh-checkout create binds
+        // the helm's resolved checkout intent beside it (R1.4's versioned
+        // discriminant, now `github_checkout_v4`). An agent's create binds the
+        // request the agent sent instead (`agent_request_fingerprint`), so a
+        // retry of that request replays even when what it names was edited.
+        let idempotency = intent_key.map(|intent_key| IntentClaim {
+            intent_key,
+            fingerprint: match request_fingerprint.as_deref() {
+                Some(digest) => super::core::agent_create_fingerprint(digest, prompt.as_deref()),
+                None if named_start.is_some() => super::core::named_create_fingerprint(
+                    parent.as_deref(),
+                    &cwd,
+                    &mode,
+                    title.as_deref(),
+                    named_start.as_ref().expect("named branch"),
+                    prompt.as_deref(),
+                ),
+                None => create_fingerprint(
+                    github_checkout.as_ref(),
+                    parent.as_deref(),
+                    &cwd,
+                    &mode,
+                    title.as_deref(),
+                    prompt.as_deref(),
+                ),
             },
-            idempotency,
-            guards,
-        )
-        .await
-    {
-        Ok(session) => {
-            send_reply(tx, &ControlMsg::SessionCreated { req_id, session }).await;
-        }
-        Err(e) => {
-            // Missing proof remains an ordinary error. A failed lookup must
-            // not turn an ambiguous create into permission to mint another key.
-            let create_unaccepted = match refusal_claim {
-                Some(claim) => sup
-                    .ordinary_create_was_refused(&claim)
-                    .await
-                    .unwrap_or(false),
-                None => false,
-            };
-            send_reply(
-                tx,
-                &ControlMsg::Error {
-                    req_id,
-                    kind: error_kind(&e),
-                    message: format!("{e:#}"),
-                    create_unaccepted,
+            dedup_scope: admission.dedup_scope(),
+        });
+        let refusal_claim = idempotency.clone();
+        match sup
+            .create_session_admitted(
+                CreateInputs {
+                    prompt,
+                    named_start,
+                    cwd: &cwd,
+                    parent,
+                    github_checkout,
+                    launch: mode,
+                    title,
+                    cols,
+                    rows,
                 },
+                idempotency,
+                guards,
             )
-            .await;
+            .await
+        {
+            Ok(session) => {
+                send_reply(tx, &ControlMsg::SessionCreated { req_id, session }).await;
+            }
+            Err(e) => {
+                // Missing proof remains an ordinary error. A failed lookup must
+                // not turn an ambiguous create into permission to mint another key.
+                let create_unaccepted = match refusal_claim {
+                    Some(claim) => sup
+                        .ordinary_create_was_refused(&claim)
+                        .await
+                        .unwrap_or(false),
+                    None => false,
+                };
+                send_reply(
+                    tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        kind: error_kind(&e),
+                        message: format!("{e:#}"),
+                        create_unaccepted,
+                    },
+                )
+                .await;
+            }
+        }
+    });
+    tasks.spawn(forward_owned_request_panic(mutation, panics.clone()));
+}
+
+/// Preserve an inline request's original panic on its connection reader.
+/// Normal results and replies belong to the owned work. A full handoff already
+/// holds the panic that will end the reader; a closed one has no reader left.
+/// Neither case warrants awaiting capacity or fabricating a second outcome.
+async fn forward_owned_request_panic(
+    mutation: tokio::task::JoinHandle<()>,
+    panics: mpsc::Sender<Box<dyn std::any::Any + Send + 'static>>,
+) {
+    if let Err(join) = mutation.await {
+        if join.is_panic() {
+            let _ = panics.try_send(join.into_panic());
+        } else {
+            warn!(error = %join, "supervisor-owned request task was cancelled");
         }
     }
 }
@@ -2556,6 +2591,8 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             handle_create_session(
                 sup,
                 ctx.tx,
+                ctx.tasks,
+                ctx.panics,
                 req_id,
                 request,
                 CreateAdmission::Interactive {
@@ -4280,6 +4317,7 @@ mod tests {
                     request_fingerprint: None,
                 },
                 ConnectionCtx {
+                    panics: &mpsc::channel(1).0,
                     tx: &tx,
                     priority: &tx,
                     channels: &mut channels,
@@ -4404,6 +4442,7 @@ mod tests {
                 session_id: session_id.to_string(),
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -4492,6 +4531,7 @@ mod tests {
                 session_id: session_id.to_string(),
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -4645,6 +4685,7 @@ mod tests {
                 expected_launch: None,
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -4709,6 +4750,7 @@ mod tests {
             sup,
             message,
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -4717,6 +4759,493 @@ mod tests {
         )
         .await;
         (tasks, rx)
+    }
+
+    /// Bound observations of queued create/recovery work without timing its
+    /// success path. A held real admission guard, not this deadline, proves
+    /// why the request has not completed.
+    const CREATE_REQUEST_WAIT: Duration = Duration::from_secs(20);
+
+    /// Post-admission create replies now arrive from owned work. Keeping this
+    /// observation bounded distinguishes a missing reply from a hung test,
+    /// while cheap validation tests can still assert their immediate reply.
+    async fn recv_create_reply(replies: &mut mpsc::Receiver<Frame>) -> Frame {
+        tokio::time::timeout(CREATE_REQUEST_WAIT, replies.recv())
+            .await
+            .expect("the admitted create must reply")
+            .expect("the owned create retains its reply sender")
+    }
+
+    /// A real multiplexed reader without terminal fixtures. These tests park
+    /// create admission and use a following policy acknowledgment as the
+    /// positive oracle that the same reader remains available.
+    struct CreatePeer {
+        reader: FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        writer: FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
+        server: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
+    }
+
+    impl CreatePeer {
+        /// Retain the server task so failures cannot leave a detached fixture
+        /// connection using the state directory after its test has unwound.
+        async fn new(sup: &Arc<Supervisor>) -> Self {
+            let (client, server) = tokio::io::duplex(1 << 20);
+            let sup = Arc::clone(sup);
+            let server = tokio::spawn(async move {
+                super::super::connection::handle_connection(sup, server).await
+            });
+            let (read, write) = tokio::io::split(client);
+            let mut peer = Self {
+                reader: FrameReader::new(read),
+                writer: FrameWriter::new(write),
+                server: Some(server),
+            };
+            let handshake = tokio::time::timeout(
+                CREATE_REQUEST_WAIT,
+                farhelm_proto::io::handshake(&mut peer.reader, &mut peer.writer, "helm"),
+            )
+            .await;
+            if !matches!(handshake, Ok(Ok(_))) {
+                // Construction can fail before the caller owns this peer.
+                // Settle its reader here so outer StateDir cleanup cannot
+                // race a merely requested cancellation during unwinding.
+                let server = peer.server.take().expect("constructor owns its reader");
+                server.abort();
+                let _ = server.await;
+                panic!("create fixture handshake failed: {handshake:?}");
+            }
+            peer
+        }
+
+        /// Establish that this connection is still alive before relying on a
+        /// write to it; a buffered duplex write alone would not establish that.
+        async fn send(&mut self, message: &ControlMsg) {
+            assert!(self.server.as_ref().is_some_and(|task| !task.is_finished()));
+            tokio::time::timeout(CREATE_REQUEST_WAIT, self.writer.write_control(message))
+                .await
+                .expect("write to the live create fixture must finish")
+                .expect("write create fixture frame");
+        }
+
+        /// Only hints may precede the selected reply: no terminal channels
+        /// exist, and the create under observation must still be behind its
+        /// held gate. An unexpected create reply therefore fails the premise.
+        async fn reply(&mut self, req_id: u64) -> ControlMsg {
+            tokio::time::timeout(CREATE_REQUEST_WAIT, async {
+                for _ in 0..16 {
+                    let frame = self
+                        .reader
+                        .read_frame()
+                        .await
+                        .unwrap()
+                        .expect("live reply stream");
+                    let reply = parse_control(&frame).expect("control reply");
+                    if matches!(reply, ControlMsg::SessionsChanged) {
+                        continue;
+                    }
+                    assert_eq!(
+                        reply.reply_req_id(),
+                        Some(req_id),
+                        "unexpected reply: {reply:?}"
+                    );
+                    return reply;
+                }
+                panic!("create fixture received too many hints without its reply");
+            })
+            .await
+            .expect("the following frame must pass the held create gate")
+        }
+
+        /// Finish this fixture before its owner drops the state directory.
+        /// The tests drain their replies first, so no bulk output needs a
+        /// separate drain task here. Abort is always followed by a join.
+        async fn finish(&mut self) {
+            let Some(mut server) = self.server.take() else {
+                return;
+            };
+            if let Err(error) = self.writer.shutdown().await {
+                server.abort();
+                let _ = server.await;
+                panic!("closing create fixture input failed: {error}");
+            }
+            let joined = tokio::time::timeout(CREATE_REQUEST_WAIT, &mut server).await;
+            if joined.is_err() {
+                server.abort();
+                let _ = server.await;
+                panic!("create fixture connection did not finish after its gates were released");
+            }
+            joined
+                .unwrap()
+                .expect("create fixture task must not panic")
+                .expect("clean EOF");
+        }
+    }
+
+    impl Drop for CreatePeer {
+        fn drop(&mut self) {
+            // Normal paths join in finish. On assertion unwind, cancelling
+            // the reader at least prevents another fixture frame from acting.
+            if let Some(server) = &self.server {
+                server.abort();
+            }
+        }
+    }
+
+    /// Supply a valid ordinary keyed create; an oversized title exercises
+    /// the combined cap that deliberately runs only after create admission.
+    fn queued_create(cwd: &std::path::Path, key: &str, oversized: bool) -> ControlMsg {
+        ControlMsg::CreateSession {
+            prompt: None,
+            named_start: None,
+            req_id: 41,
+            parent: None,
+            cwd: cwd.to_str().expect("fixture cwd is UTF-8").into(),
+            launch: Some(SessionLaunch::plain_command("agent")),
+            inherit_agent: false,
+            title: oversized.then(|| "x".repeat(CREATE_FIELD_CAP + 1)),
+            cols: 80,
+            rows: 24,
+            intent_key: Some(key.into()),
+            confirm_yolo: false,
+            github_checkout: None,
+            key_lives_with_session: false,
+            request_fingerprint: None,
+        }
+    }
+
+    /// With free management admission, real Pending intent and directory
+    /// acquisitions must leave the same reader able to acknowledge its next
+    /// frame. Releasing the gate then exposes the original post-guard cap
+    /// refusal, proving it was neither moved ahead nor bypassed by busy refusal.
+    #[farhelm_testtrace::test]
+    async fn queued_creates_leave_the_reader_available_before_the_field_cap() {
+        for intent_wait in [true, false] {
+            let state = StateDir::new();
+            let waiting = Arc::new(tokio::sync::Notify::new());
+            let key = "queued-create-field-cap";
+            let signal = Arc::clone(&waiting);
+            let faults = if intent_wait {
+                crate::service::FaultHooks {
+                    create_intent_waiting: Some(Arc::new(move |observed| {
+                        assert_eq!(observed, key);
+                        signal.notify_one();
+                    })),
+                    ..crate::service::FaultHooks::default()
+                }
+            } else {
+                crate::service::FaultHooks {
+                    create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
+                    ..crate::service::FaultHooks::default()
+                }
+            };
+            let sup = Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    faults,
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(sup.admission.available_permits(), HANDLER_ADMISSION_PERMITS);
+            let intent = if intent_wait {
+                Some(sup.intent_locks_for_test().claim(key).await)
+            } else {
+                None
+            };
+            let directory = if intent_wait {
+                None
+            } else {
+                Some(sup.working_copy_operations.lock().await)
+            };
+            let peer = Arc::new(tokio::sync::Mutex::new(CreatePeer::new(&sup).await));
+            let request = queued_create(state.path(), key, true);
+            // The parent retains the real blockers and the connection while
+            // assertions run elsewhere. Failure must not drop the state
+            // directory ahead of a create released by unwinding its gate.
+            let observed = tokio::spawn({
+                let sup = Arc::clone(&sup);
+                let peer = Arc::clone(&peer);
+                async move {
+                    let mut peer = peer.lock().await;
+                    peer.send(&request).await;
+                    let pending =
+                        tokio::time::timeout(CREATE_REQUEST_WAIT, waiting.notified()).await;
+                    assert!(sup.intent_locks_for_test().claimed_for_test(key));
+                    if !intent_wait {
+                        assert!(sup.working_copy_operations.try_lock().is_err());
+                    }
+                    assert!(
+                        pending.is_ok(),
+                        "create never reached its held gate; intent={intent_wait}"
+                    );
+                    assert_eq!(
+                        sup.admission.available_permits(),
+                        HANDLER_ADMISSION_PERMITS - 1
+                    );
+                    assert!(sup.store.reservation(key).await.unwrap().is_none());
+                    peer.send(&ControlMsg::SetBrowserForwarding {
+                        req_id: 42,
+                        enabled: false,
+                    })
+                    .await;
+                    assert_eq!(
+                        peer.reply(42).await,
+                        ControlMsg::BrowserForwardingSet { req_id: 42 }
+                    );
+                    assert!(sup.intent_locks_for_test().claimed_for_test(key));
+                    assert!(sup.store.reservation(key).await.unwrap().is_none());
+                }
+            })
+            .await;
+            if observed.is_err() {
+                eprintln!(
+                    "queued create failed before gate release: intent_case={intent_wait}, intent_held={}, directory_held={}, management_free={}, reader_finished={}",
+                    sup.intent_locks_for_test().claimed_for_test(key),
+                    sup.working_copy_operations.try_lock().is_err(),
+                    sup.admission.available_permits(),
+                    peer.lock()
+                        .await
+                        .server
+                        .as_ref()
+                        .is_none_or(|task| task.is_finished()),
+                );
+            }
+            drop(intent);
+            drop(directory);
+            let settled = tokio::time::timeout(
+                CREATE_REQUEST_WAIT,
+                Arc::clone(&sup.admission).acquire_many_owned(HANDLER_ADMISSION_PERMITS as u32),
+            )
+            .await;
+            let cap_reply = tokio::spawn({
+                let peer = Arc::clone(&peer);
+                let sup = Arc::clone(&sup);
+                async move {
+                    assert!(
+                        matches!(peer.lock().await.reply(41).await, ControlMsg::Error {
+                        kind: ErrorKind::InvalidRequest, message, create_unaccepted: false, ..
+                    } if message.contains("65536-byte limit"))
+                    );
+                    assert!(sup.store.reservation(key).await.unwrap().is_none());
+                    assert!(sup.sessions.lock().await.is_empty());
+                }
+            })
+            .await;
+            let closed = tokio::spawn({
+                let peer = Arc::clone(&peer);
+                async move { peer.lock().await.finish().await }
+            })
+            .await;
+            // Cleanup has completed before either assertion task's original
+            // panic is resumed. The permit barrier also covers owned work
+            // whose tracked waiter was lost during connection cleanup.
+            for outcome in [observed, cap_reply, closed] {
+                if let Err(error) = outcome {
+                    if error.is_panic() {
+                        std::panic::resume_unwind(error.into_panic());
+                    }
+                    panic!("queued create observation was cancelled: {error}");
+                }
+            }
+            assert!(
+                settled.is_ok(),
+                "queued create did not settle after its held gate was released"
+            );
+        }
+    }
+
+    /// Pure shape errors keep their existing precedence over busy admission.
+    /// A shaped request refused at the management cap must claim no intent,
+    /// create no reservation, and leave no handler behind that could run later.
+    #[farhelm_testtrace::test]
+    async fn create_shape_refusal_precedes_busy_admission_without_spawning() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let _all_permits = Arc::clone(&sup.admission)
+            .acquire_many_owned(HANDLER_ADMISSION_PERMITS as u32)
+            .await
+            .unwrap();
+        let (tx, mut replies) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let (panics, _panic_receiver) = mpsc::channel(1);
+        let mut channels = ConnectionChannels::default();
+        let mut tasks = tokio::task::JoinSet::new();
+        for malformed in [true, false] {
+            let key = if malformed {
+                "malformed-busy-create"
+            } else {
+                "shaped-busy-create"
+            };
+            let mut request = queued_create(state.path(), key, false);
+            if malformed && let ControlMsg::CreateSession { launch, .. } = &mut request {
+                *launch = None;
+            }
+            handle_control(
+                &sup,
+                request,
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    channels: &mut channels,
+                    tasks: &mut tasks,
+                    panics: &panics,
+                },
+            )
+            .await;
+            let reply = parse_control(&replies.try_recv().expect("refusal is inline")).unwrap();
+            let ControlMsg::Error {
+                req_id: 41,
+                kind,
+                message,
+                create_unaccepted: false,
+            } = reply
+            else {
+                panic!("unexpected create refusal: {reply:?}");
+            };
+            if malformed {
+                assert_eq!(kind, ErrorKind::InvalidRequest);
+                assert_eq!(message, "a create must carry a launch");
+            } else {
+                assert_eq!(kind, ErrorKind::Unavailable);
+                assert_eq!(message, farhelm_proto::HOST_BUSY_REFUSAL);
+            }
+            assert!(tasks.is_empty(), "an inline refusal must spawn no waiter");
+            assert!(!sup.intent_locks_for_test().claimed_for_test(key));
+            assert!(sup.store.reservation(key).await.unwrap().is_none());
+            assert!(sup.sessions.lock().await.is_empty());
+            assert_eq!(sup.admission.available_permits(), 0);
+        }
+    }
+
+    /// Once admitted, a keyed create belongs to the supervisor even while it
+    /// waits for directory ownership. Aborting and joining every tracked task
+    /// before releasing that gate must still yield a fully published, settled
+    /// session whose retry returns the same identity rather than a second launch.
+    #[farhelm_testtrace::test]
+    async fn accepted_create_survives_cancellation_of_its_tracked_waiter() {
+        let state = StateDir::new();
+        let waiting = Arc::new(tokio::sync::Notify::new());
+        let signal = Arc::clone(&waiting);
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                faults: crate::service::FaultHooks {
+                    create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
+                    ..crate::service::FaultHooks::default()
+                },
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        let key = "create-after-waiter-cancellation";
+        let request = queued_create(state.path(), key, false);
+        // Keep state and the supervisor in the parent. Even an assertion
+        // unwind releases the held gate and drops only the tracked waiter;
+        // the parent then waits for owned work before removing its terminal.
+        let observed = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            async move {
+        let directory = sup.working_copy_operations.lock().await;
+        let (mut tasks, mut replies) = dispatch_for_test(&sup, request.clone()).await;
+        tokio::time::timeout(CREATE_REQUEST_WAIT, waiting.notified()).await.expect("real directory Pending");
+        assert!(sup.working_copy_operations.try_lock().is_err());
+        assert!(sup.store.reservation(key).await.unwrap().is_none());
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
+        assert_eq!(sup.admission.available_permits(), HANDLER_ADMISSION_PERMITS - 1);
+        drop(directory);
+        let reply = parse_control(&recv_create_reply(&mut replies).await).unwrap();
+        let ControlMsg::SessionCreated { session, .. } = reply else { panic!("owned create failed: {reply:?}") };
+        assert!(sup.sessions.lock().await.contains_key(&session.id));
+        let reservation = sup.store.reservation(key).await.unwrap().expect("settled key");
+        assert_eq!(reservation.session_id, session.id);
+        assert!(matches!(reservation.outcome, crate::store::ReservationOutcome::Created));
+        let (mut replay_tasks, mut replay_replies) = dispatch_for_test(&sup, request).await;
+        let replay = parse_control(&recv_create_reply(&mut replay_replies).await).unwrap();
+        assert!(matches!(replay, ControlMsg::SessionCreated { session: replay, .. } if replay.id == session.id));
+        while replay_tasks.join_next().await.is_some() {}
+            }
+        }).await;
+        let settled = tokio::time::timeout(
+            CREATE_REQUEST_WAIT,
+            Arc::clone(&sup.admission).acquire_many_owned(HANDLER_ADMISSION_PERMITS as u32),
+        )
+        .await;
+        assert!(
+            settled.is_ok(),
+            "owned create did not settle before fixture cleanup"
+        );
+        let all_permits = settled.unwrap().expect("admission remains open");
+        for stored in sup.store.load_all().await.expect("read cleanup handles") {
+            let _ = sup.tmux.kill_session(&stored.tmux_name).await;
+        }
+        drop(all_permits);
+        if let Err(error) = observed {
+            if error.is_panic() {
+                std::panic::resume_unwind(error.into_panic());
+            }
+            panic!("create ownership observation was cancelled: {error}");
+        }
+    }
+
+    /// The new task boundary must preserve a genuine create panic as the
+    /// original connection unwind, including while the reader has no next
+    /// frame to wake it. An Error reply or a panicked tracked waiter would
+    /// leave that reader alive and fail this observation.
+    #[farhelm_testtrace::test]
+    async fn owned_create_panic_wakes_the_idle_reader_with_its_original_payload() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                faults: crate::service::FaultHooks {
+                    create_crash: Some(Arc::new(|stage| {
+                        if stage == crate::service::CreateStage::BeforeRecord {
+                            std::panic::panic_any("owned create panic sentinel");
+                        }
+                        Ok(())
+                    })),
+                    ..crate::service::FaultHooks::default()
+                },
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        let mut peer = CreatePeer::new(&sup).await;
+        peer.send(&queued_create(state.path(), "create-panic-key", false))
+            .await;
+        let mut server = peer.server.take().expect("owned reader task");
+        let joined = tokio::time::timeout(CREATE_REQUEST_WAIT, &mut server).await;
+        if joined.is_err() {
+            server.abort();
+            let _ = server.await;
+            panic!("owned create panic did not wake the idle reader");
+        }
+        let error = joined
+            .unwrap()
+            .expect_err("create must unwind its connection");
+        assert!(error.is_panic());
+        assert_eq!(
+            error.into_panic().downcast_ref::<&'static str>(),
+            Some(&"owned create panic sentinel")
+        );
+        assert!(
+            sup.store
+                .reservation("create-panic-key")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     /// Disconnect cleanup owns only the reply waiter, so an accepted prompt
@@ -6083,6 +6612,7 @@ mod tests {
                         if_unowned: false,
                     },
                     ConnectionCtx {
+                        panics: &mpsc::channel(1).0,
                         tx: &tx,
                         priority: &tx,
                         channels: &mut channels,
@@ -6170,6 +6700,7 @@ mod tests {
                         if_unowned: false,
                     },
                     ConnectionCtx {
+                        panics: &mpsc::channel(1).0,
                         tx: &tx,
                         priority: &tx,
                         channels: &mut channels,
@@ -6536,6 +7067,7 @@ mod tests {
                 request: preview_request,
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -6570,6 +7102,7 @@ mod tests {
                 query: "bar".to_string(),
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -6629,6 +7162,7 @@ mod tests {
                 request_fingerprint: None,
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -7875,6 +8409,7 @@ mod tests {
                     request_fingerprint: None,
                 },
                 ConnectionCtx {
+                    panics: &mpsc::channel(1).0,
                     tx: &tx,
                     priority: &tx,
                     channels: &mut channels,
@@ -7934,6 +8469,7 @@ mod tests {
                 expected_launch: None,
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -8030,6 +8566,7 @@ mod tests {
                 root: Some("~/checkouts".into()),
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut ConnectionChannels::default(),
@@ -8165,6 +8702,7 @@ mod tests {
                 request_fingerprint: Some("c".repeat(64)),
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut ConnectionChannels::default(),
@@ -8232,6 +8770,7 @@ mod tests {
                 request_fingerprint: None,
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut ConnectionChannels::default(),
@@ -8239,7 +8778,8 @@ mod tests {
             },
         )
         .await;
-        let reply: ControlMsg = serde_json::from_slice(&rx.try_recv().unwrap().body).unwrap();
+        let reply: ControlMsg =
+            serde_json::from_slice(&recv_create_reply(&mut rx).await.body).unwrap();
         assert!(matches!(reply, ControlMsg::Error {
             req_id: 97, kind: ErrorKind::InvalidRequest, message,
             ..
@@ -8296,6 +8836,7 @@ mod tests {
                 request_fingerprint: None,
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -8304,7 +8845,7 @@ mod tests {
         )
         .await;
 
-        let reply = rx.try_recv().expect("a reply must have been sent");
+        let reply = recv_create_reply(&mut rx).await;
         let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
         let ControlMsg::Error {
             req_id: got_req_id,
@@ -8388,6 +8929,7 @@ mod tests {
                     request_fingerprint: None,
                 },
                 ConnectionCtx {
+                    panics: &mpsc::channel(1).0,
                     tx: &tx,
                     priority: &tx,
                     channels: &mut channels,
@@ -8452,6 +8994,7 @@ mod tests {
                 request_fingerprint: None,
             },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -8459,7 +9002,7 @@ mod tests {
             },
         )
         .await;
-        let frame = rx.try_recv().expect("a reply must have been sent");
+        let frame = recv_create_reply(&mut rx).await;
         let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
         let ControlMsg::Error { message, .. } = decoded else {
             panic!("expected the cwd refusal: {decoded:?}");
@@ -8523,6 +9066,7 @@ mod tests {
                     request_fingerprint: None,
                 },
                 ConnectionCtx {
+                    panics: &mpsc::channel(1).0,
                     tx: &tx,
                     priority: &tx,
                     channels: &mut channels,
@@ -8530,7 +9074,7 @@ mod tests {
                 },
             )
             .await;
-            let frame = rx.try_recv().expect("a reply must have been sent");
+            let frame = recv_create_reply(&mut rx).await;
             let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
             let ControlMsg::Error { kind, message, .. } = decoded else {
                 panic!("an oversized resume template must be refused: {decoded:?}");
@@ -8653,6 +9197,7 @@ mod tests {
             &sup,
             ControlMsg::ListSessions { req_id: 1 },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -8704,6 +9249,7 @@ mod tests {
             &sup,
             ControlMsg::ListSessions { req_id: 2 },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -8851,6 +9397,7 @@ mod tests {
             sup,
             ControlMsg::ListSessions { req_id },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -9050,6 +9597,7 @@ mod tests {
             &sup,
             ControlMsg::ListSessions { req_id: 1 },
             ConnectionCtx {
+                panics: &mpsc::channel(1).0,
                 tx: &tx,
                 priority: &tx,
                 channels: &mut channels,
@@ -9491,10 +10039,10 @@ mod tests {
         ConformanceContext, ExecutionClass, conformance_requests, execution_class,
     };
 
-    /// These are the two existing inline stalls, pending their separate fix PRs.
+    /// Reconciliation remains inline until its separate fix PR.
     /// A new InlineCreate declaration is exercised unless it is named here; the
     /// class itself is never used as an implicit exemption from conformance.
-    const KNOWN_INLINE_STALLS: &[&str] = &["CreateSession", "ReconcileGithubCheckout"];
+    const KNOWN_INLINE_STALLS: &[&str] = &["ReconcileGithubCheckout"];
 
     /// Select the declaration's promises without executing anything by its class.
     /// The match is exhaustive so a new mode requires an explicit test decision.
@@ -9553,8 +10101,8 @@ mod tests {
     /// Every request promising reader progress must pass while management,
     /// lifecycle, intent, directory, agent-request and listing admission are held.
     /// A following post-replay echo on the same real connection distinguishes a
-    /// worker's wait from an inline wait. The two known create stalls remain named
-    /// until their individual fixes remove them from KNOWN_INLINE_STALLS.
+    /// worker's wait from an inline wait. The remaining reconciliation stall stays
+    /// named until its fix removes it from KNOWN_INLINE_STALLS.
     #[farhelm_testtrace::test]
     async fn declared_nonblocking_requests_process_the_following_frame_under_contention() {
         let declared = declared_progress_cases();
