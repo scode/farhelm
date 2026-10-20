@@ -4405,9 +4405,11 @@ pub struct Supervisor {
     /// directory put first on its `PATH`.
     ///
     /// The bundle's forwarder when this supervisor runs from the versioned
-    /// layout, [`Self::farhelm_exe`] otherwise. Not the launch shim: the
-    /// shim reads a launch description only this supervisor's own version
-    /// writes, so it stays [`Self::farhelm_exe`]. Everything here, by
+    /// layout, [`Self::farhelm_exe`] otherwise. Not the launch shim or the
+    /// terminal-tab helper: the shim reads a launch description only this
+    /// supervisor's own version writes, and the tab helper replaces itself
+    /// with the tab's shell at once, so both stay [`Self::farhelm_exe`].
+    /// Everything here, by
     /// contrast, can be run again after Farhelm restarts on a newer
     /// version, and the forwarder is what sends it to the right one
     /// (SPEC_impl.md, "Side-by-side versions inside Farhelm.app").
@@ -13155,7 +13157,10 @@ impl Supervisor {
         };
         let shell = self.launch_shell().await;
         let env = self.tab_environment(session_id, session_token, &tab_id);
-        let window_cmd = crate::launch::tab_window_command(&shell, scope_prefix);
+        // The tab helper runs now and immediately execs the shell; unlike hooks
+        // retained by a session, it needs this supervisor's own versioned program.
+        let window_cmd =
+            crate::launch::tab_window_command(&shell, &self.farhelm_exe, cwd, scope_prefix);
         let (window, pane) = self
             .tmux
             .new_window(&agent.tmux_name, cwd, &env, &window_cmd)
@@ -14191,6 +14196,7 @@ impl Supervisor {
         let status_path = crate::launch::status_path_for_spec(&spec_path);
         let spec = LaunchSpec {
             argv,
+            working_directory: Some(PathBuf::from(cwd)),
             status_file: status_path.clone(),
             // The kill machinery's environment-marker sweep (see
             // `kill_process_tree`) is keyed on this exact value reaching
@@ -15930,7 +15936,9 @@ pub(crate) mod tests {
     }
 
     /// The published shim spec is the execution boundary: a prompt matching
-    /// a placeholder must stay literal after both cwd and hook expansion.
+    /// a placeholder must stay literal after both cwd and hook expansion. The same
+    /// builder must carry the exact cwd for Create, retry, Restart and Replace so
+    /// the shim can enforce it after shell startup rather than trust tmux's hint.
     /// Stop at the existing pre-tmux fault seam so this test starts no vendor
     /// process; a later launch without a prompt must publish none of its text.
     #[farhelm_testtrace::test]
@@ -15993,6 +16001,7 @@ pub(crate) mod tests {
             };
             let spec: crate::launch::LaunchSpec =
                 serde_json::from_slice(&std::fs::read(spec_path).unwrap()).unwrap();
+            assert_eq!(spec.working_directory.as_deref(), Some(state.path()));
             assert_eq!(spec.argv[1], state.path().to_str().unwrap());
             match prompt {
                 Some(text) => assert_eq!(&spec.argv[spec.argv.len() - 2..], ["--", text]),
@@ -16827,6 +16836,37 @@ pub(crate) mod tests {
         PathBuf::from("/nonexistent/farhelm")
     }
 
+    /// Keep agent launches failing while allowing real terminal tabs in core tests.
+    /// These fixtures need dead or replaceable agent panes alongside live tabs; a
+    /// nonexistent program can no longer provide both because tabs now use a helper.
+    /// Dispatch only tab-shell to the production Rust helper in an isolated test
+    /// child. Everything else still fails, and dummy_exe stays unchanged for tests
+    /// whose premise is specifically a missing program.
+    fn tab_capable_dummy_exe(state: &StateDir) -> PathBuf {
+        let child = std::env::current_exe().expect("the supervisor test binary");
+        let child = shell_words::quote(child.to_str().expect("UTF-8 test executable"));
+        let shim = state.path().join("tab-capable-farhelm");
+        std::fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\ncase \"$1:$2:$3\" in\ninternal:tab-shell:--)\n  exec env FARHELM_TAB_SHELL_CHILD_DIRECTORY=\"$4\" FARHELM_TAB_SHELL_CHILD_SHELL=\"$5\" {child} --exact launch::tests::tab_shell_child --ignored --nocapture\n  ;;\nesac\nexit 127\n"
+            ),
+        )
+        .expect("write the tab-capable stand-in");
+        std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("make the stand-in executable");
+        assert_eq!(
+            std::process::Command::new(&shim)
+                .args(["internal", "launch", "unused-spec"])
+                .status()
+                .expect("probe the failing agent-launch premise")
+                .code(),
+            Some(127),
+            "the stand-in must not launch agents"
+        );
+        shim
+    }
+
     /// Restart with keeps the launch kind and agent type, refuses a legacy
     /// session with the remedy SPEC.md names, and needs a resume command.
     ///
@@ -17642,7 +17682,7 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn an_opened_tab_records_whether_it_was_scoped() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = Supervisor::new_with_exe(state.path(), tab_capable_dummy_exe(&state))
             .await
             .expect("supervisor");
         let created = sup
@@ -17712,7 +17752,7 @@ pub(crate) mod tests {
         let state = StateDir::new();
         let sup = Supervisor::new_with_seams(
             state.path(),
-            dummy_exe(),
+            tab_capable_dummy_exe(&state),
             SupervisorTimeouts::default(),
             SupervisorSeams {
                 scopes: Arc::new(crate::scope::ScopeManager::fake_reprobing(
@@ -19430,7 +19470,7 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = Supervisor::new_with_exe(state.path(), tab_capable_dummy_exe(&state))
             .await
             .expect("supervisor");
         let created = sup
@@ -20071,7 +20111,7 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn restart_replaces_only_the_dead_agent_window() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = Supervisor::new_with_exe(state.path(), tab_capable_dummy_exe(&state))
             .await
             .expect("supervisor");
         let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
@@ -20148,7 +20188,7 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn a_forged_tab_on_the_agent_window_cannot_be_listed_or_closed() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = Supervisor::new_with_exe(state.path(), tab_capable_dummy_exe(&state))
             .await
             .expect("supervisor");
         let created = sup
@@ -20479,7 +20519,7 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn forged_agent_marker_cannot_authorize_old_tab_cleanup() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = Supervisor::new_with_exe(state.path(), tab_capable_dummy_exe(&state))
             .await
             .expect("supervisor");
         let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
@@ -20588,7 +20628,7 @@ pub(crate) mod tests {
             });
             let sup = Supervisor::new_with_seams(
                 state.path(),
-                dummy_exe(),
+                tab_capable_dummy_exe(&state),
                 SupervisorTimeouts::default(),
                 SupervisorSeams {
                     launch_shell: Some("/bin/bash".to_string()),

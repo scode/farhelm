@@ -1221,6 +1221,9 @@ enum InternalCmd {
     /// this exists (zsh terminates on failed exec; a shell-side sentinel
     /// can never fire there).
     Launch { spec: PathBuf },
+    /// Enter the session directory before starting a tab's login shell. This runs
+    /// inside the tab scope, so shell startup retains the tab's cleanup contract.
+    TabShell { directory: PathBuf, shell: PathBuf },
     /// An agent hook adapter: read the vendor's JSON payload from stdin and
     /// drop a report of the conversation identity it names for the
     /// supervisor that launched this session to apply.
@@ -1442,6 +1445,9 @@ fn main() -> anyhow::Result<()> {
                 // On success exec never returns; reaching here is failure.
                 Err(farhelm_supervisor::launch::exec_launch_spec(&spec))
             }
+            InternalCmd::TabShell { directory, shell } => Err(
+                farhelm_supervisor::launch::exec_tab_shell(&directory, &shell),
+            ),
             InternalCmd::GooseHook => {
                 std::panic::set_hook(Box::new(|_| {}));
                 let enabled =

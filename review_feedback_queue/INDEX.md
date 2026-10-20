@@ -17,9 +17,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`payload-workers-outlive-state-lock.md`](payload-workers-outlive-state-lock.md) — Old payload work can overlap a
   successor helm after releasing state ownership; the integrity consequence remains unresolved.
 
-- [`unusable-directory-launches-in-home.md`](unusable-directory-launches-in-home.md) — An existing but unsearchable
-  folder can make a session launch in the home directory instead.
-
 - [`cancelled-startup-loses-archive-location.md`](cancelled-startup-loses-archive-location.md) — A cancelled startup
   worker can overwrite the recorded archive location after a successor moves the checkout.
 

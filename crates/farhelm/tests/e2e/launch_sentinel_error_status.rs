@@ -3,6 +3,53 @@
 
 use crate::harness::*;
 
+/// An existing directory without search permission must fail at the final launch
+/// boundary. Metadata still passes admission, and tmux can fall back to HOME, so
+/// only an in-process chdir prevents the executable from touching unrelated work.
+#[farhelm_testtrace::test]
+async fn create_records_error_when_the_session_directory_cannot_be_entered() {
+    // SAFETY: geteuid has no arguments and cannot fail. Root bypasses this fixture.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("SKIPPED: root bypasses directory search permissions");
+        return;
+    }
+    let h = harness_believing_boot("directory-test").await;
+    let work = farhelm_teststate::tempdir().unwrap();
+    let witness = farhelm_teststate::tempdir().unwrap();
+    let marker = witness.path().join("agent-ran");
+    let command = format!(
+        "/bin/sh -c {}",
+        farhelm_proto::text::shell_quote(&format!(
+            "printf started > {}",
+            farhelm_proto::text::shell_quote(marker.to_str().unwrap())
+        ))
+    );
+    let denied = crate::terminal_tabs::DeniedDirectory::new(work.path());
+    let session = h
+        .client
+        .create_session(work.path().to_str().unwrap(), &command, None, 80, 24)
+        .await
+        .expect("admission may publish a session before the helper fails");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    wait_for_dead_pane(
+        &h.state.path().join("tmux.sock"),
+        &format!("fh-{}", session.id),
+    )
+    .await;
+    h.sup.reconcile_for_test().await;
+    let row = wait_for_non_live_status(&h.client, &session.id, 30).await;
+    drop(denied);
+    let SessionStatus::Error { detail } = row.status else {
+        panic!("denied directory must be a launch error: {:?}", row.status);
+    };
+    assert!(detail.contains(work.path().to_str().unwrap()), "{detail}");
+    assert!(detail.contains("working directory"), "{detail}");
+    assert!(
+        !marker.exists(),
+        "the requested executable must never run in tmux's fallback directory"
+    );
+}
+
 use crate::boot_id_durable_outcome::{
     harness_believing_boot, listed, supervisor_believing_boot, supervisor_reading_boot,
     wait_for_dead_pane,

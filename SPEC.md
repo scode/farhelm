@@ -1262,6 +1262,12 @@ or similar lasting damage is never accepted, however unlikely the trigger.
 
 ### Session view
 
+A launch — a new agent, Restart, Replace or a terminal tab — starts in the session's working directory. If it cannot
+enter that directory, it fails clearly with an error naming it, without starting the requested program elsewhere.
+Resolving a symlink to its target is acceptable. Agent launches enter the session directory after login-shell startup,
+overriding a startup-file `cd`, and supply a matching `PWD`. Terminal tabs enter before their shell starts, so a `cd` in
+the shell's own startup files still applies as it would in an ordinary terminal.
+
 For opening a terminal tab, the session's working directory is a path, not a tracked inode or a preserved symlink
 destination. Use that path with normal filesystem resolution. If a symlink along it now points elsewhere, opening the
 tab there is explicitly acceptable. Do not add directory-identity tracking or symlink-change refusal for this operation.
