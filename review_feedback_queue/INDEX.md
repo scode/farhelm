@@ -8,9 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`payload-workers-outlive-state-lock.md`](payload-workers-outlive-state-lock.md) — Old payload work can overlap a
-  successor helm after releasing state ownership; the integrity consequence remains unresolved.
-
 - [`template-list-can-launch-recreated-name.md`](template-list-can-launch-recreated-name.md) — A stale template-list row
   can launch a replacement recreated under the same name; harmful execution remains unverified.
 

@@ -497,33 +497,29 @@ impl DesktopBootstrap {
         let helm = std::thread::Builder::new()
             .name("farhelm-embedded-helm".to_string())
             .spawn(move || {
-                (|| {
-                    let runtime =
-                        tokio::runtime::Runtime::new().context("starting embedded helm runtime")?;
-                    runtime.block_on(farhelm_helm::run_embedded(
-                        farhelm_helm::HelmArgs {
-                            port,
-                            state_dir: Some(helm_state),
-                            ui_dist: None,
-                            ensure_hosts: None,
-                            payload_dir: helm_payload_dir(),
-                            release_base_url: None,
-                            backstop_refresh_secs: None,
-                        },
-                        Some(native_clipboard_sink()),
-                        Some(std::sync::Arc::new(|url: &str| {
-                            webbrowser::open(url).map_err(|error| error.to_string())
-                        })),
-                        // Resolve on the native side. An unavailable Downloads
-                        // folder refuses a save rather than using the webview.
-                        dirs::download_dir().map(|directory| farhelm_helm::NativeDownloads {
-                            directory,
-                            opener: std::sync::Arc::new(open_saved_file),
-                        }),
-                        ready_tx,
-                        shutdown_rx,
-                    ))
-                })()
+                farhelm_helm::run_embedded(
+                    farhelm_helm::HelmArgs {
+                        port,
+                        state_dir: Some(helm_state),
+                        ui_dist: None,
+                        ensure_hosts: None,
+                        payload_dir: helm_payload_dir(),
+                        release_base_url: None,
+                        backstop_refresh_secs: None,
+                    },
+                    Some(native_clipboard_sink()),
+                    Some(std::sync::Arc::new(|url: &str| {
+                        webbrowser::open(url).map_err(|error| error.to_string())
+                    })),
+                    // Resolve on the native side. An unavailable Downloads
+                    // folder refuses a save rather than using the webview.
+                    dirs::download_dir().map(|directory| farhelm_helm::NativeDownloads {
+                        directory,
+                        opener: std::sync::Arc::new(open_saved_file),
+                    }),
+                    ready_tx,
+                    shutdown_rx,
+                )
             })
             .context("starting embedded helm thread")?;
         let helm_deadline = std::time::Instant::now() + DESKTOP_STARTUP_TIMEOUT;
