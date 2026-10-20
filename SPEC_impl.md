@@ -242,12 +242,18 @@ last-writer-wins.
 
 The sort travels as the bare word `?sort=` takes and is validated against that vocabulary at the write; the selection is
 the full entry-bound session reference. Its entry UUID prevents a remembered selection from following a removed host's
-bare session ID to another entry. An absent or unrecognized sort word still reads as the UI default (`activity`) on the
-client, because the row outlives the build that validated it. Nothing is kept per client: no localStorage key, no field
-in `desktop-client.json` (which holds no credentials either, only the webview readiness counter the desktop smoke reads
-and the desktop app's automatic-updates setting, which is a setting of that app installation rather than one of these
-shared preferences), no eval round trip. The visible consequences are the ones SPEC.md names — one answer shared by
-every client, and a second client attaching to whatever was selected most recently anywhere.
+bare session ID to another entry. Helm schema 66 adds `preferences.visit_history`, a JSON list of at most 32 full
+references, newest first without duplicates. Each non-null `last_selected` write prepends its reference, removes its
+previous occurrence and caps the list in the same database transaction as the sparse preference write. Null clears both
+selection and visits; omission changes neither. Clients cannot PUT the history. Deleted references remain until later
+visits age them out. Migration adds an empty list without inventing visits from a retained legacy selection; the next
+selection write establishes the history-head/last-selection invariant. Older helms refuse the newer schema. An absent or
+unrecognized sort word still reads as the UI default (`activity`) on the client, because the row outlives the build that
+validated it. Nothing is kept per client: no localStorage key, no field in `desktop-client.json` (which holds no
+credentials either, only the webview readiness counter the desktop smoke reads and the desktop app's automatic-updates
+setting, which is a setting of that app installation rather than one of these shared preferences), no eval round trip.
+The visible consequences are the ones SPEC.md names — one answer shared by every client, and a second client attaching
+to whatever was selected most recently anywhere.
 
 Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
 reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the

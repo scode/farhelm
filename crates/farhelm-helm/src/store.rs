@@ -329,7 +329,11 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 65;
+const SCHEMA_VERSION: i64 = 66;
+
+/// Shared visits are bounded independently of fleet size. Stale references
+/// remain ordinary history entries until later visits push them out.
+const VISIT_HISTORY_CAP: usize = 32;
 
 /// Distinguish host row IDs in this registry from the same IDs in a recovered
 /// or independently created registry. The row is minted with the schema and
@@ -988,7 +992,7 @@ pub fn is_known_remembered_permissions_word(text: &str) -> bool {
 /// selected, compact-row choice, and structured-launch defaults. One row, one shape — the stored row and
 /// the `GET` reply.
 ///
-/// Every field is `Option` because "never set" is a real state: the
+/// Choice fields are `Option` because "never set" is a real state: the
 /// client's default applies. `list_sort` is the bare `?sort=` word
 /// ([`parse_sort_key`]), stored as the word rather than the enum so an
 /// unset value has an honest representation; `last_selected` is a full
@@ -1039,6 +1043,11 @@ pub struct Preferences {
     /// stale; readers choose a fallback rather than treating it as routing authority.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_selected: Option<String>,
+    /// Most recently visited full references, newest first and without duplicates.
+    /// The helm maintains this from selection writes; clients cannot replace it.
+    /// An upgrade starts empty even when a legacy last selection survives.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visit_history: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compact: Option<bool>,
     /// The wire word for the permissions mode of the last successful
@@ -2222,14 +2231,15 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  created_at  INTEGER NOT NULL
              ) STRICT;
              -- The ONE client preference row (SPEC.md, Session list): the
-             -- chosen list order, last user-selected session, compact rows,
+             -- chosen list order, last-selected session and visits, compact rows,
              -- and the permissions choice of successful STRUCTURED launches,
              -- shared by every client of this helm. The old workspace-trust
              -- column remains for compatibility but is no longer read or written. Singleton
              -- for the same reason web_token is: no client keeps its own
              -- copy, so there is exactly one answer to remember. Preference
-             -- columns are nullable — an unset preference is a real state
-             -- (the default) and the row may hold one without the other.
+             -- choice columns are nullable — an unset preference is a real state
+             -- (the default) and the row may hold one without the other. JSON
+             -- collections instead use their empty value as that default.
              -- The remembered launch fields are written only by a successful
              -- structured create (`record_create_history_with_destination`), never
              -- by a client PUT: SPEC.md's launch-composer carve-out makes
@@ -2260,7 +2270,8 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  -- Appended, like every column added since this table was
                  -- created, so a fresh database matches a migrated one.
                  remembered_wrapper_prefixes TEXT NOT NULL DEFAULT '{{}}',
-                 open_extensions TEXT
+                 open_extensions TEXT,
+                 visit_history TEXT NOT NULL DEFAULT '[]'
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2352,7 +2363,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 65;",
+              PRAGMA user_version = 66;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3834,6 +3845,24 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
             .context("migrating helm.db to schema version 65")?;
         version = 65;
     }
+    if version == 65 {
+        // Do not invent visits from the legacy last selection. Column presence
+        // also tolerates synthetic fixtures that rewind only user_version.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('preferences') WHERE name = 'visit_history'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch(
+                "ALTER TABLE preferences ADD COLUMN visit_history TEXT NOT NULL DEFAULT '[]';",
+            )
+            .context("adding shared visit history")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 66;")
+            .context("migrating helm.db to schema version 66")?;
+        version = 66;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -4907,7 +4936,7 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes, open_extensions \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes, open_extensions, visit_history \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -4924,6 +4953,8 @@ impl HelmStore {
                             welcome_seen: row.get(12)?,
                             list_sort: row.get(0)?,
                             last_selected: row.get(1)?,
+                            visit_history: serde_json::from_str(&row.get::<_, String>(21)?)
+                                .map_err(|error| rusqlite::Error::FromSqlConversionFailure(21, rusqlite::types::Type::Text, Box::new(error)))?,
                             compact: row.get(2)?,
                             // Unlike `list_sort` (whose tolerance for an
                             // unrecognized word is the UI's job — the row
@@ -4968,6 +4999,10 @@ impl HelmStore {
     /// per FIELD, which is the only order anyone can observe anyway. The
     /// clear lets a successful feedback send forget its contact and lets test
     /// harnesses establish a "nothing remembered" precondition.
+    /// A selection also records a visit in the same transaction: newest first,
+    /// without duplicates, capped at 32. Clearing selection clears its history;
+    /// an unrelated patch changes neither. Stale full references age out rather
+    /// than making this preference write depend on current fleet availability.
     /// The retired `remembered_workspace_trust` field is the exception: older
     /// clients may still send it, but no patch changes its historical column.
     ///
@@ -5015,6 +5050,22 @@ impl HelmStore {
             let template_shortcuts = serde_json::to_string(&patch.template_shortcuts.flatten().unwrap_or_default())?;
             let sort = patch.list_sort.flatten();
             let selected = patch.last_selected.flatten();
+            // The transaction covers both the history read and the sparse
+            // upsert, so another connection cannot lose a visit between them.
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let mut history = Vec::<String>::new();
+            if let Some(id) = &selected {
+                let stored: Option<String> = tx.query_row(
+                    "SELECT visit_history FROM preferences WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                ).optional()?;
+                history = stored.map(|json| serde_json::from_str(&json)).transpose()?.unwrap_or_default();
+                history.retain(|previous| previous != id);
+                history.insert(0, id.clone());
+                history.truncate(VISIT_HISTORY_CAP);
+            }
+            let history = serde_json::to_string(&history)?;
             let compact = patch.compact.flatten();
             let remembered_permissions = patch.remembered_permissions.flatten();
             let codex_trust_hint = patch.codex_trust_hint_dismissed.flatten();
@@ -5022,15 +5073,16 @@ impl HelmStore {
             let pi_trust_hint = patch.pi_trust_hint_dismissed.flatten();
             let skip_host_remove_confirmation = patch.skip_host_remove_confirmation.flatten();
             let skip_host_setup_confirmation = patch.skip_host_setup_confirmation.flatten();
-            conn
+            tx
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, open_extensions) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, open_extensions, visit_history) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39, ?41) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
                                               ELSE last_selected END, \
+                         visit_history = CASE WHEN ?11 THEN excluded.visit_history ELSE visit_history END, \
                          compact = CASE WHEN ?12 THEN excluded.compact ELSE compact END, \
                          remembered_permissions = CASE WHEN ?13 \
                              THEN excluded.remembered_permissions ELSE remembered_permissions END, \
@@ -5093,10 +5145,12 @@ impl HelmStore {
                         color_terminal_frames,
                         color_terminal_frames_present,
                         open_extensions,
-                        open_extensions_present
+                        open_extensions_present,
+                        history
                     ],
                 )
                 .context("writing the client preference")?;
+            tx.commit().context("committing the client preference")?;
             Ok(())
         })
 .await
@@ -8581,6 +8635,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN color_terminal_frames;
                  ALTER TABLE preferences DROP COLUMN remembered_wrapper_prefixes;
                  ALTER TABLE preferences DROP COLUMN open_extensions;
+                 ALTER TABLE preferences DROP COLUMN visit_history;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -10959,6 +11014,64 @@ mod tests {
 
     // ---- The shared client preference ---------------------------------
 
+    /// Visits must retain user order across reopening, rather than creation
+    /// order or sparse settings writes. Repeated visits move to the front,
+    /// older visits age out, and null establishes a genuinely empty baseline.
+    #[farhelm_testtrace::test]
+    async fn selection_visits_prepend_deduplicate_cap_and_persist() {
+        let (dir, store) = fresh_store().await;
+        let ids: Vec<_> = (0..35)
+            .map(|suffix| format!("0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:visit-{suffix}"))
+            .collect();
+        for id in &ids {
+            store
+                .update_preferences(PreferencePatch {
+                    last_selected: Some(Some(id.clone())),
+                    ..PreferencePatch::default()
+                })
+                .await
+                .unwrap();
+        }
+        let revisit = ids[20].clone();
+        store
+            .update_preferences(PreferencePatch {
+                last_selected: Some(Some(revisit.clone())),
+                compact: Some(Some(true)),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        store
+            .update_preferences(PreferencePatch {
+                list_sort: Some(Some("title".into())),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        let saved = store.preferences().await.unwrap();
+        let expected: Vec<_> = std::iter::once(revisit.clone())
+            .chain(ids[3..].iter().rev().filter(|id| **id != revisit).cloned())
+            .collect();
+        assert_eq!(saved.visit_history, expected);
+        assert_eq!(saved.visit_history.len(), 32);
+        assert_eq!(saved.last_selected.as_deref(), Some(revisit.as_str()));
+        drop(store);
+        let reopened = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        assert_eq!(reopened.preferences().await.unwrap(), saved);
+        reopened
+            .update_preferences(PreferencePatch {
+                last_selected: Some(None),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        let cleared = reopened.preferences().await.unwrap();
+        assert!(cleared.visit_history.is_empty());
+        assert_eq!(cleared.last_selected, None);
+        assert_eq!(cleared.compact, Some(true));
+        assert_eq!(cleared.list_sort.as_deref(), Some("title"));
+    }
+
     /// The preference row is one shared answer with three-way per-field
     /// merge semantics: a fresh store reads as all-unset, an ABSENT field in
     /// a patch leaves the stored value alone, a `null` clears it, a value
@@ -11009,6 +11122,7 @@ mod tests {
             Preferences {
                 list_sort: Some("title".to_string()),
                 last_selected: Some("0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:session-1".to_string()),
+                visit_history: vec!["0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:session-1".into()],
                 compact: Some(true),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
@@ -11043,6 +11157,7 @@ mod tests {
             Preferences {
                 list_sort: Some("created".to_string()),
                 last_selected: Some("0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:session-1".to_string()),
+                visit_history: vec!["0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:session-1".into()],
                 compact: Some(true),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
@@ -11076,6 +11191,7 @@ mod tests {
             Preferences {
                 list_sort: Some("created".to_string()),
                 last_selected: None,
+                visit_history: Vec::new(),
                 compact: Some(true),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
@@ -11097,7 +11213,7 @@ mod tests {
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
             },
-            "an explicit null clears exactly the field it names"
+            "an explicit null clears selection and its visits without changing settings"
         );
 
         store
@@ -11159,6 +11275,7 @@ mod tests {
                 list_sort: Some("created".to_string()),
                 last_selected: None,
                 compact: None,
+                visit_history: Vec::new(),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
@@ -11559,6 +11676,58 @@ mod tests {
                 .set_pinned(&viewer_key(&store, "kept"), true)
                 .await
                 .unwrap()
+        );
+    }
+
+    /// An upgrade gains empty visit history without inventing visits from the
+    /// legacy selection or losing settings. Its DDL must match a fresh install,
+    /// and a version-only rewind must preserve already-recorded visits.
+    #[farhelm_testtrace::test]
+    async fn schema_66_starts_empty_visits_and_preserves_legacy_preferences() {
+        let (dir, store) = fresh_store().await;
+        let id = "0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:legacy";
+        store
+            .update_preferences(PreferencePatch {
+                last_selected: Some(Some(id.into())),
+                compact: Some(Some(true)),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        let path = dir.path().join("helm.db");
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        let fresh_schema = schema_objects(&conn);
+        conn.execute_batch(
+            "ALTER TABLE preferences DROP COLUMN visit_history; PRAGMA user_version = 65;",
+        )
+        .unwrap();
+        assert_eq!(conn.query_row(
+            "SELECT count(*) FROM pragma_table_info('preferences') WHERE name = 'visit_history'",
+            [], |row| row.get::<_, i64>(0),
+        ).unwrap(), 0, "premise: the preceding schema has no visit history");
+        drop(conn);
+        let migrated = HelmStore::open(&path).await.unwrap();
+        let preferences = migrated.preferences().await.unwrap();
+        assert!(preferences.visit_history.is_empty());
+        assert_eq!(preferences.last_selected.as_deref(), Some(id));
+        assert_eq!(preferences.compact, Some(true));
+        migrated
+            .update_preferences(PreferencePatch {
+                last_selected: Some(Some(id.into())),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        drop(migrated);
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(schema_objects(&conn), fresh_schema);
+        conn.execute_batch("PRAGMA user_version = 65;").unwrap();
+        drop(conn);
+        let reopened = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            reopened.preferences().await.unwrap().visit_history,
+            vec![id]
         );
     }
 
@@ -12262,6 +12431,7 @@ mod tests {
         conn.execute_batch(
             "ALTER TABLE preferences DROP COLUMN remembered_wrapper_prefixes;
              ALTER TABLE preferences DROP COLUMN open_extensions;
+             ALTER TABLE preferences DROP COLUMN visit_history;
              PRAGMA user_version = 59;",
         )
         .unwrap();
@@ -12290,6 +12460,7 @@ mod tests {
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(
             "ALTER TABLE preferences DROP COLUMN open_extensions;
+             ALTER TABLE preferences DROP COLUMN visit_history;
              PRAGMA user_version = 60;",
         )
         .unwrap();
@@ -13540,6 +13711,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN color_terminal_frames;
                  ALTER TABLE preferences DROP COLUMN remembered_wrapper_prefixes;
                  ALTER TABLE preferences DROP COLUMN open_extensions;
+                 ALTER TABLE preferences DROP COLUMN visit_history;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -13712,6 +13884,7 @@ mod tests {
                 list_sort: Some("title".to_string()),
                 last_selected: None,
                 compact: None,
+                visit_history: Vec::new(),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
@@ -13794,6 +13967,7 @@ mod tests {
                 list_sort: Some("title".to_string()),
                 last_selected: None,
                 compact: Some(true),
+                visit_history: Vec::new(),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
