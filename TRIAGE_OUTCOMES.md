@@ -16489,7 +16489,10 @@
 - Completion criteria: the effort check ignores the permission flags' state, so a compatible effort survives incomplete
   or empty custom flags; a test covers both. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or the changelog fragment). Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/launcher-composer-drafts.md`.
+- Execution: complete in change `vzokyrsyvlmstssyuzzkvynrlqxqqnrp`, bookmark
+  `plan/launcher-composer-drafts/02-keep-compatible-effort`,
+  [PR #2391](https://github.com/scode/farhelm/pull/2391/changes). The fix and browser regression total 42 lines, within
+  the 100-line gate.
 
 ## template-table-omits-custom-permission-flags.md
 

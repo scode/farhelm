@@ -7051,11 +7051,15 @@ pub(super) fn CreateSessionForm(
                                                     wrapper_prefix: None,
                                                     workspace_trust: None,
                                                 };
-                                                // An unknown catalog keeps the effort: see
-                                                // `selection_fits_catalog`.
-                                                if !crate::launch_composer::selection_fits_catalog(
-                                                    &selection, catalog_answer.as_deref(),
-                                                ) {
+                                                // Permission text can still be an unfinished draft.
+                                                // Only model/effort compatibility may clear effort;
+                                                // an unavailable catalog cannot establish a conflict.
+                                                if let Some(effort) = selection.effort
+                                                    && let Some(catalog) = catalog_answer.as_deref()
+                                                    && !crate::launch_composer::compatible_efforts(
+                                                        selection.harness, selection.model.as_deref(), catalog,
+                                                    ).contains(&effort)
+                                                {
                                                     structured_effort.set(None);
                                                     composer_reset_reason.set(
                                                         crate::launch_composer::reconciliation_reset_reason(
