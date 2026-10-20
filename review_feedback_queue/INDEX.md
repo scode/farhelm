@@ -35,10 +35,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`expanded-setup-failure-displaces-open-menu.md`](expanded-setup-failure-displaces-open-menu.md) — A setup failure can
   leave a menu beside another row while it still acts on the original target; harmful reliance is unverified.
 
-- [`queued-launch-capture-before-repaint.md`](queued-launch-capture-before-repaint.md) — Enter may capture a changed
-  template binding before its indicator repaints; scheduling and harm are unverified, and redraw acceptance may cover
-  it.
-
 ## High priority: material UX degradation
 
 - [`abandoned-planners-exhaust-global-planning-slots.md`](abandoned-planners-exhaust-global-planning-slots.md) —
