@@ -20,9 +20,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`approval-session-id-display-collision.md`](approval-session-id-display-collision.md) — Approval cards can display
   distinct session IDs identically; mistaken authorization remains unverified.
 
-- [`summary-card-omits-observed-yolo.md`](summary-card-omits-observed-yolo.md) — The main session summary can still say
-  guarded after YOLO is observed; consequential reliance remains unverified.
-
 - [`template-list-can-launch-recreated-name.md`](template-list-can-launch-recreated-name.md) — A stale template-list row
   can launch a replacement recreated under the same name; harmful execution remains unverified.
 

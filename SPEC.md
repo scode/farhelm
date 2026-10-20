@@ -1431,11 +1431,13 @@ the next preference seed across clients. The working directory and launch comman
 with the full directory in the row's hover summary card and the full invocation on its agent mark on web and desktop; an
 abbreviation is never the only place a value is recorded. The same card appears from the title or any unmarked part of
 the open button, in either density and on keyboard focus. It names the full title, status, agent, host, checkout when
-managed, directory, start and last-activity times, and what a click does; meaningful marks keep their own hover text. A
-row's own actions menu, beyond the lifecycle operations above, also offers a mark read / mark unread toggle — reachable
-there or by clicking the dot itself — that sets the session's seen state directly (see Status). Directly after it in the
-menu's first metadata group, **Pin to top** / **Unpin** toggles the shared pin. Every session row carries one permission
-mark. An amber slashed shield means the session's launch is YOLO by the rule under Creation: its effective agent-launch
+managed, directory, start and last-activity times, and what a click does; meaningful marks keep their own hover text.
+Its agent line retains the stored launch facts and adds "YOLO observed" when the shield has status-line evidence,
+including when the launch was already YOLO. The actions-menu header describes only the stored launch. A row's own
+actions menu, beyond the lifecycle operations above, also offers a mark read / mark unread toggle — reachable there or
+by clicking the dot itself — that sets the session's seen state directly (see Status). Directly after it in the menu's
+first metadata group, **Pin to top** / **Unpin** toggles the shared pin. Every session row carries one permission mark.
+An amber slashed shield means the session's launch is YOLO by the rule under Creation: its effective agent-launch
 permission is custom or YOLO, or its command was asserted to be YOLO. A green plain shield means an agent launch in
 guarded or an approval mode, or a command asserted not to be YOLO. A session created before launch kinds existed that
 was not an agent launch has no assertion and carries an amber question mark. Hover and screen-reader text name the
