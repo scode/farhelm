@@ -54,7 +54,11 @@ pub mod launch;
 mod pi_extension;
 mod repo_cache;
 pub mod repository_discovery;
+mod spare_build;
 mod spare_checkouts;
+// Synchronous CLI entry points only. The private spec, scheduler and filesystem
+// publication remain supervisor-owned rather than becoming a general job API.
+pub use spare_build::{build_spare, guard_spare_build};
 // Private, and deliberately so: `procs` is the process-table read seam
 // (`/proc` on Linux, `sysctl` on macOS) and nothing outside `service::sweep`
 // and hook attribution has business reading a process table at all. The

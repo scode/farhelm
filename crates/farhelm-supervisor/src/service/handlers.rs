@@ -7499,6 +7499,7 @@ mod tests {
                     root: "/tmp/checkouts".to_string(),
                     post_clone: None,
                     claude_trust: false,
+                    keep_spare: false,
                     preview: CheckoutPreviewBinding {
                         canonical_root: "/tmp/checkouts".to_string(),
                         basename: "bar".to_string(),
@@ -7624,6 +7625,7 @@ mod tests {
                     root: missing_root.to_string_lossy().into_owned(),
                     post_clone: None,
                     claude_trust: false,
+                    keep_spare: false,
                     preview: CheckoutPreviewBinding {
                         canonical_root: missing_root.to_string_lossy().into_owned(),
                         basename: "bar".to_string(),
@@ -9071,6 +9073,7 @@ mod tests {
             root: "/checkouts".into(),
             post_clone: None,
             claude_trust: false,
+            keep_spare: false,
             preview: farhelm_proto::CheckoutPreviewBinding {
                 canonical_root: "/checkouts".into(),
                 basename: "bar-1".into(),

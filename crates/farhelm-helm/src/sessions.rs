@@ -1163,6 +1163,8 @@ fn github_checkout_resolution(
         root,
         post_clone: config.post_clone.clone(),
         claude_trust: config.claude_trust,
+        // The producer/receiver is staged separately from the default-on setting.
+        keep_spare: false,
         preview: preview.binding.clone(),
     })))
 }

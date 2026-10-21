@@ -1221,6 +1221,10 @@ enum InternalCmd {
     /// this exists (zsh terminates on failed exec; a shell-side sentinel
     /// can never fire there).
     Launch { spec: PathBuf },
+    /// Clone a spare after the user's login shell established its environment.
+    BuildSpare { spec: PathBuf },
+    /// Bound that shell and ordinary descendants to the supervisor's lifetime.
+    BuildSpareGuard { spec: PathBuf },
     /// Record shell handoff before execing the scope wrapper. The exact executable
     /// path is carried through so a bundle forwarder retains its launch semantics.
     LaunchWrapped {
@@ -1436,6 +1440,10 @@ fn main() -> anyhow::Result<()> {
             runtime()?.block_on(run_supervisor(&dir, startup, exit_on_stdin_close))
         }
         Cmd::Internal { command } => match command {
+            // Fresh synchronous processes: the guard starts its own OS watches
+            // before user rc files; neither command needs an async runtime.
+            InternalCmd::BuildSpare { spec } => farhelm_supervisor::build_spare(&spec),
+            InternalCmd::BuildSpareGuard { spec } => farhelm_supervisor::guard_spare_build(&spec),
             InternalCmd::Stdio { state_dir } => {
                 // No tracing init — belt and braces, not necessity:
                 // tracing goes to stderr by construction (init_tracing),

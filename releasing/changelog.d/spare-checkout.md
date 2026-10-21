@@ -2,5 +2,5 @@
 kind: none
 ---
 
-Prepared-checkout reuse is not enabled yet, and no background checkouts are created. This change adds the launch-side
-implementation behind a private flag that the create path leaves off.
+Prepared-checkout reuse and replenishment are not enabled by normal helm creates yet. The launch and background
+implementations accept a frozen flag, but the staged helm producer leaves it off until the Settings switch is added.

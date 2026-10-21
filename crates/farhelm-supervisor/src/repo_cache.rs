@@ -1,6 +1,6 @@
 //! Host-local Git objects shared only while a fresh checkout is prepared.
 //!
-//! Launch shims fetch and clone under the same per-repository flock that the
+//! Terminal preparations and background builders fetch and clone under the same per-repository flock that the
 //! startup sweep takes before eviction. The lock file is permanent: unlinking
 //! it would split waiting shims and new arrivals across different lock inodes.
 //! Checkouts dissociate from the cache before releasing this lock, so eviction
@@ -25,13 +25,20 @@ pub(crate) fn path(state_dir: &Path, repo: &farhelm_proto::github_checkout::Gith
 /// Serialize cache mutation and checkout copying, after the preparation lock.
 /// Git children never inherit this guard, even if a launch is interrupted.
 pub(crate) fn acquire(cache: &Path) -> std::io::Result<PreparationLock> {
+    let lock = open_lock(cache)?;
+    lock.acquire()?;
+    Ok(lock)
+}
+
+/// Open the same permanent cache lock without waiting for another owner. The
+/// runtime builder uses try_acquire so a credential prompt in a visible clone
+/// cannot strand an unbounded blocking worker across cancellation or shutdown.
+pub(crate) fn open_lock(cache: &Path) -> std::io::Result<PreparationLock> {
     let parent = cache.parent().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "cache has no parent")
     })?;
     std::fs::create_dir_all(parent)?;
-    let lock = PreparationLock::open(&cache.with_extension("lock"))?;
-    lock.acquire()?;
-    Ok(lock)
+    PreparationLock::open(&cache.with_extension("lock"))
 }
 
 /// Evict caches unused for 30 days without disturbing surviving launch shims.

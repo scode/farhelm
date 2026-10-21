@@ -2408,11 +2408,12 @@ under the cache sweep's existing nonblocking repository lock, skips held locks, 
 thirty-day cache observation. Missing ready content alone never permits forgetting a location with a surviving claim. A
 failure is logged and retains the ownership record for later cleanup. Record reads are limited to 16 MiB and
 owner-namespace scans to 100,000 iterator calls, including EOF proof. Exhausting either limit refuses cleanup and
-retains ownership evidence; neither truncates or silently forgets old locations. This recovery layer does not itself
-create, publish or take spares.
+retains ownership evidence; neither truncates or silently forgets old locations.
 
 The preparation shim can consume a complete spare when its private `keep_spare` field is true. That field defaults to
-false and is omitted when false; the create path currently leaves it off, and nothing produces spares yet. A take runs
+false and is omitted when false. Protocol 62 carries the same frozen `keep_spare` field in `ResolvedGithubCheckout`:
+ignoring true changes receiver behavior, so the hello refuses older protocols. Omitted false preserves old retained
+fingerprint bytes. The staged helm producer still sends false until the default-on setting is enabled. A take runs
 inside the existing durable `CloneStarted` stage and preparation lock. It never reads the recovery record or acquires
 the repository cache lock. Git below 2.17 or unrecognized version output keeps the ordinary clone path: 2.17 is the
 floor for the take's `--prune-tags`, not a minimum for Farhelm. Local metadata queries are silent, limited to 4096
@@ -2443,6 +2444,63 @@ every failure after any entry moved retains the partial checkout and fails prepa
 removes only the emptied claim directory. It then runs `git merge --ff-only <full tracking ref>` in the final allocated
 folder, so changed-file filters and `post-merge` see that path. The existing post-clone command, Ready publication and
 trust steps follow unchanged. Interrupted or failed preparations remain non-restartable under the existing state rule.
+
+Each physically accepted fresh managed-checkout launch registers one background spare attempt with its frozen root,
+shell and switch. A pending recovery that actually creates a terminal registers too; reconciliation of an already
+existing terminal, accepted-key replay and Restart do not. Registration order governs only this supervisor lifetime;
+there is no persisted scheduling history, automatic retry or startup rebuild of old Ready creates. One entry per
+repository coalesces pending work: a later same-policy create replaces the pending clone gate/token. Once running,
+same-policy triggers coalesce without cancellation or a trailing attempt. Off/root changes invalidate either phase.
+Successful publication retires its entry under the final rename gate. A physical create arriving while old publication
+fsync/cleanup finishes can therefore register the next owed attempt; old cleanup preserves a new same-policy entry and
+its ready slot. This is replenishment after a new create, not a retry after failure. One serve-owned worker runs host
+builds serially. The ticker only wakes it; clone, cache waits and record fsync are not on the ticker or create admission
+path. Runtime cache admission opens the existing permanent lock and uses nonblocking flock probes with stop/policy
+cancellation and the same ten-minute attempt deadline as login/Git. It never leaves a blocking flock waiter holding
+supervisor ownership. Post-attempt cleanup tries that lock once; a busy cache retains/logs ownership evidence for
+startup rather than adding another owed attempt.
+
+The gate reads exact accepted origin/session/generation and the durable preparation state. NotStarted and CloneStarted
+wait; missing, corrupt, stale or terminal pre-clone refusal consumes that attempt without poisoning a later create.
+HookStarted, Ready, post-clone failure and Failed at clone authorize one attempt: the visible clone command has already
+returned and released its cache lock. Off cleanup does not wait for clone. Runtime discard protects every claimed name
+and retains old locations containing claims; only startup performs exact claim-liveness cleanup. It removes verified
+ready/building/trash objects before building at a new root, through the same confined remover and namespace barrier.
+
+The worker persists namespace identity before creating a strict private building folder. It starts its exact binary's
+`internal build-spare-guard` in a new session with a retained stdin owner pipe and nice 10, before login initialization.
+The guard verifies it leads that session/group, starts OS owner-EOF and ten-minute deadline watches, then runs the
+frozen user's shell with `-l -i -c` and null stdin, execing `internal build-spare`. Session credentials, markers and
+reporter authority are scrubbed before startup; private tmux variables remain through rc files as in visible launches
+and are removed from Git afterwards. The helper uses the same session-bin PATH projection, ordinary Git configuration,
+credential helpers and URL rewrites. It forces `GIT_TERMINAL_PROMPT=0`, `/bin/false` Git/SSH askpass and
+`SSH_ASKPASS_REQUIRE=never` after rc files. No Farhelm post-clone command, trust operation or agent runs in a spare;
+ordinary Git hooks and checkout filters remain the user's Git policy.
+
+The shared synchronous cache core uses the exact init/fetch/dissociating-clone commands above and marks successful use.
+The clone core acquires its cache flock inside the helper, after login startup. The supervisor's separate
+preparation/cleanup critical sections never hold it around the login shell. Immediately after the helper's flock and
+before any Git it verifies the expected building identity without recreating a missing target. Startup removal under
+that same lock therefore cannot be undone by a delayed orphan whose rc files finished later. A build starts only with an
+empty ready slot.
+
+After clone success the helper publishes a fresh private 0600 bool receipt. Only a successful direct shell exit permits
+the guard to promote that receipt by collision-refusing hard link to the final completion name; rc exit zero before
+executing the helper cannot produce completion. The guard then SIGKILLs its own retained group on every outcome, as it
+also does on owner EOF/read error or deadline. The parent retains the pipe writer outside Tokio Child.stdin, whose wait
+would otherwise close it. Parent output is limited to one MiB per stream and the whole run to ten minutes. Only an
+ordinary bounded Exited(SIGKILL) plus the fresh promoted true receipt authorizes publication; timeout, overflow and I/O
+refusal remain failures. Direct child reaping precedes private spec/receipt/result cleanup. Startup discards strict
+leftover private artifacts without adopting a job. Failures log bounded diagnostics and leave ordinary visible clone
+available.
+
+Before publication the worker durably records intended ready identity and prepares opened handles outside the short
+policy gate. Only the final current-token check and identity-checked no-replace rename serialize with registration;
+namespace fsync follows outside the gate. Off during record fsync rejects publication; off after rename schedules
+discard. A slot occupied at completion is never overwritten. The live supervisor has one worker and alone publishes; the
+guard requests termination of ordinary same-group descendants and the parent reaps its direct child. This does not
+promise instantaneous global exclusion across supervisor SIGKILL, reaping every grandchild, or containment of user code
+which explicitly changes session/process group. The cache-lock/expected-target check supplies the filesystem ordering.
 
 Last-reference Delete journals the source identity and archive destination before one no-replace rename. Linux uses
 `renameat2` through its syscall with `RENAME_NOREPLACE`; macOS uses `renameatx_np(RENAME_EXCL)`. Parent fsync barriers

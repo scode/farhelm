@@ -106,6 +106,7 @@ pub(crate) mod notifications;
 mod report_files;
 mod report_watch;
 mod request_modes;
+mod spare_builder;
 mod status;
 mod sweep;
 mod tcp_relays;
