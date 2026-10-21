@@ -4,13 +4,12 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Eleven buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove
+Ten buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove
 — the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses duplicate
 review triage within each item's stated scope; "near term" is what should be picked up next; "doc todo" holds
 documentation work; "tricky bugs" retains unresolved bug reports and their investigation findings; "deflake" gathers
 test and harness reliability work, including CI execution and restoring gates; "broken tests" records tests that fail
-deterministically, with the failure and the evidence that it predates any in-flight work; "code review" is the residue
-of the September 2026 review swarms after the policy pass, ordered by confidence and risk; "code cleanup" holds
+deterministically, with the failure and the evidence that it predates any in-flight work; "code cleanup" holds
 structural code smells from a whole-codebase assessment, grouped by kind with a suggested order; "maybe later" is wanted
 but not soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication either
 way. Within a bucket, no order unless the bucket explicitly says so.
@@ -368,8 +367,6 @@ Deferred work, with its original triggers:
   duplicate request within the scenario still fails; keep this entry until the extra request's identity is established.
 
 ## Broken tests
-
-## Code review
 
 ## Code cleanup
 
