@@ -6,6 +6,66 @@ This is the exclusive starting point for the next trailing code review of `main`
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
 
+## Incomplete review toward fe0348ef
+
+Pinned range: `5c6e49937b1e779be2a5445059637aadf3757356..fe0348ef8d4fabc3c6140a4fd89fb19dd34178b1`, 120 commits: 64
+merged PRs and 56 direct commits. The checkpoint and included tip came from fetched main, with ancestry verified. Every
+individual commit/file patch, including deletions and intermediate versions, belongs to exactly one of 62 bounded
+functional groups: 517 patches in total. Each group stayed below 2,000 mandatory lines and 64 KiB. Necessary surrounding
+source and coverage sections were inspected selectively; this is not an exhaustive review of those surrounding files.
+
+The review is **incomplete**, and `Last reviewed commit` remains unchanged. The sequence auditor retained a conditional
+FIFO-pairing concern: a refused Begin can leave a saved Enter projection unconsumed, potentially displacing later
+presses. Its source mechanism depends on native input arriving between Rust admission changes and publication to the
+webview. The auditor could neither establish that ordering nor exclude it within the pinned repository, which delegates
+that transport to unvendored Dioxus dependencies. Its clarification identifies a missing source premise, not merely an
+unmeasured runtime frequency. Its nominal second empty search therefore does not meet the stopping condition. The
+`persistent-review` stuck-investigation rule stops this group incomplete; the conditional record preserves the gap.
+
+All 62 primary groups completed inspected later-turn synthesis and separate empty discovery searches. Twenty-two fresh
+independent auditors checked proposed exclusions with possible security or user-work consequences, including candidates
+mentioned only in prose. Their agreements remain limited to the supplied mechanisms and exact acceptance decisions.
+Ambiguous exclusions became retained records. The sequence auditor's incomplete discovery prevents overall completion
+despite complete mandatory delivery; it is not a claim that a patch was skipped. Every other auditor's empty search and
+later synthesis are preserved in the private completion record.
+
+Reviewers used Codex `gpt-6.1-sol` with high reasoning, separate resumable identities and at most 19 concurrent external
+reviewers. Initial passes, later synthesis and discovery were separate actual turns. Productive searches received
+further searches; duplicate-only reports were not counted as new discoveries. Fifteen distinct records first emerged
+during discovery, including the unresolved sequence lead. That lead is retained uncertainty, not a verified reachable
+defect.
+
+The result retains 36 new queue items: seven provisionally highest, two high and 27 other. These are records for triage,
+not 36 reproduced bugs. The highest items concern disclosure occlusion, native address publication, retained gestures,
+shortcut/template preservation, cross-agent Custom flags and conditional sequence pairing. Each preserves the missing
+runtime, harmful-reliance or source premise and its possible coverage. The two high records concern pointer access to
+outage recovery and planning-slot exhaustion; their browser/configuration premises remain unexecuted. Test-oracle,
+fixture-ownership, convenience, diagnostic and tooling records retain their own limits and pre-existing attribution. The
+existing notification handback item gains a second notification-list caller; it is extended rather than duplicated. No
+unrelated existing record is removed, and no finding is fixed or triaged.
+
+Evidence is retained privately under run `fe4ac841-f515-4f11-936d-6545c4d41f8c`: `completion.md` is the compact record;
+`completion.json` holds stable assignments, session identities, successful and failed attempt turns, manifest ranges,
+audit references and per-pass judgments. `dispositions.json` maps original log IDs to retained records, the extension or
+scoped exclusion families. Each group retains its manifest, identity, append-only findings, progress, reports and
+delivery audits. Historical host-destination inputs have a separate version manifest and audits. These references
+identify session-private evidence, not files committed here. Delivery proves neither attention nor understanding,
+correctness or exhaustiveness.
+
+A second fetch found main at `efb32081eb73e24cdd5d33fe4ee433e83ad0fc60`, 62 commits beyond the pinned tip, with the same
+checkpoint and unchanged queue, known-bug file and triage ledger. Its specification changes and empty Planned bucket
+were checked for recording coverage; they add no exact acceptance for these findings. The clean working copy moved to
+that main before recording. Those 62 later commits are outside this review and are not claimed reviewed. Finding paths,
+line numbers and mechanisms refer to each record's explicit reviewed commit, not an assertion that later changes leave
+every mechanism unchanged.
+
+Two final reports needed format repairs, four backend-failed attempts resumed on their original threads, and one
+historical-context addition arrived late from the parent and required another turn. Failed and superseded artifacts
+remain retained. These are not demonstrated instances of a reviewer skipping assigned text. No product runtime, browser,
+native Mac, vendor-agent or filesystem-fault tests were run, and no historical runtime results were reused as current
+passes. This result changes only queue records, their index and this incomplete-review note. Its PR stays a draft for
+manual review and merging; it proposes no checkpoint advancement.
+
 ## Review through 5c6e4993
 
 Reviewed range: `738598601c142e9e184ee7f0427e8995b2d89e0f..5c6e49937b1e779be2a5445059637aadf3757356`, nine commits. The
