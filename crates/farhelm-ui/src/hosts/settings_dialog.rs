@@ -275,37 +275,16 @@ pub(crate) fn install_dialog_with_focus(
     quiet_initial_focus: bool,
     main_action_selector: Option<&str>,
 ) {
-    let dialog = serde_json::to_string(dialog_selector).expect("a string always serializes");
-    let initial_focus = serde_json::to_string(initial_focus).expect("a string always serializes");
-    document::eval(&format!(
-        r#"(() => {{
-            const dialog = document.querySelector({dialog});
-            if (!dialog) return;
-            if (!dialog.__farhelmFocusMemory) {{
-                dialog.__farhelmFocusMemory = true;
-                dialog.addEventListener('focusin', (event) => {{
-                    if (event.target !== dialog) dialog.__farhelmLastFocus = event.target;
-                }});
-            }}
-            // Disabled confirming answers do not receive focus. Keep their
-            // Cancel fallback separate from the independent Escape selector.
-            const initial = dialog.querySelector({initial_focus})
-                ?? dialog.querySelector('.host-settings-close, .uninstall-cancel') ?? dialog;
-            // Focus safety does not depend on the tooltip asset finishing load.
-            // A later installation observes new events, not this past focus.
-            if ({quiet_initial_focus} && window.farhelmTooltip?.focusWithoutTooltip) window.farhelmTooltip.focusWithoutTooltip(initial);
-            else initial.focus({{ preventScroll: true }});
-        }})(); {}"#,
-        // The caller supplies the dialog's safe cancel action. Settings use
-        // the field-cancel selector before their dialog close control; the
-        // add flow supplies its own cancel button.
-        modal_isolation::install_js(dialog_selector, escape_selector),
-    ));
-    let action = main_action_selector.map_or(
-        crate::dialog_focus::ContainerEnter::None,
-        crate::dialog_focus::ContainerEnter::Click,
+    // Unconverted host roots use the same installation as the shell, including
+    // focus memory and its two-eval order. Their later conversion changes the
+    // rendered root owner without leaving another copy of the focus rules.
+    let focus = crate::modal_dialog::DialogFocus::remembered(
+        initial_focus,
+        escape_selector,
+        quiet_initial_focus,
+        main_action_selector,
     );
-    document::eval(&crate::dialog_focus::install_js(dialog_selector, action));
+    crate::modal_dialog::install_focus(dialog_selector, &focus);
 }
 
 /// Put focus back inside the dialog after a write ends, if the write lost it.

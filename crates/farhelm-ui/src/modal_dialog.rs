@@ -42,25 +42,26 @@ impl DialogHandle {
         ));
     }
 
-    /// Install once on this root, preserving focus before page isolation.
-    ///
-    /// The trap uses native focus scrolling on a boundary wrap: a contained
-    /// control outside the dialog's scroll viewport must become visible too.
-    /// Gap/Enter listeners precede isolation, as in Restart with's installer.
-    fn install(self, focus: DialogFocus) {
-        let dialog = serde_json::to_string(self.selector).expect("a string always serializes");
-        let initial =
-            serde_json::to_string(focus.initial_focus).expect("a string always serializes");
-        let selector =
-            serde_json::to_string(focus.trap.selector).expect("a string always serializes");
-        let empty_to_root = focus.trap.empty_to_root;
-        let reverse_from_root = focus.trap.reverse_from_root;
-        let trap = format!(
-            r#"(() => {{
+    /// Install the opening's focus policy without repeating it on rerenders.
+    fn install(self, focus: &DialogFocus) {
+        install_focus(self.selector, focus);
+    }
+}
+
+/// Keep the existing trap's first focus and listener behind the same guard.
+///
+/// Boundary wrapping deliberately uses native focus scrolling: a contained
+/// control outside the dialog's scroll viewport must become visible too.
+fn trap_js(dialog: &str, trap: TabTrap, initial_focus: &str) -> String {
+    let selector = serde_json::to_string(trap.selector).expect("a string always serializes");
+    let empty_to_root = trap.empty_to_root;
+    let reverse_from_root = trap.reverse_from_root;
+    format!(
+        r#"(() => {{
                 const dialog = document.querySelector({dialog});
                 if (!dialog || dialog.__farhelmDialogTrap) return;
                 dialog.__farhelmDialogTrap = true;
-                dialog.querySelector({initial})?.focus({{ preventScroll: true }});
+                {initial_focus}
                 const focusable = () => [...dialog.querySelectorAll({selector})]
                     .filter(node => !node.hidden && node.getClientRects().length);
                 dialog.addEventListener('keydown', event => {{
@@ -82,14 +83,76 @@ impl DialogHandle {
                     }}
                 }});
             }})();"#,
-        );
-        let gap = crate::dialog_focus::install_js(
-            self.selector,
-            crate::dialog_focus::ContainerEnter::Click(focus.main_action),
-        );
-        let isolate = crate::modal_isolation::install_js(self.selector, Some(focus.escape_target));
-        document::eval(&format!("{trap}\n{gap}\n{isolate}"));
-    }
+    )
+}
+
+/// Install the shared boundary from a shell or an as-yet-unconverted host root.
+///
+/// Initial focus precedes isolation, which otherwise blurs an inerted opener.
+/// Remembered dialogs keep their existing two eval submissions: focus and
+/// isolation first, gap/Enter second. Direct trapped dialogs keep gap/Enter
+/// before isolation in one eval. These are mount contracts, not effects that
+/// should run again whenever a dialog's state changes.
+pub(crate) fn install_focus(dialog_selector: &str, focus: &DialogFocus) {
+    let dialog = serde_json::to_string(dialog_selector).expect("a string always serializes");
+    let setup = match &focus.initial_focus {
+        InitialFocus::Target(selector) => {
+            let selector = serde_json::to_string(selector).expect("a string always serializes");
+            let initial =
+                format!("dialog.querySelector({selector})?.focus({{ preventScroll: true }});");
+            if let Some(trap) = focus.trap {
+                trap_js(&dialog, trap, &initial)
+            } else {
+                format!(
+                    "(() => {{ const dialog = document.querySelector({dialog}); if (dialog) {{ {initial} }} }})();"
+                )
+            }
+        }
+        InitialFocus::Remembered { selector, quiet } => {
+            let initial_focus =
+                serde_json::to_string(selector).expect("a string always serializes");
+            let mut setup = format!(
+                r#"(() => {{
+                    const dialog = document.querySelector({dialog});
+                    if (!dialog) return;
+                    if (!dialog.__farhelmFocusMemory) {{
+                        dialog.__farhelmFocusMemory = true;
+                        dialog.addEventListener('focusin', (event) => {{
+                            if (event.target !== dialog) dialog.__farhelmLastFocus = event.target;
+                        }});
+                    }}
+                    // Disabled confirming answers do not receive focus. Keep their
+                    // Cancel fallback separate from the independent Escape selector.
+                    const initial = dialog.querySelector({initial_focus})
+                        ?? dialog.querySelector('.host-settings-close, .uninstall-cancel') ?? dialog;
+                    // Focus safety does not depend on the tooltip asset finishing load.
+                    // A later installation observes new events, not this past focus.
+                    if ({quiet} && window.farhelmTooltip?.focusWithoutTooltip) window.farhelmTooltip.focusWithoutTooltip(initial);
+                    else initial.focus({{ preventScroll: true }});
+                }})();"#,
+            );
+            if let Some(trap) = focus.trap {
+                setup.push_str(&trap_js(&dialog, trap, ""));
+            }
+            setup
+        }
+    };
+    let action = focus.main_action.as_deref().map_or(
+        crate::dialog_focus::ContainerEnter::None,
+        crate::dialog_focus::ContainerEnter::Click,
+    );
+    let gap = crate::dialog_focus::install_js(dialog_selector, action);
+    let isolate =
+        crate::modal_isolation::install_js(dialog_selector, focus.escape_target.as_deref());
+    match &focus.initial_focus {
+        InitialFocus::Target(_) => {
+            document::eval(&format!("{setup}\n{gap}\n{isolate}"));
+        }
+        InitialFocus::Remembered { .. } => {
+            document::eval(&format!("{setup} {isolate}"));
+            document::eval(&gap);
+        }
+    };
 }
 
 /// Preserve the dialog's actual Tab stops and its container fallback policy.
@@ -104,17 +167,55 @@ pub(crate) struct TabTrap {
     pub(crate) reverse_from_root: bool,
 }
 
-/// Declare focus targets independently of the caller's cancellation rules.
+/// Preserve each dialog family's initial-focus and installation-order contract.
 ///
-/// Initial focus need not be the primary action. Escape's safety-net target
-/// remains separate too: its ordinary button handler and native disabled state
-/// decide whether an outside-focus Escape may cancel a busy operation.
-#[derive(Clone, Copy, PartialEq)]
+/// The remembered policy keeps the host fallback and recovery memory together;
+/// the direct target retains Restart with's focus inside the trap's guard.
+#[derive(Clone, PartialEq)]
+pub(crate) enum InitialFocus {
+    /// Focus only the named descendant, without fallback or focus memory.
+    Target(String),
+    /// Remember focus before moving it, with the host family's Cancel/root fallback.
+    ///
+    /// Memory installation is idempotent; initial focus still runs on every
+    /// explicit installation, as it did for the host installers. Quiet focus
+    /// suppresses the initial tooltip without depending on its asset loading.
+    Remembered { selector: String, quiet: bool },
+}
+
+/// Keep mount targets separate from live cancellation and request ownership.
+///
+/// Missing trap and main action retain a dialog's current native Tab and Enter
+/// behavior; initial focus never implies that the same action handles Escape.
+#[derive(Clone, PartialEq)]
 pub(crate) struct DialogFocus {
-    pub(crate) initial_focus: &'static str,
-    pub(crate) trap: TabTrap,
-    pub(crate) escape_target: &'static str,
-    pub(crate) main_action: &'static str,
+    pub(crate) initial_focus: InitialFocus,
+    pub(crate) trap: Option<TabTrap>,
+    pub(crate) escape_target: Option<String>,
+    pub(crate) main_action: Option<String>,
+}
+
+impl DialogFocus {
+    /// Preserve the host-family policy while callers move onto the shared root.
+    ///
+    /// These dialogs already isolate, but do not yet trap Tab. Keeping that
+    /// absence explicit separates the structural conversion from the later fix.
+    pub(crate) fn remembered(
+        initial_focus: &str,
+        escape_target: Option<&str>,
+        quiet: bool,
+        main_action: Option<&str>,
+    ) -> Self {
+        Self {
+            initial_focus: InitialFocus::Remembered {
+                selector: initial_focus.to_owned(),
+                quiet,
+            },
+            trap: None,
+            escape_target: escape_target.map(str::to_owned),
+            main_action: main_action.map(str::to_owned),
+        }
+    }
 }
 
 /// Render one existing modal root and own its mount-time focus boundary.
@@ -123,23 +224,48 @@ pub(crate) struct DialogFocus {
 /// stay unchanged. Escape delegates to the caller's live state and layered
 /// cancellation rules; other keys keep their existing root handler. Child
 /// focus handoffs remain independent, and ordinary rerenders never repeat
-/// initial focus over a later child question.
+/// initial focus over a later child question. The optional mounted callback
+/// runs after the shared installation has been submitted; it preserves domain
+/// work such as Settings' delayed trust-section scroll, not a second installer.
+/// Movement callbacks attach to this same root only when supplied, so dialogs
+/// without resize behavior do not acquire an otherwise unused resize observer.
 #[component]
 pub(crate) fn ModalDialog(
     handle: DialogHandle,
     focus: DialogFocus,
     on_escape: EventHandler<KeyboardEvent>,
-    onkeydown: EventHandler<KeyboardEvent>,
+    #[props(default)] onkeydown: Option<EventHandler<KeyboardEvent>>,
+    #[props(default)] onmounted: Option<EventHandler<MountedEvent>>,
+    #[props(default)] onscroll: Option<EventHandler<ScrollEvent>>,
+    #[props(default)] onresize: Option<EventHandler<ResizeEvent>>,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
+    // GlobalAttributes forwards presentation attributes, but native movement
+    // events need explicit props. Keep absent listeners absent on other roots.
+    let mut attributes = attributes;
+    if let Some(onscroll) = onscroll {
+        attributes.push(dioxus::html::onscroll(move |event: ScrollEvent| {
+            onscroll.call(event);
+        }));
+    }
+    if let Some(onresize) = onresize {
+        attributes.push(dioxus::html::onresize(move |event: ResizeEvent| {
+            onresize.call(event);
+        }));
+    }
     rsx! {
         div {
-            onmounted: move |_| handle.install(focus),
+            onmounted: move |event| {
+                handle.install(&focus);
+                if let Some(onmounted) = onmounted {
+                    onmounted.call(event);
+                }
+            },
             onkeydown: move |event: KeyboardEvent| {
                 if event.key() == Key::Escape {
                     on_escape.call(event);
-                } else {
+                } else if let Some(onkeydown) = onkeydown {
                     onkeydown.call(event);
                 }
             },

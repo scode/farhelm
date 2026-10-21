@@ -569,8 +569,10 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
             feedback_open.set(true);
         }
     });
+    let feedback_dialog = crate::modal_dialog::DialogHandle::new(crate::feedback::DIALOG_SELECTOR);
+    let settings_dialog = crate::modal_dialog::DialogHandle::new(crate::settings::DIALOG_SELECTOR);
     let close_feedback = move |_| {
-        crate::feedback::return_focus_to_help();
+        feedback_dialog.close(crate::feedback::RETURN_FOCUS);
         feedback_open.set(false);
         // Announce a success only now: while the dialog is open its modal
         // isolation marks this status region inert, and a live region that
@@ -585,7 +587,7 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
         }
     };
     let close_settings = move |_| {
-        crate::settings::return_focus_to_gear();
+        settings_dialog.close(crate::settings::RETURN_FOCUS);
         settings_open.set(false);
     };
     let skew = skew::HELM_BUILD_SKEW.read();

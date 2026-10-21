@@ -29,15 +29,20 @@
 
 use dioxus::prelude::*;
 
+use crate::ApiBase;
 use crate::api::{
     PreferenceValue, TerminalLinkClick, restore_session_confirmations, store_preference,
 };
 use crate::app_updater::use_app_updater;
-use crate::hosts::settings_dialog::{HostDialogHeader, install_dialog_with_selector};
+use crate::hosts::settings_dialog::HostDialogHeader;
 use crate::list::SharedPreferences;
-use crate::{ApiBase, modal_isolation};
+use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog};
 
-const DIALOG_SELECTOR: &str = r#".app-settings-dialog[role="dialog"]"#;
+/// The app bar and trust bands close the same modal through its surviving owner.
+pub(crate) const DIALOG_SELECTOR: &str = r#".app-settings-dialog[role="dialog"]"#;
+/// Every Settings entry point returns to the gear after shared release and render.
+pub(crate) const RETURN_FOCUS: &str =
+    "document.querySelector('.app-settings-toggle')?.focus({ preventScroll: true });";
 
 /// Navigation and panel IDs share these closed keys; app follows updater availability.
 const SETTINGS_SECTIONS: [(&str, &str); 7] = [
@@ -69,15 +74,6 @@ fn focus_settings_content(section_list: bool) {
             dialog.querySelector('.host-settings-body').scrollTop = 0;
             dialog.querySelector({target})?.focus({{ preventScroll: true }});
         }});"#
-    ));
-}
-
-/// Undo modal isolation before focusing the gear, which is inert while open.
-/// The frame lets the closing render remove the dialog before focus returns.
-pub(crate) fn return_focus_to_gear() {
-    document::eval(&format!(
-        "{} requestAnimationFrame(() => document.querySelector('.app-settings-toggle')?.focus({{ preventScroll: true }}))",
-        modal_isolation::release_js(DIALOG_SELECTOR),
     ));
 }
 
@@ -163,19 +159,18 @@ pub(crate) fn SettingsDialog(
 
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
-            div {
+            ModalDialog {
+                handle: DialogHandle::new(DIALOG_SELECTOR),
+                focus: DialogFocus::remembered(
+                    trust_focus.as_deref().unwrap_or("#settings-sessions input"),
+                    Some(".app-settings-close"), false, None,
+                ),
                 class: "app-settings-dialog host-dialog-framed",
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: "settings",
                 tabindex: "-1",
                 onmounted: move |_| {
-                    install_dialog_with_selector(
-                        DIALOG_SELECTOR,
-                        trust_focus.as_deref().unwrap_or("#settings-sessions input"),
-                        Some(".app-settings-close"),
-                        None,
-                    );
                     if let Some(selector) = &trust_focus {
                         // The shared dialog focus helper deliberately prevents
                         // scrolling. A band's entry point promises its setting
@@ -187,8 +182,8 @@ pub(crate) fn SettingsDialog(
                         );
                     }
                 },
-                onkeydown: move |event: KeyboardEvent| {
-                    if event.key() == Key::Escape && !event.is_composing() {
+                on_escape: move |event: KeyboardEvent| {
+                    if !event.is_composing() {
                         on_close.call(());
                     }
                 },

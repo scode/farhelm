@@ -10,6 +10,7 @@
 
 use crate::hosts::HostsRead;
 use crate::icons::{BranchIcon, TrashIcon};
+use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog};
 use crate::ops::{OpGuard, PaneGate};
 use crate::peer::display_peer;
 use crate::{ApiBase, Host, HostId, HostPhase};
@@ -18,6 +19,9 @@ use farhelm_proto::{CheckoutTrashIssue, CheckoutTrashListing};
 use std::collections::{HashMap, HashSet};
 
 const DIALOG: &str = ".checkout-trash-dialog";
+/// Only whole-dialog dismissal returns here; cancelling a confirmation stays inside.
+const RETURN_FOCUS: &str =
+    "document.querySelector('.checkout-trash-button')?.focus({preventScroll:true});";
 // The host rejects larger batches; disclose this rather than silently omitting
 // a host from a global destructive confirmation.
 const MAX_SELECTION: usize = 10_000;
@@ -246,14 +250,6 @@ fn archived_when(seconds: Option<i64>) -> String {
         time / 3600,
         time % 3600 / 60
     )
-}
-
-/// Release isolation before handing focus back to the persistent trash button.
-fn return_focus() {
-    document::eval(&format!(
-        "{} requestAnimationFrame(() => document.querySelector('.checkout-trash-button')?.focus({{preventScroll:true}}));",
-        crate::modal_isolation::release_js(DIALOG)
-    ));
 }
 
 /// Cancelling a global choice returns to its pinned trigger, including Escape.
@@ -567,7 +563,7 @@ pub(super) fn TrashControl(
             cancel_confirmation(confirmation);
             return;
         }
-        return_focus();
+        DialogHandle::new(DIALOG).close(RETURN_FOCUS);
         open.set(false);
     };
     let (full, summary) = sidebar_summary(count, has_unchecked, all_ready);
@@ -623,9 +619,10 @@ pub(super) fn TrashControl(
         }
         if open() {
             div { class: "host-settings-backdrop", role: "presentation",
-                div { class: "checkout-trash-dialog", role: "dialog", aria_modal: "true", aria_labelledby: "checkout-trash-title", tabindex: "-1",
-                    onmounted: move |_| crate::hosts::settings_dialog::install_dialog_with_selector(DIALOG, ".trash-close", Some(".trash-confirm-cancel, .trash-close"), Some(".trash-confirm-submit")),
-                    onkeydown: move |event| { if event.key() == Key::Escape && !event.is_composing() { event.prevent_default(); event.stop_propagation(); close(()); } },
+                ModalDialog { class: "checkout-trash-dialog", role: "dialog", aria_modal: "true", aria_labelledby: "checkout-trash-title", tabindex: "-1",
+                    handle: DialogHandle::new(DIALOG),
+                    focus: DialogFocus::remembered(".trash-close", Some(".trash-confirm-cancel, .trash-close"), false, Some(".trash-confirm-submit")),
+                    on_escape: move |event: KeyboardEvent| { if !event.is_composing() { event.prevent_default(); event.stop_propagation(); close(()); } },
                     div { class: "checkout-trash-header",
                         h2 { id: "checkout-trash-title", TrashIcon { full } "trash" }
                         span { class: "checkout-trash-total", "{count} {checkouts(count)} · {space(total_bytes, total_partial)} on reachable hosts" }
