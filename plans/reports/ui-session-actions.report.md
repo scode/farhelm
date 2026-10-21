@@ -95,3 +95,70 @@ Every PR passed two independent fresh `gpt-6-astra` reviewers at high effort: ge
 review, and a separate review restricted to observable behavior differences. All six reported no findings or no
 observable difference. No bug-fix exception was used. The controller's scope review and all three commit/PR-message cold
 reads passed.
+
+### Landing
+
+Landed as #2496, #2498 and #2500, merged bottom-up, with the same content the report describes, rebased onto this
+round's main. It was the first of five plans in this landing round, which stacked all five and checked them together
+before any merged: this one, connection-stall-phase, never-started-launch-cause, yolo-confirm-launch-guarded and
+host-changed-update-warning.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained uninstall-refusal-wording (helm uninstall refusals), helm-ingress-types (typed
+request parsing in the helm, and tighter rules on how the helm reports errors that came from a supervisor) and
+create-reservation-retention (a create's retry key is freed when its session is deleted, and a refused create keeps its
+refusal for 24 hours). A fresh-context reviewer and I read them, and the other four plans of this round, against this
+one.
+
+- The UI still reads the same refusal headers from the helm, and the landed changes only alter when the helm sends them.
+  This plan's decoding keeps its priorities: a YOLO question keeps the attempt's retry key, a proven rejection or a
+  changed target drops it, and an uncertain outcome keeps it.
+- yolo-confirm-launch-guarded, which lands later in this round, moved the session launcher's whole submit code into a
+  new shared entry point, while this plan changed that same code in place (every manual release of the operation lock
+  became a guard drop, and refusals became typed outcomes). The landing merged the two; see the Landing section of
+  yolo-confirm-launch-guarded's report. The launcher keeps every change this plan made to that code.
+- The other three plans in the round do not touch the sidebar's or header's Replace, the operation lock or refusal
+  decoding.
+
+#### Fixes made during the landing
+
+None to the plan's code. Its TODO.md removal conflicted with entries main had removed in the meantime; the landing kept
+both removals.
+
+#### Possible follow-ups
+
+- The TODO.md entry about Restart with and the session launcher drifting apart still calls this plan "queued" and
+  describes what it would do. Now that it has landed, that sentence is out of date; possible follow-up: reword it.
+
+#### Checks
+
+Together the five plans change the session launcher and Replace in the UI, the helm's connection attempts and host
+updates, and the supervisor's launch startup and terminal handling, about 8,900 added and 2,200 removed lines, including
+changes to five browser spec files; that reach is why this round ran the whole Rust workspace and the full browser
+suite. All of the following ran on the five plans stacked together on this round's main, including the landing's
+conflict resolutions:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed Markdown, JSON and TOML file,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, the website build (a docs page
+  changed), the debug build, the release web build of the UI and `scripts/check-desktop-assets.sh` (which also builds
+  the desktop app): all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `3907499f-e2bc-4ba3-9a83-ce6526597d54`: 4078 passed, none failed; 40 tests
+  were left out by the suite's own filters. Its retained output is complete and has no runtime `SKIPPED` message, so the
+  real systemd-scope and SSH tests these plans rely on ran.
+- `cargo nextest run -p farhelm-ui --features desktop`, run `63f71d93-80d2-464c-841e-4d7823a61c33`: 773 passed.
+  `node --test` in `crates/farhelm-ui/js-tests`, run `e320936a-a430-48b7-b45b-e8a5b2ef6f57`: 328 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `3157847c-bee9-4df2-b327-1137c87e135f`: 2270 passed, 14 skipped by design (WebKit
+  clipboard cases and tests that need a real signed-in agent or run on one engine only), none failed or flaky; the only
+  runtime `SKIPPED` messages are those WebKit clipboard cases.
+- Skipped: the workspace and desktop doctests (no documentation example changed), the desktop smoke test (the desktop
+  app crate is unchanged; the UI's desktop feature is covered by the check and tests above), the native Mac app (not
+  runnable here) and the installer (unchanged).
+
+The report's checks ran on a main from before helm-ingress-types and create-reservation-retention landed, and it skipped
+the full Rust runtime suite and the full browser suite; both ran this round, above. Nothing in the executor's report
+became untrue at landing.
