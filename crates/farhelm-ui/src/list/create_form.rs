@@ -2662,6 +2662,10 @@ pub(super) fn CreateSessionForm(
     // `list::view`'s `on_created` handler mirrors this client's own result
     // into it afterward.
     let preferences = use_context::<SharedPreferences>();
+    // A pending quick-launch sequence owns Enter: template-shortcuts.js finishes it from
+    // the window, after this form's handlers. The search box must not also act on that key.
+    let launch_sequence =
+        try_use_context::<crate::launch_sequence::LaunchSequence>().map(|sequence| sequence.0);
     let launch_catalog_base = base.clone();
     let mut launch_catalog = use_resource(move || {
         let base = launch_catalog_base.clone();
@@ -4361,10 +4365,37 @@ pub(super) fn CreateSessionForm(
     );
     let repository_active = repository_index().min(repository_suggestions.len().saturating_sub(1));
     let repository_suggestions_for_keys = repository_suggestions.clone();
+    let agent_without_harness = launch_tab() == LaunchTab::Agent && structured_harness().is_none();
+    let search_rows = crate::launch_composer::finish_search_results(
+        &composer_search(),
+        search_rows,
+        agent_without_harness,
+    );
+    let search_message = search_rows
+        .is_empty()
+        .then(|| {
+            crate::launch_composer::empty_search_message(
+                &composer_search(),
+                agent_without_harness,
+                launch_catalog.read().is_none(),
+                launch_templates.read().is_none(),
+            )
+        })
+        .flatten();
     let search_result_groups = crate::launch_composer::grouped_search_results(search_rows);
     let catalog_models_for_search_input = catalog_models.clone();
     let composer_hosts_for_search_input = composer_hosts.clone();
     let template_names_for_search_input = template_names.clone();
+    let repositories_for_search_input = repository_result
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .and_then(|reply| {
+            live_repository_authority
+                .peek()
+                .clone()
+                .map(|authority| (authority, reply.repos.clone()))
+        });
+    let search_query_for_keys = composer_search();
     let search_results_for_keys = search_result_groups
         .iter()
         .flat_map(|(_, results)| results.iter().cloned())
@@ -6170,6 +6201,22 @@ pub(super) fn CreateSessionForm(
                                 &evt.value(),
                                 &template_names_for_search_input,
                             ));
+                            let query = evt.value();
+                            let (scope, value) = crate::launch_composer::scoped_query(&query);
+                            if scope == crate::launch_composer::SearchScope::Github {
+                                // A discovery answer belongs to its exact query and
+                                // authority. A new owner/repo still offers its manual
+                                // row immediately, without borrowing old discoveries.
+                                let discovered = repositories_for_search_input.as_ref()
+                                    .filter(|(authority, _)| authority.query == value
+                                        && Some(authority) == live_repository_authority.peek().as_ref())
+                                    .map_or(&[][..], |(_, repos)| repos.as_slice());
+                                rows.extend(repository_choices(value, discovered).into_iter()
+                                    .map(crate::launch_composer::ComposerSearchResult::Github));
+                            }
+                            let rows = crate::launch_composer::finish_search_results(
+                                &query, rows, *launch_tab.peek() == LaunchTab::Agent && active_harness.is_none(),
+                            );
                             let groups = crate::launch_composer::grouped_search_results(rows);
                             composer_search_index.set(
                                 crate::launch_composer::default_search_index(&groups, &evt.value()),
@@ -6218,6 +6265,12 @@ pub(super) fn CreateSessionForm(
                                 // Literal emptiness matters: spaces still form
                                 // a query and must never launch stale choices.
                                 Key::Enter if !evt.is_composing() => {
+                                    // Step aside entirely, default included, while a sequence waits
+                                    // for this Enter; accepting a search row here would also rename
+                                    // the session from the box's text and clear it.
+                                    if launch_sequence.is_some_and(|sequence| sequence.read().is_some()) {
+                                        return;
+                                    }
                                     // A HELD Enter must not launch. Accepting a result
                                     // empties the box synchronously, so the key's OS
                                     // auto-repeat (tens of milliseconds later) would
@@ -6238,10 +6291,21 @@ pub(super) fn CreateSessionForm(
                                     if !draft_transition_allowed(ops) {
                                         return;
                                     }
-                                    if composer_search_open() && let Some(result) =
-                                        search_results_for_keys.get(composer_active_index).cloned()
-                                    {
-                                        accept_search.call((result, None, false));
+                                    // A queued key can observe a newer input signal
+                                    // before its rows render. Reveal that query first;
+                                    // never accept a stale row under different text.
+                                    if composer_search() != search_query_for_keys {
+                                        composer_search_open.set(true);
+                                        return;
+                                    }
+                                    let active = search_results_for_keys.get(composer_active_index)
+                                        .map(|_| composer_active_index);
+                                    match crate::launch_composer::search_enter_target(composer_search_open(), active) {
+                                        crate::launch_composer::SearchEnterTarget::Pick(index) => {
+                                            accept_search.call((search_results_for_keys[index].clone(), None, false));
+                                        }
+                                        crate::launch_composer::SearchEnterTarget::Reopen => composer_search_open.set(true),
+                                        crate::launch_composer::SearchEnterTarget::Nothing => {},
                                     }
                                 }
                                 _ => {}
@@ -6249,11 +6313,14 @@ pub(super) fn CreateSessionForm(
                         }
                         },
                     }
-                    if composer_search_open() && !search_result_groups.is_empty() {
+                    if composer_search_open() && (!search_result_groups.is_empty() || search_message.is_some()) {
                         div {
                             id: "launch-composer-search-results",
-                            role: "listbox",
+                            role: if search_result_groups.is_empty() { "status" } else { "listbox" },
                             class: "launch-composer-search-results",
+                            if let Some(message) = search_message {
+                                div { class: "launch-composer-search-message", "{message}" }
+                            }
                             for (group_index, (group, results)) in search_result_groups.iter().cloned().enumerate() {
                                 div {
                                     role: "group",

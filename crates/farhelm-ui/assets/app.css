@@ -6518,6 +6518,12 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   font-weight: 600;
 }
 
+.launch-composer-search-message {
+  padding: 6px;
+  color: var(--fg-1);
+  font-size: 13px;
+}
+
 .launch-composer-search-group > button {
   min-height: 32px;
   border: 1.5px solid transparent;

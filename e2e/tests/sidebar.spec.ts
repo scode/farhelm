@@ -5653,7 +5653,9 @@ test("composer path actions keep typing inert and browse the selected remote hos
   expect(createPosts, "Browse only opens the picker").toBe(0);
 });
 
-/** A no-result combobox Enter remains search input, never a form submit. */
+/** A no-result combobox Enter remains search input, never a form submit.
+ * Plain unmatched text now offers a session name, so the query uses a prefix
+ * that names no host: it has no result and nothing Enter could accept. */
 test("composer no-result Enter keeps a valid launch draft open without posting", async ({ page }) => {
   let createPosts = 0;
   await page.route("**/api/sessions", async (route) => {
@@ -5667,7 +5669,7 @@ test("composer no-result Enter keeps a valid launch draft open without posting",
   await form.getByRole("button", { name: "Codex", exact: true }).click();
   await expect(form.locator('button[type="submit"]')).toBeEnabled();
   const search = form.locator('.launch-composer-search input[role="combobox"]');
-  await search.fill("no-result-that-must-not-launch");
+  await search.fill("host:no-result-that-must-not-launch");
   await expect(search, "Enter must remain in the focused search field").toBeFocused();
   await expect(search, "the no-result search must remain open even though no listbox is rendered").toHaveAttribute("aria-expanded", "true");
   await expect(form.locator(".launch-composer-search").getByRole("option")).toHaveCount(0);
@@ -5680,7 +5682,7 @@ test("composer no-result Enter keeps a valid launch draft open without posting",
   await expect(form).toHaveAttribute("data-submit-witness", "0");
   expect(createPosts).toBe(0);
   await expect(form).toBeVisible();
-  await expect(search).toHaveValue("no-result-that-must-not-launch");
+  await expect(search).toHaveValue("host:no-result-that-must-not-launch");
 });
 
 /** Restoring defaults clears explicit fields but is still only a draft edit. */
@@ -7277,7 +7279,8 @@ test("composer search keeps active results visible and focus contained", async (
     [target, hovered].map((option) => option.evaluate((node) => getComputedStyle(node).backgroundColor)),
   );
   expect(activeFill, "a pointer hover must not make a different option look keyboard-active").not.toBe(hoverFill);
-  await search.fill("no-such-composer-result");
+  // A prefix that names no host: plain unmatched text would offer a session name instead.
+  await search.fill("host:no-such-composer-result");
   await expect(search).not.toHaveAttribute("aria-activedescendant");
   await search.fill("scroll-model-0");
   await form.getByRole("option", { name: /Model: scroll-model-0/ }).click();

@@ -281,11 +281,12 @@ test("New's command tab keeps the agent draft dormant and preserves the raw invo
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true }).click();
   await form.getByRole("button", { name: "yolo", exact: true }).click();
 
-  // Search offers no result for the command tab; the tab is the choice.
+  // Search does not switch tabs by interpreting arbitrary words. Unmatched
+  // text instead offers an explicit name action, which this test leaves alone.
   await search.fill("command");
   // Scoped to the search box's results: the host picker's own options are
   // also options.
-  await expect(form.locator(".launch-composer-search").getByRole("option")).toHaveCount(0);
+  await expect(form.locator(".launch-composer-search").getByRole("option", { name: "Set session name: command", exact: true })).toBeVisible();
   await search.fill("");
   await form.getByRole("tab", { name: "command", exact: true }).click();
   await expect(form).toHaveAttribute("data-composer-mode", "command");

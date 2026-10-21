@@ -626,15 +626,21 @@ agent choice is independent of that destination:
   moves focus to its flags editor. Enter on an empty box launches only a complete, valid selection through the ordinary
   Launch path; an incomplete attempt says why beside Launch, as does a refused Launch press, and the greyed-out button's
   hover names what is missing. Enter when the launcher itself has focus uses that same Launch path and refusal. Request
-  refusals appear there too, within the initial dialog viewport. Enter on a non-empty query with no result never
-  launches, and Escape closes the result list without clearing the query, so Enter after Escape does nothing until the
-  box is emptied. Enter on a choice button (launch-kind tab, harness, effort, or permissions) applies that choice and
-  then launches through the ordinary Launch path, or shows its refusal beside Launch; custom instead selects the mode
-  and focuses its required flags editor. Enter on the closed host picker or the agent-type dropdown, YOLO radios, or
-  Resume checkbox launches with the values shown, without changing them; those native controls retain their Space and
-  arrow behavior. Action buttons keep their normal press. The search box, model field, YOLO confirmation, and
-  save-as-template panel keep their own Enter rules. In the editable folder field, Enter chooses an arrow-highlighted
-  dropdown entry without launching; with no highlighted entry it launches as before. A held Enter never launches.
+  refusals appear there too, within the initial dialog viewport. Unmatched unlabelled text offers one visible **Set
+  session name** row; accepting it sets the name and clears the box without launching. Scoped queries with no results
+  show a live reason in the results area: a missing name, no matching choice, a pending model or template list, or the
+  owner/repo form a repository needs. Unknown model ids belong in the model field. On the agent tab, an unmatched effort
+  or permission word, or an `effort:` or `perms:` query, asks for a harness first when none is chosen. Spaces alone ask
+  for a search or an empty box and never launch. Escape or a click outside search closes its rows or message without
+  clearing the query. Enter on a nonempty query with the area closed first reopens it; a separate Enter picks the
+  visible highlighted row, or leaves the explanation in place when there is none. Enter on a choice button (launch-kind
+  tab, harness, effort, or permissions) applies that choice and then launches through the ordinary Launch path, or shows
+  its refusal beside Launch; custom instead selects the mode and focuses its required flags editor. Enter on the closed
+  host picker or the agent-type dropdown, YOLO radios, or Resume checkbox launches with the values shown, without
+  changing them; those native controls retain their Space and arrow behavior. Action buttons keep their normal press.
+  The search box, model field, YOLO confirmation, and save-as-template panel keep their own Enter rules. In the editable
+  folder field, Enter chooses an arrow-highlighted dropdown entry without launching; with no highlighted entry it
+  launches as before. A held Enter never launches.
 - Conversation selector: New, Clone and Replace with offer an optional one-time selector for every agent launch. Claude,
   Codex, Grok and Muse label it conversation id; Goose and OpenCode session id; Cursor chat id; Pi and OMP session file.
   Empty preserves an ordinary fresh start. The selector is not saved in templates, history, defaults or the session's
@@ -1087,10 +1093,12 @@ with ephemeral paths; an explicit existing-directory launch can still do so.
 
 Unlabelled search retains ordinary matching. Leading `name:`, `host:`, `harness:`, `model:`, `effort:`, `perms:`,
 `folder:`, `recent:`, `tl:` and `gh:` labels offer or filter their respective actions, case-insensitively; unknown
-labels and colons inside model IDs retain ordinary meaning. Accepting a name or host action clears search without
-launching. Invalid `gh:` input cannot launch a hidden existing directory. Host, installation, destination, title, agent
-choice and observed configuration changes invalidate an undispatched preview. Late responses cannot restore its
-authority or steal focus. An already ambiguous submission remains bound to its original request.
+labels and colons inside model IDs retain ordinary meaning. When no ordinary result matches, unlabelled text (including
+an unknown label) offers a visible name action instead; it never silently becomes a name on submit. Accepting a name or
+host action clears search without launching. Invalid `gh:` input cannot launch a hidden existing directory. Host,
+installation, destination, title, agent choice and observed configuration changes invalidate an undispatched preview.
+Late responses cannot restore its authority or steal focus. An already ambiguous submission remains bound to its
+original request.
 
 ### Lifecycle operations
 

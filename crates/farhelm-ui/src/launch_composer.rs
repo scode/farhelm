@@ -57,7 +57,7 @@ pub(crate) use farhelm_proto::launcher::{
 
 /// Return the stable lowercase word used for an effort in the composer.
 ///
-/// The wire enum and the visible control labels use the same six words. Keeping
+/// The wire enum and the visible control labels use the same words. Keeping
 /// that spelling here lets renderer-free search and the component controls share
 /// one protocol vocabulary instead of drifting through separate `Debug` or
 /// display conversions.
@@ -866,6 +866,110 @@ pub(crate) fn scoped_query(query: &str) -> (SearchScope, &str) {
     (scope, value[1..].trim())
 }
 
+/// Recognize choices that cannot apply before an agent's harness is chosen.
+/// Whole-word matching keeps ordinary names such as `highway` available.
+fn query_needs_harness(query: &str, agent_without_harness: bool) -> bool {
+    if !agent_without_harness {
+        return false;
+    }
+    let (scope, value) = scoped_query(query);
+    matches!(scope, SearchScope::Effort | SearchScope::Permissions)
+        || (scope == SearchScope::All
+            && (value.eq_ignore_ascii_case("default")
+                || EFFORT_ORDER
+                    .iter()
+                    .any(|effort| value.eq_ignore_ascii_case(effort_value(*effort)))
+                || [
+                    ComposerPermission::Guarded,
+                    ComposerPermission::OwnSetting,
+                    ComposerPermission::Yolo,
+                    ComposerPermission::Custom,
+                    ComposerPermission::Approve,
+                    ComposerPermission::SmartApprove,
+                    ComposerPermission::Chat,
+                ]
+                .iter()
+                .any(|permission| value.eq_ignore_ascii_case(permission.search_word()))))
+}
+
+/// Offer unmatched ordinary text as an explicit name action, never submit data.
+///
+/// Run this after every source, including repositories, has contributed its
+/// rows. History and catalog matches take priority; the same text can therefore
+/// offer a name now and a remembered folder later. Render and input indexing
+/// share this boundary so Enter always accepts a row the person can see.
+pub(crate) fn finish_search_results(
+    query: &str,
+    mut rows: Vec<ComposerSearchResult>,
+    agent_without_harness: bool,
+) -> Vec<ComposerSearchResult> {
+    let (scope, value) = scoped_query(query);
+    if rows.is_empty()
+        && scope == SearchScope::All
+        && !value.is_empty()
+        && !query_needs_harness(query, agent_without_harness)
+    {
+        rows.push(ComposerSearchResult::Name(value.to_string()));
+    }
+    rows
+}
+
+/// Explain an empty result area while the query is being typed.
+///
+/// Call only after combining and finalizing every source. Loading flags mean
+/// a read is still pending, not that a completed read failed; those failures
+/// retain their existing error and retry controls. An actually empty query
+/// has no search surface, while spaces must explain why Enter cannot launch.
+pub(crate) fn empty_search_message(
+    query: &str,
+    agent_without_harness: bool,
+    models_loading: bool,
+    templates_loading: bool,
+) -> Option<&'static str> {
+    if query.is_empty() {
+        return None;
+    }
+    let (scope, value) = scoped_query(query);
+    if query_needs_harness(query, agent_without_harness) {
+        return Some("choose a harness first");
+    }
+    Some(match scope {
+        SearchScope::All => "type a search or clear the search box to launch",
+        SearchScope::Name => "type a session name after name:",
+        SearchScope::Host => "no host matches",
+        SearchScope::Harness => "no harness matches",
+        SearchScope::Model if models_loading => "loading models…",
+        SearchScope::Model => "no model matches; enter a custom model id in the model field",
+        SearchScope::Effort => "no effort matches",
+        SearchScope::Permissions => "no permissions match",
+        SearchScope::Folder => "no folder matches",
+        SearchScope::Recent => "no recent setup matches",
+        SearchScope::Github if value.is_empty() => "type owner/repo to choose a repository",
+        SearchScope::Github => "no repository matches; enter owner/repo",
+        SearchScope::Template if templates_loading => "loading templates…",
+        SearchScope::Template => "no template matches",
+    })
+}
+
+/// Search Enter chooses a visible row, reveals the area, or leaves its message.
+/// Empty-query submission and repeat/composition guards belong to the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SearchEnterTarget {
+    Pick(usize),
+    Reopen,
+    Nothing,
+}
+
+/// A closed result area must become visible before Enter can accept a choice.
+/// Both launcher search and repository suggestions use this same policy.
+pub(crate) fn search_enter_target(open: bool, active: Option<usize>) -> SearchEnterTarget {
+    if !open {
+        SearchEnterTarget::Reopen
+    } else {
+        active.map_or(SearchEnterTarget::Nothing, SearchEnterTarget::Pick)
+    }
+}
+
 /// Offer the launch templates whose names contain a `tl:` query's value, in
 /// the order given (the helm lists them by name); `tl:` alone offers them
 /// all. Only the `tl:` scope offers templates: an unlabelled query is about
@@ -1653,6 +1757,138 @@ pub(crate) fn displayed_efforts(
 
 #[cfg(test)]
 mod tests {
+    /// Fallback is an offered action after all sources, not an implicit name.
+    /// Existing results and scoped queries must never acquire a hidden alternative.
+    #[test]
+    fn unmatched_search_offers_only_explicit_name_fallbacks() {
+        for query in ["asdf", "  foo:bar  ", "highway", "yolanda"] {
+            assert_eq!(
+                finish_search_results(query, vec![], true),
+                vec![ComposerSearchResult::Name(query.trim().into())]
+            );
+        }
+        for query in [
+            "",
+            "   ",
+            "host:missing",
+            "name:",
+            "gh:bad",
+            "model:bad",
+            "tl:",
+        ] {
+            assert!(
+                finish_search_results(query, vec![], true).is_empty(),
+                "{query}"
+            );
+        }
+        let matched = vec![ComposerSearchResult::Folder("asdf".into())];
+        assert_eq!(
+            finish_search_results("asdf", matched.clone(), true),
+            matched
+        );
+        // A matching source still wins even when its text is a reserved word.
+        let matched = vec![ComposerSearchResult::Folder("high".into())];
+        assert_eq!(
+            finish_search_results("high", matched.clone(), true),
+            matched
+        );
+    }
+
+    /// Choice words explain their missing harness only in agent mode, and only
+    /// as whole words. Command mode may deliberately use those words as names.
+    #[test]
+    fn search_choice_words_explain_the_missing_harness() {
+        for query in [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "HIGH",
+            " xhigh ",
+            "max",
+            "ultra",
+            "default",
+            "yolo",
+            "guarded",
+            "own",
+            "custom",
+            "approve",
+            "smart approve",
+            "chat",
+            "effort:",
+            "perms:xyz",
+        ] {
+            assert!(
+                finish_search_results(query, vec![], true).is_empty(),
+                "{query}"
+            );
+            assert_eq!(
+                empty_search_message(query, true, false, false),
+                Some("choose a harness first")
+            );
+            if scoped_query(query).0 == SearchScope::All {
+                assert_eq!(
+                    finish_search_results(query, vec![], false),
+                    vec![ComposerSearchResult::Name(query.trim().into())]
+                );
+            }
+        }
+    }
+
+    /// Every empty scoped result has a live explanation. Pending catalogs are
+    /// distinct from answered-empty catalogs so a failed read cannot load forever.
+    #[test]
+    fn empty_search_messages_cover_labels_and_loading() {
+        assert_eq!(empty_search_message("", false, false, false), None);
+        for (query, expected) in [
+            (" ", "type a search or clear the search box to launch"),
+            ("name:", "type a session name after name:"),
+            ("host:missing", "no host matches"),
+            ("harness:xyz", "no harness matches"),
+            ("folder:", "no folder matches"),
+            ("recent:missing", "no recent setup matches"),
+            ("effort:bogus", "no effort matches"),
+            ("perms:bogus", "no permissions match"),
+            (
+                "model:custom",
+                "no model matches; enter a custom model id in the model field",
+            ),
+            ("gh:", "type owner/repo to choose a repository"),
+            ("gh:bad", "no repository matches; enter owner/repo"),
+            ("tl:bad", "no template matches"),
+        ] {
+            assert_eq!(
+                empty_search_message(query, false, false, false),
+                Some(expected),
+                "{query}"
+            );
+        }
+        assert_eq!(
+            empty_search_message("model:x", false, true, false),
+            Some("loading models…")
+        );
+        assert_eq!(
+            empty_search_message("tl:", false, false, true),
+            Some("loading templates…")
+        );
+    }
+
+    /// Enter reveals a closed area before accepting its row; an open empty
+    /// area already explains the refusal and needs no additional state change.
+    #[test]
+    fn search_enter_requires_a_visible_choice() {
+        assert_eq!(
+            search_enter_target(false, Some(2)),
+            SearchEnterTarget::Reopen
+        );
+        assert_eq!(search_enter_target(false, None), SearchEnterTarget::Reopen);
+        assert_eq!(
+            search_enter_target(true, Some(2)),
+            SearchEnterTarget::Pick(2)
+        );
+        assert_eq!(search_enter_target(true, None), SearchEnterTarget::Nothing);
+    }
+
     /// The label must distinguish a literal file path from an opaque id.
     /// Keeping this exhaustive prevents an added harness inheriting wording
     /// that suggests the wrong kind of target or a reporting promise.
