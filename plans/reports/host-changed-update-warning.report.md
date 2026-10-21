@@ -99,3 +99,60 @@ Each PR received its single fresh gpt-6.1-sol/high correctness, design and idiom
 authoring checklist. #2501 had no findings. #2504's earlier-warning preservation finding was accepted, corrected in the
 same PR, and verified by the same reviewer with no new findings; the final runtime checks passed afterwards. There were
 no rejected findings or material scope departures. Commit and PR wording passed their separate fresh cold reads.
+
+### Landing
+
+Landed as #2501 and #2504, merged bottom-up, with the same content the report describes, rebased onto this round's main.
+It was the last of five plans in this landing round, after ui-session-actions, connection-stall-phase,
+never-started-launch-cause and yolo-confirm-launch-guarded.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained helm-ingress-types (typed request parsing in the helm, and tighter rules on how the
+helm reports errors that came from a supervisor) and create-reservation-retention (a create's retry key is freed when
+its session is deleted). A fresh-context reviewer and I read them, and the other four plans of this round, against this
+plan.
+
+- connection-stall-phase, earlier in this round, changed what a helm connection attempt reports and added a live
+  connection stage to the host list. This plan's helm test, which checks that updating a protocol-skewed host records
+  its identity, works with the extended connection result; the UI's update-following ignores the new stage field, so a
+  stage change neither detaches an update nor raises the warning.
+- helm-ingress-types does not change how the helm records a host's identity or reports host facts, which is what this
+  plan's warning reads.
+- ui-session-actions, never-started-launch-cause and yolo-confirm-launch-guarded do not touch hosts or updates.
+
+#### Fixes made during the landing
+
+None to the plan's code. Its TODO.md removal conflicted with neighboring changes on main; the landing kept both sides.
+
+#### Checks
+
+Together the five plans change the session launcher and Replace in the UI, the helm's connection attempts and host
+updates, and the supervisor's launch startup and terminal handling, about 8,900 added and 2,200 removed lines, including
+changes to five browser spec files; that reach is why this round ran the whole Rust workspace and the full browser
+suite. All of the following ran on the five plans stacked together on this round's main, including the landing's
+conflict resolutions:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed Markdown, JSON and TOML file,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, the website build (a docs page
+  changed), the debug build, the release web build of the UI and `scripts/check-desktop-assets.sh` (which also builds
+  the desktop app): all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `3907499f-e2bc-4ba3-9a83-ce6526597d54`: 4078 passed, none failed; 40 tests
+  were left out by the suite's own filters. Its retained output is complete and has no runtime `SKIPPED` message, so the
+  real systemd-scope and SSH tests these plans rely on ran.
+- `cargo nextest run -p farhelm-ui --features desktop`, run `63f71d93-80d2-464c-841e-4d7823a61c33`: 773 passed.
+  `node --test` in `crates/farhelm-ui/js-tests`, run `e320936a-a430-48b7-b45b-e8a5b2ef6f57`: 328 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `3157847c-bee9-4df2-b327-1137c87e135f`: 2270 passed, 14 skipped by design (WebKit
+  clipboard cases and tests that need a real signed-in agent or run on one engine only), none failed or flaky; the only
+  runtime `SKIPPED` messages are those WebKit clipboard cases.
+- Skipped: the workspace and desktop doctests (no documentation example changed), the desktop smoke test (the desktop
+  app crate is unchanged; the UI's desktop feature is covered by the check and tests above), the native Mac app (not
+  runnable here) and the installer (unchanged).
+
+The report's checks ran on a main from before helm-ingress-types and create-reservation-retention landed, and it skipped
+the full Rust runtime suite and the full browser suite; both ran this round, above. Nothing in the executor's report
+became untrue at landing.
