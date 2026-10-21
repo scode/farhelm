@@ -24,7 +24,7 @@
 # is what `dx build --platform desktop` produces with the asset names filled
 # in. `farhelm-desktop` itself is exercised by
 # `scripts/check-desktop-assets.sh` at build time and by the maintainer on a
-# real Mac (docs/manual-mac-checklist.md).
+# real Mac.
 # The one pixel-based check (ImageMagick, region-brightness) is an
 # interaction GATE, not an assertion: it only answers "has the create
 # form visibly opened yet, so it's safe to click into it" and retries

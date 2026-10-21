@@ -22,7 +22,7 @@
  * the click-count bridge's round trip to Rust. Those need AppKit; the Rust
  * press decision is unit-tested in window_chrome.rs, the bridge's reports in
  * crates/farhelm-ui/js-tests/click-detail.test.js, and the native behavior in
- * the release brick test and docs/manual-mac-checklist.md.
+ * the release brick test.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
