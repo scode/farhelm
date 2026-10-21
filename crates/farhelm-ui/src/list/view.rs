@@ -10,6 +10,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
+use crate::anchored_popovers::{AnchorRegion, MovedRows, MovementOwner, use_registration};
 use crate::api::{
     self, ListSort, Preferences, SessionFilter, SessionListing, delete_session, fetch_hosts,
     fetch_sessions, queue_seen_write, rename_session, stop_session,
@@ -23,7 +24,7 @@ use crate::peer::PeerText;
 use crate::provisioning::ProvisioningTraceShape;
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::rows::{
-    self, absence_is_evidence, apply_optimistic_renames, count_banner, menu_row_reordered,
+    self, absence_is_evidence, apply_optimistic_renames, count_banner,
     remove_row_reporting_menu_move, retire_vanished_renames, settle_optimistic_renames,
 };
 use crate::{ApiBase, HostId, Session, SessionStatus};
@@ -800,6 +801,37 @@ pub(crate) fn ListView(
     // too, and closing is where its entries become read, which the
     // read-on-close effect below does for every way it can close.
     let mut bell_open = use_signal(|| None::<OpenBell>);
+    // Register the existing slots once, in their original close order. Live
+    // peek readers preserve effect dependencies; no second open-state model
+    // can lag a toggle or replay an earlier movement against a new opening.
+    let popovers = use_context::<MovementOwner>();
+    use_registration(
+        popovers.clone(),
+        AnchorRegion::Sessions,
+        move || menu_open.peek().clone(),
+        move || {
+            let mut slot = menu_open;
+            slot.set(None);
+        },
+    );
+    use_registration(
+        popovers.clone(),
+        AnchorRegion::Hosts,
+        move || (*host_menu_open.peek()).map(|id| id.to_string()),
+        move || {
+            let mut slot = host_menu_open;
+            slot.set(None);
+        },
+    );
+    use_registration(
+        popovers.clone(),
+        AnchorRegion::Sessions,
+        move || bell_open.peek().as_ref().map(|open| open.id.clone()),
+        move || {
+            let mut slot = bell_open;
+            slot.set(None);
+        },
+    );
     // The read mark each list this page closed sent, by session id, so a
     // list reopened before the next listing arrives does not show the same
     // entries as new again. Failed writes release only their own current mark,
@@ -999,7 +1031,9 @@ pub(crate) fn ListView(
     // form, and `hosts_list_shape` covers host count/read-state, collapsed
     // provisioning-trace transitions, and automatic-disclosure transitions.
     // `hosts_panel_layout_epoch` catches rendered host-row growth as well.
-    // The initial run is a no-op because both row-menu signals start empty.
+    // The initial run is a no-op because all registered slots start empty.
+    // Registration and open-state reads are untracked, so opening alone
+    // cannot rerun this effect or receive a past layout invalidation.
     //
     // NOT exhaustive. A session row above the open one changing height in
     // place is mostly caught elsewhere: its detail line (ended, stale) comes
@@ -1019,20 +1053,13 @@ pub(crate) fn ListView(
     // no reorder guard, on the judgment that a small, largely id-ordered
     // registry reordering under an open host menu is rare enough to accept
     // rather than duplicate that machinery for a second row kind.
+    let layout_popovers = popovers.clone();
     use_effect(move || {
         layout_epoch();
         show_create();
         hosts_list_shape();
         hosts_panel_layout_epoch();
-        if menu_open.peek().is_some() {
-            menu_open.set(None);
-        }
-        if host_menu_open.peek().is_some() {
-            host_menu_open.set(None);
-        }
-        if bell_open.peek().is_some() {
-            bell_open.set(None);
-        }
+        layout_popovers.close_open_in(&[AnchorRegion::Hosts, AnchorRegion::Sessions]);
     });
     // The create dialog's explicit host choice names the installation used
     // for creation idempotency.
@@ -1092,45 +1119,35 @@ pub(crate) fn ListView(
     // or changing its text on a row ABOVE the open session menu can move
     // that menu's row without changing any listing. The listing-side check
     // in `commit_listing` cannot see it, because the lines come from
-    // `errors`, so this effect closes the menu itself (SPEC_impl.md: the
-    // menu closes on any layout change that could have moved its row).
+    // `errors`, so this effect reports affected displayed rows to the owner
+    // (SPEC_impl.md: close on layout changes that could have moved the row).
     // `error_rows` is `errors` as of the previous run, kept in a plain cell
     // because only this effect reads it and nothing renders from it.
     let error_rows = use_hook(|| Rc::new(Cell::new(HashMap::<String, String>::new())));
+    let error_popovers = popovers.clone();
     use_effect(move || {
         let now = errors.read().clone();
         let before = error_rows.replace(now.clone());
         // The open notification list floats beside its row exactly like a
         // menu, so a refusal line appearing above it moves it the same way.
-        let moved = |open_id: &str| {
-            let changed = before
-                .iter()
-                .filter(|(id, message)| now.get(*id) != Some(*message))
-                .chain(now.iter().filter(|(id, _)| !before.contains_key(*id)))
-                .map(|(id, _)| id.as_str());
+        let changed: HashSet<&str> = before
+            .iter()
+            .filter(|(id, message)| now.get(*id) != Some(*message))
+            .chain(now.iter().filter(|(id, _)| !before.contains_key(*id)))
+            .map(|(id, _)| id.as_str())
+            .collect();
+        let moved = {
             let listing = listing.peek();
             let Some(Ok(listing)) = listing.as_ref() else {
-                return false;
+                return;
             };
             let held = order_hold.peek().clone().unwrap_or_default();
-            rows::any_shown_above(
+            rows::rows_below_changed(
                 &rows::held_display_order(&held, &listing.sessions),
-                open_id,
-                changed,
+                &changed,
             )
         };
-        let open_menu = menu_open.peek().clone();
-        if let Some(open_id) = open_menu
-            && moved(&open_id)
-        {
-            menu_open.set(None);
-        }
-        let open_bell = bell_open.peek().clone();
-        if let Some(open) = open_bell
-            && moved(&open.id)
-        {
-            bell_open.set(None);
-        }
+        error_popovers.close_affected(&MovedRows::new(AnchorRegion::Sessions, moved));
     });
     // The hold's pointer facts, read by `rows::hold_should_release`: when the
     // pointer last moved over the list, and whether it is over it now. Plain
@@ -1238,12 +1255,13 @@ pub(crate) fn ListView(
             .is_some_and(|(filter, sort)| filter == requested && *sort == ordered_by)
     };
     let occurrences = use_context::<crate::claude_trust::OccurrenceDismissals>();
-    let mut commit_listing = move |generation: u64,
-                                   requested: SessionFilter,
-                                   ordered_by: ListSort,
-                                   mut fetched: Result<SessionListing, String>,
-                                   index: u64,
-                                   authoritative: bool| {
+    let listing_popovers = popovers.clone();
+    let commit_listing = move |generation: u64,
+                               requested: SessionFilter,
+                               ordered_by: ListSort,
+                               mut fetched: Result<SessionListing, String>,
+                               index: u64,
+                               authoritative: bool| {
         // Superseded reads, and reads answering a question nobody is asking
         // anymore, are dropped before they can touch anything — including
         // the optimistic-correction pruning below, which would otherwise
@@ -1320,21 +1338,10 @@ pub(crate) fn ListView(
             // confirmed still present — a row `menu_vanished` already
             // closed above has nothing left here to reconcile.
             //
-            // `still_open_id` is bound to an OWNED value, not left as a
-            // live `peek()` borrow: the mutation below needs `menu_open`
-            // free to write again, and a borrow held through the `if let`
-            // chain (Rust extends its temporary past the whole condition)
-            // would still be outstanding at that point. The PREVIOUS
-            // listing's `Ref` guard is scoped even tighter, to this one
-            // block: it must drop well before this closure's own
-            // `listing.set(...)` at the end, or that write would panic
-            // against a borrow still outstanding on the same signal.
-            let still_open_id = menu_open.peek().clone();
-            let still_open_bell = bell_open.peek().as_ref().map(|open| open.id.clone());
-            // Whether the row `open_id` moved on screen between the previous
-            // listing and this one, which detaches whatever floats beside it:
-            // its actions menu or its notification list.
-            let row_reordered = |open_id: &str| {
+            // Report displayed rows once, independently of popup kinds. The
+            // outgoing listing borrow must end before closers or the final
+            // listing write can run, preserving the old commit boundary.
+            let moved = {
                 let previous = listing_signal.peek();
                 let previous_sessions = match previous.as_ref() {
                     Some(Ok(prev)) => Some(prev.sessions.as_slice()),
@@ -1358,25 +1365,13 @@ pub(crate) fn ListView(
                 // closure was built, and a toggle in between decides
                 // whether detail lines are on screen now.
                 let detail_lines_shown = !compact_choice(preferences.0.peek().compact);
-                menu_row_reordered(
+                rows::menu_rows_reordered(
                     previous_shown.as_deref(),
                     &rows::held_display_order(&incoming_held, &listing.sessions),
-                    open_id,
                     detail_lines_shown,
                 )
             };
-            if !menu_vanished
-                && let Some(open_id) = still_open_id
-                && row_reordered(&open_id)
-            {
-                menu_open.set(None);
-            }
-            if !bell_vanished
-                && let Some(open_id) = still_open_bell
-                && row_reordered(&open_id)
-            {
-                bell_open.set(None);
-            }
+            listing_popovers.close_affected(&MovedRows::new(AnchorRegion::Sessions, moved));
             // Still open: this listing's entries are what the list shows next.
             let still_shown = bell_open.peek().as_ref().and_then(|open| {
                 let newest = listing
@@ -1526,8 +1521,10 @@ pub(crate) fn ListView(
     // ownership of everything it captures, and `on_stop`/`on_delete` need
     // their own copy of `base` afterward.
     let read_listing_base = base.clone();
+    let read_commit_listing = commit_listing.clone();
     let listing_read = move || {
         let base = read_listing_base.clone();
+        let mut commit_listing = read_commit_listing.clone();
         // Cloned OUT of the signal rather than read through it, and the
         // annotation is what enforces that: a borrow guard moved into the
         // async block below would be held across the walk's every round
@@ -1787,6 +1784,7 @@ pub(crate) fn ListView(
     };
 
     let stop_base = base.clone();
+    let stop_commit_listing = commit_listing.clone();
     // The surface reader, for the one path that reads outside it: a stop's
     // own refetch fails on its own and has nobody to retry it (see below).
     let stop_recovery = request_listing.clone();
@@ -1843,6 +1841,7 @@ pub(crate) fn ListView(
         // Cloned per invocation: the spawned task takes ownership of what it
         // captures, and this handler runs once per stop click.
         let stop_recovery = stop_recovery.clone();
+        let mut commit_listing = stop_commit_listing.clone();
         spawn(async move {
             // No optimistic flip (PLAN_M2.md design note): the row's
             // badge only ever reflects what the NEXT poll observes, so a
@@ -1935,6 +1934,7 @@ pub(crate) fn ListView(
     // `delete_session` and `errors`'/`pending`'s "delete:"-prefixed entry
     // in place of `on_stop`'s "stop:" one.
     let delete_refresh = request_listing.clone();
+    let delete_popovers = popovers.clone();
     // `guard` is what the prompt the user answered covered, or
     // `NothingAlive` for the one caller that deletes without asking (see
     // `on_delete`): the row it decided from can be stale, and the supervisor
@@ -1953,6 +1953,7 @@ pub(crate) fn ListView(
         super::trash::capture_row(&id);
         let base = delete_base.clone();
         let refresh = delete_refresh.clone();
+        let popovers = delete_popovers.clone();
         spawn(async move {
             let outcome = delete_session(&base, &id, guard).await;
             let archived = outcome.as_ref().is_ok_and(|reply| reply.archived);
@@ -1989,8 +1990,7 @@ pub(crate) fn ListView(
                     // an id that no longer exists, a confusing failure
                     // for an action that had already succeeded.
                     if let Some(Ok(current)) = listing.write().as_mut() {
-                        let open_menu = menu_open.peek().clone();
-                        let open_bell = bell_open.peek().as_ref().map(|open| open.id.clone());
+                        let open_anchor = popovers.first_open_row(AnchorRegion::Sessions);
                         // Judged on the displayed order, which an order hold
                         // can make differ from the served one. The menu and
                         // bell exclude each other; check their sole anchor
@@ -1999,11 +1999,13 @@ pub(crate) fn ListView(
                         if remove_row_reporting_menu_move(
                             &mut current.sessions,
                             &id,
-                            open_menu.as_deref().or(open_bell.as_deref()),
+                            open_anchor.as_deref(),
                             &held,
                         ) {
-                            menu_open.set(None);
-                            bell_open.set(None);
+                            // The old paired clear also wrote the closed slot.
+                            // Keep those effect notifications, including when
+                            // removal took the anchor itself out of the list.
+                            popovers.close_registered(AnchorRegion::Sessions);
                         }
                     }
                     // A listing read already in flight started before the
@@ -3766,8 +3768,7 @@ pub(crate) fn ListView(
                             // Removing metadata moves every row below it; an
                             // open menu, or notification list, still holds its
                             // old anchor coordinates.
-                            menu_open.set(None);
-                            bell_open.set(None);
+                            popovers.close_registered(AnchorRegion::Sessions);
                             remember_compact(&base, preferences, next);
                         },
                     }

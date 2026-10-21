@@ -231,6 +231,27 @@ pub(crate) fn menu_row_reordered(
     detail_lines_shown && detail_lines_above(previous) != detail_lines_above(current)
 }
 
+/// Report every surviving row covered by the existing anchor-movement rule.
+///
+/// One displayed-list report lets the movement owner select registered
+/// popovers without this producer enumerating menu kinds. The per-row predicate
+/// stays authoritative: this does not broaden it to text rewrap or refusal
+/// crossings, and a missing baseline remains a recovery/remount, not movement.
+/// Disappeared anchors are reconciled separately before this report is used.
+pub(crate) fn menu_rows_reordered(
+    previous: Option<&[Session]>,
+    current: &[Session],
+    detail_lines_shown: bool,
+) -> Vec<String> {
+    current
+        .iter()
+        .filter(|session| {
+            menu_row_reordered(previous, current, session.id.raw(), detail_lines_shown)
+        })
+        .map(|session| session.id.raw().to_owned())
+        .collect()
+}
+
 /// Whether any of `ids` is displayed above the row `open_id` in `shown`, the
 /// session list in its displayed order.
 ///
@@ -249,6 +270,19 @@ pub(crate) fn any_shown_above<'a>(
     };
     let above: HashSet<&str> = shown[..index].iter().map(|s| s.id.raw()).collect();
     ids.into_iter().any(|id| above.contains(id))
+}
+
+/// Select displayed anchors below a changed in-flow refusal row.
+///
+/// The error-map effect reports the same strict-above rule for every possible
+/// registration at once. Own-row, below-row and absent errors remain harmless;
+/// the caller supplies displayed rather than served order during a hold.
+pub(crate) fn rows_below_changed(shown: &[Session], changed: &HashSet<&str>) -> Vec<String> {
+    shown
+        .iter()
+        .filter(|session| any_shown_above(shown, session.id.raw(), changed.iter().copied()))
+        .map(|session| session.id.raw().to_owned())
+        .collect()
 }
 
 /// Whether a session row, outside compact mode, draws its second,
@@ -1165,6 +1199,22 @@ mod tests {
         assert!(!any_shown_above(&shown, "b", ["b"]));
         assert!(!any_shown_above(&shown, "b", ["gone"]));
         assert!(!any_shown_above(&shown, "missing", ["a"]));
+    }
+
+    /// Whole-row reports must retain the old per-anchor complements: a
+    /// removal selects rows below it, not the unchanged top anchor, and an
+    /// error selects strictly lower displayed rows. A recovery has no baseline.
+    #[farhelm_testtrace::test]
+    fn selected_row_reports_preserve_existing_anchor_boundaries() {
+        let before = vec![session("a", "a"), session("b", "b"), session("c", "c")];
+        let after = vec![session("a", "a"), session("c", "c")];
+        assert_eq!(menu_rows_reordered(Some(&before), &after, true), ["c"]);
+        assert!(menu_rows_reordered(None, &after, true).is_empty());
+        assert_eq!(
+            rows_below_changed(&before, &HashSet::from(["b", "missing"])),
+            ["c"]
+        );
+        assert!(rows_below_changed(&before, &HashSet::from(["c"])).is_empty());
     }
 
     /// No baseline listing to diff against — a first load, or recovery
