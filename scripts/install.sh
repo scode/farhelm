@@ -88,6 +88,18 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   # grep -E against this is not, by itself, enough.
   VERSION_PATTERN='^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(rc|dev)\.(0|[1-9][0-9]*))?$'
 
+  # The lowest version whose farhelm does this installer's locked work
+  # (`farhelm internal install`). Every release up to and including 0.30.0
+  # shipped the installer before this one, so the floor is the lowest version
+  # this project would tag above 0.30.0, 0.30.1's first dev build: every dev
+  # build, release candidate and release of whichever release brings this
+  # installer (0.30.1 or 0.31.0) sorts at or above it. A target below it is
+  # handed to its own release's installer before anything here changes the
+  # machine (see main, step 3), because its farhelm cannot do the work this
+  # installer hands it. A release tagged without this installer after 0.30.0
+  # would need the floor raised above it before this installer ships.
+  HANDOFF_FLOOR=0.30.1-dev.0
+
   # A literal newline and a literal carriage return, for the checks below
   # that need to test whether a value CONTAINS one. Built with printf rather
   # than embedded directly in the source: command substitution strips
@@ -108,6 +120,48 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   # prerequisite check in main).
   # shellcheck disable=SC2016 # the literal backslash escapes are the payload; nothing here is meant to expand
   GZIP_TAR_PROBE='\037\213\010\000\000\000\000\000\000\003\355\316\261\015\203\060\024\004\120\217\342\015\142\154\364\231\207\046\003\100\220\030\077\026\145\112\044\047\051\336\153\116\272\346\156\175\074\323\150\245\213\230\257\354\076\263\233\322\324\242\324\045\312\174\365\321\152\113\271\014\177\326\035\373\153\335\162\376\306\324\077\072\177\175\000\000\000\000\000\000\000\000\000\200\133\336\272\161\326\206\000\050\000\000'
+
+  # True iff the decimal number $1 is smaller than $2. Both are plain digit
+  # strings without leading zeros (VERSION_PATTERN), but of any length, so
+  # they are compared as text rather than with `[ -lt ]`, whose integers
+  # overflow: the shorter number is smaller, and numbers of one length
+  # compare digit by digit in the C locale.
+  number_below() {
+    if [ "${#1}" -ne "${#2}" ]; then
+      [ "${#1}" -lt "${#2}" ]
+      return
+    fi
+    [ "$1" != "$2" ] && LC_ALL=C awk -v a="$1" -v b="$2" 'BEGIN { exit !(a "" < b "") }'
+  }
+
+  # True iff release version $1 sorts below $2 by semantic-version precedence.
+  # Both are normalized versions as VERSION_PATTERN accepts them, without the
+  # "v". A release sorts above every prerelease of the same X.Y.Z, and
+  # prereleases of one X.Y.Z compare by their label (dev before rc), then by
+  # their number.
+  version_below() {
+    vb_left=$1
+    vb_right=$2
+    vb_a=${vb_left%%-*}.
+    vb_b=${vb_right%%-*}.
+    while [ -n "$vb_a" ]; do
+      vb_x=${vb_a%%.*}
+      vb_y=${vb_b%%.*}
+      number_below "$vb_x" "$vb_y" && return 0
+      number_below "$vb_y" "$vb_x" && return 1
+      vb_a=${vb_a#*.}
+      vb_b=${vb_b#*.}
+    done
+    case $vb_left in *-*) ;; *) return 1 ;; esac
+    case $vb_right in *-*) ;; *) return 0 ;; esac
+    vb_x=${vb_left#*-}
+    vb_y=${vb_right#*-}
+    if [ "${vb_x%%.*}" != "${vb_y%%.*}" ]; then
+      [ "${vb_x%%.*}" = dev ]
+      return
+    fi
+    number_below "${vb_x#*.}" "${vb_y#*.}"
+  }
 
   # Validates $1 against $VERSION_PATTERN and echoes the normalized "vX.Y.Z"
   # (optionally "-rc.N" or "-dev.N") tag, or returns failure and prints
@@ -873,6 +927,52 @@ PLIST_EOF
         error 'download failed (HTTP %s): %s\n' "${sums_status:-000}" "$sums_url"
         exit 1
       fi
+    fi
+
+    # A release older than this installer installs itself. Its farhelm
+    # cannot do this installer's locked work, and the documented way to go
+    # back to an older release (FARHELM_VERSION=... with the newest /install.sh)
+    # and a /latest rolled back below it both land here. Its own install.sh is
+    # fetched from its release folder, checked against the SHA256SUMS just
+    # read, and run with this environment, before anything on this machine
+    # changes. This development tree's own version is exempt: it has no place
+    # in release order and is what this installer's tests install.
+    if [ "$VERSION_NUM" != 0.0.0-unreleased ] && version_below "$VERSION_NUM" "$HANDOFF_FLOOR"; then
+      # A release below the floor that carries this hand-off itself (one
+      # published with a floor above its own version) would hand off to
+      # itself forever. The marker the hand-off below exports turns that
+      # into a refusal; installers older than the hand-off ignore it.
+      if [ -n "${FARHELM_INSTALL_HANDED_OFF:-}" ]; then
+        error 'the installer of %s handed off to itself; that release cannot be installed this way\n' "$VERSION_TAG"
+        exit 1
+      fi
+      handoff_dir=$(mktemp -d "${TMPDIR:-/tmp}/farhelm-handoff.XXXXXX") || {
+        error 'could not create a private folder to run the %s installer from\n' "$VERSION_TAG"
+        exit 1
+      }
+      trap 'rm -rf "$handoff_dir"' EXIT
+      trap 'exit 129' HUP
+      trap 'exit 130' INT
+      trap 'exit 143' TERM
+      handoff_script="$handoff_dir/install.sh"
+      if ! curl_get -fsSL --max-filesize 1048576 -o "$handoff_script" "$BASE_URL/install.sh" 2>/dev/null; then
+        error 'could not download %s, the installer of %s, which installs releases this old itself\n' "$BASE_URL/install.sh" "$VERSION_TAG"
+        exit 1
+      fi
+      printf '%s\n' "$SUMS_TEXT" >"$handoff_dir/SHA256SUMS"
+      handoff_hits=$(awk '$2=="install.sh"{c++} END{print c+0}' "$handoff_dir/SHA256SUMS")
+      handoff_expected=$(awk '$2=="install.sh"{print $1; exit}' "$handoff_dir/SHA256SUMS")
+      handoff_actual=$(sha256_of "$handoff_script") || handoff_actual=""
+      if [ "$handoff_hits" -ne 1 ] || [ -z "$handoff_actual" ] || [ "$handoff_actual" != "$handoff_expected" ]; then
+        error 'the installer of %s does not match its SHA256SUMS; refusing to run it\n' "$VERSION_TAG"
+        exit 1
+      fi
+      printf 'Farhelm %s is older than this installer, so its own installer installs it.\n' "$VERSION_NUM" >&2
+      # Pinned to the release resolved here, so an unpinned run cannot read a
+      # /latest that changed meanwhile and install a newer release the old way.
+      handoff_rc=0
+      FARHELM_INSTALL_HANDED_OFF=1 FARHELM_VERSION=$VERSION_TAG /bin/sh "$handoff_script" </dev/null || handoff_rc=$?
+      exit "$handoff_rc"
     fi
 
     INSTALL_DIR="$HOME/.local/bin"
