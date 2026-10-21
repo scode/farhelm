@@ -100,3 +100,100 @@ structure reviewer checked the rebase, navigation sizing and test assertions, an
 a formatter had misplaced. The docs reviewer found that side callouts would exceed the screenshot's fixed crop; moving
 them above the dialog and inspecting the final images resolved that finding. No findings remain. Both message cold reads
 passed. Separate documentation passes covered all touched files.
+
+### Landing
+
+Landed as #2447 and #2448, merged bottom-up. It was the first of four plans in this landing round, which stacked every
+plan in queue order and checked them together before any merged. Its content is what the report describes, rebased onto
+this round's main, with one SPEC.md conflict resolution, two SPEC.md wording corrections and one browser test fix,
+described below.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained round 109's six plans, the browser suite's move to three stacks run in parallel, a
+TLS certificate fix, documentation and plan bookkeeping. A fresh-context reviewer and I read them and the other three
+plans of this round against this plan.
+
+- select-newest-on-close, from round 109, added a clause to the same SPEC.md settings paragraph this plan rewrote:
+  automatic session selection rereads the shared visits immediately before choosing. The two conflicted textually; the
+  landing kept this plan's sectioned-dialog text and added that clause in its place.
+- select-newest-on-close also makes a page save the automatic session selection while it loads. One older Settings test
+  compared every preference before and after its interactions, so that save broke it; see the fix below. None of this
+  plan's own new or changed tests depends on which session opens or counts preference reads.
+- menu-arrow-focus-race, from round 109, added a focus check to menus. Settings does not use the menu components, and
+  the check's page-wide focus listener does not interfere with focusing a section heading.
+
+The other conflicts were in TODO.md, where round 109 had already removed neighboring entries and the resolution removes
+only this plan's own entry, and in the provisioning browser tests' imports, where main's parallel-suite change and this
+plan each added one import; both are kept. None of this plan's tests uses the parts of the browser-test harness that
+change made per stack.
+
+#### Fixes made during the landing
+
+- SPEC.md: two leftovers from the old layout. A sentence about link clicks still named the old **terminal links**
+  section, now **terminal**, and the sessions sentence said "under **sessions**" twice.
+- The Settings test that checks empty space and container Enter leave a choice alone compared all preferences before and
+  after; after round 109 the page load itself saves the selection, so it failed on Chromium on this round's stack (run
+  `87ee3a27-84d7-4a4e-ab9f-8d478f5f4b35`, kept). It now leaves the selection fields out of that comparison and still
+  proves the Settings interactions write nothing; it then passed three times on each engine (run
+  `489cb959-129e-42d2-acd9-9f4e34350f0f`). The break comes from round 109's change, not this plan; the fix sits here
+  because this plan already edits that test file.
+
+#### Possible follow-ups
+
+- Not from this plan, but found while landing this round: the sidebar test "the sidebar app bar explains the helm and
+  window builds" fails on main two runs in five (see Checks). It fakes the helm's build stamp by intercepting every API
+  reply, and a faked reply sometimes arrives after its request was already settled. It first failed on round 109's
+  landed code, which added preference reads and a save while a page loads; that those requests are the ones racing the
+  test is my guess, not established. Fixing the test, or recording it as a flake, is open.
+- As the report says, the docs screenshot of the Manage hosts page still shows the old layout until the next full docs
+  screenshot refresh publishes the image captured for this layout.
+
+#### Checks
+
+Every plan in this round was executed before round 109's six plans landed, so none had been tested against them, and
+while this round ran, main also moved the browser suite onto three stacks run in parallel (each test worker runs its own
+helm and supervisors). The plans were stacked again onto that main before the checks that count, so the browser evidence
+below comes from the harness they land on. Together the four change how the supervisor runs every request, which helm
+actions finish after a client disconnects, the Settings dialog and the launcher's Enter key; that reach is why this
+round ran the whole Rust workspace and the full browser suite. All of the following ran on all four plans stacked
+together on that main, including the fixes made while landing them:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed Markdown, JSON and TOML file,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`,
+  `scripts/check-desktop-assets.sh`, and the website build (`bun run build` in `website/`): all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `fa6052db-ebdf-4204-8d20-25b8780367ec` (kept): 3977 passed, 1 failed:
+  `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay`, which has an open TODO deflake entry ("Shallow
+  pause resets under load"). Because supervisor-request-modes changes how the supervisor reads messages from a host
+  connection, I ran that test alone ten times on main without this round and ten times on this round's stack, minutes
+  apart on the same machine: 9 and 10 failures. Both sides fail almost every time, so that comparison cannot show
+  whether the plan changes the test; it does show the test is now close to always failing on main on this machine, where
+  round 109 saw it fail one time in five. See the possible follow-up in supervisor-request-modes' notes.
+- `cargo nextest run -p farhelm-ui --features desktop`, run `d8ff6545-9b27-45f8-aa33-7dfac8f07108` (kept): 724 passed, 1
+  failed: a timing assertion in the tests of how the UI orders preference saves, code no plan here touches. Ten
+  repetitions alone all passed, so I judge it machine load during the full run; on one observation it is not recorded as
+  a flake. `node --test` in `crates/farhelm-ui/js-tests`, run `b88528dc-6d84-4d63-996d-56eb15c69510`: 328 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers, no retries, run
+  `ac3bef42-b713-4f70-8e6e-0fd7b86e0a16` (kept): 2227 passed, 14 skipped by design (WebKit clipboard cases and tests
+  that need a real signed-in agent or run on one engine only), 3 failed, all on WebKit:
+  - a terminal test and a two-host test each saw a session marked as having new output where they expected a plain
+    status. Neither test file is changed by this round, and three repeats of each on both engines then passed (run
+    `8158eb60-714f-4b18-bf7f-51c8654840b8`), so I judge both timing under load with three stacks running; on one
+    observation neither is recorded as a flake;
+  - "the sidebar app bar explains the helm and window builds", which fails inside the browser tests' own way of faking
+    the helm's build stamp: a faked reply arrives after its request was already settled. It fails on main without this
+    round too, two runs in five (run `db0c82af-6a1e-4359-8724-7fa17c65dbba`), and first showed up on round 109's landed
+    code, so it is not from this round; see the possible follow-up in structured-settings-dialog's notes.
+- Before the parallel suite landed, the plans also ran on the earlier main. A narrow run there (run
+  `87ee3a27-84d7-4a4e-ab9f-8d478f5f4b35`) found the Settings test failure fixed in structured-settings-dialog, and a
+  full browser pass, stopped part-way when the parallel change landed (run `b8b3e14f-b202-4015-b7d9-1ef15efb820d`),
+  showed the app-bar test above and a launcher search test fixed in launcher-enter-feedback.
+- Skipped: the workspace and desktop doctests (no plan adds or changes a documentation example),
+  `cargo check -p farhelm-desktop` and the desktop smoke test (the desktop app's own crate is unchanged), the native Mac
+  app (not runnable here) and the installer (unchanged).
+
+The report's checks ran on a main from before round 109's landings, so they no longer describe what landed; the combined
+runs above supersede them. Nothing else in the executor's report became untrue at landing.

@@ -53,3 +53,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`test-hygiene-oct19`](reports/test-hygiene-oct19.report.md) landed 2026-10-20 in #2429, #2432, #2434, #2435: Fix a macOS path comparison in checkout tests and three browser-test cleanups that stop early or arm late (4 triage outcomes).
 - [`menu-arrow-focus-race`](reports/menu-arrow-focus-race.report.md) landed 2026-10-20 in #2438: Drop a desktop menu focus move that would land after the user moved focus elsewhere (1 TODO entry).
 - [`select-newest-on-close`](reports/select-newest-on-close.report.md) landed 2026-10-20 in #2439, #2441: When the open session goes away, open the most recently visited one, from a history kept on the helm (1 TODO entry).
+- [`structured-settings-dialog`](reports/structured-settings-dialog.report.md) landed 2026-10-21 in #2447, #2448: Restructure the Settings dialog into a sidebar of seven sections, like the Templates dialog (1 TODO entry).
