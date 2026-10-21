@@ -28,10 +28,35 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   activate a link after recovery misses dragging; native delivery and security impact are unverified.
 
 - [`shortcut-save-overwrites-intervening-agent-binding.md`](shortcut-save-overwrites-intervening-agent-binding.md) — A
-  shortcut save can restore an older target after an agent edit; a harmful later launch is unverified.
+  shortcut save can restore an older target, including a pre-read agent edit after save failure; harmful launch is
+  unverified.
 
 - [`template-preservation-promise-omits-last-write-wins.md`](template-preservation-promise-omits-last-write-wins.md) —
   The agent-edit preservation promise omits accepted template overwrites; loss from reliance is conditional.
+
+- [`guarded-preview-widens-source-deletion-consent.md`](guarded-preview-widens-source-deletion-consent.md) — A delayed
+  Guarded preview can widen consent to delete a source session that has started running.
+
+- [`header-yolo-answer-may-cross-question-opening.md`](header-yolo-answer-may-cross-question-opening.md) — An old answer
+  could authorize a reopened header question; the complete shipped input route remains unestablished.
+
+- [`superseding-launcher-may-retain-old-replace-source.md`](superseding-launcher-may-retain-old-replace-source.md) — A
+  superseded launcher could retain an earlier replacement source; normal event reachability remains unresolved.
+
+- [`numeric-token-regex-performance-remains-unresolved.md`](numeric-token-regex-performance-remains-unresolved.md) — A
+  bounded numeric-token regex slowdown remains conditional on unverified browser-engine behavior and impact.
+
+- [`repository-label-ambiguity-has-unresolved-selection-risk.md`](repository-label-ambiguity-has-unresolved-selection-risk.md)
+  — Ambiguous repository labels have an unresolved harmful-selection interpretation; launch bypasses were refuted.
+
+- [`changed-host-warning-flattens-compared-identities.md`](changed-host-warning-flattens-compared-identities.md) — A
+  changed-host warning loses distinct identities and isolation; consequential reliance remains unestablished.
+
+- [`escaped-start-remedy-changes-program-and-state-path.md`](escaped-start-remedy-changes-program-and-state-path.md) —
+  The suggested start command changes path bytes; collateral inactive-installation harm remains conditional.
+
+- [`respawn-reflow-crosses-launch-excerpt-boundary.md`](respawn-reflow-crosses-launch-excerpt-boundary.md) — Restart can
+  retain preceding-run terminal text as a startup error; consequential confidentiality exposure remains unverified.
 
 ## High priority: material UX degradation
 
@@ -40,6 +65,15 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`short-window-outage-blocks-pointer-recovery.md`](short-window-outage-blocks-pointer-recovery.md) — A short-window
   outage explanation may block pointer recovery and healthy-session navigation; keyboard and resize remain available.
+
+- [`guarded-instead-can-duplicate-uncertain-launch.md`](guarded-instead-can-duplicate-uncertain-launch.md) — Guarded
+  “instead” can duplicate an uncertain authorized launch; whether it promises one intent remains ambiguous.
+
+- [`untouched-checkout-folder-save-undoes-cli-edit.md`](untouched-checkout-folder-save-undoes-cli-edit.md) — Saving an
+  untouched checkout-folder field can overwrite a newer CLI setting.
+
+- [`spare-checkout-rewind-keeps-removed-history.md`](spare-checkout-rewind-keeps-removed-history.md) — After an upstream
+  rewind, a prepared checkout can successfully retain removed commits instead of the current upstream worktree.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -107,7 +141,7 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   record still has an unresolved Host Settings footer-clipping case; exact geometry is unverified.
 
 - [`prompt-prefill-test-opens-before-source-selection.md`](prompt-prefill-test-opens-before-source-selection.md) — The
-  prompt-prefill test may open New before its source session is selected; startup ordering is unverified.
+  prompt-prefill and clone-defaults tests may open New before source selection; startup ordering is unverified.
 
 - [`release-heading-can-close-review-page-script.md`](release-heading-can-close-review-page-script.md) — A malformed
   curated release heading can inject review-page script; attacker influence and practical impact are unverified.
@@ -138,3 +172,58 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`welcome-recovery-counts-unfinished-selection-read.md`](welcome-recovery-counts-unfinished-selection-read.md) — The
   welcome-recovery test may reject an extra legitimate preference read; adverse scheduling is unverified.
+
+- [`approval-poll-http-await-exceeds-deadline.md`](approval-poll-http-await-exceeds-deadline.md) — A stalled HTTP
+  response can outlive the approval test's deadline until the outer runner stops it.
+
+- [`removed-deflake-items-leave-exclusions.md`](removed-deflake-items-leave-exclusions.md) — Removing two tracked flake
+  items leaves their machine-readable sweep exclusions orphaned.
+
+- [`landing-leaves-baseline-flake-unrecorded.md`](landing-leaves-baseline-flake-unrecorded.md) — A landing report defers
+  recording a reproduced baseline flake; its private runtime evidence was not authenticated here.
+
+- [`launcher-report-confuses-apply-with-launch.md`](launcher-report-confuses-apply-with-launch.md) — The landing report
+  says Enter launches where the launcher actually applies queued templates to the draft.
+
+- [`numeric-version-guard-hides-artifact-filenames.md`](numeric-version-guard-hides-artifact-filenames.md) — Some bare
+  artifact filenames lose file actions under the numeric-version guard; acceptance is ambiguous.
+
+- [`host-dialog-reservation-does-not-exclude-settings.md`](host-dialog-reservation-does-not-exclude-settings.md) — A
+  Settings click during host-dialog admission may leave both dialogs inert until Escape; native ordering is unmeasured.
+
+- [`launcher-submit-callback-retains-render-snapshots.md`](launcher-submit-callback-retains-render-snapshots.md) —
+  Launcher renders retain additional submit snapshots until closure; practical memory impact is unmeasured.
+
+- [`conformance-test-never-admits-management-candidates.md`](conformance-test-never-admits-management-candidates.md) —
+  The generic responsiveness regression busy-refuses its candidates before their admitted waits.
+
+- [`probe-timeout-discards-parsed-remote-path.md`](probe-timeout-discards-parsed-remote-path.md) — Probe cleanup can
+  discard an already parsed executable path; a real escaped-helper trigger is unverified.
+
+- [`guarded-answer-loses-launcher-focus.md`](guarded-answer-loses-launcher-focus.md) — An ordinary Guarded answer
+  removes its focused control during preview refresh without a handoff; browser fallback is untested.
+
+- [`guarded-cancellation-test-lacks-effect-witness.md`](guarded-cancellation-test-lacks-effect-witness.md) — The
+  edited-form cancellation test lacks a browser-effect witness before its manual launch clears pending work.
+
+- [`repository-search-reports-empty-before-reply.md`](repository-search-reports-empty-before-reply.md) — Partial
+  repository search reports no matches while discovery is still pending.
+
+- [`startup-selection-read-outlives-intervening-visits.md`](startup-selection-read-outlives-intervening-visits.md) — A
+  delayed startup read can select an older session after intervening visits and deletion; timing is unmeasured.
+
+- [`replacement-test-supervisor-spawns-before-pid-publication.md`](replacement-test-supervisor-spawns-before-pid-publication.md)
+  — Worker interruption can leave a detached test supervisor outside cleanup registration.
+
+- [`duplicate-uninstall-advice-points-to-removed-owner.md`](duplicate-uninstall-advice-points-to-removed-owner.md) —
+  After owner removal, a duplicate's uninstall refusal points to the missing entry instead of explaining Retry.
+
+- [`retention-plan-omits-live-retry-downgrade-limit.md`](retention-plan-omits-live-retry-downgrade-limit.md) — The
+  plan's downgrade caveat omits older-code refusal of converted live checkout retries; intended compatibility is
+  ambiguous.
+
+- [`cancelled-upload-commit-retains-reply-entry.md`](cancelled-upload-commit-retains-reply-entry.md) — Cancelled final
+  upload saves can retain reply bookkeeping on a surviving connection; practical memory impact is unmeasured.
+
+- [`plan-pruning-can-interrupt-shared-cargo-build.md`](plan-pruning-can-interrupt-shared-cargo-build.md) — Plan cleanup
+  may interrupt another workspace's build using its target directory; the concurrent failure schedule is unverified.

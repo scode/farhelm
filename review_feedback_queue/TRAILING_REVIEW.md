@@ -6,6 +6,80 @@ This is the exclusive starting point for the next trailing code review of `main`
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
 
+## Incomplete review toward e7d3bb10
+
+Pinned range: `5c6e49937b1e779be2a5445059637aadf3757356..e7d3bb107618dccd17b6a06ee807a72cb3f87ef0`, 216 commits. The tip
+and its saved checkpoint came from fetched main, with ancestry verified. All 983 individual commit/file patch parts,
+including deletions and intermediate versions, were assigned exactly once to 105 bounded functional groups. Fifty-seven
+fresh auditors checked proposed exclusions and follow-up mechanisms. Every group's mandatory manifest stayed below 2,000
+lines and 64 KiB, including the complete commit list. Surrounding source and coverage sections were read selectively,
+not exhaustively across the repository.
+
+The review is **incomplete**, and `Last reviewed commit` remains unchanged. Mandatory delivery is complete for every
+group, but eight groups stop on unresolved source or causal premises:
+
+- The header-answer primary and its auditor (`g044`, `g125`) could not establish or exclude delivery of an older trusted
+  answer across cancellation, another admitted request and a reopened question. Matching Dioxus source refutes
+  asynchronous retained-click transport, but same-scope task/render ordering alone does not settle the complete route.
+- The guarded-launch primary and its auditor (`g046`, `g151`) retain the possible earlier replacement source after a
+  mounted launcher is superseded. Modal barriers obstruct the naive interaction; no shipped normal input route through
+  the complete sequence was established.
+- The numeric-token auditor (`g122`) could not establish production browser regex traversal or optimization. Structural
+  suffix overlap is confirmed, exponential repartitioning is refuted, and hostile-host-only availability impact is
+  explicitly accepted. Ordinary bounded-output slowdown remains conditional.
+- The repository-label auditor (`g138`), changed-host-warning auditor (`g139`) and start-command auditor (`g143`) could
+  not settle their severe-impact causal chains. Their presentation or path-corruption mechanisms are established;
+  harmful selection, consequential warning reliance and collateral damage to another inactive installation remain
+  unestablished.
+
+These are missing premises, not merely unmeasured occurrence rates. The affected investigations stopped under the
+skill's stuck-investigation rule; nominal empty searches were not used to claim completion. The other 154 groups
+completed parent-inspected later-turn synthesis and a separate credible empty discovery pass on their original
+identities. Productive verified discoveries received further searches. Equivalent candidates and exclusions raised only
+in prose were reconciled across groups; exact accepted behavior, source refutation and duplicate-only exclusions remain
+scoped to the supplied mechanisms. Existing records remain open unless explicitly extended here.
+
+The result retains 29 new items: eight provisionally highest, three high and 18 other. These are records for triage, not
+29 reproduced bugs. The strongest consent finding is that a Guarded Replace-with preview wait can widen source deletion
+permission after the affirmative click. A separate source-established startup-excerpt defect restores old terminal rows
+into new history during tmux respawn; consequential confidentiality exposure remains unproved. The other highest records
+preserve the unresolved premises above. Their conservative buckets do not turn conditional mechanisms into demonstrated
+security or work-loss outcomes.
+
+The high items concern a possibly duplicated uncertain launch when Guarded is offered “instead,” an untouched checkout
+folder Save undoing a newer CLI edit, and a prepared checkout retaining history removed by an upstream rewind. The first
+retains an explicit changed-request contract ambiguity. Other items concern convenience, diagnostics, test oracles,
+fixture ownership, recording omissions and a planned downgrade disclosure. Pre-existing behavior is identified where
+relevant. Two existing items are extended: failed shortcut-save overlays can overwrite agent changes completed before
+the next fresh read, and the Clone-defaults fixture has another source-selection readiness gap.
+
+The exact pinned tmux 3.7c archive was checksum-verified and inspected statically. Its command queue refutes the
+proposed guard/capture interleaving, and its synchronous death path refutes the suspected one-row banner-readiness race.
+Two reviewers independently found the different alternate-screen restoration defect; a third reconciled the source and
+actual restart route, correcting its earlier broad attribution exclusion. No tmux execution was needed for those source
+checks, and no runtime pass is inferred from inspected tests.
+
+Reviewers used Codex `gpt-6.1-sol` with high reasoning and separate resumable identities, with at most 19 concurrent
+children. Six backend capacity-failed attempts were retained and resumed with the same identities and configuration.
+Evidence remains private under run `a7b93df6-ca17-4bff-8608-f443575ae5e6`: `completion.md` is the compact record;
+`completion.json` contains stable assignments, manifest versions, session identities, attempted/successful actual turns,
+synthesis and discovery passes, audit references and stopping reasons. `dispositions.json` reconciles every latest
+finding identity with retained records, extensions or scoped exclusions, retaining withdrawn events' original line
+references. Each group keeps its append-only findings, progress, replies and delivery audits. Delivery establishes
+neither attention nor understanding, correctness or exhaustiveness.
+
+A recording-time fetch found main at `47ccf5fbfcf323094bd2133a7e2b6771797bc98e`, eight commits beyond the pinned tip,
+with the same checkpoint, queue, known bugs and triage ledger. Their specification changes and empty Planned bucket were
+checked for coverage. Focused later-code inspection found the background askpass omission repaired; the successful
+upstream-rewind concern remains. The clean working copy moved to that main before recording. Those eight commits are
+outside this review and are not claimed reviewed.
+
+No product runtime, browser, native Mac, vendor-agent or filesystem-fault tests ran, and no historical runtime results
+were reused as current passes. Private historical reports were not independently authenticated. This result changes only
+feedback records, their index and this incomplete-review note; no fixes or triage outcomes were executed. Validation
+covers changed Markdown, whitespace, queue/index consistency, record fields, assignments and instruction pointers. The
+PR remains a draft for separate manual review and merging and proposes no checkpoint advancement.
+
 ## Incomplete review toward fe0348ef
 
 Pinned range: `5c6e49937b1e779be2a5445059637aadf3757356..fe0348ef8d4fabc3c6140a4fd89fb19dd34178b1`, 120 commits: 64
