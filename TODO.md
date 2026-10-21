@@ -196,6 +196,84 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   there) from a supervisor that accepts connections but never finishes its hello from a browser-forwarding placement
   hang. Per-phase deadlines would make it exact, but a phase marker on the shared deadline may be enough; decide which
   while planning.
+- **Launch guarded from the YOLO confirmation.** When the session launcher shows the confirmation for a YOLO launch on a
+  host that asks first, offer a one-click "launch guarded instead" button next to "start YOLO session anyway", so
+  switching to a safer launch does not mean cancelling, changing the permission and launching again. UI details TBD.
+
+- Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
+  supervisor's `wrapper_failure_detail` (launch_artifacts.rs) records "the agent was never started: the launch never
+  reached farhelm's exec shim, so something before it — the transient cgroup scope wrapper, or the login shell itself —
+  exited first", which names two suspects and separates neither. The wrapper's stderr is still sitting in the dead pane
+  under `remain-on-exit`, so a `capture-pane` at classification time could say which. A first attempt (2026-08-23)
+  appended the pane's last words to the durable `LastOutcome::Error` detail and was withdrawn in review for three
+  reasons any retry must design around: (1) SPEC.md's terminal-retention contract — terminal content lives only as long
+  as the host-side terminal, with no separate history store — which a durable excerpt of startup/rc output contradicts,
+  so either the quote must not be persisted (log it, or surface it only while the pane exists) or the spec must
+  authorize a bounded exception first; (2) the pane is reused across relaunches and keeps its scrollback, so a
+  generation N+1 that died before printing anything would quote generation N's conversation unless the capture is fenced
+  to text written after the wrapper started; (3) the ownership-and-deadness check and the capture are separate steps
+  with no lifecycle claim across them on the list path, so a same-pane restart in between would quote a live later
+  generation — revalidate atomically with the capture, and budget the capture so N never-started rows cannot cost N tmux
+  timeouts on the hot list. The e2e harness already has `wait_for_agent_ready` (harness.rs), whose failure text shows
+  the same pane text for a test's own diagnosis; that is the non-durable shape to start from.
+
+- Decide the reservation tombstone scope for interactive creates, then do the work the verdict leaves standing. When a
+  client attaches an intent key to a create, the supervisor records it in `create_reservations` so a retried request
+  returns the already-created session instead of double-launching an agent. The durability-era decision made these
+  reservations PERMANENT for interactive creates (spawn's are session-bounded), which makes `create_reservations` the
+  only store table that grows without bound — every interactive create ever made adds a row nothing deletes. Two
+  follow-on debts, deliberately distinct: (a) digest the reservation fingerprint — rows currently retain enough of the
+  original request to match retries, i.e. request plaintext (titles, cwds, invocations) retained forever; hashing bounds
+  each row and ends the plaintext retention but does nothing about row count; (b) expiry/pruning — actually bounds the
+  count, at the deliberate cost that a pruned key becomes reusable after the horizon (a very late retry could
+  double-create). The digest half is worth doing under either verdict. If the verdict bounds the scope (session-lifetime
+  — defensible, since a retry outliving the session it protects is protecting nothing), the pruning half mostly
+  evaporates; that reverses a durability-milestone decision, so record the reversal where that decision lives. The store
+  module's own docs describe both debts.
+
+- Run the review-cap residue pass: one targeted review (test-quality and docs lenses only) over the three largest M7
+  surfaces — auth, provisioning, packaging. During the M7 stack's reviews, the test-quality lens (often docs too) was
+  still producing ACCEPTED findings at the hard three-pass cap on every large PR (#114, #115, #117, #118, #119/#120,
+  #121, #122, #123) — those reviews ended because the budget ran out, not because the reviewers ran dry, so there are
+  almost certainly real accepted-grade findings never surfaced in security-critical code. Treat a pass that returns zero
+  accepted findings as saturation finally reached; anything it does return gets the normal fix-or-reject treatment.
+  Cheap to run, and the difference between "reviewed until done" and "reviewed until the meter ran out" — do it before
+  declaring the first real release final.
+
+- Close the HostId-reuse create-default window. The create dialog defaults its host field to the selected session's host
+  BY ROW ID, but a host row id survives a retarget (or an adopt where a new install takes over) while the machine behind
+  it changes: look at a session on the old machine, have the row retargeted, open the create dialog within one
+  listing-refresh interval, and the create lands on the successor install. The request's own install-incarnation check
+  passes — the request was genuinely built against the successor — so the system does what it was told while the user's
+  intent lands on the wrong machine. Raised as a definite security finding in #156's review; accepted there as residual
+  because selection reconciliation already narrows the window to one refresh interval. The full fix: the helm's listing
+  must denormalize install identity per session so the client binds its create default to the install the user was
+  actually looking at, not the row id. Not urgent (needs a concurrent retarget plus a one-interval race), but "accepted
+  residual" should not quietly become "permanent".
+
+- **Rewrite the "host changed while its update was being followed" warning.** Seen 2026-10-18 on a dev build whose host
+  (running `farhelm 0.0.0-unreleased`, 0 sessions) had also been added by accident to the maintainer's 0.29.0 helm,
+  which ran setup on it too. The dev build's host row showed an update that completed every step (create-directories,
+  upload-farhelm, install-farhelm, write-unit skipped because the unit already had the requested content, daemon-reload,
+  enable-supervisor, enable-linger, restart-supervisor, attach-supervisor), with the host green, and under it a yellow
+  warning: "the host changed while its update was being followed, so that run's outcome is unknown; this row claims
+  nothing from it". To the user that reads as nonsense: every step says completed, nothing says what "the host changed"
+  means or what to do, and "this row claims nothing from it" is internal bookkeeping language. The warning fires when
+  the row's host, connection kind, destination or install identity changes while an update is in flight (the update's
+  own reconnect does not count); which one changed here was not investigated. Say in product terms what changed and what
+  it means for the user (the update may or may not be what is running now; check the host's version), and consider
+  whether the warning should stay sticky once the host is connected and healthy.
+
+- **Rewrite the uninstall refusal for a host with a version mismatch.** Seen 2026-10-18 on the maintainer's 0.29.0 helm
+  for a test host that a dev build had updated: the row read "too new", "the host speaks protocol 60 (farhelm
+  0.0.0-unreleased); this helm speaks 51 (farhelm 0.29.0)" and "<host> runs a newer farhelm than this helm; update this
+  helm so the two speak the same protocol version". Choosing uninstall then printed, in red: "uninstall is refused while
+  this host is version-skew: a supervisor answers there that Farhelm cannot use, so it cannot check that none of its
+  sessions are running. Resolve that first, then choose uninstall again". The state's internal name ("version-skew") is
+  pasted into the sentence, "a supervisor answers there that Farhelm cannot use" is vague, and "resolve that first"
+  gives no way to resolve it. The same wording covers identity-mismatch, identity-unverified and duplicate hosts. Name
+  the problem in user terms (this host runs a newer or older Farhelm than this helm) and the concrete way out for each
+  case. Host refusals now appear in a dialog; this entry concerns their wording.
 
 ## Doc todo
 
@@ -773,61 +851,6 @@ exhaustive match or a default enforces. A clear fix of the targeted bug class is
 
 ## Unbucketized
 
-- **Launch guarded from the YOLO confirmation.** When the session launcher shows the confirmation for a YOLO launch on a
-  host that asks first, offer a one-click "launch guarded instead" button next to "start YOLO session anyway", so
-  switching to a safer launch does not mean cancelling, changing the permission and launching again. UI details TBD.
-
-- Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
-  supervisor's `wrapper_failure_detail` (launch_artifacts.rs) records "the agent was never started: the launch never
-  reached farhelm's exec shim, so something before it — the transient cgroup scope wrapper, or the login shell itself —
-  exited first", which names two suspects and separates neither. The wrapper's stderr is still sitting in the dead pane
-  under `remain-on-exit`, so a `capture-pane` at classification time could say which. A first attempt (2026-08-23)
-  appended the pane's last words to the durable `LastOutcome::Error` detail and was withdrawn in review for three
-  reasons any retry must design around: (1) SPEC.md's terminal-retention contract — terminal content lives only as long
-  as the host-side terminal, with no separate history store — which a durable excerpt of startup/rc output contradicts,
-  so either the quote must not be persisted (log it, or surface it only while the pane exists) or the spec must
-  authorize a bounded exception first; (2) the pane is reused across relaunches and keeps its scrollback, so a
-  generation N+1 that died before printing anything would quote generation N's conversation unless the capture is fenced
-  to text written after the wrapper started; (3) the ownership-and-deadness check and the capture are separate steps
-  with no lifecycle claim across them on the list path, so a same-pane restart in between would quote a live later
-  generation — revalidate atomically with the capture, and budget the capture so N never-started rows cannot cost N tmux
-  timeouts on the hot list. The e2e harness already has `wait_for_agent_ready` (harness.rs), whose failure text shows
-  the same pane text for a test's own diagnosis; that is the non-durable shape to start from.
-
-- Decide the reservation tombstone scope for interactive creates, then do the work the verdict leaves standing. When a
-  client attaches an intent key to a create, the supervisor records it in `create_reservations` so a retried request
-  returns the already-created session instead of double-launching an agent. The durability-era decision made these
-  reservations PERMANENT for interactive creates (spawn's are session-bounded), which makes `create_reservations` the
-  only store table that grows without bound — every interactive create ever made adds a row nothing deletes. Two
-  follow-on debts, deliberately distinct: (a) digest the reservation fingerprint — rows currently retain enough of the
-  original request to match retries, i.e. request plaintext (titles, cwds, invocations) retained forever; hashing bounds
-  each row and ends the plaintext retention but does nothing about row count; (b) expiry/pruning — actually bounds the
-  count, at the deliberate cost that a pruned key becomes reusable after the horizon (a very late retry could
-  double-create). The digest half is worth doing under either verdict. If the verdict bounds the scope (session-lifetime
-  — defensible, since a retry outliving the session it protects is protecting nothing), the pruning half mostly
-  evaporates; that reverses a durability-milestone decision, so record the reversal where that decision lives. The store
-  module's own docs describe both debts.
-
-- Run the review-cap residue pass: one targeted review (test-quality and docs lenses only) over the three largest M7
-  surfaces — auth, provisioning, packaging. During the M7 stack's reviews, the test-quality lens (often docs too) was
-  still producing ACCEPTED findings at the hard three-pass cap on every large PR (#114, #115, #117, #118, #119/#120,
-  #121, #122, #123) — those reviews ended because the budget ran out, not because the reviewers ran dry, so there are
-  almost certainly real accepted-grade findings never surfaced in security-critical code. Treat a pass that returns zero
-  accepted findings as saturation finally reached; anything it does return gets the normal fix-or-reject treatment.
-  Cheap to run, and the difference between "reviewed until done" and "reviewed until the meter ran out" — do it before
-  declaring the first real release final.
-
-- Close the HostId-reuse create-default window. The create dialog defaults its host field to the selected session's host
-  BY ROW ID, but a host row id survives a retarget (or an adopt where a new install takes over) while the machine behind
-  it changes: look at a session on the old machine, have the row retargeted, open the create dialog within one
-  listing-refresh interval, and the create lands on the successor install. The request's own install-incarnation check
-  passes — the request was genuinely built against the successor — so the system does what it was told while the user's
-  intent lands on the wrong machine. Raised as a definite security finding in #156's review; accepted there as residual
-  because selection reconciliation already narrows the window to one refresh interval. The full fix: the helm's listing
-  must denormalize install identity per session so the client binds its create default to the install the user was
-  actually looking at, not the row id. Not urgent (needs a concurrent retarget plus a one-interval race), but "accepted
-  residual" should not quietly become "permanent".
-
 - Run the manual Mac checklist (`docs/manual-mac-checklist.md` — that file IS the record; its "Observed:" fields are the
   state, all "not run"). Blocked on a human with a real Mac. Not covered by any CI: Playwright's WebKit is not
   WKWebView.
@@ -861,26 +884,3 @@ exhaustive match or a default enforces. A clear fix of the targeted bug class is
   session that Farhelm launched sees the session's environment and runs under the session's processes, with and without
   `--no-daemon`; then decide whether Farhelm should pass `--no-daemon` or otherwise adapt.
 
-- **Rewrite the "host changed while its update was being followed" warning.** Seen 2026-10-18 on a dev build whose host
-  (running `farhelm 0.0.0-unreleased`, 0 sessions) had also been added by accident to the maintainer's 0.29.0 helm,
-  which ran setup on it too. The dev build's host row showed an update that completed every step (create-directories,
-  upload-farhelm, install-farhelm, write-unit skipped because the unit already had the requested content, daemon-reload,
-  enable-supervisor, enable-linger, restart-supervisor, attach-supervisor), with the host green, and under it a yellow
-  warning: "the host changed while its update was being followed, so that run's outcome is unknown; this row claims
-  nothing from it". To the user that reads as nonsense: every step says completed, nothing says what "the host changed"
-  means or what to do, and "this row claims nothing from it" is internal bookkeeping language. The warning fires when
-  the row's host, connection kind, destination or install identity changes while an update is in flight (the update's
-  own reconnect does not count); which one changed here was not investigated. Say in product terms what changed and what
-  it means for the user (the update may or may not be what is running now; check the host's version), and consider
-  whether the warning should stay sticky once the host is connected and healthy.
-
-- **Rewrite the uninstall refusal for a host with a version mismatch.** Seen 2026-10-18 on the maintainer's 0.29.0 helm
-  for a test host that a dev build had updated: the row read "too new", "the host speaks protocol 60 (farhelm
-  0.0.0-unreleased); this helm speaks 51 (farhelm 0.29.0)" and "<host> runs a newer farhelm than this helm; update this
-  helm so the two speak the same protocol version". Choosing uninstall then printed, in red: "uninstall is refused while
-  this host is version-skew: a supervisor answers there that Farhelm cannot use, so it cannot check that none of its
-  sessions are running. Resolve that first, then choose uninstall again". The state's internal name ("version-skew") is
-  pasted into the sentence, "a supervisor answers there that Farhelm cannot use" is vague, and "resolve that first"
-  gives no way to resolve it. The same wording covers identity-mismatch, identity-unverified and duplicate hosts. Name
-  the problem in user terms (this host runs a newer or older Farhelm than this helm) and the concrete way out for each
-  case. Host refusals now appear in a dialog; this entry concerns their wording.
