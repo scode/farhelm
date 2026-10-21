@@ -87,3 +87,81 @@ the remaining transition, request and memory assertions. Product code did not ch
 runtime evidence above belongs to this executor. A separate scope review approved the bounded preview wait and shared
 submit path. Commit and PR wording passed a fresh cold read. No finding was rejected and no maintainer decision was
 needed.
+
+### Landing
+
+Landed as #2506, with the same behavior the report describes, rebased onto this round's main, with one substantial
+conflict resolution in the session launcher described below. It was the fourth of five plans in this landing round,
+after ui-session-actions, connection-stall-phase and never-started-launch-cause; host-changed-update-warning followed
+it.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained helm-ingress-types (typed request parsing in the helm, and tighter rules on how the
+helm reports errors that came from a supervisor) and create-reservation-retention (a create's retry key is freed when
+its session is deleted). Neither changes the launcher, Restart with or how the UI reads a YOLO refusal. A fresh-context
+reviewer and I read them, and the other four plans of this round, against this plan.
+
+- ui-session-actions, the first plan of this round, changed the launcher's submit code in place: every manual release of
+  the operation lock became a guard drop, and the refusal flags became typed outcomes. This plan had moved that whole
+  submit code into one shared entry point, so the two collided; see the fix below.
+- With that merged, the guarded answer follows ui-session-actions' rules: in the launcher it applies the permission
+  change first and then goes through the shared entry point, which takes the operation lock in the same step; while a
+  managed checkout's fresh preview is pending, no lock is held. Restart with's guarded answer uses its existing
+  lock-holding path and the typed restart refusal check.
+- Plain Replace's YOLO question, now shared between the sidebar and header by ui-session-actions, offers no guarded
+  answer, as this plan's SPEC.md change says.
+- connection-stall-phase, never-started-launch-cause and host-changed-update-warning do not touch the launcher or YOLO
+  questions.
+
+#### Fixes made during the landing
+
+- The launcher's submit code: this plan's report describes moving it as mechanical, and ui-session-actions changed the
+  same code in place. The landing merged ui-session-actions' changes into the moved copy (a three-way merge of the old
+  code before and after ui-session-actions against the moved copy), and the launcher's submit now simply calls that
+  shared entry point. The reviewer compared the result with ui-session-actions' version of that code: the two are
+  identical apart from formatting. Nothing of either plan was dropped or duplicated, and no manual lock release remains.
+- Its TODO.md removal conflicted with neighboring changes on main; the landing kept both sides.
+
+#### Things you should know
+
+- A launch carries a retry key, so that pressing Launch again after a lost reply repeats the same request instead of
+  starting a second session. Choosing "start guarded session instead" drops the refused request's key, because the
+  permission changed. That matters in one rare sequence: a YOLO launch is accepted but its reply is lost, the host is
+  then switched to ask before YOLO launches, and the retry is refused with the YOLO question. Answering it with the
+  guarded choice then starts a second, guarded session beside the first. Changing the permission by hand and pressing
+  Launch already behaves the same way, and SPEC.md allows it; the new answer is a shortcut to that path, not a new risk.
+
+#### Checks
+
+Together the five plans change the session launcher and Replace in the UI, the helm's connection attempts and host
+updates, and the supervisor's launch startup and terminal handling, about 8,900 added and 2,200 removed lines, including
+changes to five browser spec files; that reach is why this round ran the whole Rust workspace and the full browser
+suite. All of the following ran on the five plans stacked together on this round's main, including the landing's
+conflict resolutions:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed Markdown, JSON and TOML file,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, the website build (a docs page
+  changed), the debug build, the release web build of the UI and `scripts/check-desktop-assets.sh` (which also builds
+  the desktop app): all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `3907499f-e2bc-4ba3-9a83-ce6526597d54`: 4078 passed, none failed; 40 tests
+  were left out by the suite's own filters. Its retained output is complete and has no runtime `SKIPPED` message, so the
+  real systemd-scope and SSH tests these plans rely on ran.
+- `cargo nextest run -p farhelm-ui --features desktop`, run `63f71d93-80d2-464c-841e-4d7823a61c33`: 773 passed.
+  `node --test` in `crates/farhelm-ui/js-tests`, run `e320936a-a430-48b7-b45b-e8a5b2ef6f57`: 328 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `3157847c-bee9-4df2-b327-1137c87e135f`: 2270 passed, 14 skipped by design (WebKit
+  clipboard cases and tests that need a real signed-in agent or run on one engine only), none failed or flaky; the only
+  runtime `SKIPPED` messages are those WebKit clipboard cases.
+- Skipped: the workspace and desktop doctests (no documentation example changed), the desktop smoke test (the desktop
+  app crate is unchanged; the UI's desktop feature is covered by the check and tests above), the native Mac app (not
+  runnable here) and the installer (unchanged).
+
+The report's checks ran on a main from before helm-ingress-types and create-reservation-retention landed and without
+ui-session-actions, and it ran selected browser specs only; the full Rust runtime suite and the full browser suite ran
+this round, above, on the merged launcher code. The report's description of the submit change as a plain move is no
+longer the whole story: the moved code now also carries ui-session-actions' changes. The report's note that the
+`start-a-session/yolo-confirmation` docs screenshot is intentionally stale still holds.
