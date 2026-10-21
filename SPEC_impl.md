@@ -2356,20 +2356,22 @@ same launch markers, environment scrubbing and `GIT_TERMINAL_PROMPT=1` as the cl
 
 ```text
 git init --bare -q <cache>
-git -c gc.autoDetach=false -c maintenance.autoDetach=false --git-dir <cache> fetch --prune <https url> '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+git -c gc.autoDetach=false -c maintenance.autoDetach=false -c gc.autoPackLimit=10 --git-dir <cache> fetch --prune <https url> '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
 git -c core.commitGraph=false clone --reference <cache> --dissociate -- <https url> <cwd>
 ```
 
 The fetch names the bare cache explicitly so Git's `safe.bareRepository=explicit` policy remains in force. Bare init is
 idempotent, including after an interrupted initial fetch. Command-line refspecs keep the cache to branches and tags
-without writing a remote configuration. Git's automatic gc remains enabled, but runs in the foreground so it cannot
-outlive the lock. Plain `--reference`, rather than `--reference-if-able`, makes an unavailable cache fail the clone
-stage; `--dissociate` copies the borrowed objects so the checkout has no alternates and keeps its GitHub origin. The
-clone alone disables commit-graph reads to avoid Git before 2.55.0 losing a cached commit's tree during dissociation;
-this command-local workaround can go once Git 2.55 is the minimum (upstream fix `3d8e4004c6`). The lock stays held
-through dissociation, then its modification time records successful use. There is no timeout or fallback. Cache errors
-name the path and use the existing `Failed{stage: clone}` state; `CloneStarted` covers the whole sequence, including
-restart refusal after interruption.
+without writing a remote configuration. Git's automatic gc remains enabled, with `gc.autoPackLimit=10` so accumulated
+fetch packs consolidate sooner instead of making each dissociating clone repeat their delta search. It runs in the
+foreground so it cannot outlive the lock; an occasional launch is slower while the cache consolidates. Plain
+`--reference`, rather than `--reference-if-able`, makes an unavailable cache fail the clone stage; `--dissociate` copies
+the borrowed objects so the checkout has no alternates and keeps its GitHub origin. The clone alone disables
+commit-graph reads to avoid Git before 2.55.0 losing a cached commit's tree during dissociation; this command-local
+workaround can go once Git 2.55 is the minimum (upstream fix `3d8e4004c6`). The lock stays held through dissociation,
+then its modification time records successful use. There is no timeout or fallback. Cache errors name the path and use
+the existing `Failed{stage: clone}` state; `CloneStarted` covers the whole sequence, including restart refusal after
+interruption.
 
 Supervisor startup sweeps `repo-cache/` on a blocking worker. It enumerates the permanent locks and tries each without
 waiting, skipping a cache still in use by a shim that survived supervisor restart. Under the lock it removes leftover

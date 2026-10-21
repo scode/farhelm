@@ -1833,13 +1833,18 @@ fn clone_with_repo_cache(
 
         let mut fetch = launch_child_command(std::ffi::OsStr::new("git"), spec);
         // This is our own bare cache, named explicitly so Git's
-        // safe.bareRepository=explicit policy need not be relaxed.
+        // safe.bareRepository=explicit policy need not be relaxed. Consolidate
+        // accumulated fetch packs sooner: dissociation otherwise repeats the
+        // expensive delta search on every clone. Foreground gc keeps that work
+        // under the cache lock, at the cost of an occasional slower launch.
         fetch
             .args([
                 "-c",
                 "gc.autoDetach=false",
                 "-c",
                 "maintenance.autoDetach=false",
+                "-c",
+                "gc.autoPackLimit=10",
                 "--git-dir",
             ])
             .arg(cache)
@@ -4199,6 +4204,8 @@ printf 'AGENT-RAN\n'
                 "gc.autoDetach=false",
                 "-c",
                 "maintenance.autoDetach=false",
+                "-c",
+                "gc.autoPackLimit=10",
                 "--git-dir",
                 cache,
                 "fetch",
@@ -5066,6 +5073,164 @@ printf 'AGENT-RAN\n'
                 .unwrap(),
             "graph-backed content\n"
         );
+    }
+
+    /// A normal launch must consolidate a cache with more than ten fetch packs.
+    ///
+    /// Small fetches otherwise leave separate packs whose delta search is paid
+    /// again on every dissociating clone. Force that actual on-disk premise,
+    /// then let the production shim fetch trigger foreground maintenance. No
+    /// explicit test-side gc may stand in for the behavior under test.
+    #[farhelm_testtrace::test]
+    fn d2_real_git_consolidates_accumulated_cache_packs() {
+        let setup = tempfile::tempdir().unwrap();
+        let work = setup.path().join("upstream");
+        std::fs::create_dir(&work).unwrap();
+
+        // Setup has no ambient Git configuration or repository context. Every
+        // override belongs to a child command, never the test process itself.
+        let git = |args: &[&str]| -> std::process::Output {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .env_clear()
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_CONFIG_COUNT", "0")
+                .output()
+                .expect("run fixture git");
+            assert!(
+                out.status.success(),
+                "fixture git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+        git(&["init", "-q", "-b", "main", work.to_str().unwrap()]);
+        let upstream_url = format!("file://{}", work.display());
+        let fixture = PrepFixture::new("https://github.com/example/repo.git", None, "/bin/sh");
+        fixture.install_script("fake-agent", "#!/bin/sh\nexit 0\n");
+        let cache = &fixture.preparation.repo_cache_path;
+        std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+        git(&["init", "--bare", "-q", cache.to_str().unwrap()]);
+
+        // Each fetch transfers a new commit over a transport that produces a
+        // pack. Suppress consolidation only during setup and force even these
+        // tiny transfers to stay packed; neither override persists in the cache.
+        for revision in 0..12 {
+            std::fs::write(
+                work.join("tracked-file.txt"),
+                format!("revision {revision}\n"),
+            )
+            .unwrap();
+            git(&["-C", work.to_str().unwrap(), "add", "."]);
+            git(&[
+                "-C",
+                work.to_str().unwrap(),
+                "-c",
+                "user.name=fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-q",
+                "-m",
+                "fixture",
+            ]);
+            git(&[
+                "-c",
+                "gc.auto=0",
+                "-c",
+                "fetch.unpackLimit=1",
+                "--git-dir",
+                cache.to_str().unwrap(),
+                "fetch",
+                "--prune",
+                &upstream_url,
+                "+refs/heads/*:refs/heads/*",
+                "+refs/tags/*:refs/tags/*",
+            ]);
+        }
+
+        // Count actual packs rather than trusting the setup commands: a Git
+        // version that unpacked or merged them would not exercise the limit.
+        let pack_count = || {
+            std::fs::read_dir(cache.join("objects/pack"))
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| path.extension() == Some(std::ffi::OsStr::new("pack")))
+                .count()
+        };
+        let before = pack_count();
+        assert!(
+            before > 10,
+            "premise: cache must have >10 packs, got {before}"
+        );
+        let upstream_head = git(&["-C", work.to_str().unwrap(), "rev-parse", "HEAD"]);
+        assert_eq!(
+            git(&[
+                "--git-dir",
+                cache.to_str().unwrap(),
+                "rev-parse",
+                "refs/heads/main"
+            ])
+            .stdout,
+            upstream_head.stdout,
+            "premise: maintenance must run even when the launch fetch has no new objects"
+        );
+
+        let child_path = format!(
+            "{}:{}",
+            fixture.bin_dir().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let instead_of_key = format!("url.{upstream_url}.insteadOf");
+        let envs = [
+            ("GIT_CONFIG_COUNT", std::ffi::OsStr::new("1")),
+            ("GIT_CONFIG_KEY_0", std::ffi::OsStr::new(&instead_of_key)),
+            (
+                "GIT_CONFIG_VALUE_0",
+                std::ffi::OsStr::new("https://github.com/example/repo.git"),
+            ),
+            ("GIT_CONFIG_GLOBAL", std::ffi::OsStr::new("/dev/null")),
+            ("GIT_CONFIG_SYSTEM", std::ffi::OsStr::new("/dev/null")),
+        ];
+        let (report, terminal, status) = fixture.run_shim_in_child_with(
+            Some(std::ffi::OsStr::new(&child_path)),
+            &envs,
+            &["GIT_CONFIG_PARAMETERS"],
+        );
+        assert!(
+            status.success() && report.is_empty(),
+            "preparation: status={status:?} report={report} terminal={terminal}"
+        );
+        let after = pack_count();
+        assert!(
+            after > 0 && after <= 10 && after < before,
+            "the production fetch must consolidate cache packs before returning: \
+             before={before} after={after} terminal={terminal}"
+        );
+        assert_eq!(fixture.state().unwrap(), PreparationState::Ready);
+        let checkout = Path::new(&fixture.preparation.cwd);
+        assert_eq!(
+            git(&["-C", checkout.to_str().unwrap(), "rev-parse", "HEAD"]).stdout,
+            upstream_head.stdout,
+            "consolidation must preserve the clone's expected commit"
+        );
+        assert_eq!(
+            std::fs::read_to_string(checkout.join("tracked-file.txt")).unwrap(),
+            "revision 11\n"
+        );
+        assert!(
+            !checkout.join(".git/objects/info/alternates").exists(),
+            "the checkout must remain independent of the consolidated cache"
+        );
+        git(&[
+            "--git-dir",
+            cache.to_str().unwrap(),
+            "fsck",
+            "--no-dangling",
+        ]);
+        git(&["-C", checkout.to_str().unwrap(), "fsck", "--no-dangling"]);
     }
 
     /// D2: the shim, running the REAL git through the insteadOf mapping,

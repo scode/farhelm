@@ -72,6 +72,16 @@ independent clone with the ordinary GitHub origin. Git uses the host's own crede
 repository without a credential helper can ask for credentials twice. A cache error stops the clone stage and names the
 cache path, rather than falling back to downloading the whole repository again.
 
+Git consolidates accumulated packs sooner so later clones spend less time repacking cached objects. The cache fetch
+runs:
+
+```text
+git -c gc.autoDetach=false -c maintenance.autoDetach=false -c gc.autoPackLimit=10 --git-dir <cache> fetch --prune <url> '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+```
+
+This work stays under the cache lock: an occasional launch is slower while the cache consolidates, and another checkout
+of the same repository waits for it.
+
 The cache is `<supervisor-state-dir>/repo-cache/<owner>/<name>.git`, outside the working-copy root. It takes roughly the
 disk space of one extra repository copy per host. When the supervisor starts, it removes caches unused for more than 30
 days. You can remove a cache directory by hand at any time; existing checkouts do not depend on it, and the next fresh
