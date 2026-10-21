@@ -88,10 +88,32 @@ impl DialogHandle {
 
     /// Release for a modal handoff without scheduling a competing focus return.
     ///
-    /// The next modal owns its initial focus. Ordinary DOM-removal cleanup is
-    /// still the fallback for success paths that do not explicitly close.
+    /// The next modal owns its initial focus. Submit this before hiding or
+    /// clearing the root even when its close owes no return; DOM-removal
+    /// cleanup remains the fallback for unmounts the owner does not initiate.
     pub(crate) fn release(self) {
         document::eval(&self.release_script());
+    }
+
+    /// Release only the modal rendered inside an existing domain owner.
+    ///
+    /// A delayed host question can retire before admission while another host's
+    /// dialog is visible. Resolve its mounted owner first, then this root inside
+    /// it, so that retirement cannot release the unrelated visible modal. A
+    /// missing owner or root does nothing, and no focus return is scheduled.
+    /// The same optional opening fence applies after the owned root is found.
+    pub(crate) fn release_within(self, owner_selector: &str) {
+        let owner = serde_json::to_string(owner_selector).expect("a string always serializes");
+        let selector = serde_json::to_string(self.selector).expect("a string always serializes");
+        let generation_guard = self.generation_guard();
+        document::eval(&format!(
+            r#"(() => {{
+                const owner = document.querySelector({owner});
+                const dialog = owner?.querySelector({selector});
+                if (!dialog{generation_guard}) return;
+                dialog.__farhelmModalRelease?.();
+            }})();"#,
+        ));
     }
 
     /// Return immediately after removal, unless a newer control already has focus.
@@ -119,6 +141,8 @@ impl DialogHandle {
     /// cannot complete a navigation handoff. The surviving owner must await
     /// this operation from its own task after requesting the closing render;
     /// a dialog-owned task would be cancelled by the removal it waits for.
+    /// It must also submit `release` before that render: this async body does
+    /// not run until polled, and its idempotent release may arrive after removal.
     /// Release and node capture share one eval, and removal is observed on
     /// that exact node rather than inferred from a frame or a later selector.
     /// As with the existing handoff, an eval failure does not block the owner.

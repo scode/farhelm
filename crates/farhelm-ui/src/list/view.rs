@@ -3452,6 +3452,9 @@ pub(crate) fn ListView(
             return;
         }
         quick_switcher_closing.set(true);
+        // The surviving task waits for removal, but its first poll can follow
+        // that render. Release while this exact switcher is still mounted.
+        super::quick_switcher::DIALOG.release();
         quick_switcher_open.set(false);
         let switcher_listing = switcher_listing.clone();
         // Spawn in this parent's scope: a task owned by the closing dialog

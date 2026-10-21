@@ -85,6 +85,12 @@ pub(crate) mod settings_dialog;
 
 use settings_dialog::SettingsField;
 
+/// Settings retirement must not release a setup, Remove or refusal modal.
+const SETTINGS_DIALOG: DialogHandle =
+    DialogHandle::new(r#".host-settings-refreshed[role="dialog"]"#);
+/// Successful removal closes its retained question without returning to a vanished row.
+const REMOVE_DIALOG: DialogHandle = DialogHandle::new(r#".host-remove-dialog[role="dialog"]"#);
+
 /// A host action's definite refusal, retained until its modal is dismissed.
 /// The helm owns the reason; only the typed planning reply may offer Remove.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1398,6 +1404,7 @@ pub(crate) fn HostsPanel(
             match request.await {
                 Ok(Commit::Confirmed) => {
                     if matches!(display, HostRequestDisplay::RemoveDialog) {
+                        REMOVE_DIALOG.release();
                         remove_open.set(None);
                     }
                     on_changed.call(());
@@ -1407,6 +1414,7 @@ pub(crate) fn HostsPanel(
                 // problem is reported as its own thing.
                 Ok(Commit::Unvalidated(warning)) => {
                     if matches!(display, HostRequestDisplay::RemoveDialog) {
+                        REMOVE_DIALOG.release();
                         remove_open.set(None);
                     }
                     warnings.write().insert(host, warning);
@@ -1531,6 +1539,7 @@ pub(crate) fn HostsPanel(
             };
             remove_error.set(None);
             if !show_dialog {
+                REMOVE_DIALOG.release();
                 remove_open.set(None);
             }
             // A host the user removes by hand did not leave the list through an
@@ -1565,6 +1574,8 @@ pub(crate) fn HostsPanel(
         if ops.busy_now() || provisioning_busy_hosts.peek().contains(&id) {
             return;
         }
+        // Remove owns the next surface; Settings owes no competing row return.
+        SETTINGS_DIALOG.release();
         editing.set(None);
         settings_open.set(None);
         host_menu_open.set(None);
@@ -1783,6 +1794,8 @@ pub(crate) fn HostsPanel(
     // client removed it) takes the dialog with it; there is nothing left for
     // its settings to change. Only a list that was actually read counts: a
     // failed or pending refresh says nothing about whether the host exists.
+    // The render decision below releases before omitting the old root; this
+    // effect retains only the existing editor and selection cleanup.
     use_effect(move || {
         let Some(id) = *settings_open.read() else {
             return;
@@ -1798,6 +1811,15 @@ pub(crate) fn HostsPanel(
     });
 
     let read = hosts.read();
+    let settings_host = settings_open
+        .read()
+        .and_then(|id| read.hosts()?.iter().find(|host| host.id == id).cloned());
+    if settings_open.read().is_some() && read.hosts().is_some() && settings_host.is_none() {
+        // A successful snapshot can omit Settings before its cleanup effect
+        // runs. Submit release now, while the previous render's root is still
+        // connected, without retaining stale settings or returning to its row.
+        SETTINGS_DIALOG.release();
+    }
     let rendered_hosts = read.hosts().map(|list| {
         list.iter()
             .cloned()
@@ -1996,6 +2018,8 @@ pub(crate) fn HostsPanel(
                         if !open {
                             add_error.set(None);
                             add_reopen.set(None);
+                        } else {
+                            settings_dialog::ADD_DIALOG.release();
                         }
                         adding.set(!open);
                     },
@@ -2238,12 +2262,10 @@ pub(crate) fn HostsPanel(
             }
             // Looked up in the list this render already read, so the dialog
             // always shows the host's current settings (a save that lands
-            // re-renders it with the new value) and simply does not render
-            // for a host that is gone; the effect above then closes it.
-            if let Some(host) = settings_open
-                .read()
-                .and_then(|id| read.hosts()?.iter().find(|host| host.id == id).cloned())
-            {
+            // re-renders it with the new value). Authoritative absence already
+            // submitted release above before this render omits the old root;
+            // the effect then clears the existing editor and selected host.
+            if let Some(host) = settings_host {
                 settings_dialog::HostSettingsDialog {
                     busy: mutation_busy_hosts.read().contains(&host.id)
                         || provisioning_busy_hosts.read().contains(&host.id)

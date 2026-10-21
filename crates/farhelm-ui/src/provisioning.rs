@@ -957,6 +957,17 @@ struct PendingPlan {
     kept_state_dir: Option<String>,
 }
 
+/// Retire only this host's mounted setup or uninstall question, without return.
+///
+/// A pending plan can still be waiting in HostModal while another host owns the
+/// page. Its existing panel wrapper scopes release to the admitted question it
+/// actually rendered; no mounted question means there is nothing to release.
+/// Inline Update confirmation has no modal boundary and is deliberately absent.
+fn release_plan_modal(host_id: HostId) {
+    DialogHandle::new(r#".host-add-dialog[role="dialog"], .host-uninstall-dialog[role="dialog"]"#)
+        .release_within(&format!(r#"[data-provisioning-host="{host_id}"]"#));
+}
+
 /// What preparing a run established without yet mutating the target.
 enum Preparation {
     /// Keep the larger plan payload off the short refusal/discovery result path.
@@ -2035,6 +2046,7 @@ fn reconcile_progress(view: ProvisioningView, commit: ProgressCommit<'_>) {
         // A run observed from another browser supersedes any ADD plan this
         // component was still displaying. (An unsubmitted UPDATE plan died
         // with its intent above.)
+        release_plan_modal(host_id);
         pending.set(None);
     }
     // ADD acceptance is authoritative only until the first applicable GET;
@@ -2450,6 +2462,7 @@ pub(crate) fn ProvisioningPanel(
             return false;
         }
         planning.set(Some(operation));
+        release_plan_modal(host_id);
         pending.set(None);
         action_error.set(None);
         action_warning.set(None);
@@ -2550,6 +2563,7 @@ pub(crate) fn ProvisioningPanel(
         // previous attempt's own diagnostics. Sticky submission
         // uncertainty survives: only this attempt's correlated success
         // supersedes that.
+        release_plan_modal(host_id);
         pending.set(None);
         // Setup/uninstall row diagnostics can still occupy the Update display
         // slots. A new Update must not hide its own result behind one.
@@ -3002,12 +3016,14 @@ pub(crate) fn ProvisioningPanel(
                 .as_ref()
                 .is_some_and(|plan| plan.binding != binding)
             {
+                release_plan_modal(host_id);
                 pending.set(None);
             }
             let running = authoritative.as_ref().is_some_and(|view| {
                 view.run_id.is_some() && view.status == ProvisioningStatus::Running
             });
             if running {
+                release_plan_modal(host_id);
                 pending.set(None);
             }
             if local_setup
@@ -3023,6 +3039,7 @@ pub(crate) fn ProvisioningPanel(
             if !local_setup && *was_local_setup.peek() {
                 local_probe_started.set(false);
                 local_auto_retry.set(false);
+                release_plan_modal(host_id);
                 pending.set(None);
                 action_error.set(None);
             }
@@ -3125,6 +3142,7 @@ pub(crate) fn ProvisioningPanel(
             return;
         };
         if plan.binding != *current_binding.peek() {
+            release_plan_modal(host_id);
             pending.set(None);
             return;
         }
@@ -3156,6 +3174,7 @@ pub(crate) fn ProvisioningPanel(
         // Every attempt consumes what was displayed from the client's point
         // of view too. A refusal or transport ambiguity cannot prove the
         // helm left this one-use id unconsumed.
+        release_plan_modal(host_id);
         pending.set(None);
         if skip_future {
             preferences.0.write().skip_host_setup_confirmation = Some(true);

@@ -9,6 +9,7 @@ import {
 import { attachSession, waitForTermText } from "./helpers/term";
 import { waitForSessionReady } from "./helpers/terminal-readiness";
 import { routeGate } from "./helpers/route-gate";
+import { disposeRelease, expectConnectedRelease, observeModalRelease, type ModalReleaseObservation } from "./helpers/modal-release";
 
 /** Override the platform before the shortcut and xterm both classify it. */
 async function platform(page: Page, mac: boolean): Promise<void> {
@@ -83,6 +84,8 @@ for (const mac of [false, true]) {
    * Real binary input frames distinguish taking the chord from merely
    * showing a dialog after xterm also sent it. A live echo after Escape and
    * after a different-session jump proves both focus handoffs.
+   * The non-Mac case also observes connected release before actual removal:
+   * observer-only cleanup cannot establish the close-before-return contract.
    */
   test(`the ${mac ? "Mac" : "non-Mac"} chord owns terminal input and restores focus`, async ({ page, request }) => {
     await platform(page, mac);
@@ -93,6 +96,8 @@ for (const mac of [false, true]) {
       if (!new URL(socket.url()).pathname.endsWith("/term")) return;
       socket.on("framesent", ({ payload }) => { if (Buffer.isBuffer(payload)) binary.push(payload); });
     });
+    let releaseObservation: ModalReleaseObservation | undefined;
+    let bodyFailed = true;
     try {
       await pinAutoSelect(page, first.id);
       await page.goto("/");
@@ -103,9 +108,20 @@ for (const mac of [false, true]) {
       let dialog = await openSwitcher(page, mac);
       await dialog.getByRole("combobox").fill(first.title);
       await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(1);
+      if (!mac) {
+        releaseObservation = await observeModalRelease(dialog, "#terminal .xterm-helper-textarea", "#terminal .xterm-helper-textarea");
+      }
       await page.keyboard.press("Escape");
       await expect(dialog).toHaveCount(0);
       await expect(terminal).toBeFocused();
+      if (releaseObservation) {
+        const events = await expectConnectedRelease(releaseObservation);
+        expect(events.findIndex((event) => event.kind === "focus"), JSON.stringify(events))
+          .toBeGreaterThan(events.findIndex((event) => event.kind === "removed"));
+        expect(await terminal.evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
+        await disposeRelease(releaseObservation);
+        releaseObservation = undefined;
+      }
       const escaped = `escape-restored-${Date.now()}`;
       await page.keyboard.type(escaped);
       await page.keyboard.press("Enter");
@@ -133,11 +149,24 @@ for (const mac of [false, true]) {
       dialog = await openSwitcher(page, mac);
       await dialog.getByRole("combobox").fill(second.title);
       await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(1);
+      if (!mac) {
+        releaseObservation = await observeModalRelease(dialog, ".filter-host", ".filter-host, #terminal .xterm-helper-textarea");
+      }
       await page.keyboard.press("Enter");
       await expect(dialog).toHaveCount(0);
       await waitForSessionReady(page, second.id);
       await waitForTermText(page, "FAKE-AGENT READY");
       await expect(terminal).toBeFocused();
+      if (releaseObservation) {
+        const events = await expectConnectedRelease(releaseObservation);
+        expect(events.findIndex((event) => event.kind === "focus"), JSON.stringify(events))
+          .toBeGreaterThan(events.findIndex((event) => event.kind === "removed"));
+        expect(events.some((event) => event.kind === "focus" && event.backgroundFocused),
+          "a different-session handoff must not restore the captured select").toBe(false);
+        expect(await page.locator(".filter-host").evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
+        await disposeRelease(releaseObservation);
+        releaseObservation = undefined;
+      }
       const jumped = `jump-restored-${Date.now()}`;
       await page.keyboard.type(jumped);
       await page.keyboard.press("Enter");
@@ -155,9 +184,13 @@ for (const mac of [false, true]) {
       await page.keyboard.press(mac ? "Meta+k" : "Control+Shift+k");
       await expect(page.locator(".quick-switcher-dialog")).toHaveCount(0);
       expect(await page.evaluate(() => (window as any).__farhelmQuickSwitcherFocus)).toBeUndefined();
+      bodyFailed = false;
     } finally {
-      await cleanupSession(request, second.id);
-      await cleanupSession(request, first.id);
+      await cleanupOwnedSteps(bodyFailed, [
+        ["release observation", () => disposeRelease(releaseObservation)],
+        ["target session", () => cleanupSession(request, second.id)],
+        ["origin session", () => cleanupSession(request, first.id)],
+      ]);
     }
   });
 }
