@@ -374,11 +374,6 @@ or per-call-site discipline, at one place when a sibling path already followed i
 maintainer chose these five behavior-preserving refactors, each of which makes one such rule something a type, an
 exhaustive match or a default enforces. A clear fix of the targeted bug class is allowed in its own PR.
 
-- **Declare how every supervisor request runs.** One exhaustive table maps each request type to how it executes, one
-  table owns the connection's channel ids, and a test proves that every request keeps the connection moving while slots
-  and locks are held; the requests that still stall it (creation and the checkout reconciliation before it) are fixed in
-  the same plan. The "typing freezes on a busy host" chain was fixed one request type at a time (#1164 to #1493). Plan:
-  `plans/queue/supervisor-request-modes.md`.
 - **Make helm ownership of accepted actions the default.** Every state-changing request runs on a helm-owned task unless
   its route is on an explicit exempt list with a reason. Seven fixes were a handler that forgot to opt in (#1196, #1319,
   #1409 and others). Plan: `plans/queue/helm-owned-by-default.md`.
