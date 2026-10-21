@@ -2954,11 +2954,12 @@ async fn clone_for_agent(
     // create is dispatched, so a transport failure here is retry-safe and
     // must not inherit the clone's own outcome-unknown vocabulary. See
     // [`ReadOnlyPhase`].
-    let source = crate::manager::drain_sessions(&source_client)
+    let source = crate::manager::drain_sessions(&source_client, source_claim.host)
         .await
         .map_err(|error| error.context(ReadOnlyPhase("reading the session to clone")))?
         .sessions
         .into_iter()
+        .map(crate::store::CachedRow::into_info)
         .find(|session| session.id == source_key.session_id)
         .ok_or_else(|| {
             anyhow::Error::new(crate::SupervisorError {
@@ -8220,7 +8221,10 @@ mod tests {
             .await
             .expect("remove the old ownership claim");
         h.manager
-            .remember_session(&new_claim, &source)
+            .remember_session(
+                &new_claim,
+                &crate::store::CachedRow::new(new_claim.host, (source).clone()).unwrap(),
+            )
             .await
             .expect("publish the new ownership claim");
         let (moved_claim, _) =

@@ -2945,7 +2945,14 @@ mod tests {
 
         let error = harness
             .manager
-            .remember_session(&stale, &rest_harness::session("from-a-past-life", 100))
+            .remember_session(
+                &stale,
+                &crate::store::CachedRow::new(
+                    stale.host,
+                    (rest_harness::session("from-a-past-life", 100)).clone(),
+                )
+                .unwrap(),
+            )
             .await
             .expect_err("a claim from a previous incarnation must never validate");
         assert!(

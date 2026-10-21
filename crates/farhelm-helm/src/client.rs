@@ -448,7 +448,11 @@ fn created_session_from(
     Ok(session)
 }
 
-/// `list_sessions`'s return value: one host's whole session list, and
+/// One host's whole session list, with its payload's admission state explicit.
+/// The wire client returns raw [`SessionInfo`] by default; a manager drain
+/// substitutes admitted [`crate::store::CachedRow`] values before cache writes.
+///
+/// The listing also carries
 /// whether the supervisor's cap cut it.
 ///
 /// A struct rather than a bare `Vec<SessionInfo>` specifically so
@@ -464,8 +468,8 @@ fn created_session_from(
 /// owning host directly (a reachable host's detail must never come from the
 /// cache — see `crate::get_session`), and the manager's own refresh drain.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionListing {
-    pub sessions: Vec<SessionInfo>,
+pub struct SessionListing<T = SessionInfo> {
+    pub sessions: Vec<T>,
     /// Whether `sessions` is missing entries the supervisor held back at
     /// its cap (`farhelm_proto::LIST_SESSIONS_CAP`), straight off the wire.
     pub truncated: bool,
