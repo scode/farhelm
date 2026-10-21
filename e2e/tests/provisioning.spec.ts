@@ -2547,6 +2547,23 @@ test("a wrong-host UPDATE acceptance warns on its source row and claims nothing"
   const to = await startAdd(request, second);
   await waitForProgress(request, from.host_id, "completed");
   await waitForProgress(request, to.host_id, "completed");
+  // A current connection may clear change-of-host advice only. A wrong-host
+  // acceptance remains uncertain even when this source host is healthy.
+  await page.route("**/api/hosts", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    const entry = body.hosts.find((host: Host) => host.id === from.host_id);
+    if (entry) {
+      entry.state = {
+        phase: "connected",
+        identity: entry.identity,
+        build_version: HELM_BUILD,
+        refresh: { status: "ok", sessions: 0 },
+      };
+    }
+    await route.fulfill({ response, json: body });
+  });
   await page.route(`**/api/hosts/${from.host_id}/update`, async (route) => {
     if (!route.request().postData()) return route.continue();
     await route.fulfill({
@@ -2559,6 +2576,8 @@ test("a wrong-host UPDATE acceptance warns on its source row and claims nothing"
   await page.goto("/");
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${from.host_id}"]`);
+  await expect(row).toHaveAttribute("data-host-phase", "connected");
+  await expect(row.locator(".host-detail")).toHaveCount(0);
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
   // UPDATE is host-bound, so a foreign acceptance is a protocol warning on
@@ -3817,7 +3836,7 @@ for (const boundary of ["following", "submitting"] as const) {
           await expect(row.locator(".provisioning-warning")).toHaveCount(0);
           acceptance.release();
           await expect(row.locator(".provisioning-warning")).toContainText(
-            "the host changed while the update was submitting",
+            `this host's identity changed from ‹${learnedIdentity}› to ‹replacement-identity› while its update was being sent`,
           );
           await expect(row.locator(".host-update-running")).toHaveCount(0);
           await expect(row.locator(".host-detail")).toBeVisible();
@@ -3850,7 +3869,7 @@ for (const boundary of ["following", "submitting"] as const) {
           await expect(row.locator(".host-name")).toHaveText("replaced-identity-marker");
           await expect(row).toHaveAttribute("data-host-phase", "unreachable-reprobing");
           await expect(row.locator(".provisioning-warning")).toContainText(
-            "the host changed while its update was being followed",
+            `this host's identity changed from ‹${learnedIdentity}› to ‹replacement-identity› while it was being updated`,
           );
           await expect(row.locator(".host-update-running")).toHaveCount(0);
           await expect(row.locator(".host-detail")).toBeVisible();
@@ -3864,6 +3883,255 @@ for (const boundary of ["following", "submitting"] as const) {
       }
     });
   }
+}
+
+// The warning is version advice after continuity breaks, not proof about the
+// detached update. Cover both constructors and both facts through real row
+// effects, including a 202 that arrives after current-version facts rendered.
+for (const boundary of ["following", "submitting", "submitting-current"] as const) {
+  for (const change of ["destination", "identity"] as const) {
+    if (boundary === "submitting-current" && change === "identity") continue;
+    test(`changed-host advice while ${boundary}: ${change}`, async ({ page, request }, testInfo) => {
+      const remote = destination(testInfo, `advice-${boundary}-${change}`);
+      const added = await startAdd(request, remote);
+      await waitForProgress(request, added.host_id, "completed");
+      await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
+      const feed = await stubFeed(page);
+      feed.notifyOnConnect(1);
+      const oldIdentity = "recorded\u2066-identity";
+      const newIdentity = "replacement\u202e-identity";
+      const moved = `${remote}\u202e-other`;
+      type Phase = "initial" | "changed" | "older" | "newer" | "current";
+      let phase: Phase = "initial";
+      await page.route("**/api/hosts", async (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        const seen = phase;
+        const response = await route.fetch();
+        const body = await response.json();
+        const entry = body.hosts.find((host: Host) => host.id === added.host_id);
+        if (entry) {
+          entry.alias = `${seen}-${change}-advice-marker`;
+          entry.name = entry.alias;
+          entry.destination = seen !== "initial" && change === "destination" ? moved : remote;
+          entry.identity = seen !== "initial" && change === "identity" ? newIdentity : oldIdentity;
+          entry.state = seen === "initial" || seen === "changed"
+            ? { phase: "unreachable-reprobing", cause: "transport-failure", last_error: "fixture disconnected" }
+            : {
+              phase: "connected",
+              identity: entry.identity,
+              build_version: seen === "current" ? HELM_BUILD : `${HELM_BUILD}-${seen}`,
+              old_version: seen === "older",
+              newer_version: seen === "newer",
+              refresh: { status: "ok", sessions: 0 },
+            };
+        }
+        await route.fulfill({ response, json: body });
+      });
+      const acceptance = routeGate();
+      const admission = routeGate();
+      let accepted: Accepted | undefined;
+      if (boundary === "following") acceptance.release();
+      await page.route(`**/api/hosts/${added.host_id}/update`, async (route) => {
+        if (!route.request().postData()) return route.continue();
+        const response = await route.fetch();
+        expect(response.status(), await responseBody(response)).toBe(202);
+        accepted = (await response.json()) as Accepted;
+        admission.release();
+        await acceptance.wait();
+        await route.fulfill({ response });
+      });
+      const updates = countUpdateRequests(page, added.host_id);
+      const row = page.locator(`[data-host-id="${added.host_id}"]`);
+      /** A served generation and its visible marker jointly prove the row's new facts. */
+      const publishPhase = async (next: Phase, revision: number) => {
+        const read = page.waitForResponse(async (response) => {
+          if (new URL(response.url()).pathname !== "/api/hosts" || response.request().method() !== "GET") return false;
+          const body = await response.json();
+          return body.hosts.some((host: Host & { name: string }) =>
+            host.id === added.host_id && host.name === `${next}-${change}-advice-marker`
+          );
+        });
+        phase = next;
+        await notifyFeed(feed, revision);
+        const response = await read;
+        expect(response.ok()).toBe(true);
+        const current = (await response.json()).hosts.find((host: Host) => host.id === added.host_id);
+        expect(current?.identity).toBe(change === "identity" ? newIdentity : oldIdentity);
+        expect(current?.destination).toBe(change === "destination" ? moved : remote);
+        expect(current?.state.phase).toBe(next === "changed" ? "unreachable-reprobing" : "connected");
+        if (next !== "changed") {
+          expect(current?.state.build_version).toBe(next === "current" ? HELM_BUILD : `${HELM_BUILD}-${next}`);
+        }
+        await expect(row.locator(".host-name")).toHaveText(`${next}-${change}-advice-marker`);
+        await expect(row).toHaveAttribute("data-host-phase", current.state.phase);
+      };
+      try {
+        await page.goto("/");
+        await expect(row.locator(".host-name")).toHaveText(`initial-${change}-advice-marker`);
+        await expect(row).toHaveAttribute("data-host-phase", "unreachable-reprobing");
+        await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+        await openHostMenu(row);
+        await row.locator(".provisioning-update").dispatchEvent("click");
+        await admission.wait();
+        const running = await waitForProgress(request, added.host_id, "running");
+        expect(accepted?.host_id).toBe(added.host_id);
+        expect(running.run_id).toBe(accepted?.run_id);
+        if (boundary === "following") {
+          await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+        } else {
+          await expect(pendingUpdate(row, "submitting")).toBeVisible();
+        }
+        if (boundary === "submitting-current") {
+          await publishPhase("current", 2);
+          await expect(row.locator(".host-update-pending")).toHaveCount(0);
+          await expect(row.locator(".provisioning-warning")).toHaveCount(0);
+          const reply = page.waitForResponse((response) =>
+            new URL(response.url()).pathname === `/api/hosts/${added.host_id}/update` &&
+            response.request().postData() !== null
+          );
+          acceptance.release();
+          expect((await reply).status()).toBe(202);
+          // No host change follows the acceptance. Its own warning signal
+          // must wake the clearing effect against the already-rendered facts.
+          await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+          await expect(row.locator(".host-detail")).toHaveCount(0);
+          await expect(row.locator(".provisioning-warning")).toHaveCount(0);
+        } else {
+          await publishPhase("changed", 2);
+          if (boundary === "submitting") acceptance.release();
+          const warning = row.locator(".provisioning-warning");
+          const changedValues = change === "destination"
+            ? `ssh destination changed from ‹${remote}› to ‹${remote}<U+202E>-other›`
+            : "identity changed from ‹recorded<U+2066>-identity› to ‹replacement<U+202E>-identity›";
+          await expect(warning).toContainText(changedValues);
+          await expect(warning).toContainText(boundary === "following"
+            ? "can't tell how it ended or which install it reached"
+            : "can't tell whether the update started");
+          await expect(warning).toContainText("check the farhelm version this host shows now");
+          await expect(row.locator(".host-detail")).toBeVisible();
+          // Both unequal builds stay connected. A connection or an age hint
+          // alone must not erase the advice before exact agreement is known.
+          await publishPhase("older", 3);
+          await expect(warning).toContainText(changedValues);
+          await publishPhase("newer", 4);
+          await expect(warning).toContainText(changedValues);
+          await publishPhase("current", 5);
+          await expect(warning).toHaveCount(0);
+          await expect(row.locator(".host-detail")).toHaveCount(0);
+        }
+        await expect(row.locator(".host-update-running")).toHaveCount(0);
+        const stillRunning = await waitForProgress(request, added.host_id, "running");
+        expect(stillRunning.run_id).toBe(running.run_id);
+        expect(updates.plans).toBe(1);
+        expect(updates.confirms).toBe(1);
+      } finally {
+        acceptance.release();
+      }
+    });
+  }
+}
+
+// Run A ending unseen and observed run B are deliberately different evidence.
+// Neither constructor may replace A's sticky warning with advice that a
+// current connection would clear; B still has to detach on the retarget.
+for (const boundary of ["following", "submitting"] as const) {
+  test(`a changed host preserves earlier update uncertainty while ${boundary}`, async ({ page, request }, testInfo) => {
+    const remote = destination(testInfo, `sticky-retarget-${boundary}`);
+    const added = await startAdd(request, remote);
+    await waitForProgress(request, added.host_id, "completed");
+    await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
+    const feed = await stubFeed(page);
+    feed.notifyOnConnect(1);
+    let moved = false;
+    await page.route("**/api/hosts", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      const seen = moved;
+      const response = await route.fetch();
+      const body = await response.json();
+      const entry = body.hosts.find((host: Host) => host.id === added.host_id);
+      if (entry && seen) {
+        entry.destination = `${remote}-moved`;
+        entry.name = entry.alias = "sticky-retarget-marker";
+        entry.state = {
+          phase: "connected", identity: entry.identity, build_version: HELM_BUILD,
+          refresh: { status: "ok", sessions: 0 },
+        };
+      }
+      await route.fulfill({ response, json: body });
+    });
+    // These are observed progress snapshots, not claims about the injected
+    // executor. A→B proves A ended without a terminal result in this client.
+    let observed: "A" | "B" | "B-failed" = "A";
+    await page.route(`**/api/hosts/${added.host_id}/provisioning`, async (route) => {
+      const seen = observed;
+      await route.fulfill({
+        headers: { "x-farhelm-build": HELM_BUILD },
+        json: {
+          host_id: added.host_id, run_id: seen === "A" ? "unresolved-A" : "observed-B",
+          operation: "update", status: seen === "B-failed" ? "failed" : "running",
+          steps: [], message: `${seen} progress marker`,
+        },
+      });
+    });
+    const admission = routeGate();
+    const acceptance = routeGate();
+    await page.route(`**/api/hosts/${added.host_id}/update`, async (route) => {
+      if (!route.request().postData()) return route.continue();
+      const response = await route.fetch();
+      expect(response.status(), await responseBody(response)).toBe(202);
+      admission.release();
+      await acceptance.wait();
+      await route.fulfill({ response });
+    });
+    const updates = countUpdateRequests(page, added.host_id);
+    try {
+      await page.goto("/");
+      const row = page.locator(`[data-host-id="${added.host_id}"]`);
+      await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+      await expect(row.locator(".host-update-running")).toBeVisible();
+      await expect(row.locator(".provisioning-warning")).toHaveCount(0);
+      observed = "B";
+      await notifyFeed(feed, 2);
+      await expect(row.locator(".provisioning-run-message")).toHaveText("B progress marker");
+      await expect(row.locator(".provisioning-run")).toHaveAttribute("data-provisioning-status", "running");
+      await expect(row.locator(".host-update-running")).toBeVisible();
+      const warning = row.locator(".provisioning-warning");
+      await expect(warning).toContainText("update run unresolved-A ended without reporting its outcome");
+      const original = await warning.textContent();
+      if (boundary === "submitting") {
+        observed = "B-failed";
+        await notifyFeed(feed, 3);
+        await expect(row.locator(".provisioning-run")).toHaveAttribute("data-provisioning-status", "failed");
+        await expect(warning).toHaveText(original!);
+        await openHostMenu(row);
+        await row.locator(".provisioning-update").dispatchEvent("click");
+        await admission.wait();
+        await waitForProgress(request, added.host_id, "running");
+        await expect(pendingUpdate(row, "submitting")).toBeVisible();
+      }
+      moved = true;
+      await notifyFeed(feed, 4);
+      await expect(row.locator(".host-name")).toHaveText("sticky-retarget-marker");
+      await expect(row).toHaveAttribute("data-host-phase", "connected");
+      await expect(row.locator(".host-update-running")).toHaveCount(0);
+      await expect(row.locator(".host-update-pending")).toHaveCount(0);
+      if (boundary === "submitting") {
+        const reply = page.waitForResponse((response) =>
+          new URL(response.url()).pathname === `/api/hosts/${added.host_id}/update` &&
+          response.request().postData() !== null
+        );
+        acceptance.release();
+        expect((await reply).status()).toBe(202);
+        await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+      }
+      await expect(warning).toHaveText(original!);
+      await expect(row.locator(".host-detail")).toBeVisible();
+      expect(updates.plans).toBe(boundary === "submitting" ? 1 : 0);
+      expect(updates.confirms).toBe(boundary === "submitting" ? 1 : 0);
+    } finally {
+      acceptance.release();
+    }
+  });
 }
 
 test("incarnation churn keeps a followed run while a target change detaches it", async ({
@@ -3936,12 +4204,12 @@ test("incarnation churn keeps a followed run while a target change detaches it",
   await notifyFeed(feed, 3);
   await expect(row.locator(".host-destination-detail")).toContainText(moved);
   await expect(row.locator(".provisioning-warning")).toContainText(
-    "the host changed while its update was being followed",
+    `this host's ssh destination changed from ‹${remote}› to ‹${moved}› while it was being updated`,
   );
   await expect(row.locator(".host-detail")).toBeVisible();
   await notifyFeed(feed, 4);
   await expect(row.locator(".provisioning-warning")).toContainText(
-    "the host changed while its update was being followed",
+    `this host's ssh destination changed from ‹${remote}› to ‹${moved}› while it was being updated`,
   );
 
   // Recovery is a fresh explicit attempt. The old held run finishes first
@@ -3956,7 +4224,7 @@ test("incarnation churn keeps a followed run while a target change detaches it",
     "completed",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    "the host changed while its update was being followed",
+    `this host's ssh destination changed from ‹${remote}› to ‹${moved}› while it was being updated`,
   );
   await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
   await openHostMenu(row);
@@ -4201,7 +4469,7 @@ test("a held acceptance across a target change retires the old run instead of ad
   // reread that would otherwise adopt it as new-target work.
   releaseAcceptance();
   await expect(row.locator(".provisioning-warning")).toContainText(
-    "the host changed while the update was submitting",
+    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
 
   // The held pre-acceptance read completes into the install fence and commits
@@ -4218,7 +4486,7 @@ test("a held acceptance across a target change retires the old run instead of ad
     "running",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    "the host changed while the update was submitting",
+    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
   const repeatRead = page.waitForResponse((response) =>
     isProvisioningGet(response.url(), response.request().method())
@@ -4230,7 +4498,7 @@ test("a held acceptance across a target change retires the old run instead of ad
     "running",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    "the host changed while the update was submitting",
+    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   expect(updates.plans).toBe(1);
@@ -4248,7 +4516,7 @@ test("a held acceptance across a target change retires the old run instead of ad
     "running",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    "the host changed while the update was submitting",
+    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
   await expect(row.locator(".host-detail")).toBeVisible();
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
@@ -4405,7 +4673,7 @@ test("a progress read across a held acceptance and target change cannot adopt th
   // since the suppressed reads adopted nothing) before the follow-up reread.
   releaseAcceptance();
   await expect(row.locator(".provisioning-warning")).toContainText(
-    "the host changed while the update was submitting",
+    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
 
   // The acceptance's own reread returns the old run, and a feed-driven
@@ -4417,7 +4685,7 @@ test("a progress read across a held acceptance and target change cannot adopt th
     "running",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    "the host changed while the update was submitting",
+    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
   const repeatRead = page.waitForResponse((response) =>
     isProvisioningGet(response.url(), response.request().method())
@@ -4429,7 +4697,7 @@ test("a progress read across a held acceptance and target change cannot adopt th
     "running",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    "the host changed while the update was submitting",
+    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   expect(updates.plans).toBe(1);
@@ -4447,7 +4715,7 @@ test("a progress read across a held acceptance and target change cannot adopt th
     "running",
   );
   await expect(row.locator(".provisioning-warning")).toContainText(
-    "the host changed while the update was submitting",
+    `ssh destination changed from ‹${remote}› to ‹${movedTo}› while its update was being sent`,
   );
   await expect(row.locator(".provisioning-warning")).not.toContainText(
     `update run ${runA} ended without reporting its outcome`,
