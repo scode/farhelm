@@ -499,39 +499,44 @@ pub(crate) async fn open_tunnel(
 }
 
 /// An idempotent local close never borrows another session's listener or needs a live host.
+/// The helm owns removal through shutdown and invalidation: dropping a caller
+/// while the accept task is ending must not leave other clients' lists stale.
 pub(crate) async fn close_tunnel(
     State(state): State<Arc<AppState>>,
     Path((session, id)): Path<(String, String)>,
 ) -> Response {
-    if state.link_opener.is_none() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    let session = match crate::sessions::resolve_session_ref(&state, &session).await {
-        Ok(session) => session,
-        Err(error) => return http_error(error),
-    };
-    let _mutation = state.tunnels.mutation.lock().await;
-    let entry = {
-        let mut listeners = state
-            .tunnels
-            .listeners
-            .lock()
-            .expect("tunnel listeners poisoned");
-        if listeners
-            .entries
-            .get(&id)
-            .is_some_and(|entry| entry.session == session)
-        {
-            listeners.entries.remove(&id)
-        } else {
-            None
+    crate::run_owned(async move {
+        if state.link_opener.is_none() {
+            return StatusCode::NOT_FOUND.into_response();
         }
-    };
-    if let Some(entry) = entry {
-        entry.stop().await;
-        state.manager.events().bump();
-    }
-    StatusCode::NO_CONTENT.into_response()
+        let session = match crate::sessions::resolve_session_ref(&state, &session).await {
+            Ok(session) => session,
+            Err(error) => return http_error(error),
+        };
+        let _mutation = state.tunnels.mutation.lock().await;
+        let entry = {
+            let mut listeners = state
+                .tunnels
+                .listeners
+                .lock()
+                .expect("tunnel listeners poisoned");
+            if listeners
+                .entries
+                .get(&id)
+                .is_some_and(|entry| entry.session == session)
+            {
+                listeners.entries.remove(&id)
+            } else {
+                None
+            }
+        };
+        if let Some(entry) = entry {
+            entry.stop().await;
+            state.manager.events().bump();
+        }
+        StatusCode::NO_CONTENT.into_response()
+    })
+    .await
 }
 
 /// Keep refusal classification shared with ordinary session REST and agent responses.
@@ -1096,6 +1101,107 @@ mod tests {
             .await
             .is_err()
         );
+    }
+
+    /// Closing a tunnel must finish shutdown and announce removal even when its
+    /// HTTP caller leaves. A gated task holds a real listener after accepting the
+    /// close signal, making the remove/await/publish boundary deterministic rather
+    /// than depending on the real accept loop happening to shut down slowly.
+    #[farhelm_testtrace::test]
+    async fn cancelled_close_still_finishes_shutdown_and_announces_removal() {
+        let (harness, _) = remote(Arc::new(|_| Ok(())), Some("installation".into())).await;
+        // The fixture's unscripted local host retries independently of SSH.
+        // Settle it before attributing fleet revisions to this tunnel alone.
+        let local = rest_harness::local_id(&harness.store).await;
+        harness
+            .await_state(local, |state| {
+                matches!(state, crate::manager::HostState::Unreachable { .. })
+            })
+            .await;
+        let session = remote_key(&harness);
+        let (owner, _) = crate::sessions::route_session(&harness.state, &session)
+            .await
+            .unwrap();
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let info = TunnelInfo {
+            id: uuid::Uuid::new_v4().to_string(),
+            local_port: address.port(),
+            remote_port: address.port(),
+        };
+        let (cancel, cancelled) = oneshot::channel();
+        let (stopping, stop_seen) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _ = cancelled.await;
+            let _ = stopping.send(());
+            // Keep the socket alive through the test-controlled shutdown tail.
+            // Dropping release on an assertion failure also lets this task end.
+            let _ = released.await;
+            drop(listener);
+        });
+        harness
+            .state
+            .tunnels
+            .listeners
+            .lock()
+            .unwrap()
+            .entries
+            .insert(
+                info.id.clone(),
+                Entry {
+                    session: session.clone(),
+                    owner,
+                    target: TunnelTarget {
+                        address: None,
+                        port: address.port(),
+                    },
+                    info: info.clone(),
+                    cancel: Some(cancel),
+                    task,
+                },
+            );
+        assert_eq!(harness.state.tunnels.list(&session)[0].id, info.id);
+        assert!(
+            TcpListener::bind(address).await.is_err(),
+            "fixture owns its live port"
+        );
+        let mut events = harness.manager.events().subscribe();
+        let revision = *events.borrow_and_update();
+        let caller = tokio::spawn(harness.router().oneshot(request(
+            Method::DELETE,
+            &format!(
+                "/api/sessions/{}/tunnels/{}",
+                reference(&harness, &session),
+                info.id
+            ),
+            json!(null),
+        )));
+        tokio::time::timeout(std::time::Duration::from_secs(5), stop_seen)
+            .await
+            .expect("close must reach the listener's shutdown boundary")
+            .expect("the published listener must receive cancellation");
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        assert!(harness.state.tunnels.list(&session).is_empty());
+        assert!(
+            TcpListener::bind(address).await.is_err(),
+            "shutdown is still gated"
+        );
+        assert_eq!(
+            *events.borrow(),
+            revision,
+            "removal is announced only after shutdown"
+        );
+        release
+            .send(())
+            .expect("the owned shutdown task must still be waiting");
+        tokio::time::timeout(std::time::Duration::from_secs(5), events.changed())
+            .await
+            .expect("close must announce after its HTTP caller disappears")
+            .expect("the helm still owns its feed");
+        let _reclaimed = TcpListener::bind(address).await.unwrap();
+        assert_eq!(*events.borrow(), revision + 1);
     }
 
     /// A failed OS dispatch leaves the already-authorized listener available for retry.
