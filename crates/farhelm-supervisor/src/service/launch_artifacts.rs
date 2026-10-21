@@ -1,8 +1,9 @@
-//! Launch sentinel and launch-spec file helpers.
+//! Generation-scoped launch specs, failure sentinels and wrapper waypoints.
 //!
 //! A launch spec is written before an agent execs; a sentinel exists only
 //! when the exec FAILED — the shim records the errno before exiting
-//! (PLAN_M3.md item 10). Both are plain files under the state directory.
+//! (PLAN_M3.md item 10). The empty waypoint proves the login shell reached
+//! Farhelm's wrapper step. All three live under the private state directory.
 //! `crate::launch` owns their on-disk shape, the shim-side write, and the
 //! raw sentinel read; what lives here is the service side of them — the
 //! async read wrapper, outcome classification, and the removal and sweep
@@ -18,17 +19,11 @@ use tracing::{debug, warn};
 /// The explanation for a launch that never reached the exec shim at all,
 /// or `None` when this is not that shape (PLAN_M3.md item 10).
 ///
-/// A gap the cgroup wrapper opened, and the reason it needs its own
-/// classifier. Every other launch failure is reported by the SHIM, which
-/// writes a sentinel before exiting (`crate::launch`'s module docs explain
-/// why the shim and not the shell). `systemd-run` runs BEFORE the shim: a
-/// wrapper that fails — the user manager died since the probe, the unit
-/// name was refused, the scope could not be created — exits the pane with
-/// no sentinel written and no `exec` ever attempted. Left alone, that
-/// classifies as a plain `Exited` with whatever code `systemd-run` chose,
-/// which is a lie about an agent that never ran, and leaves the launch
-/// spec (the agent's full command line, credentials included) on disk with
-/// nothing left to consume it.
+/// The login shell and, on scoped launches, systemd wrapper run before the
+/// shim can write its sentinel. A dead pane with an unconsumed spec proves
+/// neither reached the agent. The waypoint distinguishes those steps for
+/// new scoped commands; old scoped specs retain the two-suspect wording
+/// because absence of a marker they never wrote proves nothing.
 ///
 /// The recognizable shape has three parts, and every one is load-bearing:
 ///
@@ -45,11 +40,10 @@ use tracing::{debug, warn};
 ///    read it, so a spec still present under a dead pane means the shim
 ///    never ran at all.
 ///
-/// Narrowed to SCOPED launches deliberately. Without a wrapper there is
-/// nothing between the login shell and the shim but the shell itself, and an
-/// unconsumed spec then means the user's rc files ended the shell — a
-/// pre-existing M2 shape this build has no new evidence about and does not
-/// reclassify.
+/// An unscoped command goes directly from the shell to the shim, so its
+/// unconsumed spec already identifies the shell, including on older builds.
+/// Callers keep annotated Stop outcomes and unattributed panes outside this
+/// inference. Exit codes explain the failed step; they never establish it.
 ///
 /// A stat failure is inconclusive, not a proven absence. Callers may preserve
 /// their last-resort exit inference, but must not settle future reads from it:
@@ -60,28 +54,54 @@ pub(crate) async fn wrapper_failure_detail(
     generation: i64,
     scoped: bool,
     pane_dead: bool,
+    exit_code: Option<i32>,
 ) -> anyhow::Result<Option<String>> {
-    if !scoped || !pane_dead {
+    if !pane_dead {
         return Ok(None);
     }
     let spec = crate::launch::spec_path_for_launch(state_dir, id, generation);
-    match tokio::fs::try_exists(&spec).await {
-        Ok(true) => Ok(Some(
+    let bytes = match tokio::fs::read(&spec).await {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    // Decode only the compatibility bit, rather than materializing the
+    // credential-bearing launch just to classify which step failed.
+    #[derive(serde::Deserialize)]
+    struct Evidence {
+        #[serde(default)]
+        scope_waypoint_expected: Option<bool>,
+    }
+    let waypoint_expected = if scoped {
+        serde_json::from_slice::<Evidence>(&bytes)
+            .context("reading launch waypoint expectation")?
+            .scope_waypoint_expected
+    } else {
+        Some(false)
+    };
+    if scoped && waypoint_expected.is_none() {
+        return Ok(Some(
             "the agent was never started: the launch never reached farhelm's exec shim, so \
              something before it — the transient cgroup scope wrapper, or the login shell \
              itself — exited first"
                 .to_string(),
-        )),
-        Ok(false) => Ok(None),
-        Err(e) => {
-            debug!(
-                session = %id, generation, error = %e,
-                "could not tell whether this launch's spec was consumed; not classifying it \
-                 as a wrapper failure"
-            );
-            Err(e.into())
-        }
+        ));
     }
+    let wrapper_reached = waypoint_expected == Some(true)
+        && tokio::fs::try_exists(crate::launch::waypoint_path_for_spec(&spec)).await?;
+    let code = exit_code.map_or_else(String::new, |code| format!(" (code {code})"));
+    Ok(Some(if wrapper_reached {
+        format!(
+            "the agent was never started: the systemd scope wrapper exited{code} before \
+             starting the agent; the host's systemd user manager may have refused the scope"
+        )
+    } else {
+        format!(
+            "the agent was never started: your login shell exited{code} before it ran \
+             Farhelm's launch command; a startup file such as .bashrc or .zshrc usually \
+             exits or replaces the shell"
+        )
+    }))
 }
 
 /// Read launch evidence off the async worker for observation and reload.
@@ -139,11 +159,11 @@ pub(crate) fn sentinel_could_still_apply(outcome: &LastOutcome) -> bool {
 /// commits. For generation zero, the sentinel may also be the last proof
 /// that the original create reached a terminal: Error alone proves nothing,
 /// because preterminal refusals use that outcome too. Settle matching Pending
-/// creates before unlinking an actual sentinel; retain both files if its read
+/// creates before unlinking an actual sentinel; retain the artifacts if its read
 /// or settlement fails, or its durable generation no longer matches.
 ///
 /// Startup and periodic observers share this gate, including already-Error
-/// paths. Returns true only after evidence preservation and both removals
+/// paths. Returns true only after evidence preservation and all removals
 /// succeeded (missing files count as removed). Observers then stop retrying
 /// for this generation; failures remain retryable. A later generation cannot
 /// settle the original create from its own sentinel.
@@ -156,7 +176,7 @@ pub(crate) async fn cleanup_launch_artifacts(
     // Only the first launch can settle its original create. A real sentinel
     // may be its last acceptance evidence after tmux and its scope vanish;
     // Error alone cannot replace that proof because preterminal refusals use
-    // the same outcome. Keep both files if preservation cannot commit.
+    // the same outcome. Keep the artifacts if preservation cannot commit.
     if generation == 0 {
         let preserve = async {
             if read_launch_sentinel(state_dir, id, generation)
@@ -185,13 +205,18 @@ pub(crate) async fn cleanup_launch_artifacts(
     }
     let spec_path = crate::launch::spec_path_for_launch(state_dir, id, generation);
     let status_path = crate::launch::status_path_for_spec(&spec_path);
-    // Try both even when one fails: either can contain launch credentials.
+    // Try every artifact even when one fails; a failed removal remains retryable.
     let status_removed = best_effort_remove(&status_path, "consumed launch sentinel").await;
     let spec_removed = best_effort_remove(&spec_path, "leftover launch spec").await;
-    status_removed && spec_removed
+    let waypoint_removed = best_effort_remove(
+        &crate::launch::waypoint_path_for_spec(&spec_path),
+        "launch waypoint",
+    )
+    .await;
+    status_removed && spec_removed && waypoint_removed
 }
 
-/// Clear the launch artifacts sitting at ONE launch's spec and sentinel
+/// Clear the launch artifacts sitting at ONE launch's generation-named
 /// paths, FAIL-CLOSED, before something writes its own there.
 ///
 /// Reached from exactly one caller now that per-launch paths are
@@ -210,7 +235,7 @@ pub(crate) async fn cleanup_launch_artifacts(
 /// reason those paths carry the generation.
 ///
 /// The sentinel goes first: it is the one whose survival changes a
-/// classification, so if only one of the two removals gets to run, that is
+/// classification, so if only one removal gets to run, that is
 /// the one worth having run.
 pub(crate) async fn clear_launch_artifacts_fail_closed(
     state_dir: &Path,
@@ -220,14 +245,19 @@ pub(crate) async fn clear_launch_artifacts_fail_closed(
     let spec_path = crate::launch::spec_path_for_launch(state_dir, id, generation);
     let status_path = crate::launch::status_path_for_spec(&spec_path);
     remove_fail_closed(&status_path, "the previous launch's sentinel").await?;
+    remove_fail_closed(
+        &crate::launch::waypoint_path_for_spec(&spec_path),
+        "the previous launch's waypoint",
+    )
+    .await?;
     remove_fail_closed(&spec_path, "the previous launch's spec").await
 }
 
-/// Remove every launch spec and sentinel belonging to `session_id`, across
+/// Remove every launch spec, sentinel and waypoint belonging to `session_id`, across
 /// all of its generations, fail-closed.
 ///
 /// Delete's cleanup, and the one place that has to enumerate rather than
-/// derive: a session that was restarted owns one file pair per launch
+/// derive: a session that was restarted owns one artifact set per launch
 /// (`launch::spec_path_for_launch`), and the row that would say how many is
 /// about to be removed. Every failure — including a directory that cannot
 /// be read at all — is returned rather than logged, because these files
@@ -423,10 +453,10 @@ pub(crate) async fn sweep_launch_dir(
                     .keys()
                     .any(|session_id| staged_name_belongs_to(&name, session_id))
         } else if let Some((id, generation)) = crate::launch::parse_launch_file_name(&name) {
-            // Names are `<id>.<generation>.json|status`: launch files are
+            // Names are `<id>.<generation>.json|status|waypoint`: launch files are
             // per-LAUNCH (`launch::spec_path_for_launch`). Two rules:
             //
-            // - A session no longer on record loses its SPECS only. Its
+            // - A session no longer on record loses its spec and waypoint. Its
             //   sentinels stay: the classifier's durability promise (this
             //   function's docs) is about evidence whose owner is unknown.
             // - A live session loses every file of a SUPERSEDED launch, spec
@@ -441,7 +471,7 @@ pub(crate) async fn sweep_launch_dir(
             //   The CURRENT launch's files are kept even unread: its shim may
             //   still be mid-flight.
             match sessions.get(id) {
-                None => name.ends_with(".json"),
+                None => name.ends_with(".json") || name.ends_with(".waypoint"),
                 Some(current) => generation < *current,
             }
         } else {
@@ -544,7 +574,8 @@ mod tests {
         let state = std::path::Path::new("/state");
         let spec = crate::launch::spec_path_for_launch(state, "sess-1", 7);
         let status = crate::launch::status_path_for_spec(&spec);
-        for path in [&spec, &status] {
+        let waypoint = crate::launch::waypoint_path_for_spec(&spec);
+        for path in [&spec, &status, &waypoint] {
             let name = path.file_name().unwrap().to_string_lossy();
             assert_eq!(
                 crate::launch::parse_launch_file_name(&name),
@@ -594,8 +625,17 @@ mod tests {
         let own_spec = launch_dir.join(format!("{session}.0.json"));
         let own_staged = launch_dir.join(format!(".{session}.0.json.tmp-deadbeef"));
         let other_staged = launch_dir.join(format!(".{other}.0.json.tmp-deadbeef"));
+        let own_waypoint = launch_dir.join(format!("{session}.0.waypoint"));
+        let other_waypoint = launch_dir.join(format!("{other}.0.waypoint"));
         let unrelated = launch_dir.join(".not-a-launch-file.tmp-deadbeef");
-        for path in [&own_spec, &own_staged, &other_staged, &unrelated] {
+        for path in [
+            &own_spec,
+            &own_staged,
+            &other_staged,
+            &own_waypoint,
+            &other_waypoint,
+            &unrelated,
+        ] {
             std::fs::write(path, b"credential-bearing launch data").unwrap();
         }
 
@@ -605,12 +645,14 @@ mod tests {
 
         assert!(!own_spec.exists());
         assert!(!own_staged.exists());
+        assert!(!own_waypoint.exists());
         assert!(other_staged.exists());
+        assert!(other_waypoint.exists());
         assert!(unrelated.exists());
     }
 
     /// Spec: for a session still on record, the sweep keeps its CURRENT
-    /// generation's spec and sentinel and removes both for earlier
+    /// generation's artifacts and removes all three for earlier
     /// generations.
     ///
     /// Item 22's restart race is why the current spec must survive: a
@@ -628,8 +670,11 @@ mod tests {
         for name in [
             "live.1.json",
             "live.1.status",
+            "live.1.waypoint",
             "live.2.json",
             "live.2.status",
+            "live.2.waypoint",
+            "orphan.0.waypoint",
         ] {
             std::fs::write(launch_dir.join(name), b"{}").unwrap();
         }
@@ -653,21 +698,14 @@ mod tests {
             launch_dir.join("live.2.status").exists(),
             "the current launch's sentinel is its classifier's evidence and must stay"
         );
+        assert!(launch_dir.join("live.2.waypoint").exists());
+        assert!(!launch_dir.join("live.1.waypoint").exists());
+        assert!(!launch_dir.join("orphan.0.waypoint").exists());
     }
 
-    /// The wrapper-failure predicate, pinned in all three of its arms.
-    ///
-    /// Runs everywhere, systemd or not, because the shape it recognizes is
-    /// entirely on-disk — which is also why it needs its own test: the e2e
-    /// version can only run where a user manager exists, and this is the
-    /// classifier that decides whether an agent that never started is
-    /// reported as `error` or as a plain exit.
-    ///
-    /// The unscoped arm is the one that is easy to get wrong in the
-    /// permissive direction. Without a wrapper there is nothing between the
-    /// login shell and the shim but the shell, so an unconsumed spec there
-    /// means the user's rc files killed the shell — a pre-existing M2 shape
-    /// this build has no new evidence about and must not reclassify.
+    /// Only a dead, owned pane and an unconsumed spec identify a never-started
+    /// launch. This proof works without systemd; the compatibility bit and
+    /// waypoint refine the failed step without changing the evidence threshold.
     #[farhelm_testtrace::test]
     async fn a_wrapper_failure_is_recognized_only_by_its_full_shape() {
         let state = StateDir::new();
@@ -676,7 +714,7 @@ mod tests {
         std::fs::create_dir_all(spec.parent().expect("launch dir")).expect("launch dir");
 
         assert_eq!(
-            wrapper_failure_detail(state.path(), &id, 0, true, true)
+            wrapper_failure_detail(state.path(), &id, 0, true, true, Some(1))
                 .await
                 .unwrap(),
             None,
@@ -684,15 +722,15 @@ mod tests {
         );
 
         std::fs::write(&spec, b"{}").expect("plant an unconsumed spec");
-        assert_eq!(
-            wrapper_failure_detail(state.path(), &id, 0, false, true)
+        assert!(
+            wrapper_failure_detail(state.path(), &id, 0, false, true, Some(7))
                 .await
-                .unwrap(),
-            None,
-            "an unscoped launch has no wrapper to have failed"
+                .unwrap()
+                .is_some_and(|detail| detail.contains("your login shell exited (code 7)")),
+            "an unscoped launch goes directly from the shell to the shim"
         );
         assert_eq!(
-            wrapper_failure_detail(state.path(), &id, 0, true, false)
+            wrapper_failure_detail(state.path(), &id, 0, true, false, None)
                 .await
                 .unwrap(),
             None,
@@ -700,7 +738,7 @@ mod tests {
              strands a spec from a launch that was interrupted rather than failed"
         );
         assert!(
-            wrapper_failure_detail(state.path(), &id, 0, true, true)
+            wrapper_failure_detail(state.path(), &id, 0, true, true, Some(1))
                 .await
                 .unwrap()
                 .is_some_and(|detail| detail.contains("never reached farhelm's exec shim")),
@@ -710,11 +748,114 @@ mod tests {
         // Per LAUNCH, like every other artifact keyed on the generation: a
         // spec left by generation 0 must not paint generation 1 as failed.
         assert_eq!(
-            wrapper_failure_detail(state.path(), &id, 1, true, true)
+            wrapper_failure_detail(state.path(), &id, 1, true, true, Some(1))
                 .await
                 .unwrap(),
             None,
             "a previous generation's leftover spec is not this launch's evidence"
         );
+
+        std::fs::write(&spec, br#"{"scope_waypoint_expected":true}"#).unwrap();
+        let shell = wrapper_failure_detail(state.path(), &id, 0, true, true, Some(3))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            shell.contains("your login shell exited (code 3)"),
+            "{shell}"
+        );
+        let waypoint = crate::launch::waypoint_path_for_spec(&spec);
+        std::fs::write(&waypoint, b"").unwrap();
+        let wrapper = wrapper_failure_detail(state.path(), &id, 0, true, true, Some(4))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            wrapper.contains("systemd scope wrapper exited (code 4)"),
+            "{wrapper}"
+        );
+        let signal = wrapper_failure_detail(state.path(), &id, 0, true, true, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            !signal.contains("(code"),
+            "signal deaths have no invented code: {signal}"
+        );
+
+        // A scope selected durably may lose its manager before argv assembly.
+        // An explicitly false bit describes that new, unwrapped command; only
+        // an absent bit belongs to the ambiguous pre-waypoint format.
+        std::fs::write(&spec, br#"{"scope_waypoint_expected":false}"#).unwrap();
+        let fallback = wrapper_failure_detail(state.path(), &id, 0, true, true, Some(6))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            fallback.contains("your login shell exited (code 6)"),
+            "{fallback}"
+        );
+        std::fs::write(&spec, br#"{"scope_waypoint_expected":true}"#).unwrap();
+
+        std::fs::remove_file(&waypoint).unwrap();
+        std::os::unix::fs::symlink(&waypoint, &waypoint).unwrap();
+        assert!(
+            wrapper_failure_detail(state.path(), &id, 0, true, true, None)
+                .await
+                .is_err(),
+            "a waypoint stat failure cannot prove the shell never reached it"
+        );
+        std::fs::remove_file(&waypoint).unwrap();
+
+        // An unreadable spec is inconclusive, never evidence that it was consumed.
+        std::fs::remove_file(&spec).unwrap();
+        std::fs::create_dir(&spec).unwrap();
+        assert!(
+            wrapper_failure_detail(state.path(), &id, 0, true, true, None)
+                .await
+                .is_err()
+        );
+    }
+
+    /// A retaken generation zero must not inherit its predecessor's waypoint.
+    /// Failing to remove it would blame a new shell failure on the old wrapper.
+    #[farhelm_testtrace::test]
+    async fn retaking_a_launch_clears_its_waypoint_fail_closed() {
+        let state = StateDir::new();
+        let spec = crate::launch::spec_path_for_launch(state.path(), "retaken", 0);
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        let waypoint = crate::launch::waypoint_path_for_spec(&spec);
+        std::fs::create_dir(&waypoint).unwrap();
+        assert!(
+            clear_launch_artifacts_fail_closed(state.path(), "retaken", 0)
+                .await
+                .is_err()
+        );
+        std::fs::remove_dir(&waypoint).unwrap();
+        std::fs::write(&waypoint, b"").unwrap();
+        std::fs::write(&spec, b"{}").unwrap();
+        clear_launch_artifacts_fail_closed(state.path(), "retaken", 0)
+            .await
+            .unwrap();
+        assert!(!spec.exists() && !waypoint.exists());
+    }
+
+    /// Waypoints become unnecessary once Error is durable, and cleanup must
+    /// remove them alongside the spec and sentinel before latching success.
+    #[farhelm_testtrace::test]
+    async fn settled_launch_cleanup_removes_all_three_artifacts() {
+        let state = StateDir::new();
+        let store = SessionStore::open(&state.path().join("cleanup.db"), true)
+            .await
+            .unwrap();
+        let spec = crate::launch::spec_path_for_launch(state.path(), "settled", 1);
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        let status = crate::launch::status_path_for_spec(&spec);
+        let waypoint = crate::launch::waypoint_path_for_spec(&spec);
+        for path in [&spec, &status, &waypoint] {
+            std::fs::write(path, b"fixture").unwrap();
+        }
+        assert!(cleanup_launch_artifacts(state.path(), &store, "settled", 1).await);
+        assert!(!spec.exists() && !status.exists() && !waypoint.exists());
     }
 }

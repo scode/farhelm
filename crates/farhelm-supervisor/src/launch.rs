@@ -3,8 +3,11 @@
 //! ran-and-died.
 //!
 //! The chain is: tmux window command → user's shell as an interactive
-//! login shell (`-l -i -c`) → `exec farhelm internal launch <spec>` → the
-//! shim execs the real agent argv. The shim exists because a sentinel
+//! login shell (`-l -i -c`) → Farhelm's optional scope-waypoint helper →
+//! the scope wrapper → `farhelm internal launch <spec>` → the shim execs
+//! the real agent argv. Unscoped launches go straight to the shim. The
+//! waypoint proves shell startup completed even when the wrapper refuses
+//! to start the shim. The shim exists because a sentinel
 //! written by the shell after a failed `exec` can never fire under zsh
 //! (zsh terminates on failed exec in every mode — audited in SPEC_impl.md);
 //! the shim always exists, so its exec always succeeds, and it can record
@@ -143,6 +146,11 @@ pub struct LaunchSpec {
     /// before exec and supplies matching PWD. Absent only for older supervisors' specs.
     #[serde(default)]
     pub working_directory: Option<PathBuf>,
+    /// Whether this scoped launch writes a waypoint before execing its wrapper.
+    /// Older specs have no waypoint step: absence must retain their ambiguous
+    /// shell-or-wrapper diagnosis rather than falsely blaming shell startup.
+    #[serde(default)]
+    pub scope_waypoint_expected: bool,
     /// Where the shim attempts to record exec failure.
     ///
     /// Presence positively identifies a failed `exec`. Absence alone is
@@ -617,8 +625,9 @@ fn lookup_with_growing_buffer(
 /// shim ships inside it, which is why one artifact per host suffices.
 ///
 /// `scope_prefix` is the cgroup hardening (`crate::scope`), empty on every
-/// host without a systemd user manager. It is spliced between the shell's
-/// `exec` and the shim rather than anywhere else in the chain for two
+/// host without a systemd user manager. A scoped command first execs
+/// [`exec_wrapped_launch`], which writes its waypoint then execs the wrapper
+/// around the ordinary shim invocation. The wrapper stays after shell startup for two
 /// reasons that pull in the same direction: the login shell must still be
 /// the outermost thing tmux starts (SPEC.md's environment contract is what
 /// `-l -i` delivers, and a scope around the SHELL would put the rc files'
@@ -643,7 +652,8 @@ pub fn window_command(
     // flag with a shell metacharacter in it to break the launch. The leading
     // `exec` is the one literal left bare: it is this crate's own keyword,
     // and the no-preamble test pins the script as starting with it.
-    let mut words: Vec<String> = scope_prefix;
+    let scoped = !scope_prefix.is_empty();
+    let mut words = Vec::new();
     // Both paths are valid UTF-8, so these conversions never replace
     // anything: supervisor startup refuses a farhelm program path or state
     // directory that is not (SPEC.md "Paths that are not valid UTF-8"), and
@@ -652,8 +662,16 @@ pub fn window_command(
     // every launch, which is why that refusal exists.
     words.push(farhelm_exe.to_string_lossy().into_owned());
     words.push("internal".to_string());
-    words.push("launch".to_string());
+    words.push(if scoped { "launch-wrapped" } else { "launch" }.to_string());
     words.push(spec_path.to_string_lossy().into_owned());
+    if scoped {
+        // Preserve the exact launch executable, including a bundle forwarder.
+        // current_exe inside the helper may resolve to a different versioned path.
+        words.push("--farhelm-exe".to_string());
+        words.push(farhelm_exe.to_string_lossy().into_owned());
+        words.push("--".to_string());
+        words.extend(scope_prefix);
+    }
     let quoted = words
         .iter()
         .map(|w| farhelm_proto::text::shell_quote(w))
@@ -730,8 +748,8 @@ pub fn tab_window_command(
 /// Keyed by session id AND launch generation (`store::StoredSession::
 /// generation`), which is the naming PLAN_M3.md item 3 asked for and item
 /// 9's restart is what finally needs: a session can now launch many times,
-/// and the two files a launch owns — this spec and the sentinel derived
-/// from it — are evidence ABOUT ONE LAUNCH. Sharing one path across
+/// and the files a launch owns — this spec, its sentinel and its optional
+/// scope waypoint — are evidence ABOUT ONE LAUNCH. Sharing one path across
 /// launches made a stale sentinel and a fresh one indistinguishable except
 /// by careful deletion, so a cleanup that failed (or a crash before it
 /// ran) could paint a perfectly good relaunch as `error`. Different
@@ -752,19 +770,19 @@ pub fn spec_path_for_launch(state_dir: &Path, id: &str, generation: i64) -> Path
         .join(format!("{id}.{generation}.json"))
 }
 
-/// Split a launch-directory spec file NAME back into the session id and
+/// Split a launch artifact NAME back into the session id and
 /// generation that produced it, or `None` when it is not one of ours.
 ///
-/// The inverse of [`spec_path_for_launch`], and it exists for exactly one
-/// caller: the startup sweep, which must decide whether a leftover file
-/// belongs to a session that still exists. A session id is a UUID and
+/// Recognizes the `.json` spec, `.status` sentinel and `.waypoint` derived
+/// from [`spec_path_for_launch`]. Sweeps and Delete use that ownership
+/// before removing anything. A session id is a UUID and
 /// contains no `.`, so splitting on the LAST two dot-separated components
 /// is unambiguous; anything that does not parse is left alone rather than
 /// guessed at, since an unrecognized file in this directory is not this
 /// code's to delete.
 pub fn parse_launch_file_name(name: &str) -> Option<(&str, i64)> {
     let (rest, extension) = name.rsplit_once('.')?;
-    if extension != "json" && extension != "status" {
+    if extension != "json" && extension != "status" && extension != "waypoint" {
         return None;
     }
     let (id, generation) = rest.rsplit_once('.')?;
@@ -849,6 +867,72 @@ pub fn read_launch_sentinel(
 /// without the spec's own payload needing to restate it.
 pub fn status_path_for_spec(spec_path: &Path) -> PathBuf {
     spec_path.with_extension("status")
+}
+
+/// The generation-specific proof that shell startup reached Farhelm's wrapper step.
+/// It shares the spec's private launch directory and naming, so an older launch
+/// cannot supply evidence about a newer one. The empty file carries no terminal text.
+pub fn waypoint_path_for_spec(spec_path: &Path) -> PathBuf {
+    spec_path.with_extension("waypoint")
+}
+
+/// Mark successful shell handoff, then replace this process with the scope wrapper.
+/// The wrapper receives the ordinary shim argv appended verbatim. Nothing is printed
+/// before exec, no environment is changed, and the spec remains for the shim to consume.
+/// Every failure records the ordinary sentinel; a failed wrapper exec names its errno.
+/// On success this never returns. Like the shim, its caller must exit after failure.
+pub fn exec_wrapped_launch(
+    spec_path: &Path,
+    farhelm_exe: &Path,
+    wrapper: &[std::ffi::OsString],
+) -> anyhow::Error {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::process::CommandExt;
+
+    let status_path = status_path_for_spec(spec_path);
+    let Some((program, arguments)) = wrapper.split_first() else {
+        return anyhow::anyhow!(record_launch_failure(
+            &status_path,
+            "scope wrapper has empty argv".to_string(),
+            &crate::files::RealFs,
+        ));
+    };
+    let waypoint = waypoint_path_for_spec(spec_path);
+    // The directory is already private. Refuse any existing entry rather than
+    // following a symlink or accepting evidence another invocation left behind.
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&waypoint)
+    {
+        Ok(file) => drop(file),
+        Err(error) => {
+            let report = record_launch_failure(
+                &status_path,
+                format!("creating scope waypoint {}: {error}", waypoint.display()),
+                &crate::files::RealFs,
+            );
+            return anyhow::Error::from(error).context(report);
+        }
+    }
+    let error = std::process::Command::new(program)
+        .args(arguments)
+        .arg(farhelm_exe)
+        .args(["internal", "launch"])
+        .arg(spec_path)
+        .exec();
+    let report = record_launch_failure(
+        &status_path,
+        format!(
+            "scope wrapper exec_failed argv0={} errno={}: {error}",
+            Path::new(program).display(),
+            error.raw_os_error().unwrap_or(-1)
+        ),
+        &crate::files::RealFs,
+    );
+    anyhow::Error::from(error).context(report)
 }
 
 /// The shim body: exec the spec's argv, recording failure to the status
@@ -2155,6 +2239,162 @@ mod tests {
         unsafe { libc::_exit(1) }
     }
 
+    /// Replace only a disposable child with the real wrapper helper. Child-only
+    /// environment wiring leaves the test runner untouched, including after exec fails.
+    fn wrapped_launch_child_command(
+        spec: &Path,
+        farhelm_exe: &Path,
+        wrapper: &[String],
+    ) -> std::process::Command {
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "launch::tests::wrapped_launch_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("FARHELM_WRAPPED_CHILD_SPEC", spec)
+            .env("FARHELM_WRAPPED_CHILD_EXE", farhelm_exe)
+            .env(
+                "FARHELM_WRAPPED_CHILD_ARGV",
+                serde_json::to_string(wrapper).unwrap(),
+            );
+        command
+    }
+
+    /// Exercise the production exec boundary without returning its failed-exec
+    /// environment to libtest cleanup. A returned helper error means launch failure.
+    #[farhelm_testtrace::test]
+    #[ignore = "the child half of the wrapped-launch fixtures"]
+    fn wrapped_launch_child() {
+        let spec = PathBuf::from(std::env::var_os("FARHELM_WRAPPED_CHILD_SPEC").unwrap());
+        let executable = PathBuf::from(std::env::var_os("FARHELM_WRAPPED_CHILD_EXE").unwrap());
+        let wrapper: Vec<String> =
+            serde_json::from_str(&std::env::var("FARHELM_WRAPPED_CHILD_ARGV").unwrap()).unwrap();
+        let wrapper: Vec<_> = wrapper.into_iter().map(std::ffi::OsString::from).collect();
+        let error = exec_wrapped_launch(&spec, &executable, &wrapper);
+        eprintln!("{error:#}");
+        // SAFETY: failed exec is isolated in this child; cleanup must not inspect
+        // the process environment that CommandExt::exec may have invalidated.
+        unsafe { libc::_exit(1) }
+    }
+
+    /// The wrapper sees a private waypoint before it runs, and receives the exact
+    /// executable and spec after its own argv. Neither helper consumes the spec nor
+    /// shell quoting of spaces and metacharacters may alter that handoff.
+    #[farhelm_testtrace::test]
+    fn wrapped_launch_marks_shell_handoff_then_execs_exact_wrapper_argv() {
+        let tmp = tempfile::tempdir().unwrap();
+        let spec = spec_path_for_launch(tmp.path(), "wrapped", 7);
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        std::fs::set_permissions(
+            spec.parent().unwrap(),
+            std::fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        std::fs::write(&spec, b"unconsumed spec").unwrap();
+        let waypoint = waypoint_path_for_spec(&spec);
+        let executable = Path::new("/bundle/forward er'!$/farhelm");
+        // A POSIX-shell fixture matches existing launch tests and inspects the
+        // actual exec'd argv; a command-builder assertion alone cannot prove exec.
+        let wrapper = vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "test -f \"$1\" || exit 91; shift; printf '%s\\n' \"$@\"".into(),
+            "wrapper-fixture".into(),
+            waypoint.to_string_lossy().into_owned(),
+            "literal ' !$ {}".into(),
+        ];
+        let output = wrapped_launch_child_command(&spec, executable, &wrapper)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let expected = format!(
+            "literal ' !$ {{}}\n{}\ninternal\nlaunch\n{}\n",
+            executable.display(),
+            spec.display()
+        );
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .ends_with(&expected)
+        );
+        let metadata = std::fs::metadata(&waypoint).unwrap();
+        assert_eq!(metadata.len(), 0);
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::read(&spec).unwrap(), b"unconsumed spec");
+        assert!(!status_path_for_spec(&spec).exists());
+    }
+
+    /// A missing wrapper is an ordinary launch error with the OS errno, rather
+    /// than a later ambiguous shell diagnosis; the shim has not consumed its spec.
+    #[farhelm_testtrace::test]
+    fn wrapped_launch_records_wrapper_exec_errno_without_consuming_spec() {
+        let tmp = tempfile::tempdir().unwrap();
+        let spec = spec_path_for_launch(tmp.path(), "missing-wrapper", 3);
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        std::fs::write(&spec, b"private spec").unwrap();
+        let missing = tmp.path().join("absent-wrapper");
+        let output = wrapped_launch_child_command(
+            &spec,
+            Path::new("/farhelm"),
+            &[missing.to_string_lossy().into_owned()],
+        )
+        .output()
+        .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        let sentinel = std::fs::read_to_string(status_path_for_spec(&spec)).unwrap();
+        assert!(
+            sentinel.contains(&format!(
+                "scope wrapper exec_failed argv0={} errno={}",
+                missing.display(),
+                libc::ENOENT
+            )),
+            "{sentinel}"
+        );
+        assert!(waypoint_path_for_spec(&spec).is_file());
+        assert_eq!(std::fs::read(&spec).unwrap(), b"private spec");
+    }
+
+    /// An existing waypoint symlink must never be followed or accepted as proof
+    /// of this invocation. Refusal leaves its target and the launch spec untouched.
+    #[farhelm_testtrace::test]
+    fn wrapped_launch_refuses_waypoint_symlinks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let spec = spec_path_for_launch(tmp.path(), "symlink", 2);
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        std::fs::write(&spec, b"private spec").unwrap();
+        let target = tmp.path().join("untouched");
+        std::fs::write(&target, b"keep this").unwrap();
+        let waypoint = waypoint_path_for_spec(&spec);
+        std::os::unix::fs::symlink(&target, &waypoint).unwrap();
+        assert!(
+            std::fs::symlink_metadata(&waypoint)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        let output =
+            wrapped_launch_child_command(&spec, Path::new("/farhelm"), &["/bin/true".into()])
+                .output()
+                .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(
+            std::fs::read_to_string(status_path_for_spec(&spec))
+                .unwrap()
+                .contains("creating scope waypoint")
+        );
+        assert_eq!(std::fs::read(&target).unwrap(), b"keep this");
+        assert!(
+            std::fs::symlink_metadata(&waypoint)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(std::fs::read(&spec).unwrap(), b"private spec");
+    }
+
     /// The ordinary case: no launch has ever failed for this session, so
     /// there is no sentinel file at all, and the reader must say so
     /// plainly rather than treating a missing file as any kind of error.
@@ -2194,6 +2434,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn browser_forwarding_preserves_agent_environment_and_excludes_preparation() {
         let spec = LaunchSpec {
+            scope_waypoint_expected: false,
             working_directory: None,
             argv: vec!["agent".into()],
             status_file: PathBuf::from("/tmp/status"),
@@ -2236,9 +2477,14 @@ mod tests {
         let mut legacy = serde_json::to_value(&spec).unwrap();
         legacy.as_object_mut().unwrap().remove("browser_command");
         legacy.as_object_mut().unwrap().remove("working_directory");
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("scope_waypoint_expected");
         let legacy: LaunchSpec = serde_json::from_value(legacy).unwrap();
         assert!(legacy.working_directory.is_none());
         assert!(legacy.browser_command.is_none());
+        assert!(!legacy.scope_waypoint_expected);
     }
 
     /// Explicit launch environment must not override the PWD established after
@@ -2252,6 +2498,7 @@ mod tests {
         let directory = std::fs::canonicalize(work.path()).unwrap();
         let spec = LaunchSpec {
             argv: vec!["/usr/bin/printenv".into(), "PWD".into()],
+            scope_waypoint_expected: false,
             working_directory: Some(directory.clone()),
             status_file: work.path().join("unused.status"),
             session_id: "directory-test".into(),
@@ -2282,6 +2529,7 @@ mod tests {
         std::fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
         let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
         let spec = LaunchSpec {
+            scope_waypoint_expected: false,
             working_directory: None,
             argv: vec![missing_binary.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
@@ -2393,6 +2641,7 @@ mod tests {
         let spec_path = tmp.path().join("spec.json");
         let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
         let spec = LaunchSpec {
+            scope_waypoint_expected: false,
             working_directory: Some(tmp.path().to_path_buf()),
             argv: vec![missing_binary.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
@@ -2447,6 +2696,7 @@ mod tests {
         let spec_path = tmp.path().join("spec.json");
         let directory = tmp.path().join("missing-directory");
         let spec = LaunchSpec {
+            scope_waypoint_expected: false,
             working_directory: Some(directory.clone()),
             argv: vec![tmp.path().join("missing-agent").to_str().unwrap().into()],
             status_file: status_path_for_spec(&spec_path),
@@ -2488,6 +2738,7 @@ mod tests {
         std::fs::write(&non_executable, b"not a real binary").unwrap();
         std::fs::set_permissions(&non_executable, std::fs::Permissions::from_mode(0o600)).unwrap();
         let spec = LaunchSpec {
+            scope_waypoint_expected: false,
             working_directory: None,
             argv: vec![non_executable.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
@@ -2567,6 +2818,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let spec_path = tmp.path().join("spec.json");
         let spec = LaunchSpec {
+            scope_waypoint_expected: false,
             working_directory: None,
             argv: vec![],
             status_file: status_path_for_spec(&spec_path),
@@ -2603,6 +2855,7 @@ mod tests {
         let spec_path = tmp.path().join("spec.json");
         let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
         let spec = LaunchSpec {
+            scope_waypoint_expected: false,
             working_directory: None,
             argv: vec![missing_binary.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
@@ -2731,6 +2984,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_launchs_own_environment_reaches_only_the_agent_and_wins() {
         let spec = LaunchSpec {
+            scope_waypoint_expected: false,
             working_directory: None,
             argv: vec!["pi".to_string()],
             status_file: PathBuf::from("/tmp/status"),
@@ -2768,6 +3022,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn agent_command_injects_the_spawn_contract() {
         let spec = LaunchSpec {
+            scope_waypoint_expected: false,
             working_directory: None,
             argv: vec!["agent".to_string()],
             status_file: PathBuf::from("/tmp/status"),
@@ -2817,7 +3072,7 @@ mod tests {
     }
 
     /// The cgroup wrapper (PLAN_M3.md item 10) must land BETWEEN the
-    /// shell's `exec` and the shim, leaving both ends of the chain exactly
+    /// waypoint helper and the shim, leaving both ends of the chain exactly
     /// as they were: the login shell still outermost (the environment
     /// contract), the shim still `exec`ing the agent (the sentinel
     /// contract). A prefix that wrapped the shell instead, or that
@@ -2850,6 +3105,13 @@ mod tests {
             parsed,
             vec![
                 "exec",
+                "/opt/farhelm",
+                "internal",
+                "launch-wrapped",
+                "/state/launch/abc.0.json",
+                "--farhelm-exe",
+                "/opt/farhelm",
+                "--",
                 "systemd-run",
                 "--user",
                 "--scope",
@@ -2857,10 +3119,6 @@ mod tests {
                 "--quiet",
                 "--unit=farhelm-abc-0.scope",
                 "--",
-                "/opt/farhelm",
-                "internal",
-                "launch",
-                "/state/launch/abc.0.json",
             ]
         );
     }
@@ -3261,6 +3519,7 @@ exec sleep 60
         /// matching the production builder's post-preparation directory contract.
         fn write_spec(&self) -> PathBuf {
             let spec = LaunchSpec {
+                scope_waypoint_expected: false,
                 working_directory: Some(PathBuf::from(&self.preparation.cwd)),
                 argv: FAKE_AGENT_ARGV.iter().map(|s| s.to_string()).collect(),
                 status_file: status_path_for_spec(&self.spec_path),

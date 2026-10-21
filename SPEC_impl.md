@@ -1584,11 +1584,18 @@ classification does not rely on exit codes: the shell execs `farhelm internal la
 resolves and execs the session's invocation and, on exec failure, writes a sentinel with the errno detail to a
 per-launch status file (named by session and launch generation, so a sentinel left by a failed earlier launch can never
 describe a later relaunch) before exiting. The supervisor classifies **error** on that sentinel; the one sentinel-less
-error path is a cgroup-scoped launch whose `systemd-run` wrapper died before the shim ever ran, recognized only by its
-full evidence shape (dead pane, launch spec still unconsumed, no sentinel) so it can never claim an agent that actually
-started. NOTE: a sentinel written by the shell after a failed `exec` was audited and rejected — interactive bash
-survives a failed exec, but zsh terminates on it in every mode, so shell-side code after `exec` never runs for zsh
-users; the shim works identically under any `$SHELL`.
+error path is a launch whose login shell or `systemd-run` scope wrapper died before the shim ever ran, recognized only
+by its full evidence shape (owned dead pane, launch spec still unconsumed, no sentinel). An absent or unattributed pane
+does not qualify, and a completed user Stop keeps its annotation. A scoped window command first execs
+`farhelm internal launch-wrapped`, which creates an empty generation-named `.waypoint` file without following symlinks
+and then execs the wrapper with the ordinary shim command appended. No waypoint means the login shell exited before
+Farhelm's command; a waypoint means the systemd scope wrapper exited before starting the agent. The error names that
+step and includes the pane's exit code when known. New specs carry `scope_waypoint_expected`; an older scoped spec
+without that bit retains the two-suspect explanation because it never promised a waypoint. An unscoped command has no
+wrapper, so its unconsumed spec already identifies the shell, including for older launches. A failed wrapper exec
+records the ordinary sentinel with the wrapper and errno. NOTE: a sentinel written by the shell after a failed `exec`
+was audited and rejected — interactive bash survives a failed exec, but zsh terminates on it in every mode, so
+shell-side code after `exec` never runs for zsh users; the shim works identically under any `$SHELL`.
 
 Motivation for never rendering through a normal attach: a rendering tmux client takes over the outer terminal on the
 alternate screen and draws everything itself, which kills native scrolling — xterm.js would accumulate no scrollback,
@@ -3000,9 +3007,10 @@ file is introduced.
   afterwards as the backstop, and is the whole mechanism where no user manager exists — a missing manager never degrades
   stop below the sweep's guarantees. A broken one does not silently pass either: for a scoped launch or tab, a scope
   that cannot be confirmed collected fails the operation even when the sweep found nothing (SPEC.md, Lifecycle
-  operations), since the scope is what catches the processes the sweep cannot see. A wrapper that fails runs before the
-  shim can write its exec-failure sentinel, so the supervisor classifies that shape (a launch spec nothing ever
-  consumed, on a dead pane, for a scoped launch) as **error** rather than letting it masquerade as a plain exit.
+  operations), since the scope is what catches the processes the sweep cannot see. A silent Farhelm waypoint step sits
+  between the login shell and wrapper, outside the scope, and execs onward without changing the eventual process tree. A
+  wrapper that fails runs before the shim can write its exec-failure sentinel; the generation's waypoint and unconsumed
+  spec on an owned dead pane distinguish that **error** from a login shell that exited first.
 
   Terminal tabs also receive separate scopes, named from the session and tab IDs. A tab has no database row, so whether
   its open selected a scope is recorded as an option on its tmux window, and closing the tab decides from that whether
@@ -3085,14 +3093,16 @@ file is introduced.
   private tmux server, `repo-cache/` (host-local repository objects and permanent locks; see "Owned checkout admission
   and lifetime"), `hook-log/<session>.log` (each session's hook diagnostics) and `hook-reports/<session>/` (its waiting
   report files; see "Report files"), and `launch/` holding one 0600 JSON spec per LAUNCH, named
-  `<session>.<generation>.json`. A launch spec carries the agent's command line and the session credential, but nothing
-  the session's own database row does not already hold, in the same private state directory, for the session's whole
-  lifetime (the plaintext invocation, and the credential kept so a restart can inject the same one). Removing specs is
-  therefore tidiness, not a credential boundary: the shim unlinks its spec as soon as it has read it, creation removes
-  it if the session never starts, and the supervisor's startup sweep removes specs of sessions that no longer exist and
-  of launches a later generation superseded. A current-generation spec whose launch never reached the shim (a login
-  shell that exited in its rc files, a reboot, or a stop before launch) may stay until the session is deleted, whichever
-  path observed the outcome (startup reconciliation, the runtime observers, or Stop); Delete removes it.
+  `<session>.<generation>.json`, plus a `.status` failure sentinel and an empty `.waypoint` proving a scoped command
+  reached its wrapper step. The waypoint follows the same generation cleanup and superseded-launch sweep as the spec;
+  orphan waypoints are removed too. A launch spec carries the agent's command line and the session credential, but
+  nothing the session's own database row does not already hold, in the same private state directory, for the session's
+  whole lifetime (the plaintext invocation, and the credential kept so a restart can inject the same one). Removing
+  specs is therefore tidiness, not a credential boundary: the shim unlinks its spec as soon as it has read it, creation
+  removes it if the session never starts, and the supervisor's startup sweep removes specs of sessions that no longer
+  exist and of launches a later generation superseded. A current-generation spec whose launch never reached the shim (a
+  login shell that exited in its rc files, a reboot, or a stop before launch) may stay until the session is deleted,
+  whichever path observed the outcome (startup reconciliation, the runtime observers, or Stop); Delete removes it.
 - Symlink TOCTOU hardening of the state directory is intentionally absent. The directory create, chmod, lock, socket,
   and sweep operations are plain path-based calls that follow symlinks; making them airtight means `O_NOFOLLOW` opens,
   dir-fd-relative operations, and ownership verification throughout. Exploiting the gap requires write access to a

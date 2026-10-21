@@ -6204,6 +6204,17 @@ async fn a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit() {
         launch_scope_of(&h, &session.id).await.is_some(),
         "test setup: this launch must have selected a scope"
     );
+    let spec = spec_path_for_launch(h.state.path(), &session.id, 0);
+    let waypoint = farhelm_supervisor::launch::waypoint_path_for_spec(&spec);
+    assert!(
+        waypoint.exists(),
+        "fixture premise: this launch reached its wrapper"
+    );
+    // Plant before death: an observer that sees the dead pane before this
+    // spec could settle its negative reads and never revisit the evidence.
+    // The real agent already passed the shim and cannot consume it again.
+    std::fs::write(&spec, br#"{"scope_waypoint_expected":true}"#)
+        .expect("plant an unconsumed launch spec with this build's waypoint contract");
 
     // Kill the agent outright so the pane is dead with no sentinel — the
     // state a failed wrapper leaves, reached the only way a test can.
@@ -6229,12 +6240,6 @@ async fn a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit() {
     }
     wait_until_pid_gone(pane_pid, 10).await;
 
-    // The shim consumed and unlinked its own spec on the way past; putting
-    // one back is what stands in for a wrapper that died before the shim
-    // ever ran.
-    let spec = spec_path_for_launch(h.state.path(), &session.id, 0);
-    std::fs::write(&spec, b"{}").expect("plant an unconsumed launch spec");
-
     let found = wait_for_reconciled_listing(
         &h.sup,
         &h.client,
@@ -6254,14 +6259,193 @@ async fn a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit() {
         panic!("a launch that never reached the shim must classify as error, got {found:?}");
     };
     assert!(
-        detail.contains("never reached farhelm's exec shim"),
-        "the error must say the agent never started, got {detail:?}"
+        detail.contains("systemd scope wrapper exited"),
+        "the waypoint must distinguish wrapper failure from shell failure, got {detail:?}"
     );
     assert!(
         !spec.exists(),
         "classifying the failure must also clean up the credential-bearing spec the wrapper \
          left behind"
     );
+    assert!(
+        !waypoint.exists(),
+        "settled failure cleanup removes the waypoint too"
+    );
+}
+
+/// A real interactive shell startup file can exit before it executes the
+/// launch command. The unscoped path must report that failure and its code,
+/// rather than claiming the requested agent ran and exited. An explicit
+/// rcfile keeps the fixture independent of the operator's startup files.
+#[farhelm_testtrace::test]
+async fn an_unscoped_login_shell_startup_failure_classifies_as_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let work = farhelm_teststate::tempdir().unwrap();
+    let rc = work.path().join("startup.rc");
+    let shell = work.path().join("login-shell");
+    let proof = work.path().join("startup-ran");
+    let agent_proof = work.path().join("agent-ran");
+    std::fs::write(
+        &rc,
+        format!(
+            "printf 'startup failed\\n'; touch {}; exit 23\n",
+            shell_words::quote(&proof.to_string_lossy())
+        ),
+    )
+    .unwrap();
+    // The injected shell receives -l -i -c SCRIPT. Bash's explicit rcfile
+    // exercises actual interactive startup without reading a real home.
+    std::fs::write(
+        &shell,
+        format!(
+            "#!/bin/sh\nexec /bin/bash --noprofile --rcfile {} -i -c \"$4\"\n",
+            shell_words::quote(&rc.to_string_lossy())
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            launch_shell: Some(shell.to_string_lossy().into_owned()),
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &format!(
+                "touch {}",
+                shell_words::quote(&agent_proof.to_string_lossy())
+            ),
+            None,
+            80,
+            24,
+        )
+        .await
+        .unwrap();
+    let rows = wait_for_reconciled_listing(&h.sup, &h.client, 15, "startup shell error", |rows| {
+        rows.iter()
+            .any(|row| row.id == session.id && matches!(row.status, SessionStatus::Error { .. }))
+    })
+    .await;
+    assert!(
+        proof.exists(),
+        "fixture premise: the startup file really ran"
+    );
+    assert!(
+        !agent_proof.exists(),
+        "the startup exit must prevent the agent command"
+    );
+    assert!(launch_scope_of(&h, &session.id).await.is_none());
+    let row = rows.iter().find(|row| row.id == session.id).unwrap();
+    let SessionStatus::Error { detail } = &row.status else {
+        panic!("{row:?}")
+    };
+    assert!(
+        detail.contains("your login shell exited (code 23)"),
+        "{detail}"
+    );
+    let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
+        .await
+        .unwrap();
+    assert!(matches!(
+        store.session(&session.id).await.unwrap().unwrap().outcome,
+        LastOutcome::Error { .. }
+    ));
+}
+
+/// Stop during interactive startup is an intentional stop even though the
+/// launch spec remains unconsumed. The classifier must not later turn that
+/// same dead-pane shape into an error about a shell that failed on its own.
+#[farhelm_testtrace::test]
+async fn stopping_during_login_shell_startup_keeps_the_stop_annotation() {
+    use std::os::unix::fs::PermissionsExt;
+    let work = farhelm_teststate::tempdir().unwrap();
+    let rc = work.path().join("startup.rc");
+    let shell = work.path().join("login-shell");
+    let ready = work.path().join("startup-ready");
+    std::fs::write(
+        &rc,
+        format!(
+            "touch {}; read -r line; exit 23\n",
+            shell_words::quote(&ready.to_string_lossy())
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        &shell,
+        format!(
+            "#!/bin/sh\nexec /bin/bash --noprofile --rcfile {} -i -c \"$4\"\n",
+            shell_words::quote(&rc.to_string_lossy())
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            launch_shell: Some(shell.to_string_lossy().into_owned()),
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let session = h
+        .client
+        .create_session(&work.path().to_string_lossy(), "true", None, 80, 24)
+        .await
+        .unwrap();
+    wait_for_file(&ready, 15).await;
+    let spec = spec_path_for_launch(h.state.path(), &session.id, 0);
+    assert!(
+        spec.exists(),
+        "fixture premise: the shell has not reached the shim"
+    );
+    let live = tmux_query(
+        &h.state.path().join("tmux.sock"),
+        &[
+            "display-message",
+            "-p",
+            "-t",
+            &format!("fh-{}", session.id),
+            "#{pane_dead}",
+        ],
+    )
+    .await;
+    assert_eq!(
+        String::from_utf8_lossy(&live.stdout).trim(),
+        "0",
+        "fixture premise: startup is still live"
+    );
+    h.client.stop_session(&session.id).await.unwrap();
+    let rows = wait_for_reconciled_listing(&h.sup, &h.client, 15, "startup stop", |rows| {
+        rows.iter()
+            .any(|row| row.id == session.id && matches!(row.status, SessionStatus::Exited { .. }))
+    })
+    .await;
+    let row = rows.iter().find(|row| row.id == session.id).unwrap();
+    assert!(
+        matches!(row.status, SessionStatus::Exited { .. }),
+        "{row:?}"
+    );
+    assert!(
+        row.annotation.is_some(),
+        "intentional Stop must remain annotated: {row:?}"
+    );
+    let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
+        .await
+        .unwrap();
+    assert!(matches!(
+        store.session(&session.id).await.unwrap().unwrap().outcome,
+        LastOutcome::Exited {
+            annotation: Some(_),
+            ..
+        }
+    ));
 }
 
 /// The fallback proof, run on EVERY host including the ones that have a

@@ -6153,6 +6153,7 @@ impl Supervisor {
                                 row.generation,
                                 row.launch_scoped,
                                 pane_dead,
+                                found.as_ref().and_then(|(_, state)| state.exit_code),
                             )
                             .await
                             .ok()
@@ -6317,11 +6318,12 @@ impl Supervisor {
         }
 
         // Sentinel lifecycle (PLAN_M3.md item 3): once an `Error` this
-        // pass proposed has actually committed durably, both files it can
+        // pass proposed has actually committed durably, the files it can
         // leave behind — the sentinel itself and the per-launch spec
         // (item 25 of the review-swarm fix batch: the shim's own
         // missing/malformed-spec paths, or a failed unlink, can leave the
-        // credential-bearing spec stranded too) — are removed together
+        // credential-bearing spec stranded too), plus the empty wrapper
+        // waypoint — are removed together
         // via `cleanup_launch_artifacts`. That helper also preserves the
         // first launch's accepted-create evidence before removing its
         // sentinel: Error alone does not settle a Pending reservation.
@@ -10330,6 +10332,11 @@ impl Supervisor {
             }
             best_effort_remove(&spec_path, "launch spec").await;
             best_effort_remove(&status_file_path, "launch status file").await;
+            best_effort_remove(
+                &crate::launch::waypoint_path_for_spec(&spec_path),
+                "launch waypoint",
+            )
+            .await;
             // Delete already removed this session's reservation. A stale
             // settlement must neither recreate it nor affect a replacement
             // claim under the same key; settlement also fences session identity.
@@ -10388,6 +10395,11 @@ impl Supervisor {
             // shim may have started writing.
             best_effort_remove(&spec_path, "launch spec").await;
             best_effort_remove(&status_file_path, "launch status file").await;
+            best_effort_remove(
+                &crate::launch::waypoint_path_for_spec(&spec_path),
+                "launch waypoint",
+            )
+            .await;
             // Only once the terminal is CONFIRMED gone: an unkillable tmux
             // session may still be running the agent, and the launching
             // row is then the sole record anyone could use to find it
@@ -11967,6 +11979,10 @@ impl Supervisor {
                         &crate::launch::status_path_for_spec(&spec_path),
                         "launch sentinel",
                     ),
+                    (
+                        &crate::launch::waypoint_path_for_spec(&spec_path),
+                        "launch waypoint",
+                    ),
                 ] {
                     if let Err(e) = remove_fail_closed(path, what).await {
                         teardown.push(e);
@@ -12211,11 +12227,18 @@ impl Supervisor {
         // Confirmed absent: nothing is running under this launch, so its
         // spec — which holds the agent's full command line, credentials
         // included — must not be left for nothing to consume. A removal
-        // that itself fails is reported rather than swallowed; the file is
-        // this launch's only leftover, and silence about it is what turns
-        // hygiene into a leak.
+        // that itself fails is reported rather than swallowed. Remove the
+        // empty waypoint too: nothing remains to classify this failed launch.
         let mut error = error;
         if let Err(cleanup) = remove_fail_closed(spec_path, "the failed relaunch's spec").await {
+            error = error.context(cleanup);
+        }
+        if let Err(cleanup) = remove_fail_closed(
+            &crate::launch::waypoint_path_for_spec(spec_path),
+            "the failed relaunch's waypoint",
+        )
+        .await
+        {
             error = error.context(cleanup);
         }
         // The marker sweep, not just tmux: a launch that got far enough to
@@ -14147,8 +14170,9 @@ impl Supervisor {
     /// `scope` is the cgroup unit this launch was ALREADY recorded as
     /// running in (PLAN_M3.md item 10) — the caller decides and commits it
     /// durably first, so this function only spends it. It reaches the agent
-    /// through the window command, never through the spec, because the spec
-    /// is read by the shim and the scope has to exist before the shim runs.
+    /// through the window command because the scope has to exist before the
+    /// shim reads its spec. The spec records only whether this command expects
+    /// the wrapper waypoint, for upgrade-safe failure classification.
     ///
     /// Failures are classified rather than flattened, because the two
     /// classes cannot be unwound the same way: a spec that never landed
@@ -14233,6 +14257,25 @@ impl Supervisor {
                     .expect("initial prompt capability validated before launch"),
             );
         }
+        // Resolve the actual wrapper before publishing the spec: its compatibility
+        // bit must describe this command, including a selected scope whose manager
+        // became unavailable before launch. The durable scope selection still owns
+        // teardown; this bit only tells the classifier to expect a waypoint.
+        let scope_prefix = match scope {
+            Some(unit) => match self.seams.scopes.launch_prefix(unit).await {
+                Some(prefix) => prefix,
+                None => {
+                    warn!(
+                        session = %id, unit,
+                        "this launch selected a cgroup scope but the user manager is no longer \
+                         usable; launching without one, so stop falls back to the \
+                         process-tree sweep"
+                    );
+                    Vec::new()
+                }
+            },
+            None => Vec::new(),
+        };
         let spec_path = crate::launch::spec_path_for_launch(&self.state_dir, id, generation);
         // Derived the SAME way the shim derives it from its own copy of
         // `spec_path` (`launch::status_path_for_spec`) — never computed
@@ -14253,6 +14296,7 @@ impl Supervisor {
             supervisor_sock: Self::socket_path(&self.state_dir),
             farhelm_bin_dir: self.session_bin_dir().to_path_buf(),
             browser_command: self.browser_command(),
+            scope_waypoint_expected: !scope_prefix.is_empty(),
             // The session-terminal checkout preparation for a fresh GitHub
             // checkout (Design D): the shim clones, runs the post-clone
             // hook, and only then execs the agent — all inside this
@@ -14330,33 +14374,6 @@ impl Supervisor {
         }
 
         let shell = self.launch_shell().await;
-        // The scope wrapper, or nothing at all. Note the asymmetry with the
-        // rest of this function: `scope` is DECIDED and RECORDED durably by
-        // the caller, before the launching row commits, and only consumed
-        // here — the selection has to precede the side effect it describes
-        // (item 2's ordering rule), or a crash mid-launch would leave a row
-        // that cannot say what stop should do.
-        //
-        // A selected scope whose prefix cannot be built is a contradiction
-        // this supervisor can only have reached by losing its user manager
-        // between the selection and now. Launching UNWRAPPED is the right
-        // answer to it — never worse than M2 — and it is loud, because the
-        // row will go on claiming a scope that no longer exists.
-        let scope_prefix = match scope {
-            Some(unit) => match self.seams.scopes.launch_prefix(unit).await {
-                Some(prefix) => prefix,
-                None => {
-                    warn!(
-                        session = %id, unit,
-                        "this launch selected a cgroup scope but the user manager is no longer \
-                         usable; launching without one, so stop falls back to the \
-                         process-tree sweep"
-                    );
-                    Vec::new()
-                }
-            },
-            None => Vec::new(),
-        };
         let cmd = self.shim_window_command(&shell, &spec_path, scope_prefix);
         let fresh_target = !matches!(&target, SpawnTarget::Reuse(_));
         let existing_session = match &target {
@@ -34209,10 +34226,10 @@ exit 0
     }
 
     /// A known Terminal may precede its durable pane record. When the
-    /// wrapper-failure classifier has no sentinel, persisting that accepted
+    /// never-started classifier has no sentinel, persisting that accepted
     /// pane with Error is what keeps replay safe after tmux disappears.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn wrapper_error_observation_preserves_unconfirmed_terminal_provenance() {
+    async fn pre_shim_error_observation_preserves_unconfirmed_terminal_provenance() {
         let PendingSentinelFixture {
             state,
             sup,
@@ -34242,9 +34259,8 @@ exit 0
             LastOutcome::Launching,
         );
         entry.info.id = row.id.clone();
-        // Supply the scoped-wrapper classification input explicitly. This
-        // fixture tests the observer's evidence contract, not systemd-run.
-        entry.scope = Some("fixture-scoped-launch".into());
+        // This fixture selected no scope: an unconsumed spec under its
+        // dead pane now proves that its login shell never reached the shim.
         let observed = super::super::status::observe_entry(
             &sup,
             &Arc::new(entry),
@@ -34257,7 +34273,7 @@ exit 0
             observed
                 .sentinel
                 .as_ref()
-                .is_some_and(|detail| detail.contains("never reached"))
+                .is_some_and(|detail| detail.contains("your login shell exited"))
         );
         sup.store
             .transition_many(vec![(
