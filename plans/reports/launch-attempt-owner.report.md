@@ -117,3 +117,74 @@ final PR's dedicated reviewer confirmed that every difference qualifies for the 
 The general reviews received the full test-authoring checklist. No review finding was rejected. Commit and PR prose also
 passed independent cold reads. Both existing final-PR reviewers also accepted the test-only fixture correction and
 confirmed it does not hide a product behavior change.
+
+### Landing
+
+Landed as #2516, #2517 and #2518, merged bottom-up, with the same content the report describes. It was the first of two
+plans in this landing round, which stacked both and checked them together before either merged; helm-launch-admission
+followed it.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained only queue bookkeeping and plan files for future work. A fresh-context reviewer and
+I read this plan against helm-launch-admission, the other plan of this round, and against the recently landed work it
+was written on top of.
+
+- helm-launch-admission changes only the helm's create and restart routes. This plan changes only the supervisor (and
+  one end-to-end test). Neither changes the messages between helm and supervisor or the kinds of error the supervisor
+  returns, and nothing in the helm or UI matches on the refusal wording this plan extends.
+- A create refused after its terminal is confirmed gone now saves any cleanup failure in its refusal, before its retry
+  key is settled, so a retry gets the identical refusal back. The helm passes that refusal through unchanged under both
+  plans.
+- The launch progress file that never-started-launch-cause added is now removed on every path that removes the other
+  launch files. Prepared spare checkouts from spare-launch-checkout keep their files in separate directories, which this
+  cleanup never touches. Deleting a session still removes its launch files before its record, so a create retry that
+  races a Delete cannot revive or close out the retry slot the Delete freed (create-reservation-retention).
+
+#### Fixes made during the landing
+
+None to the plan's code. helm-launch-admission's TODO.md removal conflicted with this plan's; the landing kept both
+removals.
+
+#### Possible follow-ups
+
+- Found at landing, not mentioned in the report:
+  - The changelog fragment's second clause, that Farhelm "avoids repeating successful cleanup when you stop a session
+    whose agent could not start", describes internal work a user cannot observe. Nothing to do now; release-time
+    changelog editing can drop it.
+  - SPEC_impl.md still says a create that never starts removes its launch spec; it now also removes the status and
+    progress files. The sentence is narrower than the code rather than wrong; possible follow-up: mention all three.
+
+#### Checks
+
+Together the two plans add about 1,500 lines and remove about 500 in how the supervisor removes a failed launch's files
+and how the helm's create and restart routes resolve workspace trust, and both executors ran selected tests only; that
+is why this round ran the whole Rust workspace, plus the browser specs that drive workspace trust, Replace, Restart
+with, terminal restart and create retries end to end. All of the following ran on both plans stacked together on this
+round's main, including the TODO.md conflict resolution:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the isolated test-sleep check, `dprint check` on every changed
+  Markdown, JSON and TOML file, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, the
+  workspace debug build and the UI's release web build: all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `68a7a44f-3142-4013-aaef-7d0dc5350e0c` (kept): 4153 passed, 1 failed; 40 tests
+  marked as ignored did not run, and the output has no runtime `SKIPPED` message. The failure is a UI test,
+  `api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline`, which checks that a read queued behind a
+  save that never finishes waits at least 30 milliseconds before giving up; it gave up slightly sooner. Neither plan
+  changes the UI crate. The same test has failed this way in three earlier landing rounds, twice in the full workspace
+  run (runs `e5bf0834` and `d854fd00`) and once in the UI's desktop-feature run (`d8ff6545`), and passes on its own: 50
+  repeats on this round's code (run `e1bfd2c4-f6cd-4627-8ab3-028d8dd8ca26`) all passed. I attribute it to that
+  pre-existing timing flake. It is not recorded yet; I am opening a separate draft PR that records it in FLAKES.md, adds
+  its Deflake entry to TODO.md and its line to `deflake/known-flakes.txt`.
+- `npx playwright test` in `e2e/` for `workspace-trust`, `claude-trust`, `restart-with`, `replace`, `terminal-restart`
+  and `terminal-create-idempotency` on Chromium and WebKit, three workers each with its own helm and supervisors, no
+  retries, run `34c8e607-2f6d-44ab-b53a-7bd8f1593c35`: 170 passed, none failed.
+- Skipped: the desktop feature check and tests, the JavaScript harness and the website build (no UI, asset JavaScript or
+  docs changed), the rest of the browser suite (the browser-visible behavior both plans could affect is in the specs
+  above), the doctests (no documentation example changed), the desktop smoke test, the native Mac app (not runnable
+  here) and the installer (unchanged).
+
+The report's checks ran selected supervisor and lifecycle tests on the plan's own base and skipped the full Rust
+workspace and the browser suite; the workspace and the browser specs above ran this round. Nothing in the executor's
+report became untrue at landing.
