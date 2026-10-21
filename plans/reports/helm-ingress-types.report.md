@@ -80,3 +80,71 @@ Each PR passed its two independent fresh gpt-6-astra/high reviews: general adver
 no-functional-change review. All six reviews found no actionable issue or observable behavior difference on their first
 round. No bug-fix exception or rejected code-review finding was needed. Commit and PR wording passed the required cold
 reads.
+
+### Landing
+
+Landed as #2492, #2494 and #2495, merged bottom-up, with the same content the report describes, rebased onto this
+round's main. It was the first of two plans in this landing round, which stacked both and checked them together before
+either merged.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained uninstall-refusal-wording and plan bookkeeping; ui-peer-text-type was already in it.
+A fresh-context reviewer and I read this plan against uninstall-refusal-wording and against
+create-reservation-retention, the other plan of this round.
+
+- create-reservation-retention changes when the supervisor frees a create retry key: a delete now frees it, and a
+  refused create returns the same refusal for 24 hours. Its replies reach the helm through the same reply decoding this
+  plan restricted, and the helm classifies them as before: a retry after a delete is an ordinary new session, and
+  deleting a session while it is still being created still returns the supervisor's conflict error. This plan's typed
+  agent parsing passes the retry key through unchanged.
+- The two plans conflicted in one end-to-end test, where this plan switched an error check to the error type's new
+  accessors and create-reservation-retention replaced that test block entirely; see its notes.
+- uninstall-refusal-wording's refusal reaches the browser as its own uninstall refusal, from files this plan does not
+  touch, so its text and its Remove offer are unchanged.
+
+#### Fixes made during the landing
+
+None.
+
+#### Checks
+
+Together the two plans change how the helm parses every request and attributes errors, and how the supervisor keeps and
+frees create retry keys, about 3,000 added and 1,700 removed lines; that reach is why this round ran the whole Rust
+workspace and the full browser suite. All of the following ran on both plans stacked together on this round's main,
+including the test conflict resolution:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed Markdown, JSON and TOML file,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` and
+  `scripts/check-desktop-assets.sh`: all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `1719f6e8-158f-4c4f-aeb5-1beb7448cc68` (kept): 4014 passed, 1 failed:
+  `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay`, which has an open TODO deflake entry ("Shallow
+  pause resets under load") and fails nine runs in ten on main on this machine without these plans (see
+  supervisor-request-modes' landing notes). create-reservation-retention changes the supervisor, so this result cannot
+  show whether it affects that test; it changes how the supervisor stores and frees create retry keys, not terminal
+  output flow, so I attribute the failure to the known flake.
+- `cargo nextest run -p farhelm-ui --features desktop`, run `399561a0-e400-41bc-baf4-e3851c200847`: 750 passed.
+  `node --test` in `crates/farhelm-ui/js-tests`, run `9223f292-2f47-4978-835d-da43554bc77b`: 328 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `cd9c8375-7d5e-463e-ac6b-fb2d96014aa3` (kept): 2230 passed, 14 skipped by design
+  (WebKit clipboard cases and tests that need a real signed-in agent or run on one engine only), 2 failed:
+  - on Chromium, "terminal link ownership opens once and preserves program clicks in all mounted terminals" timed out
+    waiting for its test agent to start;
+  - on WebKit, "don't ask again on a refused YOLO replace marks the host, then replaces with the override", the case
+    FLAKES.md recorded as a flake on 2026-10-20.
+
+  Three repeats of each on both engines then passed (run `775ade88-df3c-4bc8-81ed-c744911ccf8b`). I attribute the
+  Chromium timeout to machine load from three parallel workers: it passed three repeats on both engines, and the rest of
+  the suite starts test agents the same way. I did not add it to FLAKES.md on a single failure. The WebKit failure is
+  the flake FLAKES.md already records.
+- Skipped: the workspace and desktop doctests (no documentation example changed), `cargo check -p farhelm-desktop` and
+  the desktop smoke test (no desktop code changed), the native Mac app (not runnable here) and the installer
+  (unchanged).
+
+The report's checks ran on a base that did not yet include uninstall-refusal-wording, and it skipped the full Rust
+runtime suite and the browser suite; both ran this round, above. One end-to-end error check this plan changed no longer
+exists on main, because create-reservation-retention replaced that test block. Nothing else in the executor's report
+became untrue at landing.
