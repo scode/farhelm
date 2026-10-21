@@ -1250,16 +1250,7 @@ impl ProvisioningService {
         let refused =
             |message: String| anyhow::Error::new(ProvisioningRequestError::Refused(message));
         let status = self.manager.status(host);
-        let not_connected = || {
-            let phase = status
-                .as_ref()
-                .map_or("not connected", |status| status.state.phase());
-            refused(format!(
-                "uninstall needs this host connected, so Farhelm can check that none of its \
-                 sessions are running; it is {phase} right now. Get it connected first, then choose \
-                 uninstall again"
-            ))
-        };
+        let not_connected = || refused(super::uninstall_refusal::not_connected());
         let client = status
             .as_ref()
             .filter(|status| status.state.is_connected())
@@ -1293,24 +1284,10 @@ impl ProvisioningService {
                         // whose sessions were checked, and uninstall removes
                         // files.
                         if host_identity != row.host_identity {
-                            let reported = host_identity
-                                .as_deref()
-                                .map_or_else(|| "no identity".to_string(), peer_text);
-                            return Err(refused(match &row.host_identity {
-                                Some(recorded) => format!(
-                                    "the supervisor answering at this host's destination reports \
-                                     {reported}, not the identity {} this host has on record, so \
-                                     uninstall cannot tell it is the same machine; resolve that \
-                                     first",
-                                    peer_text(recorded),
-                                ),
-                                None => format!(
-                                    "the supervisor answering at this host's destination reports \
-                                     {reported}, but this host has no identity on record, so \
-                                     uninstall cannot tell it is the same machine; resolve that \
-                                     first"
-                                ),
-                            }));
+                            return Err(refused(super::uninstall_refusal::changed_identity(
+                                row.host_identity.as_deref(),
+                                host_identity.as_deref(),
+                            )));
                         }
                         (Some(dial_farhelm), dial_state_dir)
                     }
@@ -1333,21 +1310,39 @@ impl ProvisioningService {
                             .to_string(),
                     ));
                 }
-                if let Some(status) = &status
-                    && matches!(
-                        status.state,
-                        HostState::VersionSkew { .. }
-                            | HostState::IdentityMismatch { .. }
-                            | HostState::IdentityUnverified { .. }
-                            | HostState::Duplicate { .. }
-                    )
-                {
-                    return Err(refused(format!(
-                        "uninstall is refused while this host is {}: a supervisor answers there \
-                         that Farhelm cannot use, so it cannot check that none of its sessions are \
-                         running. Resolve that first, then choose uninstall again",
-                        status.state.phase()
-                    )));
+                if let Some(status) = &status {
+                    // The connection snapshot supplies the twin's ID, while the
+                    // registry supplies its current display name and whether it
+                    // has a panel uninstall action. A removed twin still gets a
+                    // useful fallback; neither lookup grants authority
+                    // to uninstall anything through this unusable connection.
+                    let twin = if let HostState::Duplicate { twin, .. } = &status.state {
+                        self.store
+                            .list_hosts()
+                            .await?
+                            .into_iter()
+                            .find(|row| row.id == *twin)
+                            .map(|row| {
+                                (
+                                    crate::aggregate::host_display_name(
+                                        row.kind,
+                                        row.destination.as_deref(),
+                                        row.alias.as_deref(),
+                                    ),
+                                    row.kind,
+                                )
+                            })
+                    } else {
+                        None
+                    };
+                    if let Some(message) = super::uninstall_refusal::unusable_host(
+                        &status.state,
+                        twin.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                    ) {
+                        return Err(anyhow::Error::new(ProvisioningRequestError::RemoveInstead(
+                            message,
+                        )));
+                    }
                 }
                 match self.backend.probe(&target).await {
                     Ok(ProbeObservation::Absent) => {}

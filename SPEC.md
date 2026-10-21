@@ -161,12 +161,14 @@ own `farhelm uninstall` removes it), a supervisor running from anywhere other th
 directory that is itself a symbolic link (removing it would remove only the link), naming where the link points; a link
 further up the path, such as a linked home directory, is not refused. Removing the host from the list, which never
 touches the host, stays available whatever its layout, and the refusal points to it as the way to stop using the host
-without uninstalling. Success removes the host from the list, cached sessions included, as removing it does, and the
-window that confirmed shows a one-line removal notice. Its hover text names the kept data directory, a copy control
-copies that path, and × dismisses the notice. A run that fails partway keeps the host listed with its steps showing what
-is left, and choosing uninstall again continues from there. Such a retry may go ahead without a connection only once the
-unit file is gone, since nothing can start the supervisor again after that. Linger is left as it is. The helm's own
-machine has no uninstall in the panel: Farhelm there is removed with `farhelm uninstall` (see
+without uninstalling; when the host list already shows incompatible versions, an unverified or changed identity, or two
+entries reaching the same machine, uninstall's refusal also explains the remedy and offers Remove. Success removes the
+host from the list, cached sessions included, as removing it does, and the window that confirmed shows a one-line
+removal notice. Its hover text names the kept data directory, a copy control copies that path, and × dismisses the
+notice. A run that fails partway keeps the host listed with its steps showing what is left, and choosing uninstall again
+continues from there. Such a retry may go ahead without a connection only once the unit file is gone, since nothing can
+start the supervisor again after that. Linger is left as it is. The helm's own machine has no uninstall in the panel:
+Farhelm there is removed with `farhelm uninstall` (see
 [Uninstall scope and interaction](#uninstall-scope-and-interaction)).
 
 Connections are direct: the helm connects straight to each registered supervisor, over the user's own SSH access —

@@ -224,18 +224,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   whether the warning should stay sticky once the host is connected and healthy. Plan:
   `plans/queue/host-changed-update-warning.md`.
 
-- **Rewrite the uninstall refusal for a host with a version mismatch.** Seen 2026-10-18 on the maintainer's 0.29.0 helm
-  for a test host that a dev build had updated: the row read "too new", "the host speaks protocol 60 (farhelm
-  0.0.0-unreleased); this helm speaks 51 (farhelm 0.29.0)" and "<host> runs a newer farhelm than this helm; update this
-  helm so the two speak the same protocol version". Choosing uninstall then printed, in red: "uninstall is refused while
-  this host is version-skew: a supervisor answers there that Farhelm cannot use, so it cannot check that none of its
-  sessions are running. Resolve that first, then choose uninstall again". The state's internal name ("version-skew") is
-  pasted into the sentence, "a supervisor answers there that Farhelm cannot use" is vague, and "resolve that first"
-  gives no way to resolve it. The same wording covers identity-mismatch, identity-unverified and duplicate hosts. Name
-  the problem in user terms (this host runs a newer or older Farhelm than this helm) and the concrete way out for each
-  case. Host refusals now appear in a dialog; this entry concerns their wording. Plan:
-  `plans/queue/uninstall-refusal-wording.md`.
-
 - **Stop treating Restart with as a separate launch surface by default.** Launch-related features keep needing a
   separate decision for Restart with (and sometimes plain Restart and Replace), and agents default to leaving it out:
   planning the "launch guarded from the YOLO confirmation" entry on 2026-10-20, the planner recommended "the session
