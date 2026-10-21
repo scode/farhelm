@@ -11,6 +11,7 @@ use dioxus::prelude::*;
 
 use std::collections::HashMap;
 
+use crate::anchored_popovers::{AnchorRegion, Interest, MovementOwner, use_registration};
 use crate::app_updater::{AppUpdater, use_app_updater};
 use crate::menu_panel::{
     MenuFocusQueue, MenuOpenIntent, MenuOrder, MenuWiring, PanelPlacement, ROW_MENU_OUTSIDE_RELAY,
@@ -357,10 +358,18 @@ fn use_bar_menu(layout_epoch: ReadSignal<u64>, name: &'static str) -> BarMenuSta
         open_generation: use_signal(|| 0_u64),
         close_menu: use_callback(move |()| open.set(false)),
     };
+    let registration = use_registration(
+        use_context::<MovementOwner>(),
+        Interest::new(AnchorRegion::AppBar),
+        move || (*open.peek()).then(|| name.to_string()),
+        move || state.close_menu.call(()),
+    );
+    // Retain this menu's own epoch continuation: a pending effect for the
+    // epoch captured by begin_open must not dismiss that fresh measurement.
     use_effect(move || {
         let epoch = layout_epoch();
         if *open.peek() && epoch != *opened_epoch.peek() {
-            open.set(false);
+            registration.close_if_open();
         }
     });
     use_effect(move || {

@@ -10,7 +10,9 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
-use crate::anchored_popovers::{AnchorRegion, MovedRows, MovementOwner, use_registration};
+use crate::anchored_popovers::{
+    AnchorRegion, Interest, MovedRows, MovementOwner, use_registration,
+};
 use crate::api::{
     self, ListSort, Preferences, SessionFilter, SessionListing, delete_session, fetch_hosts,
     fetch_sessions, queue_seen_write, rename_session, stop_session,
@@ -807,7 +809,10 @@ pub(crate) fn ListView(
     let popovers = use_context::<MovementOwner>();
     use_registration(
         popovers.clone(),
-        AnchorRegion::Sessions,
+        Interest {
+            direct_host_disclosure: true,
+            ..Interest::new(AnchorRegion::Sessions)
+        },
         move || menu_open.peek().clone(),
         move || {
             let mut slot = menu_open;
@@ -816,7 +821,10 @@ pub(crate) fn ListView(
     );
     use_registration(
         popovers.clone(),
-        AnchorRegion::Hosts,
+        Interest {
+            direct_host_disclosure: true,
+            ..Interest::new(AnchorRegion::Hosts)
+        },
         move || (*host_menu_open.peek()).map(|id| id.to_string()),
         move || {
             let mut slot = host_menu_open;
@@ -825,7 +833,7 @@ pub(crate) fn ListView(
     );
     use_registration(
         popovers.clone(),
-        AnchorRegion::Sessions,
+        Interest::new(AnchorRegion::Sessions),
         move || bell_open.peek().as_ref().map(|open| open.id.clone()),
         move || {
             let mut slot = bell_open;

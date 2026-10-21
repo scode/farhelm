@@ -8,6 +8,7 @@
 
 use super::shared::HostOption;
 use crate::ApiBase;
+use crate::anchored_popovers::{AnchorRegion, Interest, MovementOwner, use_registration};
 use crate::api::{PreferenceValue, Preferences};
 use crate::launch_sequence::TEMPLATE_SHORTCUTS;
 use crate::menu_panel::{
@@ -118,14 +119,23 @@ fn NumberShortcutMenu(
             focus_menu_toggle("data-row-menu-key", &focus_key, ".templates-number-key");
         }
     });
+    let anchor_name = name.clone();
+    let registration = use_registration(
+        use_context::<MovementOwner>(),
+        Interest::new(AnchorRegion::Templates),
+        move || (*open.peek()).then(|| anchor_name.clone()),
+        move || close_menu.call(()),
+    );
     // Fixed coordinates become stale when either the dialog or its ancestors
     // move. Opening is deliberately not a dependency; the popup's own scroller
     // also leaves these epochs untouched, so its ten choices stay reachable.
+    // Keep the existing initial run and both dependencies; unlike bar menus,
+    // this continuation has no opening-epoch admission rule.
     use_effect(move || {
         layout_epoch();
         dialog_epoch();
         if *open.peek() {
-            close_menu.call(());
+            registration.close_if_open();
         }
     });
     // The popup and key listener must keep the same binding order. The first
