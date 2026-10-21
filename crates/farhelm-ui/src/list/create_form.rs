@@ -2,8 +2,9 @@
 //!
 //! Intent binding and host reconciliation live beside the form because they
 //! define when an idempotency key still describes the submitted create.
-//! Accepted tab choices and one-time inputs live in `draft`; this module keeps
-//! their reactive subscriptions and the ordered host/submission guards.
+//! Accepted tab choices, one-time inputs and placement live in `draft`; this
+//! module keeps preview observations, reactive subscriptions and the ordered
+//! host/submission guards.
 
 mod draft;
 
@@ -390,34 +391,25 @@ enum TemplateEdit {
     Set(Box<dyn FnOnce()>),
 }
 
-/// The launcher's ownership handles for template replay. Tab drafts and one-time
-/// inputs use one owner; placement and transient UI retain their own signals.
+/// The launcher's ownership handles for template replay. Accepted choices,
+/// one-time inputs and placement use one owner; authority and UI stay outside.
 /// All handles are Copy so deferred edits keep one owner rather than mirrors.
 #[derive(Clone, Copy)]
 struct TemplateTargets {
     draft: LaunchDraftState,
     composer_reset_reason: Signal<Option<String>>,
     chosen_host: Signal<Option<HostId>>,
-    destination: Signal<DestinationDraft>,
-    cwd: Signal<String>,
-    cwd_raw_seed: Signal<Option<String>>,
-    cwd_edited: Signal<bool>,
-    title: Signal<String>,
-    title_raw_seed: Signal<Option<String>>,
-    title_edited: Signal<bool>,
-    clone_checkout_naming: Signal<CheckoutNaming>,
     preview_revision: Signal<u64>,
     template_error: Signal<Option<String>>,
     intent_key: Signal<Option<(String, IntentBinding)>>,
 }
 
-/// Semantic draft values outside the template projection still belong to
-/// Undo. Connection evidence, cache reads and async generations do not: they
-/// must be checked afresh when a restored destination is used.
+/// Undo also restores the external host choice and its selection context.
+/// Preview evidence, cache reads and async generations must be checked afresh;
+/// they never become part of the plain draft's restoration snapshot.
 #[derive(Clone, Copy)]
 struct PermissionUndoTargets {
     fields: TemplateTargets,
-    folder_is_explicit: Signal<bool>,
     clone_host_state: Signal<CloneHostState>,
     remembered_destination: Signal<Option<CreateTarget>>,
     model_draft: Signal<String>,
@@ -446,8 +438,9 @@ struct PermissionEscalation {
 }
 
 /// Capture user-editable values, never an old retry key or authority cache.
-/// Accepted launch choices are one plain snapshot; the remaining field groups
-/// retain their existing immutable restoration values during the notice.
+/// Accepted choices, editor ownership, destination and naming are one plain
+/// snapshot. Host-selection context and picker drafts retain their immutable
+/// restoration values separately; no preview result or authority is captured.
 #[allow(
     clippy::clone_on_copy,
     reason = "the snapshot macro handles Copy and Clone signal values together"
@@ -476,11 +469,9 @@ fn capture_permission_switch(targets: PermissionUndoTargets) -> PermissionSwitch
         }};
     }
     let restore = capture!((
-        composer_reset_reason, chosen_host,
-        destination, cwd, cwd_raw_seed, cwd_edited, title, title_raw_seed, title_edited,
-        clone_checkout_naming
+        composer_reset_reason, chosen_host
     ); (
-        folder_is_explicit, clone_host_state, remembered_destination,
+        clone_host_state, remembered_destination,
         model_draft, model_draft_error
     ));
     PermissionSwitchBefore {
@@ -590,12 +581,12 @@ fn launcher_snapshot(
         }),
         // An unselected query is an editor draft, not a reusable destination.
         // Saving it would make the whole template fail when applied later.
-        destination: match &*t.destination.peek() {
+        destination: match &draft.destination() {
             DestinationDraft::Existing { .. } => {
                 Some(TemplateDestination::Folder(submitted_field(
-                    &t.cwd.peek(),
-                    *t.cwd_edited.peek(),
-                    t.cwd_raw_seed.peek().as_deref(),
+                    &draft.cwd(),
+                    draft.cwd_edited(),
+                    draft.cwd_raw_seed().as_deref(),
                 )))
             }
             DestinationDraft::GithubInput { .. } => None,
@@ -604,23 +595,14 @@ fn launcher_snapshot(
             }
         },
         name: Some(
-            t.clone_checkout_naming
-                .peek()
+            draft
+                .checkout_naming()
                 .template_name()
                 .map(|(base, _)| base.to_string())
-                .unwrap_or_else(|| {
-                    effective_title(
-                        &t.title.peek(),
-                        *t.title_edited.peek(),
-                        t.title_raw_seed.peek().as_deref(),
-                        &t.destination.peek(),
-                        &t.clone_checkout_naming.peek(),
-                    )
-                }),
+                .unwrap_or_else(|| draft.effective_title()),
         ),
-        name_kind: t
-            .clone_checkout_naming
-            .peek()
+        name_kind: draft
+            .checkout_naming()
             .template_name()
             .map(|(_, kind)| kind),
     }
@@ -876,16 +858,7 @@ fn template_edits(
             .name_kind
             .expect("an applied name carries its template policy");
         edits.push(TemplateEdit::Set(Box::new(move || {
-            t.title.set(name.clone());
-            t.title_raw_seed.set(None);
-            t.title_edited.set(true);
-            t.clone_checkout_naming.set(CheckoutNaming {
-                source: Some(CheckoutNameSource::Template {
-                    base: name.clone(),
-                    kind,
-                }),
-                ..Default::default()
-            });
+            t.draft.edit(|draft| draft.apply_template_name(name, kind));
             // A name-only template can change Fixed to Base without changing
             // the text. Re-preview that policy change instead of keeping an
             // already-failed offer whose authority has the same title bytes.
@@ -914,13 +887,10 @@ fn template_edits(
 /// closing the search surface.
 #[expect(
     clippy::too_many_arguments,
-    reason = "destination authority and the remaining field groups retain independent ownership during the draft migration"
+    reason = "search acceptance combines plain draft edits with independent host, history and UI ownership"
 )]
 fn apply_composer_search_result(
     result: crate::launch_composer::ComposerSearchResult,
-    mut title: Signal<String>,
-    mut title_edited: Signal<bool>,
-    mut clone_checkout_naming: Signal<CheckoutNaming>,
     mut chosen_host: Signal<Option<HostId>>,
     hosts: &[HostOption],
     mut clone_host_state: Signal<CloneHostState>,
@@ -928,12 +898,7 @@ fn apply_composer_search_result(
     mut live_destination: Signal<Option<CreateTarget>>,
     mut remembered_destination: Signal<Option<CreateTarget>>,
     history_activation_attempts: Signal<u64>,
-    mut destination_draft: Signal<DestinationDraft>,
     mut preview_revision: Signal<u64>,
-    mut cwd: Signal<String>,
-    mut cwd_raw_seed: Signal<Option<String>>,
-    mut cwd_edited: Signal<bool>,
-    mut folder_is_explicit: Signal<bool>,
     draft: LaunchDraftState,
     preferences: SharedPreferences,
     mut composer_reset_reason: Signal<Option<String>>,
@@ -977,12 +942,10 @@ fn apply_composer_search_result(
             unreachable!("template_edits expands every template result")
         }
         ComposerSearchResult::Name(name) => {
-            clone_checkout_naming.set(CheckoutNaming::default());
-            title.set(name);
             // A cloned title may have an escaped display seed. This action
             // is the user's new text, so submit and checkout preview must
             // read it rather than replay the clone's raw title.
-            title_edited.set(true);
+            draft.edit(|draft| draft.edit_title(name));
         }
         ComposerSearchResult::Host(host) => {
             // A host action has the same authority effects as the selector:
@@ -997,34 +960,20 @@ fn apply_composer_search_result(
         }
         ComposerSearchResult::Github(repo) => {
             remembered_destination.set(None);
-            destination_draft.set(DestinationDraft::github(repo));
+            draft.edit(|draft| draft.select_repository(repo));
             preview_revision.with_mut(|value| {
                 *value = value.checked_add(1).expect("preview revision exhausted")
             });
         }
         crate::launch_composer::ComposerSearchResult::UsePath(folder)
         | crate::launch_composer::ComposerSearchResult::Folder(folder) => {
-            select_existing_directory(
-                &mut destination_draft,
-                &mut cwd,
-                &mut cwd_raw_seed,
-                &mut cwd_edited,
-                &mut folder_is_explicit,
-                &folder,
-            );
+            draft.edit(|draft| draft.choose_existing_folder(&folder));
         }
         crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => {
             // Query-path actions are treated like other relayed path choices:
             // the escaped field remains reviewable, while the browse request
             // and an untouched later create retain the exact requested bytes.
-            select_existing_directory(
-                &mut destination_draft,
-                &mut cwd,
-                &mut cwd_raw_seed,
-                &mut cwd_edited,
-                &mut folder_is_explicit,
-                &folder,
-            );
+            draft.edit(|draft| draft.choose_existing_folder(&folder));
             intent_key.set(None);
             return Some(folder);
         }
@@ -1114,19 +1063,12 @@ fn apply_composer_search_result(
             draft.edit(|draft| draft.restore_launch(&selection, owner));
             if let Some(repo) = entry.github_repo {
                 remembered_destination.set(None);
-                destination_draft.set(DestinationDraft::github(repo));
+                draft.edit(|draft| draft.select_repository(repo));
                 preview_revision.with_mut(|value| {
                     *value = value.checked_add(1).expect("preview revision exhausted")
                 });
             } else {
-                select_existing_directory(
-                    &mut destination_draft,
-                    &mut cwd,
-                    &mut cwd_raw_seed,
-                    &mut cwd_edited,
-                    &mut folder_is_explicit,
-                    entry.cwd.raw(),
-                );
+                draft.edit(|draft| draft.choose_existing_folder(entry.cwd.raw()));
             }
         }
     }
@@ -1148,24 +1090,6 @@ fn observe_search_agent_fields(fields: DraftFields) {
         (fields.structured_effort)(),
         (fields.structured_permissions_is_explicit)(),
     );
-}
-
-/// Every explicit path choice leaves fresh-checkout mode. Keep the raw path
-/// authority and its escaped editor spelling in the same synchronous action,
-/// before a queued submit or directory callback can observe the choice.
-fn select_existing_directory(
-    destination: &mut Signal<DestinationDraft>,
-    cwd: &mut Signal<String>,
-    raw_seed: &mut Signal<Option<String>>,
-    edited: &mut Signal<bool>,
-    folder_is_explicit: &mut Signal<bool>,
-    path: &str,
-) {
-    destination.set(DestinationDraft::Existing {
-        cwd: path.to_string(),
-    });
-    reseed_cloned_field(cwd, raw_seed, edited, path);
-    folder_is_explicit.set(true);
 }
 
 /// Refuse a draft transition once the shared operation token is held.
@@ -1616,21 +1540,21 @@ fn browse_reply_is_current(
 }
 
 /// Recheck browse authority from an event handler, after its node rendered.
+/// Snapshot the live owner, not the folder memo: a queued activation may follow
+/// a raw-only reseed whose escaped display and edited bit did not change.
 fn browse_activation_is_current(
     request: Signal<Option<BrowseAuthority>>,
     candidate: &BrowseAuthority,
     target: Signal<Option<CreateTarget>>,
     connection: Signal<Option<u64>>,
-    cwd: Signal<String>,
-    raw_seed: Signal<Option<String>>,
-    edited: Signal<bool>,
+    draft: LaunchDraftState,
 ) -> bool {
     browse_reply_is_current(
         &request(),
         candidate,
         target(),
         connection(),
-        &submitted_field(&cwd(), edited(), raw_seed.peek().as_deref()),
+        &draft.snapshot().submitted_cwd(),
     )
 }
 
@@ -1640,10 +1564,11 @@ fn browse_activation_is_current(
 /// this entry point so neither can accidentally weaken the target,
 /// connection, path, or generation guard. The request is explicit: callers
 /// choose when to invoke it; merely updating the search query never reaches
-/// the remote filesystem.
+/// the remote filesystem. Completion reads the live owner's operational path;
+/// retaining a render snapshot would admit replies after a same-turn edit.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the browse authority intentionally receives separate live signals so its completion guard cannot retain a stale aggregate draft"
+    reason = "browse authority and live draft ownership are independent completion fences"
 )]
 fn request_directory_browse(
     base: String,
@@ -1657,9 +1582,7 @@ fn request_directory_browse(
     mut browse_error: Signal<Option<String>>,
     mut reply_completions: Signal<u64>,
     live_connection: Signal<Option<u64>>,
-    live_cwd: Signal<String>,
-    live_cwd_raw_seed: Signal<Option<String>>,
-    live_cwd_edited: Signal<bool>,
+    draft: LaunchDraftState,
 ) {
     let Some(host) = selected else { return };
     let Some(target) = history_target(hosts, Some(host)) else {
@@ -1685,11 +1608,7 @@ fn request_directory_browse(
             &authority,
             browse_target(),
             live_connection(),
-            &submitted_field(
-                &live_cwd(),
-                live_cwd_edited(),
-                live_cwd_raw_seed.peek().as_deref(),
-            ),
+            &draft.snapshot().submitted_cwd(),
         ) {
             return;
         }
@@ -2113,28 +2032,12 @@ fn resolve_clone_host(
 /// override with its visible spelling means the visible spelling, and no
 /// comparison against the seed can tell that apart from not having edited at
 /// all (which is why this takes an `edited` flag rather than comparing).
-/// [`reseed_cloned_field`] is the seeding half (item2-review2.md F5).
+/// The draft's seed transitions preserve this ownership alongside the display.
 pub(crate) fn submitted_field(text: &str, edited: bool, seed: Option<&str>) -> String {
     match seed {
         Some(seed) if !edited => seed.to_string(),
         _ => text.to_string(),
     }
-}
-
-/// Seed a peer-provided directory or title without losing its original bytes.
-/// The display is escaped (`peer::display_peer`), with exact raw bytes and a cleared edited
-/// flag recorded alongside so an untouched submit reads back the ORIGINAL
-/// bytes rather than the escaped spelling (item2-review2.md F5;
-/// [`submitted_field`] is the read-back half).
-fn reseed_cloned_field(
-    display: &mut Signal<String>,
-    raw_seed: &mut Signal<Option<String>>,
-    edited: &mut Signal<bool>,
-    raw: &str,
-) {
-    display.set(display_peer(raw));
-    raw_seed.set(Some(raw.to_string()));
-    edited.set(false);
 }
 
 /// Whether the title a Clone or Replace with carried in stops counting as a
@@ -2627,24 +2530,6 @@ pub(super) fn CreateSessionForm(
     // Why the last template accepted from search was not applied, shown
     // under the search box until the next accepted result.
     let mut template_error = use_signal(|| None::<String>);
-    // Prefilled rather than empty-with-a-placeholder, deliberately: what
-    // gets sent is always exactly what the field shows, and the common
-    // "just give me a session in my home directory" create needs no typing
-    // at all. `~` resolves against the TARGET host's home — the supervisor
-    // expands it at create time (SPEC.md's working-directory rule), which
-    // is what makes a host-independent default possible here at all: this
-    // form cannot know a remote host's home path.
-    let cwd_initial_seed = initial_cwd.clone();
-    let mut cwd = use_signal(move || {
-        cwd_initial_seed
-            .as_deref()
-            .map(display_peer)
-            .unwrap_or_else(|| "~".to_string())
-    });
-    let destination_seed = initial_cwd.clone().unwrap_or_else(|| "~".into());
-    let mut destination_draft = use_signal(move || DestinationDraft::Existing {
-        cwd: destination_seed,
-    });
     let mut repository_open = use_signal(|| false);
     let mut repository_index = use_signal(|| 0_usize);
     use_effect(move || {
@@ -2652,7 +2537,6 @@ pub(super) fn CreateSessionForm(
             scroll_repository_result(repository_index());
         }
     });
-    let mut clone_checkout_naming = use_signal(CheckoutNaming::default);
     let mut github_attempt = use_signal(|| None::<(IntentBinding, GithubAttempt)>);
     // A Replace-with deletes its source, whose notice the session list shows.
     let delete_notice = use_context::<super::DeleteNotice>();
@@ -2660,7 +2544,9 @@ pub(super) fn CreateSessionForm(
     let mut preview_revision = use_signal(|| 0_u64);
     let mut observed_checkout_revision = use_signal(|| 0_i64);
     let mut live_preview_authority = use_signal(|| None::<PreviewAuthority>);
-    let mut title = use_signal(String::new);
+    // Replies are observations, not destination edits. A completion wakes only
+    // preview consumers and cannot overwrite semantic repository ownership.
+    let mut preview_state = use_signal(|| PreviewState::Pending);
     // Seeded from the helm's remembered permissions mode ONLY when this
     // mount has no prefill at all (SPEC.md's launch-composer carve-out): a
     // clone/replace prefill's own reseed effect below (`prefill.launch`)
@@ -2668,11 +2554,16 @@ pub(super) fn CreateSessionForm(
     // prefilled mount briefly starting at `None` here is never visible —
     // see `initial_structured_permissions`'s own doc for why the precedence
     // is a call-site guard rather than logic inside that function.
-    let draft = use_launch_draft(if prefill.is_none() {
-        initial_structured_permissions(&preferences.0.peek())
-    } else {
-        None
-    });
+    // Placement mounts once from the inherited raw cwd, or the editable "~"
+    // default. Expansion belongs to the target supervisor, not this browser.
+    let draft = use_launch_draft(
+        if prefill.is_none() {
+            initial_structured_permissions(&preferences.0.peek())
+        } else {
+            None
+        },
+        initial_cwd.clone(),
+    );
     // Whether `structured_permissions`'s current value is a real choice
     // (an explicit click, a restored prefill, or an applied recent/search
     // row) rather than the passive memory seed above or "reset choices"
@@ -2693,6 +2584,13 @@ pub(super) fn CreateSessionForm(
     // Handler-time authority reads the live owner rather than memo.peek(),
     // whose cached value can lag an earlier edit in the same event turn.
     let DraftFields {
+        cwd,
+        cwd_edited,
+        title,
+        title_raw_seed,
+        title_edited,
+        destination_draft,
+        clone_checkout_naming,
         launch_tab,
         invocation,
         invocation_edited,
@@ -2741,14 +2639,6 @@ pub(super) fn CreateSessionForm(
     let mut model_active = use_signal(|| None::<usize>);
     let mut model_show_all = use_signal(|| false);
     let mut model_draft_error = use_signal(|| None::<String>);
-    // Placement retains the same peer-text ownership as the command fields
-    // now held by LaunchDraft: an untouched directory or title submits its
-    // original seed, not the escaped spelling in the editor. A None seed
-    // means no peer supplied that field, so its display text is already the
-    // value to submit. See submitted_field for the deliberate-edit boundary.
-    let cwd_initial_raw_seed = initial_cwd.clone();
-    let mut cwd_raw_seed = use_signal(move || cwd_initial_raw_seed);
-    let mut cwd_edited = use_signal(|| false);
     // Opening never selects: Enter still submits a typed path until an arrow
     // deliberately gives an option keyboard authority. Blur discards that authority.
     let mut folder_open = use_signal(|| false);
@@ -2760,15 +2650,10 @@ pub(super) fn CreateSessionForm(
             scroll_folder_result(index);
         }
     });
-    // Text ownership and deliberate placement are different: a picked path
-    // keeps a raw seed, but is still pre-checked when saving a template.
-    let mut folder_is_explicit = use_signal(|| false);
     // Keep the host's readable label with the same immutable choice snapshot;
     // a later host pick must not relabel the identity this panel will save.
     let mut template_panel = use_signal(|| None::<(super::save_template::Candidate, String)>);
     let template_saving = use_signal(|| false);
-    let mut title_raw_seed = use_signal(|| None::<String>);
-    let mut title_edited = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     // Preparation describes the opening, not a refusal from a bound host.
     // First binding and later host reconciliation must not erase its explanation.
@@ -3098,28 +2983,17 @@ pub(super) fn CreateSessionForm(
                     browse_result,
                     browse_error,
                 );
-                select_existing_directory(
-                    &mut destination_draft,
-                    &mut cwd,
-                    &mut cwd_raw_seed,
-                    &mut cwd_edited,
-                    &mut folder_is_explicit,
-                    &prefill.cwd,
-                );
-                folder_is_explicit.set(false);
+                draft.edit(|draft| draft.seed_folder(&prefill.cwd));
                 template_panel.set(None);
                 let source_repo = prefill
                     .repo
                     .clone()
                     .filter(|_| prefill.replace_source.is_none());
-                clone_checkout_naming.set(CheckoutNaming {
-                    source: source_repo.clone().map(CheckoutNameSource::Clone),
-                    ..Default::default()
-                });
+                draft.edit(|draft| draft.seed_title(&prefill.title, source_repo.clone()));
                 if let Some(repo) = source_repo {
                     // A second Clone of the same row still needs a new offer:
                     // equal repository/name inputs must not reuse its old preview.
-                    destination_draft.set(DestinationDraft::github(repo));
+                    draft.edit(|draft| draft.select_repository(repo));
                     preview_revision.with_mut(|revision| {
                         *revision = revision.checked_add(1).expect("preview revision exhausted")
                     });
@@ -3127,12 +3001,6 @@ pub(super) fn CreateSessionForm(
                 // Clone owns a separate installation-reconciliation contract;
                 // a new clone generation replaces any earlier history choice.
                 remembered_destination.set(None);
-                reseed_cloned_field(
-                    &mut title,
-                    &mut title_raw_seed,
-                    &mut title_edited,
-                    &prefill.title,
-                );
                 // Every clone generation establishes the WHOLE form state,
                 // the dormant command field included, so switching a
                 // structured clone to the command path starts from the
@@ -3290,25 +3158,30 @@ pub(super) fn CreateSessionForm(
     // submit see the same name on a host or repository change. Use the
     // synchronous destination claim: create_target is reconciled by an effect
     // and can still describe the prior host during this render.
-    let mut naming = clone_checkout_naming.peek().clone();
-    naming.retarget(destination_now.clone(), destination_draft().repo().cloned());
-    if naming != *clone_checkout_naming.peek() {
-        clone_checkout_naming.set(naming);
+    let _ = destination_draft();
+    let current = draft.snapshot();
+    let mut naming = current.checkout_naming();
+    naming.retarget(
+        destination_now.clone(),
+        current.destination().repo().cloned(),
+    );
+    if naming != current.checkout_naming() {
+        draft.edit(|draft| draft.retarget_naming(destination_now.clone()));
     }
     // Display, preview authority, retry binding, submit, draft snapshot and
     // request-key re-read must share this policy. A stray raw-title read
     // would make the create disagree with its preview and be refused as stale.
     let title_for_launch = move || {
-        let destination = destination_draft();
-        let naming = clone_checkout_naming();
-        let seed = title_raw_seed();
-        effective_title(
-            &title(),
+        // Preserve field subscriptions, but an imperative call in the same
+        // event turn must see accepted owner edits before those memos settle.
+        let _ = (
+            destination_draft(),
+            clone_checkout_naming(),
+            title_raw_seed(),
+            title(),
             title_edited(),
-            seed.as_deref(),
-            &destination,
-            &naming,
-        )
+        );
+        draft.snapshot().effective_title()
     };
     let mut proposed_authority = destination_draft().repo().cloned().and_then(|repo| {
         let host = hosts.iter().find(|host| Some(host.id) == selected)?;
@@ -3342,9 +3215,11 @@ pub(super) fn CreateSessionForm(
             authority.generation = generation;
         }
         live_preview_authority.set(proposed_authority);
-        let draft = destination_draft.peek().clone();
-        if let DestinationDraft::Github { repo, .. } = draft {
-            destination_draft.set(DestinationDraft::github(repo));
+        if draft.snapshot().destination().repo().is_some() {
+            // Semantic selection stays put. Same-repo reselection reaches this
+            // boundary through preview_revision, and submit checks its applied
+            // revision before an old Ready offer can be used before rerender.
+            preview_state.set(PreviewState::Pending);
         }
     }
     let preview_base = base.clone();
@@ -3551,29 +3426,31 @@ pub(super) fn CreateSessionForm(
         if authority != live {
             return;
         }
-        let preview_state = match result {
+        let next_preview = match result {
             Ok(preview) if authority.accepts(&live, &preview) => PreviewState::Ready { authority: authority.clone(), preview },
             Ok(_) => PreviewState::Failed { authority: authority.clone(), message: "the preview is stale or belongs to a different host installation; select the repository again".into() },
             Err(failure) => {
-                let mut naming = clone_checkout_naming.peek().clone();
-                let default = naming.default_title(*title_edited.peek(), title_raw_seed.peek().as_deref(), destination_draft.peek().repo());
+                let current = draft.snapshot();
+                let mut naming = current.checkout_naming();
+                let default = naming.default_title(current.title_edited(), current.title_raw_seed().as_deref(), current.destination().repo());
+                // This is the existing system edit: authoritative occupancy may
+                // advance a default while busy, but never retire a retry key.
                 if failure.occupied && default.as_ref() == authority.title.as_ref()
                     && default.is_some() && naming.advance(retry_binding.is_some()) {
-                    clone_checkout_naming.set(naming);
+                    draft.edit(|draft| draft.advance_naming(retry_binding.is_some()));
                     return;
                 }
                 PreviewState::Failed { authority: authority.clone(), message: failure.message }
             },
         };
-        if destination_draft.peek().repo() == Some(&authority.repo) {
-            destination_draft.set(DestinationDraft::Github {
-                repo: authority.repo,
-                preview_state: Box::new(preview_state),
-            });
+        if draft.snapshot().destination().repo() == Some(&authority.repo) {
+            // A completion changes observation only, after the authority and
+            // repository fences above. It cannot select or restore a repo.
+            preview_state.set(next_preview);
         }
     }));
     let current_preview = match destination_draft() {
-        DestinationDraft::Github { preview_state, .. } => match *preview_state {
+        DestinationDraft::Github { .. } => match preview_state() {
             PreviewState::Ready { authority, preview }
                 if live_preview_authority
                     .peek()
@@ -3639,14 +3516,14 @@ pub(super) fn CreateSessionForm(
     let (folder_field_value, folder_placeholder, checkout_mode) = match destination_draft() {
         DestinationDraft::Existing { .. } => (cwd(), "", false),
         DestinationDraft::GithubInput { .. } => (String::new(), "select a repository", true),
-        DestinationDraft::Github { preview_state, .. } => (
+        DestinationDraft::Github { .. } => (
             displayed_preview
                 .as_ref()
                 .map(|preview| preview.cwd.escaped())
                 .unwrap_or_default(),
             if displayed_preview.is_some() {
                 ""
-            } else if matches!(*preview_state, PreviewState::Failed { .. }) {
+            } else if matches!(preview_state(), PreviewState::Failed { .. }) {
                 "checkout preview unavailable"
             } else {
                 "waiting for checkout preview"
@@ -3660,12 +3537,13 @@ pub(super) fn CreateSessionForm(
     // will actually get, the preview's `repo-N`, is the placeholder instead.
     let title_ignored = copied_title_ignored(
         title_edited(),
-        title_raw_seed.peek().as_deref(),
+        draft.snapshot().title_raw_seed().as_deref(),
         checkout_mode,
     );
-    let clone_default = clone_checkout_naming().default_title(
+    let _ = clone_checkout_naming();
+    let clone_default = draft.snapshot().checkout_naming().default_title(
         title_edited(),
-        title_raw_seed.peek().as_deref(),
+        draft.snapshot().title_raw_seed().as_deref(),
         destination_draft().repo(),
     );
     let title_field_value = if let Some(default) = clone_default {
@@ -3687,13 +3565,15 @@ pub(super) fn CreateSessionForm(
     // This source marker disappears as soon as a hand edit takes over.
     let template_base = checkout_mode
         .then(|| {
-            clone_checkout_naming()
+            draft
+                .snapshot()
+                .checkout_naming()
                 .template_name()
                 .filter(|(_, kind)| *kind == farhelm_proto::launcher::TemplateNameKind::Base)
                 .map(|(base, _)| {
                     (
                         base.to_string(),
-                        clone_checkout_naming().sequence.is_numbered(),
+                        draft.snapshot().checkout_naming().sequence.is_numbered(),
                     )
                 })
         })
@@ -3765,19 +3645,12 @@ pub(super) fn CreateSessionForm(
             );
             if let Some(repo) = entry.github_repo {
                 remembered_destination.set(None);
-                destination_draft.set(DestinationDraft::github(repo));
+                draft.edit(|draft| draft.select_repository(repo));
                 preview_revision.with_mut(|value| {
                     *value = value.checked_add(1).expect("preview revision exhausted")
                 });
             } else {
-                select_existing_directory(
-                    &mut destination_draft,
-                    &mut cwd,
-                    &mut cwd_raw_seed,
-                    &mut cwd_edited,
-                    &mut folder_is_explicit,
-                    entry.cwd.raw(),
-                );
+                draft.edit(|draft| draft.choose_existing_folder(entry.cwd.raw()));
             }
             // Admission precedes the mode transition so a stale destination
             // cannot leave the user on a partially applied structured draft.
@@ -3796,21 +3669,12 @@ pub(super) fn CreateSessionForm(
         draft,
         composer_reset_reason,
         chosen_host,
-        destination: destination_draft,
-        cwd,
-        cwd_raw_seed,
-        cwd_edited,
-        title,
-        title_raw_seed,
-        title_edited,
-        clone_checkout_naming,
         preview_revision,
         template_error,
         intent_key,
     };
     let undo_targets = PermissionUndoTargets {
         fields: template_targets,
-        folder_is_explicit,
         clone_host_state,
         remembered_destination,
         model_draft,
@@ -4170,9 +4034,6 @@ pub(super) fn CreateSessionForm(
     // request is in flight.
     let browse_hosts = hosts.clone();
     let browse_target = create_target;
-    let browse_cwd = cwd;
-    let browse_cwd_raw_seed = cwd_raw_seed;
-    let browse_cwd_edited = cwd_edited;
     let browse_base_for_folder = browse_base.clone();
     let browse_hosts_for_folder = browse_hosts.clone();
     let hosts_for_destination_choice = hosts.clone();
@@ -4238,9 +4099,6 @@ pub(super) fn CreateSessionForm(
                     TemplateEdit::Search(result) => {
                         browse_path = apply_composer_search_result(
                             result,
-                            title,
-                            title_edited,
-                            clone_checkout_naming,
                             chosen_host,
                             &action_hosts,
                             clone_host_state,
@@ -4248,12 +4106,7 @@ pub(super) fn CreateSessionForm(
                             live_destination,
                             remembered_destination,
                             history_activation_attempts,
-                            destination_draft,
                             preview_revision,
-                            cwd,
-                            cwd_raw_seed,
-                            cwd_edited,
-                            folder_is_explicit,
                             draft,
                             preferences,
                             composer_reset_reason,
@@ -4277,9 +4130,7 @@ pub(super) fn CreateSessionForm(
                     browse_error,
                     browse_reply_completions,
                     live_browse_connection,
-                    cwd,
-                    cwd_raw_seed,
-                    cwd_edited,
+                    draft,
                 );
             }
             note_permission_switch.call((switch_before, automatic_permission));
@@ -4310,7 +4161,7 @@ pub(super) fn CreateSessionForm(
         // earlier gh: query still owns the composer's discovery search.
         composer_search.set(String::new());
         composer_search_open.set(false);
-        destination_draft.set(DestinationDraft::github(repo));
+        draft.edit(|draft| draft.select_repository(repo));
         preview_revision
             .with_mut(|value| *value = value.checked_add(1).expect("preview revision exhausted"));
         repository_open.set(false);
@@ -4568,9 +4419,10 @@ pub(super) fn CreateSessionForm(
             if !target_ready {
                 return;
             }
-            let preview_pending = match destination_draft() {
-                DestinationDraft::Github { preview_state, .. } => {
-                    matches!(*preview_state, PreviewState::Pending)
+            let _ = destination_draft();
+            let preview_pending = match draft.snapshot().destination() {
+                DestinationDraft::Github { .. } => {
+                    matches!(preview_state(), PreviewState::Pending)
                 }
                 _ => false,
             };
@@ -4683,7 +4535,7 @@ pub(super) fn CreateSessionForm(
     // reseeding. None submits. Local home is still a deliberate host pin even
     // when that host is already selected; home changes only its folder.
     let choose_folder = Callback::new(move |choice: FolderChoice| {
-        if !draft_transition_allowed(ops) || destination_draft.peek().is_managed() {
+        if !draft_transition_allowed(ops) || draft.snapshot().destination().is_managed() {
             return;
         }
         partial_template_hint.set(false);
@@ -4718,14 +4570,7 @@ pub(super) fn CreateSessionForm(
             browse_result,
             browse_error,
         );
-        select_existing_directory(
-            &mut destination_draft,
-            &mut cwd,
-            &mut cwd_raw_seed,
-            &mut cwd_edited,
-            &mut folder_is_explicit,
-            &path,
-        );
+        draft.edit(|draft| draft.choose_existing_folder(&path));
         intent_key.set(None);
         folder_open.set(false);
         folder_active.set(None);
@@ -4770,11 +4615,7 @@ pub(super) fn CreateSessionForm(
             let mut binding = IntentBinding::of(
                 selected,
                 &hosts,
-                submitted_field(
-                    &cwd.peek(),
-                    *cwd_edited.peek(),
-                    cwd_raw_seed.peek().as_deref(),
-                ),
+                current.submitted_cwd(),
                 LaunchIntent::Structured(selection),
                 title_for_launch(),
                 prefill
@@ -4788,7 +4629,7 @@ pub(super) fn CreateSessionForm(
             );
             binding.conversation =
                 (!current.conversation().is_empty()).then(|| current.conversation());
-            match destination_draft.peek().clone() {
+            match current.destination() {
                 DestinationDraft::Existing { cwd } => binding.cwd = cwd,
                 DestinationDraft::Github { repo, .. } => {
                     let authority = live_preview_authority.peek().clone()?;
@@ -5011,10 +4852,11 @@ pub(super) fn CreateSessionForm(
             // this form may reach by omission while its own selector is
             // still blank. Saying so beats creating on a machine the
             // user was never shown.
+            let _ = (cwd(), cwd_edited());
             let Some(mut binding) = IntentBinding::of(
                 selected_now,
                 &hosts,
-                submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()),
+                draft.snapshot().submitted_cwd(),
                 launch,
                 title_for_launch(),
                 replace_source,
@@ -5066,7 +4908,10 @@ pub(super) fn CreateSessionForm(
                     return;
                 }
             }
-            if binding.conversation.is_some() && destination_draft().repo().is_some() {
+            if binding.conversation.is_some() && {
+                let _ = destination_draft();
+                draft.snapshot().destination().repo().is_some()
+            } {
                 error.set(Some("named conversations cannot start in a new managed checkout; choose an existing folder".into()));
                 drop(op_guard);
                 return;
@@ -5079,7 +4924,7 @@ pub(super) fn CreateSessionForm(
             let fresh_draft_snapshot = move || {
                 let current = draft.snapshot();
                 (
-                    destination_draft.peek().repo().cloned(),
+                    current.destination().repo().cloned(),
                     current.tab(),
                     current.harness(),
                     current.model(),
@@ -5107,7 +4952,7 @@ pub(super) fn CreateSessionForm(
             };
             let fresh_snapshot = fresh_draft_snapshot();
             let mut replaying_fresh = false;
-            match destination_draft.peek().clone() {
+            match draft.snapshot().destination() {
                 DestinationDraft::Existing { cwd } => {
                     binding.cwd = cwd;
                 }
@@ -5115,10 +4960,7 @@ pub(super) fn CreateSessionForm(
                     error.set(Some("select a GitHub repository before launching".into()));
                     return;
                 }
-                DestinationDraft::Github {
-                    repo,
-                    preview_state,
-                } => {
+                DestinationDraft::Github { repo } => {
                     let installation = hosts
                         .iter()
                         .find(|host| host.id == binding.host)
@@ -5137,7 +4979,8 @@ pub(super) fn CreateSessionForm(
                         binding = original;
                         intent_key.set(Some((attempt.key, binding.clone())));
                         replaying_fresh = true;
-                    } else if let PreviewState::Ready { authority, preview } = *preview_state
+                    } else if let PreviewState::Ready { authority, preview } =
+                        preview_state.peek().clone()
                         && live_preview_authority
                             .peek()
                             .as_ref()
@@ -5330,11 +5173,7 @@ pub(super) fn CreateSessionForm(
                         cwd: if binding.github_checkout.is_some() {
                             binding.cwd.clone()
                         } else {
-                            submitted_field(
-                                &cwd.peek(),
-                                *cwd_edited.peek(),
-                                cwd_raw_seed.peek().as_deref(),
-                            )
+                            current.submitted_cwd()
                         },
                         // Re-read through the preview's effective-name
                         // policy. The operation gate fixes the destination
@@ -5622,11 +5461,12 @@ pub(super) fn CreateSessionForm(
         if ops.busy() || ops.busy_now() {
             return;
         }
-        let DestinationDraft::Github { preview_state, .. } = destination_draft() else {
+        let _ = destination_draft();
+        let DestinationDraft::Github { .. } = draft.snapshot().destination() else {
             guarded_submit_pending.set(None);
             return;
         };
-        match *preview_state {
+        match preview_state() {
             PreviewState::Pending => {}
             PreviewState::Ready { authority, preview }
                 if live_preview_authority
@@ -5785,6 +5625,8 @@ pub(super) fn CreateSessionForm(
                             {
                                 (current.restore)();
                                 invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
+                                // Undo restores semantics, never an old offer. Invalidate
+                                // before a queued submit can use the retained Ready slot.
                                 preview_revision += 1;
                                 permission_escalation.set(None);
                                 focus_composer_surface(false);
@@ -5916,10 +5758,11 @@ pub(super) fn CreateSessionForm(
                                 return;
                             }
                             let state = launcher_snapshot(template_targets, &hosts_for_template_save, selected);
+                            let placement = draft.snapshot();
                             template_panel.set(Some((super::save_template::Candidate::from_state(&state,
                                 super::save_template::ExplicitChoices {
                                     host: chosen_host().is_some() && clone_host_state() != CloneHostState::Bound,
-                                    folder: folder_is_explicit(), name: title_edited(),
+                                    folder: placement.folder_is_explicit(), name: placement.title_edited(),
                                     permissions: structured_permissions_is_explicit(),
                                     wrapper: wrapper_is_explicit(),
                                 }), host_label_for_template_save.clone())));
@@ -6003,7 +5846,7 @@ pub(super) fn CreateSessionForm(
                             yolo_confirmed_key.set(None);
                             yolo_stop_asking.set(None);
                             choose_permissions.call(Some(LaunchPermission::Guarded));
-                            if destination_draft.peek().repo().is_some() {
+                            if draft.snapshot().destination().repo().is_some() {
                                 // The row transition changes the fingerprint
                                 // before render installs its new authority.
                                 // Carry the remaining accepted authority into
@@ -6568,20 +6411,15 @@ pub(super) fn CreateSessionForm(
                             span { class: "launch-composer-section-label", "destination" }
                             DestinationTypeControl { managed: checkout_mode, disabled: busy,
                                 on_change: move |managed| {
-                                    if !draft_transition_allowed(ops) || managed == destination_draft.peek().is_managed() { return; }
+                                    if !draft_transition_allowed(ops) || managed == draft.snapshot().destination().is_managed() { return; }
                                     partial_template_hint.set(false);
                                     remembered_destination.set(None);
                                     promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
                                     invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
                                     repository_open.set(false);
-                                    if managed {
-                                        destination_draft.set(DestinationDraft::GithubInput { query: String::new() });
-                                    } else {
-                                        // A proposal is not an existing path. Return to the
-                                        // last editable seed, including Clone's source cwd.
-                                        let previous = submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref());
-                                        select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, &previous);
-                                    }
+                                    // A proposal is not an existing path. Folder mode
+                                    // returns to its dormant raw editor ownership.
+                                    draft.edit(|draft| draft.choose_destination_type(managed));
                                     intent_key.set(None);
                                 },
                             }
@@ -6597,9 +6435,9 @@ pub(super) fn CreateSessionForm(
                                             if !draft_transition_allowed(ops) { return; }
                                             request_directory_browse(
                                                 browse_base_for_folder.clone(), selected, &browse_hosts_for_folder, browse_target,
-                                                submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()),
+                                                draft.snapshot().submitted_cwd(),
                                                 browse_generation, browse_request, browse_result, browse_error, browse_reply_completions,
-                                                live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
+                                                live_browse_connection, draft,
                                             );
                                         },
                                         // Center the whole label as one inline
@@ -6645,7 +6483,7 @@ pub(super) fn CreateSessionForm(
                                             if !draft_transition_allowed(ops) || repository_read_only { return; }
                                             remembered_destination.set(None);
                                             invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
-                                            destination_draft.set(DestinationDraft::GithubInput { query: evt.value() });
+                                            draft.edit(|draft| draft.edit_repository_query(evt.value()));
                                             repository_index.set(0);
                                             repository_open.set(true);
                                             intent_key.set(None);
@@ -6669,7 +6507,7 @@ pub(super) fn CreateSessionForm(
                                                     }
                                                     // A queued key must not select a row from
                                                     // the previous query or host installation.
-                                                    if destination_draft.peek().repository_text() != repository_query_for_keys
+                                                    if draft.snapshot().destination().repository_text() != repository_query_for_keys
                                                         || *live_repository_authority.peek() != repository_authority_for_keys
                                                     {
                                                         repository_open.set(true);
@@ -6703,7 +6541,7 @@ pub(super) fn CreateSessionForm(
                                             if !draft_transition_allowed(ops) { return; }
                                             remembered_destination.set(None);
                                             invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
-                                            destination_draft.set(DestinationDraft::GithubInput { query: String::new() });
+                                            draft.edit(|draft| draft.edit_repository_query(String::new()));
                                             repository_index.set(0);
                                             repository_open.set(false);
                                             intent_key.set(None);
@@ -6738,11 +6576,11 @@ pub(super) fn CreateSessionForm(
                                 if choosing_repository && !search_owns_repositories && !show_checkout_root_setup && let Some(note) = &repository_note {
                                     div { class: "launch-composer-repository-note", role: "status", "{display_peer(note)}" }
                                 }
-                                if let DestinationDraft::Github { repo, preview_state } = destination_draft() {
+                                if let DestinationDraft::Github { repo } = destination_draft() {
                                     div { class: "launch-composer-checkout-preview", aria_live: "polite",
                                         // Completion must be observable even while reconciliation
                                         // hides a preview error behind the original accepted path.
-                                        "data-preview-state": match preview_state.as_ref() {
+                                        "data-preview-state": match preview_state() {
                                             PreviewState::Pending => "pending",
                                             PreviewState::Ready { .. } => "ready",
                                             PreviewState::Failed { .. } => "failed",
@@ -6754,7 +6592,7 @@ pub(super) fn CreateSessionForm(
                                         if retry_binding.is_some() {
                                             div { "retry reconciles the original request at this path" }
                                         } else {
-                                            match preview_state.as_ref() {
+                                            match preview_state() {
                                                 PreviewState::Pending => rsx! { div { "waiting for a current checkout preview" } },
                                                 PreviewState::Failed { message, .. } => rsx! { div { class: "create-session-error", "{display_peer(&message)}" } },
                                                 PreviewState::Ready { .. } => rsx! {},
@@ -6786,7 +6624,7 @@ pub(super) fn CreateSessionForm(
                                 disabled: busy,
                                 aria_label: "folder",
                                 onfocus: move |_| {
-                                    if !destination_draft.peek().is_managed() {
+                                    if !draft.snapshot().destination().is_managed() {
                                         folder_active.set(None);
                                         folder_open.set(true);
                                     }
@@ -6796,7 +6634,7 @@ pub(super) fn CreateSessionForm(
                                     folder_active.set(None);
                                 },
                                 onkeydown: move |evt: KeyboardEvent| {
-                                    if destination_draft.peek().is_managed() || evt.is_composing() { return; }
+                                    if draft.snapshot().destination().is_managed() || evt.is_composing() { return; }
                                     match evt.key() {
                                         Key::Escape if folder_open() => {
                                             evt.prevent_default(); evt.stop_propagation();
@@ -6832,16 +6670,13 @@ pub(super) fn CreateSessionForm(
                                     // A checkout path is evidence from the helm,
                                     // never an editable suggestion. The folder
                                     // segment is the only way back to typing.
-                                    if destination_draft().is_managed() { return; }
+                                    if draft.snapshot().destination().is_managed() { return; }
                                     promote_fetched_history_snapshot(
                                         offered_history, create_target, fetched_history,
                                     );
-                                    cwd.set(evt.value());
-                                    destination_draft.set(DestinationDraft::Existing { cwd: evt.value() });
-                                    cwd_edited.set(true);
+                                    draft.edit(|draft| draft.edit_folder(evt.value()));
                                     folder_active.set(None);
                                     folder_open.set(true);
-                                    folder_is_explicit.set(true);
                                     remembered_destination.set(None);
                                     invalidate_directory_browse(
                                         browse_generation, browse_request, browse_result, browse_error,
@@ -6926,9 +6761,7 @@ pub(super) fn CreateSessionForm(
                                         if !draft_transition_allowed(ops) {
                                             return;
                                         }
-                                        title.set(evt.value());
-                                        title_edited.set(true);
-                                        clone_checkout_naming.set(CheckoutNaming::default());
+                                        draft.edit(|draft| draft.edit_title(evt.value()));
                                         // An edit makes the next submit a DIFFERENT
                                         // intent, so the key the last one used stops
                                         // applying here (this component's docs carry
@@ -7334,11 +7167,10 @@ pub(super) fn CreateSessionForm(
                     &result_authority,
                     browse_target(),
                     live_browse_connection(),
-                    &submitted_field(
-                        &browse_cwd(),
-                        browse_cwd_edited(),
-                        browse_cwd_raw_seed.peek().as_deref(),
-                    ),
+                    &{
+                        let _ = (cwd(), cwd_edited());
+                        draft.snapshot().submitted_cwd()
+                    },
                 )
             {
                 div { class: "launch-composer-browser",
@@ -7354,7 +7186,7 @@ pub(super) fn CreateSessionForm(
                                 if !draft_transition_allowed(ops)
                                     || !browse_activation_is_current(
                                         browse_request, &authority, browse_target,
-                                        live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
+                                        live_browse_connection, draft,
                                     )
                                 {
                                     return;
@@ -7362,7 +7194,7 @@ pub(super) fn CreateSessionForm(
                                 promote_fetched_history_snapshot(
                                     offered_history, create_target, fetched_history,
                                 );
-                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, selected_cwd.raw());
+                                draft.edit(|draft| draft.choose_existing_folder(selected_cwd.raw()));
                                 remembered_destination.set(None);
                                 invalidate_directory_browse(
                                     browse_generation, browse_request, browse_result, browse_error,
@@ -7384,7 +7216,7 @@ pub(super) fn CreateSessionForm(
                                 if !draft_transition_allowed(ops)
                                     || !browse_activation_is_current(
                                         browse_request, &authority, browse_target,
-                                        live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
+                                        live_browse_connection, draft,
                                     )
                                 {
                                     return;
@@ -7392,7 +7224,7 @@ pub(super) fn CreateSessionForm(
                                 promote_fetched_history_snapshot(
                                     offered_history, create_target, fetched_history,
                                 );
-                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, parent.raw());
+                                draft.edit(|draft| draft.choose_existing_folder(parent.raw()));
                                 remembered_destination.set(None);
                                 invalidate_directory_browse(
                                     browse_generation, browse_request, browse_result, browse_error,
@@ -7418,7 +7250,7 @@ pub(super) fn CreateSessionForm(
                                 if !draft_transition_allowed(ops)
                                     || !browse_activation_is_current(
                                         browse_request, &authority, browse_target,
-                                        live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
+                                        live_browse_connection, draft,
                                     )
                                 {
                                     return;
@@ -7426,7 +7258,7 @@ pub(super) fn CreateSessionForm(
                                 promote_fetched_history_snapshot(
                                     offered_history, create_target, fetched_history,
                                 );
-                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, child.raw());
+                                draft.edit(|draft| draft.choose_existing_folder(child.raw()));
                                 remembered_destination.set(None);
                                 invalidate_directory_browse(
                                     browse_generation, browse_request, browse_result, browse_error,
@@ -8848,7 +8680,7 @@ mod tests {
             "the escaped display must differ from the raw bytes for this test to mean anything"
         );
 
-        // What `reseed_cloned_field` seeds the field with, and what an
+        // What the draft's raw seed transitions display, and what an
         // UNTOUCHED submit sends back — the original bytes, not the
         // escaped spelling the input box is showing.
         assert_eq!(

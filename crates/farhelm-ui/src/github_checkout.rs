@@ -13,6 +13,8 @@ use crate::peer::PeerText;
 /// text. Existing retains the exact submitted path; the separate text editor
 /// may show an escaped spelling of that path. A GitHub destination never uses
 /// that dormant editor value as a fallback while its preview is unavailable.
+/// Preview observations are separate from this semantic value: completing a
+/// request cannot select a repository or invalidate unrelated draft observers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DestinationDraft {
     Existing {
@@ -25,9 +27,6 @@ pub(crate) enum DestinationDraft {
     },
     Github {
         repo: GithubRepo,
-        // Ready carries the complete authority and reply. Keep that larger
-        // snapshot indirect so ordinary destination drafts stay compact.
-        preview_state: Box<PreviewState>,
     },
 }
 
@@ -48,13 +47,10 @@ pub(crate) enum PreviewState {
 }
 
 impl DestinationDraft {
-    /// Selecting a repo is explicit fresh intent, even if it is the same repo
-    /// as the prior selection. Never inherit that selection's preview.
+    /// Repository selection carries intent only. The form separately advances
+    /// its preview revision even when the same repository is selected again.
     pub(crate) fn github(repo: GithubRepo) -> Self {
-        Self::Github {
-            repo,
-            preview_state: Box::new(PreviewState::Pending),
-        }
+        Self::Github { repo }
     }
 
     /// Return the repo intent without exposing an old checkout path.
