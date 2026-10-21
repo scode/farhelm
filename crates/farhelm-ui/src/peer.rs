@@ -74,6 +74,12 @@ impl PeerText {
     pub(crate) fn escaped(&self) -> String {
         display_peer(self.raw())
     }
+
+    /// Show an identity without hiding spaces or confusing literal escape text.
+    /// Comparisons and adoption must still use the original bytes from `raw`.
+    pub(crate) fn identity(&self) -> String {
+        display_identity(self.raw())
+    }
 }
 
 /// Mark owned bytes as peer text without validating or normalizing them.
@@ -368,6 +374,7 @@ mod tests {
             let text: PeerText = serde_json::from_str(&wire).unwrap();
             assert_eq!(text.raw(), raw);
             assert_eq!(text.escaped(), display_peer(raw));
+            assert_eq!(text.identity(), display_identity(raw));
             assert_eq!(serde_json::to_string(&text).unwrap(), wire);
             assert_eq!(format!("{text:?}"), format!("{raw:?}"));
             assert_eq!(

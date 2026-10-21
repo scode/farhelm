@@ -125,6 +125,7 @@
 //! here.
 
 use dioxus::prelude::*;
+use peer::PeerText;
 use serde::Deserialize;
 
 mod activity;
@@ -923,6 +924,10 @@ impl HostKind {
 /// believable. A truncated or reshaped reply is a FAILED READ (see
 /// `hosts::HostsRead`), which the panel shows as such while keeping the last
 /// snapshot it trusts.
+///
+/// Human-readable payloads retain their bytes as `PeerText` until a consumer
+/// chooses a presentation. The cause token and numeric fields are protocol
+/// vocabulary, so they keep their comparison semantics.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(tag = "phase")]
 pub enum HostPhase {
@@ -933,7 +938,7 @@ pub enum HostPhase {
         attempt: u32,
         /// Absent before the first attempt has failed — genuinely optional
         /// on the wire, unlike the fields around it.
-        last_error: Option<String>,
+        last_error: Option<PeerText>,
     },
     /// The active window is spent and background re-probing continues
     /// forever, so this host comes back by itself once it is back.
@@ -942,14 +947,16 @@ pub enum HostPhase {
         /// `"local-supervisor-not-running"` is the one cause with a remedy
         /// on the machine the user is already sitting at, and the panel's
         /// manual-start hint keys off exactly this string.
+        /// Other values remain accepted for forward compatibility; this token
+        /// is selected by the helm, not taken from transport diagnostics.
         cause: String,
-        last_error: String,
+        last_error: PeerText,
     },
     #[serde(rename = "connected")]
     Connected {
         /// Genuinely optional: a supervisor may report no identity at all.
-        identity: Option<String>,
-        build_version: String,
+        identity: Option<PeerText>,
+        build_version: PeerText,
         /// Whether the connected peer's parseable build predates the helm's
         /// build. Older helms omit this additive field, which means the age
         /// is unknown and must remain visually connected.
@@ -970,10 +977,10 @@ pub enum HostPhase {
     #[serde(rename = "version-skew")]
     VersionSkew {
         peer_protocol: u32,
-        peer_build: String,
+        peer_build: PeerText,
         our_protocol: u32,
-        our_build: String,
-        remediation: String,
+        our_build: PeerText,
+        remediation: PeerText,
     },
     /// Frozen awaiting a user decision: adopt `reported`, or fix the
     /// destination. `reported` is the value an adopt request must carry —
@@ -981,7 +988,10 @@ pub enum HostPhase {
     /// re-probe landing between the display and the click cannot silently
     /// adopt a third install.
     #[serde(rename = "identity-mismatch")]
-    IdentityMismatch { recorded: String, reported: String },
+    IdentityMismatch {
+        recorded: PeerText,
+        reported: PeerText,
+    },
     /// Frozen because the destination answered with NO identity while this
     /// entry has one on record — so there is nothing to compare and,
     /// deliberately, nothing to adopt.
@@ -992,26 +1002,27 @@ pub enum HostPhase {
     /// entry, or removing it — and the state re-probes itself, so a host
     /// that starts identifying again recovers unaided.
     #[serde(rename = "identity-unverified")]
-    IdentityUnverified { recorded: String },
+    IdentityUnverified { recorded: PeerText },
     /// This ENTRY reaches a machine another entry already holds. Nothing is
     /// connected through it; this row exists so the user can remove the
     /// other entry or change this one's destination, then press Retry.
     #[serde(rename = "duplicate")]
     Duplicate {
         twin: HostId,
-        identity: String,
+        identity: PeerText,
         /// The other entry's name as this UI shows it, filled in from the
         /// same host list once it is read (`hosts::name_duplicate_twins`);
         /// the helm never sends it. `None` when that entry is not in the
-        /// list.
+        /// list. This is already escaped by `gui_host_name`; detail rendering
+        /// still applies its existing second escaping pass.
         #[serde(skip)]
-        twin_name: Option<String>,
+        twin_name: Option<PeerText>,
     },
     /// No connection actor is running for this row. Reported rather than
     /// hidden, because an operation refused against it has to have something
     /// honest to name — and because retry is what brings it back.
     #[serde(rename = "retired")]
-    Retired { reason: String },
+    Retired { reason: PeerText },
     /// A phase this build does not know. Not a state the helm can be in —
     /// it is what a UI one version behind sees, and it exists so that host
     /// costs the rest of the panel nothing (see the type's own docs).
@@ -1040,7 +1051,7 @@ pub enum RefreshHealth {
     /// The last refresh failed while the PREVIOUS cache stayed in place, so
     /// this host's sessions are still listed.
     #[serde(rename = "failed")]
-    Failed { error: String },
+    Failed { error: PeerText },
     /// Same tolerance posture as [`HostPhase::Unrecognized`], one level
     /// down: an unknown refresh status must not cost the panel the host's
     /// connection state, which is the part SPEC.md requires to be visible.
@@ -2666,11 +2677,11 @@ mod tests {
         assert!(matches!(
             &hosts[1].state,
             HostPhase::VersionSkew { peer_protocol: 9, our_protocol: 8, remediation, .. }
-                if remediation == "update the host's farhelm binary"
+                if remediation.raw() == "update the host's farhelm binary"
         ));
         assert!(matches!(
             &hosts[2].state,
-            HostPhase::Duplicate { twin: 2, identity, .. } if identity == "identity-shared"
+            HostPhase::Duplicate { twin: 2, identity, .. } if identity.raw() == "identity-shared"
         ));
     }
 

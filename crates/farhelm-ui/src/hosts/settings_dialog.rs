@@ -494,7 +494,7 @@ pub(crate) fn HostDialogHeader(
                         if let Some(version) = reported_version {
                             span { class: "host-settings-version",
                                 "Farhelm "
-                                span { class: "peer-value", dir: "ltr", "{display_peer(&version)}" }
+                                span { class: "peer-value", dir: "ltr", "{version.escaped()}" }
                             }
                         }
                     }

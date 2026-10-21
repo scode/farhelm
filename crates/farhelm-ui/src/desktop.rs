@@ -1029,6 +1029,11 @@ fn local_supervisor_refusal(
             our_build,
             remediation,
         } => {
+            // Our build and the local remedy are app-authored on this path.
+            // Their original line breaks belong to the native alert's structure.
+            let peer_build = peer_build.raw();
+            let our_build = our_build.raw();
+            let remediation = remediation.raw();
             let mismatch = format!(
                 "the {label} in {dir} speaks protocol {peer_protocol} (build {peer_build}), but \
                  this app speaks protocol {our_protocol} (build {our_build})"
@@ -1043,19 +1048,26 @@ fn local_supervisor_refusal(
                 )
             }
         }
-        crate::HostPhase::IdentityMismatch { recorded, reported } => format!(
-            "the {label} in {dir} reports identity {reported}, but this machine's host entry \
+        crate::HostPhase::IdentityMismatch { recorded, reported } => {
+            let recorded = recorded.raw();
+            let reported = reported.raw();
+            format!(
+                "the {label} in {dir} reports identity {reported}, but this machine's host entry \
              recorded {recorded}. The supervisor's database (supervisor.db) and this app's own \
              (helm.db) in {dir} no longer describe the same install, which happens when one of \
              them is restored from a backup or replaced without the other, or when \
              supervisor.db is deleted. Restarting this app alone will not change it. To fix \
              it, quit Farhelm, make sure no supervisor is still running for {dir}, and restore \
              both files from the same backup."
-        ),
-        crate::HostPhase::IdentityUnverified { recorded } => format!(
-            "the {label} in {dir} reports no identity, but this machine's host entry recorded \
+            )
+        }
+        crate::HostPhase::IdentityUnverified { recorded } => {
+            let recorded = recorded.raw();
+            format!(
+                "the {label} in {dir} reports no identity, but this machine's host entry recorded \
              {recorded}, so this app cannot tell whether it is the same supervisor."
-        ),
+            )
+        }
         _ => return None,
     })
 }
@@ -1558,10 +1570,10 @@ mod tests {
         };
         let skew = crate::HostPhase::VersionSkew {
             peer_protocol: 9,
-            peer_build: "old-build".to_string(),
+            peer_build: "old-build".into(),
             our_protocol: 10,
-            our_build: "new-build".to_string(),
-            remediation: "update the supervisor".to_string(),
+            our_build: "new-build".into(),
+            remediation: "update the supervisor".into(),
         };
 
         let refusal =
@@ -1591,8 +1603,8 @@ mod tests {
             &[host(
                 crate::HostKind::Local,
                 crate::HostPhase::IdentityMismatch {
-                    recorded: "id-recorded".to_string(),
-                    reported: "id-reported".to_string(),
+                    recorded: "id-recorded".into(),
+                    reported: "id-reported".into(),
                 },
             )],
             dir,
@@ -1619,7 +1631,7 @@ mod tests {
             &[host(
                 crate::HostKind::Local,
                 crate::HostPhase::IdentityUnverified {
-                    recorded: "id-recorded".to_string(),
+                    recorded: "id-recorded".into(),
                 },
             )],
             dir,
