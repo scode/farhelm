@@ -134,7 +134,7 @@ async fn named_restart_with_refuses_malformed_argv_without_stopping_the_old_run(
             .await
             .expect_err("malformed argv must be refused at admission");
         assert_eq!(
-            error.downcast_ref::<SupervisorError>().unwrap().kind,
+            error.downcast_ref::<SupervisorError>().unwrap().kind(),
             ErrorKind::InvalidRequest
         );
         assert_eq!(snapshot_of(&h, &session.id).await.generation, generation);
@@ -286,7 +286,7 @@ async fn named_create_runs_once_and_reports_identity_without_changing_saved_laun
     assert_eq!(create("requested-target").await.unwrap().id, created.id);
     let changed = create("other-target").await.unwrap_err();
     assert_eq!(
-        changed.downcast_ref::<SupervisorError>().unwrap().kind,
+        changed.downcast_ref::<SupervisorError>().unwrap().kind(),
         ErrorKind::Conflict
     );
     let (channel, mut stream, mut seen) = attach_ready(&h, &created).await;
@@ -339,7 +339,7 @@ async fn assert_restart_with_refused(
         error
             .downcast_ref::<SupervisorError>()
             .expect("supervisor classifies the refusal")
-            .kind,
+            .kind(),
         ErrorKind::Conflict
     );
     // Every refusal here is a Conflict, so the message is what tells WHICH
@@ -871,11 +871,11 @@ async fn restarting_a_working_session_without_consent_is_refused_and_kills_nothi
     let err = err
         .downcast_ref::<SupervisorError>()
         .expect("a refusal carries the supervisor's own classification");
-    assert_eq!(err.kind, ErrorKind::Conflict);
+    assert_eq!(err.kind(), ErrorKind::Conflict);
     assert!(
-        err.message.contains("is working"),
+        err.message().contains("is working"),
         "the refusal must say why, so a client can ask the user: {}",
-        err.message
+        err.message()
     );
 
     assert!(
@@ -1080,11 +1080,11 @@ async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotati
     let err = err
         .downcast_ref::<SupervisorError>()
         .expect("a precondition failure carries its classification");
-    assert_eq!(err.kind, ErrorKind::InvalidRequest);
+    assert_eq!(err.kind(), ErrorKind::InvalidRequest);
     assert!(
-        err.message.contains(&cwd),
+        err.message().contains(&cwd),
         "the error must name the directory (SPEC.md): {}",
-        err.message
+        err.message()
     );
 
     let after = listed(&h.client, &session.id).await;

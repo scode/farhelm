@@ -1126,7 +1126,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     let refusal = refusal
         .downcast_ref::<SupervisorError>()
         .expect("resume refusal is a supervisor error");
-    assert_eq!(refusal.kind, farhelm_proto::ErrorKind::Conflict);
+    assert_eq!(refusal.kind(), farhelm_proto::ErrorKind::Conflict);
     let after_refusal = h
         .sup
         .session_snapshot(&session.id)
@@ -1440,7 +1440,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         refusal
             .downcast_ref::<SupervisorError>()
             .expect("supervisor refusal")
-            .kind,
+            .kind(),
         farhelm_proto::ErrorKind::Conflict
     );
     assert_eq!(

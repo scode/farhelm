@@ -691,7 +691,7 @@ async fn opening_a_tab_without_a_tmux_session_says_to_restart_first() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("a refused open must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::Conflict,
         "a session in the wrong state for this operation is a conflict, not a missing thing"
     );

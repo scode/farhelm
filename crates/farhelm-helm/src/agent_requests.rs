@@ -508,11 +508,10 @@ impl AgentRequestHandler for HelmAgentRequests {
                     Err(error) => return outcome_of(Err(error), mutating),
                 };
                 if target == SessionKey::new(origin.host, session_id) {
-                    return outcome_of(Err(anyhow::Error::new(crate::SupervisorError {
-                        origin: crate::client::ErrorOrigin::Helm,
-                        kind: ErrorKind::InvalidRequest,
-                        message: "a session cannot delete itself; use stop to end its agent while keeping the session".to_string(),
-                    })), mutating);
+                    return outcome_of(Err(anyhow::Error::new(crate::SupervisorError::helm(
+                        ErrorKind::InvalidRequest,
+                        "a session cannot delete itself; use stop to end its agent while keeping the session".to_string(),
+                    ))), mutating);
                 }
                 agent_delete(&state, origin, session_id, &target, stop_if_running).await
             }
@@ -534,11 +533,10 @@ impl AgentRequestHandler for HelmAgentRequests {
                 };
                 if target == SessionKey::new(origin.host, session_id) {
                     return outcome_of(
-                        Err(anyhow::Error::new(crate::SupervisorError {
-                            origin: crate::client::ErrorOrigin::Helm,
-                            kind: ErrorKind::InvalidRequest,
-                            message: "a session cannot send a prompt to itself".to_string(),
-                        })),
+                        Err(anyhow::Error::new(crate::SupervisorError::helm(
+                            ErrorKind::InvalidRequest,
+                            "a session cannot send a prompt to itself".to_string(),
+                        ))),
                         mutating,
                     );
                 }
@@ -574,14 +572,13 @@ impl AgentRequestHandler for HelmAgentRequests {
                 // be retried once the helm has the session's details again.
                 let Some(shown) = cached_launch(&state, &target).await else {
                     return outcome_of(
-                        Err(anyhow::Error::new(crate::SupervisorError {
-                            origin: crate::client::ErrorOrigin::Helm,
-                            kind: ErrorKind::Unavailable,
-                            message: "Farhelm cannot read this session's launch right now, so \
+                        Err(anyhow::Error::new(crate::SupervisorError::helm(
+                            ErrorKind::Unavailable,
+                            "Farhelm cannot read this session's launch right now, so \
                                       it cannot show you what a restart would run; nothing was \
                                       done, retry shortly"
                                 .to_string(),
-                        })),
+                        ))),
                         mutating,
                     );
                 };
@@ -603,14 +600,13 @@ impl AgentRequestHandler for HelmAgentRequests {
                 // landing after this check (`expected_launch`).
                 let approval = match approved(&state, origin, session_id, action).await {
                     Ok(()) if cached_launch(&state, &target).await.as_ref() != Some(&shown) => {
-                        Err(anyhow::Error::new(crate::SupervisorError {
-                            origin: crate::client::ErrorOrigin::Helm,
-                            kind: ErrorKind::Conflict,
-                            message: "the session's launch changed while this restart waited \
+                        Err(anyhow::Error::new(crate::SupervisorError::helm(
+                            ErrorKind::Conflict,
+                            "the session's launch changed while this restart waited \
                                       for approval, so it was not restarted; retry to see the \
                                       new launch on the card"
                                 .to_string(),
-                        }))
+                        )))
                     }
                     other => other,
                 };
@@ -1376,34 +1372,32 @@ async fn resolve_host(
         let mut matches = views.iter().filter(|view| view.name == name);
         let Some(view) = matches.next() else {
             let names: Vec<&str> = views.iter().map(|view| view.name.as_str()).collect();
-            return Err(anyhow::Error::new(crate::SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::NotFound,
+            return Err(anyhow::Error::new(crate::SupervisorError::helm(
+                ErrorKind::NotFound,
                 // The name is quoted back so a typo is visible as a
                 // typo, and the alternatives are listed because the
                 // agent's next move is to pick one.
-                message: format!(
+                format!(
                     "no host named {name:?} is registered with this helm; known hosts: {}{}",
                     known_hosts(&names),
                     unnameable_hosts(&names).unwrap_or_default()
                 ),
-            }));
+            )));
         };
         if matches.next().is_some() {
             let duplicates = views.iter().filter(|view| view.name == name).count();
-            return Err(anyhow::Error::new(crate::SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::Conflict,
+            return Err(anyhow::Error::new(crate::SupervisorError::helm(
+                ErrorKind::Conflict,
                 // `Conflict`, not `NotFound` or `InvalidRequest`: the
                 // request is well formed and the fleet is the thing
                 // that is incoherent. The remedy is a rename the agent cannot perform, so the
                 // message says who has to do it.
-                message: format!(
+                format!(
                     "{duplicates} hosts registered with this helm are named {name:?}, so the \
                          target is ambiguous; rename one in the Farhelm UI, or name a host whose \
                          display name is unique"
                 ),
-            }));
+            )));
         }
         Ok((view.id, view.name.clone()))
     }
@@ -1639,14 +1633,13 @@ async fn create_for_agent(
     if let Some(parent) = &parent
         && parent != &SessionKey::new(origin.host, asking_session)
     {
-        return Err(anyhow::Error::new(crate::SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Unauthorized,
-            message: format!(
+        return Err(anyhow::Error::new(crate::SupervisorError::helm(
+            ErrorKind::Unauthorized,
+            format!(
                 "a session-authenticated peer may name only itself ({}) as parent",
                 escape_for_log(asking_session)
             ),
-        }));
+        )));
     }
     // Fingerprints below still read the unmodified request. The supervisor
     // receives only the resolved parent's bare suffix on this spawn's own entry.
@@ -1702,7 +1695,7 @@ async fn create_for_agent(
         .map_err(|error| {
             if keyed
                 && crate::find_cause::<crate::SupervisorError>(&error)
-                    .is_some_and(|e| e.kind == ErrorKind::CheckoutConflict)
+                    .is_some_and(|e| e.kind() == ErrorKind::CheckoutConflict)
             {
                 error.context("this checkout attempt was refused; retry with a new idempotency key")
             } else {
@@ -1942,8 +1935,8 @@ async fn create_checkout_for_agent(
                     error
                         .downcast_ref::<crate::SupervisorError>()
                         .is_some_and(|error| {
-                            error.origin == crate::client::ErrorOrigin::SupervisorReply
-                                && error.kind == ErrorKind::Conflict
+                            error.origin() == crate::client::ErrorOrigin::SupervisorReply
+                                && error.kind() == ErrorKind::Conflict
                         });
                 if let Some(base) = &base
                     && occupied
@@ -2240,13 +2233,12 @@ async fn approve_launch(
     };
     approved(state, origin, asking_session, action).await?;
     if state.manager.status(host).map(|status| status.incarnation) != target_before {
-        return Err(anyhow::Error::new(crate::SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Unavailable,
-            message: "the target host's connection changed while this request waited for \
+        return Err(anyhow::Error::new(crate::SupervisorError::helm(
+            ErrorKind::Unavailable,
+            "the target host's connection changed while this request waited for \
                       approval, so nothing was started; retry"
                 .to_string(),
-        }));
+        )));
     }
     crate::yolo_guard::check_agent_approved(
         state,
@@ -2282,11 +2274,10 @@ async fn agent_prompt(
             snapshot.id == claim.host && snapshot.incarnation == claim.incarnation
         });
     let Some(snapshot) = snapshot.filter(|_| shown.id == target.session_id) else {
-        return Err(anyhow::Error::new(crate::SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Unavailable,
-            message: "Farhelm cannot confirm the target session's current owner, so no prompt was sent; retry".to_string(),
-        }));
+        return Err(anyhow::Error::new(crate::SupervisorError::helm(
+            ErrorKind::Unavailable,
+            "Farhelm cannot confirm the target session's current owner, so no prompt was sent; retry".to_string(),
+        )));
     };
     let action = ApprovalAction::Prompt {
         target: farhelm_proto::approvals::ApprovalSession {
@@ -2309,11 +2300,10 @@ async fn agent_prompt(
         || current_claim.incarnation != claim.incarnation
         || current_client.connection_id() != client.connection_id()
     {
-        return Err(anyhow::Error::new(crate::SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Unavailable,
-            message: "the target host's connection changed while this request waited for approval, so no prompt was sent; retry".to_string(),
-        }));
+        return Err(anyhow::Error::new(crate::SupervisorError::helm(
+            ErrorKind::Unavailable,
+            "the target host's connection changed while this request waited for approval, so no prompt was sent; retry".to_string(),
+        )));
     }
     client.prompt_session(&target.session_id, prompt).await?;
     Ok(AgentReply::Prompted {})
@@ -2335,18 +2325,13 @@ async fn agent_delete(
         .await
         .context(ReadOnlyPhase("reading the session to delete"))?;
     let shown = listing.sessions.iter().find(|info| info.id == target.session_id).ok_or_else(|| {
-        anyhow::Error::new(crate::SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Unavailable,
-            message: "Farhelm cannot read the target session's running state, so nothing was deleted; retry after refreshing the session listing".to_string(),
-        })
+        anyhow::Error::new(crate::SupervisorError::helm(
+            ErrorKind::Unavailable,
+            "Farhelm cannot read the target session's running state, so nothing was deleted; retry after refreshing the session listing".to_string(),
+        ))
     })?;
     let guard = agent_delete_guard(shown, stop_if_running).map_err(|message| {
-        anyhow::Error::new(crate::SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Conflict,
-            message,
-        })
+        anyhow::Error::new(crate::SupervisorError::helm(ErrorKind::Conflict, message))
     })?;
     let action = ApprovalAction::Delete {
         target: crate::approvals::describe_session(state, target, &claim.entry_uuid).await,
@@ -2392,11 +2377,10 @@ async fn approved(
 ) -> anyhow::Result<()> {
     crate::approvals::ask(state, origin, asking_session, action).await?;
     if !origin_is_live(state, origin) {
-        return Err(anyhow::Error::new(crate::SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Unavailable,
-            message: crate::approvals::ORIGIN_GONE_REFUSAL.to_string(),
-        }));
+        return Err(anyhow::Error::new(crate::SupervisorError::helm(
+            ErrorKind::Unavailable,
+            crate::approvals::ORIGIN_GONE_REFUSAL.to_string(),
+        )));
     }
     Ok(())
 }
@@ -2447,15 +2431,14 @@ fn template_host_moved(
     if claim.identity.as_deref() == Some(expected) {
         return None;
     }
-    Some(anyhow::Error::new(crate::SupervisorError {
-        origin: crate::client::ErrorOrigin::Helm,
-        kind: ErrorKind::Conflict,
-        message: format!(
+    Some(anyhow::Error::new(crate::SupervisorError::helm(
+        ErrorKind::Conflict,
+        format!(
             "the host {host_name} that the template names now reaches a different Farhelm \
              installation than the one the template was made for, so nothing was created; \
              check that host in the host list, or name a host with --host"
         ),
-    }))
+    )))
 }
 
 /// Send one resolved agent create to its host.
@@ -2712,14 +2695,13 @@ async fn write_template_for_agent(
     let before = find_template(state, &name).await?;
     let template = match (&before, create) {
         (Some(_), true) => {
-            return Err(anyhow::Error::new(crate::SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::Conflict,
-                message: format!(
+            return Err(anyhow::Error::new(crate::SupervisorError::helm(
+                ErrorKind::Conflict,
+                format!(
                     "a template named {name:?} already exists; change it with farhelm agent \
                      template edit"
                 ),
-            }));
+            )));
         }
         (None, false) => return Err(no_such_template(&name)),
         (None, true) => farhelm_proto::launcher::LaunchTemplate {
@@ -2968,11 +2950,10 @@ async fn template_host_name(state: &AppState, identity: &str) -> Option<String> 
 }
 
 fn no_such_template(name: &str) -> anyhow::Error {
-    anyhow::Error::new(crate::SupervisorError {
-        origin: crate::client::ErrorOrigin::Helm,
-        kind: ErrorKind::NotFound,
-        message: format!("no template is named {name:?}; farhelm agent templates lists them"),
-    })
+    anyhow::Error::new(crate::SupervisorError::helm(
+        ErrorKind::NotFound,
+        format!("no template is named {name:?}; farhelm agent templates lists them"),
+    ))
 }
 
 /// The refusal of a template write that would switch a template between
@@ -2987,23 +2968,21 @@ fn changes_launch_kind(name: &str) -> anyhow::Error {
 }
 
 fn template_changed() -> anyhow::Error {
-    anyhow::Error::new(crate::SupervisorError {
-        origin: crate::client::ErrorOrigin::Helm,
-        kind: ErrorKind::Conflict,
-        message: "the template changed while this request waited for approval, so nothing was \
+    anyhow::Error::new(crate::SupervisorError::helm(
+        ErrorKind::Conflict,
+        "the template changed while this request waited for approval, so nothing was \
                   written; look at it again and retry"
             .to_string(),
-    })
+    ))
 }
 
 /// A shortcut card bound both the template and every shortcut assignment.
 /// Name both in this refusal so an agent knows why a retry needs a new card.
 fn template_or_shortcuts_changed() -> anyhow::Error {
-    anyhow::Error::new(crate::SupervisorError {
-        origin: crate::client::ErrorOrigin::Helm,
-        kind: ErrorKind::Conflict,
-        message: "the template or its shortcut bindings changed while this request waited for approval, so nothing was written; look again and retry".to_string(),
-    })
+    anyhow::Error::new(crate::SupervisorError::helm(
+        ErrorKind::Conflict,
+        "the template or its shortcut bindings changed while this request waited for approval, so nothing was written; look again and retry".to_string(),
+    ))
 }
 
 /// `templates`: every template the helm holds, with command text withheld.
@@ -3115,14 +3094,13 @@ async fn clone_for_agent(
         .map(crate::store::CachedRow::into_info)
         .find(|session| session.id == source_key.session_id)
         .ok_or_else(|| {
-            anyhow::Error::new(crate::SupervisorError {
- origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::NotFound,
-                message: format!(
+            anyhow::Error::new(crate::SupervisorError::helm(
+                ErrorKind::NotFound,
+                format!(
                     "the selected source host no longer lists session {:?}, so there is nothing to clone",
                     request.source_session_id
                 ),
-            })
+            ))
         })?;
 
     let mode = crate::sessions::mode_from_source(
@@ -3175,11 +3153,10 @@ async fn clone_for_agent(
     let (confirmed_claim, confirmed_client) =
         crate::sessions::route_session(state, &source_key).await?;
     if confirmed_claim != source_claim || !Arc::ptr_eq(&confirmed_client, &source_client) {
-        return Err(anyhow::Error::new(crate::SupervisorError {
- origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Conflict,
-            message: "the source session's owner changed while it was being read; run discovery again before retrying the clone".to_string(),
-        }));
+        return Err(anyhow::Error::new(crate::SupervisorError::helm(
+            ErrorKind::Conflict,
+            "the source session's owner changed while it was being read; run discovery again before retrying the clone".to_string(),
+        )));
     }
     let (current_claim, _) = crate::sessions::host_client(state, host)?;
     crate::precondition::incarnation_holds(&current_claim, Some(claim.incarnation))?;
@@ -3281,11 +3258,10 @@ fn reject_clone_replay(
     // "this host" rather than the name, because `on_host` wraps this
     // refusal with the host it is about, exactly as it wraps the target's
     // own refusals.
-    Err(anyhow::Error::new(crate::SupervisorError {
- origin: crate::client::ErrorOrigin::Helm,
-        kind: ErrorKind::Conflict,
-        message: "the idempotency key replayed the create that made the source or caller session, so no copy was made; retry the clone with a key that has not been used on this host, or with none at all".to_string(),
-    }))
+    Err(anyhow::Error::new(crate::SupervisorError::helm(
+        ErrorKind::Conflict,
+        "the idempotency key replayed the create that made the source or caller session, so no copy was made; retry the clone with a key that has not been used on this host, or with none at all".to_string(),
+    )))
 }
 
 /// Project a session a lifecycle verb just mutated into the same

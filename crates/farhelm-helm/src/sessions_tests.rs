@@ -10599,10 +10599,17 @@ async fn a_preview_with_a_stale_incarnation_is_refused_before_any_frame() {
 #[farhelm_testtrace::test]
 fn repository_discovery_failure_names_a_busy_host_and_nothing_else() {
     let reply = |origin, kind| {
-        anyhow::Error::new(crate::SupervisorError {
-            origin,
-            kind,
-            message: "remote text that must never be shown".to_string(),
+        anyhow::Error::new(match origin {
+            crate::client::ErrorOrigin::Helm => crate::SupervisorError::helm(
+                kind,
+                "remote text that must never be shown".to_string(),
+            ),
+            crate::client::ErrorOrigin::SupervisorReply => {
+                crate::client::supervisor_reply_error_for_test(
+                    kind,
+                    "remote text that must never be shown".to_string(),
+                )
+            }
         })
         .context("searching repositories on host builder")
     };

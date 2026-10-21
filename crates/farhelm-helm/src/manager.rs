@@ -4092,7 +4092,7 @@ impl HostActor {
             Ok(Err(error)) => {
                 let internal = error
                     .downcast_ref::<SupervisorError>()
-                    .is_some_and(|e| e.kind == ErrorKind::Internal);
+                    .is_some_and(|e| e.kind() == ErrorKind::Internal);
                 // The message is the PEER's, in full: a supervisor's
                 // `Error.message` is whatever it chose to send, and this
                 // one is both logged and retained in the connected state

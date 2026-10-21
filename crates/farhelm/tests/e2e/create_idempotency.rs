@@ -286,14 +286,14 @@ async fn a_key_reused_for_a_different_request_is_refused() {
         .chain()
         .find_map(|c| c.downcast_ref::<SupervisorError>())
         .expect("the refusal must carry a classified kind");
-    assert_eq!(downcast.kind, ErrorKind::Conflict);
+    assert_eq!(downcast.kind(), ErrorKind::Conflict);
     // The key is not echoed: an agent's key reaches the supervisor in a
     // helm-scoped form it never typed, and every caller knows its own key.
     assert!(
-        downcast.message.contains("different create request")
-            && !downcast.message.contains("intent-2"),
+        downcast.message().contains("different create request")
+            && !downcast.message().contains("intent-2"),
         "the refusal must say why without naming the key: {}",
-        downcast.message
+        downcast.message()
     );
 
     let listing = h.client.list_sessions().await.expect("list");
@@ -457,14 +457,14 @@ async fn a_replay_for_a_deleted_session_reports_that_it_is_gone() {
         .find_map(|c| c.downcast_ref::<SupervisorError>())
         .expect("the gone-error must carry a classified kind");
     assert_eq!(
-        downcast.kind,
+        downcast.kind(),
         ErrorKind::Conflict,
         "nothing is missing — the KEY is spent, which is the same rule a reuse gets"
     );
     assert!(
-        downcast.message.contains(&session.id) && downcast.message.contains("deleted"),
+        downcast.message().contains(&session.id) && downcast.message().contains("deleted"),
         "the error must name the session and what happened to it: {}",
-        downcast.message
+        downcast.message()
     );
     assert!(
         h.client
@@ -929,7 +929,7 @@ async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
         .downcast_ref::<SupervisorError>()
         .expect("the refusal carries a SupervisorError");
     assert!(
-        refused_error.message.contains("home"),
+        refused_error.message().contains("home"),
         "the refusal must name the home problem: {refused:#}"
     );
 
@@ -965,11 +965,13 @@ async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
         .downcast_ref::<SupervisorError>()
         .expect("the replay carries a SupervisorError");
     assert_eq!(
-        replayed_error.message, refused_error.message,
+        replayed_error.message(),
+        refused_error.message(),
         "the replay must be byte-for-byte the original refusal"
     );
     assert_eq!(
-        replayed_error.kind, refused_error.kind,
+        replayed_error.kind(),
+        refused_error.kind(),
         "the replay must carry the original error kind"
     );
     let conflict = client2
@@ -987,7 +989,7 @@ async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
         conflict
             .downcast_ref::<SupervisorError>()
             .expect("a key-reuse refusal must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::Conflict,
     );
     drop(slot);

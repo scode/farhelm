@@ -870,13 +870,13 @@ async fn an_unattended_attach_is_refused_while_another_lease_holds_the_session()
         .downcast_ref::<farhelm_helm::SupervisorError>()
         .expect("the refusal is the supervisor's own error");
     assert_eq!(
-        supervised.kind,
+        supervised.kind(),
         farhelm_proto::ErrorKind::TakenOver,
         "a session held by someone else is refused as taken over: the helm relays that kind as the \
          browser's taken_over code, which is what the browser decides from"
     );
     assert_eq!(
-        supervised.message,
+        supervised.message(),
         farhelm_proto::ATTACH_REFUSED_TAKEN_OVER,
         "the refusal still reads as the takeover wording a person sees"
     );
@@ -1062,7 +1062,7 @@ async fn an_over_cap_lease_is_refused_without_disturbing_the_incumbent() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("an over-cap lease must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::InvalidRequest,
         "an over-cap lease is a malformed request, not a not-found or a server fault"
     );
@@ -1144,7 +1144,7 @@ async fn the_lease_cap_counts_bytes_not_characters() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("an over-cap lease must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::InvalidRequest,
         "the cap must be counted in bytes, not characters"
     );
@@ -1202,7 +1202,7 @@ async fn attaching_a_terminal_tab_is_a_not_found_that_names_the_tab() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("a tab attach must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::NotFound,
         "a terminal that does not exist is a not-found, not a bad request or a server fault"
     );
@@ -1496,7 +1496,7 @@ async fn create_in_missing_directory_errors() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("a bad-cwd failure must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::InvalidRequest,
         "a missing directory is the caller's mistake, not a server fault"
     );
@@ -1542,7 +1542,7 @@ async fn create_with_relative_cwd_is_rejected() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("a relative-cwd failure must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::InvalidRequest,
         "a relative cwd is the caller's mistake, not a server fault"
     );
@@ -1681,7 +1681,7 @@ async fn create_with_tilde_user_cwd_is_rejected() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("a ~user refusal must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::InvalidRequest,
         "a ~user cwd is the caller's mistake, not a server fault"
     );
@@ -1707,7 +1707,7 @@ async fn create_in_a_regular_file_reports_not_a_directory() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("a not-a-directory failure must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::InvalidRequest,
         "cwd being a file is the caller's mistake, not a server fault"
     );
@@ -1734,7 +1734,7 @@ async fn create_under_a_regular_file_is_invalid_request() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("a not-a-directory failure must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::InvalidRequest,
         "a path nested under a file is the caller's mistake, not a server fault"
     );
@@ -1758,7 +1758,7 @@ async fn create_with_nul_byte_in_cwd_is_invalid_request() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("an invalid-cwd-text failure must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::InvalidRequest,
         "a NUL byte in the cwd is the caller's mistake, not a server fault"
     );
@@ -2255,7 +2255,7 @@ async fn attach_exited_pane(h: &Harness, session_id: &str) -> (u32, TermStream) 
 fn looks_like_a_tmux_timeout(error: &anyhow::Error) -> bool {
     error
         .downcast_ref::<SupervisorError>()
-        .is_some_and(|e| e.kind == ErrorKind::Internal && e.message.contains("timed out"))
+        .is_some_and(|e| e.kind() == ErrorKind::Internal && e.message().contains("timed out"))
 }
 
 /// The adopted-server gap: tmux reads a `-f` config only when it STARTS a
@@ -2408,7 +2408,7 @@ async fn unparseable_invocations_error_without_creating_a_session() {
         empty
             .downcast_ref::<SupervisorError>()
             .expect("an empty invocation must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::InvalidRequest,
         "an empty invocation is the caller's mistake, not a server fault"
     );
@@ -2435,7 +2435,7 @@ async fn unparseable_invocations_error_without_creating_a_session() {
         unterminated
             .downcast_ref::<SupervisorError>()
             .expect("an unparseable invocation must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::InvalidRequest,
         "a shell-syntax error in the invocation is the caller's mistake, not a server fault"
     );
@@ -3206,7 +3206,7 @@ async fn attach_to_unknown_session_errors_and_connection_survives() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("an unknown-session attach must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::NotFound,
         "an unknown session id is a not-found, not a bad request or server fault"
     );
@@ -3260,7 +3260,7 @@ async fn cutover_failure_is_request_local() {
         error
             .downcast_ref::<SupervisorError>()
             .expect("a tmux failure during cutover must still carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::Internal,
         "an unclassified tmux failure is a server fault, not the caller's mistake"
     );
@@ -3830,7 +3830,7 @@ async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("a terminal-less attach must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::NotFound,
         "a vanished terminal is a not-found, not a bad request or server fault"
     );
@@ -4414,7 +4414,7 @@ async fn restart_gap_is_decided_per_session() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("a terminal-less attach must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::NotFound,
         "a vanished terminal is a not-found, not a bad request or server fault"
     );
@@ -4827,7 +4827,7 @@ async fn stop_unknown_session_is_not_found() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::NotFound
     );
 }
@@ -4844,7 +4844,7 @@ async fn delete_unknown_session_is_not_found() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::NotFound
     );
 }
@@ -4899,7 +4899,7 @@ async fn an_unconfirmed_delete_is_refused_while_anything_is_alive() {
     let (session, _work) = basic_session(&h).await;
     let conflict = |err: anyhow::Error| {
         err.downcast_ref::<SupervisorError>()
-            .map(|error| (error.kind, error.message.clone()))
+            .map(|error| (error.kind(), error.message().to_owned()))
             .expect("a refused delete carries a SupervisorError")
     };
 
@@ -4969,11 +4969,11 @@ async fn a_tabs_only_confirmation_refuses_a_running_agent_but_closes_tabs() {
     let error = refused
         .downcast_ref::<SupervisorError>()
         .expect("a refused delete carries a SupervisorError");
-    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert_eq!(error.kind(), ErrorKind::Conflict);
     assert!(
-        error.message.contains("agent is still running"),
+        error.message().contains("agent is still running"),
         "{}",
-        error.message
+        error.message()
     );
     assert_eq!(h.client.list_sessions().await.unwrap().sessions.len(), 1);
 
@@ -4990,15 +4990,15 @@ async fn a_tabs_only_confirmation_refuses_a_running_agent_but_closes_tabs() {
         .downcast_ref::<SupervisorError>()
         .expect("premise: the stricter guard's refusal carries a SupervisorError");
     assert_eq!(
-        error.kind,
+        error.kind(),
         ErrorKind::Conflict,
         "premise: {}",
-        error.message
+        error.message()
     );
     assert!(
-        error.message.contains("1 terminal tab open"),
+        error.message().contains("1 terminal tab open"),
         "premise: the stricter guard refuses because of the live tab, not for another reason: {}",
-        error.message
+        error.message()
     );
 
     // ... and the tabs-only guard deletes, tab and all.
@@ -5460,7 +5460,7 @@ async fn delete_after_renamed_tmux_session_fails_closed() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("a failed teardown must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::Internal,
         "a teardown failure is a server-side sweep problem, not a caller precondition"
     );
@@ -6469,7 +6469,7 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
         .downcast_ref::<SupervisorError>()
         .expect("must carry a SupervisorError");
     assert_eq!(
-        failure.kind,
+        failure.kind(),
         ErrorKind::Internal,
         "an unremovable artifact is a server-side sweep problem, not a caller precondition"
     );
@@ -6479,11 +6479,11 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
     // failure could impersonate this one. The message names the removal and
     // the exact path, and the file it could not remove is still there.
     assert!(
-        failure.message.starts_with("removing ")
-            && failure.message.contains(&spec_path.display().to_string()),
+        failure.message().starts_with("removing ")
+            && failure.message().contains(&spec_path.display().to_string()),
         "the failure must be the artifact removal of {}, got: {}",
         spec_path.display(),
-        failure.message
+        failure.message()
     );
     assert!(
         spec_path.exists(),
@@ -6619,9 +6619,9 @@ async fn attach_during_delete_race_ends_in_a_consistent_state() {
                 // anything else is retried, bounded by the outer
                 // deadline, since it may just be a transient blip rather
                 // than the race settling.
-                let expected_race_outcome = e
-                    .downcast_ref::<SupervisorError>()
-                    .is_some_and(|se| matches!(se.kind, ErrorKind::NotFound | ErrorKind::Internal));
+                let expected_race_outcome = e.downcast_ref::<SupervisorError>().is_some_and(|se| {
+                    matches!(se.kind(), ErrorKind::NotFound | ErrorKind::Internal)
+                });
                 if expected_race_outcome {
                     break;
                 }

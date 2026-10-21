@@ -205,7 +205,8 @@ struct GithubRepositoriesBody {
 /// only choose between two helm-written sentences.
 fn repository_discovery_failure(error: &anyhow::Error) -> String {
     let busy = crate::find_cause::<SupervisorError>(error).is_some_and(|e| {
-        e.origin == crate::client::ErrorOrigin::SupervisorReply && e.kind == ErrorKind::Unavailable
+        e.origin() == crate::client::ErrorOrigin::SupervisorReply
+            && e.kind() == ErrorKind::Unavailable
     });
     if busy {
         farhelm_proto::HOST_BUSY_REFUSAL.to_string()
@@ -226,22 +227,17 @@ pub(crate) async fn github_repositories(
 ) -> impl IntoResponse {
     if req.query.len() > 4096 {
         return http_error(
-            SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::InvalidRequest,
-                message: "repository query exceeds the 4096-byte limit".into(),
-            }
+            SupervisorError::helm(
+                ErrorKind::InvalidRequest,
+                "repository query exceeds the 4096-byte limit".into(),
+            )
             .into(),
         );
     }
     let Some(status) = state.manager.status(req.host) else {
         return http_error(
-            SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::NotFound,
-                message: format!("no such host: {}", req.host),
-            }
-            .into(),
+            SupervisorError::helm(ErrorKind::NotFound, format!("no such host: {}", req.host))
+                .into(),
         );
     };
     // Offline suggestions belong to the registry's accepted installation,
@@ -272,11 +268,10 @@ pub(crate) async fn github_repositories(
         .filter(|identity| !identity.is_empty())
     else {
         return http_error(
-            SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::Conflict,
-                message: "repository discovery requires a stable host installation identity".into(),
-            }
+            SupervisorError::helm(
+                ErrorKind::Conflict,
+                "repository discovery requires a stable host installation identity".into(),
+            )
             .into(),
         );
     };
@@ -395,12 +390,10 @@ pub(crate) async fn preview_github_checkout(
     title: Option<String>,
 ) -> anyhow::Result<GithubCheckoutPreviewBody> {
     let Some(installation_identity) = claim.identity.clone().filter(|id| !id.is_empty()) else {
-        return Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Conflict,
-            message: "managed checkout preview requires a host with a stable installation identity"
-                .into(),
-        }));
+        return Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Conflict,
+            "managed checkout preview requires a host with a stable installation identity".into(),
+        )));
     };
     // One database snapshot: root + revision are resolved together so the
     // binding the create later presents is internally consistent.
@@ -409,11 +402,10 @@ pub(crate) async fn preview_github_checkout(
         .resolve_checkout_config(Some(claim.host))
         .await?;
     let Some(root) = config.root.clone() else {
-        return Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: "no checkout folder is configured; set one in Settings".to_string(),
-        }));
+        return Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            "no checkout folder is configured; set one in Settings".to_string(),
+        )));
     };
     let request = farhelm_proto::GithubPreviewRequest {
         host: Some(claim.host.to_string()),
@@ -633,14 +625,13 @@ async fn list_filter(state: &AppState, q: &ListQuery) -> anyhow::Result<store::S
     }
     if let Some(status) = present(&q.status) {
         let known = store::parse_status_key(&status).ok_or_else(|| {
-            anyhow::Error::new(SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::InvalidRequest,
-                message: format!(
+            anyhow::Error::new(SupervisorError::helm(
+                ErrorKind::InvalidRequest,
+                format!(
                     "{status:?} is not a session status; this helm knows running, waiting, idle, \
                      exited, error, interrupted, and unknown"
                 ),
-            })
+            ))
         })?;
         filter = filter.status(known);
     }
@@ -666,14 +657,13 @@ fn list_sort(q: &ListQuery) -> anyhow::Result<store::ListSort> {
         return Ok(store::ListSort::default());
     };
     store::parse_sort_key(sort).ok_or_else(|| {
-        anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: format!(
+        anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            format!(
                 "{sort:?} is not a session list order; this helm serves created, activity, and \
                  title"
             ),
-        })
+        ))
     })
 }
 
@@ -766,11 +756,10 @@ pub(crate) async fn resolve_session_ref(
 /// A missing entry and a missing suffix have the same safe public refusal.
 /// The raw reference is omitted so ordinary GUI errors do not expose entry UUIDs.
 fn no_such_session() -> anyhow::Error {
-    anyhow::Error::new(SupervisorError {
-        origin: crate::client::ErrorOrigin::Helm,
-        kind: ErrorKind::NotFound,
-        message: "no such session on this host entry".to_string(),
-    })
+    anyhow::Error::new(SupervisorError::helm(
+        ErrorKind::NotFound,
+        "no such session on this host entry".to_string(),
+    ))
 }
 
 /// Qualify only at the client boundary, with the entry that supplied the reply.
@@ -824,11 +813,10 @@ pub(crate) async fn route_session(
         identity,
     };
     let client = status.client.ok_or_else(|| {
-        anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Conflict,
-            message: refusal_text(host, &status.state),
-        })
+        anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Conflict,
+            refusal_text(host, &status.state),
+        ))
     })?;
     Ok((claim, client))
 }
@@ -849,12 +837,10 @@ pub(crate) async fn resolve_owner(
     let status = state.manager.status(key.host).ok_or_else(no_such_session)?;
     if cached {
         if !state.store.has_cached_session(key).await? {
-            return Err(anyhow::Error::new(SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::Conflict,
-                message: "the session changed while this request was being routed; retry it"
-                    .to_string(),
-            }));
+            return Err(anyhow::Error::new(SupervisorError::helm(
+                ErrorKind::Conflict,
+                "the session changed while this request was being routed; retry it".to_string(),
+            )));
         }
     } else if !status
         .live_sessions
@@ -1079,23 +1065,21 @@ fn accepted_checkout_preview<'a>(
     checkout: &'a farhelm_proto::GithubCheckoutRequest,
     claim: &manager::SessionClaim,
 ) -> anyhow::Result<&'a farhelm_proto::AcceptedGithubPreview> {
-    let preview = checkout.preview.as_ref().ok_or_else(|| SupervisorError {
-        origin: crate::client::ErrorOrigin::Helm,
-        kind: ErrorKind::InvalidRequest,
-        message:
+    let preview = checkout.preview.as_ref().ok_or_else(|| {
+        SupervisorError::helm(
+            ErrorKind::InvalidRequest,
             "managed checkout requires an accepted preview; request a preview before launching"
                 .into(),
+        )
     })?;
     if preview.host != claim.host.to_string()
         || preview.installation_identity.is_empty()
         || claim.identity.as_deref() != Some(preview.installation_identity.as_str())
     {
-        return Err(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Conflict,
-            message: "the accepted checkout preview belongs to a different host installation"
-                .into(),
-        }
+        return Err(SupervisorError::helm(
+            ErrorKind::Conflict,
+            "the accepted checkout preview belongs to a different host installation".into(),
+        )
         .into());
     }
     Ok(preview)
@@ -1131,52 +1115,45 @@ fn github_checkout_resolution(
 ) -> Option<anyhow::Result<Option<farhelm_proto::ResolvedGithubCheckout>>> {
     let checkout = req.github_checkout.as_ref()?;
     if let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo) {
-        return Some(Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: format!(
+        return Some(Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            format!(
                 "invalid GitHub repository {:?}: {error}",
                 truncate_repo_text(&checkout.repo)
             ),
-        })));
+        ))));
     }
     // Browser compositions use this same snapshot for agent trust. An agent
     // launch instead retains the choice already shown on its approval card.
     let Some(root) = config.root.clone() else {
-        return Some(Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: "no checkout folder is configured; set one in Settings".to_string(),
-        })));
+        return Some(Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            "no checkout folder is configured; set one in Settings".to_string(),
+        ))));
     };
     let repo = farhelm_proto::parse_github_repo(&checkout.repo)
         .expect("the parse above already accepted this identifier");
     let Some(preview) = &checkout.preview else {
-        return Some(Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message:
-                "managed checkout requires an accepted preview; request a preview before launching"
-                    .into(),
-        })));
+        return Some(Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            "managed checkout requires an accepted preview; request a preview before launching"
+                .into(),
+        ))));
     };
     if preview.binding.config_revision != config.config_revision {
-        return Some(Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Conflict,
-            message: "checkout settings changed since the accepted preview; request a new preview"
-                .into(),
-        })));
+        return Some(Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Conflict,
+            "checkout settings changed since the accepted preview; request a new preview".into(),
+        ))));
     }
     // REST callers may retain the displayed preview path in their request,
     // but it is not a second destination. Reject contradictory folder state
     // before converting this request to the supervisor's fresh-only shape.
     if !req.cwd.is_empty() && req.cwd != preview.binding.cwd {
-        return Some(Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: "managed checkout cwd must be empty or match the accepted preview".into(),
-        })));
+        return Some(Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            "managed checkout cwd must be empty or match the accepted preview".into(),
+        ))));
     }
     Some(Ok(Some(farhelm_proto::ResolvedGithubCheckout {
         client_identity,
@@ -1218,11 +1195,10 @@ pub(crate) fn default_rows() -> u16 {
 /// missing-row case in `yolo_guard`) shows the browser, the command line and
 /// agents the same text.
 pub(crate) fn no_such_host(host: store::HostId) -> anyhow::Error {
-    anyhow::Error::new(SupervisorError {
-        origin: crate::client::ErrorOrigin::Helm,
-        kind: ErrorKind::NotFound,
-        message: format!("no such host: {host}"),
-    })
+    anyhow::Error::new(SupervisorError::helm(
+        ErrorKind::NotFound,
+        format!("no such host: {host}"),
+    ))
 }
 
 /// The live connection for one NAMED host, plus the claim that pins WHICH
@@ -1275,11 +1251,10 @@ pub(crate) fn host_client(
         identity,
     };
     let client = status.client.ok_or_else(|| {
-        anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Conflict,
-            message: refusal_text(host, &status.state),
-        })
+        anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Conflict,
+            refusal_text(host, &status.state),
+        ))
     })?;
     Ok((claim, client))
 }
@@ -1465,14 +1440,13 @@ pub(crate) async fn create_session(
     if let Some(checkout) = req.github_checkout.as_ref()
         && let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo)
     {
-        return http_error(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: format!(
+        return http_error(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            format!(
                 "invalid GitHub repository {:?}: {error}",
                 truncate_repo_text(&checkout.repo)
             ),
-        }));
+        )));
     }
     // Mode compilation consumes selector fields. Retain the original request
     // first so later reconciliation does not depend on mutable catalogs.
@@ -2060,11 +2034,10 @@ async fn create_fresh_session_resolved(
         if let (Some(outer), Some(inner)) = (&req.title, &checkout.title)
             && outer != inner
         {
-            return Err(anyhow::Error::new(SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::InvalidRequest,
-                message: "managed checkout and session titles must agree".into(),
-            }));
+            return Err(anyhow::Error::new(SupervisorError::helm(
+                ErrorKind::InvalidRequest,
+                "managed checkout and session titles must agree".into(),
+            )));
         }
         if req.title.is_none() {
             req.title = checkout.title.clone();
@@ -2448,11 +2421,7 @@ mod workspace_trust_tests {
 
 /// A helm-originated `InvalidRequest`, the 400 every create-body refusal is.
 pub(crate) fn invalid_request(message: String) -> anyhow::Error {
-    anyhow::Error::new(SupervisorError {
-        origin: crate::client::ErrorOrigin::Helm,
-        kind: ErrorKind::InvalidRequest,
-        message,
-    })
+    anyhow::Error::new(SupervisorError::helm(ErrorKind::InvalidRequest, message))
 }
 
 /// Route to `id`'s owning host and kill its agent's process tree, leaving
@@ -3015,11 +2984,10 @@ pub(crate) async fn do_delete_session(
     let id = key.session_id.as_str();
     let (claim, client) = route_session(state, key).await?;
     if agent_connection.is_some_and(|expected| expected != client.connection_id()) {
-        return Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Conflict,
-            message: "the target host's connection changed while this delete waited for approval; nothing was deleted, retry to approve its current state".to_string(),
-        }));
+        return Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Conflict,
+            "the target host's connection changed while this delete waited for approval; nothing was deleted, retry to approve its current state".to_string(),
+        )));
     }
     let _deleting = state.approvals.deny_session(key);
     let outcome = client
@@ -3457,14 +3425,13 @@ pub(crate) async fn do_replace_session(
             if let Some(checkout) = with.github_checkout.as_ref()
                 && let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo)
             {
-                return Err(anyhow::Error::new(SupervisorError {
-                    origin: crate::client::ErrorOrigin::Helm,
-                    kind: ErrorKind::InvalidRequest,
-                    message: format!(
+                return Err(anyhow::Error::new(SupervisorError::helm(
+                    ErrorKind::InvalidRequest,
+                    format!(
                         "invalid GitHub repository {:?}: {error}",
                         truncate_repo_text(&checkout.repo)
                     ),
-                }));
+                )));
             }
             if with.github_checkout.is_some() {
                 // A recorded fresh intent must reconcile before today's
@@ -3480,13 +3447,12 @@ pub(crate) async fn do_replace_session(
         && let Some(with_key) = &with.intent_key
         && Some(with_key) != intent_key.as_ref()
     {
-        return Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: "the replace's own idempotency key and its \"with\" body's key disagree; \
+        return Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            "the replace's own idempotency key and its \"with\" body's key disagree; \
                       send the same key in both places, or omit it from \"with\" entirely"
                 .to_string(),
-        }));
+        )));
     }
     let (claim, client) = route_session(state, key).await?;
     // "Replace with" keeps the source's own host — SPEC.md draws this line
@@ -3500,16 +3466,15 @@ pub(crate) async fn do_replace_session(
         && let Some(wanted_host) = with.host
         && wanted_host != claim.host
     {
-        return Err(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Conflict,
-            message: format!(
+        return Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Conflict,
+            format!(
                 "replace with keeps the source session's own host ({}); it cannot move a \
                  session to another host ({wanted_host}) — clone is the way to start one \
                  elsewhere",
                 claim.host
             ),
-        }));
+        )));
     }
     if with
         .as_ref()
@@ -3545,13 +3510,12 @@ pub(crate) async fn do_replace_session(
         .map(store::CachedRow::into_info)
         .find(|session| session.id == id)
         .ok_or_else(|| {
-            anyhow::Error::new(SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::NotFound,
-                message: "this session's own host no longer lists it, so there is nothing to \
+            anyhow::Error::new(SupervisorError::helm(
+                ErrorKind::NotFound,
+                "this session's own host no longer lists it, so there is nothing to \
                           replace"
                     .to_string(),
-            })
+            ))
         })?;
     // The create half's fields: from the override body when "replace with"
     // supplied one (its mode already resolved at the top of this function,
@@ -3655,14 +3619,13 @@ fn replacement_result_check(id: &str) -> CreatedSessionCheck {
         if created.id != source_id {
             return Ok(());
         }
-        Err(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::Conflict,
-            message: "the idempotency key replayed the create that made the source \
+        Err(SupervisorError::helm(
+            ErrorKind::Conflict,
+            "the idempotency key replayed the create that made the source \
                       session, so no replacement was made; retry the replace with a \
                       key that has not been used on this host, or with none at all"
                 .into(),
-        }
+        )
         .into())
     })
 }
@@ -3702,12 +3665,10 @@ async fn replace_with_fresh_checkout(
         .iter()
         .any(|session| session.info().id == id)
     {
-        return Err(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::NotFound,
-            message: "this session's own host no longer lists it, so there is nothing to replace"
-                .into(),
-        }
+        return Err(SupervisorError::helm(
+            ErrorKind::NotFound,
+            "this session's own host no longer lists it, so there is nothing to replace".into(),
+        )
         .into());
     }
     let created = create_fresh_session(
@@ -3795,11 +3756,10 @@ async fn finish_replacement(
                     created.id
                 )
             };
-            return Err(anyhow::Error::new(SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::Internal,
+            return Err(anyhow::Error::new(SupervisorError::helm(
+                ErrorKind::Internal,
                 message,
-            }));
+            )));
         }
     };
     forget_deleted_session(state, claim, id).await;

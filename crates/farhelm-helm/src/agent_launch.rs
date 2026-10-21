@@ -149,13 +149,12 @@ pub(crate) fn resolve(
                     template
                 })
                 .ok_or_else(|| {
-                    anyhow::Error::new(crate::SupervisorError {
-                        origin: crate::client::ErrorOrigin::Helm,
-                        kind: ErrorKind::NotFound,
-                        message: format!(
+                    anyhow::Error::new(crate::SupervisorError::helm(
+                        ErrorKind::NotFound,
+                        format!(
                             "no template is named {name:?}; farhelm agent templates lists them"
                         ),
-                    })
+                    ))
                 })
         })
         .collect::<anyhow::Result<_>>()?;

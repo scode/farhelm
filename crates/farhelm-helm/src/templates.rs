@@ -102,11 +102,10 @@ pub(crate) async fn store_template(
 ) -> anyhow::Result<bool> {
     template.fields.workspace_trust = None;
     check_template_shape(&template).map_err(|message| {
-        anyhow::Error::new(crate::SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: farhelm_proto::ErrorKind::InvalidRequest,
+        anyhow::Error::new(crate::SupervisorError::helm(
+            farhelm_proto::ErrorKind::InvalidRequest,
             message,
-        })
+        ))
     })?;
     // Validate before erasing an explicit Base: a kind without a name must be
     // refused, while valid base templates retain the old stored JSON shape.
@@ -164,11 +163,10 @@ pub(crate) async fn delete_template(
 ) -> impl IntoResponse {
     match remove_template(&state, name, Precondition::None).await {
         Ok(true) => axum::Json(serde_json::json!({})).into_response(),
-        Ok(false) => http_error(anyhow::Error::new(crate::SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: farhelm_proto::ErrorKind::NotFound,
-            message: "no template has that name".to_string(),
-        })),
+        Ok(false) => http_error(anyhow::Error::new(crate::SupervisorError::helm(
+            farhelm_proto::ErrorKind::NotFound,
+            "no template has that name".to_string(),
+        ))),
         Err(error) => http_error(error),
     }
 }

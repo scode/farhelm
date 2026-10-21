@@ -884,15 +884,17 @@ async fn a_refused_delete_preserves_an_in_flight_upload() {
         .downcast_ref::<SupervisorError>()
         .expect("a failed Delete must carry a SupervisorError");
     assert_eq!(
-        supervisor_error.kind,
+        supervisor_error.kind(),
         ErrorKind::Internal,
         "a pane-owner refusal is a server-side teardown failure"
     );
     assert!(
-        supervisor_error.message.contains("belongs to session")
-            && supervisor_error.message.contains("renamed out from under"),
+        supervisor_error.message().contains("belongs to session")
+            && supervisor_error
+                .message()
+                .contains("renamed out from under"),
         "the refusal must identify the renamed pane owner, got: {}",
-        supervisor_error.message
+        supervisor_error.message()
     );
     assert!(
         h.client

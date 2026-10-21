@@ -119,7 +119,7 @@ async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("a refused open must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::Conflict
     );
     let sessions = tmux_query(&state.path().join("tmux.sock"), &["list-sessions"]).await;
@@ -202,7 +202,7 @@ async fn a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes() {
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("a refused attach must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::NotFound,
         "a dead tab answers exactly like a reaped one"
     );
@@ -277,7 +277,7 @@ async fn closing_an_unknown_but_well_formed_tab_id_is_not_found_and_harms_nothin
     assert_eq!(
         err.downcast_ref::<SupervisorError>()
             .expect("a refused close must carry a SupervisorError")
-            .kind,
+            .kind(),
         ErrorKind::NotFound,
     );
     assert_eq!(
@@ -946,7 +946,7 @@ async fn a_close_tab_racing_a_delete_leaves_one_coherent_winner() {
             assert_eq!(
                 e.downcast_ref::<SupervisorError>()
                     .expect("a refused close must carry a SupervisorError")
-                    .kind,
+                    .kind(),
                 ErrorKind::NotFound,
                 "offset {offset_ms}: a close that lost the race must report the session or tab \
                  as gone, not a teardown failure: {e:#}"

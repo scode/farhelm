@@ -104,11 +104,10 @@ pub(crate) async fn open_url(
     url: String,
 ) -> anyhow::Result<AgentReply> {
     let permission = permission_for_url(&url).map_err(|message| {
-        anyhow::Error::new(crate::SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: message.to_string(),
-        })
+        anyhow::Error::new(crate::SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            message.to_string(),
+        ))
     })?;
     let answer = crate::approvals::ask_with_answer(
         state,
