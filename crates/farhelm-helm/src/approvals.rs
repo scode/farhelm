@@ -589,136 +589,134 @@ pub(crate) async fn list_approvals(
 /// TunnelAndOpen grants no host setting. Native capability, the narrow URL
 /// target, the requesting connection/session ownership and recorded consent
 /// must all still hold before that answer removes the pending entry.
+/// The authenticated router owns persistence through answer delivery, so a
+/// disconnected browser cannot strand an accepted setting before its answer.
 pub(crate) async fn answer_approval(
     State(state): State<std::sync::Arc<AppState>>,
     AxPath(id): AxPath<String>,
     axum::Json(request): axum::Json<ApprovalAnswerRequest>,
 ) -> impl IntoResponse {
-    crate::run_owned(async move {
-        let verdict = match request.answer {
-            ApprovalAnswer::Allow => Verdict::Allow,
-            ApprovalAnswer::Deny => Verdict::Deny,
-            ApprovalAnswer::TunnelAndOpen => {
-                let Some((origin, _, action, asking)) = state.approvals.origin_of(&id) else {
-                    return gone(&id);
-                };
-                // Validate before taking the entry: an invalid answer must leave the
-                // request answerable. The manager repeats consent/ownership checks
-                // when opening, so revocation cannot race into a new listener.
-                let eligible = match action {
-                    ApprovalAction::OpenUrl { url, .. } => {
-                        state.link_opener.is_some()
-                            && crate::tunnels::classify_url(&url).is_ok()
-                            && crate::agent_requests::origin_is_live(&state, origin)
-                            && match state.store.list_hosts().await {
-                                Ok(rows) => rows.iter().any(|row| {
-                                    row.id == origin.host && row.kind == crate::store::HostKind::Ssh
-                                }),
-                                Err(error) => return http_error(error),
-                            }
-                    }
-                    _ => false,
-                };
-                if !eligible {
+    let verdict = match request.answer {
+        ApprovalAnswer::Allow => Verdict::Allow,
+        ApprovalAnswer::Deny => Verdict::Deny,
+        ApprovalAnswer::TunnelAndOpen => {
+            let Some((origin, _, action, asking)) = state.approvals.origin_of(&id) else {
+                return gone(&id);
+            };
+            // Validate before taking the entry: an invalid answer must leave the
+            // request answerable. The manager repeats consent/ownership checks
+            // when opening, so revocation cannot race into a new listener.
+            let eligible = match action {
+                ApprovalAction::OpenUrl { url, .. } => {
+                    state.link_opener.is_some()
+                        && crate::tunnels::classify_url(&url).is_ok()
+                        && crate::agent_requests::origin_is_live(&state, origin)
+                        && match state.store.list_hosts().await {
+                            Ok(rows) => rows.iter().any(|row| {
+                                row.id == origin.host && row.kind == crate::store::HostKind::Ssh
+                            }),
+                            Err(error) => return http_error(error),
+                        }
+                }
+                _ => false,
+            };
+            if !eligible {
+                return http_error(refusal(
+                    ErrorKind::Conflict,
+                    "this request cannot open through a tunnel".into(),
+                ));
+            }
+            match crate::browser::tunnel_origin_matches(&state, origin, &asking).await {
+                Ok(true) => {}
+                Ok(false) => {
                     return http_error(refusal(
                         ErrorKind::Conflict,
-                        "this request cannot open through a tunnel".into(),
+                        "the requesting session no longer belongs to this host connection".into(),
                     ));
                 }
-                match crate::browser::tunnel_origin_matches(&state, origin, &asking).await {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        return http_error(refusal(
-                            ErrorKind::Conflict,
-                            "the requesting session no longer belongs to this host connection"
-                                .into(),
-                        ));
-                    }
-                    Err(error) => return http_error(error),
-                }
-                match state.store.preferences().await {
-                    Ok(preferences) if preferences.tunnel_consent == Some(true) => {}
-                    Ok(_) => {
-                        return http_error(refusal(
-                            ErrorKind::Conflict,
-                            "allow tunnels in Farhelm before opening this link".into(),
-                        ));
-                    }
-                    Err(error) => return http_error(error),
-                }
-                Verdict::TunnelAndOpen
+                Err(error) => return http_error(error),
             }
-            ApprovalAnswer::AlwaysAllow => {
-                let Some((origin, identity, action, _)) = state.approvals.origin_of(&id) else {
-                    return gone(&id);
-                };
-                if action.requires_direct_allow() {
+            match state.store.preferences().await {
+                Ok(preferences) if preferences.tunnel_consent == Some(true) => {}
+                Ok(_) => {
                     return http_error(refusal(
+                        ErrorKind::Conflict,
+                        "allow tunnels in Farhelm before opening this link".into(),
+                    ));
+                }
+                Err(error) => return http_error(error),
+            }
+            Verdict::TunnelAndOpen
+        }
+        ApprovalAnswer::AlwaysAllow => {
+            let Some((origin, identity, action, _)) = state.approvals.origin_of(&id) else {
+                return gone(&id);
+            };
+            if action.requires_direct_allow() {
+                return http_error(refusal(
                         ErrorKind::Conflict,
                         "this wrapper needs an Allow answer for this request; Always allow cannot approve it"
                             .into(),
                     ));
+            }
+            if !crate::agent_requests::origin_is_live(&state, origin) {
+                return http_error(refusal(
+                    ErrorKind::Conflict,
+                    ORIGIN_GONE_REFUSAL.to_string(),
+                ));
+            }
+            let serialized = state.manager.host_write_lock(origin.host).await;
+            let allowed = match action {
+                ApprovalAction::OpenUrl { local_network, .. } => {
+                    let permission = if local_network {
+                        crate::store::BrowserPermission::LocalNetwork
+                    } else {
+                        crate::store::BrowserPermission::Public
+                    };
+                    state
+                        .store
+                        .allow_browser_for_identity(origin.host, identity, permission)
+                        .await
                 }
-                if !crate::agent_requests::origin_is_live(&state, origin) {
+                _ => {
+                    state
+                        .store
+                        .allow_commands_for_identity(origin.host, identity)
+                        .await
+                }
+            };
+            drop(serialized);
+            match allowed {
+                Ok(true) => {
+                    state.manager.events().bump();
+                    tracing::info!(
+                        host = origin.host,
+                        "host request permission turned on from an approval card"
+                    );
+                }
+                Ok(false) => {
                     return http_error(refusal(
                         ErrorKind::Conflict,
-                        ORIGIN_GONE_REFUSAL.to_string(),
-                    ));
-                }
-                let serialized = state.manager.host_write_lock(origin.host).await;
-                let allowed = match action {
-                    ApprovalAction::OpenUrl { local_network, .. } => {
-                        let permission = if local_network {
-                            crate::store::BrowserPermission::LocalNetwork
-                        } else {
-                            crate::store::BrowserPermission::Public
-                        };
-                        state
-                            .store
-                            .allow_browser_for_identity(origin.host, identity, permission)
-                            .await
-                    }
-                    _ => {
-                        state
-                            .store
-                            .allow_commands_for_identity(origin.host, identity)
-                            .await
-                    }
-                };
-                drop(serialized);
-                match allowed {
-                    Ok(true) => {
-                        state.manager.events().bump();
-                        tracing::info!(
-                            host = origin.host,
-                            "host request permission turned on from an approval card"
-                        );
-                    }
-                    Ok(false) => {
-                        return http_error(refusal(
-                            ErrorKind::Conflict,
-                            "the requesting host now reports a different install than the one \
+                        "the requesting host now reports a different install than the one \
                              that asked, so its setting was not changed; answer this request \
                              with allow or deny"
-                                .to_string(),
-                        ));
-                    }
-                    Err(error) => return http_error(error),
+                            .to_string(),
+                    ));
                 }
-                Verdict::Allow
+                Err(error) => return http_error(error),
             }
-        };
-        match state.approvals.take(&id) {
-            Some(entry) => {
-                // A failed send means the parked handler is already gone; its
-                // guard announces the removal.
-                let _ = entry.answer.send(verdict);
-                axum::http::StatusCode::NO_CONTENT.into_response()
-            }
-            None => gone(&id),
+            Verdict::Allow
         }
-    })
-    .await
+    };
+    match state.approvals.take(&id) {
+        Some(entry) => {
+            // A failed send means the parked handler is already gone; its
+            // guard announces the removal.
+            let _ = entry.answer.send(verdict);
+            axum::http::StatusCode::NO_CONTENT.into_response()
+        }
+        None => gone(&id),
+    }
 }
 
 /// The answer to an answer that arrived after its request stopped waiting.

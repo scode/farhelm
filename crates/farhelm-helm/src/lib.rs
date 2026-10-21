@@ -1067,9 +1067,9 @@ mod request_ownership_tests {
     use tokio::sync::{mpsc, oneshot};
     use tower::ServiceExt;
 
-    /// The real authenticated router owns parsing, before the trust handler's
-    /// existing task can start. A body parked at EOF separates that guarantee
-    /// from the old per-handler wrapper, which cannot protect extraction.
+    /// The real authenticated router owns parsing before the trust handler
+    /// starts. A body parked at EOF separates that guarantee from the former
+    /// per-handler wrapper, which could not protect extraction.
     #[farhelm_testtrace::test]
     async fn authenticated_mutation_finishes_parsing_after_its_caller_is_cancelled() {
         let harness = crate::rest_harness::idle_helm().await;

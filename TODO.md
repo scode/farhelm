@@ -374,9 +374,6 @@ or per-call-site discipline, at one place when a sibling path already followed i
 maintainer chose these five behavior-preserving refactors, each of which makes one such rule something a type, an
 exhaustive match or a default enforces. A clear fix of the targeted bug class is allowed in its own PR.
 
-- **Make helm ownership of accepted actions the default.** Every state-changing request runs on a helm-owned task unless
-  its route is on an explicit exempt list with a reason. Seven fixes were a handler that forgot to opt in (#1196, #1319,
-  #1409 and others). Plan: `plans/queue/helm-owned-by-default.md`.
 - **Type the helm's trust boundary.** Session data from supervisors, parsed agent verbs and the origin of the helm's
   errors become types only the checking code constructs, replacing checks repeated per call site (#1491, #1128, #1083,
   #1036). Plan: `plans/queue/helm-ingress-types.md`.

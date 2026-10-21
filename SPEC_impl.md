@@ -35,6 +35,11 @@ intentional live outside that layer: read-only POSTs, Stop and tab operations, t
 admission or owned-work boundaries documented at their registrations. GET, its implicit HEAD companion and WebSocket
 upgrades keep their existing lifetimes. Desktop preflight and the standalone token exchange remain outside ownership.
 
+Ordinary HTTP handlers rely on that router boundary rather than spawning an additional whole-handler task. Narrower
+operations still own their work where they have non-HTTP callers or a different contract: template persistence and its
+notification, provisioning service operations, preference consent cleanup and hint invalidation. Their existing task
+error mappings and lock boundaries remain part of those operations; router ownership does not replace them.
+
 The reason is that dropping an async task stops it at whatever step it had reached, while blocking work already handed
 to other threads, such as a database transaction, still finishes. A handler written as a sequence of steps (commit a
 change, then reconcile running state with it; mark a host busy, then start the job that clears the flag; start killing a

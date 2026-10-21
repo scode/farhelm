@@ -519,19 +519,10 @@ pub(crate) async fn set_yolo_without_asking(
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<YoloWithoutAskingSpec>,
 ) -> impl IntoResponse {
-    // Save, then announce: helm-owned for the reason `add_host` is. A
-    // request dropped between the two would leave the setting saved but
+    // Save, then announce: the HTTP router owns both steps. Dropping the
+    // operation between them would leave the setting saved but
     // every other open client showing the old one, and nothing later
     // re-announces it (the registry reconcile does not compare this flag).
-    crate::run_owned(set_yolo_without_asking_owned(state, host, spec)).await
-}
-
-/// [`set_yolo_without_asking`]'s body, run on a helm-owned task.
-async fn set_yolo_without_asking_owned(
-    state: Arc<AppState>,
-    host: HostId,
-    spec: YoloWithoutAskingSpec,
-) -> axum::response::Response {
     let serialized = state.manager.host_write_lock(host).await;
     let changed = match state
         .store
@@ -569,8 +560,8 @@ pub(crate) struct AppearanceSpec {
 
 /// Save a host's chosen mark and announce it to every open client.
 ///
-/// This is a helm-owned operation: a client leaving after the durable write
-/// must not cancel the feed bump and strand other clients on the old mark.
+/// The HTTP router owns the operation: a client leaving after the durable
+/// write must not cancel the feed bump and strand other clients on the old mark.
 /// Actors do not consume decorative identity, so no reconnect or reconcile
 /// is needed. The ordinary host write lock serializes it with removal.
 pub(crate) async fn set_appearance(
@@ -578,26 +569,23 @@ pub(crate) async fn set_appearance(
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<AppearanceSpec>,
 ) -> impl IntoResponse {
-    crate::run_owned(async move {
-        let serialized = state.manager.host_write_lock(host).await;
-        match state
-            .store
-            .set_appearance(host, spec.icon, spec.color)
-            .await
-        {
-            Ok(true) => {
-                state.manager.events().bump();
-            }
-            Ok(false) => {}
-            Err(error) => return http_error(error),
+    let serialized = state.manager.host_write_lock(host).await;
+    match state
+        .store
+        .set_appearance(host, spec.icon, spec.color)
+        .await
+    {
+        Ok(true) => {
+            state.manager.events().bump();
         }
-        drop(serialized);
-        match host_view(&state, host).await {
-            Ok(view) => axum::Json(view).into_response(),
-            Err(error) => http_error(error),
-        }
-    })
-    .await
+        Ok(false) => {}
+        Err(error) => return http_error(error),
+    }
+    drop(serialized);
+    match host_view(&state, host).await {
+        Ok(view) => axum::Json(view).into_response(),
+        Err(error) => http_error(error),
+    }
 }
 
 /// The body of `POST /api/hosts/{id}/commands-without-asking`: the new setting, required.
@@ -611,35 +599,32 @@ pub(crate) struct CommandsWithoutAskingSpec {
 /// `farhelm` commands from this host's sessions without asking the user, answering with the
 /// updated host view.
 ///
-/// The sibling of [`set_yolo_without_asking`], with the same locking and announcement rules
-/// for the same reasons. The approval cards' "Always allow from this host" answer goes
-/// through [`set_commands_without_asking_for`] rather than this route, so the two cannot
-/// disagree about what turning the setting on means.
+/// The sibling of [`set_yolo_without_asking`], with the same locking and announcement
+/// rules for the same reasons. The HTTP router owns the save through its announcement
+/// and the updated host view; the shared write helper does not create a task itself.
 pub(crate) async fn set_commands_without_asking(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<CommandsWithoutAskingSpec>,
 ) -> impl IntoResponse {
-    crate::run_owned(async move {
-        if let Err(error) =
-            set_commands_without_asking_for(&state, host, spec.commands_without_asking).await
-        {
-            return http_error(error);
-        }
-        match host_view(&state, host).await {
-            Ok(view) => axum::Json(view).into_response(),
-            Err(error) => http_error(error),
-        }
-    })
-    .await
+    if let Err(error) =
+        set_commands_without_asking_for(&state, host, spec.commands_without_asking).await
+    {
+        return http_error(error);
+    }
+    match host_view(&state, host).await {
+        Ok(view) => axum::Json(view).into_response(),
+        Err(error) => http_error(error),
+    }
 }
 
 /// Store a host's "run farhelm commands without asking" setting under the host write
 /// lock and announce a real change on the event feed.
 ///
-/// Callers run this on a helm-owned task (`crate::run_owned`) for the reason
-/// [`set_yolo_without_asking`] does: a request dropped between the save and the bump
-/// would leave other clients showing the old value.
+/// The caller must supply ownership: the HTTP handler inherits it from the router,
+/// while any non-HTTP caller must run this within its own owned operation. This helper
+/// does not spawn a task. Dropping it between the save and the bump would leave other
+/// clients showing the old value, for the same reason as [`set_yolo_without_asking`].
 pub(crate) async fn set_commands_without_asking_for(
     state: &AppState,
     host: HostId,
@@ -699,31 +684,31 @@ pub(crate) async fn set_local_links_without_asking(
     .await
 }
 
-/// Own the settings write through its event announcement, even if the client goes away.
+/// Save and announce one browser permission within its HTTP caller's owned operation.
+///
+/// Both callers are owned by the router. This shared implementation keeps their locking
+/// and real-change announcement rules identical without supplying a separate task.
 async fn set_browser_permission(
     state: Arc<AppState>,
     host: HostId,
     permission: crate::store::BrowserPermission,
     allowed: bool,
 ) -> axum::response::Response {
-    crate::run_owned(async move {
-        let serialized = state.manager.host_write_lock(host).await;
-        match state
-            .store
-            .set_browser_permission(host, permission, allowed)
-            .await
-        {
-            Ok(true) => state.manager.events().bump(),
-            Ok(false) => {}
-            Err(error) => return http_error(error),
-        }
-        drop(serialized);
-        match host_view(&state, host).await {
-            Ok(view) => axum::Json(view).into_response(),
-            Err(error) => http_error(error),
-        }
-    })
-    .await
+    let serialized = state.manager.host_write_lock(host).await;
+    match state
+        .store
+        .set_browser_permission(host, permission, allowed)
+        .await
+    {
+        Ok(true) => state.manager.events().bump(),
+        Ok(false) => {}
+        Err(error) => return http_error(error),
+    }
+    drop(serialized);
+    match host_view(&state, host).await {
+        Ok(view) => axum::Json(view).into_response(),
+        Err(error) => http_error(error),
+    }
 }
 
 /// The body of `POST /api/hosts/{id}/alias`.
@@ -787,13 +772,8 @@ pub(crate) async fn add_host(
     State(state): State<Arc<AppState>>,
     axum::Json(spec): axum::Json<HostSpec>,
 ) -> impl IntoResponse {
-    // Commit, then start the actor: owned by the helm so a client that goes
-    // away between the two cannot leave a registered host with no actor.
-    crate::run_owned(add_host_owned(state, spec)).await
-}
-
-/// The body of [`add_host`], run on a helm-owned task.
-async fn add_host_owned(state: Arc<AppState>, spec: HostSpec) -> axum::response::Response {
+    // The HTTP router owns the commit through actor creation, so a client
+    // leaving between them cannot leave a registered host with no actor.
     let added = state
         .store
         .add_ssh_host(
@@ -883,17 +863,9 @@ pub(crate) async fn set_destination(
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<HostSpec>,
 ) -> impl IntoResponse {
-    // Commit, then reconcile the live connection: helm-owned for the reason
-    // `add_host` is.
-    crate::run_owned(set_destination_owned(state, host, spec)).await
-}
-
-/// The body of [`set_destination`], run on a helm-owned task.
-async fn set_destination_owned(
-    state: Arc<AppState>,
-    host: HostId,
-    spec: HostSpec,
-) -> axum::response::Response {
+    // The HTTP router owns the commit through reconciliation, so a client
+    // leaving cannot cancel the live connection's convergence on its new address.
+    //
     // Held across the write AND the reconcile: see this function's docs for
     // the in-flight write it fences out. Dropped before the reply is built,
     // which needs nothing from it.
@@ -955,20 +927,11 @@ pub(crate) async fn set_alias(
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<AliasSpec>,
 ) -> impl IntoResponse {
-    // Commit, then reconcile: helm-owned for the reason `add_host` is. The
+    // The HTTP router owns the commit through reconciliation. The
     // hosts list reads names from the actors' snapshots, which only the
     // reconcile updates (and announces), so a client that disconnected
     // between the two would otherwise leave the alias saved while every
     // client, its own after a reload included, kept showing the old name.
-    crate::run_owned(set_alias_owned(state, host, spec)).await
-}
-
-/// The body of [`set_alias`], run on a helm-owned task.
-async fn set_alias_owned(
-    state: Arc<AppState>,
-    host: HostId,
-    spec: AliasSpec,
-) -> axum::response::Response {
     let provisioning = state.manager.host_provision_lock(host).await;
     let serialized = state.manager.host_write_lock(host).await;
     if let Err(error) = state.store.update_alias(host, spec.alias.as_deref()).await {
@@ -1020,13 +983,8 @@ pub(crate) async fn remove_host(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
 ) -> impl IntoResponse {
-    // Delete the row, then stop its actor: helm-owned so a dropped request
-    // cannot leave an actor running for a host that is no longer registered.
-    crate::run_owned(remove_host_owned(state, host)).await
-}
-
-/// The body of [`remove_host`], run on a helm-owned task.
-async fn remove_host_owned(state: Arc<AppState>, host: HostId) -> axum::response::Response {
+    // The HTTP router owns row deletion through actor teardown, so a dropped
+    // request cannot leave an actor running for a host no longer registered.
     let Some(provisioning) = state.manager.try_host_provision_lock(host) else {
         return (
             axum::http::StatusCode::CONFLICT,
@@ -1103,15 +1061,12 @@ pub(crate) async fn adopt_host(
     axum::Json(req): axum::Json<AdoptReq>,
 ) -> impl IntoResponse {
     // `adopt` commits the new identity and then resets the host's status and
-    // nudges its actor; helm-owned so a dropped request cannot stop between
-    // the two and leave the host stuck on a mismatch it already adopted.
-    crate::run_owned(async move {
-        match state.manager.adopt(host, &req.reported).await {
-            Ok(()) => axum::Json(serde_json::json!({})).into_response(),
-            Err(e) => http_error(e),
-        }
-    })
-    .await
+    // nudges its actor; the HTTP router owns both so a dropped request cannot
+    // stop between them and leave the host stuck on a mismatch it already adopted.
+    match state.manager.adopt(host, &req.reported).await {
+        Ok(()) => axum::Json(serde_json::json!({})).into_response(),
+        Err(e) => http_error(e),
+    }
 }
 
 /// `POST /api/hosts/{id}/retry` — reconnect this host now.

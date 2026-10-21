@@ -221,6 +221,9 @@ pub(crate) async fn put_preferences(
     // SQLite can commit after an HTTP caller disappears. Both consent cleanup
     // and trust-hint invalidation must finish on the task that owns that write.
     let result = if tunnel_consent_changed {
+        // This is narrower than HTTP ownership and deliberately turns a task
+        // panic into the existing error response. The router cannot replace
+        // that mapping or the consent gate's write/close/announcement lifetime.
         let state = Arc::clone(&state);
         tokio::spawn(async move {
             let _mutation = state.tunnels.mutation.lock().await;
@@ -242,6 +245,9 @@ pub(crate) async fn put_preferences(
         .map_err(anyhow::Error::from)
         .and_then(|result| result)
     } else if trust_hint_changed {
+        // Keep the write-plus-hint sub-operation owned independently of its
+        // response conversion, like consent above. Direct handler callers use
+        // this same contract; this is not a whole-handler routing wrapper.
         let state = Arc::clone(&state);
         crate::run_owned(async move {
             state.store.update_preferences(patch).await?;
