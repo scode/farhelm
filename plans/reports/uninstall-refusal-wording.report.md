@@ -96,3 +96,70 @@ The required single fresh-context gpt-6.1-sol/high review passed on 1682486b, wh
 Its findings about escaping assertions, the local machine's unavailable menu action, the overly broad SPEC promise and
 the absent-identity sentence were all addressed. No findings remain. The commit title and description also passed the
 required cold read. A fresh scope reassessment found no unnecessary complexity in the local-host correction.
+
+### Landing
+
+Landed as #2491, with the same content the report describes, rebased onto this round's main. It was the only plan in
+this landing round.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained ui-peer-text-type, which makes the UI escape host- and agent-supplied text on
+display, and plan bookkeeping. A fresh-context reviewer and I read it against this plan. The new refusals embed values
+from the host (another entry's name, recorded and reported identities, build versions). They reach the screen as one
+message that the uninstall refusal dialog escapes and isolates on display, after the helm has already quoted each value,
+so hidden or direction-changing characters in them show escaped and cannot rearrange the sentence. Whether Remove is
+offered comes from a separate flag in the helm's reply, never from the text. ui-peer-text-type changed only how that
+dialog calls the escaping, not what it does. helm-owned-by-default was already in this plan's base: uninstall requests
+finish even if the client disconnects, and this plan only adds a read of the host list there. The plan applied without
+conflicts.
+
+#### Fixes made during the landing
+
+None.
+
+#### Possible follow-ups
+
+The review at landing found two issues the executor's review did not; neither blocks landing.
+
+- Two uninstall refusals show the host's identities: the changed-identity refusal, which this plan rewrote to show them,
+  and the refusal when the identity changes during the fresh uninstall check, which already showed them before this
+  plan. Both put each identity in quotes with control characters escaped, but leave spaces and look-alike letters as
+  they are, so for example `ab 12` and `ab  12` (two spaces) look the same. SPEC.md says identities the user compares
+  must show spaces visibly so that two different ones never look alike, and the host list and the adopt prompt already
+  show them that way. No unsafe action follows, since adopting shows the identities correctly. Possible follow-up, which
+  I recommend: show identities in these refusals the way the host list does, with spaces and other non-ASCII characters
+  made visible. The alternative is to drop the identities from these messages and point to the host list.
+- For two entries reaching the same machine, the refusal names the other entry, which takes a read of the helm's own
+  host list. If that local read failed, the user would get a generic error instead of the refusal; before this plan they
+  saw a less helpful refusal naming an internal state. Such a read essentially only fails if the helm's database is
+  broken, so this is low priority; falling back to the refusal without the other entry's name would close it.
+
+#### Checks
+
+This plan was executed before ui-peer-text-type landed. It changes only the helm's uninstall refusals, SPEC.md and one
+docs page, plus its changelog fragment and TODO entry, so the browser runs below select the two spec files that drive
+host uninstall rather than the full suite. All of the following ran on the plan stacked on this round's main:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the isolated test-sleep check, `dprint check` on every changed
+  Markdown, JSON and TOML file, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, and
+  the website build (`bun run build` in `website/`): all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `a7a3e8f9-7104-476d-aa06-8af4056f4ea3` (kept): 4006 passed, 1 failed:
+  `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay`, which has an open TODO deflake entry ("Shallow
+  pause resets under load") and fails nine runs in ten on main without this plan (see supervisor-request-modes' landing
+  notes). This plan does not touch terminals or the supervisor. No test reported itself skipped at runtime in this
+  output.
+- `npx playwright test 'provisioning\.spec\.ts' 'terminal-multihost\.spec\.ts'` in `e2e/` on Chromium and WebKit, three
+  workers with their own helm and supervisors, no retries, run `ed5bedf6-7b30-4450-beaf-fd97809fbc21`: 242 passed, none
+  skipped. A first attempt of the same command was refused by the test recorder before any test ran (run
+  `5e0eb05e-a0f8-43ba-bde6-52789fa3177d`); its reason was not captured, and the repeat ran normally.
+- Skipped: the full browser suite (this plan changes no UI code and only the uninstall paths those two files cover), the
+  desktop and JavaScript tests and the desktop checks (no UI or desktop code changed), the doctests (no documentation
+  example changed), the native Mac app (not runnable here) and the installer (unchanged).
+
+Superseded at landing: the report's checks and its statement that no rebase was needed (replaced by the runs above on
+this round's main), its "None" under open questions and follow-ups and its "no findings remain" (the review at landing
+found the two follow-ups above), and its PR line (now merged). Nothing else in the executor's report became untrue at
+landing.
