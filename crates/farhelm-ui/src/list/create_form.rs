@@ -2491,12 +2491,11 @@ fn effective_title(
 /// Arbitrary commands remain available through the legacy surface, but
 /// cannot contribute hidden values to a structured request.
 ///
-/// `submitting` is owned by the CALLER (`ListView`), not this component:
-/// `ListView`'s own "new session" toggle button needs to see it too, so it
-/// can refuse to unmount this form while a create is still in flight —
-/// dropping this component mid-`spawn` would strand the POST's eventual
-/// response with nothing left to act on it. Lifting the flag up is
-/// simpler than trying to keep a detached task meaningful after the fact.
+/// The page-owned operation token keeps the caller's navigation and host
+/// mutations out while a submit is in flight. This form owns its guard:
+/// cancellation releases the token, but cannot recover an uncertain create
+/// reply or run the success callback after the form is gone. Ordinary close
+/// controls therefore refuse to unmount a submitting form.
 ///
 /// `on_created` fires only on a successful POST, with the newly created
 /// `Session` from the response body and the launch this form submitted
@@ -5148,8 +5147,8 @@ pub(super) fn CreateSessionForm(
             onclick: move |_| {
                 // This is a handler-time decision. The rendered `busy` value
                 // can be one turn stale immediately after submit, when
-                // unmounting would cancel the create future and strand its
-                // page-operation claim.
+                // unmounting would cancel the create future before it can
+                // reconcile the reply or run its success callback.
                 if !quick_launch_hidden() && !ops.busy_now() && !template_saving() {
                     on_cancel.call(());
                 }
@@ -5264,7 +5263,7 @@ pub(super) fn CreateSessionForm(
                 // from the one the button was pressed on.
                 let launch = if *launch_tab.peek() == LaunchTab::Agent {
                     let Some(harness) = *structured_harness.peek() else {
-                        ops.release();
+                        drop(op_guard);
                         return;
                     };
                     if *structured_permissions.peek() == Some(LaunchPermission::Custom)
@@ -5277,7 +5276,7 @@ pub(super) fn CreateSessionForm(
                         Ok(prefix) => prefix,
                         Err(reason) => {
                             error.set(Some(reason));
-                            ops.release();
+                            drop(op_guard);
                             return;
                         }
                     };
@@ -5321,7 +5320,7 @@ pub(super) fn CreateSessionForm(
                              launching"
                                 .to_string(),
                         ));
-                        ops.release();
+                        drop(op_guard);
                         return;
                     };
                     LaunchIntent::Command(command)
@@ -5348,7 +5347,7 @@ pub(super) fn CreateSessionForm(
                         "the target host changed while this create was being submitted, so nothing was sent — check the agent and press create again"
                             .to_string(),
                     ));
-                    ops.release();
+                    drop(op_guard);
                     return;
                 }
                 if !selected_now.is_some_and(|id| {
@@ -5357,7 +5356,7 @@ pub(super) fn CreateSessionForm(
                         .find(|host| host.id == id)
                         .is_some_and(|host| host.phase.is_none())
                 }) {
-                    ops.release();
+                    drop(op_guard);
                     return;
                 }
                 // "Replace with" keeps the source's own host (SPEC.md's
@@ -5402,7 +5401,7 @@ pub(super) fn CreateSessionForm(
                         }
                         .to_string(),
                     ));
-                    ops.release();
+                    drop(op_guard);
                     return;
                 }
                 // No host, no create. The helm would default a hostless body
@@ -5429,7 +5428,7 @@ pub(super) fn CreateSessionForm(
                                 .to_string()
                         },
                     ));
-                    ops.release();
+                    drop(op_guard);
                     return;
                 };
                 binding.conversation = (matches!(binding.agent, LaunchIntent::Structured(_)) && !conversation().is_empty()).then(&*conversation);
@@ -5450,7 +5449,7 @@ pub(super) fn CreateSessionForm(
                 }
                 if binding.conversation.is_some() && destination_draft().repo().is_some() {
                     error.set(Some("named conversations cannot start in a new managed checkout; choose an existing folder".into()));
-                    ops.release();
+                    drop(op_guard);
                     return;
                 }
                 if crate::launch_composer::scoped_query(&composer_search()).0 == crate::launch_composer::SearchScope::Github {
@@ -5546,10 +5545,9 @@ pub(super) fn CreateSessionForm(
                 error.set(None);
                 let catalog_for_recheck = catalog_for_submit.clone();
                 spawn(async move {
-                    // Own the release through every await. If navigation or a
-                    // parent state change drops this component, dropping this
-                    // future releases the shared mutation gate as well.
-                    let _op_guard = op_guard;
+                    // This future owns op_guard through every await. Explicit
+                    // drops preserve early-release points; cancellation drops
+                    // the same owner if the form disappears first.
                     // Mint until the key and the binding agree.
                     //
                     // Minting is an `await` (the wasm renderer asks the
@@ -5583,7 +5581,7 @@ pub(super) fn CreateSessionForm(
                                  generated, so this create was not sent; try again"
                                     .to_string(),
                             ));
-                            ops.release();
+                            drop(op_guard);
                             return;
                         }
                         attempts += 1;
@@ -5601,7 +5599,7 @@ pub(super) fn CreateSessionForm(
                                      it was not sent (a retry could otherwise create a second \
                                      session): {reason}"
                                 )));
-                                ops.release();
+                                drop(op_guard);
                                 return;
                             }
                         }
@@ -5622,14 +5620,14 @@ pub(super) fn CreateSessionForm(
                                 error.set(Some(
                                     "the structured launch choice changed while its idempotency key was being generated; choose a harness and press launch again".to_string(),
                                 ));
-                                ops.release();
+                                drop(op_guard);
                                 return;
                             };
                             let wrapper_prefix = match wrapper_words(&structured_wrapper()) {
                                 Ok(prefix) => prefix,
                                 Err(reason) => {
                                     error.set(Some(reason));
-                                    ops.release();
+                                    drop(op_guard);
                                     return;
                                 }
                             };
@@ -5650,7 +5648,7 @@ pub(super) fn CreateSessionForm(
                                 error.set(Some(
                                     "the structured launch choice changed while its idempotency key was being generated; review it and press launch again".to_string(),
                                 ));
-                                ops.release();
+                                drop(op_guard);
                                 return;
                             }
                             binding.agent = LaunchIntent::Structured(selection);
@@ -5712,7 +5710,7 @@ pub(super) fn CreateSessionForm(
                         yolo_confirmed_key.set(None);
                         yolo_error.set(Some(reason));
                         open_yolo_question(answered.refused_key, answered.ask);
-                        ops.release();
+                        drop(op_guard);
                         return;
                     }
                     let agent = match &bound.agent {
@@ -5816,11 +5814,10 @@ pub(super) fn CreateSessionForm(
                     }};
                     match create_result {
                         Ok(session) => {
-                            // Released before navigating: `on_created`
-                            // unmounts this component, and a token released
-                            // afterwards would be released by a task nobody
-                            // is left to run.
-                            ops.release();
+                            // The callback may open quick-launch naming, which
+                            // checks this token synchronously. Release before
+                            // that handoff, rather than at the future's end.
+                            drop(op_guard);
                             let submitted_launch = match &bound.agent {
                                 LaunchIntent::Structured(selection) => Some(selection.clone()),
                                 LaunchIntent::Command(_) => None,
@@ -5874,7 +5871,7 @@ pub(super) fn CreateSessionForm(
                                             ),
                                         },
                                     );
-                                    ops.release();
+                                    drop(op_guard);
                                     return;
                                 }
                                 if definitely_unaccepted {
@@ -5909,7 +5906,7 @@ pub(super) fn CreateSessionForm(
                                 // or retiring the new target's retry identity.
                                 error.set(Some("a launch for an earlier setup was refused".into()));
                             }
-                            ops.release();
+                            drop(op_guard);
                         }
                     }
                 });
