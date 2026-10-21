@@ -5,9 +5,9 @@
  * can happen under a dialog without the user doing anything: a selected tab
  * whose shell exits, or that another client closes, drops out and the view
  * falls back to the agent. The restart-with dialog has its own spec for this
- * (restart-with.spec.ts); this file covers the other modal dialogs, which have
- * no `inert` isolation behind them and so depend entirely on the terminal's
- * own open-dialog veto.
+ * (restart-with.spec.ts); this file covers Rename. Page isolation and the
+ * terminal's own open-dialog veto must both preserve that modal's keyboard
+ * ownership when terminal selection changes underneath it.
  */
 import { expect, test } from "./helpers/evidence";
 import { openRowMenu } from "./helpers/fleet";
@@ -31,12 +31,12 @@ installTerminalSuiteHooks({ tabSweep: true });
  * The rename dialog keeps focus, and so the title being typed, when the
  * selected tab goes away under it.
  *
- * The rename dialog is modal but, unlike restart-with, does not mark the page
- * inert, so before the terminal's veto covered every open modal dialog the
- * agent terminal took focus here and the rest of the typed title went to the
- * agent. This specifies that with the rename field focused, removing the
- * selected tab leaves focus in the field, typing lands in the field, and the
- * agent terminal gets no focus event.
+ * Before the terminal's veto covered every open modal dialog, the agent
+ * terminal took focus here and the rest of the typed title went to the
+ * agent. Rename now isolates the page as well; selection changes still must
+ * not attempt a terminal focus handoff under it. Removing the selected tab
+ * leaves focus in the field, typing lands in the field, and the agent terminal
+ * gets no focus event.
  */
 test("rename keeps focus in its field when the selected tab goes away", async ({ page, request }) => {
   test.setTimeout(120_000);

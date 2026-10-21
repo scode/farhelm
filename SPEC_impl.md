@@ -592,6 +592,13 @@ dialog's submit uses Restart's stop-first consent and handles the reply through 
 an ordinary restart. That path reattaches the terminal even when the restart is refused and the dialog stays open,
 beneath a modal whose keystrokes must never reach the agent.
 
+Every modal renders through the shared `ModalDialog` boundary, which isolates the page and traps sequential Tab. Its
+targets are connected, visible native Tab stops, excluding disabled controls (including fieldset descendants), hidden or
+inert descendants and explicit `tabindex=-1` options. `aria-disabled` actions remain focusable. Native interior Tab and
+radio-group navigation stay native; the boundary wraps at either end, enters the first or last target from the
+container, and keeps focus on the container when no target is available. Initial-focus order and gap-click retention
+remain explicit policies, separate from trapping and isolation. Hidden preparation isolates without focusing fields.
+
 The dialog owns keyboard focus structurally. While it is mounted, every sibling of every element on its path up to
 `body` is `inert`, including siblings rendered after it opened, except the agent approval cards (`data-modal-exempt`),
 which stay live so that an agent waiting on a card does not also wait on the dialog, so no other code can focus anything
@@ -1164,16 +1171,16 @@ The form's quick-launch flag changes visibility and schedules one ordinary submi
 template/catalog reads, host binding and the current managed-checkout preview settle. Its transparent modal backdrop and
 existing modal isolation prevent page clicks or keyboard input from replacing the pending intent, while hidden fields
 take no focus. Parent opening generations revoke late reads and scheduled submissions when another opening takes over;
-the modal install epoch also notices an intervening modal that already closed. Session Rename uses its own focus trap
-and explicitly revokes a held quick read when opened. Clone/Replace reveals a superseding draft and spends the automatic
-intent. Incomplete or offline prerequisites, request errors and YOLO refusal reveal that same form. The auto-submit
-intent is consumed before requestSubmit and stays consumed through retry reconciliation or a new path preview. There is
-no headless composition, second create path or timer-based readiness. The YOLO question mounts only after reveal so its
-usual Cancel focus still applies. A completed initial host-read failure reveals the cancellable draft, focuses its
-loading Cancel button, and cannot launch later merely because the host read recovers. Preparation errors survive first
-binding; every unsuccessful create reveals the form even when its old-target refusal is fenced out after a target
-change. The quick-switcher row closes its modal through the existing DOM-removal handoff before using this shortcut
-path.
+the modal install epoch also notices an intervening modal that already closed. Session Rename uses the shared modal
+boundary and explicitly revokes a held quick read when opened. Clone/Replace reveals a superseding draft and spends the
+automatic intent. Incomplete or offline prerequisites, request errors and YOLO refusal reveal that same form. The
+auto-submit intent is consumed before requestSubmit and stays consumed through retry reconciliation or a new path
+preview. There is no headless composition, second create path or timer-based readiness. The YOLO question mounts only
+after reveal so its usual Cancel focus still applies. A completed initial host-read failure reveals the cancellable
+draft, focuses its loading Cancel button, and cannot launch later merely because the host read recovers. Preparation
+errors survive first binding; every unsuccessful create reveals the form even when its old-target refusal is fenced out
+after a target change. The quick-switcher row closes its modal through the existing DOM-removal handoff before using
+this shortcut path.
 
 Successful creation carries one local fact to the list: whether this quick-launch opening never revealed New, read from
 its original quick-launch flag and current hidden state at success. The list selects the accepted session and opens its

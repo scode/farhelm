@@ -14,6 +14,7 @@
 
 
 import { expect, newObservedContext, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type Page } from "@playwright/test";
 import { createSession, openRowMenu, SESSION_LISTING, stubFeed } from "./helpers/fleet";
 import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
@@ -979,9 +980,9 @@ test("held rename success keeps dialog focus and returns it after unmount", asyn
  * A focus destination chosen after submission is newer than focus return.
  *
  * The held success still closes its own dialog, but it may not reclaim focus
- * from another control reached while the request was outstanding. The move is
- * programmatic because the modal backdrop intentionally blocks pointer input
- * to the sidebar; focus ownership is the contract, regardless of its source.
+ * from an independently usable approval answer reached while the request was
+ * outstanding. Approval cards remain live over modal isolation, so this is a
+ * newer focus owner the dialog must preserve through successful completion.
  */
 test("held rename success preserves an unrelated focus destination", async ({ page, request }) => {
   const title = `rename-held-external-focus-${Date.now()}`;
@@ -991,13 +992,41 @@ test("held rename success preserves an unrelated focus destination", async ({ pa
   const release = new Promise<void>((resolve) => { releaseRename = resolve; });
   let markEntered!: () => void;
   const entered = new Promise<void>((resolve) => { markEntered = resolve; });
-  await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/rename`, async (route) => {
-    if (route.request().method() !== "POST") return route.continue();
-    markEntered();
-    await release;
-    await route.continue();
-  });
+  let waiting = false;
+  const approvalId = `rename-newer-focus-${Date.now()}`;
+  const answers: string[] = [];
+  let bodyFailed = true;
   try {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/rename`, async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      markEntered();
+      await release;
+      await route.continue();
+    });
+    const feed = await stubFeed(page);
+    feed.notifyOnConnect(1);
+    // This normal approval reader stays empty until the submitted Rename is
+    // held. The card then arrives as an independent owner, rather than being
+    // present before Rename's initial focus admission.
+    await page.route((url) => url.pathname === "/api/approvals", (route) => fulfillAsHelm(route, {
+      json: { approvals: waiting ? [{
+        id: approvalId, host_id: 1, host_name: "fixture-host",
+        session: { id: session.id, title, host_name: "fixture-host" },
+        expires_at_ms: Date.now() + 540_000,
+        action: {
+          kind: "launch", verb: "create", host_name: "fixture-host", cwd: "/work/project",
+          title: null, source: null,
+          launch: { kind: "agent", selection: { harness: "claude", model: "opus", effort: "high", permissions: "guarded" },
+            start: ["claude", "--model", "opus", "--effort", "high", "--permission-mode", "auto", "{farhelm_args}"], resume: null },
+        },
+      }] : [] },
+    }));
+    await page.route((url) => url.pathname === `/api/approvals/${approvalId}`, async (route) => {
+      expect(route.request().method()).toBe("POST");
+      answers.push(route.request().postDataJSON().answer);
+      waiting = false;
+      await fulfillAsHelm(route, { status: 204 });
+    });
     await page.goto("/");
     const source = page.locator(`[data-session-id="${session.id}"]`);
     await expect(source).toBeVisible({ timeout: 20_000 });
@@ -1013,7 +1042,18 @@ test("held rename success preserves an unrelated focus destination", async ({ pa
     await expect(field).not.toBeEditable();
     await expect(field).toBeFocused();
 
-    const destination = page.locator(".new-session-button");
+    waiting = true;
+    await expect.poll(() => feed.openSockets()).toBe(1);
+    feed.notify(2);
+    const card = page.locator(`.approval-card[data-approval-id="${approvalId}"]`);
+    const destination = card.getByRole("button", { name: "allow", exact: true });
+    await expect(card).toBeVisible();
+    await expect(destination).toBeVisible();
+    await expect(destination).toBeEnabled();
+    expect(await destination.evaluate((node) => node.closest("[data-modal-exempt]") !== null)).toBe(true);
+    expect(await destination.evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
+    await expect(field).not.toBeEditable();
+    await expect(dialog.locator(".rename-cancel")).toBeDisabled();
     await destination.focus();
     await expect(destination).toBeFocused();
     releaseRename();
@@ -1022,10 +1062,17 @@ test("held rename success preserves an unrelated focus destination", async ({ pa
     await expect(destination, "completion must preserve the newer focus destination").toBeFocused();
     await expect(source.locator(".session-title")).toHaveText(renamed);
     await expect(source.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(destination).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => answers).toEqual(["allow"]);
+    await expect(card).toHaveCount(0);
+    bodyFailed = false;
   } finally {
-    releaseRename();
-    await page.unroute(`**/api/sessions/${encodeURIComponent(session.id)}/rename`);
-    await cleanupSession(request, session.id);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["held rename", () => releaseRename()],
+      ["rename and approval routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["source session", () => cleanupSession(request, session.id)],
+    ]);
   }
 });
 

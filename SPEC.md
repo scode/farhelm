@@ -1268,6 +1268,10 @@ tab close, host setup, removal and uninstall, and permanent trash deletion. Repe
 the new question. Escape cancels the header's Restart, Replace or Delete question and returns focus to the terminal. The
 YOLO confirmation and Restart with dialog still start on Cancel.
 
+Every modal dialog keeps Tab and Shift+Tab within its visible, enabled controls and keyboard scroll regions. The page
+behind it cannot receive focus or clicks, while independent agent approval cards remain usable. Hidden quick-launch
+preparation blocks page input without focusing its hidden fields; revealing the launcher supplies its normal focus.
+
 A primary click on empty space keeps focus on the control in use in the session launcher, Restart with, the dialogs that
 share the host and Settings installer, and the session row and header Restart, Replace and Delete questions; text can
 still be selected. Rename, tab close, the interrupted card's Replace question and the host update confirmation do not

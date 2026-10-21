@@ -60,9 +60,9 @@
 //! Engines that do not implement `inert` ignore the attribute. They keep the
 //! safety net and whatever per-dialog layers the caller has.
 //!
-//! Restart-with, host settings and hidden quick-launch preparation use this.
-//! Ordinary New retains its own focus trap. A quick-launch fallback keeps this
-//! isolation through reveal, and releases it before returning focus on close.
+//! Every `ModalDialog` uses this alongside the shell's sequential Tab boundary.
+//! Hidden quick-launch preparation isolates without taking focus and keeps
+//! isolation through reveal. Gap-click behavior remains a separate policy.
 
 use dioxus::prelude::*;
 

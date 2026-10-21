@@ -2522,7 +2522,6 @@ pub(crate) fn ListView(
         {
             return;
         }
-        // Rename traps Tab without page isolation.
         // Retire a held quick read here so cancelling Rename cannot revive it.
         opening_generation += 1;
         quick_launch_pending.set(false);
@@ -2581,6 +2580,7 @@ pub(crate) fn ListView(
             // an event racing another pane's write must retain the busy guard.
             end_row_op(&id);
             rename_focus_return.set(Some((id, generation, terminal_return)));
+            crate::rename::dialog_handle(generation).release();
             rename_editor.set(None);
             rename_error.set(None);
             return;
@@ -2629,6 +2629,9 @@ pub(crate) fn ListView(
                                 terminal_return,
                             )));
                         }
+                        // Even a close that owes no return must release its own
+                        // isolation before removing the generation it belongs to.
+                        crate::rename::dialog_handle(generation).release();
                         rename_editor.set(None);
                         rename_error.set(None);
                     }
@@ -3100,6 +3103,7 @@ pub(crate) fn ListView(
                 generation,
                 editor.shortcut || editor.naming,
             )));
+            crate::rename::dialog_handle(generation).release();
             rename_editor.set(None);
             rename_error.set(None);
         }
@@ -3799,6 +3803,9 @@ pub(crate) fn ListView(
                             open_new.call(None);
                             return;
                         }
+                        // A queued toggle-close still owns the visible form's
+                        // isolation even though New is inert while it is open.
+                        COMPOSER_DIALOG.release();
                         {
                             // Closing the dialog discards its host choice with
                             // every other draft it holds. The signal lives up here
@@ -3906,6 +3913,9 @@ pub(crate) fn ListView(
                         FocusTarget::new(".new-session-button", None, false).focus();
                     },
                     on_template_saved: move |template| {
+                        // Templates owns the next focus; release the launcher
+                        // before removing it without queuing a New-button return.
+                        COMPOSER_DIALOG.release();
                         chosen_host.set(None);
                         clone_prefill.set(None);
                         initial_create_action.set(None);

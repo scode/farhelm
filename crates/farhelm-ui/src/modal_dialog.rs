@@ -5,6 +5,8 @@
 //! not add a wrapper or change selectors. This is also the seam where a later
 //! native `<dialog>` conversion can replace the boundary without moving each
 //! dialog's contents or request ownership.
+//! Every root shares one sequential Tab boundary and page isolation; callers
+//! choose their initial handoff and optional gap behavior independently.
 //!
 //! Closing is explicit: the caller decides whether its live operation permits
 //! dismissal and which focus destination belongs to that close reason. DOM
@@ -293,41 +295,55 @@ fn target_js(scope: &str, target: &FocusTarget, root_fallback: bool) -> String {
     )
 }
 
-/// Keep the existing trap's first focus and listener behind the same guard.
+/// Give every modal the same sequential boundary without changing interior Tab.
 ///
 /// Boundary wrapping deliberately uses native focus scrolling: a contained
 /// control outside the dialog's scroll viewport must become visible too.
-/// A handoff without a trap still uses this guard to consume its capture once.
-fn trap_js(handle: DialogHandle, trap: Option<TabTrap>, initial_focus: &str) -> String {
+/// The opening's focus handoff shares the once-per-node guard, so a later child
+/// question or an independent approval keeps its own focus on rerenders.
+fn trap_js(handle: DialogHandle, initial_focus: &str) -> String {
     let dialog = serde_json::to_string(handle.selector).expect("a string always serializes");
     let generation_guard = handle.generation_guard();
-    let listener = trap.map_or(String::new(), |trap| {
-        let selector = serde_json::to_string(trap.selector).expect("a string always serializes");
-        let empty_to_root = trap.empty_to_root;
-        let reverse_from_root = trap.reverse_from_root;
-        format!(
-            r#"const focusable = () => [...dialog.querySelectorAll({selector})]
-                    .filter(node => !node.hidden && node.getClientRects().length);
-                dialog.addEventListener('keydown', event => {{
+    let listener = r#"
+                // Every selector branch passes the same native eligibility test.
+                // In particular, arrow-owned buttons with tabindex=-1 and controls
+                // disabled by a fieldset must not become scripted Tab destinations.
+                const eligible = node => node.isConnected && dialog.contains(node)
+                    && node.tabIndex >= 0 && !node.matches(':disabled')
+                    && !node.closest('[hidden], [inert]') && node.getClientRects().length > 0
+                    && !['hidden', 'collapse'].includes(getComputedStyle(node).visibility);
+                const sameRadioGroup = (left, right) => left instanceof HTMLInputElement
+                    && right instanceof HTMLInputElement && left.type === 'radio' && right.type === 'radio'
+                    && left.name !== '' && left.name === right.name && left.form === right.form;
+                dialog.addEventListener('keydown', event => {
                     if (event.key !== 'Tab') return;
-                    const nodes = focusable();
-                    if (!nodes.length) {{
-                        if ({empty_to_root}) {{
-                            event.preventDefault();
-                            dialog.focus({{ preventScroll: true }});
-                        }}
+                    const candidates = [...dialog.querySelectorAll(
+                        'button, input, textarea, select, a[href], summary, [tabindex]',
+                    )].filter(eligible);
+                    // Radio groups are one native Tab stop. An unanswered group
+                    // admits its first answer forward and its last answer backward;
+                    // arrow navigation within it remains entirely browser-owned.
+                    const nodes = candidates.filter(node => {
+                        if (!(node instanceof HTMLInputElement) || node.type !== 'radio' || !node.name) return true;
+                        const group = candidates.filter(other => sameRadioGroup(node, other));
+                        const target = group.find(other => other.checked)
+                            || (event.shiftKey ? group[group.length - 1] : group[0]);
+                        return node === target;
+                    });
+                    if (!nodes.length) {
+                        event.preventDefault();
+                        dialog.focus({ preventScroll: true });
                         return;
-                    }}
+                    }
                     const first = nodes[0], last = nodes[nodes.length - 1];
-                    const atStart = document.activeElement === first
-                        || ({reverse_from_root} && document.activeElement === dialog);
-                    if (event.shiftKey ? atStart : document.activeElement === last) {{
+                    const active = document.activeElement;
+                    const atStart = active === first || sameRadioGroup(active, first);
+                    const atEnd = active === last || sameRadioGroup(active, last);
+                    if (active === dialog || (event.shiftKey ? atStart : atEnd)) {
                         event.preventDefault();
                         (event.shiftKey ? last : first).focus();
-                    }}
-                }});"#,
-        )
-    });
+                    }
+                });"#;
     format!(
         r#"(() => {{
                 const dialog = document.querySelector({dialog});
@@ -388,6 +404,7 @@ fn handoff_js(
 /// should run again whenever a dialog's state changes. A preparable surface
 /// submits gap/Enter and trap first, then samples its live hidden state: hidden
 /// preparation isolates without focus, while reveal owns a later handoff.
+/// Visible surfaces likewise isolate, after their existing focus submission.
 fn install_focus(handle: DialogHandle, focus: &DialogFocus) {
     let dialog_selector = handle.selector;
     let dialog = serde_json::to_string(dialog_selector).expect("a string always serializes");
@@ -396,13 +413,7 @@ fn install_focus(handle: DialogHandle, focus: &DialogFocus) {
         InitialFocus::Target(selector) => {
             let target = FocusTarget::new(selector.clone(), None, false);
             let initial = target_js("dialog", &target, false);
-            if let Some(trap) = focus.trap {
-                trap_js(handle, Some(trap), &initial)
-            } else {
-                format!(
-                    "(() => {{ const dialog = document.querySelector({dialog}); if (!dialog{generation_guard}) return; {initial} }})();"
-                )
-            }
+            trap_js(handle, &initial)
         }
         InitialFocus::Remembered { selector, quiet } => {
             // Disabled confirming answers retain a separate Cancel/root fallback;
@@ -426,9 +437,7 @@ fn install_focus(handle: DialogHandle, focus: &DialogFocus) {
                     {initial_focus}
                 }})();"#,
             );
-            if let Some(trap) = focus.trap {
-                setup.push_str(&trap_js(handle, Some(trap), ""));
-            }
+            setup.push_str(&trap_js(handle, ""));
             setup
         }
         InitialFocus::Handoff {
@@ -438,10 +447,9 @@ fn install_focus(handle: DialogHandle, focus: &DialogFocus) {
             admission,
         } => trap_js(
             handle,
-            focus.trap,
             &handoff_js(selector, *select_all, *captured_opener, admission),
         ),
-        InitialFocus::Surface { .. } => trap_js(handle, focus.trap, ""),
+        InitialFocus::Surface { .. } => trap_js(handle, ""),
     };
     let action = focus.main_action.as_deref().map_or(
         crate::dialog_focus::ContainerEnter::None,
@@ -452,11 +460,7 @@ fn install_focus(handle: DialogHandle, focus: &DialogFocus) {
     } else {
         String::new()
     };
-    let isolate = if focus.isolation {
-        handle.isolation_script(focus.escape_target.as_deref())
-    } else {
-        String::new()
-    };
+    let isolate = handle.isolation_script(focus.escape_target.as_deref());
     match &focus.initial_focus {
         InitialFocus::Target(_) | InitialFocus::Handoff { .. } => {
             document::eval(&format!("{setup}\n{gap}\n{isolate}"));
@@ -476,18 +480,6 @@ fn install_focus(handle: DialogHandle, focus: &DialogFocus) {
             }
         }
     };
-}
-
-/// Preserve the dialog's actual Tab stops and its container fallback policy.
-///
-/// The selector must exclude arrow-owned option rows when native Tab skips
-/// them. A root parked by the isolation safety net can count as the reverse
-/// boundary; a render with no stops can likewise keep Tab on that root.
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) struct TabTrap {
-    pub(crate) selector: &'static str,
-    pub(crate) empty_to_root: bool,
-    pub(crate) reverse_from_root: bool,
 }
 
 /// Preserve each dialog family's initial-focus and installation-order contract.
@@ -518,8 +510,8 @@ pub(crate) enum InitialFocus {
     /// Prepare without focusing hidden controls; reveal is a separate action.
     ///
     /// The installer calls `hidden_now` once after submitting gap/Enter and
-    /// trap setup. Hidden preparation always isolates; a visible opening uses
-    /// the ordinary isolation flag after its preferred/fallback/root handoff.
+    /// trap setup. Hidden preparation isolates without focus; a visible opening
+    /// isolates after its preferred/fallback/root handoff.
     /// The callback reads live caller state without making installation reactive.
     Surface {
         target: FocusTarget,
@@ -541,28 +533,23 @@ pub(crate) enum FocusAdmission {
 
 /// Keep mount targets separate from live cancellation and request ownership.
 ///
-/// Missing trap and main action retain a dialog's current native Tab and Enter
-/// behavior; initial focus never implies that the same action handles Escape.
-/// Isolation and gap retention are independent: neither follows from a trap
-/// or from the absence of a container action. Existing constructors enable both.
+/// Every modal traps sequential Tab and isolates the page. Initial focus never
+/// implies that the same action handles Escape or container Enter. Gap-click
+/// retention remains independent because Rename deliberately keeps native gaps.
 #[derive(Clone, PartialEq)]
 pub(crate) struct DialogFocus {
     pub(crate) initial_focus: InitialFocus,
-    pub(crate) trap: Option<TabTrap>,
     pub(crate) escape_target: Option<String>,
     pub(crate) main_action: Option<String>,
-    /// Preserve visible page isolation independently of Tab trapping.
-    /// Hidden Surface preparation always isolates, without taking focus.
-    pub(crate) isolation: bool,
     /// Preserve gap-click retention independently of a container Enter action.
     pub(crate) gap: bool,
 }
 
 impl DialogFocus {
-    /// Preserve the host-family policy while callers move onto the shared root.
+    /// Keep the host family's focus memory and quiet initial-target policy.
     ///
-    /// These dialogs already isolate, but do not yet trap Tab. Keeping that
-    /// absence explicit separates the structural conversion from the later fix.
+    /// Cancellation and container Enter retain independent live selectors;
+    /// neither changes the shared trap or isolation contract.
     pub(crate) fn remembered(
         initial_focus: &str,
         escape_target: Option<&str>,
@@ -574,10 +561,8 @@ impl DialogFocus {
                 selector: initial_focus.to_owned(),
                 quiet,
             },
-            trap: None,
             escape_target: escape_target.map(str::to_owned),
             main_action: main_action.map(str::to_owned),
-            isolation: true,
             gap: true,
         }
     }
