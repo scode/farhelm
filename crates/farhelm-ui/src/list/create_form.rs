@@ -2,6 +2,8 @@
 //!
 //! Intent binding and host reconciliation live beside the form because they
 //! define when an idempotency key still describes the submitted create.
+//! Accepted tab choices and one-time inputs live in `draft`; this module keeps
+//! their reactive subscriptions and the ordered host/submission guards.
 
 mod draft;
 
@@ -388,24 +390,13 @@ enum TemplateEdit {
     Set(Box<dyn FnOnce()>),
 }
 
-/// The launcher's ownership handles for template replay. Accepted agent choices
-/// use the draft owner; the remaining field groups retain their own signals.
+/// The launcher's ownership handles for template replay. Tab drafts and one-time
+/// inputs use one owner; placement and transient UI retain their own signals.
 /// All handles are Copy so deferred edits keep one owner rather than mirrors.
 #[derive(Clone, Copy)]
 struct TemplateTargets {
-    prompt: Signal<Option<String>>,
-    launch_tab: Signal<LaunchTab>,
     draft: LaunchDraftState,
     composer_reset_reason: Signal<Option<String>>,
-    invocation: Signal<String>,
-    invocation_raw_seed: Signal<Option<String>>,
-    invocation_edited: Signal<bool>,
-    command_yolo: Signal<Option<bool>>,
-    command_agent: Signal<Option<LaunchHarness>>,
-    command_resume_on: Signal<bool>,
-    command_resume: Signal<String>,
-    command_resume_raw_seed: Signal<Option<String>>,
-    command_resume_edited: Signal<bool>,
     chosen_host: Signal<Option<HostId>>,
     destination: Signal<DestinationDraft>,
     cwd: Signal<String>,
@@ -426,7 +417,6 @@ struct TemplateTargets {
 #[derive(Clone, Copy)]
 struct PermissionUndoTargets {
     fields: TemplateTargets,
-    conversation: Signal<String>,
     folder_is_explicit: Signal<bool>,
     clone_host_state: Signal<CloneHostState>,
     remembered_destination: Signal<Option<CreateTarget>>,
@@ -456,7 +446,7 @@ struct PermissionEscalation {
 }
 
 /// Capture user-editable values, never an old retry key or authority cache.
-/// Accepted agent choices are one plain snapshot; the remaining field groups
+/// Accepted launch choices are one plain snapshot; the remaining field groups
 /// retain their existing immutable restoration values during the notice.
 #[allow(
     clippy::clone_on_copy,
@@ -467,7 +457,7 @@ fn capture_permission_switch(targets: PermissionUndoTargets) -> PermissionSwitch
     let draft_before = t.draft.snapshot();
     let harness = draft_before.harness();
     let permission = harness.and_then(|h| h.request_permission(draft_before.permissions()));
-    let tab = *t.launch_tab.peek();
+    let tab = draft_before.tab();
     macro_rules! capture {
         (($($field:ident),*); ($($extra:ident),*)) => {{
             $(let $field = t.$field.peek().clone();)*
@@ -486,13 +476,11 @@ fn capture_permission_switch(targets: PermissionUndoTargets) -> PermissionSwitch
         }};
     }
     let restore = capture!((
-        prompt, launch_tab, composer_reset_reason, invocation, invocation_raw_seed,
-        invocation_edited, command_yolo, command_agent, command_resume_on,
-        command_resume, command_resume_raw_seed, command_resume_edited, chosen_host,
+        composer_reset_reason, chosen_host,
         destination, cwd, cwd_raw_seed, cwd_edited, title, title_raw_seed, title_edited,
         clone_checkout_naming
     ); (
-        conversation, folder_is_explicit, clone_host_state, remembered_destination,
+        folder_is_explicit, clone_host_state, remembered_destination,
         model_draft, model_draft_error
     ));
     PermissionSwitchBefore {
@@ -556,12 +544,12 @@ fn launcher_snapshot(
 ) -> farhelm_proto::launcher::LauncherState {
     use farhelm_proto::launcher::{LauncherKind, LauncherState, TemplateDestination};
     let draft = t.draft.snapshot();
-    let kind_now = match *t.launch_tab.peek() {
+    let kind_now = match draft.tab() {
         LaunchTab::Agent => LauncherKind::Agent,
         LaunchTab::Command => LauncherKind::Command,
     };
     LauncherState {
-        prompt: active_prompt(kind_now, draft.harness(), &t.prompt.peek()),
+        prompt: active_prompt(kind_now, draft.harness(), &draft.prompt()),
         kind: Some(kind_now),
         harness: draft.harness(),
         model: draft.model().as_ref().map(|model| {
@@ -581,17 +569,17 @@ fn launcher_snapshot(
         wrapper_prefix: wrapper_words(&draft.wrapper()).ok().flatten(),
         workspace_trust: None,
         command: submitted_field(
-            &t.invocation.peek(),
-            *t.invocation_edited.peek(),
-            t.invocation_raw_seed.peek().as_deref(),
+            &draft.invocation(),
+            draft.invocation_edited(),
+            draft.invocation_raw_seed().as_deref(),
         ),
-        yolo: *t.command_yolo.peek(),
-        command_agent: *t.command_agent.peek(),
-        resume_command: t.command_resume_on.peek().then(|| {
+        yolo: draft.command_yolo(),
+        command_agent: draft.command_agent(),
+        resume_command: draft.command_resume_on().then(|| {
             submitted_field(
-                &t.command_resume.peek(),
-                *t.command_resume_edited.peek(),
-                t.command_resume_raw_seed.peek().as_deref(),
+                &draft.command_resume(),
+                draft.command_resume_edited(),
+                draft.command_resume_raw_seed().as_deref(),
             )
         }),
         host: selected.and_then(|chosen| {
@@ -659,7 +647,7 @@ fn validated_template_batch(
     let mut state = launcher_snapshot(t, hosts, *t.chosen_host.peek());
     // A partial template may fill an agent later in this same batch. Preserve
     // its dormant prompt while checking the projected sequence.
-    state.prompt = t.prompt.peek().clone();
+    state.prompt = t.draft.snapshot().prompt();
     let known_hosts: Vec<String> = hosts
         .iter()
         .filter(|host| !host.identity_mismatch)
@@ -767,9 +755,11 @@ fn template_edits(
     // 1. The launch kind.
     if let Some(kind) = fields.kind {
         edits.push(TemplateEdit::Set(Box::new(move || {
-            t.launch_tab.set(match kind {
-                LauncherKind::Agent => LaunchTab::Agent,
-                LauncherKind::Command => LaunchTab::Command,
+            t.draft.edit(|draft| {
+                draft.choose_tab(match kind {
+                    LauncherKind::Agent => LaunchTab::Agent,
+                    LauncherKind::Command => LaunchTab::Command,
+                });
             });
         })));
     }
@@ -781,7 +771,8 @@ fn template_edits(
                 edits.push(TemplateEdit::Search(ComposerSearchResult::Harness(agent)))
             }
             LauncherKind::Command => edits.push(TemplateEdit::Set(Box::new(move || {
-                t.command_agent.set(Some(agent));
+                t.draft
+                    .edit(|draft| draft.choose_command_agent(Some(agent)));
             }))),
         }
     }
@@ -842,22 +833,18 @@ fn template_edits(
     // 4. The command launch's fields, typed text the user owns from here.
     if let Some(command) = fields.command {
         edits.push(TemplateEdit::Set(Box::new(move || {
-            t.invocation.set(command);
-            t.invocation_raw_seed.set(None);
-            t.invocation_edited.set(true);
+            t.draft
+                .edit(|draft| draft.apply_template_invocation(command));
         })));
     }
     if let Some(yolo) = fields.yolo {
         edits.push(TemplateEdit::Set(Box::new(move || {
-            t.command_yolo.set(Some(yolo))
+            t.draft.edit(|draft| draft.choose_command_yolo(yolo))
         })));
     }
     if let Some(resume) = fields.resume_command {
         edits.push(TemplateEdit::Set(Box::new(move || {
-            t.command_resume_on.set(resume.is_some());
-            t.command_resume.set(resume.unwrap_or_default());
-            t.command_resume_raw_seed.set(None);
-            t.command_resume_edited.set(true);
+            t.draft.edit(|draft| draft.apply_template_resume(resume));
         })));
     }
     // 5. Destination uses its ordinary actions. A template name additionally
@@ -908,7 +895,8 @@ fn template_edits(
         })));
     }
     edits.push(TemplateEdit::Set(Box::new(move || {
-        t.prompt.set(applied_prompt.clone());
+        t.draft
+            .edit(|draft| draft.apply_template_prompt(applied_prompt.clone()));
         // Search edits may clear this along the way. Compare the completed
         // request at submit, not an intermediate template field transition.
         t.intent_key.set(retry);
@@ -946,7 +934,6 @@ fn apply_composer_search_result(
     mut cwd_raw_seed: Signal<Option<String>>,
     mut cwd_edited: Signal<bool>,
     mut folder_is_explicit: Signal<bool>,
-    mut launch_tab: Signal<LaunchTab>,
     draft: LaunchDraftState,
     preferences: SharedPreferences,
     mut composer_reset_reason: Signal<Option<String>>,
@@ -1042,7 +1029,9 @@ fn apply_composer_search_result(
             return Some(folder);
         }
         crate::launch_composer::ComposerSearchResult::Harness(harness) => {
-            launch_tab.set(LaunchTab::Agent);
+            draft.edit(|draft| {
+                draft.choose_tab(LaunchTab::Agent);
+            });
             observe_search_agent_fields(draft.fields());
             let outcome = draft.edit(|draft| {
                 draft.choose_harness(
@@ -1058,7 +1047,9 @@ fn apply_composer_search_result(
             // A model carries its harness ownership, so selecting it is also
             // an explicit return to structured mode rather than leaving a
             // structured draft hidden behind command controls.
-            launch_tab.set(LaunchTab::Agent);
+            draft.edit(|draft| {
+                draft.choose_tab(LaunchTab::Agent);
+            });
             observe_search_agent_fields(draft.fields());
             let outcome = draft.edit(|draft| {
                 draft.choose_catalog_model(
@@ -1110,7 +1101,9 @@ fn apply_composer_search_result(
             }
         }
         crate::launch_composer::ComposerSearchResult::Recent(entry) => {
-            launch_tab.set(LaunchTab::Agent);
+            draft.edit(|draft| {
+                draft.choose_tab(LaunchTab::Agent);
+            });
             composer_reset_reason.set(None);
             let mut selection = crate::launch_composer::select_recent(&entry);
             selection.permissions = crate::launch_composer::normalized_permissions(
@@ -2128,9 +2121,8 @@ pub(crate) fn submitted_field(text: &str, edited: bool, seed: Option<&str>) -> S
     }
 }
 
-/// Seed one of the create form's peer-relayed text fields (working
-/// directory, invocation, title) from a clone's raw value: shown escaped
-/// (`peer::display_peer`), with the exact raw bytes and a cleared edited
+/// Seed a peer-provided directory or title without losing its original bytes.
+/// The display is escaped (`peer::display_peer`), with exact raw bytes and a cleared edited
 /// flag recorded alongside so an untouched submit reads back the ORIGINAL
 /// bytes rather than the escaped spelling (item2-review2.md F5;
 /// [`submitted_field`] is the read-back half).
@@ -2668,21 +2660,7 @@ pub(super) fn CreateSessionForm(
     let mut preview_revision = use_signal(|| 0_u64);
     let mut observed_checkout_revision = use_signal(|| 0_i64);
     let mut live_preview_authority = use_signal(|| None::<PreviewAuthority>);
-    let mut invocation = use_signal(String::new);
-    // The command launch's other fields (SPEC.md, Creation): the YOLO
-    // assertion, unanswered until the user picks; the declared agent type;
-    // and Resume with its own command.
-    let mut command_yolo = use_signal(|| None::<bool>);
-    let mut command_agent = use_signal(|| None::<LaunchHarness>);
-    let mut command_resume_on = use_signal(|| false);
-    let mut command_resume = use_signal(String::new);
-    // A cloned resume command is peer-relayed text like the command itself:
-    // shown escaped, with its raw bytes kept to send back untouched (see
-    // `reseed_cloned_field` and `submitted_field`).
-    let mut command_resume_raw_seed = use_signal(|| None::<String>);
-    let mut command_resume_edited = use_signal(|| false);
     let mut title = use_signal(String::new);
-    let mut launch_tab = use_signal(|| LaunchTab::Agent);
     // Seeded from the helm's remembered permissions mode ONLY when this
     // mount has no prefill at all (SPEC.md's launch-composer carve-out): a
     // clone/replace prefill's own reseed effect below (`prefill.launch`)
@@ -2715,6 +2693,16 @@ pub(super) fn CreateSessionForm(
     // Handler-time authority reads the live owner rather than memo.peek(),
     // whose cached value can lag an earlier edit in the same event turn.
     let DraftFields {
+        launch_tab,
+        invocation,
+        invocation_edited,
+        command_yolo,
+        command_agent,
+        command_resume_on,
+        command_resume,
+        command_resume_edited,
+        prompt,
+        conversation,
         structured_harness,
         structured_model,
         structured_model_raw_seed,
@@ -2726,12 +2714,6 @@ pub(super) fn CreateSessionForm(
         structured_wrapper,
         wrapper_is_explicit,
     } = draft.fields();
-    // Never seed from a source, history or template: every dialog starts fresh.
-    let mut conversation = use_signal(String::new);
-    // A message belongs to this opening, not its reusable launch. Keep the
-    // agent tab's draft while visiting command mode or choosing a recent;
-    // active_prompt excludes dormant/unsupported text from every request.
-    let mut prompt = use_signal(|| None::<String>);
     // Compatibility clears are intentional, but defaults must never make an
     // earlier explicit choice vanish without telling the person what changed.
     let mut composer_reset_reason = use_signal(|| None::<String>);
@@ -2759,17 +2741,11 @@ pub(super) fn CreateSessionForm(
     let mut model_active = use_signal(|| None::<usize>);
     let mut model_show_all = use_signal(|| false);
     let mut model_draft_error = use_signal(|| None::<String>);
-    // What each of the three text fields above was SEEDED from, raw, and
-    // whether the user has typed in it since (item2-review2.md F5): a
-    // clone's directory, invocation and title are peer-relayed text going
-    // into an editable control, and an untouched field must submit the
-    // ORIGINAL bytes rather than the escaped spelling `cwd`/`invocation`/
-    // `title` display while the clone is on screen (see the reseed effect
-    // below for where the escaping is applied, and [`submitted_field`] for
-    // the read-back half these are fed into at submit time). `None` seeds
-    // mean "never clone-seeded", which is the ordinary blank-create case:
-    // there the field's own text already IS the value to submit, since
-    // nothing relayed it from a peer.
+    // Placement retains the same peer-text ownership as the command fields
+    // now held by LaunchDraft: an untouched directory or title submits its
+    // original seed, not the escaped spelling in the editor. A None seed
+    // means no peer supplied that field, so its display text is already the
+    // value to submit. See submitted_field for the deliberate-edit boundary.
     let cwd_initial_raw_seed = initial_cwd.clone();
     let mut cwd_raw_seed = use_signal(move || cwd_initial_raw_seed);
     let mut cwd_edited = use_signal(|| false);
@@ -2791,8 +2767,6 @@ pub(super) fn CreateSessionForm(
     // a later host pick must not relabel the identity this panel will save.
     let mut template_panel = use_signal(|| None::<(super::save_template::Candidate, String)>);
     let template_saving = use_signal(|| false);
-    let mut invocation_raw_seed = use_signal(|| None::<String>);
-    let mut invocation_edited = use_signal(|| false);
     let mut title_raw_seed = use_signal(|| None::<String>);
     let mut title_edited = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
@@ -3112,7 +3086,7 @@ pub(super) fn CreateSessionForm(
                 prefill_applied.set(Some(prefill.generation));
                 // A mounted Clone/Replace prefill supersedes the old opening's
                 // first message even when the selected agent stays the same.
-                prompt.set(None);
+                draft.edit(LaunchDraft::clear_prompt_for_prefill);
                 permission_escalation.set(None);
                 // A clone generation replaces the destination as a unit.
                 // Invalidate before reseeding so an A→B→A clone sequence
@@ -3163,39 +3137,13 @@ pub(super) fn CreateSessionForm(
                 // the dormant command field included, so switching a
                 // structured clone to the command path starts from the
                 // source's own command.
-                reseed_cloned_field(
-                    &mut invocation,
-                    &mut invocation_raw_seed,
-                    &mut invocation_edited,
-                    &prefill.invocation,
-                );
+                draft.edit(|draft| draft.seed_invocation(&prefill.invocation));
                 // A command launch's clone carries its assertion, agent
                 // type and resume command (SPEC.md, Clone). Anything else —
                 // an agent launch, or a legacy session whose command is all
                 // the launcher gets — leaves them for the user, the YOLO
                 // assertion unanswered.
-                match &prefill.command {
-                    Some(command) => {
-                        command_yolo.set(Some(command.yolo));
-                        command_agent.set(command.agent);
-                        command_resume_on.set(command.resume.is_some());
-                        reseed_cloned_field(
-                            &mut command_resume,
-                            &mut command_resume_raw_seed,
-                            &mut command_resume_edited,
-                            command.resume.as_deref().unwrap_or_default(),
-                        );
-                        launch_tab.set(LaunchTab::Command);
-                    }
-                    None => {
-                        command_yolo.set(None);
-                        command_agent.set(None);
-                        command_resume_on.set(false);
-                        command_resume.set(String::new());
-                        command_resume_raw_seed.set(None);
-                        command_resume_edited.set(false);
-                    }
-                }
+                draft.edit(|draft| draft.seed_command_fields(prefill.command.as_ref()));
                 if let Some(launch) = &prefill.launch {
                     // A structured snapshot is the source's explicit
                     // request, whereas its invocation is only the compiler's
@@ -3203,7 +3151,9 @@ pub(super) fn CreateSessionForm(
                     // compatibility normalization: an older omitted
                     // permission is Pi's mandatory YOLO mode. Trust is no longer
                     // editable and is composed by the helm for the destination.
-                    launch_tab.set(LaunchTab::Agent);
+                    draft.edit(|draft| {
+                        draft.choose_tab(LaunchTab::Agent);
+                    });
                     // A restored model must establish ownership just like a
                     // freshly typed one. Known catalog ids override this
                     // fallback during harness reconciliation; an unknown id
@@ -3215,7 +3165,9 @@ pub(super) fn CreateSessionForm(
                     // source session made, not a passive default — it must
                     // filter recents exactly as it always has.
                 } else {
-                    launch_tab.set(LaunchTab::Command);
+                    draft.edit(|draft| {
+                        draft.choose_tab(LaunchTab::Command);
+                    });
                     draft.edit(LaunchDraft::clear_for_command_seed);
                 }
                 // A prefill is as fresh an intent as any manual edit —
@@ -3311,7 +3263,7 @@ pub(super) fn CreateSessionForm(
             submitted_field(
                 &invocation(),
                 invocation_edited(),
-                invocation_raw_seed.peek().as_deref()
+                draft.snapshot().invocation_raw_seed().as_deref()
             ),
         ) + &format!(
             ":{:?}:{:?}:{}:{}",
@@ -3321,7 +3273,7 @@ pub(super) fn CreateSessionForm(
             submitted_field(
                 &command_resume(),
                 command_resume_edited(),
-                command_resume_raw_seed.peek().as_deref()
+                draft.snapshot().command_resume_raw_seed().as_deref()
             )
         )
     };
@@ -3540,28 +3492,24 @@ pub(super) fn CreateSessionForm(
     } else {
         (None, crate::DeleteGuard::NothingAlive)
     };
-    let current_launch = if launch_tab() == LaunchTab::Agent {
-        draft.snapshot().request().map(LaunchIntent::Structured)
-    } else {
-        command_intent(
-            submitted_field(
-                &invocation(),
+    // Keep the command arm's conditional subscriptions. The live owner supplies
+    // values after those reads, including seeds that never subscribed here.
+    let current_launch = {
+        if launch_tab() == LaunchTab::Command {
+            let _ = (
+                invocation(),
                 invocation_edited(),
-                invocation_raw_seed.peek().as_deref(),
-            ),
-            command_yolo(),
-            command_agent(),
-            command_resume_on(),
-            &submitted_field(
-                &command_resume(),
+                command_yolo(),
+                command_agent(),
+                command_resume_on(),
+                command_resume(),
                 command_resume_edited(),
-                command_resume_raw_seed.peek().as_deref(),
-            ),
-        )
-        .map(LaunchIntent::Command)
+            );
+        }
+        draft.snapshot().request()
     };
     let retry_binding = current_launch.and_then(|launch| {
-        let mut draft = IntentBinding::of(
+        let mut binding = IntentBinding::of(
             selected,
             &hosts,
             cwd(),
@@ -3571,11 +3519,11 @@ pub(super) fn CreateSessionForm(
                 .as_ref()
                 .and_then(|prefill| prefill.replace_source.clone()),
         )?;
-        draft.prompt = match &draft.agent {
+        binding.prompt = match &binding.agent {
             LaunchIntent::Structured(selection) => active_prompt(
                 farhelm_proto::launcher::LauncherKind::Agent,
                 Some(selection.harness),
-                &prompt.peek(),
+                &draft.snapshot().prompt(),
             ),
             LaunchIntent::Command(_) => None,
         };
@@ -3587,7 +3535,7 @@ pub(super) fn CreateSessionForm(
             .identity
             .as_deref()?;
         github_attempt()
-            .filter(|(original, _)| same_fresh_intent(original, &draft, repo, installation))
+            .filter(|(original, _)| same_fresh_intent(original, &binding, repo, installation))
             .map(|(binding, _)| binding)
     });
     // A preview cannot prove that a lost create was refused: its occupied
@@ -3836,26 +3784,17 @@ pub(super) fn CreateSessionForm(
             // Once admitted, the row's meaning is the whole structured setup;
             // leaving command mode active would submit an unrelated dormant
             // invocation when Enter follows this callback.
-            launch_tab.set(LaunchTab::Agent);
+            draft.edit(|draft| {
+                draft.choose_tab(LaunchTab::Agent);
+            });
             composer_reset_reason.set(None);
             intent_key.set(None);
             true
         }
     });
     let template_targets = TemplateTargets {
-        prompt,
-        launch_tab,
         draft,
         composer_reset_reason,
-        invocation,
-        invocation_raw_seed,
-        invocation_edited,
-        command_yolo,
-        command_agent,
-        command_resume_on,
-        command_resume,
-        command_resume_raw_seed,
-        command_resume_edited,
         chosen_host,
         destination: destination_draft,
         cwd,
@@ -3871,7 +3810,6 @@ pub(super) fn CreateSessionForm(
     };
     let undo_targets = PermissionUndoTargets {
         fields: template_targets,
-        conversation,
         folder_is_explicit,
         clone_host_state,
         remembered_destination,
@@ -3888,10 +3826,7 @@ pub(super) fn CreateSessionForm(
                 return;
             }
             permission_escalation.set(None);
-            if !automatic
-                || before.tab != LaunchTab::Agent
-                || *launch_tab.peek() != LaunchTab::Agent
-            {
+            if !automatic || before.tab != LaunchTab::Agent || current.tab() != LaunchTab::Agent {
                 return;
             }
             let (Some(_), Some(harness)) = (before.harness, after) else {
@@ -4319,7 +4254,6 @@ pub(super) fn CreateSessionForm(
                             cwd_raw_seed,
                             cwd_edited,
                             folder_is_explicit,
-                            launch_tab,
                             draft,
                             preferences,
                             composer_reset_reason,
@@ -4547,9 +4481,11 @@ pub(super) fn CreateSessionForm(
                     ChoiceOrigin::Control,
                 )
             });
-            let changed = outcome.selection_changed || *launch_tab.peek() != LaunchTab::Agent;
+            let changed = outcome.selection_changed || draft.snapshot().tab() != LaunchTab::Agent;
             composer_reset_reason.set(outcome.reset_reason);
-            launch_tab.set(LaunchTab::Agent);
+            draft.edit(|draft| {
+                draft.choose_tab(LaunchTab::Agent);
+            });
             note_permission_switch.call((switch_before, true));
             if changed {
                 intent_key.set(None);
@@ -4563,10 +4499,9 @@ pub(super) fn CreateSessionForm(
         }
         partial_template_hint.set(false);
         promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
-        if *launch_tab.peek() != tab {
+        if draft.edit(|draft| draft.choose_tab(tab)) {
             intent_key.set(None);
         }
-        launch_tab.set(tab);
         focus_composer_surface(false);
     });
     let launch_from_choice = EventHandler::new(move |_| resubmit_composer());
@@ -4812,20 +4747,22 @@ pub(super) fn CreateSessionForm(
         });
     });
     // A guarded answer may arrive after another control's event but before
-    // that control's render. Reconstruct the executable draft from live
-    // signals rather than treating the rendered question as edit authority.
+    // that control's render. Reconstruct the executable draft from its live
+    // owner rather than treating the rendered question as edit authority.
     let live_yolo_binding = {
         let hosts = hosts.clone();
         let open_host = open_host.clone();
         let prefill = prefill_for_submit.clone();
         move || {
-            if *launch_tab.peek() != LaunchTab::Agent {
+            let current = draft.snapshot();
+            if current.tab() != LaunchTab::Agent {
                 return None;
             }
-            let current = draft.snapshot();
             let harness = current.harness()?;
             wrapper_words(&current.wrapper()).ok()?;
-            let selection = current.request()?;
+            let LaunchIntent::Structured(selection) = current.request()? else {
+                return None;
+            };
             let selected = effective_create_host(&hosts, *chosen_host.peek(), open_host.as_ref());
             if !target_matches_selection(selected, &hosts, create_target.peek().as_ref()) {
                 return None;
@@ -4847,10 +4784,10 @@ pub(super) fn CreateSessionForm(
             binding.prompt = active_prompt(
                 farhelm_proto::launcher::LauncherKind::Agent,
                 Some(harness),
-                &prompt.peek(),
+                &current.prompt(),
             );
             binding.conversation =
-                (!conversation.peek().is_empty()).then(|| conversation.peek().clone());
+                (!current.conversation().is_empty()).then(|| current.conversation());
             match destination_draft.peek().clone() {
                 DestinationDraft::Existing { cwd } => binding.cwd = cwd,
                 DestinationDraft::Github { repo, .. } => {
@@ -4939,16 +4876,17 @@ pub(super) fn CreateSessionForm(
             // reconciliation rather than an answer, hence `clear`.
             yolo_refusal.clear();
             yolo_error.set(None);
-            // Frozen HERE, from the live signals, and not touched again:
+            // Frozen HERE, from the live owner, and not touched again:
             // the minting await below can span further edits, and
             // re-reading across it would let the request's MODE differ
             // from the one the button was pressed on.
-            let launch = if *launch_tab.peek() == LaunchTab::Agent {
-                if draft.snapshot().harness().is_none() {
+            let current = draft.snapshot();
+            let launch = if current.tab() == LaunchTab::Agent {
+                if current.harness().is_none() {
                     drop(op_guard);
                     return;
                 }
-                if draft.snapshot().permissions() == Some(LaunchPermission::Custom)
+                if current.permissions() == Some(LaunchPermission::Custom)
                     && farhelm_proto::split_permission_flags(&structured_permission_flags())
                         .is_err()
                 {
@@ -4966,11 +4904,9 @@ pub(super) fn CreateSessionForm(
                 // The flags read was unconditional in the old snapshot
                 // builder, including synchronous guarded-preview submission.
                 let _ = structured_permission_flags();
-                let selection = draft
-                    .snapshot()
+                current
                     .request()
-                    .expect("the live harness was checked above");
-                LaunchIntent::Structured(selection)
+                    .expect("the live harness was checked above")
             } else {
                 // The RAW bytes while untouched, not the escaped display
                 // the field shows — see [`submitted_field`]
@@ -4978,25 +4914,11 @@ pub(super) fn CreateSessionForm(
                 // Replacing browser required-field validation keeps its
                 // empty-command refusal visible at Launch. Accepted fresh
                 // retries keep their existing exemption from this check.
-                if command_requires_text && invocation.peek().is_empty() {
+                if command_requires_text && current.invocation().is_empty() {
                     error.set(Some("enter an agent command before launching".to_string()));
                     return;
                 }
-                let Some(command) = command_intent(
-                    submitted_field(
-                        &invocation.peek(),
-                        *invocation_edited.peek(),
-                        invocation_raw_seed.peek().as_deref(),
-                    ),
-                    *command_yolo.peek(),
-                    *command_agent.peek(),
-                    *command_resume_on.peek(),
-                    &submitted_field(
-                        &command_resume.peek(),
-                        *command_resume_edited.peek(),
-                        command_resume_raw_seed.peek().as_deref(),
-                    ),
-                ) else {
+                let Some(launch) = current.request() else {
                     error.set(Some(
                         "say whether this command runs in YOLO mode (YOLO) before \
                          launching"
@@ -5005,7 +4927,7 @@ pub(super) fn CreateSessionForm(
                     drop(op_guard);
                     return;
                 };
-                LaunchIntent::Command(command)
+                launch
             };
             // The HOST is derived here too, from the live signal — never
             // from what the last render computed. The same one-turn window
@@ -5109,15 +5031,28 @@ pub(super) fn CreateSessionForm(
                 drop(op_guard);
                 return;
             };
-            binding.conversation = (matches!(binding.agent, LaunchIntent::Structured(_))
-                && !conversation().is_empty())
-            .then(&*conversation);
+            let current = draft.snapshot();
+            binding.conversation = if matches!(binding.agent, LaunchIntent::Structured(_)) {
+                // This tracked read also belongs to a synchronously calling
+                // guarded-submit effect; the snapshot supplies same-turn values.
+                let _ = conversation();
+                let conversation_text = current.conversation();
+                (!conversation_text.is_empty()).then(|| {
+                    let _ = conversation();
+                    conversation_text
+                })
+            } else {
+                None
+            };
             binding.prompt = match &binding.agent {
-                LaunchIntent::Structured(selection) => active_prompt(
-                    farhelm_proto::launcher::LauncherKind::Agent,
-                    Some(selection.harness),
-                    &prompt(),
-                ),
+                LaunchIntent::Structured(selection) => {
+                    let _ = prompt();
+                    active_prompt(
+                        farhelm_proto::launcher::LauncherKind::Agent,
+                        Some(selection.harness),
+                        &current.prompt(),
+                    )
+                }
                 LaunchIntent::Command(_) => None,
             };
             if let Some(message) = &binding.prompt {
@@ -5142,31 +5077,32 @@ pub(super) fn CreateSessionForm(
                 return;
             }
             let fresh_draft_snapshot = move || {
+                let current = draft.snapshot();
                 (
                     destination_draft.peek().repo().cloned(),
-                    *launch_tab.peek(),
-                    draft.snapshot().harness(),
-                    draft.snapshot().model(),
-                    draft.snapshot().effort(),
-                    draft.snapshot().permissions(),
+                    current.tab(),
+                    current.harness(),
+                    current.model(),
+                    current.effort(),
+                    current.permissions(),
                     submitted_field(
-                        &invocation.peek(),
-                        *invocation_edited.peek(),
-                        invocation_raw_seed.peek().as_deref(),
+                        &current.invocation(),
+                        current.invocation_edited(),
+                        current.invocation_raw_seed().as_deref(),
                     ),
                     (
-                        *command_yolo.peek(),
-                        *command_agent.peek(),
-                        *command_resume_on.peek(),
+                        current.command_yolo(),
+                        current.command_agent(),
+                        current.command_resume_on(),
                         submitted_field(
-                            &command_resume.peek(),
-                            *command_resume_edited.peek(),
-                            command_resume_raw_seed.peek().as_deref(),
+                            &current.command_resume(),
+                            current.command_resume_edited(),
+                            current.command_resume_raw_seed().as_deref(),
                         ),
                     ),
                     title_for_launch(),
                     *chosen_host.peek(),
-                    prompt.peek().clone(),
+                    current.prompt(),
                 )
             };
             let fresh_snapshot = fresh_draft_snapshot();
@@ -5344,7 +5280,8 @@ pub(super) fn CreateSessionForm(
                     // complete declarative intent so the next key binds
                     // exactly what the person now sees.
                     if matches!(binding.agent, LaunchIntent::Structured(_)) {
-                        if draft.snapshot().harness().is_none() {
+                        let current = draft.snapshot();
+                        if current.harness().is_none() {
                             error.set(Some(
                                 "the structured launch choice changed while its idempotency key was being generated; choose a harness and press launch again".to_string(),
                             ));
@@ -5360,11 +5297,10 @@ pub(super) fn CreateSessionForm(
                             }
                         }
                         let _ = structured_permission_flags();
-                        let selection = draft
-                            .snapshot()
-                            .request()
+                        let selection = current
+                            .structured_selection()
                             .expect("the live harness was checked above");
-                        if *launch_tab.peek() != LaunchTab::Agent
+                        if current.tab() != LaunchTab::Agent
                             || !crate::launch_composer::selection_fits_catalog(
                                 &selection,
                                 catalog_for_recheck.as_deref(),
@@ -5378,18 +5314,19 @@ pub(super) fn CreateSessionForm(
                         }
                         binding.agent = LaunchIntent::Structured(selection);
                     }
+                    let current = draft.snapshot();
                     binding = IntentBinding {
                         prompt: match &binding.agent {
                             LaunchIntent::Structured(selection) => active_prompt(
                                 farhelm_proto::launcher::LauncherKind::Agent,
                                 Some(selection.harness),
-                                &prompt.peek(),
+                                &current.prompt(),
                             ),
                             LaunchIntent::Command(_) => None,
                         },
                         conversation: (matches!(binding.agent, LaunchIntent::Structured(_))
-                            && !conversation.peek().is_empty())
-                        .then(|| conversation.peek().clone()),
+                            && !current.conversation().is_empty())
+                        .then(|| current.conversation()),
                         cwd: if binding.github_checkout.is_some() {
                             binding.cwd.clone()
                         } else {
@@ -5973,7 +5910,7 @@ pub(super) fn CreateSessionForm(
                             if !draft_transition_allowed(ops) || template_saving() || template_panel().is_some() { return; }
                             // The command tab retains the agent draft for a
                             // later switch, but does not save any of it.
-                            if *launch_tab.peek() == LaunchTab::Agent
+                            if draft.snapshot().tab() == LaunchTab::Agent
                                 && let Err(reason) = wrapper_words(&structured_wrapper()) {
                                 error.set(Some(reason));
                                 return;
@@ -6076,7 +6013,7 @@ pub(super) fn CreateSessionForm(
                                     authority.agent = preview_agent_now();
                                     guarded_submit_pending.set(Some(GuardedSubmitStamp::new(
                                         *opening_generation.peek(), authority,
-                                        prompt.peek().clone(), conversation.peek().clone(),
+                                        draft.snapshot().prompt(), draft.snapshot().conversation(),
                                     )));
                                 }
                             } else {
@@ -6214,11 +6151,11 @@ pub(super) fn CreateSessionForm(
                                     .then(|| history.clone())
                                 })
                                 .unwrap_or_default();
-                            let active_harness = (*launch_tab.peek()
+                            let active_harness = (draft.snapshot().tab()
                                 == LaunchTab::Agent)
                                 .then(&*structured_harness)
                                 .flatten();
-                            let active_model = (*launch_tab.peek()
+                            let active_model = (draft.snapshot().tab()
                                 == LaunchTab::Agent)
                                 .then(&*structured_model)
                                 .flatten();
@@ -6251,7 +6188,7 @@ pub(super) fn CreateSessionForm(
                                     .map(crate::launch_composer::ComposerSearchResult::Github));
                             }
                             let rows = crate::launch_composer::finish_search_results(
-                                &query, rows, *launch_tab.peek() == LaunchTab::Agent && active_harness.is_none(),
+                                &query, rows, draft.snapshot().tab() == LaunchTab::Agent && active_harness.is_none(),
                             );
                             let groups = crate::launch_composer::grouped_search_results(rows);
                             composer_search_index.set(
@@ -7045,7 +6982,7 @@ pub(super) fn CreateSessionForm(
                                         promote_fetched_history_snapshot(
                                             offered_history, create_target, fetched_history,
                                         );
-                                        launch_tab.set(target);
+                                        draft.edit(|draft| { draft.choose_tab(target); });
                                         partial_template_hint.set(false);
                                         intent_key.set(None);
                                         // After the render that moves the
@@ -7112,13 +7049,13 @@ pub(super) fn CreateSessionForm(
                                 prompt: prompt().unwrap_or_default(),
                                 on_prompt: Some(EventHandler::new(move |value: String| {
                                     if !draft_transition_allowed(ops) { return; }
-                                    prompt.set((!value.is_empty()).then_some(value));
+                                    draft.edit(|draft| draft.edit_prompt(value));
                                     intent_key.set(None);
                                 })),
                                 conversation: conversation(),
                                 on_conversation: Some(EventHandler::new(move |value| {
                                     if !draft_transition_allowed(ops) { return; }
-                                    conversation.set(value);
+                                    draft.edit(|draft| draft.edit_conversation(value));
                                     intent_key.set(None);
                                 })),
                                 harness: structured_harness(),
@@ -7266,8 +7203,7 @@ pub(super) fn CreateSessionForm(
                         if !draft_transition_allowed(ops) {
                             return;
                         }
-                        invocation.set(evt.value());
-                        invocation_edited.set(true);
+                        draft.edit(|draft| draft.edit_invocation(evt.value()));
                         intent_key.set(None);
                     },
                 }
@@ -7287,7 +7223,7 @@ pub(super) fn CreateSessionForm(
                         disabled: busy,
                         onchange: move |_| {
                             if !draft_transition_allowed(ops) { return; }
-                            command_yolo.set(Some(true));
+                            draft.edit(|draft| draft.choose_command_yolo(true));
                             intent_key.set(None);
                         },
                     }
@@ -7303,7 +7239,7 @@ pub(super) fn CreateSessionForm(
                         disabled: busy,
                         onchange: move |_| {
                             if !draft_transition_allowed(ops) { return; }
-                            command_yolo.set(Some(false));
+                            draft.edit(|draft| draft.choose_command_yolo(false));
                             intent_key.set(None);
                         },
                     }
@@ -7319,12 +7255,12 @@ pub(super) fn CreateSessionForm(
                     disabled: busy,
                     onchange: move |evt| {
                         if !draft_transition_allowed(ops) { return; }
-                        command_agent.set(
+                        draft.edit(|draft| draft.choose_command_agent(
                             LaunchHarness::ALL
                                 .iter()
                                 .copied()
                                 .find(|harness| harness_value(*harness) == evt.value()),
-                        );
+                        ));
                         intent_key.set(None);
                     },
                     option { value: "", selected: command_agent().is_none(), "none" }
@@ -7351,7 +7287,7 @@ pub(super) fn CreateSessionForm(
                         disabled: busy,
                         onchange: move |evt| {
                             if !draft_transition_allowed(ops) { return; }
-                            command_resume_on.set(evt.checked());
+                            draft.edit(|draft| draft.choose_command_resume(evt.checked()));
                             intent_key.set(None);
                         },
                     }
@@ -7372,8 +7308,7 @@ pub(super) fn CreateSessionForm(
                             disabled: busy,
                             oninput: move |evt| {
                                 if !draft_transition_allowed(ops) { return; }
-                                command_resume.set(evt.value());
-                                command_resume_edited.set(true);
+                                draft.edit(|draft| draft.edit_command_resume(evt.value()));
                                 intent_key.set(None);
                             },
                         }
@@ -7746,57 +7681,6 @@ mod tests {
             agent: None,
             resume: None,
         }
-    }
-
-    /// Spec: the command form describes no launch until the YOLO question
-    /// is answered; once answered it carries the command, the answer, the
-    /// declared agent type and, only while Resume is ticked AND a type is
-    /// declared, the resume command.
-    ///
-    /// Why: SPEC.md makes the YOLO assertion a required choice with no
-    /// default, so an unanswered form must not launch as "not YOLO". The
-    /// Resume controls are shown only with a declared type, so a resume
-    /// command left behind after the type is cleared must not be sent: the
-    /// helm refuses it, naming a field the user can no longer see.
-    #[test]
-    fn the_command_form_needs_a_yolo_answer_and_drops_a_hidden_resume_command() {
-        use farhelm_proto::LaunchHarness;
-        assert_eq!(
-            super::command_intent("c".into(), None, None, false, ""),
-            None
-        );
-        assert_eq!(
-            super::command_intent(
-                "c {farhelm_args}".into(),
-                Some(true),
-                Some(LaunchHarness::Claude),
-                true,
-                "c --resume {conversation} {farhelm_args}",
-            ),
-            Some(super::CommandLaunch {
-                command: "c {farhelm_args}".to_string(),
-                yolo: true,
-                agent: Some(LaunchHarness::Claude),
-                resume: Some("c --resume {conversation} {farhelm_args}".to_string()),
-            })
-        );
-        assert_eq!(
-            super::command_intent(
-                "c".into(),
-                Some(false),
-                Some(LaunchHarness::Claude),
-                false,
-                "c --resume {conversation} {farhelm_args}",
-            )
-            .and_then(|launch| launch.resume),
-            None,
-            "an unticked Resume sends no resume command"
-        );
-        assert_eq!(
-            super::command_intent("c".into(), Some(false), None, true, "left over"),
-            Some(test_command("c")),
-            "clearing the agent type drops the resume command it hid"
-        );
     }
 
     /// The banner orders approval mechanisms by policy, not by enum order or
@@ -9166,7 +9050,10 @@ mod tests {
                     String::new(),
                     ChoiceOrigin::Control,
                 );
-                draft.request().expect("the refused request has an agent")
+                match draft.request().expect("the refused request has an agent") {
+                    LaunchIntent::Structured(selection) => selection,
+                    LaunchIntent::Command(_) => panic!("the fixture is an agent launch"),
+                }
             }),
             title: "original title".into(),
             replace_source: None,
