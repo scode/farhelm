@@ -1,12 +1,16 @@
-/** Helm-wide confirmation choices must change the next action in this client.
- * These tests keep the real preference route and host registry, so a checkbox
- * that changes only its own appearance cannot satisfy the round trip.
+/** Helm-wide settings must persist and affect the next action in this client.
+ * These tests keep real configuration or preference reads and the host registry,
+ * so a checkbox that changes only its appearance cannot satisfy the round trip.
  */
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { clickDialogGap } from "./helpers/dialog-gap";
+import { routeGate } from "./helpers/route-gate";
 import { openSettings, selectSettingsSection, type SettingsSection } from "./helpers/settings";
 import type { APIRequestContext, Request, Route } from "@playwright/test";
+import { request as independentRequest } from "@playwright/test";
+import { harnessAuthorizationHeaders } from "./helpers/device-auth";
+import { currentStackSlot } from "../stack-slots";
 import {
   forceBuildSkew,
   hostRowByName,
@@ -17,6 +21,117 @@ import {
 
 /** The web fixture has no updater, so its navigation omits the app pane. */
 const webSettingsSections: SettingsSection[] = ["sessions", "hosts", "terminal", "checkouts", "agent trust", "notifications"];
+
+/** The prepared-checkout choice is explicit configuration. Unknown reads stay
+ * locked, refusals restore the saved native checkbox, and a dismissed field's
+ * pending save must fence the next mounted read rather than lose that write. */
+test("prepared checkout settings preserve saved choices across reads, refusals and close", async ({ page, request }) => {
+  let build: string | undefined;
+  const read = async () => {
+    const reply = await request.get("/api/checkout-spare");
+    expect(reply.ok(), await reply.text()).toBe(true);
+    build = reply.headers()["x-farhelm-build"];
+    return await reply.json() as { enabled: boolean };
+  };
+  const previous = await read();
+  expect(build, "fixture refusals must preserve the real helm build stamp").toBeTruthy();
+  const readGate = routeGate();
+  const writeGate = routeGate();
+  let mode: "read-failure" | "normal" | "refuse" | "hold-write" = "read-failure";
+  let readEntered = false;
+  let heldRequest: Request | undefined;
+  let bodyFailed = true;
+  const intercept = async (route: Route) => {
+    if (route.request().method() === "GET" && mode === "read-failure") {
+      readEntered = true;
+      await readGate.wait();
+      return route.fulfill({ status: 500, headers: { "x-farhelm-build": build! }, body: "fixture initial read refusal" });
+    }
+    if (route.request().method() === "PUT") {
+      if (mode === "refuse") return route.fulfill({ status: 500, headers: { "x-farhelm-build": build! }, body: "fixture spare save refusal" });
+      if (mode === "hold-write") {
+        heldRequest = route.request();
+        await writeGate.wait();
+      }
+    }
+    await route.continue();
+  };
+  await page.route("**/api/checkout-spare", intercept);
+  try {
+    const seeded = await request.put("/api/checkout-spare", { data: { enabled: true } });
+    expect(seeded.ok(), await seeded.text()).toBe(true);
+    await page.goto("/");
+    await openSettings(page, "checkouts");
+    const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+    const field = dialog.locator("#checkout-spare");
+    const toggle = field.getByRole("checkbox", { name: "keep a checkout ready for faster launches", exact: true });
+    await expect.poll(() => readEntered, { message: "the initial configuration read is held" }).toBe(true);
+    await expect(toggle).toBeDisabled();
+    readGate.release();
+    await expect(field.getByRole("alert")).toContainText("fixture initial read refusal");
+    await expect(toggle).toBeDisabled();
+    mode = "normal";
+    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await openSettings(page, "checkouts");
+    await expect(toggle).toBeEnabled();
+    await expect(toggle).toBeChecked();
+    await expect(field).toContainText("one extra checkout per repository and host");
+    await expect(field.getByRole("link")).toHaveAttribute("href", "https://farhelm.io/docs/using/start-a-session/#prepared-checkouts");
+    mode = "refuse";
+    // Refusal may restore the native state before Playwright checks an
+    // uncheck() postcondition. Click tests that rollback without demanding
+    // that the deliberately refused choice remain selected.
+    await toggle.click();
+    await expect(field.getByRole("alert")).toContainText("fixture spare save refusal");
+    await expect(toggle).toBeChecked();
+    await expect(toggle).toBeEnabled();
+    expect(await read()).toEqual({ enabled: true });
+    mode = "hold-write";
+    await toggle.uncheck();
+    await expect.poll(() => heldRequest !== undefined, { message: "the explicit opt-out PUT is held" }).toBe(true);
+    expect(heldRequest!.postDataJSON()).toEqual({ enabled: false });
+    await expect(toggle).not.toBeChecked();
+    await expect(toggle).toBeDisabled();
+    await selectSettingsSection(page, "sessions");
+    await selectSettingsSection(page, "checkouts");
+    await expect(toggle).toBeDisabled();
+    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await openSettings(page, "checkouts");
+    await expect(toggle).toBeDisabled();
+    expect(await read(), "held write has not reached persistence").toEqual({ enabled: true });
+    writeGate.release();
+    await expect.poll(read).toEqual({ enabled: false });
+    await expect(toggle).toBeEnabled();
+    await expect(toggle).not.toBeChecked();
+    mode = "normal";
+    await toggle.check();
+    await expect.poll(read).toEqual({ enabled: true });
+    await expect(toggle).toBeEnabled();
+    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await openSettings(page, "checkouts");
+    await expect(toggle).toBeChecked();
+    await expect(toggle).toBeEnabled();
+    bodyFailed = false;
+  } finally {
+    readGate.release();
+    writeGate.release();
+    await cleanupOwnedSteps(bodyFailed, [
+      ["owned spare save", async () => { const reply = await heldRequest?.response(); if (reply) await reply.finished(); }],
+      ["spare route", () => page.unroute("**/api/checkout-spare", intercept)],
+      ["prepared checkout choice", async () => {
+        // Timeout can dispose the per-test request before finally runs. This
+        // shared mutation still needs restoration after the owned write settles.
+        const slot = currentStackSlot();
+        const cleanup = await independentRequest.newContext({ baseURL: slot.baseURL,
+          extraHTTPHeaders: harnessAuthorizationHeaders(slot.authStatePath), timeout: 10_000 });
+        try {
+          const reply = await cleanup.put("/api/checkout-spare", { data: previous });
+          expect(reply.ok(), await reply.text()).toBe(true);
+        } finally { await cleanup.dispose(); }
+      }],
+    ]);
+  }
+});
 
 /**
  * The shared installer serves Settings even though Settings has no single
@@ -126,7 +241,7 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
     await page.setViewportSize({ width, height: 560 });
     await gear.click();
     await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
-    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(17);
+    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(18);
     await page.evaluate(() => document.fonts.ready);
     await selectSettingsSection(page, "agent trust");
     await expect(dismiss).toHaveAttribute("data-tooltip", "close settings; unsaved fields are discarded");
@@ -174,7 +289,7 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
   await page.setViewportSize({ width: 1280, height: 5000 });
   await gear.click();
   await selectSettingsSection(page, "agent trust");
-  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(17);
+  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(18);
   const tall = await body.evaluate((el) => ({ content: el.scrollHeight, height: el.clientHeight }));
   expect(tall.height).toBeGreaterThan(0);
   expect(tall.content, "a tall window must fit the settings without scrolling").toBeLessThanOrEqual(tall.height);
@@ -198,7 +313,7 @@ test("settings navigation keeps mounted panes and follows the narrow list path",
   await expect(navigation.getByRole("button")).toHaveText(webSettingsSections);
   await expect(navigation.getByRole("button", { name: "app", exact: true })).toHaveCount(0);
   await expect(panels).toHaveCount(webSettingsSections.length);
-  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(17);
+  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(18);
   await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
   for (const section of webSettingsSections) {
     const panel = await selectSettingsSection(page, section);
@@ -1012,7 +1127,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     await expect(dialog).toBeVisible();
     await expect(page.locator('[role="menu"]')).toHaveCount(0);
-    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(17);
+    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(18);
     const setup = dialog.getByRole("checkbox", { name: "set up new hosts without asking", exact: true });
     await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
     await selectSettingsSection(page, "hosts");
@@ -1065,7 +1180,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
         expect(alignment.overflowing).toBe(false);
         for (const left of [...alignment.choices, ...alignment.help]) expect(left).toBeCloseTo(alignment.heading, 0);
       }
-      expect(measuredSwitches, "every mounted switch must be measured in its visible pane").toBe(17);
+      expect(measuredSwitches, "every mounted switch must be measured in its visible pane").toBe(18);
     }
     // Space exercises the native input rather than Playwright's checked-state
     // setter, and the real helm reply proves the preference writer still runs.

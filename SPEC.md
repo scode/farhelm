@@ -459,10 +459,11 @@ user must stop services outside Farhelm's removal authority. Basic uninstall doe
 overrides or inspect their processes.
 
 Persistent user data is retained, including session history, attachments, credentials, the host registry, preferences,
-logs, cached payloads, and repository caches. Completion names the retained data locations; retaining data must not be
-presented as erasing all traces of Farhelm. There is no `--purge` in this first version. Project directories, agent
-harness installations and their own data, independently installed dependencies, and unrelated files are untouched.
-Uninstall does not remove shared parent directories or change their permissions.
+logs, cached payloads, repository caches, and prepared checkouts inside the configured checkout roots. Completion names
+the retained data locations; retaining data must not be presented as erasing all traces of Farhelm. There is no
+`--purge` in this first version. Project directories, agent harness installations and their own data, independently
+installed dependencies, and unrelated files are untouched. Uninstall does not remove shared parent directories or change
+their permissions.
 
 The command affects only the selected local installation. It does not contact registered hosts, uninstall remotely
 provisioned supervisors (the hosts panel's uninstall does that; see [Topology](#topology)), or remove a separate
@@ -1018,15 +1019,52 @@ repository again restores Clone's default name, unless the user has edited it.
 Repository input is a GitHub owner/repository pair, not a URL, branch selector or shell fragment. The owner has 1–39
 ASCII letters, digits or hyphens, starts and ends alphanumeric, and has no consecutive hyphens. The repository has 1–100
 ASCII letters, digits, underscores, dots or hyphens, excluding `.` and `..`. Identity is lowercase. Clone uses the
-constructed HTTPS GitHub URL, with the target user's ordinary credentials. The clone stage first creates or refreshes
-the host's cache of that repository's branches and tags, then clones from GitHub using its cached objects. The cache
-lives under the supervisor's state directory on that host, is always used, and is removed at supervisor startup after
-more than 30 days without a successful checkout. Concurrent checkouts of the same repository take turns on the cache.
-Every checkout is independent: its origin remains the constructed GitHub URL, and removing the cache cannot break it. A
-cache failure fails the clone stage with the cache path in the error; there is no fallback to a clone without it. Cache
-refresh, clone, configured hook, and agent run in that order inside the session terminal, so progress, authentication
-prompts and failures are visible. A failed stage prevents later stages and preserves partial content. A checkout is not
-permission to run a hook unless the maintainer configured that hook.
+constructed HTTPS GitHub URL, with the target user's ordinary credentials. On the ordinary clone path, the clone stage
+first creates or refreshes the host's cache of that repository's branches and tags, then clones from GitHub using its
+cached objects. The cache lives under the supervisor's state directory on that host, is always used on this path, and is
+removed at supervisor startup after more than 30 days without a successful checkout. Concurrent checkouts of the same
+repository take turns on the cache. Every checkout is independent: its origin remains the constructed GitHub URL, and
+removing the cache cannot break it. A cache failure fails the clone stage with the cache path in the error; there is no
+fallback to a clone without it. Cache refresh, clone, configured hook, and agent run in that order inside the session
+terminal, so progress, authentication prompts and failures are visible. A failed stage prevents later stages and
+preserves partial content. A checkout is not permission to run a hook unless the maintainer configured that hook.
+
+With **keep a checkout ready for faster launches** on (the default), a managed-checkout create may instead take a
+complete independent clone prepared earlier for that repository on that host. The reserved hidden container is
+`<checkout root>/.farhelm-spares/<owner>/<repository>`; allocation treats its name as occupied and repository discovery
+skips it. Each create freezes the switch and checkout root alongside its post-clone command and trust choice. Taking a
+spare preserves the newly allocated directory's identity, fetches from GitHub visibly in the session terminal, moves the
+spare's contents into that directory, then fast-forwards there. The terminal says an earlier checkout is being updated.
+The configured post-clone command, optional Claude trust and agent still run only at launch, in the final directory, in
+their existing order.
+
+The resulting checkout is a clone made earlier and then updated: its reflog records that clone and update, `FETCH_HEAD`
+and `ORIG_HEAD` exist, unchanged files retain older modification times, and objects from branches deleted upstream can
+remain until Git's own cleanup. Git hooks and checkout filters, including Git LFS and process filters, ran at build time
+in another directory. At launch they run only for the update in the final directory, with `post-merge` rather than
+`post-checkout`. The checkout retains the GitHub origin and no dependency on the cache.
+
+An empty, unexpected or structurally unusable spare falls back to the ordinary cache-and-clone path before any content
+moves. A deleted upstream branch falls back too. Git 2.48 and later detects a changed default branch; older take-capable
+Git accepts its clone-time default branch if it still exists upstream. Git below the take's required capabilities uses
+ordinary clone. A failed spare fetch fails the clone stage visibly, without another clone or credential prompt. A
+failure after any entry has moved retains partial content and refuses automatic repetition. The shim never recursively
+deletes a claimed tree; supervisor cleanup owns leftovers.
+
+After a new managed-checkout launch's clone stage has ended, including a recorded clone failure, the supervisor may make
+one attempt to build the next spare. It runs the ordinary cache refresh and clone through the user's login shell,
+without a terminal or credential prompts, at low CPU priority, with a deadline of about ten minutes. Ordinary Git hooks
+and filters run; Farhelm's post-clone command, trust edit and agent do not. Failure is logged and leaves no spare, so a
+later launch can clone normally. One live supervisor builds one spare at a time across its host; pending or running
+requests for the same repository coalesce, with no automatic retry after failure. A spare becomes available only as a
+complete clone; concurrent launches can take it only once.
+
+Turning the global switch off affects future creates. Each repository's next create on that host discards its spare
+instead of building, and a create using another checkout root discards the spare at the old root first. Accepted creates
+and retries keep their frozen choices. Startup removes leftover building and claimed directories except claims still in
+a live launch's clone stage, and spares are evicted with their caches after more than 30 days unused. Discard renames
+owned content to private trash names and uses the existing identity-checked confined removal; replaced directories,
+symlinks and mounts do not grant deletion authority.
 
 Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete. A
 completed preparation permits ordinary restart without repeating clone or hook. Interrupted, missing, corrupt or
@@ -1382,11 +1420,14 @@ by every client, outside the preference row. Save refusals appear inline. The st
 shows whether one exists and allows replacing or clearing it. Changing to another server clears a saved token unless a
 new one is entered, and the form says so before saving. **Send test** uses the saved configuration, even while disabled,
 and reports success or failure inline. The **checkouts** section holds the explicitly saved all-hosts checkout folder
-and, below it, a monospace multi-line post-clone command field (see [Managed checkouts](#managed-checkouts)). The
-folder's help explains expansion on each host, first-use folder creation, and that command-line host overrides keep
-their folder. The command's help explains that it runs in each new checkout on its host, after cloning and before the
-agent starts, that changes affect future checkouts only, and that command-line host overrides keep their command. The
-installed desktop app's dialog also has an **app** section with a switch for installing updates automatically (see
+and, below it, a monospace multi-line post-clone command field and the default-on **keep a checkout ready for faster
+launches** switch (see [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk
+space per repository and host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard
+on the next create or after 30 days unused; it links the full earlier-clone caveats. The folder's help explains
+expansion on each host, first-use folder creation, and that command-line host overrides keep their folder. The command's
+help explains that it runs in each new checkout on its host, after cloning and before the agent starts, that changes
+affect future checkouts only, and that command-line host overrides keep their command. The installed desktop app's
+dialog also has an **app** section with a switch for installing updates automatically (see
 [Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of that app
 installation, kept with the app rather than by the helm, and a browser never shows it. The two host confirmation choices
 apply to every host and client of this helm; existing controls with a natural place in the main UI stay there. No client
@@ -2309,11 +2350,16 @@ Ordinary session operation is version-control-agnostic. Explicit managed-checkou
   repositories, and plain directories all work identically.
 - No requirement of branches, one-branch-per-session, Git worktrees, default-branch workflows, or any PR topology.
   Stacked changes work because the control plane stays out of the way, not because it models them.
-- The system never performs VCS mutations implicitly. Repository state is owned by the agent, repository instructions
-  (`AGENTS.md` and kin), and user-chosen tools (`jj`, Graphite, plain Git, whatever).
+- Outside requested managed-checkout preparation and its bounded spare builds below, the system never performs VCS
+  mutations implicitly. Repository state is owned by the agent, repository instructions (`AGENTS.md` and kin), and
+  user-chosen tools (`jj`, Graphite, plain Git, whatever).
 - An explicit GitHub checkout request runs the repository-cache refresh, clone and configured post-clone command
-  described above. It creates no branch/worktree workflow, and later session operations do not infer one. Last-reference
-  Delete moves the owned directory intact; it does not inspect, reset or clean its repository state.
+  described above, or updates an earlier independent clone. With the default-on prepared-checkout switch, it also
+  authorizes one spare build for repositories the user has already requested on that host: through the user's login
+  shell without a terminal or credential prompts, at low CPU priority and with a roughly ten-minute deadline. Failure is
+  logged and leaves the ordinary visible clone available. This creates no branch/worktree workflow, and later session
+  operations do not infer one. Last-reference Delete moves the owned directory intact; it does not inspect, reset or
+  clean its repository state.
 - The working directory and the running agent are authoritative; the UI never presents a cached branch model as truth.
   VCS-specific UI, if any exists, is informational and degrades to hidden when not applicable.
 
@@ -3453,14 +3499,15 @@ is not recognized as being there, and a file hard-linked between checkouts is no
 detect aliasing or add complexity to cope with it.
 
 Confirmed 2026-10-11: Farhelm has dedicated ownership of the managed checkouts it creates, their checkout roots and the
-trash (`farhelm-archived-working-copies`). Out-of-band manipulation of those paths is unsupported, including restoring a
-filesystem snapshot over them, user-instigated kernel-level overrides, or using uncommon filesystems such as FAT.
-Farhelm adds no complexity to detect or defend against these changes. The foreign-replacement guard protects ordinary
-replacement, such as a folder removed and recreated or a re-clone; replacing a folder inside the guard's check-then-move
-window is out of band too. This acceptance does not extend to the state directory or installation, or change the
-ownership checks required elsewhere: installer checksum matching, uninstall refusing unknown app-bundle entries, and the
-symlink and canonical-path rules still apply. Ordinary reboots and remounts on supported filesystems such as btrfs, NFS
-and overlayfs remain supported, as the managed-checkout identity rule above specifies.
+trash (`farhelm-archived-working-copies`) and reserved spare container (`.farhelm-spares`). Out-of-band manipulation of
+those paths is unsupported, including restoring a filesystem snapshot over them, user-instigated kernel-level overrides,
+or using uncommon filesystems such as FAT. Farhelm adds no complexity to detect or defend against these changes. The
+foreign-replacement guard protects ordinary replacement, such as a folder removed and recreated or a re-clone; replacing
+a folder inside the guard's check-then-move window is out of band too. This acceptance does not extend to the state
+directory or installation, or change the ownership checks required elsewhere: installer checksum matching, uninstall
+refusing unknown app-bundle entries, and the symlink and canonical-path rules still apply. Ordinary reboots and remounts
+on supported filesystems such as btrfs, NFS and overlayfs remain supported, as the managed-checkout identity rule above
+specifies.
 
 ### Supported host setup
 

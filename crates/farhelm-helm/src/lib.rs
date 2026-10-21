@@ -798,6 +798,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             get(checkout_config::get_claude_trust).put(checkout_config::put_claude_trust),
         )
         .route(
+            "/api/checkout-spare",
+            get(checkout_config::get_checkout_spare).put(checkout_config::put_checkout_spare),
+        )
+        .route(
             "/api/checkout-agent-trust/{harness}",
             get(checkout_config::get_agent_trust).put(checkout_config::put_agent_trust),
         )

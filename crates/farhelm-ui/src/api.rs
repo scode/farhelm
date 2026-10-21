@@ -656,6 +656,45 @@ pub(crate) fn save_checkout_post_clone(
     }
 }
 
+/// One global future-create choice; absence of a successful read is unknown.
+#[derive(Clone, Deserialize)]
+pub(crate) struct CheckoutSpareState {
+    pub enabled: bool,
+}
+
+/// Reopening Settings shares the save fence with every other configuration read.
+pub(crate) async fn fetch_checkout_spare(base: &str) -> Result<CheckoutSpareState, String> {
+    let url = format!("{base}/api/checkout-spare");
+    let resp = send(client().get(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    resp.json::<CheckoutSpareState>()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Register synchronously so a close/reopen cannot read past an unpolled save.
+/// This is explicit configuration: refusals remain visible to the component.
+pub(crate) fn save_checkout_spare(
+    base: &str,
+    enabled: bool,
+) -> impl Future<Output = Result<(), String>> + use<> {
+    let url = format!("{base}/api/checkout-spare");
+    let sending = send_save(
+        client()
+            .put(&url)
+            .json(&serde_json::json!({"enabled": enabled})),
+    );
+    async move {
+        let resp = sending.await?;
+        if !resp.status().is_success() {
+            return Err(refusal_text("PUT", &url, resp).await);
+        }
+        Ok(())
+    }
+}
+
 /// Current shared trust setting and hint opt-out, including local dirty intent.
 #[derive(Clone, Deserialize)]
 pub(crate) struct CheckoutTrustState {

@@ -1,6 +1,11 @@
 ---
-kind: none
+kind: added
 ---
 
-Prepared-checkout reuse and replenishment are not enabled by normal helm creates yet. The launch and background
-implementations accept a frozen flag, but the staged helm producer leaves it off until the Settings switch is added.
+Managed-checkout launches can now reuse a checkout prepared earlier, with a switch under Settings → checkouts that's
+on by default and costs one extra checkout's disk space per repository and host. Unchanged files keep older modification
+times, and Git hooks and checkout filters run ahead of time and again only for the update.
+
+Background preparation does not prompt for credentials; if it fails, a later launch can clone normally. The
+[prepared-checkout guide](https://farhelm.io/docs/using/start-a-session/#prepared-checkouts) describes how the earlier
+clone differs and when Farhelm discards it.

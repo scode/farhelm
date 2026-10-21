@@ -326,7 +326,7 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   // pane so header buttons cannot satisfy a missing section's sweep premise.
   const settingsSections: [SettingsSection, number][] = [
     ["sessions", 3], ["hosts", 2], ["terminal", 3],
-    ["checkouts", 2], ["agent trust", 7], ["notifications", 5],
+    ["checkouts", 3], ["agent trust", 7], ["notifications", 5],
   ];
   for (const [section, minimum] of settingsSections) {
     await selectSettingsSection(page, section);

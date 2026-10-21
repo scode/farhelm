@@ -329,7 +329,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 66;
+const SCHEMA_VERSION: i64 = 67;
 
 /// Shared visits are bounded independently of fleet size. Stale references
 /// remain ordinary history entries until later visits push them out.
@@ -480,10 +480,13 @@ const SESSION_KEY_BATCH: usize = 400;
 ///   itself: config survives a retarget or adoption of that row (it
 ///   describes the row, not the machine behind it) and disappears with
 ///   the row when the host is removed.
-/// - `revision` counts ACTUAL changes to any stored value, global or
-///   overridden, incremented in the same transaction as the change; a
-///   write that stores the value already there bumps nothing. It is the
-///   cheap changed-only signal for future config readers.
+/// - `revision` counts ACTUAL root and hook changes, global or overridden,
+///   incremented in the same transaction as the change; a write that stores
+///   the value already there bumps nothing. Trust and prepared-checkout
+///   switches leave destination previews valid and do not change this revision.
+/// - `keep_spare` defaults on for future creates. Retained launch snapshots
+///   have their own default-false encoding, so an upgrade cannot add background
+///   work to a create accepted before the setting existed.
 const CHECKOUT_CONFIG_SCHEMA: &str = "\
              CREATE TABLE checkout_config (
                  singleton  INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -493,7 +496,8 @@ const CHECKOUT_CONFIG_SCHEMA: &str = "\
                  claude_trust INTEGER NOT NULL DEFAULT 0 CHECK (claude_trust IN (0, 1)),
                  codex_trust INTEGER NOT NULL DEFAULT 0 CHECK (codex_trust IN (0, 1)),
                  muse_trust INTEGER NOT NULL DEFAULT 0 CHECK (muse_trust IN (0, 1)),
-                 pi_trust INTEGER NOT NULL DEFAULT 0 CHECK (pi_trust IN (0, 1))
+                 pi_trust INTEGER NOT NULL DEFAULT 0 CHECK (pi_trust IN (0, 1)),
+                 keep_spare INTEGER NOT NULL DEFAULT 1 CHECK (keep_spare IN (0, 1))
              ) STRICT;
              INSERT INTO checkout_config (singleton, root, post_clone, revision)
                  VALUES (1, NULL, NULL, 0);
@@ -2087,6 +2091,8 @@ pub struct HelmStore {
 /// - 64: qualify the remembered selection with its uniquely cached host entry.
 ///   Unowned, ambiguous or unrepresentable legacy selections are cleared.
 /// - 65: drop bare-ID uniqueness; the host/session primary key is the cache identity.
+/// - 66: shared recent visit history, without inventing legacy visits.
+/// - 67: default-on prepared checkout policy for future managed creates.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2395,7 +2401,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 66;",
+              PRAGMA user_version = 67;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3894,6 +3900,23 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         tx.execute_batch("PRAGMA user_version = 66;")
             .context("migrating helm.db to schema version 66")?;
         version = 66;
+    }
+    if version == 66 {
+        // New creates use prepared checkouts by default, including on upgrade.
+        // Version-only fixture rewinds must preserve a later explicit opt-out.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('checkout_config') WHERE name = 'keep_spare'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch(
+                "ALTER TABLE checkout_config ADD COLUMN keep_spare INTEGER NOT NULL DEFAULT 1 CHECK (keep_spare IN (0, 1));",
+            ).context("adding prepared checkout setting")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 67;")
+            .context("migrating helm.db to schema version 67")?;
+        version = 67;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to

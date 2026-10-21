@@ -66,11 +66,11 @@ connection error or ordinary conflict alone does not authorize a second checkout
 
 ## Repository caches
 
-Repeated managed checkouts of the same repository are faster because each host keeps a cache of its Git objects. Before
-each checkout, Git fetches new branches, tags and objects into that cache in the session terminal, then makes an
-independent clone with the ordinary GitHub origin. Git uses the host's own credentials for both commands; a private
-repository without a credential helper can ask for credentials twice. A cache error stops the clone stage and names the
-cache path, rather than falling back to downloading the whole repository again.
+Repeated managed checkouts of the same repository are faster because each host keeps a cache of its Git objects. When no
+usable prepared checkout is available, Git fetches new branches, tags and objects into that cache in the session
+terminal, then makes an independent clone with the ordinary GitHub origin. Git uses the host's own credentials for both
+commands; a private repository without a credential helper can ask for credentials twice. A cache error stops the clone
+stage and names the cache path, rather than falling back to downloading the whole repository again.
 
 Git consolidates accumulated packs sooner so later clones spend less time repacking cached objects. The cache fetch
 runs:
@@ -87,6 +87,32 @@ disk space of one extra repository copy per host. When the supervisor starts, it
 days. You can remove a cache directory by hand at any time; existing checkouts do not depend on it, and the next fresh
 checkout downloads it again. Avoid removing it while a checkout is being prepared, since that preparation can fail.
 Leave the sibling `.lock` files in place so simultaneous checkouts continue to take turns on the same lock.
+
+## Prepared checkouts
+
+The **keep a checkout ready for faster launches** switch under Settings → checkouts is on by default. Farhelm prepares
+one extra independent clone per repository and host in `<checkout folder>/.farhelm-spares/<owner>/<name>`. The next
+launch updates it visibly from GitHub, moves its contents into the new checkout and fast-forwards in that final
+directory. It keeps the allocated directory's identity. The configured post-clone command and agent run only at launch.
+
+Preparing the spare uses your login shell and ordinary Git configuration, without a terminal or credential prompts, at
+low CPU priority with a deadline of about ten minutes. If it fails, the next launch can clone normally. A failed
+launch-time update instead stops the clone stage visibly, without another clone and credential prompt. A missing or
+structurally unusable spare falls back before moving content; a failure after moving content keeps the partial checkout
+and refuses automatic repetition.
+
+This uses one extra checkout's disk space per repository and host, in addition to the cache. It is a clone made earlier:
+unchanged files keep older modification times, its reflog shows the clone and update, `FETCH_HEAD` and `ORIG_HEAD`
+exist, and objects from deleted branches can remain until Git cleans them up. Git hooks and checkout filters run while
+the spare is prepared in another directory, then only for the update in the final directory, using `post-merge` rather
+than `post-checkout`. Git 2.48 and later notices a renamed default branch and clones normally; older capable Git may
+keep the original default branch until the next spare. A deleted branch falls back on every version.
+
+Changing the switch affects future creates; accepted requests keep their choice. With the switch off, a repository's
+spare is discarded at its next create on that host, or with its cache after 30 days unused. Configuring another checkout
+folder discards the old spare when that repository is next created there. Leave `.farhelm-spares` to Farhelm; uninstall
+retains it inside your checkout folders. The
+[website guide](https://farhelm.io/docs/using/start-a-session/#prepared-checkouts) has the user-facing explanation.
 
 ## What deletion does
 

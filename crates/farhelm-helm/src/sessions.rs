@@ -1163,8 +1163,7 @@ fn github_checkout_resolution(
         root,
         post_clone: config.post_clone.clone(),
         claude_trust: config.claude_trust,
-        // The producer/receiver is staged separately from the default-on setting.
-        keep_spare: false,
+        keep_spare: config.keep_spare,
         preview: preview.binding.clone(),
     })))
 }
@@ -2323,6 +2322,51 @@ mod workspace_trust_tests {
     use super::*;
     use farhelm_proto::{LaunchHarness, LaunchSelection};
 
+    /// Fresh resolution reads the saved global spare choice once, alongside
+    /// root/hook/trust; later saves cannot mutate the already resolved payload.
+    #[farhelm_testtrace::test]
+    async fn fresh_checkout_resolution_freezes_the_saved_spare_choice() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::store::HelmStore::open(&dir.path().join("helm.db"))
+            .await
+            .unwrap();
+        store.set_checkout_root(None, "/checkouts").await.unwrap();
+        store.set_claude_trust(true).await.unwrap();
+        let req: CreateReq = serde_json::from_value(serde_json::json!({
+            "cwd":"", "github_checkout":{"repo":"acme/bar", "preview":{
+                "canonical_root":"/checkouts", "basename":"bar-1", "cwd":"/checkouts/bar-1",
+                "config_revision":1, "host":"1", "incarnation":1, "installation_identity":"fixture"
+            }}
+        }))
+        .unwrap();
+        let enabled = github_checkout_resolution(
+            &req,
+            "same-client".into(),
+            &store.resolve_checkout_config(None).await.unwrap(),
+        )
+        .unwrap()
+        .unwrap()
+        .unwrap();
+        assert!(enabled.keep_spare && enabled.claude_trust);
+        store.set_keep_spare(false).await.unwrap();
+        let disabled = github_checkout_resolution(
+            &req,
+            "same-client".into(),
+            &store.resolve_checkout_config(None).await.unwrap(),
+        )
+        .unwrap()
+        .unwrap()
+        .unwrap();
+        assert!(!disabled.keep_spare);
+        let mut expected = enabled.clone();
+        expected.keep_spare = false;
+        assert_eq!(
+            disabled, expected,
+            "only a new resolution sees the new global choice"
+        );
+        assert!(enabled.keep_spare, "retained resolution remains frozen");
+    }
+
     /// Old clients still send this strict wire member. Its value cannot
     /// bypass Settings or make an unrelated harness's request invalid.
     #[test]
@@ -2355,6 +2399,7 @@ mod workspace_trust_tests {
     fn settings_supply_trust_only_for_managed_supported_launches() {
         for enabled in [false, true] {
             let config = crate::checkout_config::ResolvedCheckoutConfig {
+                keep_spare: true,
                 claude_trust: false,
                 codex_trust: enabled,
                 muse_trust: enabled,
@@ -2402,6 +2447,7 @@ mod workspace_trust_tests {
             (LaunchHarness::Pi, false, false, true),
         ] {
             let config = crate::checkout_config::ResolvedCheckoutConfig {
+                keep_spare: true,
                 claude_trust: true,
                 codex_trust,
                 muse_trust,

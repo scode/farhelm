@@ -218,7 +218,7 @@ in a subdirectory. The name starts as the source's name plus `-clone`, then `-cl
 taken. Editing the name keeps exactly the name you enter and reports a conflict if its directory is taken. **folder**
 restores the source's directory and name. **Replace with** and **Replace** keep the existing directory.
 
-When you launch, Git brings the host's cache of the repository up to date, then clones the default branch in the
+When no [prepared checkout](/docs/using/start-a-session/#prepared-checkouts) is ready, Git brings the host's cache of the repository up to date, then clones the default branch in the
 session's terminal. The agent starts once that finishes. Both commands use the host's own Git credentials, so anything
 Git asks for, such as a password, shows up in the terminal for you to answer. A private repository without a credential
 helper can ask twice. If either command fails, the session's status shows error, the terminal says what went wrong,
@@ -230,7 +230,8 @@ checkout directory. Farhelm removes caches unused for more than 30 days when the
 keeps its sessions running, starts (see [The pieces](/docs/how-it-works/the-pieces/)). You can delete a cache directory
 by hand at any time; existing checkouts stay independent, and the next managed checkout downloads it again. Avoid doing
 that while a checkout is being prepared, since it can make that launch fail, and leave the sibling `.lock` files in
-place so concurrent checkouts still take turns. A cache failure names its path in the terminal and stops the clone.
+place so concurrent checkouts still take turns. An occasional launch takes longer while Git consolidates the cache for
+later clones. A cache failure names its path in the terminal and stops the clone.
 
 An agent in one of your sessions can also start a session in a new managed checkout when you ask it to, with your
 approval ([Approve what agents do](/docs/using/approve-agent-requests/)).
@@ -249,6 +250,32 @@ opened from the gear beside the version number at the top of the sidebar.
 The same section has a **post-clone command** field for a shell command to run in each new clone, on its host, before the
 agent starts (installing dependencies, say). Save it explicitly; empty the field and save to remove it. Changes affect
 future checkouts only.
+
+### Prepared checkouts
+
+By default, Farhelm keeps one extra checkout ready for each repository you launch on each host. The next launch updates
+that earlier clone from GitHub instead of cloning again, avoiding much of the local work. Its terminal says when it
+uses an earlier checkout. The **keep a checkout ready for faster launches** switch is under **checkouts** in
+**settings**.
+
+The extra checkout uses disk space in `.farhelm-spares` inside your checkout directory, in addition to the repository
+cache. Farhelm prepares it through your login shell, without a terminal or credential prompts, at low CPU priority for
+at most about ten minutes. If credentials need you to type something, or preparation fails, the next launch can clone
+normally in its terminal. Your post-clone command still runs only when you launch, in the session's final directory.
+
+This is a clone made earlier and then updated. Unchanged files keep older modification times, and Git's reflog records
+the earlier clone and update. `FETCH_HEAD` and `ORIG_HEAD` exist, and objects from deleted branches can remain until Git
+cleans them up. Git hooks and checkout filters, including Git LFS, run when the extra checkout is prepared in another
+directory, then only for the update in the final directory. That update runs `post-merge` rather than `post-checkout`.
+
+If the branch was deleted upstream, Farhelm clones normally. Git 2.48 and later also notices a changed default branch;
+older capable Git may use the original default branch until the next spare is prepared. A failed update stops the
+launch and shows its error instead of starting another clone and asking for credentials again.
+
+Turning the switch off affects future creates. Each repository's prepared checkout is discarded at its next create on
+that host. Choosing a different checkout directory likewise discards the old spare when you next create a checkout of that
+repository. Unused spares go with the repository cache after 30 days. Leave `.farhelm-spares` to Farhelm;
+[uninstalling](/docs/get-started/uninstall/) keeps it alongside your other checkout data.
 
 ### Trust in managed checkouts
 
@@ -286,7 +313,7 @@ The directory and the command apply to every host. To give one host a directory 
 [The pieces](/docs/how-it-works/the-pieces/)); `farhelm helm checkout-config --help` lists the options. A host given its
 own directory or command there keeps it whatever **settings** says.
 
-Farhelm owns the managed checkouts it makes, the directory they go into, and their trash. Work in a checkout as usual,
+Farhelm owns the managed checkouts it makes, the directory they go into, their prepared checkouts and their trash. Work in a checkout as usual,
 but do not restore a backup or filesystem snapshot over them, and keep them on an ordinary filesystem rather than one
 like FAT: Farhelm does not detect such changes.
 

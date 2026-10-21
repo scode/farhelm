@@ -138,6 +138,7 @@ mod attachments;
 mod auth;
 mod checkout_post_clone;
 mod checkout_root;
+mod checkout_spare;
 mod claude_trust;
 #[cfg(native_desktop)]
 pub mod desktop;

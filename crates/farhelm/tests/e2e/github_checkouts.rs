@@ -464,8 +464,17 @@ struct CheckoutStack {
 }
 
 impl CheckoutStack {
-    /// Start the shipped processes with child-local Git and fake-agent inputs.
+    /// Ordinary-clone contracts opt out through the public API before creating.
+    /// Their exact root inventories and teardown must not race background work.
     async fn start() -> Self {
+        let stack = Self::start_with_default_spares().await;
+        stack.set_spare_enabled(false).await;
+        stack
+    }
+
+    /// Leave a fresh helm's default untouched for the enabled-feature proof.
+    /// Git and fake-agent inputs remain child-local, including the login shell.
+    async fn start_with_default_spares() -> Self {
         let slot = SLOTS.acquire().await.expect("semaphore is never closed");
         let fake = fake_harness();
         let home = PathBuf::from(fake.login_home_with_fake_path());
@@ -507,6 +516,34 @@ impl CheckoutStack {
         };
         stack.configure_a().await;
         stack
+    }
+
+    /// Read the operator-facing global setting, rather than inspect helm.db.
+    async fn spare_enabled(&self) -> bool {
+        let reply = self
+            .client
+            .get(format!("{}/api/checkout-spare", self.helm().base))
+            .send()
+            .await
+            .expect("read spare setting");
+        assert!(reply.status().is_success());
+        let value: Value = reply.json().await.unwrap();
+        value["enabled"]
+            .as_bool()
+            .expect("explicit boolean spare choice")
+    }
+
+    /// Apply and verify the same protected write used by Settings.
+    async fn set_spare_enabled(&self, enabled: bool) {
+        let reply = self
+            .client
+            .put(format!("{}/api/checkout-spare", self.helm().base))
+            .json(&json!({"enabled":enabled}))
+            .send()
+            .await
+            .expect("save spare setting");
+        assert_eq!(reply.status(), reqwest::StatusCode::NO_CONTENT);
+        assert_eq!(self.spare_enabled().await, enabled);
     }
 
     fn helm(&self) -> &HelmProcess {
@@ -1428,4 +1465,245 @@ async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_rest
     assert_process_argv(&fresh_case, &argv);
     assert_eq!(hook_count(&stack.hook_b(), &fresh.cwd), 1);
     assert_eq!(directory_names(stack.root_a.path()), expected_a);
+}
+
+/// Read the accepted snapshot without migration or new resolution. A public
+/// session reply does not expose the spare policy and cannot prove it froze.
+async fn retained_checkout(
+    stack: &CheckoutStack,
+    session: &SessionInfo,
+) -> farhelm_proto::ResolvedGithubCheckout {
+    let store = farhelm_supervisor::store::SessionStore::open(
+        &stack.supervisor.state.path().join("supervisor.db"),
+        false,
+    )
+    .await
+    .unwrap();
+    let row = store
+        .origin_working_copy(&bare_session_id(&session.id))
+        .await
+        .unwrap()
+        .expect("accepted session has original working-copy provenance");
+    let snapshot: farhelm_supervisor::working_copies::PreparationSnapshot = serde_json::from_str(
+        row.preparation_snapshot
+            .as_deref()
+            .expect("accepted snapshot"),
+    )
+    .unwrap();
+    snapshot.resolved
+}
+
+/// Atomic ready publication is stronger than session readiness. Inspect real
+/// Git only after that boundary; polling repeatedly launching Git would hide
+/// which process completed the clone and make failure diagnostics needlessly big.
+async fn await_ready_spare(stack: &CheckoutStack, slot: &Path, hooks: usize) -> std::fs::File {
+    use std::os::unix::fs::MetadataExt;
+    wait_for_file(&slot.join(".git/HEAD"), REAL_STACK_SETTLE.as_secs()).await;
+    stack.git.assert_clone(path_text(slot));
+    assert_eq!(
+        std::fs::read_to_string(slot.join(SENTINEL_NAME)).unwrap(),
+        SENTINEL_CONTENT
+    );
+    assert!(
+        !slot.join(".git/objects/info/alternates").exists(),
+        "spare is an independent clone"
+    );
+    run_command(
+        git_command(
+            &stack.git.home,
+            &stack.git.config,
+            ["-C", path_text(slot), "fsck", "--no-dangling"],
+        ),
+        "verify published spare objects",
+    );
+    assert_eq!(
+        std::fs::read_to_string(stack.hook_a())
+            .unwrap()
+            .lines()
+            .count(),
+        hooks,
+        "background preparation must not run Farhelm's configured post-clone command"
+    );
+    // Retaining this CLOEXEC handle prevents inode reuse from making a later
+    // ordinary clone look as though it moved the old spare's Git directory.
+    let git_dir = std::fs::File::open(slot.join(".git")).unwrap();
+    assert!(git_dir.metadata().unwrap().is_dir());
+    assert_ne!(git_dir.metadata().unwrap().ino(), 0);
+    git_dir
+}
+
+/// The shipped default-on path must really move a published spare, replenish
+/// it, and retain its accepted policy across lost delivery and a helm restart.
+/// Git directory identity distinguishes a take from a content-identical clone;
+/// the final new off-create proves the setting affects future work only.
+#[farhelm_testtrace::test]
+async fn default_spares_are_taken_replenished_and_frozen_across_replay() {
+    use std::os::unix::fs::MetadataExt;
+    let mut stack = CheckoutStack::start_with_default_spares().await;
+    assert!(
+        stack.spare_enabled().await,
+        "a fresh helm defaults on without a setting write"
+    );
+    let root = stack.root_a.path().canonicalize().unwrap();
+    let namespace = root.join(".farhelm-spares/acme");
+    let slot = namespace.join("bar");
+    assert!(
+        !slot.exists(),
+        "premise: the first launch cannot take a spare"
+    );
+    let selector = Selector::Raw;
+    let first_preview = preview(&stack, "first-clone").await;
+    let first_body = create_body(
+        &stack.claim,
+        &first_preview,
+        "first-clone",
+        "first-spare-key",
+        &selector,
+    );
+    let response = post_exact_body(&stack.client, &stack.helm().base, first_body).await;
+    assert!(response.status().is_success());
+    let first: SessionInfo = response.json().await.unwrap();
+    let first_case = AcceptedCase::new(
+        "first-clone",
+        Selector::Raw,
+        1,
+        Vec::new(),
+        first_preview,
+        first.clone(),
+    );
+    let argv = await_prepared(&stack, &first, &stack.hook_a(), 1).await;
+    assert_process_argv(&first_case, &argv);
+    assert!(
+        !Path::new(&first.cwd)
+            .join(".git/objects/info/alternates")
+            .exists()
+    );
+    let first_git = await_ready_spare(&stack, &slot, 1).await;
+    let spare_identity = (
+        first_git.metadata().unwrap().dev(),
+        first_git.metadata().unwrap().ino(),
+    );
+
+    let second_preview = preview(&stack, "second-take").await;
+    let body = create_body(
+        &stack.claim,
+        &second_preview,
+        "second-take",
+        "second-spare-key",
+        &selector,
+    );
+    let unread = send_unread_create(&stack, &body).await;
+    let second = await_server_session(&stack, "second-take").await;
+    let second_case = AcceptedCase::new(
+        "second-take",
+        Selector::Raw,
+        2,
+        body.clone(),
+        second_preview,
+        second.clone(),
+    );
+    let argv = await_prepared(&stack, &second, &stack.hook_a(), 2).await;
+    assert_process_argv(&second_case, &argv);
+    drop(unread);
+    let taken = std::fs::metadata(Path::new(&second.cwd).join(".git")).unwrap();
+    assert_eq!(
+        (taken.dev(), taken.ino()),
+        spare_identity,
+        "the second launch must move the ready spare"
+    );
+    let terminal = tmux_query(
+        &stack.supervisor.state.path().join("tmux.sock"),
+        &[
+            "capture-pane",
+            "-p",
+            "-S",
+            "-",
+            "-t",
+            &format!("fh-{}", bare_session_id(&second.id)),
+        ],
+    )
+    .await;
+    assert!(terminal.status.success());
+    assert!(normalize_pane_text(&terminal.stdout).contains("updating a checkout prepared earlier"));
+    let replacement_git = await_ready_spare(&stack, &slot, 2).await;
+    let replacement_identity = (
+        replacement_git.metadata().unwrap().dev(),
+        replacement_git.metadata().unwrap().ino(),
+    );
+    assert_ne!(
+        replacement_identity, spare_identity,
+        "taking a spare must leave a newly built replacement"
+    );
+
+    let frozen = retained_checkout(&stack, &second).await;
+    assert!(frozen.keep_spare);
+    stack.set_spare_enabled(false).await;
+    stack.restart_helm().await;
+    assert!(
+        !stack.spare_enabled().await,
+        "the global opt-out survives the helm restart"
+    );
+    let response = post_exact_body(&stack.client, &stack.helm().base, body).await;
+    assert!(response.status().is_success());
+    let replay: SessionInfo = response.json().await.unwrap();
+    assert_case_metadata(&replay, &second_case);
+    assert_eq!(
+        retained_checkout(&stack, &second).await,
+        frozen,
+        "replay must not re-resolve a now-disabled setting"
+    );
+    assert_eq!(hook_count(&stack.hook_a(), &second.cwd), 1);
+    assert_one_agent_execution(&stack, &second_case).await;
+
+    let third_preview = preview(&stack, "third-off").await;
+    let body = create_body(
+        &stack.claim,
+        &third_preview,
+        "third-off",
+        "third-spare-key",
+        &selector,
+    );
+    let response = post_exact_body(&stack.client, &stack.helm().base, body).await;
+    assert!(response.status().is_success());
+    let third: SessionInfo = response.json().await.unwrap();
+    let third_case = AcceptedCase::new(
+        "third-off",
+        Selector::Raw,
+        3,
+        Vec::new(),
+        third_preview,
+        third.clone(),
+    );
+    let argv = await_prepared(&stack, &third, &stack.hook_a(), 3).await;
+    assert_process_argv(&third_case, &argv);
+    assert!(!retained_checkout(&stack, &third).await.keep_spare);
+    let third_git = std::fs::metadata(Path::new(&third.cwd).join(".git")).unwrap();
+    assert_ne!(
+        (third_git.dev(), third_git.ino()),
+        replacement_identity,
+        "the new off-create must clone rather than take the existing replacement"
+    );
+    assert!(
+        !Path::new(&third.cwd)
+            .join(".git/objects/info/alternates")
+            .exists()
+    );
+    // The replacement completed before the flip. The off-create owes only
+    // discard, so an empty owned namespace settles all background source users
+    // before the stack's Git configuration, source and roots can be dropped.
+    wait_for_listing_with(
+        || async { Ok(directory_names(&namespace)) },
+        REAL_STACK_SETTLE.as_secs(),
+        "the off-create discards its ready spare and temporary entries",
+        |names| names.is_empty(),
+    )
+    .await;
+    assert!(!slot.exists());
+    assert_eq!(
+        std::fs::read_to_string(stack.hook_a())
+            .unwrap()
+            .lines()
+            .count(),
+        3
+    );
 }

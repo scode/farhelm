@@ -66,4 +66,6 @@ Your remote hosts are not updated automatically. Once Farhelm on your Mac has re
 shows which hosts run an older version and lets you update them; see
 [Manage hosts](/docs/using/manage-hosts/#update-a-host).
 
-To remove Farhelm, see [Uninstall Farhelm](/docs/get-started/uninstall/).
+To remove Farhelm, see [Uninstall Farhelm](/docs/get-started/uninstall/). Uninstall keeps your managed checkouts,
+including their trash and [prepared checkouts](/docs/using/start-a-session/#prepared-checkouts) inside checkout
+directories.
