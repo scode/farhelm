@@ -31,18 +31,21 @@ use farhelm_proto::{CommandLaunch, ErrorKind, LaunchRequest, LaunchSelection, Se
 
 use crate::hosts::{HostStateView, HostView};
 
-/// What an agent's create resolved to, before a host is chosen. Resolved
-/// afresh on every attempt; a keyed retry is matched on its host by the
-/// request, not by this (`agent_requests::AgentRequestDigest`).
+/// The launch, destination and template facts resolved for one agent create.
+/// Resolved afresh on every attempt; a keyed retry is matched on its host by
+/// the request, not by this (`agent_requests::AgentRequestDigest`). Resolution
+/// starts with a raw launch before host selection; callers carry the
+/// trust-resolved specialization through approval so dispatch cannot substitute
+/// another launch after the card.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Resolution {
+pub(crate) struct Resolution<L = SessionLaunch> {
     /// Transient first message, kept outside the compiled reusable launch.
     pub(crate) prompt: Option<String>,
     pub(crate) cwd: String,
     /// A fresh checkout destination. Its exact cwd is previewed only after
     /// keyed recovery, so an accepted retry does not propose another clone.
     pub(crate) github_repo: Option<String>,
-    pub(crate) launch: SessionLaunch,
+    pub(crate) launch: L,
     /// Request flags override named templates. A wrapper set by those flags
     /// is the agent's own choice and needs a direct answer on guarded hosts.
     pub(crate) agent_wrapper_supplied: bool,

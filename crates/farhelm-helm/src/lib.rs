@@ -218,6 +218,8 @@ mod sessions;
 /// The launch templates API: the helm-owned catalog of named, partial
 /// launcher edits (SPEC.md, Launch templates).
 mod templates;
+/// Workspace-trust policies and the private launch evidence required by create.
+mod workspace_trust;
 /// The refusal of a YOLO launch on a host that asks before YOLO launches (see its own docs).
 mod yolo_guard;
 

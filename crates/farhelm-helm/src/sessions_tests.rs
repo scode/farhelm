@@ -2957,12 +2957,8 @@ async fn plain_replace_of_a_legacy_session_is_refused_with_its_remedy() {
 /// a confirmation that promised the same settings.
 #[farhelm_testtrace::test]
 async fn replace_of_an_agent_launch_copies_its_stored_launch() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{
-        ControlMsg, Frame, LaunchEffort, LaunchHarness, LaunchSelection, SessionInfo,
-    };
+    use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchSelection};
 
-    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
     let selection = LaunchSelection {
         permission_flags: None,
         harness: LaunchHarness::Claude,
@@ -2990,15 +2986,67 @@ async fn replace_of_an_agent_launch_copies_its_stored_launch() {
             "{farhelm_args}".to_string(),
         ]),
     };
+    assert_plain_replace_copies_stored_launch(stored).await;
+}
+
+/// Plain Replace retains true, false and omitted trust without consulting
+/// current Settings. The wire assertion also catches recompilation
+/// that loses historical argv, rather than checking only selection metadata.
+#[farhelm_testtrace::test]
+async fn plain_replace_retains_stored_workspace_trust_and_historical_words() {
+    use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection, SessionLaunch};
+
+    for trust in [None, Some(false), Some(true)] {
+        let mut stored = crate::launches::compile(LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: Some(LaunchPermission::Yolo),
+            permission_flags: None,
+            wrapper_prefix: None,
+            workspace_trust: trust,
+        })
+        .unwrap();
+        let SessionLaunch::Agent { start, resume, .. } = &mut stored else {
+            panic!("fixture must compile an agent launch");
+        };
+        start.insert(1, "--historical-flag".into());
+        resume
+            .as_mut()
+            .expect("Codex has a resume command")
+            .insert(1, "--historical-flag".into());
+        assert_plain_replace_copies_stored_launch(stored).await;
+    }
+}
+
+/// Exercise the complete plain-Replace route against an exact stored launch.
+/// The peer accepts only create then delete, so a new trust ownership query
+/// fails instead of silently changing this same-folder retention policy.
+async fn assert_plain_replace_copies_stored_launch(stored: farhelm_proto::SessionLaunch) {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+
+    assert!(
+        crate::yolo_guard::create_is_yolo(&stored),
+        "premise: the stored launch needs the confirmation asserted below"
+    );
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
     let source = SessionInfo {
         invocation: stored.display_command(),
         launch: stored.clone(),
         ..rest_harness::session("sess-1", 1_700_000_000)
     };
     let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
-    // No permission field means an older no-flag command, not a request for
-    // today's guarded default. Replace must ask before copying it, then keep
-    // it unchanged when the user confirms.
+    // A new Codex composition would consult ownership with this switch on.
+    // The peer below accepts only Create, so even a new ownership read is a
+    // regression, regardless of whether its answer would retain the same trust.
+    harness
+        .store
+        .set_agent_trust(farhelm_proto::LaunchHarness::Codex, true)
+        .await
+        .unwrap();
+    // Confirmation permits copying this stored launch; it must not recompile
+    // the launch or replace its historical choices with today's defaults.
     let fleet = harness.fleet.clone();
     let peer = tokio::spawn(async move {
         let (r, w) = tokio::io::split(peer_side);
