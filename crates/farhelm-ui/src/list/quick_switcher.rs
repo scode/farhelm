@@ -11,16 +11,19 @@ use dioxus::prelude::*;
 
 use crate::api::{ListSort, Preferences, SessionFilter, fetch_sessions, fetch_templates};
 use crate::hosts::HostsRead;
-use crate::hosts::settings_dialog::install_dialog_with_selector;
 use crate::icons::HostMark;
 use crate::launch_composer::{
     ComposerSearchResult, SearchScope, harness_label, scoped_query, template_search_results,
 };
+use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog, SavedFocus};
 use crate::peer::display_peer;
 use crate::status::{StatusBadgeView, status_badge};
-use crate::{ApiBase, Session, SessionLaunch, modal_isolation};
+use crate::{ApiBase, Session, SessionLaunch};
 
-const DIALOG_SELECTOR: &str = ".quick-switcher-dialog";
+/// The parent waits for this same root to leave before dispatching a pick.
+pub(super) const DIALOG: DialogHandle = DialogHandle::new(".quick-switcher-dialog");
+/// Both switcher chords capture this opener before clicking their hidden relay.
+pub(super) const OPENER: SavedFocus = SavedFocus::new("__farhelmQuickSwitcherFocus");
 
 /// A choice closes the switcher before using the list's normal entry point.
 /// New carries an accepted search action; it never creates a session itself.
@@ -39,44 +42,6 @@ pub(super) enum SwitcherPick {
 pub(super) enum SwitcherMode {
     Sessions,
     Templates,
-}
-
-/// Wait for the closing render before navigation lets a terminal take focus.
-///
-/// This task belongs to ListView, which survives the dialog. Releasing inert
-/// alone is insufficient: terminal.js also refuses focus while any modal DOM
-/// remains mounted. Focus restoration is a separate step: an accepted jump
-/// must leave focus free for the new terminal, rather than restoring an
-/// editable opener that would veto the terminal's reveal handoff.
-pub(super) async fn finish_close() {
-    let js = format!(
-        r#"{}
-        const dialog = document.querySelector('.quick-switcher-dialog');
-        if (dialog) await new Promise(resolve => {{
-            const observer = new MutationObserver(() => {{
-                if (!dialog.isConnected) {{ observer.disconnect(); resolve(); }}
-            }});
-            observer.observe(document.body, {{ childList: true, subtree: true }});
-        }});
-        return true;"#,
-        modal_isolation::release_js(DIALOG_SELECTOR)
-    );
-    let _ = document::eval(&js).join::<bool>().await;
-}
-
-/// Consume the opener after the navigation gate has decided whether to act.
-///
-/// Cancellation, a refused pick and the current session owe the old control
-/// its focus. A different accepted session owes its terminal the keyboard;
-/// restoring a select or input would prevent that terminal from taking it.
-pub(super) fn restore_focus(restore: bool) {
-    document::eval(&format!(
-        r#"
-        const previous = window.__farhelmQuickSwitcherFocus;
-        delete window.__farhelmQuickSwitcherFocus;
-        if ({restore} && previous?.isConnected) previous.focus({{ preventScroll: true }});
-    "#
-    ));
 }
 
 /// Original character positions of a case-insensitive subsequence.
@@ -239,6 +204,8 @@ fn MatchedText(text: crate::peer::PeerText, positions: Vec<usize>) -> Element {
 /// through the same template matcher. It returns a name, not a captured
 /// template: the parent closes this modal before fresh launch dispatch.
 /// The input retains focus while arrows change its active row.
+/// The shared boundary owns initial focus and isolation; the surviving parent
+/// decides the pick's admission and consumes the opener after the root leaves.
 #[component]
 pub(super) fn QuickSwitcher(
     mode: SwitcherMode,
@@ -367,12 +334,13 @@ pub(super) fn QuickSwitcher(
     };
     rsx! {
         div { class: "quick-switcher-backdrop", role: "presentation", onclick: move |_| on_close.call(()),
-            div {
+            ModalDialog {
+                handle: DIALOG,
+                focus: DialogFocus::remembered(".quick-switcher-search", Some(".quick-switcher-close"), false, None),
                 class: "quick-switcher-dialog", role: "dialog", aria_modal: "true", aria_label: if template_only { "template launcher" } else { "quick switcher" }, tabindex: "-1",
-                onclick: move |event| event.stop_propagation(),
-                onmounted: move |_| install_dialog_with_selector(DIALOG_SELECTOR, ".quick-switcher-search", Some(".quick-switcher-close"), None),
-                onkeydown: move |event: KeyboardEvent| {
-                    if !event.is_composing() && event.key() == Key::Escape { event.prevent_default(); on_close.call(()); }
+                onclick: move |event: MouseEvent| event.stop_propagation(),
+                on_escape: move |event: KeyboardEvent| {
+                    if !event.is_composing() { event.prevent_default(); on_close.call(()); }
                 },
                 input {
                     // Queries include literal session names and tl: keys;
