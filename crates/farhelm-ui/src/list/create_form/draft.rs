@@ -327,12 +327,13 @@ impl LaunchDraft {
     }
 
     /// Reapply New's passive permission seed while preserving launch context.
-    /// The dormant flag buffer is retained here to preserve the existing reset
-    /// behavior; changing that ownership rule belongs to a separate fix.
+    /// Clearing the selected agent also ends its ownership of custom words;
+    /// leaving them dormant would let search restore them under another CLI.
     pub(super) fn reset_choices(&mut self, permission: Option<LaunchPermission>) {
         self.harness = None;
         self.choose_default_model();
         self.effort = None;
+        self.permission_flags.clear();
         self.permissions = permission;
         self.permissions_explicit = false;
         self.wrapper.clear();
@@ -671,8 +672,8 @@ mod tests {
         assert!(draft.wrapper_explicit());
     }
 
-    /// Reset and model-default have separate contracts. Preserve the dormant
-    /// flag buffer until its aligned fix, while effort survives model-default.
+    /// Reset discards agent-owned words even when remembered permissions survive.
+    /// Model-default changes only the model and must preserve independent effort.
     #[test]
     fn default_model_and_reset_keep_their_existing_distinct_rules() {
         let mut draft = LaunchDraft::new(None);
@@ -683,7 +684,7 @@ mod tests {
         draft.reset_choices(Some(LaunchPermission::Guarded));
         assert_eq!(draft.harness(), None);
         assert_eq!(draft.effort(), None);
-        assert_eq!(draft.permission_flags(), "old raw flags");
+        assert_eq!(draft.permission_flags(), "");
         assert!(!draft.permissions_explicit());
     }
 

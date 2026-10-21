@@ -5,7 +5,7 @@
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type Page, type Route } from "@playwright/test";
-import { agentLaunchRow, listHosts, localHostId, openRowMenu, SESSION_LISTING, setLocalYoloWithoutAsking } from "./helpers/fleet";
+import { agentLaunchRow, listHosts, localHostId, openRowMenu, patchPreferences, readPreferences, SESSION_LISTING, setLocalYoloWithoutAsking } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 
@@ -135,6 +135,111 @@ test("queued custom permission edits cannot change an in-flight launch", async (
     // Drain only routes that actually entered; setup failures before Launch
     // have no pending route to wait for and create no session to remove.
     await Promise.all(completions);
+  }
+});
+
+/** Reset ends the source agent's ownership of custom words. Same-agent choices
+ * must still preserve literal editor text, so clearing on every agent choice
+ * cannot satisfy this regression by discarding useful input.
+ */
+test("reset then agent search cannot restore another agent's custom flags", async ({ page, request }) => {
+  const previous = await readPreferences(request);
+  const bodies: Record<string, unknown>[] = [];
+  const completions: Promise<void>[] = [];
+  const endpoint = "**/api/sessions";
+  const refuseCreate = async (route: Route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const attempt = bodies.push(route.request().postDataJSON());
+    const completion = fulfillAsHelm(route, {
+      status: 503,
+      contentType: "text/plain",
+      body: `reset flags fixture refused create ${attempt}`,
+    });
+    completions.push(completion);
+    await completion;
+  };
+  let bodyFailed = false;
+  try {
+    // Seed the real preference before loading the page. The bug needs a
+    // remembered mode supported by both agents, not a fabricated UI label.
+    await patchPreferences(request, { remembered_permissions: "yolo" });
+    expect((await readPreferences(request)).remembered_permissions).toBe("yolo");
+    await page.route(endpoint, refuseCreate);
+    const form = await openNew(page);
+    const permissions = form.locator(".launch-composer-permissions-choice");
+    const custom = permissions.getByRole("button", { name: "custom", exact: true });
+    const yolo = permissions.getByRole("button", { name: "yolo", exact: true });
+    const flags = form.locator(".custom-permission-flags");
+    const words = form.locator(".custom-permission-words code");
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    const claude = form.locator(".launch-composer-harness-choice")
+      .getByRole("button", { name: "Claude", exact: true });
+    await expect(claude).toHaveAttribute("aria-pressed", "true");
+    await expect(yolo).toHaveAttribute("aria-pressed", "true");
+    await custom.click();
+    await expect(flags).toBeFocused();
+    const original = '  --mode "claude only"   ';
+    await flags.fill(original);
+    await expect(words).toHaveText(["--mode", "claude only"]);
+
+    // These controls prove that normal re-selection retains exact spacing.
+    // Reset below must end ownership even though its remembered mode survives.
+    await claude.click();
+    await expect(flags).toHaveValue(original);
+    await search.fill("harness:claude");
+    await form.getByRole("option", { name: "Harness: Claude", exact: true }).click();
+    await expect(search).toHaveValue("");
+    await expect(flags).toHaveValue(original);
+    await expect(custom).toHaveAttribute("aria-pressed", "true");
+
+    await form.getByRole("button", { name: "reset choices", exact: true }).click();
+    await expect(claude).toHaveAttribute("aria-pressed", "false");
+    await expect(form.locator('.launch-composer-harness-choice button[aria-pressed="true"]')).toHaveCount(0);
+    await expect(yolo).toHaveAttribute("aria-pressed", "true");
+    await expect(flags).toHaveCount(0);
+    await search.fill("harness:codex");
+    await form.getByRole("option", { name: "Harness: Codex", exact: true }).click();
+    await expect(search).toHaveValue("");
+    await expect(form.locator(".launch-composer-harness-choice")
+      .getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(yolo).toHaveAttribute("aria-pressed", "true");
+    await custom.click();
+    await expect(flags).toHaveValue("");
+    await expect(words).toHaveCount(0);
+    // Custom schedules its own focus. Observe that handoff before fill can
+    // supply focus and leave a pending callback able to interrupt folder input.
+    await expect(flags).toBeFocused();
+    expect(bodies, "picker and Reset actions do not create sessions").toHaveLength(0);
+
+    // The completed stamped refusal observes actual submission without
+    // launching a vendor process; the DOM buffer alone is not the oracle.
+    await flags.fill('--mode "codex only"');
+    await expect(words).toHaveText(["--mode", "codex only"]);
+    const folder = form.getByLabel("folder", { exact: true });
+    await folder.fill("/tmp");
+    await expect(folder).toHaveValue("/tmp");
+    await expect(flags).toHaveValue('--mode "codex only"');
+    const launch = form.locator(".create-session-submit");
+    await expect(launch).toHaveAttribute("aria-disabled", "false");
+    await launch.click();
+    await expect(form.locator(".create-session-error")).toContainText("reset flags fixture refused create 1");
+    await expect(launch).toHaveAttribute("aria-disabled", "false");
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].intent_key).toEqual(expect.any(String));
+    expect(bodies[0].intent_key).not.toBe("");
+    expect(bodies[0].launch).toMatchObject({ harness: "codex", permissions: "custom", permission_flags: ["--mode", "codex only"] });
+    expect(bodies[0]).not.toHaveProperty("confirm_yolo");
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["create route", async () => {
+        await page.unroute(endpoint, refuseCreate);
+        await Promise.all(completions);
+      }],
+      ["remembered permissions", () => patchPreferences(request, { remembered_permissions: previous.remembered_permissions ?? null })],
+    ]);
   }
 });
 
