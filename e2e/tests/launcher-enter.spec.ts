@@ -8,7 +8,8 @@ import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { clickDialogGap } from "./helpers/dialog-gap";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
-import { cleanupSession, createSession, openRowMenu } from "./helpers/fleet";
+import { cleanupSession, createSession, listHosts, openRowMenu, stubFeed } from "./helpers/fleet";
+import { routeGate } from "./helpers/route-gate";
 
 /** Clone must offer the typed name visibly before a separate Enter launches.
  * A real fake-agent source and successor distinguish setting a draft from an
@@ -228,6 +229,171 @@ test("launcher shows the helm's refusal beside Launch", async ({ page, request }
   await launch.click();
   await expectReasonByLaunch(form, "launch fixture refused this request");
   expect(posts, "the refusal must come from exactly one ordinary launch attempt").toBe(1);
+});
+
+/** Invalid custom flags are a repairable editor problem, not a catalog
+ * incompatibility. Both whitespace and an unfinished quote must explain Enter
+ * locally without invoking the installed agent.
+ */
+test("launcher Enter names invalid custom permission flags", async ({ page }) => {
+  let posts = 0;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() === "POST") posts++;
+    await route.continue();
+  });
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true }).click();
+  const flags = form.locator(".custom-permission-flags");
+  for (const draft of ["", "  ", "--mode '"]) {
+    await flags.fill(draft);
+    await expect(flags).toHaveValue(draft);
+    await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "true");
+    await expect(form.locator(".create-session-submit")).toHaveAttribute("data-tooltip", /custom permission flags/);
+    await flags.focus();
+    await expect(flags).toBeFocused();
+    await flags.press("Enter");
+    await expectReasonByLaunch(form, "enter valid custom permission flags before launching");
+    await expect(form).not.toContainText("choose a compatible model or effort");
+    expect(posts).toBe(0);
+  }
+});
+
+/** Pending template replay has no Launch action yet. Count submit events,
+ * because an accidental requestSubmit can still stop at missing prerequisites
+ * and produce zero POSTs. Releasing the catalog proves replay can finish.
+ */
+test("launcher container Enter waits for visible session setup loading", async ({ page, request }) => {
+  const name = `enter-loading-${Date.now()}`;
+  const sessionName = `${name}-applied`;
+  const gate = routeGate();
+  let reads = 0;
+  let posts = 0;
+  let bodyFailed = false;
+  try {
+    // A name-only partial template can apply without an agent. Effort-only
+    // templates instead refuse after loading when no harness is selected.
+    const saved = await request.put(`/api/templates/${encodeURIComponent(name)}`, { data: { name: sessionName } });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    await page.route("**/api/launch-catalog", async (route) => {
+      reads++;
+      await gate.wait();
+      await route.fulfill({ response: await route.fetch() });
+    });
+    const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"];
+    expect(build).toBeTruthy();
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() === "POST") posts++;
+      if (route.request().method() !== "POST") return route.continue();
+      await route.fulfill({ status: 409, headers: { "x-farhelm-build": build }, body: "loading fixture refused an unexpected create" });
+    });
+    await page.goto("/");
+    await expect(page.locator(".quick-switcher-template-trigger")).toHaveCount(1);
+    await page.keyboard.press("Control+Shift+j");
+    const list = page.getByRole("dialog", { name: "template launcher" });
+    await expect(list.getByRole("combobox")).toBeFocused();
+    await list.getByRole("combobox").fill(name);
+    await expect(list.getByRole("option")).toHaveCount(1);
+    await list.getByRole("combobox").press("Enter");
+    const form = page.locator(".create-session-form");
+    const loading = form.getByRole("status").filter({ hasText: "loading session setup…" });
+    await expect(form).toBeVisible();
+    await expect(loading).toBeVisible();
+    await expect.poll(() => reads, { message: "the catalog reply is held during setup replay" }).toBeGreaterThan(0);
+    await expect(form.locator(".create-session-submit")).toHaveCount(0);
+    await expect(form.locator(".launch-composer-loading-cancel")).toBeFocused();
+    await form.evaluate((node) => {
+      node.dataset.submitWitness = "0";
+      node.addEventListener("submit", () => {
+        node.dataset.submitWitness = String(Number(node.dataset.submitWitness) + 1);
+      });
+    });
+    await form.focus();
+    await expect(form).toBeFocused();
+    await form.press("Enter");
+    await expect(form).toHaveAttribute("data-submit-witness", "0");
+    await expect(loading).toBeVisible();
+    expect(posts).toBe(0);
+    gate.release();
+    await expect(loading).toHaveCount(0);
+    await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue(sessionName);
+    expect(posts).toBe(0);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    gate.release();
+    await cleanupOwnedSteps(bodyFailed, [
+      ["held browser routes", async () => { await page.unrouteAll({ behavior: "wait" }); }],
+      ["loading template", async () => {
+        const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }],
+    ]);
+  }
+});
+
+/** An old target's refusal still ends visibly after the selected installation
+ * changes, without attributing its private prose to the new destination. Only
+ * the browser's host read changes; the owned supervisor remains untouched.
+ */
+test("launcher shows a generic refusal after its target changes", async ({ page, request }) => {
+  const local = (await listHosts(request)).find((host) => host.kind === "local");
+  expect(local?.identity).toBeTruthy();
+  const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"];
+  expect(build).toBeTruthy();
+  const feed = await stubFeed(page);
+  feed.notifyOnConnect(0);
+  const gate = routeGate();
+  let moved = false;
+  let posts = 0;
+  await page.route("**/api/hosts", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    if (moved) {
+      const host = body.hosts.find((row: { id: number }) => row.id === local!.id);
+      host.destination = "fixture-retarget";
+      host.identity = "fixture-replaced-install";
+      host.state = { ...host.state, identity: host.identity };
+    }
+    await route.fulfill({ response, json: body });
+  });
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    posts++;
+    await gate.wait();
+    await route.fulfill({ status: 409, headers: { "x-farhelm-build": build }, body: "old-target private refusal" });
+  });
+  try {
+    await page.goto("/");
+    await feed.waitForConnection(1);
+    await page.locator(".new-session-button").click();
+    const form = page.locator(".create-session-form");
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+    await form.getByLabel("folder", { exact: true }).fill("/tmp");
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+    const launch = form.locator(".create-session-submit");
+    await expect(launch).toHaveAttribute("aria-disabled", "false");
+    const original = await form.getAttribute("data-create-target-fingerprint");
+    expect(original).toBeTruthy();
+    await launch.click();
+    await expect.poll(() => posts, { message: "the old target's create reply is held" }).toBe(1);
+    moved = true;
+    expect(feed.openSockets()).toBe(1);
+    feed.notify(2);
+    await expect(form).not.toHaveAttribute("data-create-target-fingerprint", original!);
+    await expect(form).not.toHaveAttribute("data-create-target-fingerprint", "");
+    gate.release();
+    await expectReasonByLaunch(form, "a launch for an earlier setup was refused");
+    await expect(form).not.toContainText("old-target private refusal");
+    expect(posts).toBe(1);
+  } finally {
+    gate.release();
+    await page.unrouteAll({ behavior: "wait" });
+  }
 });
 
 /**

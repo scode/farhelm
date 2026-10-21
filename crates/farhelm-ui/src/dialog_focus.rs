@@ -14,7 +14,6 @@
 /// mounted later or disabled by a pending request retains its ordinary rules.
 pub(crate) enum ContainerEnter<'a> {
     None,
-    SubmitForm,
     Click(&'a str),
 }
 
@@ -26,7 +25,6 @@ pub(crate) fn install_js(dialog_selector: &str, action: ContainerEnter<'_>) -> S
     let selector = serde_json::to_string(dialog_selector).expect("a string always serializes");
     let enter = match action {
         ContainerEnter::None => "null".to_string(),
-        ContainerEnter::SubmitForm => "'submit'".to_string(),
         ContainerEnter::Click(selector) => {
             serde_json::to_string(selector).expect("a string always serializes")
         }
@@ -48,8 +46,7 @@ pub(crate) fn install_js(dialog_selector: &str, action: ContainerEnter<'_>) -> S
                     if (event.key !== 'Enter' || event.target !== dialog || event.repeat || event.isComposing) return;
                     event.preventDefault();
                     event.stopPropagation();
-                    if (enterAction === 'submit') dialog.requestSubmit();
-                    else dialog.querySelector(enterAction)?.click();
+                    dialog.querySelector(enterAction)?.click();
                 }});
             }}
         }})();"#

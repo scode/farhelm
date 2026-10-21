@@ -94,6 +94,11 @@ fn remembered_wrapper(preferences: &api::Preferences, harness: Option<LaunchHarn
         .unwrap_or_default()
 }
 
+/// A malformed custom editor needs its own reason, even when catalog
+/// compatibility also rejects the resulting incomplete selection.
+const CUSTOM_PERMISSION_FLAGS_REFUSAL: &str =
+    "enter valid custom permission flags before launching";
+
 /// The first unmet launch prerequisite, shared by the button and its refusal.
 ///
 /// These are presentation inputs, not admission authority: submit still checks
@@ -108,6 +113,7 @@ struct LaunchPrerequisites {
     github_search: bool,
     remembered_destination_valid: bool,
     needs_harness: bool,
+    invalid_permission_flags: bool,
     incompatible_choice: bool,
     invalid_wrapper: bool,
 }
@@ -130,6 +136,8 @@ impl LaunchPrerequisites {
             Some(REMEMBERED_DESTINATION_CHANGED)
         } else if self.needs_harness {
             Some("choose a structured harness before launching")
+        } else if self.invalid_permission_flags {
+            Some(CUSTOM_PERMISSION_FLAGS_REFUSAL)
         } else if self.incompatible_choice {
             Some(
                 "this saved choice is no longer supported by the current catalog; choose a compatible model or effort",
@@ -933,6 +941,7 @@ fn apply_composer_search_result(
     preferences: SharedPreferences,
     mut structured_permissions_is_explicit: Signal<bool>,
     mut composer_reset_reason: Signal<Option<String>>,
+    mut action_error: Signal<Option<String>>,
     // `None` while the catalog read is pending or failed; see
     // `launch_composer::selection_fits_catalog`.
     catalog_answer: Option<&[crate::api::LaunchCatalogModel]>,
@@ -949,6 +958,12 @@ fn apply_composer_search_result(
         remembered_destination,
         history_activation_attempts,
     ) {
+        // A retained result can outlive its installation. Keep the existing
+        // admission fence, but explain the rejected activation where other
+        // search/template failures already appear.
+        action_error.set(Some(
+            "that result belongs to an earlier host; choose a current result".into(),
+        ));
         return None;
     }
     if matches!(
@@ -1732,13 +1747,15 @@ fn request_directory_browse(
 /// node makes its lifetime exactly the dialog's lifetime; no global handler
 /// can survive a close and interfere with the next open. The shared focus
 /// listener keeps a gap click on the current control, while container Enter
-/// submits through the same validation path as the Launch button.
+/// clicks the mounted Launch button through its ordinary validation path.
+/// Loading setup has no Launch button, so container Enter cannot submit a
+/// partially replayed template; the visible loading line explains the wait.
 fn install_composer_focus_trap() {
     document::eval(&format!(
         "{}\n{}",
         crate::dialog_focus::install_js(
             ".create-session-form[role=\"dialog\"]",
-            crate::dialog_focus::ContainerEnter::SubmitForm,
+            crate::dialog_focus::ContainerEnter::Click(".create-session-submit"),
         ),
         r#"(() => {
             const dialog = document.querySelector('.create-session-form[role="dialog"]');
@@ -3582,7 +3599,15 @@ pub(super) fn CreateSessionForm(
     // model and effort visible for clone, but refuse to turn an incompatible
     // known choice into a different launch by guessing a replacement. Pi's
     // omitted-permission compatibility rule was already applied while seeding.
+    let invalid_permission_flags = launch_tab() == LaunchTab::Agent
+        && structured_permissions() == Some(LaunchPermission::Custom)
+        && farhelm_proto::split_permission_flags(&structured_permission_flags()).is_err();
     let structured_choice_error = structured_harness().and_then(|harness| {
+        // Bad editor text is not evidence that the host's catalog changed.
+        // Preserve that distinction beside the controls as well as at Launch.
+        if invalid_permission_flags {
+            return Some(CUSTOM_PERMISSION_FLAGS_REFUSAL);
+        }
         let selection = LaunchSelection {
             permission_flags: crate::launch_composer::permission_words(structured_permissions(), &structured_permission_flags()),
             wrapper_prefix: wrapper_words(&structured_wrapper()).ok().flatten(),
@@ -3756,6 +3781,7 @@ pub(super) fn CreateSessionForm(
         needs_harness: retry_binding.is_none()
             && launch_tab() == LaunchTab::Agent
             && structured_harness().is_none(),
+        invalid_permission_flags: retry_binding.is_none() && invalid_permission_flags,
         incompatible_choice: retry_binding.is_none()
             && launch_tab() == LaunchTab::Agent
             && structured_choice_error.is_some(),
@@ -4365,6 +4391,16 @@ pub(super) fn CreateSessionForm(
     );
     let repository_active = repository_index().min(repository_suggestions.len().saturating_sub(1));
     let repository_suggestions_for_keys = repository_suggestions.clone();
+    let repository_query_for_keys = repository_text.clone();
+    let repository_authority_for_keys = live_repository_authority.peek().clone();
+    // The dedicated field uses the same owner/repo grammar as gh: search,
+    // without any harness or catalog dependency.
+    let repository_message = crate::launch_composer::empty_search_message(
+        &format!("gh:{repository_text}"),
+        false,
+        false,
+        false,
+    );
     let agent_without_harness = launch_tab() == LaunchTab::Agent && structured_harness().is_none();
     let search_rows = crate::launch_composer::finish_search_results(
         &composer_search(),
@@ -4514,6 +4550,7 @@ pub(super) fn CreateSessionForm(
                             preferences,
                             structured_permissions_is_explicit,
                             composer_reset_reason,
+                            template_error,
                             action_catalog.as_deref(),
                             intent_key,
                         );
@@ -5087,8 +5124,10 @@ pub(super) fn CreateSessionForm(
                 // A click that leaves the search surface must make its
                 // hidden results ineligible before another control handles
                 // a following Enter. The search wrapper stops its own
-                // events, so typing and choosing inside it keep the listbox.
+                // events, as does the repository field, so typing and choosing
+                // inside either surface keep its result area open.
                 composer_search_open.set(false);
+                repository_open.set(false);
                 evt.stop_propagation();
             },
             oninput: move |_| partial_template_hint.set(false),
@@ -5106,6 +5145,12 @@ pub(super) fn CreateSessionForm(
             },
             onsubmit: move |evt| {
                 evt.prevent_default();
+                // A queued submit can outlive the render that exposed Launch.
+                // Check replay state live before clearing its loading reason or
+                // taking a mutation claim for an incomplete initial setup.
+                if pending_initial_action.peek().is_some() || !pending_initial_templates.peek().is_empty() {
+                    return;
+                }
                 // Parent actions revoke this before the render updates the
                 // generation attribute. An old queued auto-submit cannot use
                 // a newly supplied Clone/Replace draft in that gap.
@@ -5153,6 +5198,12 @@ pub(super) fn CreateSessionForm(
                         ops.release();
                         return;
                     };
+                    if *structured_permissions.peek() == Some(LaunchPermission::Custom)
+                        && farhelm_proto::split_permission_flags(&structured_permission_flags()).is_err()
+                    {
+                        error.set(Some(CUSTOM_PERMISSION_FLAGS_REFUSAL.into()));
+                        return;
+                    }
                     let wrapper_prefix = match wrapper_words(&structured_wrapper()) {
                         Ok(prefix) => prefix,
                         Err(reason) => {
@@ -5225,7 +5276,7 @@ pub(super) fn CreateSessionForm(
                 // the request can bind its idempotency and connection claims.
                 if !target_matches_selection(selected_now, &hosts, target_now.as_ref()) {
                     error.set(Some(
-                        "the target host changed while this create was being submitted, so                          nothing was sent — check the agent and press create again"
+                        "the target host changed while this create was being submitted, so nothing was sent — check the agent and press create again"
                             .to_string(),
                     ));
                     ops.release();
@@ -5723,11 +5774,7 @@ pub(super) fn CreateSessionForm(
                             // Every unsuccessful quick request ends hidden
                             // preparation, even if its old target no longer owns
                             // the refusal. Keep that refusal fenced below.
-                            let was_hidden = *quick_launch_hidden.peek();
                             quick_launch_hidden.set(false);
-                            if was_hidden && create_target.peek().as_ref() != target_now.as_ref() {
-                                preparation_error.set(Some("the destination changed while quick launch was pending; review this setup before launching".into()));
-                            }
                             // Gated on the target this request was DISPATCHED
                             // for still being the one on screen: a refusal
                             // naming host A must not land under a form that
@@ -5787,6 +5834,11 @@ pub(super) fn CreateSessionForm(
                                 // A user who instead fixes the form gets a new
                                 // key, because the binding no longer matches.
                                 error.set(Some(prose));
+                            } else {
+                                // The old request still ended unsuccessfully.
+                                // Say so without leaking its host-specific prose
+                                // or retiring the new target's retry identity.
+                                error.set(Some("a launch for an earlier setup was refused".into()));
                             }
                             ops.release();
                         }
@@ -6289,6 +6341,7 @@ pub(super) fn CreateSessionForm(
                                     }
                                     evt.prevent_default();
                                     if !draft_transition_allowed(ops) {
+                                        template_error.set(Some("wait for the current operation to finish before choosing a result".into()));
                                         return;
                                     }
                                     // A queued key can observe a newer input signal
@@ -6653,10 +6706,14 @@ pub(super) fn CreateSessionForm(
                             }
                             if checkout_mode {
                                 label { class: "launch-composer-repository-field",
+                                    onclick: move |evt| {
+                                        composer_search_open.set(false);
+                                        evt.stop_propagation();
+                                    },
                                     span { class: "launch-composer-section-label", "repository" }
                                     input { r#type: "text", role: "combobox", aria_label: "repository", aria_autocomplete: "list",
-                                        aria_expanded: repository_open() && !repository_suggestions.is_empty(),
-                                        aria_controls: (repository_open() && !repository_suggestions.is_empty()).then_some("checkout-repository-options"),
+                                        aria_expanded: repository_open(),
+                                        aria_controls: repository_open().then_some("checkout-repository-options"),
                                         aria_activedescendant: (repository_open() && !repository_suggestions.is_empty()).then(|| format!("checkout-repository-{repository_active}")),
                                         value: "{repository_text}", placeholder: "owner/repo", disabled: busy,
                                         autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false", dir: "ltr",
@@ -6683,9 +6740,30 @@ pub(super) fn CreateSessionForm(
                                                 }
                                                 Key::Enter => {
                                                     evt.prevent_default(); evt.stop_propagation();
-                                                    if evt.is_auto_repeating() || evt.is_composing() || !draft_transition_allowed(ops) { return; }
-                                                    if repository_open() && let Some(repo) = repository_suggestions_for_keys.get(repository_active) {
-                                                        select_repository.call(repo.clone());
+                                                    if evt.is_auto_repeating() || evt.is_composing() { return; }
+                                                    if !draft_transition_allowed(ops) {
+                                                        template_error.set(Some("wait for the current operation to finish before choosing a repository".into()));
+                                                        return;
+                                                    }
+                                                    // A queued key must not select a row from
+                                                    // the previous query or host installation.
+                                                    if destination_draft.peek().repository_text() != repository_query_for_keys
+                                                        || *live_repository_authority.peek() != repository_authority_for_keys
+                                                    {
+                                                        repository_open.set(true);
+                                                        return;
+                                                    }
+                                                    match crate::launch_composer::search_enter_target(
+                                                        repository_open(),
+                                                        (!repository_suggestions_for_keys.is_empty()).then_some(repository_active),
+                                                    ) {
+                                                        crate::launch_composer::SearchEnterTarget::Pick(index) => {
+                                                            if let Some(repo) = repository_suggestions_for_keys.get(index) {
+                                                                select_repository.call(repo.clone());
+                                                            }
+                                                        }
+                                                        crate::launch_composer::SearchEnterTarget::Reopen => repository_open.set(true),
+                                                        crate::launch_composer::SearchEnterTarget::Nothing => {}
                                                     }
                                                 }
                                                 _ => {}
@@ -6693,8 +6771,16 @@ pub(super) fn CreateSessionForm(
                                         },
                                     }
                                 }
-                                if repository_open() && !repository_suggestions.is_empty() {
-                                    div { class: "launch-composer-repository-options", id: "checkout-repository-options", role: "listbox", aria_label: "repositories",
+                                if repository_open() {
+                                    div { class: "launch-composer-repository-options", id: "checkout-repository-options",
+                                        role: if repository_suggestions.is_empty() { "status" } else { "listbox" }, aria_label: "repositories",
+                                        onclick: move |evt| {
+                                            composer_search_open.set(false);
+                                            evt.stop_propagation();
+                                        },
+                                        if repository_suggestions.is_empty() && let Some(message) = repository_message {
+                                            div { class: "launch-composer-search-message", "{message}" }
+                                        }
                                         for (index, repo) in repository_suggestions.iter().enumerate() {
                                             button { r#type: "button", role: "option", id: "checkout-repository-{index}",
                                                 aria_selected: index == repository_active, disabled: busy, tabindex: "-1",
@@ -7468,6 +7554,30 @@ pub(super) fn CreateSessionForm(
 
 #[cfg(test)]
 mod tests {
+    /// An unfinished custom editor can also fail catalog compatibility. Its
+    /// actionable repair must win over the unrelated saved-model explanation.
+    #[test]
+    fn custom_flag_refusal_precedes_catalog_incompatibility() {
+        let mut prerequisites = super::LaunchPrerequisites {
+            busy: false,
+            saving_template: false,
+            host_available: true,
+            destination_ready: true,
+            github_search: false,
+            remembered_destination_valid: true,
+            needs_harness: false,
+            invalid_permission_flags: true,
+            incompatible_choice: true,
+            invalid_wrapper: false,
+        };
+        assert_eq!(
+            prerequisites.refusal(),
+            Some(super::CUSTOM_PERMISSION_FLAGS_REFUSAL)
+        );
+        prerequisites.invalid_permission_flags = false;
+        assert!(prerequisites.refusal().unwrap().contains("current catalog"));
+    }
+
     /// A remembered prefix belongs to one agent type. Editing invalid shell
     /// text must stay visible and refuse launch instead of submitting none.
     #[test]
