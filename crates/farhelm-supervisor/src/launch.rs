@@ -14,6 +14,10 @@
 //! the real exec's errno before exiting. The `-l -i` reproduces the file
 //! sourcing an SSH-and-type session gets, which is SPEC.md's environment
 //! contract; `-i` is load-bearing (bare `-c` skips `.zshrc`/`.bashrc`).
+//!
+//! `LaunchArtifacts` names the generation's spec and evidence files. The shim
+//! consumes its input through that value; the service supplies the settlement
+//! removals and directory sweeps after preserving the evidence its lifecycle needs.
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -752,6 +756,64 @@ pub fn tab_window_command(
     argv
 }
 
+/// The files belonging to one launch, independent of its process or durable row.
+///
+/// The service removes these paths only after preserving the evidence its
+/// lifecycle needs. The shim has a narrower responsibility: consume only the
+/// spec after reading it, before parsing credential-bearing bytes. Keeping the
+/// paths together lets both sides agree without reading the spec's payload.
+pub(crate) struct LaunchArtifacts {
+    spec: PathBuf,
+    status: PathBuf,
+    waypoint: PathBuf,
+}
+
+impl LaunchArtifacts {
+    /// Name one generation's files without consulting or changing the filesystem.
+    /// Different generations must never share evidence, even if old cleanup failed.
+    pub(crate) fn for_launch(state_dir: &Path, id: &str, generation: i64) -> Self {
+        Self::from_spec_path(
+            &state_dir
+                .join("launch")
+                .join(format!("{id}.{generation}.json")),
+        )
+    }
+
+    /// Derive sibling evidence paths even when the supplied spec cannot be read.
+    /// Internal shim invocations can use relative or malformed spec paths; failure
+    /// reporting must not depend on parsing either their filename or JSON content.
+    pub(crate) fn from_spec_path(spec: &Path) -> Self {
+        Self {
+            spec: spec.to_path_buf(),
+            status: spec.with_extension("status"),
+            waypoint: spec.with_extension("waypoint"),
+        }
+    }
+
+    /// The credential-bearing input that the shim consumes before parsing.
+    pub(crate) fn spec(&self) -> &Path {
+        &self.spec
+    }
+
+    /// Durable failure evidence, addressable without decoding the spec.
+    pub(crate) fn status(&self) -> &Path {
+        &self.status
+    }
+
+    /// Generation-local proof that shell startup reached the scope wrapper.
+    pub(crate) fn waypoint(&self) -> &Path {
+        &self.waypoint
+    }
+
+    /// Unlink only a spec whose bytes the shim has already read, before parsing.
+    /// Every unlink failure remains fatal here, including absence after the read;
+    /// settlement's absence-tolerant cleanup must not weaken that existing rule.
+    /// The caller records the failure in the sentinel with its original context.
+    fn consume_spec(&self) -> std::io::Result<()> {
+        std::fs::remove_file(self.spec())
+    }
+}
+
 /// Where one LAUNCH's spec file lives:
 /// `<state_dir>/launch/<id>.<generation>.json`.
 ///
@@ -775,9 +837,7 @@ pub fn tab_window_command(
 /// function, so the two sides can never compute diverging paths for the
 /// same launch.
 pub fn spec_path_for_launch(state_dir: &Path, id: &str, generation: i64) -> PathBuf {
-    state_dir
-        .join("launch")
-        .join(format!("{id}.{generation}.json"))
+    LaunchArtifacts::for_launch(state_dir, id, generation).spec
 }
 
 /// Split a launch artifact NAME back into the session id and
@@ -836,8 +896,9 @@ pub fn read_launch_sentinel(
     id: &str,
     generation: i64,
 ) -> anyhow::Result<Option<String>> {
-    let status_path = status_path_for_spec(&spec_path_for_launch(state_dir, id, generation));
-    match std::fs::read(&status_path) {
+    let artifacts = LaunchArtifacts::for_launch(state_dir, id, generation);
+    let status_path = artifacts.status();
+    match std::fs::read(status_path) {
         Ok(bytes) => {
             let content = String::from_utf8(bytes).with_context(|| {
                 format!(
@@ -876,14 +937,14 @@ pub fn read_launch_sentinel(
 /// same way when it first writes the spec, so the two sides always agree
 /// without the spec's own payload needing to restate it.
 pub fn status_path_for_spec(spec_path: &Path) -> PathBuf {
-    spec_path.with_extension("status")
+    LaunchArtifacts::from_spec_path(spec_path).status
 }
 
 /// The generation-specific proof that shell startup reached Farhelm's wrapper step.
 /// It shares the spec's private launch directory and naming, so an older launch
 /// cannot supply evidence about a newer one. The empty file carries no terminal text.
 pub fn waypoint_path_for_spec(spec_path: &Path) -> PathBuf {
-    spec_path.with_extension("waypoint")
+    LaunchArtifacts::from_spec_path(spec_path).waypoint
 }
 
 /// Mark successful shell handoff, then replace this process with the scope wrapper.
@@ -899,15 +960,16 @@ pub fn exec_wrapped_launch(
     use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::process::CommandExt;
 
-    let status_path = status_path_for_spec(spec_path);
+    let artifacts = LaunchArtifacts::from_spec_path(spec_path);
+    let status_path = artifacts.status();
     let Some((program, arguments)) = wrapper.split_first() else {
         return anyhow::anyhow!(record_launch_failure(
-            &status_path,
+            status_path,
             "scope wrapper has empty argv".to_string(),
             &crate::files::RealFs,
         ));
     };
-    let waypoint = waypoint_path_for_spec(spec_path);
+    let waypoint = artifacts.waypoint();
     // The directory is already private. Refuse any existing entry rather than
     // following a symlink or accepting evidence another invocation left behind.
     match std::fs::OpenOptions::new()
@@ -915,12 +977,12 @@ pub fn exec_wrapped_launch(
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&waypoint)
+        .open(waypoint)
     {
         Ok(file) => drop(file),
         Err(error) => {
             let report = record_launch_failure(
-                &status_path,
+                status_path,
                 format!("creating scope waypoint {}: {error}", waypoint.display()),
                 &crate::files::RealFs,
             );
@@ -934,7 +996,7 @@ pub fn exec_wrapped_launch(
         .arg(spec_path)
         .exec();
     let report = record_launch_failure(
-        &status_path,
+        status_path,
         format!(
             "scope wrapper exec_failed argv0={} errno={}: {error}",
             Path::new(program).display(),
@@ -974,13 +1036,14 @@ pub fn exec_launch_spec_with_seam(
 ) -> anyhow::Error {
     use std::os::unix::process::CommandExt;
 
-    let status_path = status_path_for_spec(spec_path);
+    let artifacts = LaunchArtifacts::from_spec_path(spec_path);
+    let status_path = artifacts.status();
 
-    let bytes = match std::fs::read(spec_path) {
+    let bytes = match std::fs::read(artifacts.spec()) {
         Ok(bytes) => bytes,
         Err(e) => {
             let report = record_launch_failure(
-                &status_path,
+                status_path,
                 format!("launch spec unreadable at {}: {e}", spec_path.display()),
                 seam,
             );
@@ -990,11 +1053,11 @@ pub fn exec_launch_spec_with_seam(
     // Unlink the moment the bytes are in hand — before parsing, not just
     // before exec: the spec holds the agent's full command line, which
     // users do put credentials into, and an early return on a malformed
-    // spec must not leave it on disk. Nothing else removes it during
-    // this supervisor's lifetime; only the next restart's sweep would.
-    if let Err(e) = std::fs::remove_file(spec_path) {
+    // spec must not leave it on disk. Sibling evidence belongs to settlement,
+    // so consuming the input must not clear the sentinel or wrapper waypoint.
+    if let Err(e) = artifacts.consume_spec() {
         let report = record_launch_failure(
-            &status_path,
+            status_path,
             format!("removing launch spec {}: {e}", spec_path.display()),
             seam,
         );
@@ -1004,7 +1067,7 @@ pub fn exec_launch_spec_with_seam(
         Ok(spec) => spec,
         Err(e) => {
             let report = record_launch_failure(
-                &status_path,
+                status_path,
                 format!("launch spec at {} is malformed: {e}", spec_path.display()),
                 seam,
             );
@@ -1013,7 +1076,7 @@ pub fn exec_launch_spec_with_seam(
     };
     if spec.argv.is_empty() {
         let report =
-            record_launch_failure(&status_path, "launch spec has empty argv".to_string(), seam);
+            record_launch_failure(status_path, "launch spec has empty argv".to_string(), seam);
         return anyhow::anyhow!(report);
     }
     debug_assert_eq!(
@@ -1029,18 +1092,18 @@ pub fn exec_launch_spec_with_seam(
     // exit"; the terminal and any partial checkout are left in place for
     // inspection, exactly like a failed exec.
     if let Some(preparation) = &spec.preparation
-        && let Err(e) = run_checkout_preparation(&spec, preparation, &status_path, seam)
+        && let Err(e) = run_checkout_preparation(&spec, preparation, status_path, seam)
     {
         return e;
     }
     // This disposable shim enters the directory itself, so an entry error cannot
     // be confused with exec failing for a missing or non-executable agent. Keep
     // the sentinel anchored across that chdir, even for a relative internal spec.
-    let status_path = match std::path::absolute(&status_path) {
+    let status_path = match std::path::absolute(status_path) {
         Ok(path) => path,
         Err(error) => {
             let report = record_launch_failure(
-                &status_path,
+                status_path,
                 format!("resolving launch failure path: {error}"),
                 seam,
             );
@@ -2535,6 +2598,33 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let result = read_launch_sentinel(tmp.path(), "never-launched", 0).unwrap();
         assert_eq!(result, None);
+    }
+
+    /// Consuming malformed input still removes only the spec before parsing;
+    /// failure evidence remains available, and a repeated consume cannot turn a
+    /// disappeared input into success. The arbitrary filename needs no launch id.
+    #[farhelm_testtrace::test]
+    fn consuming_a_spec_preserves_sibling_evidence_and_rejects_absence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let artifacts = LaunchArtifacts::from_spec_path(&tmp.path().join("unparsed.input"));
+        std::fs::write(artifacts.spec(), b"not JSON").unwrap();
+        std::fs::write(artifacts.status(), b"failure evidence").unwrap();
+        std::fs::write(artifacts.waypoint(), b"").unwrap();
+        assert_eq!(std::fs::read(artifacts.spec()).unwrap(), b"not JSON");
+        assert!(artifacts.status().is_file() && artifacts.waypoint().is_file());
+
+        artifacts.consume_spec().unwrap();
+
+        assert!(!artifacts.spec().exists());
+        assert_eq!(
+            std::fs::read(artifacts.status()).unwrap(),
+            b"failure evidence"
+        );
+        assert!(artifacts.waypoint().is_file());
+        assert_eq!(
+            artifacts.consume_spec().unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
     }
 
     /// Common readers disagree about quoting. Forward only paths whose literal spelling

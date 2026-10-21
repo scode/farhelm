@@ -5,13 +5,14 @@
 //! (PLAN_M3.md item 10). The empty waypoint proves the login shell reached
 //! Farhelm's wrapper step. All three live under the private state directory.
 //! `crate::launch` owns their on-disk shape, the shim-side write, and the
-//! raw sentinel read; what lives here is the service side of them — the
-//! async read wrapper, outcome classification, and the removal and sweep
-//! helpers. A never-started error may also retain a bounded terminal excerpt,
+//! raw sentinel read through `LaunchArtifacts`; what lives here is their
+//! service side — the async read wrapper, outcome classification, and the
+//! removal and sweep helpers. A never-started error may also retain a bounded terminal excerpt,
 //! using the launch's process-local fence and tmux's atomic capture guard.
 //! This never runs on the list path. See `service::sweep` for the process-tree
 //! side of a launch's failure classification.
 
+use crate::launch::LaunchArtifacts;
 use crate::store::{LastOutcome, SessionStore};
 use anyhow::Context;
 use std::path::Path;
@@ -110,8 +111,8 @@ pub(crate) async fn wrapper_failure_detail(
     if !pane_dead {
         return Ok(None);
     }
-    let spec = crate::launch::spec_path_for_launch(state_dir, id, generation);
-    let bytes = match tokio::fs::read(&spec).await {
+    let artifacts = LaunchArtifacts::for_launch(state_dir, id, generation);
+    let bytes = match tokio::fs::read(artifacts.spec()).await {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
@@ -138,8 +139,8 @@ pub(crate) async fn wrapper_failure_detail(
                 .to_string(),
         ));
     }
-    let wrapper_reached = waypoint_expected == Some(true)
-        && tokio::fs::try_exists(crate::launch::waypoint_path_for_spec(&spec)).await?;
+    let wrapper_reached =
+        waypoint_expected == Some(true) && tokio::fs::try_exists(artifacts.waypoint()).await?;
     let code = exit_code.map_or_else(String::new, |code| format!(" (code {code})"));
     Ok(Some(if wrapper_reached {
         format!(
@@ -254,17 +255,9 @@ pub(crate) async fn cleanup_launch_artifacts(
             }
         }
     }
-    let spec_path = crate::launch::spec_path_for_launch(state_dir, id, generation);
-    let status_path = crate::launch::status_path_for_spec(&spec_path);
-    // Try every artifact even when one fails; a failed removal remains retryable.
-    let status_removed = best_effort_remove(&status_path, "consumed launch sentinel").await;
-    let spec_removed = best_effort_remove(&spec_path, "leftover launch spec").await;
-    let waypoint_removed = best_effort_remove(
-        &crate::launch::waypoint_path_for_spec(&spec_path),
-        "launch waypoint",
-    )
-    .await;
-    status_removed && spec_removed && waypoint_removed
+    LaunchArtifacts::for_launch(state_dir, id, generation)
+        .remove_settled_best_effort()
+        .await
 }
 
 /// Clear the launch artifacts sitting at ONE launch's generation-named
@@ -293,15 +286,33 @@ pub(crate) async fn clear_launch_artifacts_fail_closed(
     id: &str,
     generation: i64,
 ) -> Result<(), String> {
-    let spec_path = crate::launch::spec_path_for_launch(state_dir, id, generation);
-    let status_path = crate::launch::status_path_for_spec(&spec_path);
-    remove_fail_closed(&status_path, "the previous launch's sentinel").await?;
-    remove_fail_closed(
-        &crate::launch::waypoint_path_for_spec(&spec_path),
-        "the previous launch's waypoint",
-    )
-    .await?;
-    remove_fail_closed(&spec_path, "the previous launch's spec").await
+    LaunchArtifacts::for_launch(state_dir, id, generation)
+        .clear_for_retake_fail_closed()
+        .await
+}
+
+impl LaunchArtifacts {
+    /// Remove settled evidence without letting one failed unlink skip the rest.
+    /// The caller has already preserved accepted-create evidence where necessary.
+    /// Attempt every file so one obstruction does not retain the other leftovers;
+    /// only complete success allows the observer to latch cleanup for this launch.
+    async fn remove_settled_best_effort(&self) -> bool {
+        let status_removed =
+            Self::remove_file_best_effort(self.status(), "consumed launch sentinel").await;
+        let spec_removed = Self::remove_file_best_effort(self.spec(), "leftover launch spec").await;
+        let waypoint_removed =
+            Self::remove_file_best_effort(self.waypoint(), "launch waypoint").await;
+        status_removed && spec_removed && waypoint_removed
+    }
+
+    /// Clear reused paths before a retaken create can publish a new launch there.
+    /// Sentinel first preserves the existing precedence: its survival can falsely
+    /// classify the replacement. Every other removal failure also aborts the retry.
+    async fn clear_for_retake_fail_closed(&self) -> Result<(), String> {
+        Self::remove_file_fail_closed(self.status(), "the previous launch's sentinel").await?;
+        Self::remove_file_fail_closed(self.waypoint(), "the previous launch's waypoint").await?;
+        Self::remove_file_fail_closed(self.spec(), "the previous launch's spec").await
+    }
 }
 
 /// Remove every launch spec, sentinel and waypoint belonging to `session_id`, across
@@ -318,37 +329,49 @@ pub(crate) async fn remove_launch_artifacts_for_session(
     state_dir: &Path,
     session_id: &str,
 ) -> Result<(), String> {
-    let launch_dir = state_dir.join("launch");
-    let mut entries = match tokio::fs::read_dir(&launch_dir).await {
-        Ok(entries) => entries,
-        // A launch directory that was never created is nothing to clean up
-        // — the honest empty case, unlike a directory this process cannot
-        // read, which is reported.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => {
-            return Err(format!(
-                "reading {} to remove this session's launch files: {e}",
-                launch_dir.display()
-            ));
-        }
-    };
-    loop {
-        let entry = match entries.next_entry().await {
-            Ok(None) => return Ok(()),
-            Ok(Some(entry)) => entry,
+    LaunchArtifacts::remove_for_session_fail_closed(state_dir, session_id).await
+}
+
+impl LaunchArtifacts {
+    /// Delete exact owned directory entries, including staging copies, before the row.
+    /// Enumeration order and first-error precedence remain the directory's own;
+    /// deriving a canonical set would miss staging copies and change that contract.
+    async fn remove_for_session_fail_closed(
+        state_dir: &Path,
+        session_id: &str,
+    ) -> Result<(), String> {
+        let launch_dir = state_dir.join("launch");
+        let mut entries = match tokio::fs::read_dir(&launch_dir).await {
+            Ok(entries) => entries,
+            // A launch directory that was never created is nothing to clean up
+            // — the honest empty case, unlike a directory this process cannot
+            // read, which is reported.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
             Err(e) => {
                 return Err(format!(
-                    "listing {} to remove this session's launch files: {e}",
+                    "reading {} to remove this session's launch files: {e}",
                     launch_dir.display()
                 ));
             }
         };
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if crate::launch::parse_launch_file_name(&name).is_some_and(|(id, _)| id == session_id)
-            || staged_name_belongs_to(&name, session_id)
-        {
-            remove_fail_closed(&entry.path(), "launch file").await?;
+        loop {
+            let entry = match entries.next_entry().await {
+                Ok(None) => return Ok(()),
+                Ok(Some(entry)) => entry,
+                Err(e) => {
+                    return Err(format!(
+                        "listing {} to remove this session's launch files: {e}",
+                        launch_dir.display()
+                    ));
+                }
+            };
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if crate::launch::parse_launch_file_name(&name).is_some_and(|(id, _)| id == session_id)
+                || staged_name_belongs_to(&name, session_id)
+            {
+                Self::remove_file_fail_closed(&entry.path(), "launch file").await?;
+            }
         }
     }
 }
@@ -393,12 +416,20 @@ fn staged_name_belongs_to(name: &str, session_id: &str) -> bool {
 /// that original error with an unrelated filesystem one. Returns whether
 /// removal succeeded so a background observer can stop retrying only then.
 pub(crate) async fn best_effort_remove(path: &Path, what: &str) -> bool {
-    match tokio::fs::remove_file(path).await {
-        Ok(()) => true,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
-        Err(e) => {
-            warn!(path = %path.display(), error = %e, "could not remove {what}");
-            false
+    LaunchArtifacts::remove_file_best_effort(path, what).await
+}
+
+impl LaunchArtifacts {
+    /// Best-effort removal never masks the failure its caller is already unwinding.
+    /// Absence is success; other failures warn and remain retryable by the observer.
+    async fn remove_file_best_effort(path: &Path, what: &str) -> bool {
+        match tokio::fs::remove_file(path).await {
+            Ok(()) => true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            Err(e) => {
+                warn!(path = %path.display(), error = %e, "could not remove {what}");
+                false
+            }
         }
     }
 }
@@ -407,17 +438,25 @@ pub(crate) async fn best_effort_remove(path: &Path, what: &str) -> bool {
 /// unlinked it — see launch.rs) but treating any OTHER failure as fatal,
 /// unlike `best_effort_remove`'s log-and-continue.
 ///
-/// Used only by `DeleteSession`: a leftover launch spec may hold the
+/// Used by Delete and launch cleanup: a leftover launch spec may hold the
 /// agent's full command line, credentials included, and delete is the
 /// last moment anything will ever come back to clean it up — a caller
 /// here cannot shrug off a removal failure the way create's failure-
 /// unwind path does (which returns a different, already-fatal error
 /// either way).
 pub(crate) async fn remove_fail_closed(path: &Path, what: &str) -> Result<(), String> {
-    match tokio::fs::remove_file(path).await {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!("removing {what} ({}): {e}", path.display())),
+    LaunchArtifacts::remove_file_fail_closed(path, what).await
+}
+
+impl LaunchArtifacts {
+    /// Fail-closed removal accepts absence but returns every other filesystem failure.
+    /// The caller keeps the existing label so error text and precedence remain stable.
+    async fn remove_file_fail_closed(path: &Path, what: &str) -> Result<(), String> {
+        match tokio::fs::remove_file(path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("removing {what} ({}): {e}", path.display())),
+        }
     }
 }
 
@@ -467,71 +506,83 @@ pub(crate) async fn sweep_launch_dir(
     launch_dir: &Path,
     sessions: &std::collections::HashMap<String, i64>,
 ) {
-    let mut entries = match tokio::fs::read_dir(launch_dir).await {
-        Ok(entries) => entries,
-        Err(e) => {
-            warn!(error = %e, "could not sweep launch dir; orphaned entries may remain");
-            return;
-        }
-    };
-    loop {
-        let entry = match entries.next_entry().await {
-            Ok(None) => break,
-            Ok(Some(entry)) => entry,
+    LaunchArtifacts::sweep_dir(launch_dir, sessions).await;
+}
+
+impl LaunchArtifacts {
+    /// Sweep selected exact entries after exclusive ownership and session reload.
+    /// Selection preserves live launch evidence; orphan sentinels and surviving
+    /// shims' staged sentinels cannot be removed as a whole generation's file set.
+    async fn sweep_dir(launch_dir: &Path, sessions: &std::collections::HashMap<String, i64>) {
+        let mut entries = match tokio::fs::read_dir(launch_dir).await {
+            Ok(entries) => entries,
             Err(e) => {
-                warn!(error = %e, "launch-dir sweep aborted early; orphaned entries may remain");
-                break;
+                warn!(error = %e, "could not sweep launch dir; orphaned entries may remain");
+                return;
             }
         };
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
+        loop {
+            let entry = match entries.next_entry().await {
+                Ok(None) => break,
+                Ok(Some(entry)) => entry,
+                Err(e) => {
+                    warn!(error = %e, "launch-dir sweep aborted early; orphaned entries may remain");
+                    break;
+                }
+            };
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
 
-        let should_remove = if crate::files::is_staged_temp_name(&name) {
-            // A restart leaves the old shim alive. Its unpublished staged
-            // sentinel is still launch-failure evidence, so a staged
-            // `.status` is orphaned only when its parsed owner is absent.
-            //
-            // A staged `.json` is different: only a supervisor writes specs,
-            // and this sweep runs after this one proved it is the state
-            // directory's sole owner and before it launches anything, so a
-            // staged spec present now was left by a dead supervisor (a crash
-            // between link and unlink, or mid-write) and can never be
-            // finished or read. Keeping it only kept a hidden second copy of
-            // the command line and session token until the session was
-            // deleted, so it goes whoever owns it.
-            staged_spec_name(&name)
-                || !sessions
-                    .keys()
-                    .any(|session_id| staged_name_belongs_to(&name, session_id))
-        } else if let Some((id, generation)) = crate::launch::parse_launch_file_name(&name) {
-            // Names are `<id>.<generation>.json|status|waypoint`: launch files are
-            // per-LAUNCH (`launch::spec_path_for_launch`). Two rules:
-            //
-            // - A session no longer on record loses its spec and waypoint. Its
-            //   sentinels stay: the classifier's durability promise (this
-            //   function's docs) is about evidence whose owner is unknown.
-            // - A live session loses every file of a SUPERSEDED launch, spec
-            //   and sentinel alike. A restart writes the next generation and
-            //   nothing reads an older one again: sentinel reads address one
-            //   exact generation (`launch::read_launch_sentinel`), so an
-            //   earlier launch's sentinel is unreachable, and its spec is a
-            //   leftover no restart path removes (a login shell that died in
-            //   its rc files never reached the shim that would have). The
-            //   reloaded map says which generation is current, so this is a
-            //   registry question, not a guess from the directory listing.
-            //   The CURRENT launch's files are kept even unread: its shim may
-            //   still be mid-flight.
-            match sessions.get(id) {
-                None => name.ends_with(".json") || name.ends_with(".waypoint"),
-                Some(current) => generation < *current,
-            }
-        } else {
-            false
-        };
+            let should_remove = if crate::files::is_staged_temp_name(&name) {
+                // A restart leaves the old shim alive. Its unpublished staged
+                // sentinel is still launch-failure evidence, so a staged
+                // `.status` is orphaned only when its parsed owner is absent.
+                //
+                // A staged `.json` is different: only a supervisor writes specs,
+                // and this sweep runs after this one proved it is the state
+                // directory's sole owner and before it launches anything, so a
+                // staged spec present now was left by a dead supervisor (a crash
+                // between link and unlink, or mid-write) and can never be
+                // finished or read. Keeping it only kept a hidden second copy of
+                // the command line and session token until the session was
+                // deleted, so it goes whoever owns it.
+                staged_spec_name(&name)
+                    || !sessions
+                        .keys()
+                        .any(|session_id| staged_name_belongs_to(&name, session_id))
+            } else if let Some((id, generation)) = crate::launch::parse_launch_file_name(&name) {
+                // Names are `<id>.<generation>.json|status|waypoint`: launch files are
+                // per-LAUNCH (`launch::spec_path_for_launch`). Two rules:
+                //
+                // - A session no longer on record loses its spec and waypoint. Its
+                //   sentinels stay: the classifier's durability promise (this
+                //   function's docs) is about evidence whose owner is unknown.
+                // - A live session loses every file of a SUPERSEDED launch, spec
+                //   and sentinel alike. A restart writes the next generation and
+                //   nothing reads an older one again: sentinel reads address one
+                //   exact generation (`launch::read_launch_sentinel`), so an
+                //   earlier launch's sentinel is unreachable, and its spec is a
+                //   leftover no restart path removes (a login shell that died in
+                //   its rc files never reached the shim that would have). The
+                //   reloaded map says which generation is current, so this is a
+                //   registry question, not a guess from the directory listing.
+                //   The CURRENT launch's files are kept even unread: its shim may
+                //   still be mid-flight.
+                match sessions.get(id) {
+                    None => name.ends_with(".json") || name.ends_with(".waypoint"),
+                    Some(current) => generation < *current,
+                }
+            } else {
+                false
+            };
 
-        if should_remove && let Err(e) = tokio::fs::remove_file(entry.path()).await {
-            warn!(path = %entry.path().display(), error = %e,
+            // Preserve the sweep's existing warning for every unlink error, including
+            // an entry disappearing after enumeration. Settlement cleanup instead
+            // treats absence as success; changing that here would change its logs.
+            if should_remove && let Err(e) = tokio::fs::remove_file(entry.path()).await {
+                warn!(path = %entry.path().display(), error = %e,
                 "could not remove orphaned launch-dir entry");
+            }
         }
     }
 }
@@ -562,11 +613,8 @@ mod tests {
         )
         .unwrap();
         std::fs::write(launch_dir.join("orphan.0.json"), b"{}").unwrap();
-        // A LATER generation of a session that still exists: this sweep
-        // asks about session ownership, never about which launch is
-        // current, so a live session's files survive whatever their
-        // generation (the restart that supersedes them cleans up its own
-        // predecessor).
+        // A live session's current generation must survive: its shell may
+        // still be on its way to the shim that will consume this spec.
         std::fs::write(launch_dir.join("live.3.json"), b"{}").unwrap();
         std::fs::write(launch_dir.join(".orphan.0.json.tmp-deadbeef"), b"partial").unwrap();
         // A live session's staged SPEC: only a supervisor writes specs, so
@@ -908,5 +956,67 @@ mod tests {
         }
         assert!(cleanup_launch_artifacts(state.path(), &store, "settled", 1).await);
         assert!(!spec.exists() && !status.exists() && !waypoint.exists());
+    }
+
+    /// A sentinel obstruction must keep cleanup retryable without retaining the
+    /// other files. This pins attempt-all behavior independently of store settlement,
+    /// so replacing the policy with a short-circuiting loop cannot pass unnoticed.
+    #[farhelm_testtrace::test]
+    async fn settled_cleanup_attempts_every_file_after_an_early_removal_failure() {
+        let state = StateDir::new();
+        let artifacts = LaunchArtifacts::for_launch(state.path(), "obstructed", 1);
+        std::fs::create_dir_all(artifacts.spec().parent().unwrap()).unwrap();
+        std::fs::create_dir(artifacts.status()).unwrap();
+        std::fs::write(artifacts.spec(), b"credential-bearing fixture").unwrap();
+        std::fs::write(artifacts.waypoint(), b"").unwrap();
+        assert!(artifacts.status().is_dir());
+        assert!(artifacts.spec().is_file() && artifacts.waypoint().is_file());
+
+        assert!(!artifacts.remove_settled_best_effort().await);
+        assert!(artifacts.status().is_dir());
+        assert!(!artifacts.spec().exists() && !artifacts.waypoint().exists());
+
+        // A later pass can confirm cleanup after the obstruction disappears;
+        // already-removed siblings are ordinary success, not a new failure.
+        std::fs::remove_dir(artifacts.status()).unwrap();
+        assert!(artifacts.remove_settled_best_effort().await);
+    }
+
+    /// A retake must stop at the first obstruction in sentinel → waypoint → spec
+    /// order, because it cannot publish over evidence it failed to remove. Directory
+    /// obstructions exercise real unlink failures without permission or uid assumptions.
+    #[farhelm_testtrace::test]
+    async fn retake_cleanup_preserves_order_and_stops_at_the_first_removal_failure() {
+        let state = StateDir::new();
+        let artifacts = LaunchArtifacts::for_launch(state.path(), "retake-order", 0);
+        std::fs::create_dir_all(artifacts.spec().parent().unwrap()).unwrap();
+        std::fs::create_dir(artifacts.status()).unwrap();
+        std::fs::write(artifacts.spec(), b"credential-bearing fixture").unwrap();
+        std::fs::write(artifacts.waypoint(), b"").unwrap();
+        assert!(artifacts.status().is_dir());
+        assert!(artifacts.spec().is_file() && artifacts.waypoint().is_file());
+
+        let error = artifacts.clear_for_retake_fail_closed().await.unwrap_err();
+        assert!(error.starts_with("removing the previous launch's sentinel ("));
+        assert!(error.contains(&artifacts.status().display().to_string()));
+        assert!(artifacts.spec().is_file() && artifacts.waypoint().is_file());
+
+        std::fs::remove_dir(artifacts.status()).unwrap();
+        std::fs::write(artifacts.status(), b"failure fixture").unwrap();
+        std::fs::remove_file(artifacts.waypoint()).unwrap();
+        std::fs::create_dir(artifacts.waypoint()).unwrap();
+        assert!(artifacts.status().is_file());
+        assert!(artifacts.waypoint().is_dir() && artifacts.spec().is_file());
+
+        let error = artifacts.clear_for_retake_fail_closed().await.unwrap_err();
+        assert!(error.starts_with("removing the previous launch's waypoint ("));
+        assert!(error.contains(&artifacts.waypoint().display().to_string()));
+        assert!(!artifacts.status().exists());
+        assert!(artifacts.spec().is_file());
+
+        std::fs::remove_dir(artifacts.waypoint()).unwrap();
+        artifacts.clear_for_retake_fail_closed().await.unwrap();
+        assert!(!artifacts.spec().exists());
+        artifacts.clear_for_retake_fail_closed().await.unwrap();
     }
 }
