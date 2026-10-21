@@ -3699,6 +3699,173 @@ test("global details alone control disclosure while update progress stays inline
   await expect(row.locator(".provisioning-trace")).toHaveCount(0);
 });
 
+// First contact after a protocol-skewed host is updated learns its identity.
+// Exercise both continuity checks, with success proving the false alarm is
+// gone and replacement proving the first learned identity becomes an anchor.
+for (const boundary of ["following", "submitting"] as const) {
+  for (const outcome of ["completion", "replacement", "replacement-before-acceptance"] as const) {
+    if (boundary === "following" && outcome === "replacement-before-acceptance") continue;
+    test(`a first identity learned while ${boundary}: ${outcome}`, async ({
+      page,
+      request,
+    }, testInfo) => {
+      const remote = destination(testInfo, `first-identity-${boundary}-${outcome}`);
+      const added = await startAdd(request, remote);
+      await waitForProgress(request, added.host_id, "completed");
+      await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
+      const feed = await stubFeed(page);
+      feed.notifyOnConnect(1);
+      const learnedIdentity = `learned-${testInfo.project.name}`;
+      let phase: "unknown" | "learned" | "replaced" = "unknown";
+      // Snapshot each request's phase. The visible name is a render barrier,
+      // so a served response alone cannot masquerade as a changed UI binding.
+      await page.route("**/api/hosts", async (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        const seen = phase;
+        const response = await route.fetch();
+        const body = await response.json();
+        const entry = body.hosts.find((host: Host) => host.id === added.host_id);
+        if (entry) {
+          entry.identity = seen === "unknown" ? null : seen === "learned" ? learnedIdentity : "replacement-identity";
+          entry.alias = `${seen}-identity-marker`;
+          entry.name = entry.alias;
+          if (seen === "learned") {
+            entry.state = {
+              phase: "connected",
+              identity: learnedIdentity,
+              build_version: HELM_BUILD,
+              refresh: { status: "ok", sessions: 0 },
+            };
+          } else if (seen === "replaced") {
+            // Keep the replacement disconnected so the warning describes
+            // an unsettled outcome rather than a healthy current version.
+            entry.state = {
+              phase: "unreachable-reprobing",
+              cause: "transport-failure",
+              last_error: "replacement connection not established",
+            };
+          }
+        }
+        await route.fulfill({ response, json: body });
+      });
+      const acceptance = routeGate();
+      const admission = routeGate();
+      let accepted: Accepted | undefined;
+      if (boundary === "following") acceptance.release();
+      await page.route(`**/api/hosts/${added.host_id}/update`, async (route) => {
+        if (!route.request().postData()) return route.continue();
+        const response = await route.fetch();
+        expect(response.status(), await responseBody(response)).toBe(202);
+        accepted = (await response.json()) as Accepted;
+        admission.release();
+        await acceptance.wait();
+        await route.fulfill({ response });
+      });
+      const updates = countUpdateRequests(page, added.host_id);
+      // Ignore older in-flight registry reads; readiness names the phase
+      // actually served, not merely the next response to arrive.
+      const registryRead = (expectedPhase: string) => page.waitForResponse(async (response) => {
+        if (new URL(response.url()).pathname !== "/api/hosts" || response.request().method() !== "GET") return false;
+        const body = await response.json();
+        return body.hosts.some((host: Host & { name: string }) =>
+          host.id === added.host_id && host.name === `${expectedPhase}-identity-marker`
+        );
+      });
+      try {
+        const initialRead = registryRead("unknown");
+        await page.goto("/");
+        const initialResponse = await initialRead;
+        expect(initialResponse.ok()).toBe(true);
+        const initialHost = (await initialResponse.json()).hosts.find((host: Host) => host.id === added.host_id);
+        expect(initialHost?.identity, "the browser must start with no recorded identity").toBeNull();
+        const row = page.locator(`[data-host-id="${added.host_id}"]`);
+        await expect(row.locator(".host-name")).toHaveText("unknown-identity-marker");
+        await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+        await openHostMenu(row);
+        await row.locator(".provisioning-update").dispatchEvent("click");
+        await admission.wait();
+        const running = await waitForProgress(request, added.host_id, "running");
+        expect(accepted?.host_id).toBe(added.host_id);
+        expect(running.run_id).toBe(accepted?.run_id);
+        expect(running.run_id).not.toBeNull();
+        if (boundary === "following") {
+          await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+        } else {
+          await expect(pendingUpdate(row, "submitting")).toBeVisible();
+        }
+
+        const learnedRead = registryRead("learned");
+        phase = "learned";
+        await notifyFeed(feed, 2);
+        const learnedResponse = await learnedRead;
+        expect(learnedResponse.ok()).toBe(true);
+        const learnedHost = (await learnedResponse.json()).hosts.find((host: Host) => host.id === added.host_id);
+        expect(learnedHost?.identity).toBe(learnedIdentity);
+        expect(learnedHost?.state.phase).toBe("connected");
+        expect(learnedHost?.state.build_version).toBe(HELM_BUILD);
+        await expect(row.locator(".host-name")).toHaveText("learned-identity-marker");
+        await expect(row).toHaveAttribute("data-host-phase", "connected");
+        if (outcome === "replacement-before-acceptance") {
+          // The intent is already invalidated by first contact. Its still-
+          // outstanding POST must remember A rather than accepting B as
+          // another first contact when the delayed 202 finally arrives.
+          await expect(row.locator(".host-update-pending")).toHaveCount(0);
+          phase = "replaced";
+          await notifyFeed(feed, 3);
+          await expect(row.locator(".host-name")).toHaveText("replaced-identity-marker");
+          await expect(row).toHaveAttribute("data-host-phase", "unreachable-reprobing");
+          await expect(row.locator(".provisioning-warning")).toHaveCount(0);
+          acceptance.release();
+          await expect(row.locator(".provisioning-warning")).toContainText(
+            "the host changed while the update was submitting",
+          );
+          await expect(row.locator(".host-update-running")).toHaveCount(0);
+          await expect(row.locator(".host-detail")).toBeVisible();
+          const stillRunning = await waitForProgress(request, added.host_id, "running");
+          expect(stillRunning.run_id).toBe(running.run_id);
+          expect(updates.plans).toBe(1);
+          expect(updates.confirms).toBe(1);
+          return;
+        }
+        // In the submitting case the full-binding watcher drops the intent,
+        // but the POST still owns suppression until its checked reply lands.
+        acceptance.release();
+        await expect(row.locator(".host-update-running")).toContainText(RUNNING_PROGRESS);
+        await expect(row.locator(".host-detail")).toHaveCount(0);
+        await expect(row.locator(".provisioning-warning")).toHaveCount(0);
+
+        if (outcome === "completion") {
+          await configureBackend();
+          const completed = await waitForProgress(request, added.host_id, "completed");
+          expect(completed.run_id).toBe(running.run_id);
+          await notifyFeed(feed, 3);
+          await expect(row.locator(".host-update-running")).toHaveCount(0);
+          await expect(row.locator(".host-detail")).toHaveCount(0);
+          await expect(row.locator(".provisioning-warning")).toHaveCount(0);
+        } else {
+          // This second transition distinguishes pinning the learned identity
+          // from allowing every later identity against a stale unknown one.
+          phase = "replaced";
+          await notifyFeed(feed, 3);
+          await expect(row.locator(".host-name")).toHaveText("replaced-identity-marker");
+          await expect(row).toHaveAttribute("data-host-phase", "unreachable-reprobing");
+          await expect(row.locator(".provisioning-warning")).toContainText(
+            "the host changed while its update was being followed",
+          );
+          await expect(row.locator(".host-update-running")).toHaveCount(0);
+          await expect(row.locator(".host-detail")).toBeVisible();
+          const stillRunning = await waitForProgress(request, added.host_id, "running");
+          expect(stillRunning.run_id).toBe(running.run_id);
+        }
+        expect(updates.plans).toBe(1);
+        expect(updates.confirms).toBe(1);
+      } finally {
+        acceptance.release();
+      }
+    });
+  }
+}
+
 test("incarnation churn keeps a followed run while a target change detaches it", async ({
   page,
   request,

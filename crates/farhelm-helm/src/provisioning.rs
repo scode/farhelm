@@ -2259,11 +2259,18 @@ mod tests {
     /// stale refusal. The row is registered with the install paths the
     /// update's probe reports, so the run has no reason to rewrite them
     /// either.
+    ///
+    /// The install also reports an identity throughout: the incompatible
+    /// hello must leave it unrecorded, and the update's compatible attach
+    /// must record it before completion. This is the first-contact case
+    /// that the host row must keep following rather than treating the newly
+    /// learned identity as a different install.
     #[farhelm_testtrace::test]
     async fn updating_a_skewed_host_is_not_stopped_by_its_old_refusal() {
         let root = tempfile::tempdir().unwrap();
         let farhelm = root.path().join("farhelm").display().to_string();
         let state_dir = root.path().join("state").display().to_string();
+        let identity = "identity-learned-after-skew-update";
         let (builder, host) = FleetBuilder::new()
             .await
             .ssh_at(
@@ -2272,6 +2279,7 @@ mod tests {
                 Some(&state_dir),
                 HostScript {
                     protocol: farhelm_proto::PROTOCOL_VERSION - 1,
+                    identity: Some(identity.to_string()),
                     ..HostScript::default()
                 },
             )
@@ -2282,6 +2290,18 @@ mod tests {
             .wait_for_state(host, |state| matches!(state, HostState::VersionSkew { .. }))
             .await
             .expect("actor is running");
+        let before = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .expect("the skewed host is registered");
+        assert_eq!(
+            before.host_identity, None,
+            "an incompatible hello must not establish the install's identity"
+        );
 
         let fleet = Arc::clone(&harness.fleet);
         let manager = Arc::clone(&harness.manager);
@@ -2315,6 +2335,28 @@ mod tests {
             RunStatus::Completed,
             "the update must attach to the fixed supervisor: {:?}",
             finished.message
+        );
+        let after = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .expect("the updated host remains registered");
+        assert_eq!(
+            after.host_identity.as_deref(),
+            Some(identity),
+            "the update's first compatible attach must durably record the identity"
+        );
+        let connected = harness.manager.state(host);
+        assert!(
+            matches!(
+                &connected,
+                Some(HostState::Connected { identity: reported, .. })
+                    if reported.as_deref() == Some(identity)
+            ),
+            "the completed update must have connected the newly identified install: {connected:?}"
         );
     }
 
