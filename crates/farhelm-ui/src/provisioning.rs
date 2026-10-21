@@ -319,10 +319,20 @@ impl From<&Host> for HostBinding {
         Self {
             id: host.id,
             kind: host.kind,
-            destination: host.destination.clone(),
-            identity: host.identity.clone(),
-            remote_farhelm: host.remote_farhelm.clone(),
-            remote_state_dir: host.remote_state_dir.clone(),
+            // Bindings compare dial coordinates and identity, never their display spellings.
+            destination: host
+                .destination
+                .as_ref()
+                .map(|value| value.raw().to_owned()),
+            identity: host.identity.as_ref().map(|value| value.raw().to_owned()),
+            remote_farhelm: host
+                .remote_farhelm
+                .as_ref()
+                .map(|value| value.raw().to_owned()),
+            remote_state_dir: host
+                .remote_state_dir
+                .as_ref()
+                .map(|value| value.raw().to_owned()),
             incarnation: host.incarnation,
         }
     }
@@ -1102,7 +1112,7 @@ pub(crate) fn UninstallConfirmation(
     on_confirm: EventHandler<()>,
     on_cancel: EventHandler<()>,
 ) -> Element {
-    let name = crate::hosts::gui_host_name(&host.name, host.kind == HostKind::Local);
+    let name = crate::hosts::gui_host_name(host.name.raw(), host.kind == HostKind::Local);
     rsx! {
         settings_dialog::HostDialogHeader {
             host: Some(host),
@@ -1177,13 +1187,20 @@ async fn prepare(
                 HostKind::Ssh => {
                     let destination = host
                         .destination
-                        .as_deref()
+                        .as_ref()
+                        .map(|value| value.raw())
                         .ok_or_else(|| "this ssh host has no destination to probe".to_string())?;
                     probe_ssh_host(
                         base,
                         destination,
-                        host.remote_farhelm.as_deref().unwrap_or_default(),
-                        host.remote_state_dir.as_deref().unwrap_or_default(),
+                        host.remote_farhelm
+                            .as_ref()
+                            .map(|value| value.raw())
+                            .unwrap_or_default(),
+                        host.remote_state_dir
+                            .as_ref()
+                            .map(|value| value.raw())
+                            .unwrap_or_default(),
                     )
                     .await?
                 }
@@ -2891,7 +2908,8 @@ pub(crate) fn ProvisioningPanel(
     // exclusion even if this row disappears while the POST is pending.
     let submit_base = base.clone();
     let submit_progress = request_progress.clone();
-    let notice_host_name = host.name.clone();
+    // Retain the raw snapshot for the notice's existing peer-rendered name parts.
+    let notice_host_name = host.name.raw().to_owned();
     let confirmed_submission_host = host.clone();
     let preference_base = base.clone();
     // `skip_future` is setup's permanent answer ("don't ask in the
@@ -3179,7 +3197,7 @@ pub(crate) fn ProvisioningPanel(
                             SetupPlanConfirmation {
                                 confirmation: plan.confirmation,
                                 steps: plan.steps,
-                                name: crate::hosts::gui_host_name(&host.name, host.kind == HostKind::Local),
+                                name: crate::hosts::gui_host_name(host.name.raw(), host.kind == HostKind::Local),
                                 host: Some(host.clone()),
                                 local: host.kind == HostKind::Local,
                                 busy: page_busy,

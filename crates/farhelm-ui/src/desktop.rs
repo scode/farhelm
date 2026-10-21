@@ -1545,7 +1545,7 @@ mod tests {
             icon: Default::default(),
             destination: None,
             alias: None,
-            name: "this machine".to_string(),
+            name: "this machine".into(),
             identity: None,
             remote_farhelm: None,
             remote_state_dir: None,

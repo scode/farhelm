@@ -134,9 +134,9 @@ fn HostRefusalDialog(
     on_close: EventHandler<()>,
     on_remove: EventHandler<()>,
 ) -> Element {
-    let name = gui_host_name(&host.name, host.kind.is_this_machine());
+    let name = gui_host_name(host.name.raw(), host.kind.is_this_machine());
     // The shortened heading must leave the complete destination readable.
-    let destination = display_peer(host.destination.as_deref().unwrap_or(&host.name));
+    let destination = host.destination.as_ref().unwrap_or(&host.name).escaped();
     let action = match refusal.action {
         HostRefusalAction::Setup => "set up host",
         HostRefusalAction::Update => "update host",
@@ -208,6 +208,8 @@ fn HostRefusalDialog(
 ///
 /// An alias stays the name the user chose. Callers with only an unconfirmed
 /// session host must pass `false`, even if its name happens to be `this machine`.
+/// The input is raw so only the exact registry sentinel gets the local wording;
+/// every other value goes through the ordinary peer display helper here.
 pub(crate) fn gui_host_name(name: &str, local: bool) -> String {
     if local && name == "this machine" {
         "local (this machine)".to_string()
@@ -229,7 +231,7 @@ pub(crate) fn name_duplicate_twins(hosts: &mut [Host]) {
         .map(|host| {
             (
                 host.id,
-                gui_host_name(&host.name, host.kind.is_this_machine()),
+                gui_host_name(host.name.raw(), host.kind.is_this_machine()),
             )
         })
         .collect();
@@ -2549,17 +2551,19 @@ fn host_menu_label(name: &str) -> String {
 /// Split the host-menu header into app-authored separators and peer-owned
 /// values so bidi and invisible controls cannot reorder the summary.
 fn host_menu_summary_parts(host: &Host) -> Vec<DetailPart> {
-    let destination = host.destination.as_deref().unwrap_or("local host");
+    let destination = host
+        .destination
+        .as_ref()
+        .map_or_else(|| DetailPart::peer("local host"), DetailPart::peer);
     let version = match &host.state {
-        HostPhase::Connected { build_version, .. } => build_version.as_str(),
-        HostPhase::VersionSkew { peer_build, .. } => peer_build.as_str(),
-        _ => host.remote_farhelm.as_deref().unwrap_or("not connected"),
+        HostPhase::Connected { build_version, .. } => DetailPart::peer(build_version),
+        HostPhase::VersionSkew { peer_build, .. } => DetailPart::peer(peer_build),
+        _ => host
+            .remote_farhelm
+            .as_ref()
+            .map_or_else(|| DetailPart::peer("not connected"), DetailPart::peer),
     };
-    vec![
-        DetailPart::peer(destination),
-        DetailPart::text(" · Farhelm "),
-        DetailPart::peer(version),
-    ]
+    vec![destination, DetailPart::text(" · Farhelm "), version]
 }
 
 /// Flatten peer runs for a text-only tooltip without losing their direction boundary.
@@ -3180,7 +3184,7 @@ fn HostRow(
         .map(|reported| format!("adopt {}", display_identity(reported)));
     let remedy = state_remedy(&host.state);
     let detail = state_detail(&host.state);
-    let shown_name = gui_host_name(&host.name, host.kind.is_this_machine());
+    let shown_name = gui_host_name(host.name.raw(), host.kind.is_this_machine());
     // Keep peer-owned destination and version values isolated in the same
     // `PeerLine` contract used by the session menu. The menu header is a
     // compact identity aid, so it follows the live phase when a peer has
@@ -3530,7 +3534,7 @@ fn HostRow(
                     button {
                         r#type: "button",
                         class: "btn host-row-menu",
-                        aria_label: host_menu_label(&host.name),
+                        aria_label: host_menu_label(host.name.raw()),
                         "data-tooltip": "host actions: settings, update, retry, remove and more",
                         aria_expanded: menu_open,
                         aria_haspopup: "menu",
@@ -3599,7 +3603,7 @@ fn HostRow(
                                 div {
                                 class: "host-row-menu-items session-row-menu-items",
                                 role: "menu",
-                                aria_label: host_menu_label(&host.name),
+                                aria_label: host_menu_label(host.name.raw()),
                                 button {
                                     r#type: "button",
                                     class: "btn session-row-menu-item host-row-menu-item host-retry",
@@ -3966,7 +3970,7 @@ fn HostRow(
             }
             }
             if details_open {
-                if host.alias.clone().flatten().is_some() && let Some(destination) = host.destination.as_deref() {
+                if host.alias.clone().flatten().is_some() && let Some(destination) = host.destination.as_ref() {
                     // The one place an alias never hides the real
                     // destination — which makes it exactly the wrong place
                     // to lose this module's peer-text safety boundary; see
@@ -4039,6 +4043,11 @@ fn HostRow(
 /// alias is a label a person chose on purpose — a "helpful" browser rewrite
 /// would submit text the user did not type and never asked to see
 /// corrected.
+///
+/// The initial draft is raw authenticated registry configuration, and remains
+/// raw in the input so an untouched save keeps the existing editor behavior.
+/// Host/agent advertisements do not supply either setting. At-rest labels use
+/// peer escaping separately; this editor does not submit those display escapes.
 ///
 /// The draft belongs to the panel, not to this form: the panel is the one
 /// owner that outlives everything that can come and go around the editor (a
@@ -4221,7 +4230,7 @@ fn probe_error_parts(error: String) -> Vec<DetailPart> {
 /// to let that destination bypass this module's escaping and isolation:
 /// the row's own NAME gets the identical treatment (`HostRow`'s own doc),
 /// and a destination is exactly as peer/registry-supplied as a name is.
-fn destination_detail_parts(destination: &str) -> Vec<DetailPart> {
+fn destination_detail_parts(destination: impl Into<crate::peer::PeerText>) -> Vec<DetailPart> {
     vec![
         DetailPart::text("destination: "),
         DetailPart::peer(destination),
@@ -4657,9 +4666,9 @@ mod tests {
         Host {
             id: 1,
             kind: HostKind::Ssh,
-            destination: Some("user@box".to_string()),
+            destination: Some("user@box".into()),
             alias: None,
-            name: "user@box".to_string(),
+            name: "user@box".into(),
             identity: None,
             remote_farhelm: None,
             remote_state_dir: None,
@@ -4672,6 +4681,57 @@ mod tests {
             icon: Default::default(),
             color: Default::default(),
         }
+    }
+
+    /// Decoding registry text must preserve the bytes that bind a host action,
+    /// while the same snapshot's menu and destination detail escape for display.
+    /// Otherwise this type migration could silently retarget comparisons or
+    /// turn an invisible character into live GUI formatting.
+    #[farhelm_testtrace::test]
+    fn registry_text_keeps_raw_fingerprints_and_escaped_labels() {
+        let host: Host = serde_json::from_value(serde_json::json!({
+            "id": 7,
+            "kind": "ssh",
+            "name": "build\u{202e}box",
+            "destination": "user@\u{200b}box",
+            "alias": "build\u{202e}box",
+            "identity": "install\u{200b}id",
+            "remote_farhelm": "/bin/\u{202e}farhelm",
+            "remote_state_dir": "/state/\u{200b}farhelm",
+            "state": { "phase": "connecting", "attempt": 1, "last_error": null }
+        }))
+        .expect("registry text fixture decodes");
+
+        assert_eq!(host.name.raw(), "build\u{202e}box");
+        assert_eq!(
+            host.alias
+                .as_ref()
+                .and_then(|alias| alias.as_ref())
+                .map(|alias| alias.raw()),
+            Some("build\u{202e}box")
+        );
+        assert_eq!(
+            host_incarnation(&host),
+            serde_json::to_string(&(
+                7,
+                Some("install\u{200b}id"),
+                Some("user@\u{200b}box"),
+                Some("/bin/\u{202e}farhelm"),
+                Some("/state/\u{200b}farhelm")
+            ))
+            .unwrap()
+        );
+        assert_eq!(gui_host_name(host.name.raw(), false), "build<U+202E>box");
+        assert_eq!(
+            detail_text(&host_menu_summary_parts(&host)),
+            "user@<U+200B>box · Farhelm /bin/<U+202E>farhelm"
+        );
+        assert_eq!(
+            detail_text(&destination_detail_parts(
+                host.destination.as_ref().unwrap()
+            )),
+            "destination: user@<U+200B>box"
+        );
     }
 
     /// A duplicate entry is told which entry holds its machine by that
@@ -4688,7 +4748,7 @@ mod tests {
     fn a_duplicate_names_the_entry_holding_its_machine() {
         let mut owner = host(HostPhase::Unrecognized);
         owner.id = 7;
-        owner.name = "build box".to_string();
+        owner.name = "build box".into();
         let mut duplicate = host(HostPhase::Duplicate {
             twin: 7,
             identity: "shared-install".to_string(),
@@ -5861,9 +5921,9 @@ mod tests {
         Host {
             id,
             kind: HostKind::Ssh,
-            destination: Some("user@box".to_string()),
+            destination: Some("user@box".into()),
             alias: None,
-            name: "user@box".to_string(),
+            name: "user@box".into(),
             identity: None,
             remote_farhelm: None,
             remote_state_dir: None,

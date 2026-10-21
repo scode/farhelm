@@ -693,12 +693,16 @@ pub type HostId = i64;
 /// Mirror of the helm's `GET /api/hosts` row (farhelm-helm's `HostView`,
 /// PLAN_M6.md item 5): the registry's own facts plus the live connection
 /// state that makes them actionable.
+///
+/// Registry text retains its raw wire spelling until a consumer chooses
+/// presentation or an operational use. In particular, identity/configuration
+/// fingerprints and editor seeds must not store escaped display spellings.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Host {
     pub id: HostId,
     pub kind: HostKind,
     /// `None` for the local row, always present for an ssh row.
-    pub destination: Option<String>,
+    pub destination: Option<peer::PeerText>,
     /// The optional stored alias, editable from the host row's "⋯" menu.
     ///
     /// The outer option is a COMPATIBILITY signal, not a value: an older
@@ -709,18 +713,20 @@ pub struct Host {
     /// editor at all — an older helm has no `/api/hosts/{id}/alias` route
     /// to submit to, so showing it would be a dead end.
     #[serde(default, deserialize_with = "double_option")]
-    pub alias: Option<Option<String>>,
+    pub alias: Option<Option<peer::PeerText>>,
     /// The helm's own rendering of the host's name — the same string
     /// session rows carry in `host_name`, so a row and its chip never
     /// disagree about what a host is called.
-    pub name: String,
+    pub name: peer::PeerText,
     /// The identity the REGISTRY holds, not what the host is reporting. The
     /// two differ exactly while an identity decision is pending, and the
     /// reported one rides `state` — see [`HostPhase::IdentityMismatch`],
     /// whose `reported` is what an adopt must name.
-    pub identity: Option<String>,
-    pub remote_farhelm: Option<String>,
-    pub remote_state_dir: Option<String>,
+    pub identity: Option<peer::PeerText>,
+    /// Optional remote executable override; `None` uses the host's default.
+    pub remote_farhelm: Option<peer::PeerText>,
+    /// Optional remote state path override, retained verbatim for probing.
+    pub remote_state_dir: Option<peer::PeerText>,
     pub state: HostPhase,
     /// Which CONNECTION this host is on — the helm's own opaque, monotonic
     /// token, which changes whenever the host's client does (a retarget, an
@@ -2487,7 +2493,13 @@ mod tests {
         assert_eq!(null.alias, Some(None));
         let present: Host =
             serde_json::from_value(body(Some(serde_json::json!("shortname")))).unwrap();
-        assert_eq!(present.alias, Some(Some("shortname".to_string())));
+        assert_eq!(
+            present
+                .alias
+                .as_ref()
+                .map(|alias| alias.as_ref().map(|value| value.raw())),
+            Some(Some("shortname"))
+        );
     }
 
     /// An old-shaped `Session` JSON (no `status` field at all — exactly

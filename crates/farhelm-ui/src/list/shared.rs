@@ -595,7 +595,8 @@ pub(super) fn host_options(hosts: &[Host]) -> Vec<HostOption> {
         .iter()
         .map(|host| HostOption {
             id: host.id,
-            name: host.name.clone(),
+            // HostOption owns raw matching input; its label applies the GUI spelling later.
+            name: host.name.raw().to_owned(),
             local: host.kind.is_this_machine(),
             icon: host.icon,
             color: host.color,
@@ -605,7 +606,10 @@ pub(super) fn host_options(hosts: &[Host]) -> Vec<HostOption> {
                 .then(|| phase_display_label(&host.state).to_string()),
             incarnation: host_incarnation(host),
             connection: host.incarnation,
-            identity: host.identity.clone(),
+            identity: host
+                .identity
+                .as_ref()
+                .map(|identity| identity.raw().to_owned()),
             identity_mismatch: matches!(host.state, crate::HostPhase::IdentityMismatch { .. }),
         })
         .collect()
@@ -965,10 +969,10 @@ pub(super) mod tests {
         let catalog = vec![Host {
             id: 7,
             kind: HostKind::Ssh,
-            destination: Some("user@box".to_string()),
+            destination: Some("user@box".into()),
             alias: None,
-            name: "user@box".to_string(),
-            identity: Some("install-7".to_string()),
+            name: "user@box".into(),
+            identity: Some("install-7".into()),
             remote_farhelm: None,
             remote_state_dir: None,
             state: crate::HostPhase::IdentityMismatch {
@@ -1102,10 +1106,10 @@ pub(super) mod tests {
         Host {
             id,
             kind,
-            destination: (kind == HostKind::Ssh).then(|| format!("user@box-{id}")),
+            destination: (kind == HostKind::Ssh).then(|| format!("user@box-{id}").into()),
             alias: None,
-            name: format!("host-{id}"),
-            identity: Some(format!("install-{id}")),
+            name: format!("host-{id}").into(),
+            identity: Some(format!("install-{id}").into()),
             remote_farhelm: None,
             remote_state_dir: None,
             state: crate::HostPhase::Connected {

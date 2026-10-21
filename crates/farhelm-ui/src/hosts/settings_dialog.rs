@@ -541,7 +541,7 @@ pub(super) fn HostSettingsDialog(
     on_close: EventHandler<()>,
 ) -> Element {
     let id = host.id;
-    let shown_name = gui_host_name(&host.name, host.kind.is_this_machine());
+    let shown_name = gui_host_name(host.name.raw(), host.kind.is_this_machine());
     // Same gates the row's panel used: a destination exists only for a kind
     // the registry manages, and the alias editor only against a helm that
     // sent the `alias` key at all (see `Host.alias`), whatever the kind.
@@ -659,7 +659,7 @@ pub(super) fn HostSettingsDialog(
                             }
                         } else {
                             span { class: "host-settings-value peer-value", dir: "ltr",
-                                "{display_peer(&destination)}"
+                                "{destination.escaped()}"
                             }
                             button {
                                 r#type: "button",
@@ -668,7 +668,9 @@ pub(super) fn HostSettingsDialog(
                                 "data-tooltip": "edit: change the ssh destination Farhelm uses for this host",
                                 disabled: busy || editing.is_some(),
                                 onclick: {
-                                    let destination = destination.clone();
+                                    // These are authenticated registry settings, not host advertisements.
+                                    // Keep the existing raw editor seed so saving untouched data round-trips.
+                                    let destination = destination.raw().to_owned();
                                     move |_| on_edit_start.call((id, EditField::Destination, destination.clone()))
                                 },
                                 "edit"
@@ -690,7 +692,7 @@ pub(super) fn HostSettingsDialog(
                             }
                         } else {
                             span { class: "host-settings-value peer-value", dir: "ltr",
-                                "{display_peer(alias.as_deref().unwrap_or(\"none\"))}"
+                                "{alias.as_ref().map_or_else(|| display_peer(\"none\"), |alias| alias.escaped())}"
                             }
                             button {
                                 r#type: "button",
@@ -699,7 +701,8 @@ pub(super) fn HostSettingsDialog(
                                 "data-tooltip": "edit: change the name this host is shown under",
                                 disabled: busy || editing.is_some(),
                                 onclick: {
-                                    let alias = alias.clone().unwrap_or_default();
+                                    // As with destination, the editor owns the user's exact stored bytes.
+                                    let alias = alias.as_ref().map(|alias| alias.raw().to_owned()).unwrap_or_default();
                                     move |_| on_edit_start.call((id, EditField::Alias, alias.clone()))
                                 },
                                 "edit"
@@ -849,9 +852,9 @@ pub(super) fn HostRemoveDialog(
     on_remove: EventHandler<bool>,
     on_cancel: EventHandler<()>,
 ) -> Element {
-    let shown_name = gui_host_name(&host.name, host.kind.is_this_machine());
+    let shown_name = gui_host_name(host.name.raw(), host.kind.is_this_machine());
     // The shortened heading must leave the complete destination readable.
-    let destination = display_peer(host.destination.as_deref().unwrap_or(&host.name));
+    let destination = host.destination.as_ref().unwrap_or(&host.name).escaped();
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
             div {
