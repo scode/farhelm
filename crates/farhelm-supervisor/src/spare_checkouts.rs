@@ -103,6 +103,17 @@ fn canonical_uuid(value: &str) -> bool {
     uuid::Uuid::parse_str(value).is_ok_and(|id| id.to_string() == value)
 }
 
+/// Use the same strict lifecycle alphabet for taking and startup recovery.
+/// A legacy or malformed launch cannot claim a folder cleanup cannot protect.
+pub(crate) fn claim_name(repo: &str, session: &str, generation: i64) -> Option<CString> {
+    let name = format!(".{repo}:claimed-{session}-{generation}");
+    if matches!(private_name(repo, &name), Some(PrivateName::Claimed { .. })) {
+        CString::new(name).ok()
+    } else {
+        None
+    }
+}
+
 /// Finish spare recovery while the caller holds this repository's existing
 /// nonblocking cache flock. A take never takes that lock; its live claim is
 /// protected by the separately collected launch snapshot instead.

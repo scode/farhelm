@@ -22,6 +22,11 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+// The take belongs to this shim's durable preparation stage and uses the
+// same child environment; keeping it private avoids a second launch API.
+#[path = "spare_take.rs"]
+mod spare_take;
+
 /// The environment marker every launched session carries: its own session
 /// id, set by the shim just before `exec`. Two independent consumers rely
 /// on it, both documented in SPEC_impl.md/lore/2026-07-27-m2-process-tree-
@@ -257,6 +262,11 @@ pub struct CheckoutPreparation {
     /// initially launched there. Existing launch specs remain off.
     #[serde(default)]
     pub claude_trust: bool,
+    /// Frozen permission to consume a prepared checkout. Omitted false keeps
+    /// retained launch specs unchanged; production stays off until the helm
+    /// sends the setting and the supervisor can build replacements.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_spare: bool,
     /// The resolved shell the hook runs under.
     pub shell: String,
     /// Supervisor-generated path of this preparation's persistent state
@@ -1695,7 +1705,14 @@ fn run_checkout_preparation(
             false,
         );
     }
-    if let Err(detail) = clone_with_repo_cache(spec, preparation) {
+    let clone_result = spare_take::take(spec, preparation, status_path).and_then(|taken| {
+        if taken {
+            Ok(())
+        } else {
+            clone_with_repo_cache(spec, preparation)
+        }
+    });
+    if let Err(detail) = clone_result {
         return abort_preparation(preparation, status_path, seam, "clone", detail, true);
     }
 
@@ -1781,19 +1798,11 @@ fn run_checkout_preparation(
     Ok(())
 }
 
-/// Refresh the host's object cache and produce an independent GitHub checkout.
-///
-/// This is part of the durable CloneStarted stage, in the user's terminal and
-/// environment. The working-copy lock is already held; the repository lock is
-/// taken second and held through dissociation, including foreground Git gc.
-/// Every failure names the cache and aborts the clone stage without fallback.
-/// Git's repository-local overrides cannot redirect these commands, while Git
-/// configuration and credentials still come from the user's environment. The
-/// agent and preparation hook keep their ordinary launch environment.
-fn clone_with_repo_cache(
-    spec: &LaunchSpec,
-    preparation: &CheckoutPreparation,
-) -> Result<(), String> {
+/// Give cache clones, spare inspection and updates the same Git environment.
+/// Repository-location overrides cannot redirect preparation into an inherited
+/// repository; ordinary config, credentials and URL rewrites remain available.
+/// Agent and post-clone commands retain their separate ordinary environment.
+fn git_preparation_command(spec: &LaunchSpec) -> std::process::Command {
     // `git rev-parse --local-env-vars`, excluding its configuration variables:
     // -C and explicit paths cannot protect the cache when GIT_DIR or another
     // repository-local override takes precedence. Keep configuration so URL
@@ -1812,6 +1821,22 @@ fn clone_with_repo_cache(
         "GIT_SHALLOW_FILE",
         "GIT_COMMON_DIR",
     ];
+    let mut command = launch_child_command(std::ffi::OsStr::new("git"), spec);
+    command.env("GIT_TERMINAL_PROMPT", "1");
+    for name in REPOSITORY_ENV_VARS {
+        command.env_remove(name);
+    }
+    command
+}
+
+/// Refresh the cache under its existing lock and produce an independent clone.
+/// The working-copy lock is held first; the cache lock spans dissociation and
+/// foreground gc. Errors abort visibly, with no timeout or plain-clone retry.
+/// A take never enters this fallback after a fetch failure or any moved entry.
+fn clone_with_repo_cache(
+    spec: &LaunchSpec,
+    preparation: &CheckoutPreparation,
+) -> Result<(), String> {
     let cache = &preparation.repo_cache_path;
     let result = (|| {
         if !cache.is_absolute() {
@@ -1822,16 +1847,13 @@ fn clone_with_repo_cache(
 
         // argv, never shell text. init is deliberately idempotent, including
         // after an interrupted first fetch; no staging or cache repair policy.
-        let mut init = launch_child_command(std::ffi::OsStr::new("git"), spec);
+        let mut init = git_preparation_command(spec);
         init.args(["init", "--bare", "-q"])
             .arg(cache)
             .env("GIT_TERMINAL_PROMPT", "1");
-        for name in REPOSITORY_ENV_VARS {
-            init.env_remove(name);
-        }
         run_preparation_child_process(&mut init, "cache init")?;
 
-        let mut fetch = launch_child_command(std::ffi::OsStr::new("git"), spec);
+        let mut fetch = git_preparation_command(spec);
         // This is our own bare cache, named explicitly so Git's
         // safe.bareRepository=explicit policy need not be relaxed. Consolidate
         // accumulated fetch packs sooner: dissociation otherwise repeats the
@@ -1856,16 +1878,13 @@ fn clone_with_repo_cache(
                 "+refs/tags/*:refs/tags/*",
             ])
             .env("GIT_TERMINAL_PROMPT", "1");
-        for name in REPOSITORY_ENV_VARS {
-            fetch.env_remove(name);
-        }
         run_preparation_child_process(&mut fetch, "cache fetch")?;
 
         // Git before 2.55.0 can lose a cached commit's tree during dissociation
         // when the reference's commit-graph covers it ("unable to parse commit").
         // Upstream fix 3d8e4004c6 restores that lookup; remove this workaround once
         // Git 2.55 is Farhelm's minimum. Neither repository's config is changed.
-        let mut clone = launch_child_command(std::ffi::OsStr::new("git"), spec);
+        let mut clone = git_preparation_command(spec);
         clone
             .args(["-c", "core.commitGraph=false", "clone", "--reference"])
             .arg(cache)
@@ -1876,9 +1895,6 @@ fn clone_with_repo_cache(
                 &preparation.cwd,
             ])
             .env("GIT_TERMINAL_PROMPT", "1");
-        for name in REPOSITORY_ENV_VARS {
-            clone.env_remove(name);
-        }
         run_preparation_child_process(&mut clone, "clone")?;
         lock.mark_used()
             .map_err(|e| format!("could not record cache use: {e}"))?;
@@ -2128,6 +2144,7 @@ mod tests {
     //! these tests must do the same without poisoning the shared test process.
 
     use super::*;
+    use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::PermissionsExt;
 
     const EXEC_FAILURE_CHILD_SPEC: &str = "FARHELM_LAUNCH_EXEC_FAILURE_CHILD_SPEC";
@@ -3479,6 +3496,7 @@ exec sleep 60
                 directory_inode: cwd_metadata.ino(),
                 post_clone,
                 claude_trust: false,
+                keep_spare: false,
                 shell: shell.to_string(),
                 state_path,
             };
@@ -3528,7 +3546,11 @@ exec sleep 60
                 working_directory: Some(PathBuf::from(&self.preparation.cwd)),
                 argv: FAKE_AGENT_ARGV.iter().map(|s| s.to_string()).collect(),
                 status_file: status_path_for_spec(&self.spec_path),
-                session_id: "prep-session".to_string(),
+                session_id: parse_launch_file_name(
+                    self.spec_path.file_name().unwrap().to_str().unwrap(),
+                )
+                .map(|(id, _)| id.to_owned())
+                .unwrap_or_else(|| "prep-session".to_string()),
                 session_token: "prep-token".to_string(),
                 supervisor_sock: self.tmp.path().join("supervisor.sock"),
                 farhelm_bin_dir: self.bin_dir(),
@@ -4685,6 +4707,792 @@ printf 'AGENT-RAN\n'
     // configured with GIT_CONFIG_* variables ON THE CHILD COMMAND (never
     // the test process). No network, no credentials.
     // ---------------------------------------------------------------------
+
+    /// A complete hand-placed spare, reached through a child-only URL rewrite.
+    /// The wrapper pins the selected Git and private config for both direct
+    /// take calls and real shim children, without changing this process's env.
+    struct SpareFixture {
+        prep: PrepFixture,
+        seed: PathBuf,
+        upstream: PathBuf,
+        slot: PathBuf,
+        git: PathBuf,
+        home: PathBuf,
+        calls: PathBuf,
+    }
+
+    impl SpareFixture {
+        /// Seed two branches and a tag so pruning assertions establish that
+        /// data existed before the take, rather than merely testing absence.
+        fn new() -> Self {
+            let mut prep = PrepFixture::new("https://github.com/example/repo.git", None, "/bin/sh");
+            prep.preparation.keep_spare = true;
+            prep.preparation.cwd = Path::new(&prep.preparation.cwd)
+                .canonicalize()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            prep.spec_path = prep
+                .tmp
+                .path()
+                .join(format!("{}.0.json", uuid::Uuid::new_v4()));
+            let root = prep.tmp.path().canonicalize().unwrap();
+            let seed = root.join("seed");
+            let upstream = root.join("upstream.git");
+            let home = root.join("home");
+            std::fs::create_dir(&home).unwrap();
+            std::fs::create_dir(&seed).unwrap();
+            let git = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .map(|directory| directory.join("git"))
+                .find(|path| path.is_file())
+                .expect("real Git is required for spare take fixtures")
+                .canonicalize()
+                .unwrap();
+            let slot = root
+                .join(crate::working_copies::SPARE_DIR_NAME)
+                .join("example/repo");
+            std::fs::create_dir_all(slot.parent().unwrap()).unwrap();
+            let calls = root.join("git-calls");
+            let fixture = Self {
+                prep,
+                seed,
+                upstream,
+                slot,
+                git,
+                home,
+                calls,
+            };
+            std::fs::write(fixture.home.join(".gitconfig"), format!(
+                "[url \"file://{}\"]\n\tinsteadOf = https://github.com/example/repo.git\n[clone]\n\tdefaultRemoteName = upstream\n",
+                fixture.upstream.display())).unwrap();
+            fixture.command(&fixture.seed, &["init", "-q"]);
+            fixture.command(&fixture.seed, &["symbolic-ref", "HEAD", "refs/heads/trunk"]);
+            fixture.command(&fixture.seed, &["config", "user.name", "fixture"]);
+            fixture.command(
+                &fixture.seed,
+                &["config", "user.email", "fixture@example.invalid"],
+            );
+            std::fs::write(fixture.seed.join("changed.txt"), "before\n").unwrap();
+            std::fs::write(fixture.seed.join("unchanged.txt"), "unchanged\n").unwrap();
+            fixture.command(&fixture.seed, &["add", "."]);
+            fixture.command(&fixture.seed, &["commit", "-qm", "initial"]);
+            fixture.command(&fixture.seed, &["branch", "obsolete"]);
+            fixture.command(&fixture.seed, &["tag", "old-tag"]);
+            fixture.command(
+                &fixture.seed,
+                &["init", "--bare", "-q", fixture.upstream.to_str().unwrap()],
+            );
+            fixture.command(
+                &fixture.seed,
+                &["push", fixture.upstream.to_str().unwrap(), "--all"],
+            );
+            fixture.command(
+                &fixture.seed,
+                &["push", fixture.upstream.to_str().unwrap(), "--tags"],
+            );
+            fixture.command(
+                &fixture.upstream,
+                &["symbolic-ref", "HEAD", "refs/heads/trunk"],
+            );
+            fixture.command(
+                &fixture.seed,
+                &[
+                    "clone",
+                    "--origin",
+                    "upstream",
+                    "--",
+                    &fixture.prep.preparation.clone_url,
+                    fixture.slot.to_str().unwrap(),
+                ],
+            );
+            assert_eq!(
+                fixture.command(&fixture.slot, &["symbolic-ref", "HEAD"]),
+                "refs/heads/trunk\n"
+            );
+            assert!(fixture.slot.join(".git").is_dir());
+            fixture.install_wrapper("");
+            let marker = farhelm_proto::text::shell_quote(fixture.prep.marker().to_str().unwrap());
+            fixture.prep.install_script(
+                "fake-agent",
+                &format!("#!/bin/sh\nprintf 'agent\\n' >> {marker}\n"),
+            );
+            fixture
+        }
+
+        /// Run small fixture setup/observation commands with only the selected
+        /// Git's helper path and private HOME. No ambient repository can leak in.
+        fn command(&self, cwd: &Path, args: &[&str]) -> String {
+            let mut command = std::process::Command::new(&self.git);
+            command
+                .env_clear()
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                .env("HOME", &self.home)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", self.home.join(".gitconfig"))
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .current_dir(cwd)
+                .args(args);
+            if let Some(path) = std::env::var_os("GIT_EXEC_PATH") {
+                command.env("GIT_EXEC_PATH", path);
+            }
+            let output = command.output().unwrap();
+            assert!(output.status.success(), "fixture Git {args:?}: {output:?}");
+            String::from_utf8(output.stdout).unwrap()
+        }
+
+        /// The injected prefix changes only a named Git boundary. All ordinary
+        /// commands, including fallback clone, still run the same real Git.
+        fn install_wrapper(&self, prefix: &str) {
+            let quote = farhelm_proto::text::shell_quote;
+            let exec_path = std::env::var_os("GIT_EXEC_PATH")
+                .map(|path| format!("export GIT_EXEC_PATH={}\n", quote(path.to_str().unwrap())))
+                .unwrap_or_default();
+            self.prep.install_script("git", &format!(
+                "#!/bin/sh\nexport HOME={}\nexport GIT_CONFIG_NOSYSTEM=1\nexport GIT_CONFIG_GLOBAL={}\nexport GIT_CONFIG_SYSTEM=/dev/null\nunset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS\n{exec_path}printf '%s\\n' \"$*\" >> {}\n{prefix}\nexec {} \"$@\"\n",
+                quote(self.home.to_str().unwrap()), quote(self.home.join(".gitconfig").to_str().unwrap()),
+                quote(self.calls.to_str().unwrap()), quote(self.git.to_str().unwrap())));
+        }
+
+        /// Advance the original branch and change both positive and negative
+        /// refs, while leaving the default branch unchanged for a valid take.
+        fn advance(&self) {
+            std::fs::write(self.seed.join("changed.txt"), "after\n").unwrap();
+            self.command(&self.seed, &["add", "changed.txt"]);
+            self.command(&self.seed, &["commit", "-qm", "advance"]);
+            self.command(&self.seed, &["tag", "new-tag"]);
+            self.command(
+                &self.seed,
+                &[
+                    "push",
+                    self.upstream.to_str().unwrap(),
+                    "trunk",
+                    "refs/tags/new-tag",
+                    ":obsolete",
+                    ":refs/tags/old-tag",
+                ],
+            );
+        }
+
+        /// Load the exact serialized launch shape the real shim uses. Its
+        /// canonical session/generation filename also names startup's claim.
+        fn spec(&self) -> LaunchSpec {
+            serde_json::from_slice(&std::fs::read(self.prep.write_spec()).unwrap()).unwrap()
+        }
+
+        /// Direct take tests can distinguish declined from failed without
+        /// substituting a fake clone implementation for production fallback.
+        fn take(&self) -> Result<bool, String> {
+            let spec = self.spec();
+            spare_take::take(&spec, &self.prep.preparation, &spec.status_file)
+        }
+
+        /// Read recorded argv only after the owned command has ended. Each
+        /// fixture is private, so another test cannot contribute calls.
+        fn calls(&self) -> String {
+            std::fs::read_to_string(&self.calls).unwrap_or_default()
+        }
+    }
+
+    /// An unchanged spare still avoids the cache lock, while preserving the
+    /// allocated inode and timestamps rather than replacing the whole folder.
+    #[farhelm_testtrace::test]
+    fn spare_take_unchanged_avoids_cache_and_preserves_identity() {
+        let fixture = SpareFixture::new();
+        let metadata = std::fs::metadata(&fixture.prep.preparation.cwd).unwrap();
+        let identity = crate::working_copies::DirectoryEvidence::capture(
+            &std::fs::File::open(&fixture.prep.preparation.cwd).unwrap(),
+        )
+        .unwrap();
+        let before = std::fs::metadata(fixture.slot.join("unchanged.txt"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let raw_name = std::ffi::OsStr::from_bytes(b"untracked-\xff");
+        std::fs::write(fixture.slot.join(raw_name), b"hook-created content").unwrap();
+        std::os::unix::fs::symlink("/unrelated-target", fixture.slot.join("link")).unwrap();
+        // A regular file at the cache parent makes any cache acquire fail;
+        // success therefore distinguishes take from an unnoticed clone.
+        std::fs::write(
+            fixture
+                .prep
+                .preparation
+                .repo_cache_path
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap(),
+            b"cache unavailable",
+        )
+        .unwrap();
+        assert!(fixture.take().unwrap());
+        let after = std::fs::metadata(&fixture.prep.preparation.cwd).unwrap();
+        assert_eq!((metadata.dev(), metadata.ino()), (after.dev(), after.ino()));
+        identity
+            .verify(&std::fs::File::open(&fixture.prep.preparation.cwd).unwrap())
+            .unwrap();
+        assert_eq!(
+            std::fs::read(Path::new(&fixture.prep.preparation.cwd).join(raw_name)).unwrap(),
+            b"hook-created content"
+        );
+        assert_eq!(
+            std::fs::read_link(Path::new(&fixture.prep.preparation.cwd).join("link")).unwrap(),
+            PathBuf::from("/unrelated-target")
+        );
+        assert_eq!(
+            before,
+            std::fs::metadata(Path::new(&fixture.prep.preparation.cwd).join("unchanged.txt"))
+                .unwrap()
+                .modified()
+                .unwrap()
+        );
+        assert!(!fixture.slot.exists());
+        let calls = fixture.calls();
+        assert_eq!(
+            calls
+                .lines()
+                .filter(|line| line.contains(" fetch "))
+                .count(),
+            1,
+            "{calls}"
+        );
+        assert!(
+            !calls
+                .lines()
+                .any(|line| line.starts_with("clone ") || line.contains("--git-dir ")),
+            "{calls}"
+        );
+    }
+
+    /// Ref pruning and final-folder filtering must coexist: unchanged files
+    /// retain old metadata, changed files run smudge, and post-merge precedes
+    /// the ordinary post-clone command and agent in the real shim.
+    #[farhelm_testtrace::test]
+    fn spare_take_updates_refs_filters_and_hooks_in_final_folder() {
+        let mut fixture = SpareFixture::new();
+        let quote = farhelm_proto::text::shell_quote;
+        let events = fixture.prep.marker();
+        let smudge = fixture.prep.tmp.path().join("smudge");
+        std::fs::write(
+            &smudge,
+            format!(
+                "#!/bin/sh\nprintf 'smudge:%s:%s\\n' \"$PWD\" \"$1\" >> {}\n/bin/cat\n",
+                quote(events.to_str().unwrap())
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&smudge, std::fs::Permissions::from_mode(0o700)).unwrap();
+        fixture.command(
+            &fixture.slot,
+            &[
+                "config",
+                "filter.probe.smudge",
+                &format!("{} %f", quote(smudge.to_str().unwrap())),
+            ],
+        );
+        fixture.command(&fixture.slot, &["config", "filter.probe.clean", "/bin/cat"]);
+        std::fs::create_dir_all(fixture.slot.join(".git/info")).unwrap();
+        std::fs::write(
+            fixture.slot.join(".git/info/attributes"),
+            "*.txt filter=probe\n",
+        )
+        .unwrap();
+        let hooks = fixture.prep.tmp.path().join("hooks");
+        std::fs::create_dir(&hooks).unwrap();
+        fixture.command(
+            &fixture.slot,
+            &["config", "core.hooksPath", hooks.to_str().unwrap()],
+        );
+        std::fs::write(
+            hooks.join("post-merge"),
+            format!(
+                "#!/bin/sh\nprintf 'merge:%s\\n' \"$PWD\" >> {}\n",
+                quote(events.to_str().unwrap())
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            hooks.join("post-merge"),
+            std::fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fixture.prep.preparation.post_clone = Some(format!(
+            "printf 'hook:%s\\n' \"$PWD\" >> {}",
+            quote(events.to_str().unwrap())
+        ));
+        let before = std::fs::metadata(fixture.slot.join("unchanged.txt"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let before_refs = fixture.command(&fixture.slot, &["show-ref"]);
+        assert!(
+            before_refs.contains("old-tag")
+                && before_refs.contains("obsolete")
+                && !before_refs.contains("new-tag"),
+            "{before_refs}"
+        );
+        fixture.advance();
+        let (report, terminal, status) = fixture.prep.run_shim_in_child();
+        assert!(status.success() && report.is_empty(), "{report} {terminal}");
+        assert_eq!(fixture.prep.state().unwrap(), PreparationState::Ready);
+        let cwd = Path::new(&fixture.prep.preparation.cwd);
+        assert_eq!(
+            std::fs::read_to_string(cwd.join("changed.txt")).unwrap(),
+            "after\n"
+        );
+        assert_eq!(
+            std::fs::metadata(cwd.join("unchanged.txt"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            before
+        );
+        let refs = fixture.command(cwd, &["show-ref"]);
+        assert!(
+            refs.contains("refs/tags/new-tag")
+                && !refs.contains("old-tag")
+                && !refs.contains("obsolete"),
+            "{refs}"
+        );
+        let events = std::fs::read_to_string(events).unwrap();
+        assert_eq!(
+            events,
+            format!(
+                "smudge:{}:changed.txt\nmerge:{}\nhook:{}\nagent\n",
+                cwd.display(),
+                cwd.display(),
+                cwd.display()
+            )
+        );
+        assert!(terminal.contains("Farhelm: updating a checkout prepared earlier from GitHub."));
+        assert!(!terminal.contains("git version"));
+    }
+
+    /// A failed authenticated fetch must not turn into a second clone attempt,
+    /// hook or agent. Restart refuses the retained failed clone stage too.
+    #[farhelm_testtrace::test]
+    fn spare_take_fetch_failure_never_clones_or_runs_later_steps() {
+        let fixture = SpareFixture::new();
+        fixture.install_wrapper("if [ \"$3\" = fetch ]; then exit 23; fi");
+        let (report, terminal, _) = fixture.prep.run_shim_in_child();
+        assert!(
+            report.contains("spare fetch exited with status 23"),
+            "{report} {terminal}"
+        );
+        assert!(
+            matches!(fixture.prep.state().unwrap(), PreparationState::Failed { stage, .. } if stage == "clone")
+        );
+        assert!(!fixture.prep.marker().exists());
+        let calls = fixture.calls();
+        assert_eq!(
+            calls
+                .lines()
+                .filter(|line| line.contains(" fetch "))
+                .count(),
+            1
+        );
+        assert!(!calls.contains("clone ") && !calls.contains("merge "));
+        assert!(
+            std::fs::read_dir(&fixture.prep.preparation.cwd)
+                .unwrap()
+                .next()
+                .is_none()
+        );
+        let (report, _, _) = fixture.prep.run_shim_in_child();
+        assert!(report.contains("not automatically repeated"), "{report}");
+        assert_eq!(fixture.calls(), calls);
+    }
+
+    /// Old/unknown Git and a disabled flag leave the ready slot untouched,
+    /// preserving today's clone rather than failing at an unsupported option.
+    #[farhelm_testtrace::test]
+    fn spare_take_off_old_unknown_and_empty_decline() {
+        for version in ["git version 2.16.6", "unrecognized wrapper"] {
+            let fixture = SpareFixture::new();
+            fixture.install_wrapper(&format!(
+                "if [ \"$1\" = --version ]; then printf '%s\\n' '{version}'; exit 0; fi"
+            ));
+            assert!(!fixture.take().unwrap());
+            assert!(fixture.slot.join(".git").is_dir());
+            assert!(!fixture.calls().contains(" fetch "));
+            let (report, terminal, status) = fixture.prep.run_shim_in_child();
+            assert!(status.success() && report.is_empty(), "{report} {terminal}");
+            assert!(fixture.calls().contains("--dissociate"));
+            assert!(fixture.slot.join(".git").is_dir());
+        }
+        let mut fixture = SpareFixture::new();
+        fixture.prep.preparation.keep_spare = false;
+        assert!(!fixture.take().unwrap());
+        assert!(fixture.calls().is_empty());
+        let (report, terminal, status) = fixture.prep.run_shim_in_child();
+        assert!(status.success() && report.is_empty(), "{report} {terminal}");
+        assert!(fixture.calls().contains("--dissociate"));
+        // The empty-slot check needs a fresh empty allocated destination;
+        // it must not borrow the checkout populated by the preceding clone.
+        let fixture = SpareFixture::new();
+        std::fs::rename(&fixture.slot, fixture.slot.with_file_name("parked")).unwrap();
+        assert!(!fixture.take().unwrap());
+    }
+
+    /// Structural metadata failures leave the destination empty and claim for
+    /// cleanup. No network request is needed to reject a non-plain clone.
+    #[farhelm_testtrace::test]
+    fn spare_take_refuses_unsupported_git_layouts_before_fetch() {
+        for kind in [
+            "missing",
+            "gitfile",
+            "symlink",
+            "detached",
+            "worktree",
+            "common",
+            "bare",
+            "alternates",
+        ] {
+            let fixture = SpareFixture::new();
+            match kind {
+                "missing" => {
+                    std::fs::rename(fixture.slot.join(".git"), fixture.slot.join("parked-git"))
+                        .unwrap()
+                }
+                "gitfile" => {
+                    std::fs::rename(fixture.slot.join(".git"), fixture.slot.join("parked-git"))
+                        .unwrap();
+                    std::fs::write(fixture.slot.join(".git"), "gitdir: parked-git\n").unwrap();
+                }
+                "symlink" => {
+                    std::fs::rename(fixture.slot.join(".git"), fixture.slot.join("parked-git"))
+                        .unwrap();
+                    std::os::unix::fs::symlink("parked-git", fixture.slot.join(".git")).unwrap();
+                }
+                "detached" => {
+                    fixture.command(&fixture.slot, &["checkout", "--detach", "-q"]);
+                }
+                "worktree" => {
+                    fixture.command(
+                        &fixture.slot,
+                        &["config", "core.worktree", fixture.slot.to_str().unwrap()],
+                    );
+                }
+                "common" => {
+                    std::fs::write(fixture.slot.join(".git/commondir"), "../parked\n").unwrap();
+                }
+                "bare" => {
+                    fixture.command(&fixture.slot, &["config", "core.bare", "true"]);
+                }
+                "alternates" => {
+                    std::fs::write(
+                        fixture.slot.join(".git/objects/info/alternates"),
+                        "/unavailable/objects\n",
+                    )
+                    .unwrap();
+                }
+                _ => unreachable!(),
+            }
+            assert!(!fixture.take().unwrap(), "layout {kind}");
+            assert!(!fixture.calls().contains(" fetch "), "layout {kind}");
+            assert!(
+                std::fs::read_dir(&fixture.prep.preparation.cwd)
+                    .unwrap()
+                    .next()
+                    .is_none()
+            );
+        }
+    }
+
+    /// Deleting the checked-out upstream branch is structural fallback on
+    /// every Git version, including old versions with a stale remote HEAD.
+    #[farhelm_testtrace::test]
+    fn spare_take_deleted_branch_falls_back_to_real_clone() {
+        let fixture = SpareFixture::new();
+        fixture.command(&fixture.seed, &["branch", "replacement"]);
+        fixture.command(
+            &fixture.seed,
+            &["push", fixture.upstream.to_str().unwrap(), "replacement"],
+        );
+        fixture.command(
+            &fixture.upstream,
+            &["symbolic-ref", "HEAD", "refs/heads/replacement"],
+        );
+        fixture.command(
+            &fixture.seed,
+            &["push", fixture.upstream.to_str().unwrap(), ":trunk"],
+        );
+        let (report, terminal, status) = fixture.prep.run_shim_in_child();
+        assert!(status.success() && report.is_empty(), "{report} {terminal}");
+        assert_eq!(
+            fixture.command(
+                Path::new(&fixture.prep.preparation.cwd),
+                &["symbolic-ref", "HEAD"]
+            ),
+            "refs/heads/replacement\n"
+        );
+        assert!(fixture.calls().contains("--dissociate"));
+        assert!(
+            std::fs::read_dir(fixture.slot.parent().unwrap())
+                .unwrap()
+                .any(|entry| entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(":claimed-"))
+        );
+    }
+
+    /// Renaming HEAD without deleting the old branch is detected only on new
+    /// Git; older versions intentionally accept the clone-time HEAD value.
+    #[farhelm_testtrace::test]
+    fn spare_take_default_branch_change_obeys_git_capability() {
+        let fixture = SpareFixture::new();
+        fixture.command(&fixture.seed, &["branch", "replacement"]);
+        fixture.command(
+            &fixture.seed,
+            &["push", fixture.upstream.to_str().unwrap(), "replacement"],
+        );
+        fixture.command(
+            &fixture.upstream,
+            &["symbolic-ref", "HEAD", "refs/heads/replacement"],
+        );
+        let version = fixture.command(&fixture.seed, &["--version"]);
+        let version = version.strip_prefix("git version ").unwrap();
+        let mut parts = version.split('.');
+        let pair = (
+            parts.next().unwrap().parse::<u64>().unwrap(),
+            parts.next().unwrap().parse::<u64>().unwrap(),
+        );
+        assert_eq!(fixture.take().unwrap(), pair < (2, 48));
+    }
+
+    /// The first failed move can decline because cwd remains empty; after
+    /// .git moved, no rollback or clone can hide a partially prepared tree.
+    #[farhelm_testtrace::test]
+    fn spare_take_rename_failure_boundary_retains_partial_checkout() {
+        for fail_after_git in [false, true] {
+            let fixture = SpareFixture::new();
+            let spec = fixture.spec();
+            write_preparation_state(
+                &fixture.prep.preparation.state_path,
+                "wc-1",
+                &PreparationState::CloneStarted,
+                &crate::files::RealFs,
+            )
+            .unwrap();
+            let mut moved = 0;
+            let result = spare_take::take_with_rename(
+                &spec,
+                &fixture.prep.preparation,
+                &spec.status_file,
+                &mut |from, name, to, target| {
+                    if name == c".git" && !fail_after_git {
+                        return Err(std::io::Error::from_raw_os_error(libc::EXDEV));
+                    }
+                    if fail_after_git && moved == 1 {
+                        return Err(std::io::Error::other("entry move failure"));
+                    }
+                    crate::working_copies::rename_at_noreplace(from, name, to, target)?;
+                    if name == c".git" {
+                        moved = 1;
+                    }
+                    Ok(())
+                },
+            );
+            if fail_after_git {
+                assert!(result.unwrap_err().contains("partial move"));
+                assert!(
+                    Path::new(&fixture.prep.preparation.cwd)
+                        .join(".git")
+                        .is_dir()
+                );
+                let (report, _, _) = fixture.prep.run_shim_in_child();
+                assert!(report.contains("not automatically repeated"), "{report}");
+            } else {
+                assert!(!result.unwrap());
+                assert!(
+                    std::fs::read_dir(&fixture.prep.preparation.cwd)
+                        .unwrap()
+                        .next()
+                        .is_none()
+                );
+            }
+            assert!(!fixture.calls().contains("merge ") && !fixture.calls().contains("clone "));
+        }
+    }
+
+    /// A single no-replace claim selects the winner without waiting for a
+    /// cache lock. Independent allocated directories must not share contents.
+    #[farhelm_testtrace::test]
+    fn spare_take_concurrent_launches_have_one_winner() {
+        let fixture = SpareFixture::new();
+        let first = fixture.spec();
+        let mut second = first.clone();
+        second.session_id = uuid::Uuid::new_v4().to_string();
+        second.status_file = fixture
+            .prep
+            .tmp
+            .path()
+            .join(format!("{}.0.status", second.session_id));
+        let directory = fixture
+            .prep
+            .tmp
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("other-checkout");
+        std::fs::create_dir(&directory).unwrap();
+        let mut preparation = fixture.prep.preparation.clone();
+        let metadata = std::fs::metadata(&directory).unwrap();
+        preparation.cwd = directory.to_str().unwrap().to_owned();
+        preparation.directory_device = metadata.dev();
+        preparation.directory_inode = metadata.ino();
+        let barrier = std::sync::Barrier::new(2);
+        let outcomes = std::thread::scope(|scope| {
+            let left = scope.spawn(|| {
+                barrier.wait();
+                spare_take::take(&first, &fixture.prep.preparation, &first.status_file).unwrap()
+            });
+            let right = scope.spawn(|| {
+                barrier.wait();
+                spare_take::take(&second, &preparation, &second.status_file).unwrap()
+            });
+            [left.join().unwrap(), right.join().unwrap()]
+        });
+        assert_eq!(outcomes.into_iter().filter(|taken| *taken).count(), 1);
+        assert_ne!(
+            Path::new(&fixture.prep.preparation.cwd)
+                .join(".git")
+                .exists(),
+            directory.join(".git").exists()
+        );
+        assert_eq!(
+            fixture
+                .calls()
+                .lines()
+                .filter(|line| line.contains(" fetch "))
+                .count(),
+            1
+        );
+    }
+
+    /// A claimed folder cannot be mistaken for Ready after interruption.
+    /// Restart refuses durable CloneStarted without issuing any Git command.
+    #[farhelm_testtrace::test]
+    fn spare_take_interrupted_claim_is_not_restarted() {
+        let fixture = SpareFixture::new();
+        let spec = fixture.spec();
+        let name = crate::spare_checkouts::claim_name("repo", &spec.session_id, 0).unwrap();
+        std::fs::rename(
+            &fixture.slot,
+            fixture
+                .slot
+                .parent()
+                .unwrap()
+                .join(std::ffi::OsStr::from_bytes(name.to_bytes())),
+        )
+        .unwrap();
+        write_preparation_state(
+            &fixture.prep.preparation.state_path,
+            "wc-1",
+            &PreparationState::CloneStarted,
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        let (report, _, _) = fixture.prep.run_shim_in_child();
+        assert!(report.contains("not automatically repeated"));
+        assert!(fixture.calls().is_empty());
+        assert!(!fixture.prep.marker().exists());
+    }
+
+    /// Verbose or stuck version wrappers are optional-path refusal, not
+    /// unbounded terminal spam or a preparation hang. The query leader is reaped.
+    #[farhelm_testtrace::test]
+    fn spare_take_bounded_queries_decline_and_reap() {
+        for body in [
+            "while :; do printf 'version flood\\n'; done",
+            "while :; do :; done",
+            "(/usr/bin/tail -f /dev/null) & printf 'git version 2.43.0\\n'; exit 0",
+        ] {
+            let fixture = SpareFixture::new();
+            let pid = fixture.prep.tmp.path().join("query.pid");
+            fixture.install_wrapper(&format!(
+                "if [ \"$1\" = --version ]; then printf '%s' \"$$\" > {}; {body}; fi",
+                farhelm_proto::text::shell_quote(pid.to_str().unwrap())
+            ));
+            assert!(!fixture.take().unwrap());
+            let leader = std::fs::read_to_string(pid)
+                .unwrap()
+                .parse::<libc::pid_t>()
+                .unwrap();
+            // SAFETY: signal zero observes this fixture's captured/reaped child,
+            // not an unrelated process selected by a command-name search.
+            assert_eq!(unsafe { libc::kill(leader, 0) }, -1);
+            assert!(fixture.slot.join(".git").is_dir());
+            assert!(!fixture.calls().contains(" fetch "));
+        }
+    }
+
+    /// Omitted false keeps old retained launch encodings stable; a missing
+    /// private field must never enable a take after a supervisor upgrade.
+    #[farhelm_testtrace::test]
+    fn spare_take_private_flag_is_omitted_and_defaults_false() {
+        let fixture = PrepFixture::new("https://github.com/example/repo.git", None, "/bin/sh");
+        let value = serde_json::to_value(&fixture.preparation).unwrap();
+        assert!(value.get("keep_spare").is_none());
+        let decoded: CheckoutPreparation = serde_json::from_value(value).unwrap();
+        assert!(!decoded.keep_spare);
+    }
+
+    /// A positively observed replacement or nonempty allocation is a refusal,
+    /// never permission to fall through into clone at that same destination.
+    #[farhelm_testtrace::test]
+    fn spare_take_unsafe_destination_fails_before_claim() {
+        for replaced in [false, true] {
+            let mut fixture = SpareFixture::new();
+            if replaced {
+                fixture.prep.preparation.directory_inode += 1;
+            } else {
+                std::fs::write(
+                    Path::new(&fixture.prep.preparation.cwd).join("foreign"),
+                    b"retained",
+                )
+                .unwrap();
+            }
+            assert!(fixture.take().unwrap_err().contains("destination"));
+            assert!(fixture.slot.join(".git").is_dir());
+            assert!(!fixture.calls().contains(" fetch "));
+        }
+    }
+
+    /// A user hook may dirty files in the earlier clone. A conflicting update
+    /// fails after moving, retains that content, and never runs later steps.
+    #[farhelm_testtrace::test]
+    fn spare_take_final_merge_failure_retains_checkout_and_refuses_restart() {
+        let fixture = SpareFixture::new();
+        std::fs::write(fixture.slot.join("changed.txt"), "local hook edits\n").unwrap();
+        fixture.advance();
+        let (report, terminal, _) = fixture.prep.run_shim_in_child();
+        assert!(
+            report.contains("spare fast-forward exited with status"),
+            "{report} {terminal}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(Path::new(&fixture.prep.preparation.cwd).join("changed.txt"))
+                .unwrap(),
+            "local hook edits\n"
+        );
+        assert!(!fixture.prep.marker().exists());
+        assert!(!fixture.slot.exists());
+        let calls = fixture.calls();
+        let (report, _, _) = fixture.prep.run_shim_in_child();
+        assert!(report.contains("not automatically repeated"));
+        assert_eq!(calls, fixture.calls());
+    }
+
+    /// The synchronous preparation API is also used from async test/service
+    /// contexts; bounded local queries must not nest a Tokio runtime there.
+    #[farhelm_testtrace::test]
+    async fn spare_take_inside_runtime_uses_its_isolated_query_context() {
+        let fixture = SpareFixture::new();
+        assert!(fixture.take().unwrap());
+    }
 
     /// An inherited repository override must not redirect checkout preparation's
     /// forced fetch into an unrelated repository. The foreign branch and tag are

@@ -479,10 +479,11 @@ fn allocated_bytes(metadata: &rustix::fs::Stat) -> Option<u64> {
     u64::try_from(metadata.st_blocks).ok()?.checked_mul(512)
 }
 
-/// Observe a size entry without counting data supplied by a mount. Linux
-/// O_PATH can open a symlink itself and refuses even same-device file binds;
-/// macOS has no bind mounts, and its no-follow device check covers mounts.
-fn size_metadata(parent: impl AsFd, name: &CStr) -> std::io::Result<rustix::fs::Stat> {
+/// Observe an entry without following links or accepting data from a mount.
+/// Size accounting and spare-take preflight share this boundary: Linux O_PATH
+/// observes a symlink itself and refuses even same-device file binds; macOS's
+/// no-follow device check covers its mounts. This grants no delete authority.
+pub(crate) fn entry_metadata(parent: impl AsFd, name: &CStr) -> std::io::Result<rustix::fs::Stat> {
     #[cfg(target_os = "linux")]
     {
         let fd = rustix::fs::openat2(
@@ -541,7 +542,7 @@ fn disk_usage_dir(directory: &fs::File, deadline: Instant, remaining: &mut usize
         }
         *remaining -= 1;
         let parent = stack.last()?.fd().ok()?;
-        let metadata = size_metadata(parent, name).ok()?;
+        let metadata = entry_metadata(parent, name).ok()?;
         if identities.insert((metadata.st_dev, metadata.st_ino)) {
             bytes = bytes.checked_add(allocated_bytes(&metadata)?)?;
         }

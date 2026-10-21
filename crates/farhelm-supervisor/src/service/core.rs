@@ -10019,6 +10019,9 @@ impl Supervisor {
                     directory_inode: accepted.identity.1,
                     post_clone: resolved.post_clone.clone(),
                     claude_trust: resolved.claude_trust,
+                    // Take support is private until the frozen public setting
+                    // and replacement builder arrive together.
+                    keep_spare: false,
                     // The supervisor's own resolved shell; the hook runs
                     // under it with the checkout as its working directory.
                     shell: shell.clone(),
