@@ -2543,7 +2543,7 @@ fn uninstall_notice_compact_parts(notice: &UninstallNotice) -> Vec<DetailPart> {
 /// recorded/reported value [`adoptable`] compares, a distinct thing from
 /// the name or destination a menu happens to be labeled with.
 fn host_menu_label(name: &str) -> String {
-    format!("host actions for {}", clamp_title(&display_peer(name)))
+    format!("host actions for {}", clamp_title(&name.into()))
 }
 
 /// Split the host-menu header into app-authored separators and peer-owned

@@ -1073,19 +1073,17 @@ pub(crate) fn install_row_menu_outside_dismiss() {
 /// rows apart, and the ellipsis says something was cut. Char-based, not
 /// byte-based, so a multi-byte value can never split a codepoint.
 ///
-/// Callers that build a label from PEER-supplied text (`hosts::host_menu_label`)
-/// are expected to run it through [`display_peer`](crate::peer::display_peer)
-/// FIRST, so this clamp routinely sees `<U+XXXX>` escape tokens rather than
-/// the live control characters they stand for. The naive char-count cut
-/// point can land inside one of those tokens (eight to ten characters) — the
+/// The input remains raw peer text until this helper escapes it, so a caller
+/// cannot accidentally clamp before exposing hidden characters. The naive
+/// char-count cut can land inside an escape token (eight to ten characters) — the
 /// character-boundary safety above says nothing about TOKEN boundaries — so
 /// [`back_off_from_split_escape`] nudges the cut point left, out of any
 /// token it would otherwise bisect, before truncating. A clamped title that
-/// happens to contain that literal shape without having gone through
-/// `display_peer` at all only ever loses a few extra characters as a
-/// harmless side effect; it never gains any.
-pub(crate) fn clamp_title(title: &str) -> String {
+/// contains that literal shape rather than an escaped character only loses
+/// a few extra characters as a harmless side effect; it never gains any.
+pub(crate) fn clamp_title(title: &crate::peer::PeerText) -> String {
     const MAX_CHARS: usize = 64;
+    let title = title.escaped();
     let mut clamped: String = title.chars().take(MAX_CHARS + 1).collect();
     if clamped.chars().count() > MAX_CHARS {
         let cut = clamped
@@ -1981,9 +1979,9 @@ mod tests {
     /// once rather than per caller.
     #[farhelm_testtrace::test]
     fn clamp_title_cuts_long_values_with_an_ellipsis() {
-        assert_eq!(clamp_title("short"), "short");
+        assert_eq!(clamp_title(&"short".into()), "short");
         let long = "x".repeat(200);
-        let clamped = clamp_title(&long);
+        let clamped = clamp_title(&long.into());
         assert_eq!(
             clamped.chars().count(),
             65,
@@ -1993,16 +1991,16 @@ mod tests {
         // Char-based, not byte-based: a multi-byte title must never be
         // cut mid-codepoint (which would not even be a `String`).
         let multibyte = "é".repeat(200);
-        assert_eq!(clamp_title(&multibyte).chars().count(), 65);
+        assert_eq!(clamp_title(&multibyte.into()).chars().count(), 65);
     }
 
-    /// A clamp applied to `display_peer`'s output must never bisect one of
-    /// its `<U+XXXX>` escape tokens — a truncated token such as `<U+206`
+    /// Escaping inside the typed clamp must never bisect one of the resulting
+    /// `<U+XXXX>` tokens — a truncated token such as `<U+206`
     /// with no closing `>` is not a shorter escape, it is meaningless
     /// literal text indistinguishable from something the
     /// peer actually sent (`hosts::host_menu_label` is the real caller this
-    /// protects: an ssh destination escaped by `display_peer` before being
-    /// clamped for a menu's `aria-label`).
+    /// protects: an ssh destination escaped before being clamped for a menu's
+    /// `aria-label`). Actual control characters exercise both phases.
     ///
     /// The fixture is built so the naive char-count cut point (64) lands
     /// inside the eighth token's `<U+2066` prefix, one character before its
@@ -2014,8 +2012,8 @@ mod tests {
     fn clamp_title_never_bisects_an_escape_token() {
         // Covered separately below: tokens longer than eight characters.
         let token = "<U+2066>";
-        let long = format!("AB{}", token.repeat(9));
-        let clamped = clamp_title(&long);
+        let long = format!("AB{}", "\u{2066}".repeat(9));
+        let clamped = clamp_title(&long.into());
         assert_eq!(
             clamped,
             format!("AB{}…", token.repeat(7)),
@@ -2037,7 +2035,7 @@ mod tests {
         // before the seventh token's `>`.
         assert_eq!(long.chars().nth(64), Some('>'));
         assert_eq!(
-            clamp_title(&long),
+            clamp_title(&format!("AB{}", "\u{E0041}".repeat(8)).into()),
             format!("AB{}…", tag.repeat(6)),
             "the partial nine-character token is dropped whole"
         );

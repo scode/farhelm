@@ -49,6 +49,56 @@
 use dioxus::prelude::*;
 use farhelm_proto::text::is_presentation_unsafe;
 
+/// Raw peer-authored text that requires an explicit presentation choice.
+///
+/// Storage and serialization preserve the original bytes: escaping here would
+/// corrupt request values, identity comparisons and clipboard contents. There
+/// is deliberately no `Display`, string dereference or conversion back into a
+/// `String`; a consumer chooses escaped presentation or explicitly borrows raw
+/// data. Directly decoded protocol types still use the helpers below.
+#[derive(
+    Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Deserialize, serde::Serialize,
+)]
+#[serde(transparent)]
+pub struct PeerText(String);
+
+impl PeerText {
+    /// Borrow the original value for matching, transport and other raw contracts.
+    /// This is not presentation-safe; a raw display needs its own justification.
+    pub(crate) fn raw(&self) -> &str {
+        &self.0
+    }
+
+    /// Show the existing visible spelling, including empty/whitespace markers.
+    /// The original bytes remain available separately for round trips.
+    pub(crate) fn escaped(&self) -> String {
+        display_peer(self.raw())
+    }
+}
+
+/// Mark owned bytes as peer text without validating or normalizing them.
+impl From<String> for PeerText {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+/// Capture a borrowed peer value without changing its operational spelling.
+impl From<&str> for PeerText {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+/// Keep diagnostic and component-key spelling identical to the former String.
+/// Some ownership keys Debug-format nested identity options; adding a tuple
+/// wrapper to that output would remount components despite unchanged evidence.
+impl std::fmt::Debug for PeerText {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0, formatter)
+    }
+}
+
 /// One peer-supplied value as it should be SHOWN.
 ///
 /// Escapes everything `is_presentation_unsafe` rejects, and gives the two degenerate
@@ -290,6 +340,25 @@ pub(crate) fn PeerBlock(class: String, text: String, scroll_label: Option<String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Choosing a presentation must never change bytes later sent or compared.
+    /// Transparent JSON and String-compatible Debug also preserve the former
+    /// wire values and identity-derived component keys, including nested options.
+    #[farhelm_testtrace::test]
+    fn typed_peer_text_preserves_raw_wire_and_debug_values() {
+        for raw in ["", "   ", "left\u{202e}right\u{200b}", "שלום", "<U+202E>"] {
+            let wire = serde_json::to_string(raw).unwrap();
+            let text: PeerText = serde_json::from_str(&wire).unwrap();
+            assert_eq!(text.raw(), raw);
+            assert_eq!(text.escaped(), display_peer(raw));
+            assert_eq!(serde_json::to_string(&text).unwrap(), wire);
+            assert_eq!(format!("{text:?}"), format!("{raw:?}"));
+            assert_eq!(
+                format!("{:?}", Some(Some(text))),
+                format!("{:?}", Some(Some(raw)))
+            );
+        }
+    }
 
     /// Why this matters: rename seeds its field with this spelling, and the
     /// field's text becomes the new title as soon as the user types. Spec:

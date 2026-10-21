@@ -41,7 +41,7 @@ use crate::menu_panel::{
     PanelPlacement, clamp_title, measurement_outcome, session_menu_placement_style,
     session_menu_pointer_style, should_measure_on_mount,
 };
-use crate::peer::{DetailPart, PeerLine, display_peer};
+use crate::peer::{DetailPart, PeerLine};
 
 /// The bell's accessible name: which session it belongs to, and how many
 /// notifications are unread, since a screen reader cannot hear the loud
@@ -52,10 +52,10 @@ pub(super) fn bell_label(title: &str, unread: usize) -> String {
 
 /// "notifications for <title>", the open list's accessible name and the
 /// start of the bell's. The title is peer text (agents may rename any
-/// session), so it is escaped before `menu_panel::clamp_title` cuts it, the
-/// order that function's own doc requires.
+/// session), so the typed `menu_panel::clamp_title` exposes hidden characters
+/// before cutting the accessible name.
 fn list_label(title: &str) -> String {
-    format!("notifications for {}", clamp_title(&display_peer(title)))
+    format!("notifications for {}", clamp_title(&title.into()))
 }
 
 /// "1 unread", "3 unread" or "none unread", shared by the accessible name
@@ -357,6 +357,7 @@ fn close_when_focus_leaves(key: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::peer::display_peer;
 
     /// Session titles are peer text, and an accessible name is read aloud,
     /// so the bell's name carries the escaped title: a bidi override or an

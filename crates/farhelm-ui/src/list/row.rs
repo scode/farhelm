@@ -210,7 +210,7 @@ fn row_class(stale: bool, selected: bool, menu_open: bool) -> &'static str {
 /// was cut. Escape before clamping so hidden characters are visible and
 /// the shared clamp can preserve whole escape tokens at its boundary.
 fn menu_label(title: &str) -> String {
-    format!("session actions for {}", clamp_title(&display_peer(title)))
+    format!("session actions for {}", clamp_title(&title.into()))
 }
 
 /// Split the header's saved launch facts into peer and app-authored runs.
@@ -1118,15 +1118,15 @@ pub(super) fn SessionRow(
     let prompt_label = if confirming {
         format!(
             "delete confirmation for {}",
-            clamp_title(&display_peer(&session.title))
+            clamp_title(&session.title.clone().into())
         )
     } else if confirming_replace {
         format!(
             "replace confirmation for {}",
-            clamp_title(&display_peer(&session.title))
+            clamp_title(&session.title.clone().into())
         )
     } else {
-        format!("rename {}", clamp_title(&display_peer(&session.title)))
+        format!("rename {}", clamp_title(&session.title.clone().into()))
     };
     // The separator earns its place only when something actually
     // precedes delete. Rename is unconditional today, so this is always
@@ -2852,7 +2852,7 @@ mod tests {
         // Escaping expands the second control character across the cut.
         // This fixture must distinguish the order of the two operations.
         assert_ne!(
-            display_peer(&clamp_title(LONG_SPOOF)),
+            display_peer(&LONG_SPOOF.chars().take(64).collect::<String>()),
             long_accessible_title
         );
         for (title, prompt, cwd, shown) in [
