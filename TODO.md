@@ -199,12 +199,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Doc todo
 
-- Bring the README overview/splash content into the main documentation.
-- Document the harness support feature matrix so supported and unsupported features are clear.
-- Answer "Is it vibe coded?" with a clear explanation.
-- Tell users that on Codex sessions Farhelm starts with hook injection, hooks Codex has not reviewed still run: those in
-  their Codex config home and, once a workspace is trusted, the workspace's own `.codex/` hooks. Trusting a workspace
-  means trusting its Codex configuration to run commands. SPEC_impl.md's hook-injection section states the rule.
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
   roots shared with or writable by other local accounts, and does not check. SPEC.md's fresh-checkout section states the
   rule.
