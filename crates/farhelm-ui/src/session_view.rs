@@ -1456,7 +1456,7 @@ pub(crate) fn SessionView(
                 match &outcome {
                     // Only a restart WITH new settings is ever refused this way;
                     // a plain restart relaunches a choice already made.
-                    Err(e) if e.yolo_confirmation && with.is_some() => {
+                    Err(e) if e.outcome.requires_yolo() && with.is_some() => {
                         let ask = {
                             let shown = current.peek();
                             crate::yolo_confirm::YoloAsk {
@@ -1658,7 +1658,8 @@ pub(crate) fn SessionView(
                     on_replaced.call(new_session);
                 }
                 Err(error)
-                    if error.yolo_confirmation && yolo_questions.write().insert(id.clone()) =>
+                    if error.outcome.requires_yolo()
+                        && yolo_questions.write().insert(id.clone()) =>
                 {
                     // A new question starts without an earlier one's
                     // "don't ask again" failure.
@@ -1682,7 +1683,7 @@ pub(crate) fn SessionView(
                     }));
                 }
                 Err(error) => {
-                    if !error.retain_replace_key() {
+                    if error.outcome.retires_retry() {
                         end_intent();
                     }
                     replace_error.set(Some(error.text));

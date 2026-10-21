@@ -2464,7 +2464,7 @@ pub(crate) fn ListView(
                         refresh(Trigger::Explicit);
                     }
                     Err(e) => {
-                        if !e.retain_replace_key() {
+                        if e.outcome.retires_retry() {
                             end_intent();
                         }
                         // Keyed by the SOURCE id: the row this error belongs
@@ -2474,7 +2474,7 @@ pub(crate) fn ListView(
                         // that same failure the message already names the new
                         // session's id too (`api::replace_session`'s own doc),
                         // so nothing here needs to remember it separately.
-                        if e.yolo_confirmation {
+                        if e.outcome.requires_yolo() {
                             let ask = crate::yolo_confirm::YoloAsk {
                                 host: source.host,
                                 // The confirmation escapes this raw snapshot
