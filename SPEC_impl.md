@@ -1786,20 +1786,21 @@ check, never from anything a supervisor wrote in a message body. The agent relay
 and the terminal WebSocket were not audited against this rule when it was written.
 
 Protocol 53 adds `create_unaccepted` to the existing `Error` reply. An ordinary keyed create can set it only when the
-reservation matches the full request (including its tombstone digest after store reopening) and key lifetime, has
-settled `Failed`, and has no surviving session row. The ordinary rollback paths settle that state only after confirming
-the session's terminal is gone; a retained or ambiguous launch does not qualify. That is not proof that every descendant
-of the failed launch stopped: the rollback after a failed tmux creation accepts a systemd scope kill it could not
-confirm once the portable sweep finds nothing, and after a failed database confirmation a sweep error only adds to the
-returned error. A survivor of either can then keep running beside the fresh attempt this proof allows, which needs two
-coinciding faults and falls under SPEC.md's two-fault exception in "Lifecycle operations". Keeping the session when such
-cleanup is unconfirmed is deferred in TODO.md's entry on requiring a systemd user manager on Linux. Managed-checkout and
-agent-request recovery encodings are excluded. This is reply metadata: the stored refusal and its same-key replay do not
-change. Missing proof, including a failed proof lookup, stays inconclusive. The helm accepts this host-local statement
-only on a `CreateSession` reply and translates it to its existing definitely-unaccepted HTTP marker. A flag on a failed
-Delete cannot retire a successful replacement's identity. Launchers drop a create identity on that marker, so repairing
-a missing folder and pressing Launch again starts a fresh attempt without weakening recovery after an uncertain or
-partially successful attempt.
+reservation matches the full request and key lifetime, has settled `Failed`, has no surviving session row, and is within
+the 24-hour refusal window. Legacy tombstone fingerprint matching remains readable; new refusals keep the fingerprint
+and error detail as written, and new Deletes remove the reservation. The ordinary rollback paths settle that state only
+after confirming the session's terminal is gone; a retained or ambiguous launch does not qualify. That is not proof that
+every descendant of the failed launch stopped: the rollback after a failed tmux creation accepts a systemd scope kill it
+could not confirm once the portable sweep finds nothing, and after a failed database confirmation a sweep error only
+adds to the returned error. A survivor of either can then keep running beside the fresh attempt this proof allows, which
+needs two coinciding faults and falls under SPEC.md's two-fault exception in "Lifecycle operations". Keeping the session
+when such cleanup is unconfirmed is deferred in TODO.md's entry on requiring a systemd user manager on Linux.
+Managed-checkout and agent-request recovery encodings are excluded. This is reply metadata: the stored refusal and its
+same-key replay do not change. Missing proof, including a failed proof lookup, stays inconclusive. The helm accepts this
+host-local statement only on a `CreateSession` reply and translates it to its existing definitely-unaccepted HTTP
+marker. A flag on a failed Delete cannot retire a successful replacement's identity. Launchers drop a create identity on
+that marker, so repairing a missing folder and pressing Launch again starts a fresh attempt without weakening recovery
+after an uncertain or partially successful attempt.
 
 `SessionInfo::last_work_started_at` is the millisecond ordering key for the session list's stable work bursts. It was
 added within protocol version 20 under the same additive rule: absent decodes to zero, and zero falls back to
@@ -2030,24 +2031,24 @@ stdout as the answer, and an id carrying a newline forges a second line in whate
 check is refused rather than sanitized, because a scrubbed id is not the session's id and everything done with it
 afterwards would address something that does not exist.
 
-One deliberate difference from `farhelm spawn` is worth stating rather than discovering. Spawn's `intent_key` gets a
-session-lifetime reservation scope, because the child lives on the asking session's own host, whose supervisor knows the
-asking session (the helm marks the spawn's create with `key_lives_with_session`, see "Agent launches from the CLI"). An
-agent's `create`/`clone` may land on a supervisor that has never heard of the asking session, so the key currently gets
-the same permanent, interactive scope any other helm-mediated create gets. Permanent retention is not a security
-requirement for these agent-originated requests: a retry is a new request that the user approves like any other
-(SPEC.md, Agent-spawned sessions), so how long a key is kept is not what authorizes it. A keyed create into a managed
-checkout is the exception: its retry returns or finishes the approved attempt without a new card, which only ever
-completes that exact request for the session that asked, on its host (SPEC.md, Local authority and trust between hosts).
-The current implementation remains described here until a separate retention change is made. Session-lifetime scoping is
-not merely unimplemented here — it is not expressible, since the target supervisor may never have heard of the asking
-session. Every kind of key is stored scoped to the asking session and its host by the helm relay, so a key only ever
-replays for the session that used it. Every spawn is an agent `create` placed on the asking session's own host and goes
-through the helm, so the user can be asked first (SPEC.md, Agent-spawned sessions); there is no offline spawn. With
-`--inherit-agent` the asking session's supervisor fills in that session's exact stored launch
-(`SpawnPlacement::inherited_launch`, overwriting whatever the CLI sent) before relaying it, and the helm launches that
-launch rather than resolving templates and flags. A session-authenticated `CreateSession` sent straight to the
-supervisor is refused outright (protocol 41), so the relay is the only way a session creates one.
+Every keyed create gets a session-lifetime reservation: app creates, agent `create`/`clone`, and spawn all retain the
+key until the created session is deleted. This lifetime follows the created session on its target supervisor, regardless
+of whether that supervisor knows the asking session. Caller scoping is separate: the helm relay namespaces every agent
+key by the asking session and its host, so a key only ever replays for the session that used it. Refusals without a
+surviving session retain their fingerprint and error detail for 24 hours; a retained error session keeps its reservation
+until Delete, without an age limit.
+
+This reverses the July 2026 keep-forever decision, which protected against a retry racing Delete and re-creating the
+session. The maintainer chose session lifetime because a key that outlives its session protects nothing, losing a reply
+and then deleting and retrying is rare, and an agent's fresh request still needs the user's approval under the ordinary
+rules. An approved managed-checkout retry can finish that exact approved attempt without another card only while its
+created session still exists; after Delete it is a fresh request too (SPEC.md, Local authority and trust between hosts).
+Every spawn is an agent `create` placed on the asking session's own host and goes through the helm, so the user can be
+asked first (SPEC.md, Agent-spawned sessions); there is no offline spawn. With `--inherit-agent` the asking session's
+supervisor fills in that session's exact stored launch (`SpawnPlacement::inherited_launch`, overwriting whatever the CLI
+sent) before relaying it, and the helm launches that launch rather than resolving templates and flags. A
+session-authenticated `CreateSession` sent straight to the supervisor is refused outright (protocol 41), so the relay is
+the only way a session creates one.
 
 The discovery verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
 narrowings are contractual rather than incidental. The session listing is the same whole-fleet listing the UI reads, cut
@@ -2164,19 +2165,28 @@ reconnect terminals retain it.
 Protocol 24 carries validated checkout destinations separately from existing cwd requests. Only full-authority callers
 can preview, discover or create them; restricted session clients cannot supply helm-owned configuration. Shared proto
 validation constructs the sole HTTPS GitHub URL and validates naming; the supervisor repeats validation at admission.
-Existing request fingerprint encodings remain frozen. When Delete removes a session, its permanent reservations keep
-only a `sha256:` digest of their fingerprint (and, for a managed checkout, a digest of its client identity, which
-reconciliation compares): enough to answer a retry of the same request and refuse a different one under the spent key,
-without keeping the command line the fingerprint holds. Opening the store applies the same reduction to reservations of
-sessions deleted before it existed. Fresh fingerprints include the original client identity and resolved configuration,
-while reconciliation looks up the original request before consulting mutable settings.
+Existing request fingerprint encodings remain frozen, including the legacy tombstone digest decoders and matchers.
+Delete now removes every reservation for the session in the same transaction as the session row, including `Pending`
+claims; it neither settles them `Created` nor writes a digest. A retry after Delete allocates a fresh session identity.
+Fresh fingerprints still include the original client identity and resolved configuration, while reconciliation looks up
+a retained original request before consulting mutable settings.
 
-Reconciliation defaults to lookup: an unknown key has no effect. When the helm must refuse an unknown request, it asks
-the supervisor to settle a permanent identity-bound refusal under intent and directory admission. The supervisor reads
-back the stored row before returning proof, so a concurrent winner remains authoritative. Known pending attempts still
-use their recorded recovery state; reconciliation is therefore not generally read-only. Storage or authority failure, an
-identity mismatch or an unverified installation cannot establish definite refusal. The identity-only refusal uses a
-versioned fresh fingerprint variant and the ordinary serialized create-field cap; existing fingerprints stay unchanged.
+Refusals with no surviving session row keep their fingerprint and `error_detail` as written for at most 24 hours of
+retry protection, measured from the existing `created_at`. Expired refusals are pruned before each keyed create or
+reconciliation lookup and on writable store open; there is no timer. An idle store can therefore retain expired rows
+until its next writable open or keyed request, but an expired row cannot answer a retry. A retained error session is not
+a refusal eligible for this age prune. Writable open also removes legacy `Created` reservations whose sessions are gone
+and converts live permanent reservations to session lifetime. This replaces the old startup digest sweep without a
+schema change: older supervisors already understand session-lifetime rows. The cleanup is one-way; a downgrade cannot
+restore deleted-session answers for records it removed.
+
+Reconciliation defaults to lookup: an unknown key allocates no session and records no refusal. Admission still expires
+old refusal rows. When the helm must refuse an unknown request, it asks the supervisor to settle an identity-bound
+refusal with the same 24-hour window under intent and directory admission. The supervisor reads back the stored row
+before returning proof, so a concurrent winner remains authoritative. Known pending attempts still use their recorded
+recovery state; reconciliation is therefore not generally read-only. Storage or authority failure, an identity mismatch
+or an unverified installation cannot establish definite refusal. The identity-only refusal uses a versioned fresh
+fingerprint variant and the ordinary serialized create-field cap; existing fingerprints stay unchanged.
 
 Schema 18 stores the checkout registry, memberships, origin provenance and preparation snapshot alongside session and
 intent state. Directory admission serializes allocation, membership insertion and last-reference teardown. Intent locks
@@ -4870,10 +4880,11 @@ create-idempotency reservations already on disk were written for the old shapes.
 compatibility added for them. A key is matched by plain string equality between the stored fingerprint and the
 fingerprint of the retry, so a retry that crosses the upgrade with an old key whose shape changed is refused as key
 reuse (`Conflict`) and never runs a second launch, while one whose shape did not (a raw create into an existing
-directory, whose fingerprint is a frozen tuple) still replayed until launch kinds; deleting the rows instead would let
-one intended create start two sessions, which SPEC.md forbids. The frozen fingerprint encoder for a helm-resolved
-profile bundle (`"resolved_profile"`, added in protocol 15) was deleted with profiles: nothing produces that shape any
-more, and its stored rows need no encoder to stay unmatchable.
+directory, whose fingerprint is a frozen tuple) still replayed until launch kinds. These rows follow the same retention
+rules as other reservations; removing a live claim merely because its encoding is old would let one intended create
+start two sessions, which SPEC.md forbids. The frozen fingerprint encoder for a helm-resolved profile bundle
+(`"resolved_profile"`, added in protocol 15) was deleted with profiles: nothing produces that shape any more, and its
+stored rows need no encoder to stay unmatchable.
 
 Launch kinds (protocol 39, supervisor schema 26) change every create's shape: each now fingerprints as
 `("session_launch_v1", parent, cwd, title, launch)` with the resolved launch whole, and the raw, parented and structured
@@ -4889,9 +4900,10 @@ reply. Under profile removal alone (protocol 38) a row stored before it still de
 removed `source_profile` member, and the helm's fresh-create retry reused the stored string, so such a lost reply was
 still recovered. Launch kinds end that: every row from before them is `github_checkout_v3`, and a stored mode that fails
 to decode under the current types is refused explicitly ("no compatible fresh-checkout recovery snapshot") rather than
-treated as an unknown key, which would otherwise allocate a second checkout. A deleted session's tombstone keeps the
-digest of its client identity for both encodings, so a retry after Delete is still told the session was deleted, or that
-the key belongs to another request, whichever encoding its reservation was written in.
+treated as an unknown key, which would otherwise allocate a second checkout. Legacy tombstone identity digests remain
+decodable for both encodings; this compatibility does not extend retention. Writable open removes legacy `Created`
+records whose sessions are gone, and Delete removes the session's record regardless of its fingerprint encoding, so a
+retry after Delete is a fresh request.
 
 The 64 KiB create bound counts the launch as the JSON it is stored and fingerprinted as, so quotes and backslashes in a
 command count twice and the field names count too; this is slightly stricter than counting the text the user typed.
@@ -5162,9 +5174,9 @@ are applied, so the flag wins even over a template whose host was since reinstal
 `tl:` would refuse. A spawn's parent must be the asking session; the relay holds the asking session's delete fence for
 the whole request, which keeps the parent from being deleted under the create. An inheriting spawn is placed the same
 way, with the launch its supervisor filled in, and a host row that has gone missing during the request refuses it rather
-than letting it fall back to another host. The helm sends the spawn's create with `key_lives_with_session` (protocol
-40), which the supervisor honors only on the helm's full-authority connection, so the key gets a spawn's
-session-lifetime reservation rather than an interactive create's permanent one.
+than letting it fall back to another host. The helm still sends the spawn's create with `key_lives_with_session`
+(protocol 40). The field remains accepted on the wire, but the supervisor ignores it: every authorized keyed create gets
+session-lifetime scope, whether the marker is present or absent.
 
 A keyed agent create or clone is matched on its target by the request as the agent sent it (protocol 43). The helm
 digests a dedicated, versioned input (`agent_requests::AgentRequestDigest`): `agent_create_v1` holds the `--host` name,
@@ -5173,24 +5185,26 @@ holds the source session, the host name and the `--cwd`/`--title` overrides as g
 field an older CLI may still send. The SHA-256 of its JSON travels beside the asker-scoped key as
 `CreateSession::request_fingerprint`, and the supervisor stores `("agent_request_v1", digest)` as the reservation's
 fingerprint in place of the resolved fields, so a retry that resolves differently after a template or source edit still
-replays, and a deleted child's tombstone digests it like any fingerprint. The supervisor honors the field only beside a
-key and never beside a managed checkout, and only the helm's full-authority connection can send it, since a
-session-authenticated create is refused before any field is read (protocol 41). Every attempt resolves afresh and the
-helm keeps no record of a key; a create the first attempt left pending is still relaunched from its stored row
-(`validate_retry`), never from the retry's resolution, and only when the launches, folders and titles agree: under a
-request fingerprint the helm approved and YOLO-checked the retry's launch, folder and title, so a stored one (the folder
-compared after `~` expansion, a title the retry leaves out not compared) that differs is refused as a `Conflict` rather
-than run unseen. A permanent key records that refusal; a spawn's session-lifetime key is freed with the stranded row
-instead, so its next retry creates afresh from the request as it resolves then. The digest input's JSON is frozen,
-because it lands in reservations that outlive builds: a new shape gets a new tag. `TemplateFields` is the one protocol
-type inside it, which is safe because its JSON is already the stored template format and omits unset fields, so a
-launcher field added later leaves existing digests alone. An inheriting spawn sends no request fingerprint and keeps the
-resolved-launch one. A keyed `farhelm agent create` without `--host` is refused at the helm (SPEC.md gives the reason).
-Reservations written before protocol 43 hold resolved-launch fingerprints, so a retry spanning the upgrade is refused as
-key reuse and never duplicated, the rule "Launch-kinds reservations" already applies. Helm schema 39 kept each keyed
-create's first resolution (`agent_create_bindings`, for 30 days) to spare retries from template edits; schema 42 drops
-that table, and the 38→39 step no longer creates it. A keyed spawn re-run after its child was deleted creates a new
-child from the templates as they are now, because the spawn's session-lifetime reservation is pruned with the child.
+replays while its retry record is retained. Delete prunes that record like any other reservation. The supervisor honors
+the field only beside a key and never beside a managed checkout, and only the helm's full-authority connection can send
+it, since a session-authenticated create is refused before any field is read (protocol 41). Every attempt resolves
+afresh and the helm keeps no record of a key; a create the first attempt left pending is still relaunched from its
+stored row (`validate_retry`), never from the retry's resolution, and only when the launches, folders and titles agree:
+under a request fingerprint the helm approved and YOLO-checked the retry's launch, folder and title, so a stored one
+(the folder compared after `~` expansion, a title the retry leaves out not compared) that differs is refused as a
+`Conflict` rather than run unseen. If recovery removes the stranded row, the key retains that refusal for 24 hours for
+every create, spawn included; after expiry the next retry creates afresh from the request as it resolves then. Explicit
+Delete frees the key immediately. The digest input's JSON is frozen, because it lands in reservations that outlive
+builds: a new shape gets a new tag. `TemplateFields` is the one protocol type inside it, which is safe because its JSON
+is already the stored template format and omits unset fields, so a launcher field added later leaves existing digests
+alone. An inheriting spawn sends no request fingerprint and keeps the resolved-launch one. A keyed
+`farhelm agent create` without `--host` is refused at the helm (SPEC.md gives the reason). Reservations written before
+protocol 43 hold resolved-launch fingerprints, so a retry spanning the upgrade is refused as key reuse and never
+duplicated, the rule "Launch-kinds reservations" already applies. Helm schema 39 kept each keyed create's first
+resolution (`agent_create_bindings`, for 30 days) to spare retries from template edits; schema 42 drops that table, and
+the 38→39 step no longer creates it. A keyed create, clone or spawn re-run after its created session was deleted creates
+a new session from the request as it resolves now, with the ordinary approval rules, because its reservation is pruned
+with that session.
 
 Managed-checkout agent creates use that same frozen `agent_create_v1` digest as the checkout's `client_identity`,
 without a `request_fingerprint`. The helm resolves the request and host, checks the agent YOLO rule, and performs
@@ -5366,9 +5380,10 @@ unchanged. Prompt-bearing ordinary and named creates bind their text separately 
 retains its accepted prompt in its versioned reservation snapshot. An agent's frozen request digest includes explicit
 prompt edits through template-field serialization. A new `agent_prompt_request_v1` reservation holds that digest plus
 the resolved prompt's hash: completed replay compares request digests, pending recovery also compares prompt hashes.
-Deletion tombstones retain only the normalized request identity. A prompt-bearing approval uses `LaunchWithPrompt`, so
-an older UI refuses its unknown kind rather than approving an unseen first message. Template fields already refuse
-unknown fields. Both cards render the full message through the escaped multiline peer block.
+Delete removes these reservations too; it writes no prompt tombstone. Legacy tombstone normalization remains readable. A
+prompt-bearing approval uses `LaunchWithPrompt`, so an older UI refuses its unknown kind rather than approving an unseen
+first message. Template fields already refuse unknown fields. Both cards render the full message through the escaped
+multiline peer block.
 
 What a card shows is what an approval does. Launches are resolved fully before the card, and the dispatched launch is
 the one shown. The agent YOLO rule (`yolo_guard::check_agent`) runs before the card, after it, and again at dispatch: on

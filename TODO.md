@@ -196,20 +196,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the same pane text for a test's own diagnosis; that is the non-durable shape to start from. Plan:
   `plans/queue/never-started-launch-cause.md`.
 
-- Decide the reservation tombstone scope for interactive creates, then do the work the verdict leaves standing. When a
-  client attaches an intent key to a create, the supervisor records it in `create_reservations` so a retried request
-  returns the already-created session instead of double-launching an agent. The durability-era decision made these
-  reservations PERMANENT for interactive creates (spawn's are session-bounded), which makes `create_reservations` the
-  only store table that grows without bound — every interactive create ever made adds a row nothing deletes. Two
-  follow-on debts, deliberately distinct: (a) digest the reservation fingerprint — rows currently retain enough of the
-  original request to match retries, i.e. request plaintext (titles, cwds, invocations) retained forever; hashing bounds
-  each row and ends the plaintext retention but does nothing about row count; (b) expiry/pruning — actually bounds the
-  count, at the deliberate cost that a pruned key becomes reusable after the horizon (a very late retry could
-  double-create). The digest half is worth doing under either verdict. If the verdict bounds the scope (session-lifetime
-  — defensible, since a retry outliving the session it protects is protecting nothing), the pruning half mostly
-  evaporates; that reverses a durability-milestone decision, so record the reversal where that decision lives. The store
-  module's own docs describe both debts. Plan: `plans/queue/create-reservation-retention.md`.
-
 - **Rewrite the "host changed while its update was being followed" warning.** Seen 2026-10-18 on a dev build whose host
   (running `farhelm 0.0.0-unreleased`, 0 sessions) had also been added by accident to the maintainer's 0.29.0 helm,
   which ran setup on it too. The dev build's host row showed an update that completed every step (create-directories,

@@ -428,53 +428,146 @@ async fn concurrent_creates_under_one_intent_key_yield_one_session() {
     drop(slot);
 }
 
-/// A replay whose session was since DELETED returns an explicit
-/// gone-error: never a live-looking success carrying a dead id, and never
-/// a fresh duplicate.
+/// Delete ends the retry key's lifetime, so reusing it creates a fresh session.
 ///
-/// Both wrong answers are worth naming. Handing back the deleted id would
-/// have the client attach to nothing; creating a second session would
-/// resurrect work the user explicitly threw away, under a key they have no
-/// reason to think is still live. The honest answer is that the key is
-/// spent, and the message says which session it was spent on.
+/// The old identity and its reservation must both be gone before the retry.
+/// Checking the replacement's live agent and the sole stored row distinguishes
+/// a new create from a stale success carrying the deleted session's id.
 #[farhelm_testtrace::test]
-async fn a_replay_for_a_deleted_session_reports_that_it_is_gone() {
+async fn a_retry_after_delete_creates_a_fresh_session() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = create_keyed(&h.client, work.path(), "intent-4")
         .await
         .expect("create");
+    let sock = h.state.path().join("tmux.sock");
+    wait_for_agent_ready(&sock, &session.id).await;
+    assert_eq!(
+        stored_reservation(h.state.path(), "intent-4")
+            .await
+            .expect("premise: the keyed create recorded its result")
+            .session_id,
+        session.id
+    );
     h.client
         .delete_session(&session.id)
         .await
         .expect("delete the session the intent created");
-
-    let error = create_keyed(&h.client, work.path(), "intent-4")
-        .await
-        .expect_err("a replay for a deleted session must not succeed");
-    let downcast = error
-        .chain()
-        .find_map(|c| c.downcast_ref::<SupervisorError>())
-        .expect("the gone-error must carry a classified kind");
-    assert_eq!(
-        downcast.kind(),
-        ErrorKind::Conflict,
-        "nothing is missing — the KEY is spent, which is the same rule a reuse gets"
-    );
     assert!(
-        downcast.message().contains(&session.id) && downcast.message().contains("deleted"),
-        "the error must name the session and what happened to it: {}",
-        downcast.message()
-    );
-    assert!(
-        h.client
-            .list_sessions()
+        stored_reservation(h.state.path(), "intent-4")
             .await
-            .expect("list")
-            .sessions
-            .is_empty(),
-        "and it must not have created a replacement"
+            .is_none(),
+        "Delete must remove the reservation along with its session"
     );
+    assert!(
+        stored_sessions(h.state.path()).await.is_empty(),
+        "premise: the original session was deleted before the retry"
+    );
+
+    let replacement = create_keyed(&h.client, work.path(), "intent-4")
+        .await
+        .expect("a deleted session's key is available for a new create");
+    assert_ne!(
+        replacement.id, session.id,
+        "the retry must mint a fresh identity"
+    );
+    wait_for_agent_ready(&sock, &replacement.id).await;
+    let rows = stored_sessions(h.state.path()).await;
+    assert_eq!(rows.len(), 1, "only the replacement may remain stored");
+    assert_eq!(rows[0].id, replacement.id);
+    assert_eq!(
+        tmux_session_names(&sock).await,
+        vec![format!("fh-{}", replacement.id)],
+        "the new identity must own the only remaining agent"
+    );
+}
+
+/// Delete also releases a key whose create crashed before launching an agent.
+///
+/// A pending reservation already owns an identity, but Delete must prune it
+/// rather than settle it as created. The successor's retry must launch under
+/// a new identity instead of recovering the placeholder the user removed.
+/// The crash seam precedes in-memory publication, so the successor must load
+/// that placeholder before it becomes available for the user's Delete.
+#[farhelm_testtrace::test]
+async fn deleting_a_pending_create_frees_its_key_without_relaunching_its_identity() {
+    let slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let state = farhelm_teststate::tempdir().expect("tempdir");
+    let sock = state.path().join("tmux.sock");
+    let _tmux = TmuxServerGuard::new(sock.clone());
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let sup1 = Supervisor::new_with_seams(
+        state.path(),
+        farhelm_bin().into(),
+        suite_timeouts(),
+        SupervisorSeams {
+            faults: FaultHooks {
+                create_crash: Some(crash_at(CreateStage::AfterRecord)),
+                ..FaultHooks::default()
+            },
+            ..SupervisorSeams::default()
+        },
+    )
+    .await
+    .expect("supervisor");
+    let client1 = connect_client(&sup1).await;
+    create_keyed(&client1, work.path(), "intent-pending-delete")
+        .await
+        .expect_err("the injected crash must leave the create pending");
+    let pending = stored_reservation(state.path(), "intent-pending-delete")
+        .await
+        .expect("premise: the interrupted create reserved a key");
+    assert_eq!(pending.outcome, ReservationOutcome::Pending);
+    let rows = stored_sessions(state.path()).await;
+    assert_eq!(rows.len(), 1, "premise: a single launching row survived");
+    assert_eq!(rows[0].id, pending.session_id);
+    assert_eq!(rows[0].outcome, LastOutcome::Launching);
+    assert!(
+        tmux_session_names(&sock).await.is_empty(),
+        "premise: no launch occurred"
+    );
+
+    let sup2 = handoff_to_new_supervisor(state.path(), sup1, client1).await;
+    let client2 = connect_client(&sup2).await;
+    let listing = client2
+        .list_sessions()
+        .await
+        .expect("list the recovered placeholder");
+    assert_eq!(listing.sessions.len(), 1);
+    assert_eq!(listing.sessions[0].id, pending.session_id);
+    assert_eq!(
+        stored_reservation(state.path(), "intent-pending-delete").await,
+        Some(pending.clone()),
+        "premise: reload preserves the pending key until Delete"
+    );
+    assert!(tmux_session_names(&sock).await.is_empty());
+
+    client2
+        .delete_session(&pending.session_id)
+        .await
+        .expect("delete the pending session");
+    assert!(stored_sessions(state.path()).await.is_empty());
+    assert!(
+        stored_reservation(state.path(), "intent-pending-delete")
+            .await
+            .is_none(),
+        "Delete must prune a pending reservation instead of settling it"
+    );
+
+    let replacement = create_keyed(&client2, work.path(), "intent-pending-delete")
+        .await
+        .expect("the released key must create normally after the crash seam is gone");
+    assert_ne!(replacement.id, pending.session_id);
+    wait_for_agent_ready(&sock, &replacement.id).await;
+    assert_eq!(
+        tmux_session_names(&sock).await,
+        vec![format!("fh-{}", replacement.id)],
+        "the deleted placeholder must never be relaunched"
+    );
+    let rows = stored_sessions(state.path()).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, replacement.id);
+    drop(slot);
 }
 
 /// The durable state a crash at `stage` leaves behind, as the next

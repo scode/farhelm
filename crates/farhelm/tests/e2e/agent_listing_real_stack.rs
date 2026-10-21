@@ -197,6 +197,35 @@ fn agent_command_builder(
     command
 }
 
+/// Observe the real approval table while the owned command is still waiting.
+///
+/// A command that exits without a card is a fixture failure, not a successful
+/// wait. Keep the command and GUI alive through the caller's card assertions
+/// so those assertions describe an approval that can still be answered.
+async fn await_cli_approval(
+    client: &reqwest::Client,
+    base: &str,
+    child: &mut tokio::process::Child,
+    deadline: tokio::time::Instant,
+) -> serde_json::Value {
+    loop {
+        let cards = get_json(client, &format!("{base}/api/approvals")).await;
+        assert!(
+            child.try_wait().expect("inspect the owned CLI").is_none(),
+            "CLI ended before its approval appeared: {cards}"
+        );
+        if let Some(card) = cards["approvals"].as_array().unwrap().first() {
+            return card.clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "live CLI never produced a card: {cards}"
+        );
+        // sleep-ok: poll the named approval-table oracle while checking the owned CLI's liveness.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 /// The link CLI must wait for approval without fencing other commands from its session.
 /// Exercise both relay hops and the shipped CLI's exit status: Allow succeeds; Deny,
 /// the preapproved card's Dismiss (the same wire answer), and absence of a GUI fail.
@@ -278,22 +307,7 @@ async fn browser_link_cli_waits_without_fencing_and_reports_each_answer() {
             .stderr(std::process::Stdio::piped());
         let mut child = command.spawn().expect("spawn link CLI");
         let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
-        let pending = loop {
-            let cards = get_json(&client, &format!("{}/api/approvals", helm.base)).await;
-            if let Some(card) = cards["approvals"].as_array().unwrap().first() {
-                break card.clone();
-            }
-            assert!(
-                child.try_wait().unwrap().is_none(),
-                "link CLI ended before its approval appeared"
-            );
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "live link CLI never produced a card: {cards}"
-            );
-            // sleep-ok: poll the named approval-table oracle while checking the owned CLI's liveness.
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        };
+        let pending = await_cli_approval(&client, &helm.base, &mut child, deadline).await;
         assert_eq!(pending["action"]["url"], url);
         assert_eq!(pending["action"]["preapproved"], preapproved);
         assert!(
@@ -1342,4 +1356,182 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
             .expect("read replacement")
             .expect("replacement remains stored");
     assert_eq!(replacement_stored.launch, replacement.launch);
+}
+
+/// A keyed agent create or clone needs new approval after its session is deleted.
+///
+/// The real CLI, relay, helm approval table and supervisor store all participate.
+/// Delete makes the same request wait on a different card before creating a new identity.
+/// Keeping only the asker stored during each approval proves the new launch did
+/// not happen before the user answered.
+#[farhelm_testtrace::test]
+async fn keyed_agent_create_and_clone_need_fresh_approval_after_delete() {
+    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let supervisor = supervisor_process().await;
+    let helm = helm_process(supervisor.state.path(), None).await;
+    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let client = client_with_secret(&secret);
+    await_local_host(&client, &helm.base).await;
+    let hosts = get_json(&client, &format!("{}/api/hosts", helm.base)).await;
+    let host = hosts["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["kind"] == "local")
+        .expect("the connected local host")["id"]
+        .as_i64()
+        .unwrap();
+    // Command launches need the host's YOLO permission even with --no-yolo.
+    // Leave command approval enabled: the two cards are the boundary under test.
+    let (status, body) = post(
+        &client,
+        &format!("{}/api/hosts/{host}/yolo-without-asking", helm.base),
+        serde_json::json!({"yolo_without_asking": true}),
+    )
+    .await;
+    assert!(
+        status.is_success(),
+        "allow the owned command fixture: {body}"
+    );
+
+    let work = farhelm_teststate::tempdir().expect("requester and launch workdir");
+    let invocation = fixture_cmd("fake-agent --script basic");
+    let cwd = work.path().to_string_lossy().into_owned();
+    let (status, body) = post(
+        &client,
+        &format!("{}/api/sessions", helm.base),
+        serde_json::json!({
+            "cwd": cwd,
+            "command": {"command": invocation, "yolo": false},
+            "title": "keyed request asker",
+        }),
+    )
+    .await;
+    assert!(status.is_success(), "create the asking session: {body}");
+    let asker: SessionInfo = serde_json::from_str(&body).expect("asking session JSON");
+    let sock = supervisor.state.path().join("tmux.sock");
+    wait_for_agent_ready(&sock, &bare_session_id(&asker.id)).await;
+    let _terminal = attach_terminal(&helm, &secret, &asker.id).await;
+    let token = session_token(supervisor.state.path(), &asker.id).await;
+    let socket = supervisor.state.path().join("supervisor.sock");
+    hosts_until_attached(&asker.id, &token, &socket).await;
+    let _gui = hold_gui_socket(&helm, &secret, "/api/events").await;
+    let store = SessionStore::open(&supervisor.state.path().join("supervisor.db"), false)
+        .await
+        .expect("inspect the supervisor's durable state");
+
+    for verb in ["create", "clone"] {
+        let key = format!("retry-after-delete-{verb}");
+        let mut args = if verb == "create" {
+            vec![
+                "create",
+                "--command",
+                &invocation,
+                "--no-yolo",
+                "--cwd",
+                &cwd,
+            ]
+        } else {
+            vec!["clone", "--source-session", &asker.id]
+        };
+        args.extend(["--host", "this machine", "--idempotency-key", &key]);
+        let mut deleted_id = None;
+        let mut previous_card = None;
+
+        for _ in 0..2 {
+            assert_eq!(
+                get_json(&client, &format!("{}/api/approvals", helm.base)).await["approvals"],
+                serde_json::json!([]),
+                "premise: no earlier approval remains"
+            );
+            let rows = store
+                .load_all()
+                .await
+                .expect("stored sessions before the request");
+            assert_eq!(rows.len(), 1, "premise: only the asking session remains");
+            assert_eq!(rows[0].id, bare_session_id(&asker.id));
+            let mut command = tokio::process::Command::from(agent_command_builder(
+                &args, &asker.id, &token, &socket,
+            ));
+            command
+                .kill_on_drop(true)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+            let mut child = command.spawn().expect("spawn the keyed agent command");
+            let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
+            let card = await_cli_approval(&client, &helm.base, &mut child, deadline).await;
+            assert_eq!(card["action"]["verb"], verb);
+            let card_id = card["id"].as_str().expect("approval id").to_string();
+            assert_ne!(
+                previous_card.as_ref(),
+                Some(&card_id),
+                "a retry needs fresh consent"
+            );
+            previous_card = Some(card_id.clone());
+            assert_eq!(
+                store
+                    .load_all()
+                    .await
+                    .expect("sessions while approval waits")
+                    .len(),
+                1,
+                "the request must not create a replacement before approval"
+            );
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "premise: the CLI is awaiting approval"
+            );
+            let (status, body) = post(
+                &client,
+                &format!("{}/api/approvals/{card_id}", helm.base),
+                serde_json::json!({"answer": "allow"}),
+            )
+            .await;
+            assert!(status.is_success(), "answer the launch card: {body}");
+            let output = tokio::time::timeout_at(deadline, child.wait_with_output())
+                .await
+                .expect("the approved CLI must finish")
+                .expect("collect the approved CLI");
+            assert!(
+                output.status.success(),
+                "{verb}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let id = String::from_utf8(output.stdout)
+                .expect("session id is UTF-8")
+                .trim()
+                .to_string();
+            assert_ne!(id, asker.id);
+            assert_ne!(
+                deleted_id.as_ref(),
+                Some(&id),
+                "the deleted identity must not return"
+            );
+            wait_for_agent_ready(&sock, &bare_session_id(&id)).await;
+            let created = store
+                .session(&bare_session_id(&id))
+                .await
+                .unwrap()
+                .expect("the approved session must be stored");
+            assert_eq!(created.cwd, cwd);
+
+            let response = client
+                .delete(format!("{}/api/sessions/{id}", helm.base))
+                .send()
+                .await
+                .expect("Delete reaches the helm");
+            let status = response.status();
+            let body = response.text().await.unwrap();
+            assert!(status.is_success(), "delete the {verb} result: {body}");
+            assert!(
+                store
+                    .session(&bare_session_id(&id))
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "premise: Delete removed the result before the next retry"
+            );
+            deleted_id = Some(id);
+        }
+    }
 }

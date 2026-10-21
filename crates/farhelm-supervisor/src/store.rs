@@ -29,8 +29,7 @@
 //! command that ran and finished (`service::session_status` spells the
 //! full precedence out).
 //!
-//! A second kind of durable fact has a lifetime that is not a
-//! session's at all: [`Reservation`] (PLAN_M3.md item 6) records
+//! A second kind of durable fact, [`Reservation`] (PLAN_M3.md item 6), records
 //! that a client-supplied create INTENT was claimed, so a create retried
 //! after an ambiguous failure replays its original outcome instead of
 //! launching a second agent. A reservation and its launching row are
@@ -38,9 +37,10 @@
 //! reservation its own table is that it is keyed by the CLIENT's intent
 //! key rather than by a session id (the lookup a replay performs happens
 //! before any session is known), that it can exist with no session row at
-//! all (a create refused before it ever launched), and that it OUTLIVES
-//! the session as a tombstone — so a replay for a deleted session can say
-//! so instead of duplicating it.
+//! all (a create refused before it ever launched). Accepted keys live until
+//! Delete removes their session. Refusals without a session retain their
+//! original request and error for 24 hours, then a keyed admission or writable
+//! open prunes them. No timer or schema change is needed for that policy.
 //!
 //! The per-session integration snapshot and the conversation identity
 //! captured against it form the capture half of the schema (PLAN_M3.md
@@ -549,27 +549,18 @@ type OutcomeColumns = (String, Option<i32>, Option<String>, Option<String>);
 /// for rather than having to guess whether the previous attempt got
 /// anywhere.
 ///
-/// `Permanent` rows are TOMBSTONES: they outlive the session they created (see
-/// [`SessionStore::delete_session_archiving_memberships`]), because the
-/// question a replay asks — "did this intent already happen?" — still has
-/// an answer after the session is gone, and the honest answer is "yes, and
-/// it was deleted", never a fresh duplicate.
+/// Every new row uses `SessionLifetime`: Delete prunes it in the same
+/// transaction as its session, including a still-pending claim. A later
+/// request under that key is fresh and receives a new session identity.
+/// Writable open converts legacy live `Permanent` rows and removes settled
+/// successful records of already-deleted sessions without a schema bump.
 ///
-/// PLAN_M7.md adds `SessionLifetime` for spawn. Those rows are pruned in the
-/// same transaction that deletes their child, so a retry key becomes usable
-/// again exactly when the session it identified is gone.
-///
-/// Each row holds a
-/// full copy of its request's canonical fields (`service`'s
-/// `create_fingerprint`), so a create with a long invocation stores a long
-/// row — bounded by the request caps, not small in principle. Two separate
-/// pieces of work would change that and neither is owned here: a DIGEST
-/// would shrink each row to a constant size (and stop the invocation from
-/// being retained past its session's deletion), while an EXPIRY would
-/// bound the row COUNT. They are independent — a digest keeps growth
-/// linear in creates, an expiry keeps the text — and only an expiry trades
-/// against correctness, since a forgotten key is a key that can duplicate
-/// again.
+/// A refusal with no session instead lives for 24 hours from `created_at`.
+/// Its full fingerprint and error detail remain unchanged throughout that
+/// window, so replay and definite-refusal proof agree. Retained Error
+/// sessions still own their keys and do not expire by age. The table holds
+/// live keyed sessions, a day of refusals, and unresolved legacy recovery
+/// evidence; it no longer grows with every deleted session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reservation {
     pub intent_key: String,
@@ -592,9 +583,8 @@ pub struct Reservation {
     /// probes tmux for exactly this name at decision time rather than
     /// trusting a session map that may predate a late-completing create.
     pub tmux_name: String,
-    /// How long this row deduplicates its key. Spawn creates (restricted, or
-    /// the helm's marked create for a spawn with launch flags) use
-    /// `SessionLifetime`; other full-authority creates use `Permanent`.
+    /// Stored scope of the original claim. New creates and refusals use
+    /// `SessionLifetime`; legacy pending recovery may still carry `Permanent`.
     pub dedup_scope: DedupScope,
     pub outcome: ReservationOutcome,
 }
@@ -602,18 +592,14 @@ pub struct Reservation {
 /// The lifetime policy attached to one create reservation (PLAN_M7.md
 /// item 2).
 ///
-/// This is derived from the creating connection, so a caller cannot widen
-/// its own deduplication window. The one input from the wire is the helm's
-/// `key_lives_with_session` marker for a `farhelm spawn` it creates on the
-/// asking session's host (protocol 40), honored only on the helm's
-/// full-authority connection, and it can only narrow a key to
-/// `SessionLifetime`. One reservation mechanism therefore serves both
-/// interactive creates and bounded spawn retries.
+/// New creates all use session lifetime. Both SQLite spellings stay readable
+/// because the retention change does not raise the schema version, and a
+/// legacy pending orphan may still need its original recovery evidence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DedupScope {
-    /// M3's existing tombstone behavior: the key remains spent forever.
+    /// Legacy spelling retained for decoding and unresolved crash recovery.
     Permanent,
-    /// The key remains spent only while the child session exists.
+    /// The key belongs to its session, or to a session-free refusal for one day.
     SessionLifetime,
 }
 
@@ -714,8 +700,8 @@ pub enum Claimed {
 /// The outcome of trying to take over a pending reservation for a relaunch
 /// ([`SessionStore::restart_pending_launch`]).
 ///
-/// The three variants are the three things that can be true by the time
-/// the transition actually runs, and distinguishing them is what keeps a
+/// The variants distinguish surviving reservations at the takeover boundary;
+/// a vanished reservation returns an error instead. These checks keep a
 /// racing delete from being resurrected: the caller decided to relaunch
 /// against evidence it gathered a moment earlier, and this is the atomic
 /// re-check of that decision.
@@ -766,10 +752,9 @@ pub enum RetryClaim {
         /// recovery of a row whose generation is no longer zero.
         generation: i64,
     },
-    /// The reservation is no longer pending — something settled it first
-    /// (most often a concurrent delete, which tombstones as `Created`). The
-    /// caller must answer from this outcome, which for a deleted session is
-    /// the gone-error rather than a new launch.
+    /// The reservation was settled or claimed by another session before
+    /// takeover. Answer from that outcome; never launch from the stale row.
+    /// A Delete that removed the reservation instead makes takeover fail.
     Resolved(Box<Reservation>),
     /// The reserved session row moved past `Launching` while the caller was
     /// deciding: evidence of a launch appeared after all, so the caller
@@ -895,20 +880,21 @@ pub enum RelaunchDecision {
 ///
 /// Terminal states are monotonic — [`SessionStore::settle_reservations`]
 /// only ever moves a `Pending` row — so an outcome, once recorded, is what
-/// every later replay of that key reports.
+/// every replay of that retained claim reports. Delete or refusal expiry
+/// removes the claim; later use of the same key is a new intent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReservationOutcome {
     /// Claimed, with the create still in flight — or interrupted by a
     /// crash, which is indistinguishable from in-flight after the fact and
     /// is exactly why reconciliation exists.
     Pending,
-    /// The session named by [`Reservation::session_id`] was created. It
-    /// may since have been DELETED; that is not recorded here, because the
-    /// session table already answers it (`service`'s replay looks the id up
-    /// and reports the gone-error when it is absent) and a second copy of
-    /// the same fact could only ever disagree with the first.
+    /// The session named by [`Reservation::session_id`] was created. Delete
+    /// removes this reservation transactionally; a replay that already read
+    /// it still checks the session table rather than returning a dead id.
     Created,
     /// The create failed, with the error the first attempt reported.
+    /// Without a surviving session, this outcome replays for one day from
+    /// the claim's timestamp. A retained Error session owns its key until Delete.
     ///
     /// `kind` rides along with the message because replaying an
     /// `InvalidRequest` as an `Internal` would turn the first attempt's 400
@@ -1429,9 +1415,9 @@ pub(crate) struct StoredSessionNotification {
 ///   create idempotency (see [`Reservation`]). Its own table rather than
 ///   columns on `sessions` because it is keyed by the client's intent key
 ///   (the lookup a replay runs before any session is known), because it
-///   can exist with no session row at all, and because it outlives the
-///   session it created as a tombstone. Its lifetime is the INTENT's, not
-///   the session's.
+///   can exist with no session row at all. Originally these keys outlived
+///   their sessions as tombstones; the retention policy now prunes them on
+///   Delete and retains session-free refusals for one day, without a schema bump.
 /// - 4: PLAN_M3.md items 7 and 8 — the per-session integration snapshot
 ///   (`agent_kind`, `resume_template`), the conversation identity captured
 ///   against it, and the first-input timestamp the former scan correlated on.
@@ -1665,13 +1651,10 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         // a create for one is impossible — a key is claimed at create time
         // or never.
         //
-        // The index is PARTIAL, and that is the whole point: this table is
-        // immortal (see `Reservation`'s tombstone docs), so it is the one
-        // table here that grows without bound, while both queries that are
-        // not by primary key touch only PENDING rows — reload's
-        // reconciliation worklist and the delete path's settlement. A
-        // partial index keeps their cost proportional to creates currently
-        // in flight rather than to every create this host has ever done.
+        // Reload's recovery worklist needs only pending claims. Keep its
+        // index partial rather than indexing every live session and recent
+        // refusal. Session-lifetime retention now bounds the table itself;
+        // the original keep-forever policy is no longer in force.
         conn.execute_batch(
             "BEGIN;
              CREATE TABLE create_reservations (
@@ -2373,7 +2356,7 @@ fn migrate_to_launch_kinds(conn: &Connection) -> anyhow::Result<()> {
 }
 
 /// Seconds since the Unix epoch, for [`StoredSession::created_at`] and the
-/// `create_reservations` table's own informational timestamp. `pub(crate)`
+/// `create_reservations` table's refusal-retention clock. Public
 /// so a `StoredSession` builder in `service` can mint the SAME value it
 /// hands to `insert_session`/`restart_pending_launch`, which is what keeps
 /// a freshly created `SessionInfo`'s `created_at` (PLAN_M6.md item 1)
@@ -2405,26 +2388,22 @@ pub fn now_unix() -> i64 {
         .map_or(0, |d| d.as_secs() as i64)
 }
 
-/// Read one reservation through whatever connection or transaction the
-/// caller already holds.
-///
-/// A free function rather than a method because half its callers are
-/// INSIDE a transaction that must not be interrupted by a second lock
-/// acquisition: the claim's lost-race path and the relaunch takeover both
-/// have to read the reservation as part of their own atomic decision, and
-/// a method that took the store's mutex again would deadlock against the
-/// guard they are already holding.
 /// Apply one [`Settlement`] inside a transaction the caller owns; see
 /// [`SessionStore::settle_reservations`] for what the two `WHERE`
 /// conditions protect and why a non-matching row is a silent no-op.
 ///
 /// Shared with `delete_session`'s rollback path, which has to settle in
 /// the same transaction as the row removal it accompanies.
+/// A legacy pending orphan retains its recovery policy until this boundary.
+/// Once proven failed, it adopts the common refusal scope so a current
+/// request's strict scope match can still prove non-acceptance. The original
+/// timestamp and fingerprint remain unchanged; settlement is not a new claim.
 fn settle_within(conn: &Connection, settlement: &Settlement) -> anyhow::Result<()> {
     let (state, error_kind, error_detail) = settlement.outcome.columns();
     conn.execute(
         "UPDATE create_reservations \
-         SET state = ?3, error_kind = ?4, error_detail = ?5 \
+         SET state = ?3, error_kind = ?4, error_detail = ?5, \
+             dedup_scope = CASE WHEN ?3 = 'failed' THEN 'session_lifetime' ELSE dedup_scope END \
          WHERE intent_key = ?1 AND session_id = ?2 AND state = 'pending'",
         rusqlite::params![
             settlement.intent_key,
@@ -2737,12 +2716,17 @@ fn check_legacy_launch(
 /// Independent of the byte caps it is enforced alongside, because the two
 /// bound different things: a template of ten thousand EMPTY elements costs
 /// almost nothing in bytes while still being nothing a resume invocation
-/// could legitimately be, and on the create path it lands in a never-pruned
+/// could legitimately be, and on the create path it lands in a durable
 /// reservation row. 64 elements is far beyond every real resume invocation
 /// (`claude --resume {conversation}` is three).
 ///
 pub(crate) use farhelm_proto::RESUME_TEMPLATE_ELEMENT_CAP;
 
+/// Read one reservation through the caller's existing connection or transaction.
+///
+/// Claim insertion and relaunch takeover need this read inside their atomic
+/// decision. Acquiring the store connection again there would deadlock, and
+/// reading independently could answer from a different claim under a reused key.
 fn read_reservation(conn: &Connection, intent_key: &str) -> anyhow::Result<Option<Reservation>> {
     let row = conn
         .query_row(
@@ -2846,6 +2830,9 @@ impl SessionStore {
     /// caller sets from its exclusivity over the state directory; see
     /// `apply_schema` for why upgrading another supervisor's database is a
     /// destructive act rather than a courtesy.
+    /// The same exclusive authority runs the one-way reservation retention
+    /// cleanup: convert legacy live keys, drop deleted-session records and
+    /// expire session-free refusals. Nonexclusive opens leave those rows alone.
     pub async fn open(path: &Path, may_migrate: bool) -> anyhow::Result<SessionStore> {
         let path = path.to_path_buf();
         let conn = tokio::task::spawn_blocking(move || -> anyhow::Result<Connection> {
@@ -2854,7 +2841,7 @@ impl SessionStore {
             let conn = crate::db::open_private(&path, "session database")?;
             apply_schema(&conn, may_migrate)?;
             if may_migrate {
-                digest_deleted_sessions_reservations(&conn)?;
+                apply_reservation_retention(&conn, now_unix())?;
             }
             Ok(conn)
         })
@@ -3403,28 +3390,14 @@ impl SessionStore {
     /// retained (partial deletion is the accepted contract) and a retry
     /// re-decides everything.
     ///
-    /// ## Reservation settlement
+    /// ## Reservation lifetime
     ///
-    /// Permanent interactive reservations are settled as `Created` in the
-    /// same transaction as row removal: their keys remain tombstones. A
-    /// session-lifetime spawn reservation is deleted instead, because its
-    /// key is promised only while this child exists and becomes reusable at
-    /// the same commit that removes the child.
-    ///
-    /// The settlement direction is `Created`, and it is a statement of
-    /// fact rather than a courtesy: a session cannot be deleted without
-    /// having existed, so a reservation still claiming to be in flight for
-    /// it was merely never told its launch had succeeded. Recording that
-    /// here is what keeps the tombstone honest — a later replay finds
-    /// `Created` with no session behind it and reports the gone-error,
-    /// where leaving the row `Pending` would instead tell the retry "the
-    /// crashed attempt never launched" and produce exactly the duplicate
-    /// this mechanism exists to exclude. The permanent reservation row is
-    /// deliberately kept; see [`Reservation`]'s docs on tombstones. Plain
-    /// [`SessionStore::delete_session`] settles in the OPPOSITE direction
-    /// (`Failed`) because it is ALSO the create path's rollback (`service`'s
-    /// `abandon_launching_record`), where the launch provably did not happen
-    /// and settling its reservation `Created` would be a lie.
+    /// Every reservation for this session is removed in the same transaction,
+    /// including pending and legacy permanent claims. A failed transaction
+    /// keeps both the session and its key; a committed Delete permits a fresh
+    /// create under the same key with a new identity. Create rollback uses
+    /// [`SessionStore::delete_session`] instead: its proven failure retains
+    /// a refusal for one day rather than acting as an explicit user Delete.
     ///
     /// `released` names checkouts the caller already decided to give up
     /// unarchived; their records are deleted without any filesystem proof.
@@ -3690,6 +3663,9 @@ impl SessionStore {
     /// row alone, and the caller finds it on its next lookup. Recording a
     /// failure over someone else's live claim would be strictly worse than
     /// letting this one attempt's error go unrecorded.
+    /// Every scope records the original fingerprint and detail unchanged.
+    /// Admission and writable open expire session-free failures after one day;
+    /// recording or replaying one never extends its original `created_at`.
     pub async fn record_failed_intent(
         &self,
         claim: IntentClaim,
@@ -3698,12 +3674,9 @@ impl SessionStore {
         kind: farhelm_proto::ErrorKind,
         message: &str,
     ) -> anyhow::Result<()> {
-        // A bounded key has no child to bound it when validation fails.
-        // Recording that refusal would therefore turn a session-lifetime
-        // reservation into an immortal row. Its retry revalidates instead.
-        if claim.dedup_scope == DedupScope::SessionLifetime {
-            return Ok(());
-        }
+        // A refusal has no session to bound its lifetime. The shared age
+        // prune retains it for one day, including a spawn's refusal, so
+        // repairing a directory does not silently change an immediate retry.
         let session_id = session_id.to_string();
         let tmux_name = tmux_name.to_string();
         let message = message.to_string();
@@ -3745,7 +3718,7 @@ impl SessionStore {
     /// The caller decides to relaunch by observing that nothing was ever
     /// launched under the reserved identities. Between that observation and
     /// this call, two things can have changed, and both must lose: a
-    /// concurrent DELETE can have tombstoned the reservation (relaunching
+    /// concurrent DELETE can have removed the reservation (relaunching
     /// then would resurrect a session the user threw away), and the
     /// reserved row can have moved past `Launching` (evidence appeared, so
     /// the honest answer is a replay). Both conditions are re-tested INSIDE
@@ -4389,6 +4362,19 @@ impl SessionStore {
             .await
     }
 
+    /// Expire refusals before a keyed create or reconciliation resolves its key.
+    ///
+    /// The caller supplies the clock so boundary tests can backdate stored
+    /// rows without changing process time or sleeping. A retained Error
+    /// session still owns its key: only failures with no session can expire.
+    pub async fn prune_expired_create_refusals(&self, now: i64) -> anyhow::Result<()> {
+        self.conn
+            .call("create-refusal prune task panicked", move |conn| {
+                prune_expired_create_refusals(conn, now)
+            })
+            .await
+    }
+
     /// Retain a direct wrapper Allow on the exact pending checkout attempt.
     ///
     /// The caller holds intent admission while it checks the old fingerprint
@@ -4474,13 +4460,13 @@ impl SessionStore {
     /// arriving later than the world it was computed against:
     ///
     /// - **`state = 'pending'`** makes settlement MONOTONIC: an outcome,
-    ///   once recorded, is what every later replay reports. What this
+    ///   once recorded, is what every replay of that retained claim reports. What this
     ///   protects against is not a live create racing a reload — a reload
     ///   only ever runs before this process serves anything, so that race
     ///   cannot happen — but the repeated and STALE settlements that
     ///   genuinely do occur: a retry re-settling what a previous attempt
     ///   already recorded, and a settlement computed before a concurrent
-    ///   delete tombstoned the same row.
+    ///   delete removed the same row.
     /// - **`session_id = ?`** ([`Settlement`]) keeps a settlement from
     ///   landing on a reservation that has since been re-pointed at a
     ///   different attempt's identities.
@@ -5591,14 +5577,13 @@ impl SessionStore {
     /// racing nothing, since this connection is already serialized
     /// through one mutex).
     ///
-    /// This is the CREATE-ROLLBACK delete, not the user-facing one. A
-    /// permanent reservation is settled `Failed`, preserving M3's replay
-    /// contract. A session-lifetime reservation is deleted instead: once
-    /// the child row is gone there is no lifetime left to bound it, and a
-    /// failed tombstone would otherwise be immortal.
+    /// This is the CREATE-ROLLBACK delete, not the user-facing one. A supplied
+    /// failure settlement keeps the original refusal for 24 hours, including
+    /// for a spawn. No settlement preserves pending recovery evidence rather
+    /// than guessing whether an interrupted launch reached its terminal.
     ///
     /// The reservation change rides the SAME transaction as the removal.
-    /// `None` is an unkeyed rollback and touches no reservation.
+    /// `None` touches no reservation, whether the attempt was keyed or not.
     /// Memberships are removed atomically too, but a last reference to a
     /// non-retired checkout refuses the entire rollback. Such a row is evidence
     /// for explicit cleanup; removing it would orphan the allocation. Proven
@@ -5632,17 +5617,10 @@ impl SessionStore {
             tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
                 .context("deleting session row")?;
             if let Some(settlement) = &settlement {
-                let pruned = tx
-                    .execute(
-                        "DELETE FROM create_reservations
-                         WHERE intent_key = ?1 AND session_id = ?2
-                           AND dedup_scope = 'session_lifetime'",
-                        rusqlite::params![settlement.intent_key, settlement.session_id],
-                    )
-                    .context("pruning a rolled-back bounded reservation")?;
-                if pruned == 0 {
-                    settle_within(&tx, settlement)?;
-                }
+                // Rollback proves this attempt failed; it is not the user's
+                // Delete. Keep the refusal for the same bounded replay window
+                // as validation failures that never acquired a session row.
+                settle_within(&tx, settlement)?;
             }
             tx.commit().context("committing the launch rollback")?;
             Ok(())
@@ -5650,11 +5628,13 @@ impl SessionStore {
 .await
     }
 
-    /// Remove a bounded reservation after its child has disappeared.
+    /// Remove an orphaned pending or successful session-lifetime claim.
     ///
     /// The absence check and deletion are one SQLite statement, closing
     /// the replay-versus-delete race: either the child still exists and
     /// this does nothing, or the key is free before a fresh claim begins.
+    /// Failed rows without a session are refusals and survive replay until
+    /// the separate 24-hour prune; absence alone must not free those keys.
     pub async fn prune_orphaned_bounded_reservation(
         &self,
         intent_key: &str,
@@ -5670,7 +5650,7 @@ impl SessionStore {
                         .execute(
                             "DELETE FROM create_reservations
                      WHERE intent_key = ?1 AND session_id = ?2
-                       AND dedup_scope = 'session_lifetime'
+                       AND dedup_scope = 'session_lifetime' AND state != 'failed'
                        AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = ?2)",
                             rusqlite::params![intent_key, session_id],
                         )
@@ -5774,104 +5754,73 @@ fn record_notification_within(
 /// (`SessionStore::delete_session_settling_reservations`, test-only), so the
 /// fixture cannot drift from what production deletes do.
 ///
-/// Prunes a session-lifetime (spawn) reservation, whose key becomes reusable
-/// with the child, and settles a still-pending permanent reservation as
-/// `created` so it stays a tombstone. Runs inside the caller's transaction.
+/// Every key becomes reusable at the same commit that removes its session,
+/// including a pending create interrupted by Delete. Legacy scope spellings
+/// do not extend the lifetime after an explicit user deletion.
 fn settle_create_reservations_for_delete(
     tx: &rusqlite::Transaction<'_>,
     id: &str,
 ) -> anyhow::Result<()> {
     tx.execute(
-        "DELETE FROM create_reservations \
-         WHERE session_id = ?1 AND dedup_scope = 'session_lifetime'",
+        "DELETE FROM create_reservations WHERE session_id = ?1",
         rusqlite::params![id],
     )
-    .context("pruning the deleted spawn's bounded reservation")?;
-    tx.execute(
-        "UPDATE create_reservations SET state = 'created' \
-         WHERE session_id = ?1 AND state = 'pending' \
-         AND dedup_scope = 'permanent'",
-        rusqlite::params![id],
-    )
-    .context("settling the deleted interactive session's reservations")?;
-    // The kept tombstone must not keep the request itself: a fingerprint
-    // holds the raw command line and resume template, and Delete removes
-    // what is stored about the session (SPEC.md "Lifecycle operations").
-    // The digest still identifies a retry of the same request (see
-    // `tombstone_fingerprint`).
-    let kept: Vec<(String, String)> = {
-        let mut stmt = tx
-            .prepare(
-                "SELECT intent_key, fingerprint FROM create_reservations \
-                 WHERE session_id = ?1 AND dedup_scope = 'permanent'",
-            )
-            .context("listing the deleted session's retry records")?;
-        stmt.query_map(rusqlite::params![id], |row| Ok((row.get(0)?, row.get(1)?)))
-            .context("reading the deleted session's retry records")?
-            .collect::<std::result::Result<_, _>>()
-            .context("reading the deleted session's retry records")?
-    };
-    for (intent_key, fingerprint) in kept {
-        if is_tombstone_fingerprint(&fingerprint) {
-            continue;
-        }
-        tx.execute(
-            "UPDATE create_reservations SET fingerprint = ?2 WHERE intent_key = ?1",
-            rusqlite::params![intent_key, tombstone_fingerprint(&fingerprint)],
-        )
-        .context("reducing a deleted session's retry record to a digest")?;
-    }
+    .context("pruning the deleted session's create reservations")?;
     Ok(())
 }
 
-/// Reduce the kept retry records of sessions deleted before Delete did so
-/// itself (see `settle_create_reservations_for_delete`), so upgrading does
-/// not leave their command lines behind either.
+/// Refusals protect one day of retries; accepted sessions protect their own life.
+const CREATE_REFUSAL_RETENTION_SECS: i64 = 24 * 60 * 60;
+
+/// Delete only expired failures that no retained session still needs to replay.
+fn prune_expired_create_refusals(conn: &Connection, now: i64) -> anyhow::Result<()> {
+    conn.execute(
+        "DELETE FROM create_reservations AS r \
+         WHERE r.state = 'failed' AND r.created_at <= ?1 \
+         AND NOT EXISTS (SELECT 1 FROM sessions AS s WHERE s.id = r.session_id)",
+        [now.saturating_sub(CREATE_REFUSAL_RETENTION_SECS)],
+    )
+    .context("pruning expired create refusals")?;
+    Ok(())
+}
+
+/// Apply the accepted one-way lifetime change without changing the database schema.
 ///
-/// Only settled (`created` or `failed`) permanent reservations whose session
-/// row is gone qualify: a Delete leaves either (a failed fresh checkout can
-/// keep a visible Error session until the user deletes it), and a settled
-/// outcome is answered from the recorded result, never from the request. A
-/// pending one may still need its request to recover an interrupted create.
-/// The identity-only refusal record (`github_checkout_refused_v1`) is left as
-/// it is: it holds no command line, and its reconciliation reads the identity
-/// in it. Runs on every writable open and is a no-op once nothing qualifies.
-fn digest_deleted_sessions_reservations(conn: &Connection) -> anyhow::Result<()> {
-    let stale: Vec<(String, String)> = {
-        let mut stmt = conn
-            .prepare(
-                "SELECT intent_key, fingerprint FROM create_reservations AS r \
-                 WHERE r.dedup_scope = 'permanent' AND r.state IN ('created', 'failed') \
-                 AND NOT EXISTS (SELECT 1 FROM sessions AS s WHERE s.id = r.session_id)",
-            )
-            .context("listing deleted sessions' retry records")?;
-        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .context("reading deleted sessions' retry records")?
-            .collect::<std::result::Result<_, _>>()
-            .context("reading deleted sessions' retry records")?
-    };
-    for (intent_key, fingerprint) in stale {
-        if is_tombstone_fingerprint(&fingerprint) || is_identity_only_refusal(&fingerprint) {
-            continue;
-        }
-        conn.execute(
-            "UPDATE create_reservations SET fingerprint = ?2 WHERE intent_key = ?1",
-            rusqlite::params![intent_key, tombstone_fingerprint(&fingerprint)],
-        )
-        .context("reducing a deleted session's retry record to a digest")?;
-    }
-    Ok(())
+/// Run only under writable-open authority. Existing live rows become bounded,
+/// and deleted sessions' successful tombstones disappear permanently. Pending
+/// orphan evidence is left intact for reconciliation rather than guessed away.
+/// Repeating this on later opens also expires refusals in an otherwise idle host.
+fn apply_reservation_retention(conn: &Connection, now: i64) -> anyhow::Result<()> {
+    let tx = conn
+        .unchecked_transaction()
+        .context("beginning create-key retention cleanup")?;
+    tx.execute(
+        "DELETE FROM create_reservations AS r WHERE r.state = 'created' \
+         AND NOT EXISTS (SELECT 1 FROM sessions AS s WHERE s.id = r.session_id)",
+        [],
+    )
+    .context("dropping deleted sessions' legacy retry records")?;
+    tx.execute(
+        "UPDATE create_reservations SET dedup_scope = 'session_lifetime' \
+         WHERE dedup_scope = 'permanent' AND (state = 'failed' \
+         OR EXISTS (SELECT 1 FROM sessions WHERE id = create_reservations.session_id))",
+        [],
+    )
+    .context("adopting session lifetime for existing create keys")?;
+    prune_expired_create_refusals(&tx, now)?;
+    tx.commit()
+        .context("committing create-key retention cleanup")
 }
 
-/// Prefix of a fingerprint Delete has reduced to a digest. Live fingerprints
+/// Prefix of a legacy fingerprint reduced to a digest. Live fingerprints
 /// are JSON (see `service::create_fingerprint`), so they never start with it.
 const TOMBSTONE_PREFIX: &str = "sha256:";
 
-/// The form a create fingerprint takes once its session is deleted: a
-/// SHA-256 digest of the original, which still tells a retry of the same
+/// Reconstruct the legacy deletion digest for compatibility matching.
+/// A SHA-256 digest of the original still tells a retry of the same
 /// request (answered with the deleted session's "gone" error) from a key
 /// reused for a different one, without keeping the command line the
-/// original holds.
+/// original holds. New Delete removes the reservation instead of writing one.
 ///
 /// A fresh-checkout fingerprint also keeps a digest of its client identity
 /// (`;identity=<hex>`): fresh-checkout reconciliation is asked with the
@@ -5931,8 +5880,8 @@ pub(crate) fn tombstone_identity_digest(tombstone: &str) -> Option<&str> {
 ///
 /// Both encodings count: `github_checkout_v4` is what launch kinds write,
 /// and `github_checkout_v3` is a reservation left from before them. A v3 row
-/// can no longer be recovered, but its session can still be deleted after
-/// the upgrade, and its tombstone must keep the digest so a retry is still
+/// can no longer be recovered, but a legacy digest may still be compared after
+/// the upgrade. Its encoded identity lets such a retry still be
 /// told the session was deleted (or that the key belongs to another
 /// request) rather than getting the generic no-snapshot refusal. Both put
 /// the identity at `checkout.client_identity`.
@@ -5951,15 +5900,6 @@ fn fresh_checkout_identity(fingerprint: &str) -> Option<String> {
             .as_str()?
             .to_owned(),
     )
-}
-
-/// Whether `fingerprint` is the identity-only refusal record, which keeps no
-/// request contents (see [`digest_deleted_sessions_reservations`]).
-fn is_identity_only_refusal(fingerprint: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(fingerprint)
-        .ok()
-        .and_then(|value| value.get("kind")?.as_str().map(str::to_owned))
-        .is_some_and(|kind| kind == "github_checkout_refused_v1")
 }
 
 /// Lowercase hex SHA-256 of `text`.
@@ -6791,11 +6731,11 @@ mod tests {
         );
     }
 
-    /// Every pre-v11 reservation was interactive and therefore permanent.
-    /// The 8-to-9 migration must record that fact rather than inventing a
-    /// bounded lifetime for a key that was originally promised forever.
+    /// A live key survives the schema ladder and adopts the current lifetime.
+    /// The historical 8-to-9 migration adds the scope column; writable open
+    /// then converts its permanent value without losing the session identity.
     #[farhelm_testtrace::test]
-    async fn schema_8_reservations_migrate_to_permanent_dedup_scope() {
+    async fn schema_8_live_reservations_adopt_session_lifetime() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
         plant_v7_database(&db_path, "s1");
@@ -6830,7 +6770,8 @@ mod tests {
             .await
             .expect("read migrated reservation")
             .expect("the migration must preserve the row");
-        assert_eq!(reservation.dedup_scope, DedupScope::Permanent);
+        assert_eq!(reservation.dedup_scope, DedupScope::SessionLifetime);
+        assert_eq!(reservation.session_id, "s1");
     }
 
     /// The v6-to-v7 migration (PLAN_M6.md item 2's `host_identity` column)
@@ -10105,87 +10046,163 @@ mod tests {
         );
     }
 
-    /// Opening the store reduces retry records left raw by deletes from
-    /// before Delete did it itself, and nothing else.
+    /// Writable open adopts session lifetime without discarding recovery evidence.
     ///
-    /// Why it matters: without it an upgrade would keep the command lines of
-    /// every session deleted earlier, which Delete is meant to remove.
-    /// Specified: after reopening, settled (created or failed) permanent
-    /// reservations whose session row is gone hold only a digest, a failed
-    /// one keeps its recorded outcome, one whose session still exists keeps
-    /// its fingerprint, and the identity-only refusal record is untouched.
+    /// Legacy successful tombstones disappear, live claims become bounded, and
+    /// refusals keep their original request and answer until the one-day cutoff.
+    /// An observer without migration authority must leave all of these rows
+    /// alone. The schema must remain identical so this one-way data cleanup
+    /// does not prevent an older supervisor from opening the database.
     #[farhelm_testtrace::test]
-    async fn opening_the_store_digests_deleted_sessions_retry_records() {
+    async fn opening_the_store_adopts_session_lifetime_without_changing_the_schema() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("supervisor.db");
         let store = SessionStore::open(&path, true).await.unwrap();
-        insert_reserved(&store, "kept", "live-key", "{\"invocation\":\"live\"}").await;
-        insert_reserved(&store, "gone", "gone-key", "{\"invocation\":\"SECRET\"}").await;
-        insert_reserved(
-            &store,
-            "failed",
-            "failed-key",
-            "{\"invocation\":\"FAILED-SECRET\"}",
-        )
-        .await;
+        let keys = [
+            "live-pending",
+            "live-created",
+            "live-failed",
+            "gone-raw",
+            "gone-digest",
+            "old-refusal",
+            "recent-refusal",
+            "identity-refusal",
+            "pending-orphan",
+            "bounded-pending-orphan",
+        ];
+        for key in keys {
+            insert_reserved(&store, key, key, "{\"invocation\":\"request text\"}").await;
+        }
         let refused = "{\"kind\":\"github_checkout_refused_v1\",\"client_identity\":\"who\"}";
-        insert_reserved(&store, "refused", "refused-key", refused).await;
-        {
+        let now = now_unix();
+        let schema_before = {
             let conn = store.conn.lock();
-            conn.execute("UPDATE create_reservations SET state = 'created'", [])
-                .unwrap();
             conn.execute(
-                "UPDATE create_reservations SET state = 'failed', error_kind = 'internal', \
-                 error_detail = 'kept failure' WHERE intent_key IN ('failed-key', 'refused-key')",
+                "UPDATE create_reservations SET state = 'created' \
+                 WHERE intent_key IN ('live-created', 'gone-raw', 'gone-digest')",
                 [],
             )
             .unwrap();
-            conn.execute("DELETE FROM sessions WHERE id <> 'kept'", [])
+            conn.execute(
+                "UPDATE create_reservations SET state = 'failed', error_kind = 'invalid_request', \
+                 error_detail = 'original refusal detail' \
+                 WHERE intent_key IN ('live-failed', 'old-refusal', 'recent-refusal', 'identity-refusal')",
+                [],
+            ).unwrap();
+            conn.execute(
+                "UPDATE create_reservations SET fingerprint = ?1 WHERE intent_key = 'identity-refusal'",
+                [refused],
+            ).unwrap();
+            conn.execute(
+                "UPDATE create_reservations SET fingerprint = ?1 WHERE intent_key = 'gone-digest'",
+                [format!("sha256:{}", "0".repeat(64))],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE create_reservations SET created_at = ?1 WHERE intent_key IN ('live-failed', 'old-refusal')",
+                [now - 2 * 24 * 60 * 60],
+            ).unwrap();
+            conn.execute(
+                "UPDATE create_reservations SET dedup_scope = 'session_lifetime' \
+                 WHERE intent_key = 'bounded-pending-orphan'",
+                [],
+            )
+            .unwrap();
+            conn.execute("DELETE FROM sessions WHERE id NOT LIKE 'live-%'", [])
                 .unwrap();
+            assert_eq!(
+                conn.query_row("SELECT COUNT(*) FROM create_reservations", [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                10
+            );
+            assert_eq!(
+                conn.query_row("SELECT COUNT(*) FROM sessions", [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                3
+            );
+            let version = conn
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap();
+            let schema = conn
+                .prepare("SELECT type, name, sql FROM sqlite_schema ORDER BY type, name")
+                .unwrap()
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            (version, schema)
+        };
+        let mut original = Vec::new();
+        for key in keys {
+            original.push(reservation_of(&store, key).await);
         }
         drop(store);
 
-        let store = SessionStore::open(&path, true).await.unwrap();
-        for (key, secret) in [("gone-key", "SECRET"), ("failed-key", "FAILED-SECRET")] {
-            let reduced = store.reservation(key).await.unwrap().unwrap();
-            assert!(
-                is_tombstone_fingerprint(&reduced.fingerprint),
-                "{key}: {reduced:?}"
+        let observer = SessionStore::open(&path, false).await.unwrap();
+        for reservation in &original {
+            assert_eq!(
+                reservation_of(&observer, &reservation.intent_key).await,
+                *reservation
             );
-            assert!(!reduced.fingerprint.contains(secret), "{key}: {reduced:?}");
         }
-        assert!(matches!(
-            store
-                .reservation("failed-key")
-                .await
-                .unwrap()
-                .unwrap()
-                .outcome,
-            ReservationOutcome::Failed { .. }
-        ));
+        drop(observer);
+
+        let store = SessionStore::open(&path, true).await.unwrap();
+        for key in ["gone-raw", "gone-digest", "old-refusal"] {
+            assert_eq!(store.reservation(key).await.unwrap(), None, "{key}");
+        }
+        for mut expected in original.into_iter().filter(|row| {
+            !matches!(
+                row.intent_key.as_str(),
+                "gone-raw" | "gone-digest" | "old-refusal"
+            )
+        }) {
+            if expected.intent_key != "pending-orphan" {
+                expected.dedup_scope = DedupScope::SessionLifetime;
+            }
+            assert_eq!(reservation_of(&store, &expected.intent_key).await, expected);
+        }
         assert_eq!(
-            store
-                .reservation("live-key")
-                .await
+            store.pending_reservations().await.unwrap().len(),
+            3,
+            "both orphaned pending claims remain recovery work"
+        );
+        let conn = store.conn.lock();
+        let schema_after = (
+            conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            conn.prepare("SELECT type, name, sql FROM sqlite_schema ORDER BY type, name")
                 .unwrap()
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                })
                 .unwrap()
-                .fingerprint,
-            "{\"invocation\":\"live\"}"
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
         );
         assert_eq!(
-            store
-                .reservation("refused-key")
-                .await
-                .unwrap()
-                .unwrap()
-                .fingerprint,
-            refused
+            schema_before, schema_after,
+            "retention is a data cleanup, not a schema migration"
         );
     }
 
-    /// Seed one reserved launch: a launching session row plus the pending
-    /// claim that reserved it, exactly as `create_session`'s first step
-    /// commits them.
+    /// Seed a legacy permanent claim for codec and recovery tests.
+    ///
+    /// New production claims use session lifetime. Keeping the old spelling
+    /// here exercises databases written before that policy changed; tests of
+    /// the new policy choose their scope explicitly below.
     async fn insert_reserved(store: &SessionStore, id: &str, key: &str, fingerprint: &str) {
         insert_reserved_with_scope(store, id, key, fingerprint, DedupScope::Permanent).await;
     }
@@ -10250,6 +10267,9 @@ mod tests {
     /// or not they collide with each other or with an existing word, so a
     /// typo there is invisible until a replayed reservation comes back as
     /// the wrong kind.
+    /// Settling a legacy claim as failed also adopts the current bounded
+    /// scope; successful and pending legacy claims keep their stored spelling
+    /// until writable-open cleanup or Delete applies the lifetime policy.
     #[farhelm_testtrace::test]
     async fn every_reservation_outcome_shape_round_trips() {
         let (_dir, store) = fresh_store().await;
@@ -10301,7 +10321,14 @@ mod tests {
             assert_eq!(read.session_id, format!("s{index}"));
             assert_eq!(read.tmux_name, format!("fh-s{index}"));
             assert_eq!(read.fingerprint, "fp");
-            assert_eq!(read.dedup_scope, DedupScope::Permanent);
+            assert_eq!(
+                read.dedup_scope,
+                if matches!(outcome, ReservationOutcome::Failed { .. }) {
+                    DedupScope::SessionLifetime
+                } else {
+                    DedupScope::Permanent
+                }
+            );
         }
         assert_eq!(
             store.reservation("never-claimed").await.expect("read"),
@@ -10384,7 +10411,7 @@ mod tests {
     ///
     /// Monotonicity is what makes repeated and stale settlements harmless —
     /// a retry re-settling what a previous attempt already recorded, or a
-    /// settlement computed before a concurrent delete tombstoned the same
+    /// settlement computed before a concurrent delete removed the same
     /// row. (It is NOT protecting against a reload racing a live create:
     /// reload only runs before this process serves anything.) The identity
     /// condition covers the other direction: a settlement computed for one
@@ -10482,9 +10509,8 @@ mod tests {
 
     /// `pending_reservations` is the reload worklist, so it must return
     /// exactly the rows reload can still act on — and none of the settled
-    /// ones, which would grow without bound over a state directory's life.
-    /// The non-default scope is part of that work item: losing it here would
-    /// turn a bounded spawn key into a permanent tombstone during recovery.
+    /// ones, which have no recovery work left. The scope remains part of the
+    /// work item, including when reading older databases during recovery.
     #[farhelm_testtrace::test]
     async fn pending_reservations_lists_only_the_unsettled_ones() {
         let (_dir, store) = fresh_store().await;
@@ -10514,20 +10540,32 @@ mod tests {
         assert_eq!(pending[0].outcome, ReservationOutcome::Pending);
     }
 
-    /// Deleting a session TOMBSTONES its reservations rather than
-    /// removing them, and settles a still-pending one as created.
+    /// Delete frees every key with its session, including unsettled claims.
     ///
-    /// Both halves are the tombstone rule (PLAN_M3.md item 6). Keeping the
-    /// row is what lets a later replay say "that session was deleted"
-    /// instead of silently creating a second one; settling a pending row
-    /// is what keeps a retry from concluding "the crashed attempt never
-    /// launched" about a session that demonstrably existed — nothing can
-    /// be deleted without having been created.
+    /// Both legacy permanent rows and session-lifetime rows obey the same
+    /// boundary. A stale settlement after Delete must not recreate the key:
+    /// the next create is allowed to claim it with a different identity.
     #[farhelm_testtrace::test]
-    async fn deleting_a_session_settles_and_keeps_its_reservations() {
+    async fn deleting_a_session_prunes_its_reservations_in_every_scope() {
         let (_dir, store) = fresh_store().await;
         insert_reserved(&store, "s1", "pending-key", "fp").await;
         insert_reserved(&store, "s2", "settled-key", "fp").await;
+        insert_reserved_with_scope(
+            &store,
+            "s3",
+            "bounded-pending",
+            "fp",
+            DedupScope::SessionLifetime,
+        )
+        .await;
+        insert_reserved_with_scope(
+            &store,
+            "s4",
+            "bounded-settled",
+            "fp",
+            DedupScope::SessionLifetime,
+        )
+        .await;
         store
             .settle_reservations(vec![settlement(
                 "settled-key",
@@ -10536,8 +10574,16 @@ mod tests {
             )])
             .await
             .expect("settle");
+        store
+            .settle_reservations(vec![settlement(
+                "bounded-settled",
+                "s4",
+                ReservationOutcome::Created,
+            )])
+            .await
+            .unwrap();
 
-        for id in ["s1", "s2"] {
+        for id in ["s1", "s2", "s3", "s4"] {
             store
                 .delete_session_settling_reservations(id)
                 .await
@@ -10546,19 +10592,44 @@ mod tests {
 
         assert!(
             store.load_all().await.expect("load").is_empty(),
-            "both session rows are gone"
+            "all session rows are gone"
         );
-        for key in ["pending-key", "settled-key"] {
-            assert_eq!(
-                reservation_of(&store, key).await.outcome,
+        store
+            .settle_reservations(vec![settlement(
+                "pending-key",
+                "s1",
                 ReservationOutcome::Created,
-                "{key}: a deleted session's intent is settled as created, whatever it was before"
+            )])
+            .await
+            .unwrap();
+        for key in [
+            "pending-key",
+            "settled-key",
+            "bounded-pending",
+            "bounded-settled",
+        ] {
+            assert_eq!(
+                store.reservation(key).await.unwrap(),
+                None,
+                "{key}: Delete frees the key even if its claim was pending"
             );
         }
+        insert_reserved_with_scope(
+            &store,
+            "fresh",
+            "pending-key",
+            "new request",
+            DedupScope::SessionLifetime,
+        )
+        .await;
+        assert_eq!(
+            reservation_of(&store, "pending-key").await.session_id,
+            "fresh"
+        );
     }
 
-    /// A spawned child's key and credential have exactly the child's row's
-    /// lifetime, while an interactive key remains a durable tombstone.
+    /// Deleting one session revokes its credential and frees only its own key.
+    /// Another live session's key remains available for replay.
     #[farhelm_testtrace::test]
     async fn deleting_a_spawned_child_prunes_its_bounded_key_and_credential() {
         let (_dir, store) = fresh_store().await;
@@ -10602,16 +10673,15 @@ mod tests {
                 .await
                 .unwrap()
                 .is_some(),
-            "another session's permanent key is untouched"
+            "another live session's key is untouched"
         );
     }
 
     /// The delete's two writes are one transaction: a failure leaves the
     /// session AND its reservation exactly as they were.
     ///
-    /// The direction that would hurt is a tombstone recorded over a session
-    /// that then survived the delete — a live session whose intent key
-    /// reports it as gone, permanently. Forced with a trigger that refuses
+    /// A key pruned while its session survives would allow a duplicate create.
+    /// Forced with a trigger that refuses
     /// the row removal, the only way to fail the second half on demand.
     #[farhelm_testtrace::test]
     async fn a_failed_delete_leaves_both_the_session_and_its_reservation() {
@@ -10639,7 +10709,7 @@ mod tests {
         assert_eq!(
             reservation_of(&store, "key").await.outcome,
             ReservationOutcome::Pending,
-            "and its intent key must not have been tombstoned over a session that still exists"
+            "and its intent key must survive with the session to prevent a duplicate create"
         );
     }
 
@@ -10650,7 +10720,8 @@ mod tests {
     /// may still be reconcilable must leave its reservation pending, since
     /// recording `Created` there would claim a session that never existed
     /// and recording `Failed` would close an intent whose agent might be
-    /// running.
+    /// running. A proven failure retains its original answer under the same
+    /// one-day rule in both scopes; rollback is not the user's Delete.
     #[farhelm_testtrace::test]
     async fn the_rollback_delete_settles_only_what_it_is_given() {
         let (_dir, store) = fresh_store().await;
@@ -10703,7 +10774,14 @@ mod tests {
                 message: "the spec never landed".to_string(),
             }
         );
-        assert_eq!(store.reservation("bounded").await.unwrap(), None);
+        assert_eq!(
+            reservation_of(&store, "bounded").await.outcome,
+            ReservationOutcome::Failed {
+                kind: farhelm_proto::ErrorKind::Internal,
+                message: "launch failed".to_string(),
+            },
+            "a failed rollback retains a refusal even for a bounded claim"
+        );
         assert!(store.load_all().await.expect("load").is_empty());
     }
 
@@ -10979,10 +11057,179 @@ mod tests {
         assert!(Path::new(&cwd).is_dir());
     }
 
+    /// Refusals expire exactly one day after their original claim in either scope.
+    ///
+    /// Age alone must never discard a live session's failed answer, a pending
+    /// recovery claim, or a successful claim. SQL backdating and an explicit
+    /// clock pin the inclusive cutoff without depending on scheduling or sleep.
+    #[farhelm_testtrace::test]
+    async fn refusal_retention_uses_the_claim_age_and_requires_session_absence() {
+        let (_dir, store) = fresh_store().await;
+        let now = 2_000_000;
+        let cutoff = now - 24 * 60 * 60;
+        for (prefix, scope) in [
+            ("legacy", DedupScope::Permanent),
+            ("bounded", DedupScope::SessionLifetime),
+        ] {
+            for suffix in ["before", "at", "after", "live", "pending", "created"] {
+                let key = format!("{prefix}-{suffix}");
+                insert_reserved_with_scope(&store, &key, &key, "full request text", scope).await;
+            }
+            force_outcome(
+                &store,
+                &format!("{prefix}-live"),
+                &LastOutcome::Error {
+                    detail: "retained failed launch".into(),
+                },
+            );
+        }
+        {
+            let conn = store.conn.lock();
+            conn.execute(
+                "UPDATE create_reservations SET created_at = ?1",
+                [cutoff - 1],
+            )
+            .unwrap();
+            conn.execute("UPDATE create_reservations SET state = 'failed', error_kind = 'invalid_request', error_detail = 'original refusal' WHERE intent_key NOT LIKE '%-pending' AND intent_key NOT LIKE '%-created'", []).unwrap();
+            conn.execute("UPDATE create_reservations SET state = 'created' WHERE intent_key LIKE '%-created'", []).unwrap();
+            conn.execute(
+                "UPDATE create_reservations SET created_at = ?1 WHERE intent_key LIKE '%-at'",
+                [cutoff],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE create_reservations SET created_at = ?1 WHERE intent_key LIKE '%-after'",
+                [cutoff + 1],
+            )
+            .unwrap();
+            conn.execute("DELETE FROM sessions WHERE id NOT LIKE '%-live'", [])
+                .unwrap();
+            assert_eq!(
+                conn.query_row("SELECT COUNT(*) FROM sessions", [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                2
+            );
+            assert_eq!(conn.query_row("SELECT COUNT(*) FROM create_reservations WHERE state = 'failed' AND created_at = ?1", [cutoff], |row| row.get::<_, i64>(0)).unwrap(), 2);
+        }
+
+        store.prune_expired_create_refusals(now).await.unwrap();
+        for prefix in ["legacy", "bounded"] {
+            assert!(matches!(
+                store
+                    .session(&format!("{prefix}-live"))
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .outcome,
+                LastOutcome::Error { .. }
+            ));
+            for suffix in ["before", "at"] {
+                let key = format!("{prefix}-{suffix}");
+                assert_eq!(
+                    store.reservation(&key).await.unwrap(),
+                    None,
+                    "{key}: one day is the inclusive expiry boundary"
+                );
+            }
+            let recent_key = format!("{prefix}-after");
+            let recent = reservation_of(&store, &recent_key).await;
+            assert_eq!(recent.fingerprint, "full request text");
+            assert_eq!(
+                recent.outcome,
+                ReservationOutcome::Failed {
+                    kind: farhelm_proto::ErrorKind::InvalidRequest,
+                    message: "original refusal".into(),
+                }
+            );
+            for suffix in ["live", "pending", "created"] {
+                assert!(
+                    store
+                        .reservation(&format!("{prefix}-{suffix}"))
+                        .await
+                        .unwrap()
+                        .is_some(),
+                    "{prefix}-{suffix}: expiry only applies to failures without a session"
+                );
+            }
+        }
+        store.prune_expired_create_refusals(now + 1).await.unwrap();
+        for prefix in ["legacy", "bounded"] {
+            assert_eq!(
+                store.reservation(&format!("{prefix}-after")).await.unwrap(),
+                None
+            );
+            assert!(
+                store
+                    .reservation(&format!("{prefix}-live"))
+                    .await
+                    .unwrap()
+                    .is_some(),
+                "a retained Error session's retry answer has no age limit"
+            );
+        }
+    }
+
+    /// Recovery turns an old pending orphan into a bounded refusal without renewing it.
+    ///
+    /// Protocol refusal proof compares the claim's scope with the row's scope,
+    /// so a legacy claim must adopt the current policy when recovery proves it
+    /// failed. Its original timestamp still bounds retention and its request
+    /// and diagnostic remain available for replay within that window.
+    #[farhelm_testtrace::test]
+    async fn settling_a_legacy_orphan_as_failed_adopts_the_refusal_window() {
+        let (_dir, store) = fresh_store().await;
+        insert_reserved(&store, "orphan", "key", "original full request").await;
+        let now = 2_000_000;
+        let claimed_at = now - 24 * 60 * 60 + 1;
+        {
+            let conn = store.conn.lock();
+            conn.execute("DELETE FROM sessions WHERE id = 'orphan'", [])
+                .unwrap();
+            conn.execute(
+                "UPDATE create_reservations SET created_at = ?1 WHERE intent_key = 'key'",
+                [claimed_at],
+            )
+            .unwrap();
+        }
+        let pending = reservation_of(&store, "key").await;
+        assert_eq!(pending.outcome, ReservationOutcome::Pending);
+        assert_eq!(pending.dedup_scope, DedupScope::Permanent);
+        assert!(store.session("orphan").await.unwrap().is_none());
+        let outcome = ReservationOutcome::Failed {
+            kind: farhelm_proto::ErrorKind::Internal,
+            message: "recovery proved no launch".into(),
+        };
+        store
+            .settle_reservations(vec![settlement("key", "orphan", outcome.clone())])
+            .await
+            .unwrap();
+        let refusal = reservation_of(&store, "key").await;
+        assert_eq!(refusal.dedup_scope, DedupScope::SessionLifetime);
+        assert_eq!(refusal.fingerprint, pending.fingerprint);
+        assert_eq!(refusal.outcome, outcome);
+        {
+            let conn = store.conn.lock();
+            assert_eq!(
+                conn.query_row(
+                    "SELECT created_at FROM create_reservations WHERE intent_key = 'key'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                claimed_at
+            );
+        }
+        store.prune_expired_create_refusals(now).await.unwrap();
+        assert_eq!(reservation_of(&store, "key").await, refusal);
+        store.prune_expired_create_refusals(now + 1).await.unwrap();
+        assert_eq!(store.reservation("key").await.unwrap(), None);
+    }
+
     /// A refused intent is recorded with no session row at all — the shape
-    /// a create rejected by validation leaves behind. A bounded spawn has
-    /// no child lifetime to bind this reservation to, so it must leave no
-    /// claim; permanent interactive refusals retain their durable replay.
+    /// a create rejected by validation leaves behind. Every scope retains
+    /// its full request and original error, and replay's orphan cleanup must
+    /// leave that refusal intact even though it has no session to protect it.
     #[farhelm_testtrace::test]
     async fn a_refused_intent_records_without_a_session_row() {
         let (_dir, store) = fresh_store().await;
@@ -11005,7 +11252,26 @@ mod tests {
             store.load_all().await.expect("load").is_empty(),
             "a validation refusal never had a session"
         );
-        assert_eq!(store.reservation("key").await.unwrap(), None);
+        let expected = reservation_of(&store, "key").await;
+        assert_eq!(expected.fingerprint, "fp");
+        assert_eq!(expected.dedup_scope, DedupScope::SessionLifetime);
+        assert_eq!(
+            expected.outcome,
+            ReservationOutcome::Failed {
+                kind: farhelm_proto::ErrorKind::InvalidRequest,
+                message: "working directory does not exist: /nope".to_string(),
+            }
+        );
+        for _ in 0..2 {
+            assert!(
+                !store
+                    .prune_orphaned_bounded_reservation("key", "s1")
+                    .await
+                    .unwrap(),
+                "replaying a refusal must not erase its next replay"
+            );
+            assert_eq!(reservation_of(&store, "key").await, expected);
+        }
 
         store
             .record_failed_intent(
@@ -11050,11 +11316,12 @@ mod tests {
 
     /// The relaunch takeover is a real conditional transition: it acquires
     /// only while BOTH the reservation is still pending and its row is
-    /// still un-launched, and reports which condition failed otherwise.
+    /// still un-launched. A removed reservation fails rather than granting
+    /// authority to relaunch a deleted identity.
     ///
     /// This is what keeps a racing delete from being resurrected. The
     /// caller decides to relaunch from evidence gathered a moment earlier;
-    /// if a delete tombstoned the reservation in between, relaunching would
+    /// if a delete removed the reservation in between, relaunching would
     /// recreate a session the user deliberately threw away, and if the
     /// launch landed late, relaunching would start a second agent beside
     /// the first.
@@ -11086,20 +11353,17 @@ mod tests {
             "the takeover leaves a fresh launching row under the same id"
         );
 
-        // Resolved: a delete tombstoned the reservation first.
+        // Delete removed the claim first: a stale takeover has no launch authority.
         insert_reserved(&store, "s2", "deleted", "fp").await;
         store
             .delete_session_settling_reservations("s2")
             .await
             .expect("the racing delete");
-        let claim = store
+        store
             .restart_pending_launch(launching_row("s2"), "deleted")
             .await
-            .expect("takeover");
-        let RetryClaim::Resolved(settled) = claim else {
-            panic!("a tombstoned reservation must refuse the takeover: {claim:?}");
-        };
-        assert_eq!(settled.outcome, ReservationOutcome::Created);
+            .expect_err("a removed reservation must refuse the takeover");
+        assert_eq!(store.reservation("deleted").await.unwrap(), None);
         assert!(
             store.session("s2").await.expect("read").is_none(),
             "and must not have resurrected the deleted session"

@@ -854,6 +854,11 @@ Creation guards against accidental double submission (a double-click, a retry af
 yields one session or a clear error, never two silently. Deliberately creating several sessions with identical
 parameters — same directory, same launch — is a sanctioned workflow, not a duplicate to be suppressed.
 
+A create's retry key lasts as long as the session it created, including a retained error session; a refusal without a
+surviving session is replayed for 24 hours. Delete removes the session's retry record along with the session, including
+an unfinished create's record. After Delete or refusal expiry, the same key is a fresh request that re-validates and,
+for an agent request, needs the approval any new request needs.
+
 Controls that perform exactly the same operation on the same target behave identically and share that operation's state,
 including an unresolved retry identity or a pending confirmation, differing only where the GUI strictly requires it.
 Plain Replace shares one unresolved identity across the sidebar, session header and interrupted-session card, including
@@ -1024,10 +1029,10 @@ Once allocation has occurred, failures retain the session and its checkout assoc
 completed preparation permits ordinary restart without repeating clone or hook. Interrupted, missing, corrupt or
 ambiguous preparation refuses automatic repetition. Retrying an accepted create with its original key reconciles the
 original allocation and configuration, including after a helm restart or configuration edit. A transport-ambiguous reply
-keeps that original request and key. Authenticated reconciliation can return the accepted result or a durable refusal
-that prevents this key from allocating later. That refusal resolves even an earlier lost reply: the composer refreshes
-the preview and requires another explicit submission. An ordinary conflict without that proof retains the original
-request and key.
+keeps that original request and key. Authenticated reconciliation can return the accepted result or a refusal that
+prevents this key from allocating for 24 hours, after which the key re-validates as a new request. That refusal resolves
+even an earlier lost reply: the composer refreshes the preview and requires another explicit submission. An ordinary
+conflict without that proof retains the original request and key.
 
 In managed-checkout mode, the composer's folder field shows the current preview's effective path read-only, or a pending
 or error state while no path is available. An ambiguous retry keeps displaying the original request's path. The folder
@@ -2333,10 +2338,12 @@ templates and composes agent launches. Either is refused with a remedy when no h
 when omitted. An optional idempotency key makes retries safe: re-running spawn with the same key after a timeout or
 ambiguous outcome returns the existing child rather than creating another. Keys are scoped to the asking session on its
 host and live as long as the child session does: the same key from another session is an unrelated request, never a
-replay of someone else's child, and a replay never returns the asking session itself. Confirmed 2026-09-28, the same
-scoping applies to the idempotency keys of `farhelm agent create` and `farhelm agent clone`. Guaranteed Farhelm-injected
-environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential; other Farhelm-specific variables are
-illustrative, not contract. (The user's login-shell environment is separately guaranteed; see Durability.)
+replay of someone else's child, and a replay never returns the asking session itself. The same caller scoping and
+created-session lifetime apply to the idempotency keys of `farhelm agent create` and `farhelm agent clone`, including
+when they target another host. Refusals recorded before any session exists are replayed for 24 hours for all three
+verbs. Guaranteed Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential;
+other Farhelm-specific variables are illustrative, not contract. (The user's login-shell environment is separately
+guaranteed; see Durability.)
 
 Session references handed to clients and agents are full IDs: the host entry's helm-assigned UUID in canonical
 36-character lowercase form, a colon, and the supervisor's opaque session ID. The separator is at that fixed position;
@@ -2526,12 +2533,13 @@ out after any of them. While it waits, the CLI itself says once on stderr, after
 that it is waiting for the user to approve the request in Farhelm. Deleting a session first denies the requests it has
 waiting. An approval holds only for the host connection the request arrived on: a request whose host was replaced or
 re-identified while it waited is refused rather than carried out. An approval that arrives after the asking CLI was
-killed still carries out exactly what the card showed. An approved managed-checkout create's keyed retry returns or
-finishes that attempt's session without another card; a request never approved still asks as usual. Other retries are
-new requests and are asked about like one; when one carries the first request's idempotency key, approving it returns
-the session the first approval created rather than creating another. A host's sessions can keep only a few cards waiting
-at a time; a misbehaving host that keeps asking is answered by denying its cards or removing the host, and that nuisance
-is accepted.
+killed still carries out exactly what the card showed. While its session still exists, an approved managed-checkout
+create's keyed retry returns or finishes that attempt's session without another card; a request never approved still
+asks as usual. Other retries are new requests and are asked about like one; when one carries the first request's
+idempotency key and that session still exists, approving it returns the session the first approval created rather than
+creating another. After Delete, every keyed retry is a fresh request with the ordinary approval rules. A host's sessions
+can keep only a few cards waiting at a time; a misbehaving host that keeps asking is answered by denying its cards or
+removing the host, and that nuisance is accepted.
 
 A waiting card's session targets and GUI Delete and Replace confirmations keep the full reference they showed. Removing
 and re-adding a host creates a new entry UUID, so an old confirmation cannot reach it even if it reports the same bare
@@ -2593,29 +2601,29 @@ the conflict and never submits another create automatically. Keyed recovery prec
 writes; managed-checkout trust follows Settings. A command flag repeated or contradicted (`--yolo` with `--no-yolo`) is
 refused rather than resolved by order. The removed selectors `--profile` and `--profile-id`, and
 `farhelm agent restart --mode`, are refused with a message naming what replaced them, and `--agent` given something that
-is not an agent type is refused with the list of agent types. A retry under an idempotency key is matched by the request
-as the agent sent it, not by what that request resolved to. Retrying `farhelm agent create` or `farhelm spawn` with the
-same key, host, template names, flags and spawn placement, or `farhelm agent clone` with the same key, source, host and
-`--cwd`/`--title` overrides (an override given counts as different from one left out), returns the first attempt's
-session, or the refusal its host recorded, even if a template it names or the clone's source was edited in between, for
-as long as the request still names something the helm can resolve. A retry that no longer resolves (a template deleted
-or edited into something the CLI refuses, an unconnected host, a clone source that is gone, unreachable or legacy) is
-refused, and never starts a second session. The same key with a different request is refused as key reuse, including
-when a template's destination changed between a folder and a managed checkout. For managed-checkout creates an approved
-first attempt is reconciled before another directory preview or card, including its interrupted start; the agent YOLO
-rule still checks today's resolved launch. Other creates retain the rule below. The approval card and the agent YOLO
-rule judge a keyed retry by what its request resolves to now, so a retry whose templates changed into a launch the
-host's YOLO rule refuses is refused even where a replay would have been harmless, and a retry whose first attempt was
-interrupted before its session started is refused, rather than started with what the first attempt resolved to, when its
-launch, folder or title differs. `farhelm spawn --inherit-agent` is the exception: its retry is compared by the launch
-it inherits after destination trust normalization, so a Settings change can refuse the reused key.
-`farhelm agent create` requires `--host` with an idempotency key, because the key's record lives only on the host the
-first attempt reached, and a host taken from a template could change between an attempt and its retry. A host name that
-comes to mean another machine between the two (hosts renamed or reassigned) is a known, accepted gap: the retry is then
-a new create on that machine and starts a second session, with every check a fresh create gets. `farhelm agent clone`
-copies its explicitly selected source's stored launch onto an explicitly named host, changing only destination-dependent
-workspace trust. Clone carries no translation between hosts: a command written for one machine may name a binary that is
-absent, a different build, or one that takes different flags on another.
+is not an agent type is refused with the list of agent types. While its retry record is retained, a retry under an
+idempotency key is matched by the request as the agent sent it, not by what that request resolved to. Retrying
+`farhelm agent create` or `farhelm spawn` with the same key, host, template names, flags and spawn placement, or
+`farhelm agent clone` with the same key, source, host and `--cwd`/`--title` overrides (an override given counts as
+different from one left out), returns the first attempt's session, or the refusal its host recorded, even if a template
+it names or the clone's source was edited in between, for as long as the request still names something the helm can
+resolve. A retry that no longer resolves (a template deleted or edited into something the CLI refuses, an unconnected
+host, a clone source that is gone, unreachable or legacy) is refused, and never starts a second session. The same key
+with a different request is refused as key reuse, including when a template's destination changed between a folder and a
+managed checkout. For managed-checkout creates an approved first attempt is reconciled before another directory preview
+or card, including its interrupted start; the agent YOLO rule still checks today's resolved launch. Other creates retain
+the rule below. The approval card and the agent YOLO rule judge a keyed retry by what its request resolves to now, so a
+retry whose templates changed into a launch the host's YOLO rule refuses is refused even where a replay would have been
+harmless, and a retry whose first attempt was interrupted before its session started is refused, rather than started
+with what the first attempt resolved to, when its launch, folder or title differs. `farhelm spawn --inherit-agent` is
+the exception: its retry is compared by the launch it inherits after destination trust normalization, so a Settings
+change can refuse the reused key. `farhelm agent create` requires `--host` with an idempotency key, because the key's
+record lives only on the host the first attempt reached, and a host taken from a template could change between an
+attempt and its retry. A host name that comes to mean another machine between the two (hosts renamed or reassigned) is a
+known, accepted gap: the retry is then a new create on that machine and starts a second session, with every check a
+fresh create gets. `farhelm agent clone` copies its explicitly selected source's stored launch onto an explicitly named
+host, changing only destination-dependent workspace trust. Clone carries no translation between hosts: a command written
+for one machine may name a binary that is absent, a different build, or one that takes different flags on another.
 
 `farhelm agent create` and ordinary `farhelm spawn` accept `--prompt TEXT` or `--prompt-file PATH`, mutually exclusive;
 `-` reads the file contents from stdin. Templates carry the same prompt field. The prompt shares the 64 KiB launch
@@ -3181,10 +3189,10 @@ writing the templates any host may launch from, are authorized by the user, not 
 setting on for a host grants that host's sessions exactly that authority over the fleet, including changing what later
 launches from those templates run anywhere. A retried create is a new request and is asked about like one, so how long
 agent-originated retry records are kept is not a security question. The one exception is a create into a managed
-checkout: a retry with the same idempotency key returns, or finishes, the attempt the user already approved, without
-asking again. That stays outside the retention question because the replay can only complete that exact approved
-request, and only for the session, on the host, that asked. None of this waives correctness of user-initiated GUI
-requests.
+checkout: while its created session still exists, a retry with the same idempotency key returns, or finishes, the
+attempt the user already approved, without asking again. The replay can only complete that exact approved request, and
+only for the session, on the host, that asked. Delete removes that approval's retry record, so reusing the key then
+needs the approval any new request needs. None of this waives correctness of user-initiated GUI requests.
 
 Reading is separate from acting, and stays open for now. Any attached host may obtain any template's full contents,
 including a command line and resume command it carries: an approved spawn that applies a template, or any spawn from a
