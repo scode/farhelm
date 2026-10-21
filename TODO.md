@@ -387,57 +387,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   gate do not run it while this exclusion stands. A single clean combined run cannot establish that these latent
   failures are fixed; retain the release exclusion until the evidence supports reversing it.
 
-### Systematic deflake
-
-Deferred work, with its original triggers:
-
-- A typed scale factor on harness budgets, triggered by a budget-class recurrence after the readiness-oracle changes
-  land. Keep harness budgets distinct from product deadlines (`Budget::harness` versus `Budget::product`, and
-  `expect.configure` plus a browser helper); `terminal-flood.spec.ts` has both kinds of deadline. A slow wait caused by
-  an invalid fixture premise is not evidence for scaling its budget.
-- Product observables that attribute their cause without changing the deliberately shared stall-detach reason string:
-  supervisor stall versus helm backstop, sentinel unlink path and errno, and bounded helm-death detection latency.
-  Attribution belongs in a secondary field or retained log line. This remains product work for "Near term" when the
-  maintainer chooses to schedule it.
-- Running the tag gate's suite away from the release build, after "Restore the release integration gate" lands. The
-  release gate still excludes the e2e target; evaluate any concurrency experiment using the then-current runner budget
-  rather than reviving the old libtest thread setting.
-
-- **Shallow pause resets under load.** The e2e test
-  `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` in
-  `crates/farhelm/tests/e2e/terminal_backpressure.rs` saw a catch-up reset after a 500 ms pause in deflake run
-  `cba04f06-39b5-4fd9-bfa7-3b2dcb1df22c` (failed run `4d3f498f-ae89-4925-b95f-f313bf716980`; reruns
-  `24210386-9d75-4b28-a0ca-5ffda7955268`, `b45bc530-d343-458c-8de0-2481a6a8e2ca` and
-  `61bfb8d8-ccdf-4e54-a7b2-61df5fba317f` passed) on a machine at load average about 20 (FLAKES.md, 2026-10-09).
-  Hypothesis: the reset check spans the whole 10-second drain after resume, so a load stall past tmux's `pause-after`
-  window anywhere in that drain produces a correct reset that the test reads as a shallow-pause failure. Exact-test
-  repetition batch `2304a82c-76fe-466a-a4b7-d7a1ddf66fe1` failed twice in three attempts; resets were observed at 9.45
-  and 8.30 seconds, but trace eviction lost the pause/resume boundary. Neither that timing nor a fixed number of
-  consecutive records establishes the cause: already-flushed output can precede a queued `%pause`. A sound assertion
-  needs a complete filtered trace or per-channel test observable attributing each reset to tmux's pause notification,
-  together with a flood-start-to-resume premise below `pause-after`. Leave the assertion and exclusion unchanged until
-  that distinction is available (FLAKES.md, 2026-10-17).
-
-- **Reconnect recovery misses its window under load.** The WebKit case of `view-changes-do-not-postpone-a-recovery` in
-  `e2e/tests/terminal-reconnect.spec.ts` measured a recovery at 4185 ms against its 4000 ms bound in deflake run
-  `0ca012d4-81ae-4d46-b75d-54892e9c69b0` (failed run `a20f2a95-e3d7-4a0a-a340-055ca9547555`; reruns
-  `b421c4bd-45b0-49d5-a970-9ba0b6323efe`, `a30e12c5-bc71-48df-be05-71c954456dfa` and
-  `85cd1460-b130-4ada-9dc9-ecd6450dd513` passed) on a machine at load average about 16 (FLAKES.md, 2026-10-09).
-  Hypothesis: the bound is wall-clock time measured from the test's side, so the view churn's own round trips under load
-  eat the margin above the 1.5-second rung; no reset was shown. Five exact WebKit reruns passed in
-  `6328360c-ab06-4f40-884c-86b979f3a1a9`; the original failed trace is no longer available. A replacement observable
-  must distinguish a rearmed retry from driver and terminal-mount latency, using the page's clock and a verified churn
-  premise. Verify mount deferral before treating socket construction as the timer firing. Keep the existing assertion
-  and exclusion; widening the budget alone would not establish the cause (FLAKES.md, 2026-10-17).
-
-- **Installer test counts an extra request under BusyBox.** In CI's Alpine/BusyBox leg of `scripts/test-install-sh.sh`,
-  the check "G2-G4 (pre /latest): nothing but /latest was requested" saw two GET lines where one was expected, in the
-  first attempt of CI run 38061432384 (job 114240425122) (FLAKES.md, 2026-10-10). The rerun passed, as did the GNU leg
-  of the same run and two local Alpine runs. The check only prints a count, so which second request was logged is
-  unknown. The check now attributes requests to the scenario's origin path and prints the full observation window on
-  failure, plus any other scenario's GETs even on success. GNU and Alpine baseline reruns passed on 2026-10-17. A true
-  duplicate request within the scenario still fails; keep this entry until the extra request's identity is established.
-
 ## Broken tests
 
 ## Code cleanup
