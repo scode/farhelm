@@ -4,8 +4,8 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Ten buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove
-— the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses duplicate
+Ten buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
+the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses duplicate
 review triage within each item's stated scope; "near term" is what should be picked up next; "doc todo" holds
 documentation work; "tricky bugs" retains unresolved bug reports and their investigation findings; "deflake" gathers
 test and harness reliability work, including CI execution and restoring gates; "broken tests" records tests that fail
@@ -796,27 +796,6 @@ exhaustive match or a default enforces. A clear fix of the targeted bug class is
 
 ## Unbucketized
 
-- Run the manual Mac checklist (`docs/manual-mac-checklist.md` — that file IS the record; its "Observed:" fields are the
-  state, all "not run"). Blocked on a human with a real Mac. Not covered by any CI: Playwright's WebKit is not
-  WKWebView.
-
-- Decide whether several helms sharing one supervisor becomes supported, and what that requires. SPEC.md says concurrent
-  helms are unsupported in v1, with the supervisor's one-attachment-per-session rule as the only backstop. Observed on
-  2026-08-27 while acceptance-testing the 0.1.0 rc: a desktop helm (0.1.0-rc.1) and the browser helm (0.0.3) both
-  registered the same host and both listed the same sessions, live, with no disconnects, and switching between the two
-  surfaces worked. That is not luck — sessions and their status are supervisor-owned and the helm's `session_cache` is
-  an explicit mirror, so any helm reaching the supervisor sees the same list. What was deliberately NOT tested: opening
-  the SAME session in both helms. The expected result is the displaced-client path the spec defines for a second client
-  (snapshot plus take-control, and auto-reconnect never seizing), since the supervisor enforces that rule, but the path
-  has only ever been exercised between two clients of one helm. Known gaps before this could be called supported: (1) D2
-  version coupling — each helm expects the supervisor at its OWN version and offers `update` otherwise, so helms of
-  different versions would tug the host up and down (the rc helm already offered to "update" the 0.0.3 production
-  supervisor; a compatibility rule such as "at least mine" plus a protocol version is design work, not a fix); (2) no
-  lock against two helms provisioning or updating the same host at once; (3) the cross-helm takeover,
-  replay-after-takeover and dimension handoff have no tests; (4) SPEC.md and SPEC_impl.md would need to state the
-  supported model. Same-version helms look like a small step; mixed versions are the real work. First action when
-  returning: run the untested case with two same-version helms and record what the displaced side shows.
-
 - **Check whether Codex sessions run their commands outside the session.** An unverified finding from planning
   `prompt-running-agent` (2026-10-17). Since Codex 0.157, Codex's terminal app starts or attaches to one shared
   background server per machine and runs its conversation there, unless it is launched with `--no-daemon`; Farhelm does
@@ -828,4 +807,3 @@ exhaustive match or a default enforces. A clear fix of the targeted bug class is
   tell which session a process belongs to. Start by checking, on the installed Codex, whether a command run by a Codex
   session that Farhelm launched sees the session's environment and runs under the session's processes, with and without
   `--no-daemon`; then decide whether Farhelm should pass `--no-daemon` or otherwise adapt.
-

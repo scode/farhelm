@@ -18,8 +18,8 @@
 //! the same desktop implementation, but not the same artifact: the smoke
 //! builds `farhelm-ui` for Linux, while the release builds THIS package for
 //! macOS. What each side still owes its own validation is the thin part —
-//! this wrapper, the packaging, and the platform — which is why
-//! `docs/manual-mac-checklist.md` exists.
+//! this wrapper, the packaging, and the platform — and only a run on macOS
+//! can cover it.
 //!
 //! It is a SEPARATE crate rather than a second `[[bin]]` in `farhelm-ui`
 //! because a package can turn on a dependency's feature and a bin target

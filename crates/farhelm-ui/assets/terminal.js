@@ -2525,7 +2525,7 @@
       // an unsupported engine shape is precisely what this diagnostic exists
       // to capture. It is a hook, never drawn: the last paste's facts, page
       // wide, for the browser specs and for a manual check to read from the
-      // engine's console (`docs/manual-mac-checklist.md`). A visible dump
+      // engine's console. A visible dump
       // used to sit over the terminal's status-line cells after every paste.
       // Written on every paste, `null` included (no capture helper loaded),
       // so it never shows an earlier paste's facts as the latest one's.
