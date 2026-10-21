@@ -292,6 +292,62 @@ pub(crate) async fn clear_launch_artifacts_fail_closed(
 }
 
 impl LaunchArtifacts {
+    /// Preserve create's strict spec-only unwind after tmux confirms absence.
+    /// Unlike ordinary settlement, this existing operation reports even absence
+    /// as an error. The caller adds its exact context before settling the retry key.
+    pub(super) async fn remove_failed_create_spec_strict(&self) -> std::io::Result<()> {
+        tokio::fs::remove_file(self.spec()).await
+    }
+
+    /// Remove a failed create's files after its process and tmux cleanup attempts.
+    /// Keep the original spec → status → waypoint order and attempt every file;
+    /// cleanup warnings must not replace the create failure being unwound.
+    pub(super) async fn remove_failed_create_best_effort(&self) -> bool {
+        let spec_removed = Self::remove_file_best_effort(self.spec(), "launch spec").await;
+        let status_removed =
+            Self::remove_file_best_effort(self.status(), "launch status file").await;
+        let waypoint_removed =
+            Self::remove_file_best_effort(self.waypoint(), "launch waypoint").await;
+        spec_removed && status_removed && waypoint_removed
+    }
+
+    /// Retain every cleanup error when Delete has removed a relaunch's row.
+    /// Spec → status → waypoint removals all run even if an earlier one fails;
+    /// appending to the caller's teardown errors preserves their existing precedence.
+    pub(super) async fn remove_deleted_relaunch_fail_closed(&self, errors: &mut Vec<String>) {
+        if let Err(error) = Self::remove_file_fail_closed(self.spec(), "launch spec").await {
+            errors.push(error);
+        }
+        if let Err(error) = Self::remove_file_fail_closed(self.status(), "launch sentinel").await {
+            errors.push(error);
+        }
+        if let Err(error) = Self::remove_file_fail_closed(self.waypoint(), "launch waypoint").await
+        {
+            errors.push(error);
+        }
+    }
+
+    /// Preserve the existing confirmed-absent restart cleanup before its sweep.
+    /// Only spec and waypoint are removed, in that order; the sentinel remains.
+    /// Both failures contextualize the existing launch error without skipping the
+    /// caller's later process sweep or changing its final disposition.
+    pub(super) async fn remove_unconsumed_relaunch_fail_closed(
+        &self,
+        mut error: anyhow::Error,
+    ) -> anyhow::Error {
+        if let Err(cleanup) =
+            Self::remove_file_fail_closed(self.spec(), "the failed relaunch's spec").await
+        {
+            error = error.context(cleanup);
+        }
+        if let Err(cleanup) =
+            Self::remove_file_fail_closed(self.waypoint(), "the failed relaunch's waypoint").await
+        {
+            error = error.context(cleanup);
+        }
+        error
+    }
+
     /// Remove settled evidence without letting one failed unlink skip the rest.
     /// The caller has already preserved accepted-create evidence where necessary.
     /// Attempt every file so one obstruction does not retain the other leftovers;
@@ -408,17 +464,6 @@ fn staged_name_belongs_to(name: &str, session_id: &str) -> bool {
     crate::launch::parse_launch_file_name(stem).is_some_and(|(id, _)| id == session_id)
 }
 
-/// Best-effort credential-hygiene cleanup: remove `path`, treating its
-/// absence as success (the shim may already have consumed and unlinked
-/// it) and logging anything else as a warning naming both the file and
-/// what it was, rather than propagating — every call site here is itself
-/// already unwinding a different failure, and this cleanup must not mask
-/// that original error with an unrelated filesystem one. Returns whether
-/// removal succeeded so a background observer can stop retrying only then.
-pub(crate) async fn best_effort_remove(path: &Path, what: &str) -> bool {
-    LaunchArtifacts::remove_file_best_effort(path, what).await
-}
-
 impl LaunchArtifacts {
     /// Best-effort removal never masks the failure its caller is already unwinding.
     /// Absence is success; other failures warn and remain retryable by the observer.
@@ -432,20 +477,6 @@ impl LaunchArtifacts {
             }
         }
     }
-}
-
-/// Remove `path`, tolerating its absence (the shim usually already
-/// unlinked it — see launch.rs) but treating any OTHER failure as fatal,
-/// unlike `best_effort_remove`'s log-and-continue.
-///
-/// Used by Delete and launch cleanup: a leftover launch spec may hold the
-/// agent's full command line, credentials included, and delete is the
-/// last moment anything will ever come back to clean it up — a caller
-/// here cannot shrug off a removal failure the way create's failure-
-/// unwind path does (which returns a different, already-fatal error
-/// either way).
-pub(crate) async fn remove_fail_closed(path: &Path, what: &str) -> Result<(), String> {
-    LaunchArtifacts::remove_file_fail_closed(path, what).await
 }
 
 impl LaunchArtifacts {
@@ -1018,5 +1049,101 @@ mod tests {
         artifacts.clear_for_retake_fail_closed().await.unwrap();
         assert!(!artifacts.spec().exists());
         artifacts.clear_for_retake_fail_closed().await.unwrap();
+    }
+
+    /// A relaunch that lost its row to Delete must report every remaining artifact
+    /// failure alongside earlier teardown failures. This differs from a retake's
+    /// short circuit: later files must still be removed after a spec obstruction.
+    #[farhelm_testtrace::test]
+    async fn deleted_relaunch_cleanup_aggregates_failures_and_attempts_later_files() {
+        let state = StateDir::new();
+        let artifacts = LaunchArtifacts::for_launch(state.path(), "deleted-relaunch", 1);
+        std::fs::create_dir_all(artifacts.spec().parent().unwrap()).unwrap();
+        for path in [artifacts.spec(), artifacts.status(), artifacts.waypoint()] {
+            std::fs::create_dir(path).unwrap();
+            assert!(path.is_dir());
+        }
+        let mut errors = vec!["earlier teardown failure".to_string()];
+
+        artifacts
+            .remove_deleted_relaunch_fail_closed(&mut errors)
+            .await;
+
+        assert_eq!(errors.len(), 4);
+        assert_eq!(errors[0], "earlier teardown failure");
+        for (error, label, path) in [
+            (&errors[1], "launch spec", artifacts.spec()),
+            (&errors[2], "launch sentinel", artifacts.status()),
+            (&errors[3], "launch waypoint", artifacts.waypoint()),
+        ] {
+            assert!(error.starts_with(&format!("removing {label} (")));
+            assert!(error.contains(&path.display().to_string()));
+            assert!(path.is_dir());
+        }
+
+        std::fs::remove_dir(artifacts.status()).unwrap();
+        std::fs::remove_dir(artifacts.waypoint()).unwrap();
+        std::fs::write(artifacts.status(), b"failure fixture").unwrap();
+        std::fs::write(artifacts.waypoint(), b"").unwrap();
+        assert!(artifacts.spec().is_dir());
+        assert!(artifacts.status().is_file() && artifacts.waypoint().is_file());
+        errors.clear();
+
+        artifacts
+            .remove_deleted_relaunch_fail_closed(&mut errors)
+            .await;
+
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].starts_with("removing launch spec ("));
+        assert!(!artifacts.status().exists() && !artifacts.waypoint().exists());
+    }
+
+    /// Confirmed-absent restart cleanup retains the sentinel and attempts waypoint
+    /// removal even when its spec cannot be removed. Its two cleanup contexts keep
+    /// their original nesting, so the outer error still names the last failed step.
+    #[farhelm_testtrace::test]
+    async fn unconsumed_relaunch_cleanup_keeps_sentinel_and_error_context_order() {
+        let state = StateDir::new();
+        let artifacts = LaunchArtifacts::for_launch(state.path(), "absent-relaunch", 1);
+        std::fs::create_dir_all(artifacts.spec().parent().unwrap()).unwrap();
+        std::fs::create_dir(artifacts.spec()).unwrap();
+        std::fs::write(artifacts.status(), b"retained sentinel").unwrap();
+        std::fs::write(artifacts.waypoint(), b"").unwrap();
+        assert!(artifacts.spec().is_dir());
+        assert!(artifacts.status().is_file() && artifacts.waypoint().is_file());
+
+        let error = artifacts
+            .remove_unconsumed_relaunch_fail_closed(anyhow::anyhow!("original tmux failure"))
+            .await;
+
+        assert!(!artifacts.waypoint().exists());
+        assert_eq!(
+            std::fs::read(artifacts.status()).unwrap(),
+            b"retained sentinel"
+        );
+        let chain: Vec<_> = error.chain().map(ToString::to_string).collect();
+        assert_eq!(chain.len(), 2);
+        assert!(chain[0].starts_with("removing the failed relaunch's spec ("));
+        assert_eq!(chain[1], "original tmux failure");
+
+        std::fs::create_dir(artifacts.waypoint()).unwrap();
+        assert!(artifacts.spec().is_dir() && artifacts.waypoint().is_dir());
+        assert!(artifacts.status().is_file());
+
+        let error = artifacts
+            .remove_unconsumed_relaunch_fail_closed(anyhow::anyhow!("original tmux failure"))
+            .await;
+
+        let chain: Vec<_> = error.chain().map(ToString::to_string).collect();
+        assert_eq!(chain.len(), 3);
+        assert!(chain[0].starts_with("removing the failed relaunch's waypoint ("));
+        assert!(chain[0].contains(&artifacts.waypoint().display().to_string()));
+        assert!(chain[1].starts_with("removing the failed relaunch's spec ("));
+        assert!(chain[1].contains(&artifacts.spec().display().to_string()));
+        assert_eq!(chain[2], "original tmux failure");
+        assert_eq!(
+            std::fs::read(artifacts.status()).unwrap(),
+            b"retained sentinel"
+        );
     }
 }
