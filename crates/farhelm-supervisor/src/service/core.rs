@@ -7157,6 +7157,14 @@ impl Supervisor {
         })
     }
 
+    /// Let wire conformance hold the real create-intent gate without exposing
+    /// the registry to production dispatch. Holding this gate independently
+    /// distinguishes an off-reader acquisition from a preceding busy refusal.
+    #[cfg(test)]
+    pub(crate) fn intent_locks_for_test(&self) -> &Arc<KeyedLocks> {
+        &self.intent_locks
+    }
+
     /// Claim the intent while preserving the real-Pending observation seam.
     /// Tests observe this future yielding, rather than a task merely reaching
     /// a line before it attempts acquisition; queue position is unchanged.
