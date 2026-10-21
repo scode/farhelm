@@ -1248,6 +1248,96 @@ fn take_launcher_guarded_answer(
     question.ask.reason.can_launch_guarded(selection) && slot.take(question).is_some()
 }
 
+/// Reuse the refused checkout's accepted facts when its semantic intent matches.
+/// This is a projection through the sole request builder, not preview admission:
+/// callers retain their own authority checks and observation/read ordering.
+fn bind_launcher_question_checkout(
+    current: &LaunchDraft,
+    candidate: IntentBinding,
+    repo: &GithubRepo,
+    installation: &str,
+    refused: &IntentBinding,
+) -> Option<IntentBinding> {
+    if !same_fresh_intent(refused, &candidate, repo, installation) {
+        return None;
+    }
+    current.request(RequestContext {
+        host: Some((candidate.host, &candidate.incarnation)),
+        launch: candidate.agent.clone(),
+        replace_source: candidate.replace_source.as_deref(),
+        checkout: Some(CheckoutInput::Accepted {
+            cwd: &refused.cwd,
+            request: refused.github_checkout.as_ref()?,
+        }),
+    })
+}
+
+/// Identify a completed template without subscribing to its caller's effect.
+/// Templates retain the prior retry pair until submit compares the final draft.
+/// Its question instead belongs only to that unchanged completed operation.
+/// A managed question retains the refused checkout even while a new preview is
+/// pending; this read grants no permission to submit or answer the question.
+fn completed_template_question_binding(
+    current: &LaunchDraft,
+    hosts: &[HostOption],
+    selected: Option<HostId>,
+    target: Option<&CreateTarget>,
+    replace_source: Option<&str>,
+    refused: &IntentBinding,
+) -> Option<IntentBinding> {
+    let launch = match current.tab() {
+        LaunchTab::Agent => {
+            current.harness()?;
+            wrapper_words(&current.wrapper()).ok()?;
+            current.launch_intent()?
+        }
+        // Dormant Agent editors cannot invalidate an unchanged Command.
+        LaunchTab::Command => current.launch_intent()?,
+    };
+    if !target_matches_selection(selected, hosts, target) {
+        return None;
+    }
+    let host = hosts.iter().find(|host| Some(host.id) == selected)?;
+    let candidate = current.request(RequestContext {
+        host: Some((host.id, &host.incarnation)),
+        launch,
+        replace_source,
+        checkout: None,
+    })?;
+    match current.destination() {
+        DestinationDraft::Existing { .. } => Some(candidate),
+        DestinationDraft::GithubInput { .. } => None,
+        DestinationDraft::Github { repo, .. } => bind_launcher_question_checkout(
+            current,
+            candidate,
+            &repo,
+            host.identity.as_deref()?,
+            refused,
+        ),
+    }
+}
+
+/// End the actual opening when a completed template no longer describes it.
+/// Keep the restored retry pair: submit, not template replay, decides whether
+/// its request needs another key. Exact cancellation also leaves a newer opening
+/// alone, so returning to old choices cannot resurrect a consumed question.
+fn retire_changed_template_question(
+    slot: &mut ConfirmSlot<LauncherYoloQuestion>,
+    retained: Option<&(String, IntentBinding)>,
+    current: Option<&IntentBinding>,
+) -> bool {
+    let Some(question) = slot.peek_key() else {
+        return false;
+    };
+    if retained
+        .is_some_and(|(key, refused)| key == &question.refused_key && current == Some(refused))
+    {
+        return false;
+    }
+    slot.cancel_for(&question);
+    true
+}
+
 /// Everything one intended create IS — the exact thing an idempotency key
 /// stands for.
 ///
@@ -1647,8 +1737,27 @@ fn composer_surface_target() -> FocusTarget {
 /// may still have only Cancel mounted; that remains a keyboard exit. Only reveal
 /// defers to a frame, since its effect can precede the DOM update. Ordinary
 /// interactions focus immediately so a queued handoff cannot steal later input.
+/// The deferred handoff also preserves a surviving enabled control: retiring
+/// a question after a template shortcut is not another reveal of the dialog.
 fn focus_composer_surface(defer_for_reveal: bool) {
-    COMPOSER_DIALOG.focus_surface(&composer_surface_target(), defer_for_reveal);
+    if defer_for_reveal {
+        // Question retirement can trigger this same deferred reveal handoff.
+        // Preserve its editor-ownership guard before using the shared target.
+        let focus = composer_surface_target().surface_script();
+        document::eval(&format!(
+            r#"requestAnimationFrame(() => {{
+                const dialog = document.querySelector('.create-session-form[role="dialog"]');
+                if (!dialog || !dialog.getClientRects().length) return;
+                const active = document.activeElement;
+                if (active && active !== dialog && dialog.contains(active) &&
+                    active.getClientRects().length && !active.closest('[inert]') &&
+                    !active.matches(':disabled, [aria-disabled="true"]')) return;
+                {focus}
+            }})"#
+        ));
+    } else {
+        COMPOSER_DIALOG.focus_surface(&composer_surface_target(), false);
+    }
 }
 
 /// Restore a launcher focus target only when a shortcut removed its control.
@@ -4066,6 +4175,8 @@ pub(super) fn CreateSessionForm(
     let action_history_target = current_history_target.clone();
     let action_browse_base = browse_base.clone();
     let action_browse_hosts = browse_hosts.clone();
+    let question_open_host = open_host.clone();
+    let question_prefill = prefill_for_submit.clone();
     let accept_search = use_callback(
         move |(result, captured, from_shortcut): (
             crate::launch_composer::ComposerSearchResult,
@@ -4102,6 +4213,10 @@ pub(super) fn CreateSessionForm(
             );
             promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
             let mut browse_path = None;
+            let is_template = matches!(
+                &result,
+                crate::launch_composer::ComposerSearchResult::Template(_)
+            );
             for edit in template_edits(
                 result,
                 available_templates,
@@ -4131,6 +4246,36 @@ pub(super) fn CreateSessionForm(
                             intent_key,
                         );
                     }
+                }
+            }
+            // Reconcile only the completed template, after its prompt and full
+            // retry pair are restored. Inner choices may temporarily differ.
+            // All reads stay untracked even when this runs inside opening replay.
+            if is_template && template_error.peek().is_none() && yolo_refusal.peek_key().is_some() {
+                let retained = intent_key.peek().clone();
+                let selected = effective_create_host(
+                    &action_hosts,
+                    *chosen_host.peek(),
+                    question_open_host.as_ref(),
+                );
+                let current = retained.as_ref().and_then(|(_, refused)| {
+                    completed_template_question_binding(
+                        &draft.snapshot(),
+                        &action_hosts,
+                        selected,
+                        create_target.peek().as_ref(),
+                        question_prefill
+                            .as_ref()
+                            .and_then(|prefill| prefill.replace_source.as_deref()),
+                        refused,
+                    )
+                });
+                if retire_changed_template_question(
+                    &mut yolo_refusal,
+                    retained.as_ref(),
+                    current.as_ref(),
+                ) {
+                    yolo_error.set(None);
                 }
             }
             if let Some(path) = browse_path {
@@ -4658,21 +4803,16 @@ pub(super) fn CreateSessionForm(
                         .find(|host| Some(host.id) == selected)?
                         .identity
                         .as_deref()?;
-                    if !same_fresh_intent(&refused, &binding, &repo, installation) {
-                        return None;
-                    }
                     // The refused request owns this exact preview and cwd.
                     // Reconciliation may retain them across a newer offer;
                     // admission must compare that request, not replace it.
-                    binding = current.request(RequestContext {
-                        host: Some((binding.host, &binding.incarnation)),
-                        launch: binding.agent.clone(),
-                        replace_source: binding.replace_source.as_deref(),
-                        checkout: Some(CheckoutInput::Accepted {
-                            cwd: &refused.cwd,
-                            request: refused.github_checkout.as_ref()?,
-                        }),
-                    })?;
+                    binding = bind_launcher_question_checkout(
+                        &current,
+                        binding,
+                        &repo,
+                        installation,
+                        &refused,
+                    )?;
                 }
                 DestinationDraft::GithubInput { .. } => return None,
             }
@@ -5827,6 +5967,8 @@ pub(super) fn CreateSessionForm(
             // Shown only while the draft still holds the refused request's
             // key: an edit that changes what would launch retires the key,
             // and with it a question that no longer describes the draft.
+            // Templates retain the whole pair for submit's comparison, so
+            // their completed acceptance separately cancels a changed question.
             if let Some(question) = yolo_refusal.current_key().filter(|_| !quick_launch_hidden())
                 && let Some((_, refused_binding)) = intent_key.read().clone().filter(|(key, _)| *key == question.refused_key)
             {
@@ -7296,6 +7438,386 @@ pub(super) fn CreateSessionForm(
 
 #[cfg(test)]
 mod tests {
+    /// The real owner and question hooks let completion be tested before any
+    /// renderer memo settles. This fixture retains the actual template targets,
+    /// not a parallel draft, retry comparison or confirmation implementation.
+    #[derive(Clone, Copy)]
+    struct TemplateQuestionFixture {
+        targets: super::TemplateTargets,
+        slot: crate::ops::ConfirmSlot<super::LauncherYoloQuestion>,
+    }
+
+    std::thread_local! {
+        static TEMPLATE_QUESTION_FIXTURE: std::cell::Cell<Option<TemplateQuestionFixture>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// Mount only the production ownership handles needed by template replay.
+    /// Host/network/preview admission remain explicit facts supplied by each test.
+    fn template_question_fixture() -> dioxus::prelude::Element {
+        use super::*;
+        let targets = TemplateTargets {
+            draft: use_launch_draft(None, None),
+            composer_reset_reason: use_signal(|| None),
+            chosen_host: use_signal(|| Some(1)),
+            preview_revision: use_signal(|| 0),
+            template_error: use_signal(|| None),
+            intent_key: use_signal(|| None),
+        };
+        let slot = use_confirm_slot();
+        TEMPLATE_QUESTION_FIXTURE
+            .with(|value| value.set(Some(TemplateQuestionFixture { targets, slot })));
+        rsx! {}
+    }
+
+    /// These finite fixtures use direct template fields. Execute the actual
+    /// validated Set actions, including the final prompt/pair restoration;
+    /// search semantics are covered by the full form's browser regression.
+    fn replay_template_question_sets(
+        targets: super::TemplateTargets,
+        hosts: &[super::HostOption],
+        fields: farhelm_proto::launcher::TemplateFields,
+    ) {
+        use super::*;
+        let template = farhelm_proto::launcher::LaunchTemplate {
+            name: "fixture".into(),
+            fields,
+        };
+        for edit in template_edits(
+            crate::launch_composer::ComposerSearchResult::Template(template.name.clone()),
+            &[template],
+            hosts,
+            &[],
+            false,
+            targets,
+        ) {
+            match edit {
+                TemplateEdit::Set(set) => set(),
+                TemplateEdit::Search(_) => {
+                    panic!("the fixture deliberately uses direct template fields")
+                }
+            }
+        }
+    }
+
+    /// An unchanged completed Agent or Command retains the actual opening and
+    /// whole retry pair. A changed completed template retires the slot before
+    /// render, so restoring old choices cannot revive it or authorize a queued
+    /// answer. Dormant malformed Agent text must not invalidate a Command.
+    #[farhelm_testtrace::test]
+    fn completed_templates_retire_only_changed_questions_before_render() {
+        use super::*;
+        use farhelm_proto::launcher::{LauncherKind, TemplateFields};
+        let hosts = [option(1, "local", true)];
+        let target = CreateTarget::new(1, hosts[0].incarnation.clone());
+        let mut dom = VirtualDom::new(template_question_fixture);
+        dom.rebuild_in_place();
+        let mut fixture = TEMPLATE_QUESTION_FIXTURE
+            .with(std::cell::Cell::get)
+            .unwrap();
+        dom.in_runtime(|| {
+            for tab in [LaunchTab::Agent, LaunchTab::Command] {
+                fixture.targets.draft.edit(|draft| {
+                    draft.restore(LaunchDraft::new(Some(LaunchPermission::Yolo)));
+                    draft.choose_harness(
+                        LaunchHarness::Codex,
+                        None,
+                        String::new(),
+                        ChoiceOrigin::Control,
+                    );
+                    draft.choose_tab(tab);
+                    draft.edit_invocation("safe-command".into());
+                    draft.choose_command_yolo(true);
+                    if tab == LaunchTab::Command {
+                        draft.edit_wrapper("'unfinished dormant wrapper".into());
+                        draft.edit_permission_flags("'unfinished dormant flags".into());
+                    }
+                });
+                let before = fixture.targets.draft.snapshot();
+                let refused = before
+                    .request(RequestContext {
+                        host: Some((1, &hosts[0].incarnation)),
+                        launch: before.launch_intent().unwrap(),
+                        replace_source: None,
+                        checkout: None,
+                    })
+                    .unwrap();
+                let retained = ("refused-key".to_string(), refused.clone());
+                fixture.targets.intent_key.set(Some(retained.clone()));
+                let question = LauncherYoloQuestion {
+                    opening: 1,
+                    refused_key: retained.0.clone(),
+                    ask: crate::yolo_confirm::YoloAsk {
+                        host: Some(1),
+                        host_name: "local".into(),
+                        reason: if tab == LaunchTab::Agent {
+                            crate::yolo_confirm::YoloReason::ChosenPermission
+                        } else {
+                            crate::yolo_confirm::YoloReason::Asserted
+                        },
+                    },
+                };
+                fixture.slot.open(question.clone(), ());
+                let unchanged = if tab == LaunchTab::Agent {
+                    TemplateFields {
+                        model: Some(None),
+                        ..Default::default()
+                    }
+                } else {
+                    TemplateFields {
+                        kind: Some(LauncherKind::Command),
+                        command: Some("safe-command".into()),
+                        yolo: Some(true),
+                        ..Default::default()
+                    }
+                };
+                replay_template_question_sets(fixture.targets, &hosts, unchanged);
+                assert!(fixture.targets.template_error.peek().is_none());
+                assert_eq!(*fixture.targets.intent_key.peek(), Some(retained.clone()));
+                let current = completed_template_question_binding(
+                    &fixture.targets.draft.snapshot(),
+                    &hosts,
+                    Some(1),
+                    Some(&target),
+                    None,
+                    &refused,
+                );
+                assert_eq!(current.as_ref(), Some(&refused));
+                assert!(!retire_changed_template_question(
+                    &mut fixture.slot,
+                    Some(&retained),
+                    current.as_ref()
+                ));
+                assert!(fixture.slot.peek_key() == Some(question.clone()));
+
+                // A rejected template runs no Set actions and has no successful
+                // completion. It must not alter this mounted question or pair.
+                let snapshot = fixture.targets.draft.snapshot();
+                replay_template_question_sets(
+                    fixture.targets,
+                    &hosts,
+                    TemplateFields {
+                        kind: Some(LauncherKind::Command),
+                        model: Some(Some("inapplicable".into())),
+                        ..Default::default()
+                    },
+                );
+                assert!(fixture.targets.template_error.peek().is_some());
+                assert_eq!(fixture.targets.draft.snapshot(), snapshot);
+                assert!(fixture.slot.peek_key() == Some(question.clone()));
+                assert_eq!(*fixture.targets.intent_key.peek(), Some(retained.clone()));
+
+                let changed = if tab == LaunchTab::Agent {
+                    TemplateFields {
+                        permissions: Some(Some(LaunchPermission::Guarded)),
+                        ..Default::default()
+                    }
+                } else {
+                    TemplateFields {
+                        command: Some("different-command".into()),
+                        ..Default::default()
+                    }
+                };
+                replay_template_question_sets(fixture.targets, &hosts, changed);
+                assert!(fixture.targets.template_error.peek().is_none());
+                let current = completed_template_question_binding(
+                    &fixture.targets.draft.snapshot(),
+                    &hosts,
+                    Some(1),
+                    Some(&target),
+                    None,
+                    &refused,
+                );
+                assert_ne!(current.as_ref(), Some(&refused));
+                assert!(retire_changed_template_question(
+                    &mut fixture.slot,
+                    Some(&retained),
+                    current.as_ref()
+                ));
+                assert!(
+                    fixture.slot.peek_key().is_none(),
+                    "the real slot is empty before any render"
+                );
+                assert_eq!(
+                    *fixture.targets.intent_key.peek(),
+                    Some(retained.clone()),
+                    "template completion preserves submit's whole pair"
+                );
+
+                fixture.targets.draft.edit(|draft| draft.restore(before));
+                let restored = completed_template_question_binding(
+                    &fixture.targets.draft.snapshot(),
+                    &hosts,
+                    Some(1),
+                    Some(&target),
+                    None,
+                    &refused,
+                );
+                assert_eq!(restored.as_ref(), Some(&refused));
+                assert!(!retire_changed_template_question(
+                    &mut fixture.slot,
+                    Some(&retained),
+                    restored.as_ref()
+                ));
+                assert!(
+                    fixture.slot.peek_key().is_none(),
+                    "restoration cannot resurrect the opening"
+                );
+                let (mut consent, mut stop) = (None, None);
+                for permanent in [false, true] {
+                    assert!(!answer_launcher_yolo(
+                        &mut fixture.slot,
+                        &question,
+                        permanent,
+                        &mut consent,
+                        &mut stop
+                    ));
+                }
+                assert!(!take_launcher_guarded_answer(
+                    &mut fixture.slot,
+                    &question,
+                    false,
+                    &refused,
+                    Some(&refused)
+                ));
+                assert!(consent.is_none() && stop.is_none());
+                let later = LauncherYoloQuestion {
+                    opening: 2,
+                    ..question.clone()
+                };
+                fixture.slot.open(later.clone(), ());
+                fixture.slot.cancel_for(&question);
+                assert!(!answer_launcher_yolo(
+                    &mut fixture.slot,
+                    &question,
+                    true,
+                    &mut consent,
+                    &mut stop
+                ));
+                assert!(!take_launcher_guarded_answer(
+                    &mut fixture.slot,
+                    &question,
+                    false,
+                    &refused,
+                    Some(&refused)
+                ));
+                assert!(fixture.slot.peek_key() == Some(later.clone()));
+                assert!(answer_launcher_yolo(
+                    &mut fixture.slot,
+                    &later,
+                    false,
+                    &mut consent,
+                    &mut stop
+                ));
+                assert_eq!(consent.as_deref(), Some("refused-key"));
+                fixture.slot.open(question.clone(), ());
+                let other_pair = ("another-key".into(), refused.clone());
+                assert!(retire_changed_template_question(
+                    &mut fixture.slot,
+                    Some(&other_pair),
+                    Some(&refused)
+                ));
+                assert!(
+                    fixture.slot.peek_key().is_none(),
+                    "binding equality alone cannot keep a different key's opening"
+                );
+            }
+        });
+    }
+
+    /// A managed template's identity uses its refused accepted checkout, not a
+    /// new preview offer or dormant candidate cwd. Pending preview observation
+    /// therefore cannot close an unchanged question; actual request/host changes do.
+    #[farhelm_testtrace::test]
+    fn completed_managed_template_identity_keeps_accepted_checkout_facts() {
+        use super::*;
+        let hosts = [option(1, "local", true)];
+        let target = CreateTarget::new(1, hosts[0].incarnation.clone());
+        let repo = GithubRepo::parse("acme/repo").unwrap();
+        let mut draft = LaunchDraft::new(Some(LaunchPermission::Yolo));
+        draft.choose_harness(
+            LaunchHarness::Codex,
+            None,
+            String::new(),
+            ChoiceOrigin::Control,
+        );
+        draft.edit_title("work".into());
+        draft.select_repository(repo.clone());
+        let preview = crate::github_checkout::GithubPreview {
+            canonical_root: "/accepted".into(),
+            basename: "work".into(),
+            cwd: "/accepted/work".into(),
+            config_revision: 9,
+            host: "1".into(),
+            incarnation: 1,
+            installation_identity: "install-1".into(),
+        };
+        let refused = draft
+            .request(RequestContext {
+                host: Some((1, &hosts[0].incarnation)),
+                launch: draft.launch_intent().unwrap(),
+                replace_source: None,
+                checkout: Some(CheckoutInput::Preview {
+                    repo: &repo,
+                    preview: &preview,
+                }),
+            })
+            .unwrap();
+        let current = completed_template_question_binding(
+            &draft,
+            &hosts,
+            Some(1),
+            Some(&target),
+            None,
+            &refused,
+        )
+        .unwrap();
+        assert_eq!(
+            current, refused,
+            "accepted cwd/preview/title survive without any Ready observation"
+        );
+        draft.edit_title("different".into());
+        assert!(
+            completed_template_question_binding(
+                &draft,
+                &hosts,
+                Some(1),
+                Some(&target),
+                None,
+                &refused
+            )
+            .is_none()
+        );
+        draft.edit_title("work".into());
+        let replaced = [HostOption {
+            incarnation: "replaced".into(),
+            identity: Some("other-install".into()),
+            ..hosts[0].clone()
+        }];
+        let replaced_target = CreateTarget::new(1, "replaced".into());
+        assert!(
+            completed_template_question_binding(
+                &draft,
+                &replaced,
+                Some(1),
+                Some(&replaced_target),
+                None,
+                &refused
+            )
+            .is_none()
+        );
+        assert!(
+            completed_template_question_binding(
+                &draft,
+                &hosts,
+                Some(1),
+                Some(&replaced_target),
+                None,
+                &refused
+            )
+            .is_none()
+        );
+    }
+
     /// An unfinished custom editor can also fail catalog compatibility. Its
     /// actionable repair must win over the unrelated saved-model explanation.
     #[test]

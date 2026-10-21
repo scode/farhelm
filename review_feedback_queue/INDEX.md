@@ -130,9 +130,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`delayed-refusal-reopens-cancelled-replace-question.md`](delayed-refusal-reopens-cancelled-replace-question.md) — A
   delayed refusal may reopen a cancelled Replace question; a further affirmative answer is still required.
 
-- [`guarded-template-leaves-stale-yolo-question.md`](guarded-template-leaves-stale-yolo-question.md) — Applying a
-  Guarded template can leave the previous YOLO question visible while submission still enforces the changed permissions.
-
 - [`held-reveal-fixture-pins-before-cleanup.md`](held-reveal-fixture-pins-before-cleanup.md) — A preference-pin failure
   can bypass cleanup for an owned test session; the failure has not been injected.
 

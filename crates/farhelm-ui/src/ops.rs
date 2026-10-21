@@ -300,7 +300,8 @@ impl ReadGate {
 ///
 /// `Copy` because it is a handle to a signal, like [`OpLock`]. Render code
 /// uses the tracked readers ([`Self::is_open`], [`Self::current_key`]);
-/// handlers use [`Self::take`] and [`Self::cancel_for`], which `peek`.
+/// handlers use [`Self::peek_key`], [`Self::take`] and [`Self::cancel_for`],
+/// which inspect the live slot without subscribing their caller.
 pub(crate) struct ConfirmSlot<K: 'static, P: 'static = ()> {
     open: Signal<Option<(K, P)>>,
 }
@@ -399,6 +400,13 @@ impl<K: PartialEq + Clone + 'static, P: 'static> ConfirmSlot<K, P> {
     pub(crate) fn current_key(&self) -> Option<K> {
         self.open.read().as_ref().map(|(key, _)| key.clone())
     }
+
+    /// Inspect an opening for imperative reconciliation without subscribing.
+    /// A completion callback can run inside another effect; a tracked read
+    /// there would make the caller observe this slot's unrelated later changes.
+    pub(crate) fn peek_key(&self) -> Option<K> {
+        self.open.peek().as_ref().map(|(key, _)| key.clone())
+    }
 }
 
 /// [`ConfirmSlot::open`]'s state change over a plain `Option`, split out
@@ -446,6 +454,59 @@ fn claimed_owner<T>(claimed: bool, owner: impl FnOnce() -> T) -> Option<T> {
 mod tests {
     use super::*;
     use dioxus::prelude::VirtualDom;
+
+    /// Imperative question reconciliation must not subscribe its enclosing
+    /// effect to later openings. Start with a present question and retain a
+    /// tracked positive control, so an empty-slot shortcut cannot hide a read.
+    #[farhelm_testtrace::test]
+    fn peeking_a_present_confirmation_does_not_subscribe_the_effect() {
+        use std::cell::Cell;
+        std::thread_local! {
+            static SLOT: Cell<Option<ConfirmSlot<u64>>> = const { Cell::new(None) };
+            static TRIGGER: Cell<Option<Signal<u64>>> = const { Cell::new(None) };
+            static RUNS: Cell<usize> = const { Cell::new(0) };
+        }
+        /// Mount a present slot before observing it, with one explicit effect
+        /// dependency that proves the runtime actually delivers later changes.
+        fn app() -> Element {
+            let mut slot = use_confirm_slot::<u64, ()>();
+            let trigger = use_signal(|| 0_u64);
+            use_hook(move || slot.open(1, ()));
+            SLOT.with(|value| value.set(Some(slot)));
+            TRIGGER.with(|value| value.set(Some(trigger)));
+            use_effect(move || {
+                let _ = trigger();
+                assert!(
+                    slot.peek_key().is_some(),
+                    "the observed fixture question is present"
+                );
+                RUNS.with(|value| value.set(value.get() + 1));
+            });
+            rsx! {}
+        }
+        RUNS.with(|value| value.set(0));
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        dom.process_events();
+        assert_eq!(RUNS.with(Cell::get), 1);
+        let mut slot = SLOT.with(Cell::get).unwrap();
+        let mut trigger = TRIGGER.with(Cell::get).unwrap();
+        dom.in_runtime(|| slot.open(2, ()));
+        dom.process_events();
+        assert_eq!(
+            RUNS.with(Cell::get),
+            1,
+            "an unrelated later opening is not a dependency"
+        );
+        dom.in_runtime(|| trigger.set(1));
+        dom.process_events();
+        assert_eq!(
+            RUNS.with(Cell::get),
+            2,
+            "the effect still follows its intended trigger"
+        );
+        dom.in_runtime(|| assert_eq!(slot.peek_key(), Some(2)));
+    }
 
     /// A payload that records its own drop, standing in for an `OpGuard`
     /// so the slot rules can be checked without a Dioxus runtime.

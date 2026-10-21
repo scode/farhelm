@@ -10,8 +10,10 @@
 // really carries the override the helm reads; a UI that dropped it would
 // loop on the confirmation forever, and one that skipped the question would
 // defeat the guard.
-import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import { type APIRequestContext, type Locator, type Page, type Route } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { chooseLauncherHost } from "./helpers/host-picker";
 import {
   cleanupSession,
   createResumableYoloSession,
@@ -762,6 +764,373 @@ test("a skipped header replace still asks the YOLO question", async ({ page, req
     await setLocalYoloWithoutAsking(request, false);
     for (const row of (await listSessions(request)).sessions.filter((candidate) => candidate.cwd === cwd)) {
       await cleanupSession(request, row.id);
+    }
+  }
+});
+
+/** A template preserves consent only while its completed request is unchanged.
+ * Real helm YOLO refusals establish the question; confirmed and Guarded attempts
+ * receive stamped unresolved fixture replies so this test starts no vendor agent.
+ */
+test("template edits retain an unchanged YOLO question and retire a changed one", async ({ page, request }) => {
+  const previous = await readPreferences(request);
+  const local = await localHostId(request);
+  const previousHost = (await listHosts(request)).find((host) => host.id === local);
+  expect(previousHost, "the owned stack must expose its local host before policy is changed").toBeTruthy();
+  if (!previousHost) throw new Error("the local host disappeared before the YOLO fixture started");
+  const build = requireHelmBuild(await request.get("/api/sessions"), "template YOLO fixture");
+  const cwd = stackScratchDir("yolo-template-edit-");
+  const suffix = Date.now();
+  const yoloTemplate = `e2e-question-yolo-${suffix}`;
+  const guardedTemplate = `e2e-question-guarded-${suffix}`;
+  const ownedTemplates: string[] = [];
+  const bodies: any[] = [];
+  const policyWrites: string[] = [];
+  const completions: Promise<void>[] = [];
+  const endpoint = "**/api/sessions";
+  const observeCreate = async (route: Route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const body = route.request().postDataJSON();
+    const attempt = bodies.push(body);
+    const completion = (async () => {
+      if (body.confirm_yolo !== true && body.launch?.permissions === "yolo" && body.host === local) {
+        // Only this host's unconfirmed YOLO request reaches the real
+        // guard. Every other request is intercepted before it can launch.
+        await route.continue();
+      } else {
+        // There is no definitely-unaccepted marker: the form must retain
+        // its key after this completed attempt, as for an ambiguous reply.
+        await route.fulfill({
+          status: 503,
+          headers: { "x-farhelm-build": build, "content-type": "text/plain" },
+          body: `template YOLO fixture refused create ${attempt}`,
+        });
+      }
+    })();
+    completions.push(completion);
+    await completion;
+  };
+  const observePolicy = (candidate: { method(): string; url(): string }) => {
+    if (candidate.method() === "POST" && new URL(candidate.url()).pathname === `/api/hosts/${local}/yolo-without-asking`) {
+      policyWrites.push(candidate.url());
+    }
+  };
+  let bodyFailed = false;
+  try {
+    await setLocalYoloWithoutAsking(request, false);
+    for (const [name, fields] of [
+      [yoloTemplate, { kind: "agent", agent: "codex", permissions: "yolo" }],
+      [guardedTemplate, { kind: "agent", permissions: "guarded" }],
+    ] as const) {
+      const saved = await request.put(`/api/templates/${name}`, { data: fields });
+      expect(saved.ok(), `create owned template ${name}: ${await saved.text()}`).toBe(true);
+      ownedTemplates.push(name);
+      const stored = await request.get("/api/templates");
+      expect(stored.ok()).toBe(true);
+      expect((await stored.json()).templates.find((row: { name: string }) => row.name === name)?.fields).toEqual(fields);
+    }
+    await page.route(endpoint, observeCreate);
+    page.on("request", observePolicy);
+    await page.goto("/");
+    const form = await openYoloLaunch(page, cwd);
+    await chooseLauncherHost(form.locator(".create-session-host"), String(local));
+    await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
+    await expect(form).toHaveAttribute("data-initial-templates-ready", "true");
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    const permissions = form.locator(".launch-composer-permissions-choice");
+    const yolo = permissions.getByRole("button", { name: "yolo", exact: true });
+    const guarded = permissions.getByRole("button", { name: "guarded", exact: true });
+    const question = form.locator(".yolo-confirmation");
+    const launch = form.locator(".create-session-submit");
+    const isCreate = (candidate: { request(): { method(): string }; url(): string }) =>
+      candidate.request().method() === "POST" && new URL(candidate.url()).pathname === "/api/sessions";
+
+    await expect(yolo).toHaveAttribute("aria-pressed", "true");
+    const [firstRefusal] = await Promise.all([page.waitForResponse(isCreate), launch.click()]);
+    expect(firstRefusal.status()).toBe(409);
+    expect(firstRefusal.headers()["x-farhelm-yolo-confirmation"]).toBe("confirmation-required");
+    await expect(question).toBeVisible();
+    await expect(question.locator(".yolo-cancel")).toBeFocused();
+    const firstOpening = await question.getAttribute("data-yolo-confirm-id");
+    expect(firstOpening).toBeTruthy();
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].intent_key).toEqual(expect.any(String));
+    expect(bodies[0].intent_key).not.toBe("");
+    expect(bodies[0]).toMatchObject({ host: local, cwd, launch: { harness: "codex", permissions: "yolo" } });
+    expect(bodies[0]).not.toHaveProperty("confirm_yolo");
+
+    await search.focus();
+    await expect(search).toBeFocused();
+    await search.fill(`tl:${yoloTemplate}`);
+    await form.getByRole("option", { name: `Template: ${yoloTemplate}`, exact: true }).click();
+    await expect(search).toHaveValue("");
+    await expect(search).toBeFocused();
+    await expect(yolo).toHaveAttribute("aria-pressed", "true");
+    await expect(question).toBeVisible();
+    await expect(question).toHaveAttribute("data-yolo-confirm-id", firstOpening!);
+    expect(bodies, "unchanged template application must not submit").toHaveLength(1);
+    expect(policyWrites).toHaveLength(0);
+
+    // This is the positive control for retaining the retry pair: merely
+    // leaving a question visible while minting another key must fail too.
+    await question.locator(".yolo-confirm").click();
+    await expect(form.locator(".create-session-error")).toContainText("template YOLO fixture refused create 2");
+    await expect(launch).toHaveAttribute("aria-disabled", "false");
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toEqual({ ...bodies[0], confirm_yolo: true });
+    expect(policyWrites).toHaveLength(0);
+
+    // A new name ends the confirmed request before obtaining a fresh real
+    // question. Otherwise the retained one-off consent would bypass it.
+    const name = form.getByLabel("name (optional)", { exact: true });
+    await name.focus();
+    await expect(name).toBeFocused();
+    await name.fill(`template-question-${suffix}`);
+    const [secondRefusal] = await Promise.all([page.waitForResponse(isCreate), launch.click()]);
+    expect(secondRefusal.status()).toBe(409);
+    expect(secondRefusal.headers()["x-farhelm-yolo-confirmation"]).toBe("confirmation-required");
+    await expect(question).toBeVisible();
+    await expect(question.locator(".yolo-cancel")).toBeFocused();
+    const refusedOpening = await question.getAttribute("data-yolo-confirm-id");
+    expect(refusedOpening).toBeTruthy();
+    expect(refusedOpening).not.toBe(firstOpening);
+    expect(bodies).toHaveLength(3);
+    expect(bodies[2].intent_key).toEqual(expect.any(String));
+    expect(bodies[2].intent_key).not.toBe("");
+    expect(bodies[2].intent_key).not.toBe(bodies[0].intent_key);
+    expect(bodies[2]).toEqual({ ...bodies[0], title: `template-question-${suffix}`, intent_key: bodies[2].intent_key });
+
+    await search.focus();
+    await expect(search).toBeFocused();
+    await search.fill(`tl:${guardedTemplate}`);
+    await form.getByRole("option", { name: `Template: ${guardedTemplate}`, exact: true }).click();
+    await expect(search).toHaveValue("");
+    await expect(search).toBeFocused();
+    await expect(guarded).toHaveAttribute("aria-pressed", "true");
+    await expect(question, "the old question must end before a new Launch press").toHaveCount(0);
+    expect(bodies, "changing a template edits the draft without submitting").toHaveLength(3);
+    expect(policyWrites).toHaveLength(0);
+
+    // A visibility predicate alone can hide a still-live slot. Returning
+    // to YOLO must not resurrect that old opening without a new refusal.
+    await search.focus();
+    await expect(search).toBeFocused();
+    await search.fill(`tl:${yoloTemplate}`);
+    await form.getByRole("option", { name: `Template: ${yoloTemplate}`, exact: true }).click();
+    await expect(search).toHaveValue("");
+    await expect(search).toBeFocused();
+    await expect(yolo).toHaveAttribute("aria-pressed", "true");
+    await expect(question).toHaveCount(0);
+    expect(bodies).toHaveLength(3);
+    expect(policyWrites).toHaveLength(0);
+
+    await search.focus();
+    await expect(search).toBeFocused();
+    await search.fill(`tl:${guardedTemplate}`);
+    await form.getByRole("option", { name: `Template: ${guardedTemplate}`, exact: true }).click();
+    await expect(search).toHaveValue("");
+    await expect(search).toBeFocused();
+    await expect(guarded).toHaveAttribute("aria-pressed", "true");
+    await expect(question).toHaveCount(0);
+    await launch.click();
+    await expect(form.locator(".create-session-error")).toContainText("template YOLO fixture refused create 4");
+    await expect(launch).toHaveAttribute("aria-disabled", "false");
+    expect(bodies).toHaveLength(4);
+    expect(bodies[3].intent_key).toEqual(expect.any(String));
+    expect(bodies[3].intent_key).not.toBe("");
+    expect(bodies[3].intent_key).not.toBe(bodies[2].intent_key);
+    expect(bodies[3]).toEqual({ ...bodies[2], intent_key: bodies[3].intent_key, launch: { ...bodies[2].launch, permissions: "guarded" } });
+    expect(policyWrites).toHaveLength(0);
+    expect((await listHosts(request)).find((host) => host.id === local)?.yolo_without_asking).toBe(false);
+    expect((await listSessions(request)).sessions.filter((row) => row.cwd === cwd)).toHaveLength(0);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    page.off("request", observePolicy);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["create route", async () => {
+        await page.unrouteAll({ behavior: "wait" });
+        await Promise.all(completions);
+      }],
+      ["host YOLO policy", () => setLocalYoloWithoutAsking(request, previousHost.yolo_without_asking)],
+      ["remembered permissions", () => patchPreferences(request, { remembered_permissions: previous.remembered_permissions ?? null })],
+      ...ownedTemplates.map((name): [string, () => Promise<void>] => [name, async () => {
+        const removed = await request.delete(`/api/templates/${name}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }]),
+    ]);
+  }
+});
+
+/** A Command question belongs to its literal request, just as an Agent
+ * question does. Real guard refusals establish consent openings; confirmed
+ * attempts are intercepted so preserving one cannot execute the command.
+ */
+test("command templates preserve equal YOLO questions and retire changed commands", async ({ page, request }) => {
+  const local = await localHostId(request);
+  const host = (await listHosts(request)).find((candidate) => candidate.id === local);
+  expect(host, "the owned stack must expose a local guard target").toBeTruthy();
+  expect(host?.yolo_without_asking, "fixture premise: the local host already asks before YOLO launches").toBe(false);
+  const build = requireHelmBuild(await request.get("/api/sessions"), "Command template YOLO fixture");
+  const cwd = stackScratchDir("yolo-command-template-");
+  const suffix = Date.now();
+  const original = { name: `e2e-question-command-a-${suffix}`, command: "printf first" };
+  const changed = { name: `e2e-question-command-b-${suffix}`, command: "printf second" };
+  const owned: string[] = [];
+  const bodies: any[] = [];
+  const policyWrites: string[] = [];
+  const endpoint = "**/api/sessions";
+  const observeCreate = async (route: Route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const body = route.request().postDataJSON();
+    const attempt = bodies.push(body);
+    if (body.host === local && body.command?.yolo === true && body.confirm_yolo !== true) {
+      // The real helm's guard is the sole source of questions. Only an
+      // unconfirmed YOLO Command reaches it; no confirmed command can run.
+      await route.continue();
+    } else {
+      await route.fulfill({
+        status: 503,
+        headers: { "x-farhelm-build": build, "content-type": "text/plain" },
+        body: `Command template fixture refused create ${attempt}`,
+      });
+    }
+  };
+  const observePolicy = (candidate: { method(): string; url(): string }) => {
+    if (candidate.method() === "POST" && new URL(candidate.url()).pathname === `/api/hosts/${local}/yolo-without-asking`) {
+      policyWrites.push(candidate.url());
+    }
+  };
+  let bodyFailed = false;
+  try {
+    for (const template of [original, changed]) {
+      const fields = { kind: "command", command: template.command, yolo: true };
+      const saved = await request.put(`/api/templates/${template.name}`, { data: fields });
+      expect(saved.ok(), `store Command template: ${await saved.text()}`).toBe(true);
+      owned.push(template.name);
+      const listing = await request.get("/api/templates");
+      expect(listing.ok()).toBe(true);
+      expect((await listing.json()).templates.find((row: { name: string }) => row.name === template.name)?.fields).toEqual(fields);
+    }
+    await page.route(endpoint, observeCreate);
+    page.on("request", observePolicy);
+    await page.goto("/");
+    await page.locator(".new-session-button").click();
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    await chooseLauncherHost(form.locator(".create-session-host"), String(local));
+    await expect(form.locator(".create-session-host")).toHaveAttribute("data-host-id", String(local));
+    await form.getByLabel("folder", { exact: true }).fill(cwd);
+    await expect(form).toHaveAttribute("data-initial-templates-ready", "true");
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    const question = form.locator(".yolo-confirmation");
+    const launch = form.locator(".create-session-submit");
+    const isCreate = (candidate: { request(): { method(): string }; url(): string }) =>
+      candidate.request().method() === "POST" && new URL(candidate.url()).pathname === "/api/sessions";
+
+    /** Completed template acceptance must expose the active Command value,
+     * not merely dismiss a search option while leaving another draft active.
+     */
+    const apply = async (template: typeof original) => {
+      const count = bodies.length;
+      await search.focus();
+      await expect(search).toBeFocused();
+      await search.fill(`tl:${template.name}`);
+      await form.getByRole("option", { name: `Template: ${template.name}`, exact: true }).click();
+      await expect(search).toHaveValue("");
+      await expect(search).toBeFocused();
+      await expect(form.getByRole("tab", { name: "command", exact: true })).toHaveAttribute("aria-selected", "true");
+      await expect(form.getByLabel("agent command", { exact: true })).toHaveValue(template.command);
+      await expect(form.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("yes (YOLO)", { exact: true })).toBeChecked();
+      expect(bodies, "template acceptance itself cannot launch").toHaveLength(count);
+      expect(policyWrites, "template acceptance cannot change host consent policy").toHaveLength(0);
+    };
+
+    await apply(original);
+    const [first] = await Promise.all([page.waitForResponse(isCreate), launch.click()]);
+    expect(first.status()).toBe(409);
+    expect(first.headers()["x-farhelm-yolo-confirmation"]).toBe("confirmation-required");
+    await expect(question).toBeVisible();
+    await expect(question.locator(".yolo-cancel")).toBeFocused();
+    const firstOpening = await question.getAttribute("data-yolo-confirm-id");
+    expect(firstOpening).toBeTruthy();
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ host: local, cwd, command: { command: original.command, yolo: true } });
+    expect(bodies[0].intent_key).toEqual(expect.any(String));
+    expect(bodies[0].intent_key).not.toBe("");
+    expect(bodies[0]).not.toHaveProperty("confirm_yolo");
+
+    await apply(original);
+    await expect(question).toHaveAttribute("data-yolo-confirm-id", firstOpening!);
+    await expect(question).toBeVisible();
+    await apply(changed);
+    await expect(question, "a different literal Command retires the opening before Launch").toHaveCount(0);
+    const [second] = await Promise.all([page.waitForResponse(isCreate), launch.click()]);
+    expect(second.status()).toBe(409);
+    expect(second.headers()["x-farhelm-yolo-confirmation"]).toBe("confirmation-required");
+    await expect(question).toBeVisible();
+    // Each new question schedules its safe-answer focus after becoming usable.
+    // Finish that handoff before deliberately moving back to template search.
+    await expect(question.locator(".yolo-cancel")).toBeFocused();
+    const secondOpening = await question.getAttribute("data-yolo-confirm-id");
+    expect(secondOpening).toBeTruthy();
+    expect(secondOpening).not.toBe(firstOpening);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1].intent_key).toEqual(expect.any(String));
+    expect(bodies[1].intent_key).not.toBe("");
+    expect(bodies[1].intent_key).not.toBe(bodies[0].intent_key);
+    expect(bodies[1]).toEqual({ ...bodies[0], intent_key: bodies[1].intent_key, command: { ...bodies[0].command, command: changed.command } });
+
+    // Returning to old bytes must not revive the original opening or its
+    // key. It needs a fresh real refusal before a new answer can be offered.
+    await apply(original);
+    await expect(question).toHaveCount(0);
+    expect(bodies).toHaveLength(2);
+    const [third] = await Promise.all([page.waitForResponse(isCreate), launch.click()]);
+    expect(third.status()).toBe(409);
+    expect(third.headers()["x-farhelm-yolo-confirmation"]).toBe("confirmation-required");
+    await expect(question).toBeVisible();
+    await expect(question.locator(".yolo-cancel")).toBeFocused();
+    const thirdOpening = await question.getAttribute("data-yolo-confirm-id");
+    expect(thirdOpening).toBeTruthy();
+    expect(thirdOpening).not.toBe(firstOpening);
+    expect(thirdOpening).not.toBe(secondOpening);
+    expect(bodies).toHaveLength(3);
+    expect(bodies[2].intent_key).toEqual(expect.any(String));
+    expect(bodies[2].intent_key).not.toBe("");
+    expect(bodies[2].intent_key).not.toBe(bodies[0].intent_key);
+    expect(bodies[2].intent_key).not.toBe(bodies[1].intent_key);
+    expect(bodies[2]).toEqual({ ...bodies[0], intent_key: bodies[2].intent_key });
+
+    // Keep a real Command question through another equal template batch,
+    // then prove that its answer uses the same complete request and key.
+    await apply(original);
+    await expect(question).toBeVisible();
+    await expect(question).toHaveAttribute("data-yolo-confirm-id", thirdOpening!);
+    const [confirmed] = await Promise.all([page.waitForResponse(isCreate), question.locator(".yolo-confirm").click()]);
+    expect(confirmed.status()).toBe(503);
+    await expect(form.locator(".create-session-error")).toContainText("Command template fixture refused create 4");
+    await expect(launch).toHaveAttribute("aria-disabled", "false");
+    expect(bodies).toHaveLength(4);
+    expect(bodies[3]).toEqual({ ...bodies[2], confirm_yolo: true });
+    expect(policyWrites).toHaveLength(0);
+    expect((await listHosts(request)).find((candidate) => candidate.id === local)?.yolo_without_asking).toBe(false);
+    expect((await listSessions(request)).sessions.filter((row) => row.cwd === cwd)).toHaveLength(0);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    try {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["entered create routes", () => page.unrouteAll({ behavior: "wait" })],
+        ...owned.map((name): [string, () => Promise<void>] => [name, async () => {
+          const removed = await request.delete(`/api/templates/${name}`);
+          expect(removed.ok() || removed.status() === 404).toBe(true);
+        }]),
+      ]);
+    } finally {
+      page.off("request", observePolicy);
     }
   }
 });
