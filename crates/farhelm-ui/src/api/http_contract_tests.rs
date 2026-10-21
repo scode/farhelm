@@ -174,6 +174,7 @@ fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
         *phases[1],
         HostPhase::Connecting {
             attempt: 2,
+            stage: Some(crate::ConnectionStage::SettingUp),
             last_error: Some("connection refused".into()),
         }
     );

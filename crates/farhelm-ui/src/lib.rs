@@ -922,8 +922,9 @@ impl HostKind {
 /// in the list takes the WHOLE panel down — so a host in a state this build
 /// has never heard of costs exactly one chip.
 ///
-/// The FIELDS are strict: no `#[serde(default)]` on a payload the helm
-/// always sends. Defaulting them looked like more of the same tolerance and
+/// The FIELDS are strict: no `#[serde(default)]` on a payload every
+/// supported helm sends. Additive fields document their omission semantics
+/// below. Defaulting required fields looked like more of the same tolerance and
 /// is the opposite: a missing `peer_protocol` would render as "protocol 0",
 /// a missing `twin` as "host 0", and a missing `reported` as an adopt button
 /// approving the empty identity — fabricated facts, presented with the same
@@ -943,6 +944,11 @@ pub enum HostPhase {
     #[serde(rename = "connecting")]
     Connecting {
         attempt: u32,
+        /// Older helms omit the stage; newer ones may add vocabulary. Both
+        /// cases keep the generic detail rather than guessing how far the
+        /// attempt got. Required payloads such as `attempt` remain strict.
+        #[serde(default)]
+        stage: Option<ConnectionStage>,
         /// Absent before the first attempt has failed — genuinely optional
         /// on the wire, unlike the fields around it.
         last_error: Option<PeerText>,
@@ -1037,6 +1043,28 @@ pub enum HostPhase {
     /// Deliberately NOT a `Default`: nothing in this UI may reach for a
     /// connection state it was not given, and a defaultable one invites
     /// exactly that.
+    #[serde(other)]
+    Unrecognized,
+}
+
+/// Progress evidence within Connecting, not a new host phase.
+///
+/// These tokens select renderer-owned words. Unknown future stages stay
+/// readable as generic Connecting, so one new token cannot fail a fleet read.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConnectionStage {
+    /// Between attempts: no connection operation is currently in flight.
+    WaitingToConnect,
+    /// SSH is running, without evidence yet that it reached the remote helper.
+    ConnectingToHost,
+    /// The local transport is dialing its supervisor; SSH does not use this.
+    ConnectingToSupervisor,
+    /// The transport reached the supervisor, whose hello has not completed.
+    WaitingForHello,
+    /// The supervisor answered; identity recording or browser-link setup remains.
+    SettingUp,
+    /// A future token is readable, but supplies no stage this UI can name.
     #[serde(other)]
     Unrecognized,
 }
@@ -2840,6 +2868,58 @@ mod tests {
         ));
     }
 
+    /// Stage omission and unknown vocabulary must keep Connecting readable
+    /// across helm versions, while a known stage retains its exact evidence.
+    /// This tolerance must not turn a malformed required attempt into a fact.
+    #[farhelm_testtrace::test]
+    fn connecting_stage_is_additive_and_tolerates_new_vocabulary() {
+        for (stage, expected) in [
+            (None, None),
+            (
+                Some("waiting-to-connect"),
+                Some(ConnectionStage::WaitingToConnect),
+            ),
+            (
+                Some("connecting-to-host"),
+                Some(ConnectionStage::ConnectingToHost),
+            ),
+            (
+                Some("connecting-to-supervisor"),
+                Some(ConnectionStage::ConnectingToSupervisor),
+            ),
+            (
+                Some("waiting-for-hello"),
+                Some(ConnectionStage::WaitingForHello),
+            ),
+            (Some("setting-up"), Some(ConnectionStage::SettingUp)),
+            (Some("future-stage"), Some(ConnectionStage::Unrecognized)),
+        ] {
+            let mut value = serde_json::json!({
+                "phase": "connecting", "attempt": 2, "last_error": "earlier failure",
+            });
+            if let Some(stage) = stage {
+                value["stage"] = serde_json::json!(stage);
+            }
+            assert_eq!(
+                serde_json::from_value::<HostPhase>(value.clone()).unwrap(),
+                HostPhase::Connecting {
+                    attempt: 2,
+                    stage: expected,
+                    last_error: Some("earlier failure".into()),
+                },
+                "{value}"
+            );
+            value["attempt"] = serde_json::json!("not a number");
+            assert!(serde_json::from_value::<HostPhase>(value).is_err());
+        }
+        assert!(
+            serde_json::from_value::<HostPhase>(serde_json::json!({
+                "phase": "connecting", "attempt": 1, "stage": 5, "last_error": null,
+            }))
+            .is_err()
+        );
+    }
+
     /// A kind this build does not know degrades that ONE row to
     /// unmanageable, on the same forward-compatibility terms as an unknown
     /// phase — and, critically, is not mistaken for `ssh`. Offering edit and
@@ -2870,6 +2950,8 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_missing_required_field_fails_the_decode_rather_than_fabricating_a_value() {
         for incomplete in [
+            serde_json::json!({ "phase": "connecting", "stage": "setting-up",
+                                "last_error": null }),
             serde_json::json!({ "phase": "version-skew", "peer_build": "b", "our_protocol": 8,
                                 "our_build": "a", "remediation": "update" }),
             serde_json::json!({ "phase": "identity-mismatch", "recorded": "id-old" }),
