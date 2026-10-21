@@ -71,6 +71,7 @@ use crate::menu_panel::{
     measurement_outcome, record_menu_item_focus, remember_menu_item, session_menu_placement_style,
     session_menu_pointer_style, should_measure_on_mount,
 };
+use crate::modal_dialog::{DialogFocus, DialogHandle, FocusTarget, ModalDialog};
 use crate::ops::{ConfirmSlot, OpGuard, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_identity, display_peer};
 use crate::provisioning::{
@@ -147,18 +148,19 @@ fn HostRefusalDialog(
     };
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
-            div {
+            ModalDialog {
+                handle: DialogHandle::new(".host-refusal-dialog"),
+                focus: DialogFocus::remembered(
+                    ".host-refusal-close", Some(".host-refusal-close"), false,
+                    Some(".host-refusal-close"),
+                ),
                 class: "host-settings-dialog host-refusal-dialog host-dialog-framed",
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: "{action} · {name}",
                 tabindex: "-1",
-                onmounted: move |_| settings_dialog::install_dialog_with_selector(
-                    ".host-refusal-dialog", ".host-refusal-close",
-                    Some(".host-refusal-close"), Some(".host-refusal-close"),
-                ),
-                onkeydown: move |evt: KeyboardEvent| {
-                    if evt.key() == Key::Escape && !evt.is_composing() {
+                on_escape: move |evt: KeyboardEvent| {
+                    if !evt.is_composing() {
                         on_close.call(());
                     }
                 },
@@ -1768,11 +1770,12 @@ pub(crate) fn HostsPanel(
     // toggle, the control the dialog was opened from, once the dialog's
     // isolation has released it (the toggle is inert until then; see
     // `modal_isolation`).
+    let host_dialog = settings_dialog::DIALOG;
     let on_settings_close = move |_: ()| {
         let Some(id) = *settings_open.peek() else {
             return;
         };
-        settings_dialog::return_focus_to_row(id);
+        host_dialog.close(&settings_dialog::row_focus(id).script());
         editing.set(None);
         settings_open.set(None);
     };
@@ -2291,7 +2294,7 @@ pub(crate) fn HostsPanel(
                             // A dismissal can arrive before busy props render.
                             // Keep isolation until the live request guard permits
                             // the entire close, including its focus handoff.
-                            settings_dialog::return_focus_to_row(host.id);
+                            host_dialog.close(&settings_dialog::row_focus(host.id).script());
                             remove_error.set(None);
                             remove_open.set(None);
                         }
@@ -2311,9 +2314,9 @@ pub(crate) fn HostsPanel(
                             // and its own focus installation. Only the last
                             // dismissal returns focus behind the backdrop.
                             if refusals.read().len() > 1 {
-                                settings_dialog::leave_refusal_for_handoff();
+                                host_dialog.release();
                             } else {
-                                settings_dialog::return_focus_to_row(id);
+                                host_dialog.close(&settings_dialog::row_focus(id).script());
                             }
                             refusals.write().remove(&id);
                         }
@@ -2321,7 +2324,7 @@ pub(crate) fn HostsPanel(
                     on_remove: {
                         let id = entry.host.id;
                         move |_| {
-                            settings_dialog::leave_refusal_for_handoff();
+                            host_dialog.release();
                             refusals.write().remove(&id);
                             on_remove_start.call(id);
                         }
@@ -4393,7 +4396,12 @@ fn AddHostForm(
     });
     use_effect(move || {
         if offer.is_open() && !*auto_submit.peek() {
-            settings_dialog::focus_add_confirm();
+            FocusTarget::new(
+                ".host-add-dialog .provisioning-confirm:enabled",
+                Some(".add-host-cancel"),
+                true,
+            )
+            .focus();
         }
     });
 

@@ -50,14 +50,19 @@ use dioxus::prelude::*;
 
 use super::{EditField, HostDestinationForm, gui_host_name, phase_class, phase_display_label};
 use crate::icons::HostMark;
+use crate::modal_dialog::{DialogFocus, DialogHandle, FocusTarget, ModalDialog};
 use crate::modal_isolation;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::{Host, HostId, HostKind, HostPhase};
 
 /// The selector the isolation and the focus scripts find the dialog by.
 const DIALOG_SELECTOR: &str = r#".host-settings-dialog[role="dialog"]"#;
-const ADD_DIALOG_SELECTOR: &str = r#".host-add-dialog[role="dialog"]"#;
-const UNINSTALL_DIALOG_SELECTOR: &str = r#".host-uninstall-dialog[role="dialog"]"#;
+/// Preserve the existing generic release selector for every host row close path.
+pub(crate) const DIALOG: DialogHandle = DialogHandle::new(DIALOG_SELECTOR);
+/// Add form and row setup share a selector while retaining different mount focus.
+pub(crate) const ADD_DIALOG_SELECTOR: &str = r#".host-add-dialog[role="dialog"]"#;
+/// Uninstall's root installs independently of the generic host close handle.
+pub(crate) const UNINSTALL_DIALOG_SELECTOR: &str = r#".host-uninstall-dialog[role="dialog"]"#;
 
 /// One setting the dialog can change, as the key its last write's outcome is
 /// filed under. A superset of [`EditField`]: checkboxes and appearance write through
@@ -116,28 +121,16 @@ pub(super) fn field_outcome(
     Some((owner, outcome))
 }
 
-/// Release the dialog's isolation, then focus host `id`'s "⋯" toggle.
+/// Describe the originating row without owning release or return scheduling.
 ///
-/// Called by the close path before it unmounts the dialog. The order is the
-/// point: the toggle sits outside the dialog and stays inert until the
-/// isolation is released, and `focus()` on an inert element silently does
-/// nothing. The focus waits a frame so it lands after the dialog is gone.
-/// A host that was removed meanwhile has no toggle, and the lookup just
-/// finds nothing.
-pub(crate) fn return_focus_to_row(id: HostId) {
-    let row = serde_json::to_string(&format!(r#"[data-host-id="{id}"] .host-row-menu"#))
-        .expect("a string always serializes");
-    document::eval(&format!(
-        "{} requestAnimationFrame(() => document.querySelector({row})?.focus({{ preventScroll: true }}))",
-        modal_isolation::release_js(DIALOG_SELECTOR),
-    ));
-}
-
-/// Release a refusal's isolation when another modal is about to replace it.
-/// The next dialog chooses its own initial focus; scheduling row focus here
-/// could move the keyboard behind that new modal one frame later.
-pub(crate) fn leave_refusal_for_handoff() {
-    document::eval(&modal_isolation::release_js(DIALOG_SELECTOR));
+/// A removed host has no toggle. Shared focus treats that missing destination
+/// as a no-op; it must not choose another row or the terminal instead.
+pub(crate) fn row_focus(id: HostId) -> FocusTarget {
+    FocusTarget::new(
+        format!(r#"[data-host-id="{id}"] .host-row-menu"#),
+        None,
+        false,
+    )
 }
 
 /// A refused Remove leaves its confirmation mounted. Focus its safe exit
@@ -146,36 +139,6 @@ pub(crate) fn leave_refusal_for_handoff() {
 pub(crate) fn focus_remove_refusal() {
     document::eval(
         "requestAnimationFrame(() => document.querySelector('.host-remove-dialog .host-settings-close')?.focus({ preventScroll: true }))",
-    );
-}
-
-/// Move focus into the freshly mounted dialog, then isolate it.
-///
-/// Focus goes first because `modal_isolation::install_js` requires it (making
-/// the previously focused element's ancestors inert would blur it). The first
-/// control is an edit button, or the YOLO checkbox on a host with neither a
-/// destination nor an alias to edit; the container itself is the fallback.
-/// It also starts remembering the last control inside the dialog that had
-/// focus, for `refocus_after_write`.
-fn install_dialog() {
-    // The header's quiet close button is earlier in DOM order, but opening
-    // settings still starts at the first editable setting, as it did before
-    // the header existed. Removal's confirming focus uses its own installer.
-    install_dialog_with_initial_focus(
-        ".host-edit, .host-alias, .host-yolo-without-asking-toggle, .host-settings-close",
-    );
-}
-
-/// Make Enter confirm the host removal the user explicitly opened.
-/// Cancel remains the initial fallback while removal is disabled and the
-/// independent Escape target, so changing focus never changes dismissal.
-fn install_remove_dialog() {
-    install_dialog_with_focus(
-        DIALOG_SELECTOR,
-        ".host-remove-confirm:enabled",
-        Some(".host-cancel-edit, .host-settings-close"),
-        true,
-        Some(".host-remove-confirm"),
     );
 }
 
@@ -190,19 +153,6 @@ pub(crate) fn install_add_dialog() {
     );
 }
 
-/// Focus the enabled uninstall answer without opening its tooltip.
-/// The user has already requested this plan; a new Enter confirms it, while
-/// Cancel remains the disabled-target fallback and Escape action.
-pub(crate) fn install_uninstall_dialog() {
-    install_dialog_with_focus(
-        UNINSTALL_DIALOG_SELECTOR,
-        ".uninstall-confirm:enabled",
-        Some(".uninstall-cancel"),
-        true,
-        Some(".uninstall-confirm"),
-    );
-}
-
 /// Release the add-host modal and return focus to the heading's add button.
 pub(crate) fn return_focus_to_add_button() {
     let selector = serde_json::to_string(".add-host-button").expect("a string always serializes");
@@ -210,33 +160,6 @@ pub(crate) fn return_focus_to_add_button() {
         "{} requestAnimationFrame(() => document.querySelector({selector})?.focus({{ preventScroll: true }}))",
         modal_isolation::release_js(ADD_DIALOG_SELECTOR),
     ));
-}
-
-/// Focus the setup offer's enabled confirming answer without hover help.
-///
-/// Keyboard submission retains the visible ring; a disabled submit falls
-/// back to Cancel. The tooltip hook suppresses only this automatic handoff, so
-/// later deliberate hover or keyboard navigation still explains the answer.
-pub(crate) fn focus_add_confirm() {
-    document::eval(
-        r#"(() => {
-            const target = document.querySelector('.host-add-dialog .provisioning-confirm:enabled')
-                ?? document.querySelector('.add-host-cancel');
-            if (!target) return;
-            if (window.farhelmTooltip?.focusWithoutTooltip) window.farhelmTooltip.focusWithoutTooltip(target);
-            else target.focus({ preventScroll: true });
-        })();"#,
-    );
-}
-
-/// Apply the shared modal setup and choose the first control explicitly.
-fn install_dialog_with_initial_focus(initial_focus: &str) {
-    install_dialog_with_selector(
-        DIALOG_SELECTOR,
-        initial_focus,
-        Some(".host-cancel-edit, .host-settings-close"),
-        None,
-    );
 }
 
 /// Install focus isolation and container keyboard behavior for a dialog.
@@ -263,9 +186,9 @@ pub(crate) fn install_dialog_with_selector(
 
 /// Set initial focus and the optional main action without coupling them.
 ///
-/// Ordinary settings keep their existing focus behavior. Removal, uninstall
-/// and welcome opt into quiet initial confirming focus here; setup
-/// uses the same tooltip hook when its already-mounted form receives an offer.
+/// Roots still using this bridge share the shell's remembered focus policy.
+/// Welcome requests quiet initial confirming focus; Add keeps its destination
+/// field first and uses the shared target operation when a setup offer arrives.
 /// If the container gets focus later, Enter clicks the caller's main button;
 /// a disabled button retains its native refusal.
 pub(crate) fn install_dialog_with_focus(
@@ -583,20 +506,26 @@ pub(super) fn HostSettingsDialog(
 
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
-            div {
+            ModalDialog {
+                handle: DIALOG,
+                // The earlier quiet header Close is not the first editable
+                // setting. Keep the original target order and focus memory.
+                focus: DialogFocus::remembered(
+                    ".host-edit, .host-alias, .host-yolo-without-asking-toggle, .host-settings-close",
+                    Some(".host-cancel-edit, .host-settings-close"), false, None,
+                ),
                 class: "host-settings-dialog host-settings-refreshed",
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: "host settings · {shown_name}",
                 // Programmatically focusable only, for the isolation's
-                // keydown net and the no-control fallback in
-                // `install_dialog`; `-1` keeps it out of the Tab order.
+                // keydown net and the shared initial-focus policy's no-control
+                // fallback; `-1` keeps it out of the Tab order.
                 tabindex: "-1",
-                onmounted: move |_| install_dialog(),
-                onkeydown: move |evt: KeyboardEvent| {
+                on_escape: move |evt: KeyboardEvent| {
                     // An IME uses Escape to dismiss its candidates; treating
                     // that as cancel would throw away the draft mid-word.
-                    if evt.key() != Key::Escape || evt.is_composing() {
+                    if evt.is_composing() {
                         return;
                     }
                     if editing.is_some() {
@@ -836,15 +765,19 @@ pub(super) fn HostRemoveDialog(
     let destination = host.destination.as_ref().unwrap_or(&host.name).escaped();
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
-            div {
+            ModalDialog {
+                handle: DIALOG,
+                focus: DialogFocus::remembered(
+                    ".host-remove-confirm:enabled", Some(".host-cancel-edit, .host-settings-close"),
+                    true, Some(".host-remove-confirm"),
+                ),
                 class: "host-settings-dialog host-remove-dialog host-dialog-framed",
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: "remove host · {shown_name}",
                 tabindex: "-1",
-                onmounted: move |_| install_remove_dialog(),
-                onkeydown: move |evt: KeyboardEvent| {
-                    if evt.key() == Key::Escape && !evt.is_composing() && !busy {
+                on_escape: move |evt: KeyboardEvent| {
+                    if !evt.is_composing() && !busy {
                         on_cancel.call(());
                     }
                 },
