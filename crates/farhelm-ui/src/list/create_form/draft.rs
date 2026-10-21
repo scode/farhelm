@@ -2,9 +2,10 @@
 //!
 //! Raw editor text and ownership belong together: parsing a draft and writing
 //! it back would lose unfinished quotes and change untouched peer values.
-//! Host authority, preview observations, attempt keys, confirmation and picker
-//! state stay with the form. `LaunchDraftState` is the renderer's ownership
-//! boundary; field memos are subscriptions, never live callback authority.
+//! Host authority, preview observations, confirmation and picker state stay
+//! with the form. `LaunchDraftState` shares the form's existing operation lock
+//! and retry slot for ordinary edits; submission still owns mint/reply lifetime.
+//! Field memos are subscriptions, never live callback authority.
 //!
 //! Ordinary edit facts describe submitted changes, not admission or assignment:
 //! false still performs ownership, explicitness and dormant-buffer writes.
@@ -14,6 +15,7 @@
 use dioxus::prelude::*;
 
 use crate::github_checkout::GithubPreview;
+use crate::ops::OpLock;
 use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, api};
 
 use super::{
@@ -1038,13 +1040,40 @@ pub(super) struct DraftFields {
     pub(super) wrapper_is_explicit: Memo<bool>,
 }
 
-/// The only mutable renderer handle for the accepted draft.
-/// The form still owns admission and retry policy during the staged migration;
-/// edit() is the single place that will receive those existing policies.
+/// Existing picker handles observed only after a scalar edit earns admission.
+/// History promotion deliberately keeps its tracked target/fetched reads: an
+/// opening effect that invokes a choice must retain those dependencies. These
+/// are aliases to UI/history state, not another copy of accepted launch fields.
+#[derive(Clone, Copy)]
+pub(super) struct ChoiceTargets {
+    pub(super) partial_template_hint: Signal<bool>,
+    pub(super) offered_history: Signal<Option<(CreateTarget, api::LaunchHistory)>>,
+    pub(super) create_target: Signal<Option<CreateTarget>>,
+    pub(super) fetched_history: Signal<Option<(CreateTarget, api::LaunchHistory)>>,
+}
+
+impl ChoiceTargets {
+    /// A deliberate choice may reveal refreshed history for its current install.
+    /// Keep the shared helper's tracked reads inside the admitted interaction.
+    fn promote_history(self) {
+        super::promote_fetched_history_snapshot(
+            self.offered_history,
+            self.create_target,
+            self.fetched_history,
+        );
+    }
+}
+
+/// Live publication and ordinary edit admission share the form's original handles.
+/// Concrete leaf/scalar operations own their lock and key rule. The raw edit
+/// entry remains temporarily for unconverted composite and system operations;
+/// their callers still own those policies until the next migration.
 #[derive(Clone, Copy)]
 pub(super) struct LaunchDraftState {
     value: Signal<LaunchDraft>,
     fields: DraftFields,
+    ops: OpLock,
+    intent_key: Signal<Option<(String, IntentBinding)>>,
 }
 
 impl LaunchDraftState {
@@ -1056,9 +1085,137 @@ impl LaunchDraftState {
     pub(super) fn fields(self) -> DraftFields {
         self.fields
     }
-    /// Every accepted transition writes through this one ownership boundary.
+    /// Unconverted composite/system routes retain their existing caller policy.
+    /// New ordinary handlers must use a concrete operation, never this closure.
     pub(super) fn edit<R>(mut self, edit: impl FnOnce(&mut LaunchDraft) -> R) -> R {
         edit(&mut self.value.write())
+    }
+
+    /// Reject queued edits before any preamble or live draft read can run.
+    /// The local plain copy allows internal observations without a live write
+    /// borrow. Even unchanged operations publish ownership/buffer assignments;
+    /// only their submitted-change fact retires the ordinary pair. The return
+    /// means admitted, so equal choices still receive their usual UI completion.
+    fn apply_edit(mut self, apply: impl FnOnce(&mut LaunchDraft) -> bool) -> bool {
+        if self.ops.busy_now() {
+            return false;
+        }
+        let mut current = self.snapshot();
+        let changed = apply(&mut current);
+        self.value.set(current);
+        if changed {
+            self.intent_key.set(None);
+        }
+        true
+    }
+
+    /// Ordinary name ownership follows the existing folder/checkout name policy.
+    /// Admission is returned independently of the plain transition's key fact.
+    pub(super) fn edit_title(self, text: String) -> bool {
+        self.apply_edit(|draft| draft.edit_title(text))
+    }
+
+    /// Literal command edits retire authority only when submitted bytes change.
+    /// Equality still claims editor ownership; a busy edit claims no text at all.
+    pub(super) fn edit_invocation(self, text: String) -> bool {
+        self.apply_edit(|draft| draft.edit_invocation(text))
+    }
+
+    /// An explicit assertion remains distinct from the unanswered command state.
+    /// Reapplying its current answer is still an admitted interaction.
+    pub(super) fn choose_command_yolo(self, yolo: bool) -> bool {
+        self.apply_edit(|draft| draft.choose_command_yolo(yolo))
+    }
+
+    /// Declaration edits preserve dormant Resume text and its opt-in choice.
+    /// Only the existing submitted metadata fact decides ordinary retirement.
+    pub(super) fn choose_command_agent(self, agent: Option<LaunchHarness>) -> bool {
+        self.apply_edit(|draft| draft.choose_command_agent(agent))
+    }
+
+    /// Resume visibility may change without changing the effective command.
+    /// Apply that retained state even when the plain request fact is unchanged.
+    pub(super) fn choose_command_resume(self, enabled: bool) -> bool {
+        self.apply_edit(|draft| draft.choose_command_resume(enabled))
+    }
+
+    /// Literal Resume ownership and hidden retention use the same live gate.
+    /// The plain transition keeps effective Resume separate from display text.
+    pub(super) fn edit_command_resume(self, text: String) -> bool {
+        self.apply_edit(|draft| draft.edit_command_resume(text))
+    }
+
+    /// UI empty prompt means absence; template empty prompts have a separate path.
+    /// Dormant prompt assignments still occur when their request fact is equal.
+    pub(super) fn edit_prompt(self, text: String) -> bool {
+        self.apply_edit(|draft| draft.edit_prompt(text))
+    }
+
+    /// Conversation edits retain exact selector bytes and current refusal rules.
+    /// This ordinary edit does not acquire submission or confirmation authority.
+    pub(super) fn edit_conversation(self, text: String) -> bool {
+        self.apply_edit(|draft| draft.edit_conversation(text))
+    }
+
+    /// Keep unfinished wrapper text editable and compare only proven word equality.
+    /// Admission preserves raw explicitness even when quoting changes no words.
+    pub(super) fn edit_wrapper(self, text: String) -> bool {
+        self.apply_edit(|draft| draft.edit_wrapper(text))
+    }
+
+    /// Custom flags share every ordinary editor's live queued-event protection.
+    /// The existing parser fact remains conservative for malformed drafts.
+    pub(super) fn edit_permission_flags(self, text: String) -> bool {
+        self.apply_edit(|draft| draft.edit_permission_flags(text))
+    }
+
+    /// Effort choice promotes history only after live admission, even on equality.
+    /// Its preamble order matches the segmented control's existing interaction.
+    pub(super) fn choose_effort(
+        self,
+        effort: Option<LaunchEffort>,
+        mut targets: ChoiceTargets,
+    ) -> bool {
+        self.apply_edit(|draft| {
+            targets.partial_template_hint.set(false);
+            targets.promote_history();
+            draft.choose_effort(effort)
+        })
+    }
+
+    /// Controls and guarded answers share one permission edit and retry decision.
+    /// Confirmation binding/take and subsequent submit remain with the caller.
+    pub(super) fn choose_permissions(
+        self,
+        permission: Option<LaunchPermission>,
+        mut targets: ChoiceTargets,
+    ) -> bool {
+        self.apply_edit(|draft| {
+            targets.partial_template_hint.set(false);
+            targets.promote_history();
+            draft.choose_permissions(permission)
+        })
+    }
+
+    /// Click/Enter tab choices dismiss the hint before promoting history.
+    /// The admitted return lets the renderer retain its search-focus completion.
+    pub(super) fn choose_launch_tab(self, tab: LaunchTab, mut targets: ChoiceTargets) -> bool {
+        self.apply_edit(|draft| {
+            targets.partial_template_hint.set(false);
+            targets.promote_history();
+            draft.choose_tab(tab)
+        })
+    }
+
+    /// Arrow/Home/End navigation retains its distinct hint order and tab focus.
+    /// It shares the plain tab transition and ordinary key rule with click/Enter.
+    pub(super) fn navigate_launch_tab(self, tab: LaunchTab, mut targets: ChoiceTargets) -> bool {
+        self.apply_edit(|draft| {
+            targets.promote_history();
+            let changed = draft.choose_tab(tab);
+            targets.partial_template_hint.set(false);
+            changed
+        })
     }
 }
 
@@ -1066,9 +1223,13 @@ impl LaunchDraftState {
 /// Only these memos subscribe to the aggregate; effects subscribe to the
 /// individual values they already observed, not every unrelated edit. Initial
 /// cwd is a mount-only raw seed; later source changes use explicit transitions.
+/// The operation and retry handles come from this opening's existing owner;
+/// neither is recreated or mirrored by this hook.
 pub(super) fn use_launch_draft(
     permission: Option<LaunchPermission>,
     initial_cwd: Option<String>,
+    ops: OpLock,
+    intent_key: Signal<Option<(String, IntentBinding)>>,
 ) -> LaunchDraftState {
     let value = use_signal(|| {
         let mut draft = LaunchDraft::new(permission);
@@ -1106,12 +1267,365 @@ pub(super) fn use_launch_draft(
         structured_wrapper: use_memo(move || value.read().wrapper()),
         wrapper_is_explicit: use_memo(move || value.read().wrapper_explicit()),
     };
-    LaunchDraftState { value, fields }
+    LaunchDraftState {
+        value,
+        fields,
+        ops,
+        intent_key,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Give deliberate choices distinguishable offered/fetched installation data.
+    /// Real signals keep promotion and effect subscriptions observable without
+    /// rebuilding those rules in a fixture-side edit implementation.
+    fn use_choice_targets() -> ChoiceTargets {
+        let target = CreateTarget::new(1, "install-a".into());
+        ChoiceTargets {
+            partial_template_hint: use_signal(|| true),
+            offered_history: use_signal({
+                let target = target.clone();
+                move || {
+                    Some((
+                        target,
+                        api::LaunchHistory {
+                            checkout_config_revision: 1,
+                            ..Default::default()
+                        },
+                    ))
+                }
+            }),
+            create_target: use_signal({
+                let target = target.clone();
+                move || Some(target)
+            }),
+            fetched_history: use_signal(move || {
+                Some((
+                    target,
+                    api::LaunchHistory {
+                        checkout_config_revision: 2,
+                        ..Default::default()
+                    },
+                ))
+            }),
+        }
+    }
+
+    /// Publish only the actual mounted owner and its existing choice handles.
+    /// Tests claim the same production OpLock the owner consults, never a
+    /// stand-in boolean or a fixture-side mutation/retirement dispatcher.
+    #[derive(Clone, Copy)]
+    struct OrdinaryFixture {
+        owner: LaunchDraftState,
+        choices: ChoiceTargets,
+    }
+
+    std::thread_local! {
+        static ORDINARY_FIXTURE: std::cell::Cell<Option<OrdinaryFixture>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// Mount no reactive draft values so same-turn edits can precede Memo work.
+    /// The slot passed to the owner is also the slot the test inspects directly.
+    fn ordinary_fixture() -> Element {
+        let ops = crate::ops::use_op_lock();
+        let key = use_signal(|| None);
+        let owner = use_launch_draft(None, None, ops, key);
+        let choices = use_choice_targets();
+        ORDINARY_FIXTURE.with(|slot| slot.set(Some(OrdinaryFixture { owner, choices })));
+        rsx! {}
+    }
+
+    /// A queued callback must reject before it claims text or promotes history.
+    /// Every concrete ordinary entry uses the real held token in this turn;
+    /// equal admitted choices still complete, while a real change retires K.
+    #[farhelm_testtrace::test]
+    fn ordinary_owner_gates_all_entries_and_keeps_equal_choice_completion() {
+        ORDINARY_FIXTURE.with(|slot| slot.set(None));
+        let mut dom = VirtualDom::new(ordinary_fixture);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let OrdinaryFixture { owner, mut choices } =
+            ORDINARY_FIXTURE.with(std::cell::Cell::get).unwrap();
+        dom.in_runtime(|| {
+            // Harness/template/source setup remains unconverted. All
+            // measured ordinary actions below use concrete owner operations.
+            owner.edit(|draft| {
+                draft.choose_harness(
+                    LaunchHarness::Codex,
+                    None,
+                    String::new(),
+                    ChoiceOrigin::Control,
+                );
+                draft.apply_template_permissions(
+                    Some(LaunchPermission::Custom),
+                    "--mode 'ask me'".into(),
+                );
+                draft.edit_wrapper("nice 'two words'".into());
+                draft.seed_invocation("source\u{1b}");
+            });
+            let mut key = owner.intent_key;
+            let pair = Some(("unresolved".into(), request(&owner.snapshot())));
+            key.set(pair.clone());
+            let before = owner.snapshot();
+            let offered = choices.offered_history.peek().clone();
+            let mut ops = owner.ops;
+            let guard = ops
+                .claim_guard()
+                .expect("premise: the real page token is idle");
+            assert!(ops.busy_now());
+            assert!(!owner.edit_title("changed".into()));
+            assert!(!owner.edit_invocation("changed".into()));
+            assert!(!owner.edit_command_resume("changed".into()));
+            assert!(!owner.edit_prompt("changed".into()));
+            assert!(!owner.edit_conversation("changed".into()));
+            assert!(!owner.edit_wrapper("changed".into()));
+            assert!(!owner.edit_permission_flags("changed".into()));
+            assert!(!owner.choose_command_yolo(true));
+            assert!(!owner.choose_command_agent(Some(LaunchHarness::Claude)));
+            assert!(!owner.choose_command_resume(true));
+            assert!(!owner.choose_effort(Some(LaunchEffort::High), choices));
+            assert!(!owner.choose_permissions(Some(LaunchPermission::Guarded), choices));
+            assert!(!owner.choose_launch_tab(LaunchTab::Command, choices));
+            assert!(!owner.navigate_launch_tab(LaunchTab::Command, choices));
+            assert_eq!(
+                owner.snapshot(),
+                before,
+                "rejection preserves all raw/edited fields"
+            );
+            assert_eq!(*key.peek(), pair);
+            assert!(*choices.partial_template_hint.peek());
+            assert_eq!(*choices.offered_history.peek(), offered);
+
+            drop(guard);
+            assert!(!ops.busy_now(), "the production guard releases admission");
+            assert!(owner.choose_launch_tab(LaunchTab::Agent, choices));
+            assert!(!*choices.partial_template_hint.peek());
+            assert_eq!(
+                *choices.offered_history.peek(),
+                *choices.fetched_history.peek()
+            );
+            assert_eq!(*key.peek(), pair, "equal tab still completed its preamble");
+            choices.partial_template_hint.set(true);
+            choices.offered_history.set(offered);
+            assert!(owner.navigate_launch_tab(LaunchTab::Agent, choices));
+            assert!(!*choices.partial_template_hint.peek());
+            assert_eq!(
+                *choices.offered_history.peek(),
+                *choices.fetched_history.peek()
+            );
+            assert!(owner.choose_effort(None, choices));
+            assert!(owner.choose_permissions(Some(LaunchPermission::Custom), choices));
+            assert!(owner.edit_permission_flags("--mode \"ask me\"".into()));
+            assert!(owner.edit_wrapper("nice \"two words\"".into()));
+            assert!(owner.snapshot().permissions_explicit());
+            assert_eq!(owner.snapshot().permission_flags(), "--mode \"ask me\"");
+            assert_eq!(
+                *key.peek(),
+                pair,
+                "word-equivalent edits retain the full pair"
+            );
+            assert!(owner.choose_effort(Some(LaunchEffort::High), choices));
+            assert!(
+                key.peek().is_none(),
+                "a changed submitted choice retires before return"
+            );
+            assert_eq!(
+                *owner.fields().structured_effort.peek(),
+                None,
+                "premise: Memo work has not run"
+            );
+            assert_eq!(
+                structured(&owner.snapshot()).effort,
+                Some(LaunchEffort::High)
+            );
+        });
+        ORDINARY_FIXTURE.with(|slot| slot.set(None));
+    }
+
+    /// Source bytes and visible escape spelling are different commands.
+    /// Live owner publication must beat Memo scheduling, yet hidden Resume
+    /// ownership and repeated literal edits still preserve the unresolved pair.
+    #[farhelm_testtrace::test]
+    fn ordinary_owner_keeps_raw_command_and_hidden_resume_contracts() {
+        ORDINARY_FIXTURE.with(|slot| slot.set(None));
+        let mut dom = VirtualDom::new(ordinary_fixture);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let OrdinaryFixture { owner, choices } =
+            ORDINARY_FIXTURE.with(std::cell::Cell::get).unwrap();
+        dom.in_runtime(|| {
+            owner.edit(|draft| draft.seed_invocation("c\u{1b}"));
+            assert!(owner.choose_launch_tab(LaunchTab::Command, choices));
+            assert!(owner.choose_command_yolo(true));
+            let mut key = owner.intent_key;
+            key.set(Some(("raw-command".into(), request(&owner.snapshot()))));
+            let display = owner.snapshot().invocation();
+            assert_ne!(command(&owner.snapshot()).command, display);
+            assert!(owner.edit_invocation(display.clone()));
+            assert!(key.peek().is_none());
+            assert_eq!(
+                owner.fields().invocation.peek().as_str(),
+                "",
+                "premise: the display Memo is still old"
+            );
+            assert_eq!(command(&owner.snapshot()).command, display);
+            assert!(owner.snapshot().invocation_edited());
+            let pair = Some(("literal-command".into(), request(&owner.snapshot())));
+            key.set(pair.clone());
+            assert!(owner.edit_invocation(display));
+            assert!(owner.choose_command_yolo(true));
+            assert!(owner.choose_command_agent(None));
+            assert!(owner.edit_command_resume("literal resume".into()));
+            assert!(owner.choose_command_resume(true));
+            assert!(owner.snapshot().command_resume_edited());
+            assert!(owner.snapshot().command_resume_on());
+            assert_eq!(command(&owner.snapshot()).resume, None);
+            assert_eq!(
+                *key.peek(),
+                pair,
+                "hidden Resume assignments still complete"
+            );
+            assert!(owner.choose_command_agent(Some(LaunchHarness::Claude)));
+            assert!(key.peek().is_none());
+            assert_eq!(
+                command(&owner.snapshot()).resume.as_deref(),
+                Some("literal resume")
+            );
+        });
+        ORDINARY_FIXTURE.with(|slot| slot.set(None));
+    }
+
+    /// History reads stay conditional on admission and remain tracked afterward.
+    /// An all-peek rewrite loses the positive reruns; reading context before the
+    /// gate would make the first, rejected effect subscribe to old history.
+    #[farhelm_testtrace::test]
+    fn ordinary_choice_history_dependencies_begin_only_after_admission() {
+        use std::cell::Cell;
+        /// The held guard and explicit retry stimulus belong to this one DOM.
+        /// Keeping their handles together makes the rejected/admitted effect
+        /// boundary observable without changing the production owner API.
+        #[derive(Clone, Copy)]
+        struct HistoryFixture {
+            ordinary: OrdinaryFixture,
+            claim: Signal<Option<crate::ops::OpGuard>>,
+            kick: Signal<u64>,
+        }
+        std::thread_local! {
+            static FIXTURE: Cell<Option<HistoryFixture>> = const { Cell::new(None) };
+            static RUNS: Cell<usize> = const { Cell::new(0) };
+            static ACCEPTED: Cell<usize> = const { Cell::new(0) };
+        }
+        /// Hold a production claim before the effect's first invocation. Kick
+        /// is the explicit retry boundary after rejection acquired no history deps.
+        fn probe() -> Element {
+            let mut ops = crate::ops::use_op_lock();
+            let key = use_signal(|| None);
+            let owner = use_launch_draft(None, None, ops, key);
+            let choices = use_choice_targets();
+            let mut claim = use_signal(|| None);
+            let kick = use_signal(|| 0_u64);
+            use_hook(move || {
+                claim.set(Some(
+                    ops.claim_guard()
+                        .expect("premise: mount claims the real token"),
+                ));
+            });
+            use_effect(move || {
+                let _ = kick();
+                RUNS.with(|count| count.set(count.get() + 1));
+                if owner.choose_effort(None, choices) {
+                    ACCEPTED.with(|count| count.set(count.get() + 1));
+                }
+            });
+            FIXTURE.with(|slot| {
+                slot.set(Some(HistoryFixture {
+                    ordinary: OrdinaryFixture { owner, choices },
+                    claim,
+                    kick,
+                }))
+            });
+            rsx! {}
+        }
+        FIXTURE.with(|slot| slot.set(None));
+        RUNS.with(|count| count.set(0));
+        ACCEPTED.with(|count| count.set(0));
+        let mut dom = VirtualDom::new(probe);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let HistoryFixture {
+            ordinary: OrdinaryFixture { owner, mut choices },
+            mut claim,
+            mut kick,
+        } = FIXTURE.with(Cell::get).unwrap();
+        assert_eq!(RUNS.with(Cell::get), 1);
+        assert_eq!(ACCEPTED.with(Cell::get), 0);
+        dom.in_runtime(|| {
+            assert!(
+                owner.ops.busy_now(),
+                "premise: the first effect really was rejected"
+            );
+            assert!(*choices.partial_template_hint.peek());
+            choices.fetched_history.set(None);
+            choices.create_target.set(None);
+        });
+        dom.process_events();
+        assert_eq!(
+            RUNS.with(Cell::get),
+            1,
+            "busy admission acquired no history subscriptions"
+        );
+        dom.in_runtime(|| {
+            claim.set(None);
+            assert!(!owner.ops.busy_now());
+            kick.set(1);
+        });
+        dom.process_events();
+        assert_eq!(RUNS.with(Cell::get), 2);
+        assert_eq!(ACCEPTED.with(Cell::get), 1);
+        dom.in_runtime(|| {
+            choices
+                .create_target
+                .set(Some(CreateTarget::new(2, "install-b".into())))
+        });
+        dom.process_events();
+        assert_eq!(
+            RUNS.with(Cell::get),
+            3,
+            "the admitted helper tracks current target"
+        );
+        dom.in_runtime(|| {
+            choices.fetched_history.set(Some((
+                CreateTarget::new(2, "install-b".into()),
+                api::LaunchHistory {
+                    checkout_config_revision: 4,
+                    ..Default::default()
+                },
+            )))
+        });
+        dom.process_events();
+        assert_eq!(
+            RUNS.with(Cell::get),
+            4,
+            "the admitted helper tracks fetched history"
+        );
+        dom.in_runtime(|| {
+            assert_eq!(
+                *choices.offered_history.peek(),
+                *choices.fetched_history.peek()
+            );
+            assert!(owner.edit_prompt("unrelated owner field".into()));
+        });
+        dom.process_events();
+        assert_eq!(
+            RUNS.with(Cell::get),
+            4,
+            "history choice has no whole-owner subscription"
+        );
+        FIXTURE.with(|slot| slot.set(None));
+    }
 
     /// Choices can claim editor/template ownership without changing the create.
     /// Exercise production facts alongside the resulting submitted selection;
@@ -1964,6 +2478,8 @@ mod tests {
     /// Supply external authority/UI handles to the real template adapter.
     /// The owner under test still supplies every moved field; reconstructing
     /// those fields here would hide a stale-memo or hidden-resume regression.
+    /// Reuse its retry slot too, so ordinary edits and template restoration
+    /// cannot silently exercise unrelated fixture identities.
     /// Call inside the DOM's root scope so it owns these temporary handles.
     fn template_targets(draft: LaunchDraftState) -> super::super::TemplateTargets {
         super::super::TemplateTargets {
@@ -1972,7 +2488,7 @@ mod tests {
             chosen_host: Signal::new(None),
             preview_revision: Signal::new(0),
             template_error: Signal::new(None),
-            intent_key: Signal::new(None),
+            intent_key: draft.intent_key,
         }
     }
 
@@ -1994,7 +2510,9 @@ mod tests {
         /// No render reads: process_events settles the production field memos
         /// and effects without requiring a renderer to acknowledge a new frame.
         fn probe() -> Element {
-            let owner = use_launch_draft(None, Some("/work/peer\u{202e}".into()));
+            let ops = crate::ops::use_op_lock();
+            let key = use_signal(|| None);
+            let owner = use_launch_draft(None, Some("/work/peer\u{202e}".into()), ops, key);
             let fields = owner.fields();
             let preview = use_signal(|| PreviewState::Pending);
             use_effect(move || {
@@ -2186,7 +2704,7 @@ mod tests {
             dom.in_runtime(|| owner.snapshot().effective_title()),
             "review-2"
         );
-        dom.in_runtime(|| owner.edit(|draft| draft.edit_title("typed".into())));
+        dom.in_runtime(|| owner.edit_title("typed".into()));
         dom.process_events();
         assert_eq!(NAME_RUNS.with(Cell::get), 6, "a hand edit remains observed");
         assert_eq!(DEST_RUNS.with(Cell::get), 2);
@@ -2209,6 +2727,7 @@ mod tests {
 
         std::thread_local! {
             static OWNER: Cell<Option<LaunchDraftState>> = const { Cell::new(None) };
+            static CHOICES: Cell<Option<ChoiceTargets>> = const { Cell::new(None) };
             static EFFECT_RUNS: Cell<usize> = const { Cell::new(0) };
             static GUARD_RUNS: Cell<usize> = const { Cell::new(0) };
             static RENDERS: Cell<usize> = const { Cell::new(0) };
@@ -2218,7 +2737,10 @@ mod tests {
         /// production memos and observer without a pending render boundary.
         fn probe() -> Element {
             RENDERS.with(|count| count.set(count.get() + 1));
-            let owner = use_launch_draft(None, None);
+            let ops = crate::ops::use_op_lock();
+            let key = use_signal(|| None);
+            let owner = use_launch_draft(None, None, ops, key);
+            let choices = use_choice_targets();
             let fields = owner.fields();
             use_effect(move || {
                 let _ = (
@@ -2243,10 +2765,12 @@ mod tests {
                 GUARD_RUNS.with(|count| count.set(count.get() + 1));
             });
             OWNER.with(|slot| slot.set(Some(owner)));
+            CHOICES.with(|slot| slot.set(Some(choices)));
             rsx! {}
         }
 
         OWNER.with(|slot| slot.set(None));
+        CHOICES.with(|slot| slot.set(None));
         EFFECT_RUNS.with(|count| count.set(0));
         RENDERS.with(|count| count.set(0));
         GUARD_RUNS.with(|count| count.set(0));
@@ -2254,6 +2778,9 @@ mod tests {
         dom.rebuild_in_place();
         dom.process_events();
         let owner = OWNER.with(Cell::get).expect("the production owner mounted");
+        let choices = CHOICES
+            .with(Cell::get)
+            .expect("choice history handles mounted");
         let fields = owner.fields();
         assert_eq!(EFFECT_RUNS.with(Cell::get), 1, "the observer subscribed");
         assert_eq!(RENDERS.with(Cell::get), 1);
@@ -2278,12 +2805,12 @@ mod tests {
         assert_eq!(EFFECT_RUNS.with(Cell::get), 2);
 
         dom.in_runtime(|| {
-            owner.edit(|draft| draft.choose_permissions(Some(LaunchPermission::Custom)));
+            owner.choose_permissions(Some(LaunchPermission::Custom), choices);
         });
         dom.process_events();
         assert_eq!(EFFECT_RUNS.with(Cell::get), 3);
         dom.in_runtime(|| {
-            owner.edit(|draft| draft.edit_permission_flags("--mode 'ask me'".into()));
+            owner.edit_permission_flags("--mode 'ask me'".into());
             assert_eq!(fields.structured_permission_flags.peek().as_str(), "");
             assert_eq!(
                 structured(&owner.snapshot()).permission_flags,
@@ -2311,12 +2838,12 @@ mod tests {
         dom.process_events();
         assert_eq!(EFFECT_RUNS.with(Cell::get), 4, "model remains observed");
         dom.in_runtime(|| {
-            owner.edit(|draft| draft.choose_effort(Some(LaunchEffort::High)));
+            owner.choose_effort(Some(LaunchEffort::High), choices);
         });
         dom.process_events();
         assert_eq!(EFFECT_RUNS.with(Cell::get), 5, "effort remains observed");
         dom.in_runtime(|| {
-            owner.edit(|draft| draft.choose_permissions(Some(LaunchPermission::Guarded)));
+            owner.choose_permissions(Some(LaunchPermission::Guarded), choices);
         });
         dom.process_events();
         assert_eq!(
@@ -2324,7 +2851,7 @@ mod tests {
             6,
             "permission remains observed"
         );
-        dom.in_runtime(|| owner.edit(|draft| draft.edit_wrapper("nice".into())));
+        dom.in_runtime(|| owner.edit_wrapper("nice".into()));
         dom.process_events();
         assert_eq!(EFFECT_RUNS.with(Cell::get), 7, "wrapper remains observed");
         assert_eq!(
@@ -2333,14 +2860,12 @@ mod tests {
             "choice edits do not touch one-time inputs"
         );
         dom.in_runtime(|| {
-            owner.edit(|draft| {
-                draft.choose_command_yolo(true);
-                draft.choose_command_agent(Some(LaunchHarness::Claude));
-                draft.choose_command_resume(true);
-                draft.edit_command_resume("c --resume {conversation} {farhelm_args}".into());
-                draft.edit_invocation("c {farhelm_args}".into());
-                draft.choose_tab(LaunchTab::Command);
-            });
+            owner.choose_command_yolo(true);
+            owner.choose_command_agent(Some(LaunchHarness::Claude));
+            owner.choose_command_resume(true);
+            owner.edit_command_resume("c --resume {conversation} {farhelm_args}".into());
+            owner.edit_invocation("c {farhelm_args}".into());
+            owner.choose_launch_tab(LaunchTab::Command, choices);
             assert_eq!(*fields.launch_tab.peek(), LaunchTab::Agent);
             assert_eq!(*fields.command_yolo.peek(), None);
             assert_eq!(fields.invocation.peek().as_str(), "");
@@ -2354,7 +2879,7 @@ mod tests {
                 }
             );
             let before = owner.snapshot();
-            owner.edit(|draft| draft.choose_command_agent(None));
+            owner.choose_command_agent(None);
             assert_eq!(command(&owner.snapshot()).resume, None);
             let saved = dom.in_scope(ScopeId::ROOT, || {
                 super::super::launcher_snapshot(template_targets(owner), &[], None)
@@ -2383,10 +2908,8 @@ mod tests {
                 fields.command_resume.peek().as_str(),
                 "c --resume {conversation} {farhelm_args}"
             );
-            owner.edit(|draft| {
-                draft.edit_prompt("first message".into());
-                draft.edit_conversation("named-conversation".into());
-            });
+            owner.edit_prompt("first message".into());
+            owner.edit_conversation("named-conversation".into());
         });
         dom.process_events();
         assert_eq!(
@@ -2402,28 +2925,28 @@ mod tests {
 
         // Each edit changes a different observed projection. A whole-draft
         // subscription would also have rerun for the one-time inputs above.
-        let edits: [fn(&mut LaunchDraft); 6] = [
-            |draft| {
-                draft.choose_tab(LaunchTab::Agent);
+        let edits: [fn(LaunchDraftState, ChoiceTargets); 6] = [
+            |owner, choices| {
+                owner.choose_launch_tab(LaunchTab::Agent, choices);
             },
-            |draft| {
-                draft.edit_invocation("different command".into());
+            |owner, _| {
+                owner.edit_invocation("different command".into());
             },
-            |draft| {
-                draft.choose_command_yolo(false);
+            |owner, _| {
+                owner.choose_command_yolo(false);
             },
-            |draft| {
-                draft.choose_command_agent(None);
+            |owner, _| {
+                owner.choose_command_agent(None);
             },
-            |draft| {
-                draft.choose_command_resume(false);
+            |owner, _| {
+                owner.choose_command_resume(false);
             },
-            |draft| {
-                draft.edit_command_resume("different resume".into());
+            |owner, _| {
+                owner.edit_command_resume("different resume".into());
             },
         ];
         for (index, edit) in edits.into_iter().enumerate() {
-            dom.in_runtime(|| owner.edit(edit));
+            dom.in_runtime(|| edit(owner, choices));
             dom.process_events();
             assert_eq!(
                 EFFECT_RUNS.with(Cell::get),
@@ -2493,9 +3016,9 @@ mod tests {
                 draft.choose_tab(LaunchTab::Agent);
                 draft.seed_folder("/work/current\u{202e}");
                 draft.seed_title("current-name\u{202e}", None);
-                draft.edit_prompt("same-turn prompt".into());
-                draft.edit_conversation("same-turn-conversation".into());
             });
+            owner.edit_prompt("same-turn prompt".into());
+            owner.edit_conversation("same-turn-conversation".into());
             assert_eq!(fields.cwd.peek().as_str(), "~");
             assert_eq!(fields.title.peek().as_str(), "");
             assert_eq!(
@@ -2538,6 +3061,7 @@ mod tests {
             "the probe never subscribed while rendering"
         );
         OWNER.with(|slot| slot.set(None));
+        CHOICES.with(|slot| slot.set(None));
     }
 
     /// A partial draft must not silently become a launch with a guessed agent.

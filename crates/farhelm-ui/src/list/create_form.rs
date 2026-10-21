@@ -6,12 +6,14 @@
 //! module keeps preview observations, reactive subscriptions and the ordered
 //! host/submission guards. The draft assembles every complete request from the
 //! caller's accepted facts, including the variant and checkout frozen at a press.
+//! Ordinary leaf/scalar edits also own their live lock and retry retirement in
+//! draft; composite and system routes still retain their caller policies here.
 
 mod draft;
 
 use draft::{
-    CheckoutInput, ChoiceOrigin, DraftFields, LaunchDraft, LaunchDraftState, RequestContext,
-    use_launch_draft,
+    CheckoutInput, ChoiceOrigin, ChoiceTargets, DraftFields, LaunchDraft, LaunchDraftState,
+    RequestContext, use_launch_draft,
 };
 
 use dioxus::prelude::*;
@@ -1121,9 +1123,10 @@ fn observe_search_agent_fields(fields: DraftFields) {
 ///
 /// HTML's disabled state is rendered asynchronously, while a create claims
 /// the token synchronously before its key-mint await. Every handler that can
-/// alter the intent must consult this live predicate itself; otherwise an
-/// already queued click could clear the key or change the selection the
-/// accepted request is still resolving.
+/// alter a composite intent still consults this live predicate during the
+/// staged migration. Ordinary leaf/scalar handlers instead call a concrete
+/// owner operation whose private wrapper checks the same live token. A queued
+/// callback must not clear the key or change the accepted resolving request.
 fn draft_transition_allowed(ops: OpLock) -> bool {
     !ops.busy_now()
 }
@@ -2662,6 +2665,10 @@ pub(super) fn CreateSessionForm(
     // Replies are observations, not destination edits. A completion wakes only
     // preview consumers and cannot overwrite semantic repository ownership.
     let mut preview_state = use_signal(|| PreviewState::Pending);
+    // This opening's ordinary retry pair is shared with the edit owner.
+    // Submission still mints/reconciles it through this same handle while
+    // holding the operation claim; edit-induced retirement belongs to draft.
+    let mut intent_key = use_signal(|| None::<(String, IntentBinding)>);
     // Seeded from the helm's remembered permissions mode ONLY when this
     // mount has no prefill at all (SPEC.md's launch-composer carve-out): a
     // clone/replace prefill's own reseed effect below (`prefill.launch`)
@@ -2678,6 +2685,8 @@ pub(super) fn CreateSessionForm(
             None
         },
         initial_cwd.clone(),
+        ops,
+        intent_key,
     );
     // Whether `structured_permissions`'s current value is a real choice
     // (an explicit click, a restored prefill, or an applied recent/search
@@ -3020,11 +3029,6 @@ pub(super) fn CreateSessionForm(
     {
         offered_history.set(Some((target.clone(), history.clone())));
     }
-    // This form's current intended create, if one has been submitted yet
-    // (PLAN_M3.md item 6), together with the BINDING it was minted for.
-    // Minted at first submit, reused by every later submit of the same
-    // intent, and superseded the moment any part of that binding changes.
-    let mut intent_key = use_signal(|| None::<(String, IntentBinding)>);
     let busy = ops.busy();
 
     // A host installation change rotates the idempotency key and any
@@ -3047,6 +3051,12 @@ pub(super) fn CreateSessionForm(
     // to the user's edits. It is not part of the remembered launcher draft.
     let has_partial_template = partial_template_banner.is_some();
     let mut partial_template_hint = use_signal(move || has_partial_template);
+    let choice_targets = ChoiceTargets {
+        partial_template_hint,
+        offered_history,
+        create_target,
+        fetched_history,
+    };
     let mut partial_hint_timer_started = use_signal(|| false);
     let partial_template_text = partial_template_banner
         .as_ref()
@@ -4506,13 +4516,8 @@ pub(super) fn CreateSessionForm(
         }
     });
     let choose_launch_tab = EventHandler::<LaunchTab>::new(move |tab| {
-        if !draft_transition_allowed(ops) {
+        if !draft.choose_launch_tab(tab, choice_targets) {
             return;
-        }
-        partial_template_hint.set(false);
-        promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
-        if draft.edit(|draft| draft.choose_tab(tab)) {
-            intent_key.set(None);
         }
         focus_composer_surface(false);
     });
@@ -4748,14 +4753,7 @@ pub(super) fn CreateSessionForm(
     // guarded answer. Admission stays synchronous; a queued click must not
     // retire a request whose operation claim is already held.
     let choose_permissions = Callback::new(move |permission: Option<LaunchPermission>| {
-        if !draft_transition_allowed(ops) {
-            return;
-        }
-        partial_template_hint.set(false);
-        promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
-        if draft.edit(|draft| draft.choose_permissions(permission)) {
-            intent_key.set(None);
-        }
+        draft.choose_permissions(permission, choice_targets);
     });
     // A guarded answer may arrive after another control's event but before
     // that control's render. Reconstruct the executable draft from its live
@@ -6920,14 +6918,9 @@ pub(super) fn CreateSessionForm(
                                     placeholder: "{title_placeholder}",
                                     disabled: busy,
                                     oninput: move |evt| {
-                                        if !draft_transition_allowed(ops) {
-                                            return;
-                                        }
                                         // Ownership still changes on an equal edit; only
                                         // a different submitted name retires its retry.
-                                        if draft.edit(|draft| draft.edit_title(evt.value())) {
-                                            intent_key.set(None);
-                                        }
+                                        draft.edit_title(evt.value());
                                     },
                                 }
                                 if let Some((base, true)) = &template_base {
@@ -6969,15 +6962,9 @@ pub(super) fn CreateSessionForm(
                                             _ => return,
                                         };
                                         evt.prevent_default();
-                                        if !draft_transition_allowed(ops) {
+                                        if !draft.navigate_launch_tab(target, choice_targets) {
                                             return;
                                         }
-                                        promote_fetched_history_snapshot(
-                                            offered_history, create_target, fetched_history,
-                                        );
-                                        let changed = draft.edit(|draft| draft.choose_tab(target));
-                                        partial_template_hint.set(false);
-                                        if changed { intent_key.set(None); }
                                         // After the render that moves the
                                         // tab stop, so focus lands on the tab
                                         // now selected.
@@ -7036,19 +7023,17 @@ pub(super) fn CreateSessionForm(
                                     }
                                 }
                             }
-                            // These callbacks retain the create form's history and intent
-                            // boundaries. Equal edits still claim text/explicitness; their
-                            // production facts decide only eager retry retirement.
+                            // Ordinary editors/choices delegate live admission and retry
+                            // retirement to their concrete owner operations. Model/harness
+                            // composites still retain their staged form-side policy below.
                             LaunchControls {
                                 prompt: prompt().unwrap_or_default(),
                                 on_prompt: Some(EventHandler::new(move |value: String| {
-                                    if !draft_transition_allowed(ops) { return; }
-                                    if draft.edit(|draft| draft.edit_prompt(value)) { intent_key.set(None); }
+                                    draft.edit_prompt(value);
                                 })),
                                 conversation: conversation(),
                                 on_conversation: Some(EventHandler::new(move |value| {
-                                    if !draft_transition_allowed(ops) { return; }
-                                    if draft.edit(|draft| draft.edit_conversation(value)) { intent_key.set(None); }
+                                    draft.edit_conversation(value);
                                 })),
                                 harness: structured_harness(),
                                 model: structured_model(),
@@ -7059,15 +7044,13 @@ pub(super) fn CreateSessionForm(
                                 permission_flags: structured_permission_flags(),
                                 wrapper_prefix: structured_wrapper(),
                                 on_wrapper_prefix: move |text| {
-                                    if !draft_transition_allowed(ops) { return; }
-                                    if draft.edit(|draft| draft.edit_wrapper(text)) { intent_key.set(None); }
+                                    draft.edit_wrapper(text);
                                 },
                                 on_permission_flags: move |text| {
                                     // A queued input can outlive the render that
                                     // enabled this editor. Keep the admitted
                                     // launch and its retry key unchanged.
-                                    if !draft_transition_allowed(ops) { return; }
-                                    if draft.edit(|draft| draft.edit_permission_flags(text)) { intent_key.set(None); }
+                                    draft.edit_permission_flags(text);
                                 },
                                 catalog: catalog_models.clone(),
                                 busy,
@@ -7156,16 +7139,9 @@ pub(super) fn CreateSessionForm(
                                 },
                                 on_model_option: move |option| apply_model_option.call(option),
                                 on_effort: move |effort| {
-                                    if !draft_transition_allowed(ops) { return; }
-                                    partial_template_hint.set(false);
-                                    promote_fetched_history_snapshot(
-                                        offered_history, create_target, fetched_history,
-                                    );
                                     // Reapplying a choice with Enter is also a
                                     // retry gesture. Only a real edit retires it.
-                                    if draft.edit(|draft| draft.choose_effort(effort)) {
-                                        intent_key.set(None);
-                                    }
+                                    draft.choose_effort(effort, choice_targets);
                                 },
                                 on_permissions: move |permission| choose_permissions.call(permission),
                             }
@@ -7189,10 +7165,7 @@ pub(super) fn CreateSessionForm(
                     value: "{displayed_invocation}",
                     disabled: busy,
                     oninput: move |evt| {
-                        if !draft_transition_allowed(ops) {
-                            return;
-                        }
-                        if draft.edit(|draft| draft.edit_invocation(evt.value())) { intent_key.set(None); }
+                        draft.edit_invocation(evt.value());
                     },
                 }
             }
@@ -7210,8 +7183,7 @@ pub(super) fn CreateSessionForm(
                         checked: command_yolo() == Some(true),
                         disabled: busy,
                         onchange: move |_| {
-                            if !draft_transition_allowed(ops) { return; }
-                            if draft.edit(|draft| draft.choose_command_yolo(true)) { intent_key.set(None); }
+                            draft.choose_command_yolo(true);
                         },
                     }
                     "yes (YOLO)"
@@ -7225,8 +7197,7 @@ pub(super) fn CreateSessionForm(
                         checked: command_yolo() == Some(false),
                         disabled: busy,
                         onchange: move |_| {
-                            if !draft_transition_allowed(ops) { return; }
-                            if draft.edit(|draft| draft.choose_command_yolo(false)) { intent_key.set(None); }
+                            draft.choose_command_yolo(false);
                         },
                     }
                     "no"
@@ -7240,13 +7211,12 @@ pub(super) fn CreateSessionForm(
                     "data-tooltip": "the agent this command runs, if any, so Farhelm can track and resume it",
                     disabled: busy,
                     onchange: move |evt| {
-                        if !draft_transition_allowed(ops) { return; }
-                        if draft.edit(|draft| draft.choose_command_agent(
+                        draft.choose_command_agent(
                             LaunchHarness::ALL
                                 .iter()
                                 .copied()
                                 .find(|harness| harness_value(*harness) == evt.value()),
-                        )) { intent_key.set(None); }
+                        );
                     },
                     option { value: "", selected: command_agent().is_none(), "none" }
                     for harness in LaunchHarness::ALL.iter().copied() {
@@ -7271,8 +7241,7 @@ pub(super) fn CreateSessionForm(
                         checked: command_resume_on(),
                         disabled: busy,
                         onchange: move |evt| {
-                            if !draft_transition_allowed(ops) { return; }
-                            if draft.edit(|draft| draft.choose_command_resume(evt.checked())) { intent_key.set(None); }
+                            draft.choose_command_resume(evt.checked());
                         },
                     }
                     "resume"
@@ -7291,8 +7260,7 @@ pub(super) fn CreateSessionForm(
                             value: "{command_resume}",
                             disabled: busy,
                             oninput: move |evt| {
-                                if !draft_transition_allowed(ops) { return; }
-                                if draft.edit(|draft| draft.edit_command_resume(evt.value())) { intent_key.set(None); }
+                                draft.edit_command_resume(evt.value());
                             },
                         }
                     }
@@ -7453,15 +7421,18 @@ mod tests {
 
     /// Mount only the production ownership handles needed by template replay.
     /// Host/network/preview admission remain explicit facts supplied by each test.
+    /// Template targets and ordinary owner edits share the same retry slot.
     fn template_question_fixture() -> dioxus::prelude::Element {
         use super::*;
+        let ops = crate::ops::use_op_lock();
+        let intent_key = use_signal(|| None);
         let targets = TemplateTargets {
-            draft: use_launch_draft(None, None),
+            draft: use_launch_draft(None, None, ops, intent_key),
             composer_reset_reason: use_signal(|| None),
             chosen_host: use_signal(|| Some(1)),
             preview_revision: use_signal(|| 0),
             template_error: use_signal(|| None),
-            intent_key: use_signal(|| None),
+            intent_key,
         };
         let slot = use_confirm_slot();
         TEMPLATE_QUESTION_FIXTURE
