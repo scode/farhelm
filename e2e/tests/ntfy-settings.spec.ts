@@ -3,6 +3,7 @@
  * checks never contact a notification service or expose a private subscription. */
 import { expect, test } from "./helpers/evidence";
 import { createServer } from "node:http";
+import { openSettings, selectSettingsSection } from "./helpers/settings";
 
 /** Reopening must fetch non-secret settings, preserve a saved token while editing
  * other fields, and keep rejected drafts editable. Phone geometry matters because
@@ -18,13 +19,12 @@ test("ntfy settings explicitly save, refuse, preserve and clear a token", async 
   const address = endpoint.address();
   if (!address || typeof address === "string") throw new Error("loopback server did not bind a TCP port");
   const serverUrl = `http://127.0.0.1:${address.port}`;
-  const gear = page.getByRole("button", { name: "settings", exact: true });
   const dialog = page.getByRole("dialog", { name: "settings", exact: true });
   const section = dialog.getByRole("region", { name: "ntfy alerts" });
   const topic = section.getByRole("textbox", { name: "topic", exact: true });
   const password = section.getByLabel("access token (optional)", { exact: true });
   try {
-    await gear.click();
+    await openSettings(page, "notifications");
     await expect(topic).toBeEditable();
     await expect(section.getByLabel("send ntfy alerts", { exact: true })).not.toBeChecked();
     const server = section.getByRole("textbox", { name: "server URL", exact: true });
@@ -50,7 +50,7 @@ test("ntfy settings explicitly save, refuse, preserve and clear a token", async 
       await section.screenshot({ path: testInfo.outputPath(`ntfy-settings-${width}.png`) });
     }
     await dialog.getByRole("button", { name: "close", exact: true }).click();
-    await gear.click();
+    await openSettings(page, "notifications");
     await expect(topic).toHaveValue("browser-alerts");
     await expect(password).toHaveValue("");
     await expect(password).toHaveAttribute("placeholder", "token saved; leave blank to keep it");
@@ -109,15 +109,22 @@ test("ntfy settings explicitly save, refuse, preserve and clear a token", async 
   }
 });
 
-/** A test send is a separate request with no form payload. Failure stays inline
- * and editable drafts remain unsaved; success needs an actual endpoint reply. */
+/** A test send is a separate request with no form payload. Drafts and both
+ * outcomes survive navigation; closing discards drafts, including the token.
+ * Success still needs an actual endpoint reply rather than a local notice. */
 test("ntfy send test reports outcome while leaving unsaved fields alone", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "settings", exact: true }).click();
+  await openSettings(page, "notifications");
   const section = page.getByRole("region", { name: "ntfy alerts" });
   const topic = section.getByRole("textbox", { name: "topic", exact: true });
   await expect(topic).toBeEditable();
+  const savedTopic = await topic.inputValue();
   await topic.fill("unsaved-topic");
+  const server = section.getByRole("textbox", { name: "server URL", exact: true });
+  const token = section.getByLabel("access token (optional)", { exact: true });
+  const savedServer = await server.inputValue();
+  await server.fill("http://127.0.0.1:1");
+  await token.fill("unsaved-browser-token");
   let sends = 0;
   await page.route("**/api/ntfy-alerts/test", async (route) => {
     expect(route.request().method()).toBe("POST");
@@ -129,11 +136,30 @@ test("ntfy send test reports outcome while leaving unsaved fields alone", async 
   });
   await section.getByRole("button", { name: "send test", exact: true }).click();
   await expect(section.getByRole("alert")).toHaveText("the ntfy server could not be reached");
+  // Switching panes must not discard either rejected outcomes or unsaved
+  // secrets. The send-test request above intentionally has no form payload.
+  await selectSettingsSection(page, "sessions");
+  await selectSettingsSection(page, "notifications");
+  await expect(section.getByRole("alert")).toHaveText("the ntfy server could not be reached");
   await expect(topic).toHaveValue("unsaved-topic");
+  await expect(server).toHaveValue("http://127.0.0.1:1");
+  await expect(token).toHaveValue("unsaved-browser-token");
   await section.getByRole("button", { name: "send test", exact: true }).click();
   await expect(section.getByRole("status")).toHaveText("test alert sent");
+  await selectSettingsSection(page, "sessions");
+  await selectSettingsSection(page, "notifications");
+  await expect(section.getByRole("status")).toHaveText("test alert sent");
   await expect(topic).toHaveValue("unsaved-topic");
+  await expect(server).toHaveValue("http://127.0.0.1:1");
+  await expect(token).toHaveValue("unsaved-browser-token");
   expect(sends).toBe(2);
+  await page.getByRole("dialog", { name: "settings", exact: true }).getByRole("button", { name: "close", exact: true }).click();
+  await openSettings(page, "notifications");
+  await expect(topic).toBeEditable();
+  await expect(topic).toHaveValue(savedTopic);
+  await expect(server).toHaveValue(savedServer);
+  await expect(token).toHaveValue("");
+  await expect(section.getByRole("status")).toHaveCount(0);
 });
 
 /** Load refusal does not seed an editable default that could overwrite saved
@@ -146,7 +172,7 @@ test("ntfy settings load failure is visible and retry restores editing", async (
     } else await route.continue();
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "settings", exact: true }).click();
+  await openSettings(page, "notifications");
   const section = page.getByRole("region", { name: "ntfy alerts" });
   await expect(section.getByRole("alert")).toHaveText("could not read ntfy alert settings");
   await expect(section.getByRole("button", { name: "save", exact: true })).toBeDisabled();

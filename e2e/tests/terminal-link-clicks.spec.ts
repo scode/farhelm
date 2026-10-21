@@ -7,6 +7,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { openSettings } from "./helpers/settings";
 import type { Page } from "@playwright/test";
 import path from "node:path";
 import { createSession, cleanupSession, patchPreferences, readPreferences, stubFeed } from "./helpers/fleet";
@@ -359,7 +360,7 @@ test("terminal link ownership opens once and preserves program clicks in all mou
     const opens = () => page.evaluate(() => (window as any).__linkOpens as string[]);
     let expectedOpens: string[] = [];
     for (const mode of ["both", "intercept", "program"] as const) {
-      await page.getByRole("button", { name: "settings", exact: true }).click();
+      await openSettings(page, "terminal");
       const dialog = page.getByRole("dialog", { name: "settings", exact: true });
       await dialog.getByRole("radio", { name: labels[mode], exact: true }).check();
       await expect.poll(() => readPreferences(request)).toMatchObject({ terminal_link_click: mode });
@@ -586,7 +587,7 @@ test("program-only link clicks do nothing without mouse reporting", async ({ pag
     expect(await page.evaluate(() => (window as any).__farhelmTerm.modes.mouseTrackingMode)).toBe("none");
     const reports = reportBarrier(page);
     for (const [mode, count] of [["program", 0], ["both", 1], ["intercept", 2]] as const) {
-      await page.getByRole("button", { name: "settings", exact: true }).click();
+      await openSettings(page, "terminal");
       const dialog = page.getByRole("dialog", { name: "settings", exact: true });
       await dialog.getByRole("radio", { name: labels[mode], exact: true }).check();
       await expect.poll(() => page.evaluate(() => (window as any).farhelmTerminalLinkClickMode)).toBe(mode);

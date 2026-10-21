@@ -184,9 +184,9 @@ owns both welcome and feedback so their handoff releases isolation and replaces 
 competing focus-return task.
 
 Helm schema 56 adds nullable `preferences.name_session_on_quick_launch`. Unset and true enable quick-launch naming; only
-false disables it, so upgraded helms have the same default as fresh ones. The Settings switch beside session
-confirmations writes an explicit boolean through the ordinary sparse preference queue. Null restores the enabled default
-and omission preserves the stored choice. Older helms refuse this schema.
+false disables it, so upgraded helms have the same default as fresh ones. The Settings switch under sessions, beside
+session confirmations, writes an explicit boolean through the ordinary sparse preference queue. Null restores the
+enabled default and omission preserves the stored choice. Older helms refuse this schema.
 
 Helm schema 59 adds nullable `preferences.color_terminal_frames`. Unset and false leave terminal frames uncolored on
 fresh and upgraded helms. The Settings switch under Sessions writes through the same sparse preference queue: a null
@@ -620,25 +620,34 @@ independently of row details, while a failed retained run leaves one short trace
 status is showing inline leaves that trace out because it would only repeat the progress.
 
 The app bar's gear opens a modal `settings` dialog as a sibling of the sticky bar, so the bar's stacking context cannot
-cap the backdrop below main-pane surfaces. It holds the two app-wide host-confirmation choices, with state-specific help
-and an explanation that other open clients see changes on reload, and, only in a desktop app whose updater is active,
-the automatic-updates switch, which reads and writes the desktop state file instead (see The desktop app's updater). The
-desktop file-opening field lives in the shared preference row but bypasses the best-effort preference queue: it sends
-one acknowledged sparse `PUT /api/preferences`, keeps a refused draft editable, and updates the shared client mirror
-only after success. Its warnings use the same parser and type classifier as the helm's stat and open checks. The
-switches retain native checkbox inputs for label activation and Space handling. Each host-confirmation switch reads
-`Some(true)` as without asking, updates `SharedPreferences` immediately and sends an explicit boolean through the
-existing sparse preference queue. Host-confirmation preference failures retain that queue's silent behavior. The session
-confirmation switch also updates locally immediately, but restoring confirmations observes the queue's completion: a
-failed save shows an adjacent Settings error because a reload could restore the stored opt-out. Each click advances a
-component-local generation and clears the error; only the newest restoring click can show a failure. The enqueue happens
-before spawning its waiter so a later silent opt-out cannot overtake it. Closing Settings cancels the waiter, never the
-process-owned preference writer. The dialog uses the host dialogs' framed header and footer, with a gear tile and a
-separately named × close control. Only the body scrolls; its sections group hosts, terminal links, managed checkouts,
-sounds and, when the updater is active, updates. Both close controls stay visible. It uses the shared focus/isolation
-helper with its own selector; opening focuses the first switch, Escape or either close control releases isolation and
-returns focus to the gear. The host setup and removal permanent answers each name that gear as the way to turn
-confirmation back on.
+cap the backdrop below main-pane surfaces. Its sessions section holds session confirmations, quick-launch naming and
+terminal-frame coloring; hosts holds the two app-wide host-confirmation choices, with state-specific help and an
+explanation that other open clients see changes on reload, and, only in a desktop app whose updater is active, the app
+section holds the automatic-updates switch, which reads and writes the desktop state file instead (see The desktop app's
+updater). The desktop file-opening field lives in the shared preference row but bypasses the best-effort preference
+queue: it sends one acknowledged sparse `PUT /api/preferences`, keeps a refused draft editable, and updates the shared
+client mirror only after success. Its warnings use the same parser and type classifier as the helm's stat and open
+checks. The switches retain native checkbox inputs for label activation and Space handling. Each host-confirmation
+switch reads `Some(true)` as without asking, updates `SharedPreferences` immediately and sends an explicit boolean
+through the existing sparse preference queue. Host-confirmation preference failures retain that queue's silent behavior.
+The session confirmation switch also updates locally immediately, but restoring confirmations observes the queue's
+completion: a failed save shows an adjacent Settings error because a reload could restore the stored opt-out. Each click
+advances a component-local generation and clears the error; only the newest restoring click can show a failure. The
+enqueue happens before spawning its waiter so a later silent opt-out cannot overtake it. Closing Settings cancels the
+waiter, never the process-owned preference writer. The dialog uses the host dialogs' framed header and footer, with a
+gear tile and a separately named × close control. Only the body scrolls, containing a section-button sidebar and the
+selected panel. The order is sessions, hosts, terminal, checkouts, agent trust, notifications and, when the updater is
+active, app. Terminal holds web-link choices and desktop tunnel consent and file types; checkouts holds the
+explicit-save folder and command; agent trust holds all four agents' blocks; notifications groups device sounds and
+helm-wide ntfy alerts. Inactive panels stay mounted with hidden, preserving field drafts, outcomes and pending saves.
+The sound asset's document-wide input query initializes even hidden inputs. No section choice is persisted. At 620px and
+below, a presentation-only signal reveals either the selected panel or the section list; the back button reads '‹
+settings'. Section selection focuses its heading, while back focuses the selected section button after the rendering
+frame. Neither adds a normal Tab stop or overrides platform button navigation. Both close controls stay visible. It uses
+the shared focus/isolation helper with its own selector; gear opening selects sessions and focuses its first switch.
+Existing trust props instead select agent trust before mount, focus the agent's switch and scroll its block into view.
+Escape or either close control releases isolation and returns focus to the gear. The host setup and removal permanent
+answers each name that gear as the way to turn confirmation back on.
 
 The all-hosts checkout folder uses a shared explicit-save field rather than the preference queue: invalid path text must
 have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an ordinary protected route
@@ -3170,11 +3179,11 @@ selections shape GUI defaults and suggestions. The launcher has no trust state, 
 grouping ignores historical trust, summaries omit it, and activating a recent clears it before composing a new launch.
 
 `LaunchSelection.workspace_trust` remains on the wire and in stored selections: supervisors persist selections, and
-their strict decoding must still accept older fields. The helm overwrites the field from managed-checkout Settings when
-composing a launch. Compilation remains a function of the selection alone so the YOLO guard can reproduce stored
-commands exactly. Codex true and false still compile to whole-argv config markers; the supervisor fills one at the
-shared spawn seam, after any GitHub checkout has fixed the final cwd, with a trusted or untrusted project override. The
-cwd is quoted as a TOML key and resolved on the target host; omitted trust adds no Codex override. Muse true adds
+their strict decoding must still accept older fields. The helm overwrites the field from the agent trust section in
+Settings when composing a launch. Compilation remains a function of the selection alone so the YOLO guard can reproduce
+stored commands exactly. Codex true and false still compile to whole-argv config markers; the supervisor fills one at
+the shared spawn seam, after any GitHub checkout has fixed the final cwd, with a trusted or untrusted project override.
+The cwd is quoted as a TOML key and resolved on the target host; omitted trust adds no Codex override. Muse true adds
 `--trust-workspace`; Muse false adds no trust flag and cannot undo trust from `--yolo` or vendor settings. Pi true adds
 `--approve` and Pi false adds `--no-approve`, independent of Pi's YOLO tool mode. The false branches remain for old
 stored launches, including plain Restart and Replace; new composition uses true or omission. Older selection JSON
@@ -5028,7 +5037,7 @@ refuses it at hello instead. The normal update path remains available. A host is
 Unknown fields are refused on decode, so a misspelled field is an error rather than a silently ignored edit. The retired
 `workspace_trust` field remains readable in `TemplateFields`, but application ignores it and every save drops it. The
 editor clears it in its draft and on delete undo; Save as template never offers it. This keeps old records usable
-without letting their trust choices bypass managed-checkout Settings. The GUI's writes go through
+without letting their trust choices bypass the agent trust section in Settings. The GUI's writes go through
 `PUT /api/templates/{name}` (create or replace, last write wins, no version check, as SPEC.md wants) and
 `DELETE /api/templates/{name}`; `GET /api/templates` lists them by name. The helm checks only the shape of a template
 the GUI writes (a non-empty name of at most 128 bytes with no surrounding spaces or control characters, and fields

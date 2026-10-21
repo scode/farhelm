@@ -5,6 +5,7 @@
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { clickDialogGap } from "./helpers/dialog-gap";
+import { openSettings, selectSettingsSection, type SettingsSection } from "./helpers/settings";
 import type { APIRequestContext, Request, Route } from "@playwright/test";
 import {
   forceBuildSkew,
@@ -14,13 +15,22 @@ import {
   readPreferences,
 } from "./helpers/fleet";
 
+/** The web fixture has no updater, so its navigation omits the app pane. */
+const webSettingsSections: SettingsSection[] = ["sessions", "hosts", "terminal", "checkouts", "agent trust", "notifications"];
+
 /**
  * The shared installer serves Settings even though Settings has no single
  * confirming action. Empty space preserves the current control, container
  * Enter stays inert, and a real pointer drag can still select help text.
  */
 test("settings gap keeps focus while text and container Enter keep their own behavior", async ({ page, request }) => {
-  const before = await readPreferences(request);
+  // Loading the page saves the automatic session selection (the last selection and the
+  // visit history); only the Settings interactions below must leave preferences untouched.
+  const withoutSelection = (preferences: Awaited<ReturnType<typeof readPreferences>>) => {
+    const { last_selected: _selected, visit_history: _visits, ...rest } = preferences;
+    return rest;
+  };
+  const before = withoutSelection(await readPreferences(request));
   await page.goto("/");
   await page.getByRole("button", { name: "settings", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "settings", exact: true });
@@ -36,7 +46,7 @@ test("settings gap keeps focus while text and container Enter keep their own beh
   await dialog.press("Enter");
   await expect(dialog).toBeVisible();
   expect(await choice.isChecked(), "container Enter must not toggle a Settings choice").toBe(wasChecked);
-  expect(await readPreferences(request)).toEqual(before);
+  expect(withoutSelection(await readPreferences(request))).toEqual(before);
 
   const help = dialog.locator("#session-confirmations-help");
   const box = await help.boundingBox();
@@ -116,12 +126,9 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
     await page.setViewportSize({ width, height: 560 });
     await gear.click();
     await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
-    await expect(dialog.getByRole("checkbox")).toHaveCount(17);
+    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(17);
     await page.evaluate(() => document.fonts.ready);
-    expect(await body.locator(":scope > section > h3").allTextContents()).toEqual([
-      "sessions", "hosts", "terminal links", "managed checkouts", "sounds", "ntfy alerts",
-    ]);
-    await expect(body.locator('section[aria-label="updates"]')).toHaveCount(0);
+    await selectSettingsSection(page, "agent trust");
     await expect(dismiss).toHaveAttribute("data-tooltip", "close settings; unsaved fields are discarded");
     await expect(dismiss).not.toHaveClass(/app-settings-close/);
     const overflow = await body.evaluate((el) => ({
@@ -162,18 +169,108 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
     await expect(dialog).toHaveCount(0);
     await expect(gear).toBeFocused();
   }
-  // Give the full set of sections enough height, independently of the phone
-  // overflow proof; the switches added since this test was written outgrew
-  // the former 4000-pixel viewport.
+  // Measure the same long pane in a tall window, so the no-overflow proof
+  // cannot pass merely because opening returns to the shorter sessions pane.
   await page.setViewportSize({ width: 1280, height: 5000 });
   await gear.click();
-  await expect(dialog.getByRole("checkbox")).toHaveCount(17);
+  await selectSettingsSection(page, "agent trust");
+  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(17);
   const tall = await body.evaluate((el) => ({ content: el.scrollHeight, height: el.clientHeight }));
   expect(tall.height).toBeGreaterThan(0);
   expect(tall.content, "a tall window must fit the settings without scrolling").toBeLessThanOrEqual(tall.height);
   await dialog.screenshot({ path: testInfo.outputPath("settings-pinned-tall.png") });
   await close.click();
   await expect(gear).toBeFocused();
+});
+
+/** Section changes reveal one mounted pane and move focus to its heading.
+ * Phone navigation must use the real list/back path, reset body scrolling,
+ * and forget its selection on close. Mounted hidden controls are checked
+ * separately from visible panes so a missing section cannot pass the sweep.
+ */
+test("settings navigation keeps mounted panes and follows the narrow list path", async ({ page, browserName }) => {
+  await page.setViewportSize({ width: 1280, height: 560 });
+  await page.goto("/");
+  const dialog = await openSettings(page);
+  const navigation = dialog.getByRole("navigation", { name: "settings sections", exact: true });
+  const body = dialog.locator(".host-settings-body");
+  const panels = dialog.locator("section.app-settings-panel");
+  await expect(navigation.getByRole("button")).toHaveText(webSettingsSections);
+  await expect(navigation.getByRole("button", { name: "app", exact: true })).toHaveCount(0);
+  await expect(panels).toHaveCount(webSettingsSections.length);
+  await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(17);
+  await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
+  for (const section of webSettingsSections) {
+    const panel = await selectSettingsSection(page, section);
+    await expect(dialog.locator("section.app-settings-panel:visible")).toHaveCount(1);
+    await expect(panel.locator(":scope > h3")).toHaveText(section);
+    await expect(panel.locator(":scope > h3")).toHaveAttribute("tabindex", "-1");
+    const button = navigation.getByRole("button", { name: section, exact: true });
+    await expect(button).toHaveAttribute("aria-pressed", "true");
+    await expect(button).toHaveAttribute("aria-controls", (await panel.getAttribute("id"))!);
+    // The longest section name must fit its own column rather than forcing
+    // its selected fill across the divider into the settings themselves.
+    expect(await button.evaluate(el => {
+      const button = el.getBoundingClientRect();
+      const list = el.closest("nav")!.getBoundingClientRect();
+      return button.left >= list.left && button.right <= list.right && el.scrollWidth <= el.clientWidth;
+    })).toBe(true);
+    await expect(navigation.locator('[aria-pressed="true"]')).toHaveCount(1);
+    await expect(dialog.locator("section.app-settings-panel[hidden]")).toHaveCount(webSettingsSections.length - 1);
+    if (section !== "sessions") await expect(panel.locator(":scope > h3")).toBeFocused();
+  }
+  const notifications = await selectSettingsSection(page, "notifications");
+  await expect(notifications.getByRole("region", { name: "sounds", exact: true })).toBeVisible();
+  await expect(notifications.getByRole("region", { name: "ntfy alerts", exact: true })).toBeVisible();
+
+  // Plain buttons use the browser's normal Tab order. WebKit deliberately
+  // skips buttons under its default Tab policy; no extra tab stops compensate.
+  if (browserName !== "webkit") {
+    const sessions = navigation.getByRole("button", { name: "sessions", exact: true });
+    const hosts = navigation.getByRole("button", { name: "hosts", exact: true });
+    await sessions.focus();
+    await expect(sessions).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(hosts).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(dialog.locator('section.app-settings-panel[aria-label="hosts"] > h3')).toBeFocused();
+  }
+
+  await selectSettingsSection(page, "agent trust");
+  await page.setViewportSize({ width: 390, height: 560 });
+  await expect(navigation).toBeHidden();
+  const back = dialog.getByRole("button", { name: "‹ settings", exact: true });
+  await expect(back).toBeVisible();
+  expect(await body.evaluate(el => el.scrollHeight > el.clientHeight), "agent trust must overflow before testing scroll reset").toBe(true);
+  await body.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await expect.poll(() => body.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+  await back.click();
+  await expect(navigation).toBeVisible();
+  await expect(dialog.locator("section.app-settings-panel:visible")).toHaveCount(0);
+  await expect(back).toBeHidden();
+  const trustButton = navigation.getByRole("button", { name: "agent trust", exact: true });
+  await expect(trustButton).toBeFocused();
+  // Back supplies a native focus origin in both engines, including WebKit's
+  // button-skipping Tab policy. Enter must activate this ordinary button.
+  await page.keyboard.press("Enter");
+  const trust = dialog.locator('section.app-settings-panel[aria-label="agent trust"]');
+  await expect(trust).toBeVisible();
+  await expect(trust.locator(":scope > h3")).toBeFocused();
+  await expect.poll(() => body.evaluate(el => el.scrollTop)).toBe(0);
+  await back.click();
+  await navigation.getByRole("button", { name: "checkouts", exact: true }).click();
+  await expect(dialog.locator('section.app-settings-panel[aria-label="checkouts"] > h3')).toBeFocused();
+  await expect(navigation).toBeHidden();
+  await page.setViewportSize({ width: 1280, height: 560 });
+  await expect(navigation).toBeVisible();
+  await expect(dialog.locator('section.app-settings-panel[aria-label="checkouts"]')).toBeVisible();
+  await dialog.getByRole("button", { name: "close", exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 560 });
+  await openSettings(page);
+  await expect(dialog.locator('section.app-settings-panel[aria-label="sessions"]')).toBeVisible();
+  await expect(navigation).toBeHidden();
+  await expect(back).toBeVisible();
+  await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
 });
 
 /** Naming defaults on without writing a choice during Settings open. The real
@@ -275,13 +372,12 @@ test("host browser permissions persist independently through the settings switch
 });
 
 /** Opening is read-only for all three stored states. Explicit Save preserves
- * executable spacing and newlines, refusal keeps the draft and stored value,
- * and an all-whitespace save clears rather than storing an explicit disable. */
+ * executable spacing and newlines, refusal keeps the draft and outcome across
+ * navigation, and an all-whitespace save clears rather than storing a disable. */
 test("settings saves and clears the all-hosts post-clone command", async ({ page, request }, testInfo) => {
   const previous = await readPostClone(request);
   const read = () => readPostClone(request);
   await page.goto("/");
-  const gear = page.getByRole("button", { name: "settings", exact: true });
   const dialog = page.getByRole("dialog", { name: "settings", exact: true });
   const field = dialog.locator(".checkout-post-clone-field");
   const command = field.getByRole("textbox", { name: "post-clone command", exact: true });
@@ -292,7 +388,7 @@ test("settings saves and clears the all-hosts post-clone command", async ({ page
       const seeded = await request.put("/api/checkout-post-clone", { data: { command: value } });
       expect(seeded.ok(), await seeded.text()).toBe(true);
       expect(await read()).toEqual({ command: value });
-      await gear.click();
+      await openSettings(page, "checkouts");
       await expect(command).toBeEditable();
       await expect(command).toHaveValue(value ?? "");
       expect(await read()).toEqual({ command: value });
@@ -303,7 +399,7 @@ test("settings saves and clears the all-hosts post-clone command", async ({ page
       await dialog.getByRole("button", { name: "close", exact: true }).click();
       expect(await read()).toEqual({ command: value });
     }
-    await gear.click();
+    await openSettings(page, "checkouts");
     await expect(command).toBeEditable();
     const before = await read();
     const refused = "x".repeat(16385);
@@ -311,6 +407,11 @@ test("settings saves and clears the all-hosts post-clone command", async ({ page
     await save.click();
     await expect(field.getByRole("alert")).toHaveText("post-clone command is 16385 bytes; the limit is 16384 bytes");
     await expect(command).toHaveValue(refused);
+    expect(await read()).toEqual(before);
+    await selectSettingsSection(page, "sessions");
+    await selectSettingsSection(page, "checkouts");
+    await expect(command).toHaveValue(refused);
+    await expect(field.getByRole("alert")).toHaveText("post-clone command is 16385 bytes; the limit is 16384 bytes");
     expect(await read()).toEqual(before);
     await dialog.screenshot({ path: testInfo.outputPath("post-clone-refused.png") });
 
@@ -343,7 +444,7 @@ test("settings saves and clears the all-hosts post-clone command", async ({ page
       expect(inputBounds!.x + inputBounds!.width).toBeLessThanOrEqual(fieldBounds!.x + fieldBounds!.width + 1);
     }
     await dialog.getByRole("button", { name: "close", exact: true }).click();
-    await gear.click();
+    await openSettings(page, "checkouts");
     await expect(command).toBeEditable();
     await expect(command).toHaveValue(chosen);
     await command.fill(" \n\t ");
@@ -351,7 +452,7 @@ test("settings saves and clears the all-hosts post-clone command", async ({ page
     await expect(field.getByRole("status")).toHaveText("post-clone command saved");
     expect(await read()).toEqual({ command: null });
     await dialog.getByRole("button", { name: "close", exact: true }).click();
-    await gear.click();
+    await openSettings(page, "checkouts");
     await expect(command).toBeEditable();
     await expect(command).toHaveValue("");
   } finally {
@@ -379,7 +480,6 @@ test("post-clone commands with carriage returns refuse edits but can be cleared"
   await page.route("**/api/checkout-post-clone", intercept);
   try {
     await page.goto("/");
-    const gear = page.getByRole("button", { name: "settings", exact: true });
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     const field = dialog.locator(".checkout-post-clone-field");
     const command = field.getByRole("textbox", { name: "post-clone command", exact: true });
@@ -388,7 +488,7 @@ test("post-clone commands with carriage returns refuse edits but can be cleared"
       const seeded = await request.put("/api/checkout-post-clone", { data: { command: stored } });
       expect(seeded.ok(), await seeded.text()).toBe(true);
       expect(await readPostClone(request)).toEqual({ command: stored });
-      await gear.click();
+      await openSettings(page, "checkouts");
       await expect(command).toBeEditable();
       await expect(command).toHaveValue(stored.replace(/\r\n?/g, "\n"));
       await command.focus();
@@ -455,7 +555,7 @@ test("post-clone command stays locked until its initial read completes", async (
   await page.route("**/api/checkout-post-clone", intercept);
   try {
     await page.goto("/");
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page, "checkouts");
     await reading;
     const field = page.locator(".checkout-post-clone-field");
     const command = field.getByRole("textbox", { name: "post-clone command", exact: true });
@@ -477,9 +577,9 @@ test("post-clone command stays locked until its initial read completes", async (
   }
 });
 
-/** A save outlives its dismissed field. Reopening must wait for that save
- * before seeding an editable draft, or an older held save could overwrite
- * a newer one while the reopened Settings claims the newer value was saved. */
+/** A save keeps its lock across section changes and outlives its dismissed field.
+ * Reopening must wait before seeding an editable draft, or an older held save
+ * could overwrite a newer one while reopened Settings claims it was saved. */
 test("a pending post-clone save orders reopened settings before the next save", async ({ page, request }) => {
   const previous = await readPostClone(request);
   let release!: () => void;
@@ -498,7 +598,7 @@ test("a pending post-clone save orders reopened settings before the next save", 
   await page.route("**/api/checkout-post-clone", intercept);
   try {
     await page.goto("/");
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page, "checkouts");
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     const field = dialog.locator(".checkout-post-clone-field");
     const command = field.getByRole("textbox", { name: "post-clone command", exact: true });
@@ -513,11 +613,17 @@ test("a pending post-clone save orders reopened settings before the next save", 
     await expect(command).not.toBeEditable();
     expect(submittedRequest!.postDataJSON()).toEqual({ command: chosen });
     expect(await readPostClone(request)).toEqual(previous);
+    await selectSettingsSection(page, "sessions");
+    await selectSettingsSection(page, "checkouts");
+    await expect(command).toHaveValue(chosen);
+    await expect(command).not.toBeEditable();
+    await expect(pendingSave).toHaveAttribute("aria-disabled", "true");
+    expect(await readPostClone(request)).toEqual(previous);
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
     // The old field is gone: this lock must belong to the reopened read,
     // not the previous component's local saving flag.
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page, "checkouts");
     await expect(dialog).toBeVisible();
     await expect(command).not.toBeEditable();
     expect(await readPostClone(request)).toEqual(previous);
@@ -531,6 +637,11 @@ test("a pending post-clone save orders reopened settings before the next save", 
     const newer = "printf 'newer save wins'";
     await command.fill(newer);
     await field.getByRole("button", { name: "save", exact: true }).click();
+    await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+    expect(await readPostClone(request)).toEqual({ command: newer });
+    await selectSettingsSection(page, "hosts");
+    await selectSettingsSection(page, "checkouts");
+    await expect(command).toHaveValue(newer);
     await expect(field.getByRole("status")).toHaveText("post-clone command saved");
     expect(await readPostClone(request)).toEqual({ command: newer });
   } finally {
@@ -548,11 +659,12 @@ test("a pending post-clone save orders reopened settings before the next save", 
 
 /** Editing a folder is an explicit configuration write, not a switch or a
  * local-only draft. Real route readback and reopening distinguish persisted
- * save/clear from appearance; refusal must preserve both draft and saved root.
+ * save/clear from appearance; navigation must preserve refused drafts and
+ * both refusal and success outcomes without changing the stored root.
  */
 test("settings saves and clears the all-hosts checkout folder", async ({ page, request }, testInfo) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "settings", exact: true }).click();
+  await openSettings(page, "checkouts");
   const dialog = page.getByRole("dialog", { name: "settings", exact: true });
   await expect(dialog).toBeVisible();
   const read = () => readCheckoutRoot(request);
@@ -575,6 +687,11 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
     await expect(field.getByRole("alert")).toContainText("not the relative path 'relative-folder'");
     expect(await read()).toEqual(previous);
     await expect(folder).toHaveValue("relative-folder");
+    await selectSettingsSection(page, "sessions");
+    await selectSettingsSection(page, "checkouts");
+    await expect(folder).toHaveValue("relative-folder");
+    await expect(field.getByRole("alert")).toContainText("not the relative path 'relative-folder'");
+    expect(await read()).toEqual(previous);
 
     await folder.fill(chosen);
     // Editing alone must not write; a separate click commits configuration.
@@ -591,6 +708,11 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
     expect(await refreshed.json()).toEqual({ root: chosen });
     expect(await read()).toEqual({ root: chosen });
     await expect(field.getByRole("alert")).toHaveCount(0);
+    await selectSettingsSection(page, "hosts");
+    await selectSettingsSection(page, "checkouts");
+    await expect(folder).toHaveValue(chosen);
+    await expect(field.getByRole("status")).toHaveText("checkout folder saved");
+    expect(await read()).toEqual({ root: chosen });
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await field.screenshot({ path: testInfo.outputPath(`checkout-settings-saved-${width}.png`) });
@@ -601,7 +723,7 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
       expect(inputBounds!.x + inputBounds!.width).toBeLessThanOrEqual(fieldBounds!.x + fieldBounds!.width + 1);
     }
     await dialog.getByRole("button", { name: "close", exact: true }).click();
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page, "checkouts");
     await expect(folder).toHaveValue(chosen);
     await expect(folder).toBeEditable();
     await folder.fill("");
@@ -609,7 +731,7 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
     await expect(field.getByRole("status")).toHaveText("checkout folder saved");
     expect(await read()).toEqual({ root: null });
     await dialog.getByRole("button", { name: "close", exact: true }).click();
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page, "checkouts");
     await expect(folder).toBeEditable();
     await expect(folder).toHaveValue("");
   } catch (error) {
@@ -634,6 +756,52 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
   }
 });
 
+/** Navigation keeps both unsaved checkout drafts, while closing discards them.
+ * Real API readback and a zero-PUT assertion distinguish a mounted draft from
+ * accidental autosave. No configuration write is needed for this boundary.
+ */
+test("checkout drafts survive switching sections and are discarded on close", async ({ page, request }) => {
+  const previousRoot = await readCheckoutRoot(request);
+  const previousCommand = await readPostClone(request);
+  const writes: Request[] = [];
+  page.on("request", outgoing => {
+    if (outgoing.method() === "PUT" && /\/api\/checkout-(root|post-clone)$/.test(outgoing.url())) writes.push(outgoing);
+  });
+  await page.goto("/");
+  const dialog = await openSettings(page, "checkouts");
+  const folder = dialog.getByRole("textbox", { name: "checkout folder", exact: true });
+  const command = dialog.getByRole("textbox", { name: "post-clone command", exact: true });
+  await expect(folder).toBeEditable();
+  await expect(command).toBeEditable();
+  await expect(folder).toHaveValue(previousRoot.root ?? "");
+  await expect(command).toHaveValue((previousCommand.command ?? "").replace(/\r\n?/g, "\n"));
+  const folderDraft = `${previousRoot.root ?? "~/checkouts"}/unsaved-section-draft`;
+  const commandDraft = `${(previousCommand.command ?? "").replace(/\r\n?/g, "\n")}\nprintf 'unsaved section draft'`;
+  await folder.fill(folderDraft);
+  await command.fill(commandDraft);
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 800 });
+    await selectSettingsSection(page, "notifications");
+    await selectSettingsSection(page, "checkouts");
+    await expect(folder).toHaveValue(folderDraft);
+    await expect(command).toHaveValue(commandDraft);
+    expect(await readCheckoutRoot(request)).toEqual(previousRoot);
+    expect(await readPostClone(request)).toEqual(previousCommand);
+    expect(writes).toHaveLength(0);
+  }
+  await dialog.getByRole("button", { name: "close", exact: true }).click();
+  await openSettings(page);
+  await expect(dialog.locator('section.app-settings-panel[aria-label="sessions"]')).toBeVisible();
+  await selectSettingsSection(page, "checkouts");
+  await expect(folder).toBeEditable();
+  await expect(command).toBeEditable();
+  await expect(folder).toHaveValue(previousRoot.root ?? "");
+  await expect(command).toHaveValue((previousCommand.command ?? "").replace(/\r\n?/g, "\n"));
+  expect(await readCheckoutRoot(request)).toEqual(previousRoot);
+  expect(await readPostClone(request)).toEqual(previousCommand);
+  expect(writes).toHaveLength(0);
+});
+
 /** Saving without editing must not rename a literal CLI-configured folder.
  * Only edited text loses surrounding whitespace; independent API readback
  * distinguishes stored spelling from the text left visible in the editor.
@@ -651,7 +819,7 @@ test("settings preserves untouched literal checkout folders and trims edited pat
     expect(seeded.ok()).toBe(true);
     expect(await readCheckoutRoot(request)).toEqual({ root: literal });
     await page.goto("/");
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page, "checkouts");
     const field = page.getByRole("dialog", { name: "settings", exact: true }).locator(".checkout-root-field");
     const folder = field.getByRole("textbox", { name: "checkout folder", exact: true });
     await expect(folder).toBeEditable();
@@ -715,7 +883,7 @@ test("a pending checkout folder save survives closing settings", async ({ page, 
   await page.route("**/api/checkout-root", intercept);
   try {
     await page.goto("/");
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page, "checkouts");
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     const folder = dialog.getByRole("textbox", { name: "checkout folder", exact: true });
     await expect(folder).toBeEditable();
@@ -731,7 +899,7 @@ test("a pending checkout folder save survives closing settings", async ({ page, 
     await expect(dialog).toHaveCount(0);
     release();
     await expect.poll(() => readCheckoutRoot(request)).toEqual({ root: "~/save-survives-close" });
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page, "checkouts");
     await expect(folder).toBeEditable();
     await expect(folder).toHaveValue("~/save-survives-close");
   } finally {
@@ -787,7 +955,7 @@ test("settings reverses a permanent removal answer without reloading", async ({ 
     await expect(removal).toHaveCount(0);
 
     const gear = page.getByRole("button", { name: "settings", exact: true });
-    await gear.click();
+    await openSettings(page, "hosts");
     const settings = page.getByRole("dialog", { name: "settings", exact: true });
     const toggle = settings.getByRole("checkbox", { name: "remove hosts without asking", exact: true });
     await expect(toggle).toBeChecked();
@@ -806,7 +974,7 @@ test("settings reverses a permanent removal answer without reloading", async ({ 
     await removal.getByRole("button", { name: "cancel", exact: true }).click();
     // Ticking the settings checkbox is also a permanent answer, not merely
     // a way to clear one. The same still-registered host now removes at once.
-    await gear.click();
+    await openSettings(page, "hosts");
     await toggle.check();
     await expect.poll(async () => (await readPreferences(request)).skip_host_remove_confirmation).toBe(true);
     await settings.getByRole("button", { name: "close", exact: true }).click();
@@ -826,7 +994,7 @@ test("settings reverses a permanent removal answer without reloading", async ({ 
   }
 });
 
-/** Settings switches must fit beside their labels and keep native keyboard
+/** Every pane's switches must fit beside their labels and keep native keyboard
  * behavior. The modal also isolates the page and returns focus to its opener;
  * styling a replacement control must not bypass either lifecycle.
  */
@@ -844,9 +1012,10 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     await expect(dialog).toBeVisible();
     await expect(page.locator('[role="menu"]')).toHaveCount(0);
-    await expect(dialog.getByRole("checkbox")).toHaveCount(17);
+    await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(17);
     const setup = dialog.getByRole("checkbox", { name: "set up new hosts without asking", exact: true });
     await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
+    await selectSettingsSection(page, "hosts");
     await expect(setup).not.toBeChecked();
     await expect(dialog.getByRole("checkbox", { name: "remove hosts without asking", exact: true })).not.toBeChecked();
     expect(await dialog.evaluate((el) => el.closest(".app-bar"))).toBeNull();
@@ -854,47 +1023,53 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
     await page.evaluate(() => document.fonts.ready);
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 800 });
-      await dialog.screenshot({ path: testInfo.outputPath(`settings-switches-${width}.png`) });
-      // Measure rendered text independently of the label's full-width box:
-      // a checkbox above or before its caption must fail this contract. Radios
-      // share the label layout but retain native geometry, unlike these switches.
-      const rows = await dialog.locator('.app-settings-choice:has(input[type="checkbox"])').evaluateAll((labels) => labels.map((label) => {
-        const input = label.querySelector("input")!;
-        const range = document.createRange();
-        const text = Array.from(label.childNodes).find((node) => node !== input && node.textContent?.trim())!;
-        range.selectNode(text);
-        const caption = range.getBoundingClientRect();
-        const control = input.getBoundingClientRect();
-        const row = label.getBoundingClientRect();
-        return {
-          textRight: caption.right, textTop: caption.top, textBottom: caption.bottom,
-          controlLeft: control.left, controlRight: control.right,
-          controlTop: control.top, controlBottom: control.bottom,
-          width: control.width, height: control.height, rowRight: row.right,
-          appearance: getComputedStyle(input).appearance,
-        };
-      }));
-      expect(rows).toHaveLength(17);
-      for (const row of rows) {
-        expect(row.textRight).toBeLessThan(row.controlLeft);
-        expect(row.controlTop).toBeLessThan(row.textBottom);
-        expect(row.controlBottom).toBeGreaterThan(row.textTop);
-        expect(row.controlRight).toBeCloseTo(row.rowRight, 0);
-        expect(row.width).toBe(34);
-        expect(row.height).toBe(20);
-        expect(row.appearance).toBe("none");
+      let measuredSwitches = 0;
+      for (const section of webSettingsSections) {
+        const panel = await selectSettingsSection(page, section);
+        await dialog.screenshot({ path: testInfo.outputPath(`settings-switches-${width}-${section}.png`) });
+        // Measure rendered text independently of the label's full-width box:
+        // a checkbox above or before its caption must fail this contract. Radios
+        // share the label layout but retain native geometry, unlike these switches.
+        const rows = await panel.locator('.app-settings-choice:has(input[type="checkbox"])').evaluateAll((labels) => labels.map((label) => {
+          const input = label.querySelector("input")!;
+          const range = document.createRange();
+          const text = Array.from(label.childNodes).find((node) => node !== input && node.textContent?.trim())!;
+          range.selectNode(text);
+          const caption = range.getBoundingClientRect();
+          const control = input.getBoundingClientRect();
+          const row = label.getBoundingClientRect();
+          return {
+            textRight: caption.right, textTop: caption.top, textBottom: caption.bottom,
+            controlLeft: control.left, controlRight: control.right,
+            controlTop: control.top, controlBottom: control.bottom,
+            width: control.width, height: control.height, rowRight: row.right,
+            appearance: getComputedStyle(input).appearance,
+          };
+        }));
+        measuredSwitches += rows.length;
+        for (const row of rows) {
+          expect(row.textRight).toBeLessThan(row.controlLeft);
+          expect(row.controlTop).toBeLessThan(row.textBottom);
+          expect(row.controlBottom).toBeGreaterThan(row.textTop);
+          expect(row.controlRight).toBeCloseTo(row.rowRight, 0);
+          expect(row.width).toBe(34);
+          expect(row.height).toBe(20);
+          expect(row.appearance).toBe("none");
+        }
+        const alignment = await panel.evaluate((el) => ({
+          choices: Array.from(el.querySelectorAll(".app-settings-choice"), (row) => row.getBoundingClientRect().left),
+          help: Array.from(el.querySelectorAll(".host-settings-help"), (help) => help.getBoundingClientRect().left),
+          heading: el.querySelector(":scope > h3")!.getBoundingClientRect().left,
+          overflowing: el.scrollWidth > el.clientWidth,
+        }));
+        expect(alignment.overflowing).toBe(false);
+        for (const left of [...alignment.choices, ...alignment.help]) expect(left).toBeCloseTo(alignment.heading, 0);
       }
-      const alignment = await dialog.evaluate((el) => ({
-        choices: Array.from(el.querySelectorAll(".app-settings-choice"), (row) => row.getBoundingClientRect().left),
-        help: Array.from(el.querySelectorAll(".host-settings-help"), (help) => help.getBoundingClientRect().left),
-        heading: el.querySelector("section[aria-label='sounds'] h3")!.getBoundingClientRect().left,
-        overflowing: el.scrollWidth > el.clientWidth,
-      }));
-      expect(alignment.overflowing).toBe(false);
-      for (const left of [...alignment.choices, ...alignment.help]) expect(left).toBeCloseTo(alignment.heading, 0);
+      expect(measuredSwitches, "every mounted switch must be measured in its visible pane").toBe(17);
     }
     // Space exercises the native input rather than Playwright's checked-state
     // setter, and the real helm reply proves the preference writer still runs.
+    await selectSettingsSection(page, "hosts");
     await setup.focus();
     await expect(setup).toBeFocused();
     await setup.press("Space");

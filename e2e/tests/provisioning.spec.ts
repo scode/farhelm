@@ -28,6 +28,7 @@ import { routeGate } from "./helpers/route-gate";
 import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
 import { expectKeyboardScroll } from "./helpers/keyboard-scroll";
 import { currentStackSlot } from "../stack-slots";
+import { openSettings } from "./helpers/settings";
 
 /** Live helm identity copied onto every route response this suite fabricates. */
 let HELM_BUILD = "";
@@ -1025,7 +1026,7 @@ test("a permanent setup answer is reversible through settings after the next add
   await expect(page.getByRole("button", { name: "set up", exact: true })).toHaveCount(0);
   await expect(page.locator(".add-host-form")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "settings", exact: true }).click();
+  await openSettings(page, "hosts");
   const settings = page.getByRole("dialog", { name: "settings", exact: true });
   const toggle = settings.getByRole("checkbox", { name: "set up new hosts without asking", exact: true });
   await expect(toggle).toBeChecked();
@@ -1038,7 +1039,7 @@ test("a permanent setup answer is reversible through settings after the next add
   await expect(page.getByText(`undo "don't ask again" with the gear at the top of the sidebar`)).toBeVisible();
   expect((await hosts(request)).some((host) => host.destination === third)).toBe(false);
   await page.getByRole("button", { name: "cancel", exact: true }).click();
-  await page.getByRole("button", { name: "settings", exact: true }).click();
+  await openSettings(page, "hosts");
   await toggle.check();
   await expect.poll(async () => (await readPreferences(request)).skip_host_setup_confirmation).toBe(true);
   await settings.getByRole("button", { name: "close", exact: true }).click();
@@ -1068,7 +1069,7 @@ function recordSetupPreferenceWrites(page: Page): unknown[] {
 /** The settings dialog's "set up new hosts without asking" checkbox, which
  * reflects this client's own preference at once. */
 async function expectSetupStillAsks(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "settings", exact: true }).click();
+  await openSettings(page, "hosts");
   const settings = page.getByRole("dialog", { name: "settings", exact: true });
   await expect(
     settings.getByRole("checkbox", { name: "set up new hosts without asking", exact: true }),

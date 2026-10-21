@@ -1,5 +1,6 @@
 import type { APIRequestContext, Locator, Page, Route } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
+import { openSettings, selectSettingsSection } from "./helpers/settings";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { agentLaunchRow, cleanupSession, createSession, resetPreferences } from "./helpers/fleet";
 import { attachSession } from "./helpers/term";
@@ -129,7 +130,7 @@ test("managed-checkout trust switches persist independently of Claude's legacy r
     await resetTrust(request);
     for (const { harness } of AGENTS) expect(await trustState(request, harness)).toMatchObject({ enabled: false });
     await page.goto("/");
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page, "agent trust");
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     const choices = AGENTS.map(({ harness }) =>
       dialog.locator(`#checkout-${harness}-trust`).getByRole("checkbox").first()
@@ -174,7 +175,7 @@ test("managed-checkout trust switches persist independently of Claude's legacy r
     expect((await trustState(request, "claude")).enabled).toBe(true);
     await dialog.getByRole("button", { name: "close", exact: true }).click();
     await page.reload();
-    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await openSettings(page, "agent trust");
     for (const choice of choices) await expect(choice).toBeChecked();
     await expect(dialog.locator("#checkout-claude-trust").getByRole("checkbox").first()).toBeChecked();
     await choices[0].uncheck();
@@ -237,7 +238,7 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
       const toggle = field.getByRole("checkbox").first();
       await expect(page.locator(".app-main .layout")).toHaveAttribute("data-workspace-trust-prompt", "true");
       await expect(page.locator(".build-skew")).toHaveCount(0);
-      await page.getByRole("button", { name: "settings", exact: true }).click();
+      await openSettings(page, "agent trust");
       await expect(field.getByRole("alert")).toContainText("fixture trust read refusal");
       await expect(page.locator(".build-skew")).toHaveCount(0);
       await expect(toggle).toBeDisabled();
@@ -256,23 +257,41 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
       await expect(band).toHaveAttribute("role", "status");
       await expect(terminal).toBeFocused();
       await expect(page.locator(".claude-trust-surface .claude-trust-band")).toHaveCount(0);
-      await band.getByRole("button", { name: "Settings", exact: true }).click();
-      await expect(field).toBeFocused();
-      await expect(toggle).toBeEnabled();
-      await expect(toggle).not.toBeChecked();
-      expect(
-        await toggle.evaluate((element) => {
-          const box = element.getBoundingClientRect();
-          const body = element.closest(".host-settings-body")!.getBoundingClientRect();
-          return box.top >= body.top && box.bottom <= body.bottom;
-        }),
-        "the matching switch is scrolled into the dialog viewport",
-      ).toBe(true);
+      // The real band must reveal and focus its own agent block without a
+      // helper repairing the selection, including the phone's one-pane view.
+      for (const width of [390, 1280]) {
+        await page.setViewportSize({ width, height: 900 });
+        await band.getByRole("button", { name: "Settings", exact: true }).click();
+        await expect(dialog.locator('.app-settings-panel[aria-label="agent trust"]')).toBeVisible();
+        await expect(dialog.locator('.app-settings-panel[aria-label="sessions"]')).toBeHidden();
+        await expect(field).toBeFocused();
+        await expect(toggle).toBeEnabled();
+        await expect(toggle).not.toBeChecked();
+        expect(
+          await toggle.evaluate((element) => {
+            const box = element.getBoundingClientRect();
+            const body = element.closest(".host-settings-body")!.getBoundingClientRect();
+            return box.top >= body.top && box.bottom <= body.bottom;
+          }),
+          "the matching switch is scrolled into the dialog viewport",
+        ).toBe(true);
+        if (width === 390) {
+          await expect(dialog.getByRole("button", { name: "‹ settings", exact: true })).toBeVisible();
+          await expect(dialog.getByRole("navigation", { name: "settings sections", exact: true })).toBeHidden();
+          await dialog.getByRole("button", { name: "close", exact: true }).click();
+          await openSettings(page);
+          await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
+          await expect(dialog.locator('.app-settings-panel[aria-label="agent trust"]')).toBeHidden();
+          await dialog.getByRole("button", { name: "close", exact: true }).click();
+        }
+      }
       await toggle.check();
       await expect.poll(async () => (await trustState(request, harness)).enabled).toBe(true);
       await dialog.getByRole("button", { name: "close", exact: true }).click();
       await expect(band).toHaveCount(0);
-      await page.getByRole("button", { name: "settings", exact: true }).click();
+      await openSettings(page);
+      await expect(dialog.locator('.app-settings-panel[aria-label="sessions"]')).toBeVisible();
+      await selectSettingsSection(page, "agent trust");
       await expect(toggle).toBeChecked();
       await toggle.uncheck();
       await expect.poll(async () => (await trustState(request, harness)).enabled).toBe(false);
@@ -340,7 +359,7 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
       expect((await trustState(request, otherHarness)).hint_dismissed).toBe(false);
       await attachSession(page, session.id);
       await expect(surface).toHaveAttribute("data-hint-dismissed", "true");
-      await page.getByRole("button", { name: "settings", exact: true }).click();
+      await openSettings(page, "agent trust");
       await field.getByRole("checkbox", {
         name: `show the hint when ${name} asks about a managed checkout`,
         exact: true,
