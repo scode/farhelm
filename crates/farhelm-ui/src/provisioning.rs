@@ -52,6 +52,10 @@
 //! Success clears the automatic disclosure only for the exact tracked run
 //! id — never on a 202, a planning success, a bare Connected, or an
 //! unrelated run's completion.
+//! A change-of-host warning has one narrower exception: once the host is
+//! connected at this helm's reported build, its advice to check the version
+//! is satisfied. Clearing that warning proves nothing about the detached
+//! update and does not settle any other uncertainty.
 
 use std::collections::{HashMap, HashSet};
 use web_time::Instant;
@@ -361,6 +365,53 @@ fn same_update_target(before: &HostBinding, now: &HostBinding) -> bool {
         && (before.identity.is_none() || before.identity == now.identity)
 }
 
+/// Explain a broken update continuity check using the host's visible facts.
+///
+/// The caller already decided that continuity broke. Entry/kind changes
+/// have no useful pair of values; otherwise destination takes precedence
+/// when both fields changed. Keep values raw here: the diagnostic's existing
+/// peer renderer escapes them once, including invisible controls.
+fn changed_host_warning(before: &HostBinding, now: &HostBinding, submitting: bool) -> String {
+    let when = if submitting {
+        "while its update was being sent"
+    } else {
+        "while it was being updated"
+    };
+    let changed = if before.id != now.id || before.kind != now.kind {
+        format!("this host's entry changed {when}")
+    } else if before.destination != now.destination {
+        format!(
+            "this host's ssh destination changed from ‹{}› to ‹{}› {when}",
+            before
+                .destination
+                .as_deref()
+                .unwrap_or("no ssh destination reported"),
+            now.destination
+                .as_deref()
+                .unwrap_or("no ssh destination reported"),
+        )
+    } else {
+        let meaning = if now.identity.is_some() {
+            "a different Farhelm install now answers at its ssh destination"
+        } else {
+            "the install at its ssh destination can no longer be identified"
+        };
+        format!(
+            "this host's identity changed from ‹{}› to ‹{}› {when} ({meaning})",
+            before.identity.as_deref().unwrap_or("no identity reported"),
+            now.identity.as_deref().unwrap_or("no identity reported"),
+        )
+    };
+    let consequence = if submitting {
+        "Farhelm can't tell whether the update started"
+    } else {
+        "Farhelm stopped following that update and can't tell how it ended or which install it reached"
+    };
+    format!(
+        "{changed}, so {consequence}; check the farhelm version this host shows now, and update it again if it isn't current"
+    )
+}
+
 /// Where one accepted automatic-update click stands before its POST.
 ///
 /// Planning success stores the one-use plan and moves to [`IntentPhase::WaitingForClaim`];
@@ -572,7 +623,9 @@ pub(crate) fn progress_step_status(status: &str) -> &str {
 ///
 /// An unrelated completed run, an idle view, or a successful GET never
 /// clears these; only a correlated newer success, an explicit superseding
-/// attempt, or row removal does.
+/// attempt, or row removal does. The one exception is a change-of-host
+/// warning: a connected host at this helm's build satisfies its version
+/// advice, without establishing what happened to the detached update.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct UpdateDiagnostic {
     /// The intent epoch (or the counter value, for post-intent events) that
@@ -587,7 +640,63 @@ struct UpdateDiagnostic {
     /// foreign-run explanations describe the attempt they came from and a
     /// new attempt replaces them.
     sticky: bool,
+    /// Only continuity warnings may clear from connected/version evidence.
+    /// Other sticky uncertainties still need their correlated update result.
+    host_changed: bool,
     text: String,
+}
+
+/// Offer clearable host advice only when no earlier submission uncertainty stands.
+///
+/// An observed run can coexist with an earlier update's unresolved outcome.
+/// Retargeting still detaches that run, but replacing the earlier diagnostic
+/// with version-clearable advice would let Connected erase uncertainty that
+/// only a correlated update result can settle. Keep its text and epoch intact.
+fn changed_host_diagnostic(
+    held: Option<&UpdateDiagnostic>,
+    epoch: u64,
+    before: &HostBinding,
+    now: &HostBinding,
+    submitting: bool,
+) -> Option<UpdateDiagnostic> {
+    if held.is_some_and(|held| held.sticky && !held.host_changed) {
+        return None;
+    }
+    Some(UpdateDiagnostic {
+        epoch,
+        sticky: true,
+        host_changed: true,
+        text: changed_host_warning(before, now, submitting),
+    })
+}
+
+/// Read the helm build from the evidence already used by the build-skew UI.
+///
+/// A reported mismatch names the helm rather than this bundle. Otherwise
+/// a seen stamp proves the bundle's build matched. Silent and unseen helms
+/// establish nothing. This inherits the skew latch's first-disagreement
+/// semantics and display-length cap; it is not a new version tracker.
+fn known_helm_build(skew: Option<&crate::skew::Skew>, seen: bool) -> Option<&str> {
+    match skew {
+        Some(crate::skew::Skew::Reported(build)) => Some(build),
+        None if seen => Some(crate::skew::CLIENT_BUILD),
+        Some(crate::skew::Skew::Silent) | None => None,
+    }
+}
+
+/// Whether version advice is satisfied, without settling any update result.
+///
+/// Exact raw build equality is the contract: neither age flag being set
+/// can also mean the versions were not comparable. A bare connection,
+/// unknown helm build, or another diagnostic is insufficient.
+fn change_warning_resolved(
+    warning: &UpdateDiagnostic,
+    state: &crate::HostPhase,
+    helm_build: Option<&str>,
+) -> bool {
+    warning.host_changed
+        && matches!(state, crate::HostPhase::Connected { build_version, .. }
+            if Some(build_version.raw()) == helm_build)
 }
 
 /// Whether a progress view is authoritative success for the tracked run.
@@ -1453,6 +1562,7 @@ where
                         update_warning.set(Some(UpdateDiagnostic {
                             epoch,
                             sticky: true,
+                            host_changed: false,
                             text: warning,
                         }));
                         release_outstanding(&mut outstanding, epoch);
@@ -1495,6 +1605,7 @@ where
                                     update_error.set(Some(UpdateDiagnostic {
                                         epoch,
                                         sticky: false,
+                                        host_changed: false,
                                         text,
                                     }));
                                 }
@@ -1503,6 +1614,7 @@ where
                                 update_error.set(Some(UpdateDiagnostic {
                                     epoch,
                                     sticky: true,
+                                    host_changed: false,
                                     text: format!(
                                         "the update was submitted but its reply was lost ({error}); \
                                          the run may have started, so its outcome is unknown"
@@ -1635,13 +1747,16 @@ async fn submit_accepted<R>(
                 on_running.call(false);
             }
         }
-        update_warning.set(Some(UpdateDiagnostic {
+        let warning = changed_host_diagnostic(
+            update_warning.peek().as_ref(),
             epoch,
-            sticky: true,
-            text: "the host changed while the update was submitting, so its outcome is unknown; \
-                 this row claims nothing from that attempt"
-                .to_string(),
-        }));
+            &submitted_binding,
+            &current,
+            true,
+        );
+        if let Some(warning) = warning {
+            update_warning.set(Some(warning));
+        }
         release_outstanding(outstanding, epoch);
         reread(Trigger::Explicit);
         on_changed.call(());
@@ -1651,6 +1766,7 @@ async fn submit_accepted<R>(
         update_warning.set(Some(UpdateDiagnostic {
             epoch,
             sticky: true,
+            host_changed: false,
             text: format!(
                 "the helm accepted this update for host {} instead of this row; the plan is spent \
                  and this row claims nothing from that run",
@@ -1666,6 +1782,7 @@ async fn submit_accepted<R>(
         update_warning.set(Some(UpdateDiagnostic {
             epoch,
             sticky: true,
+            host_changed: false,
             text: "the helm accepted the update but returned no run identity, so its outcome is \
                  unknown; this row claims nothing from that run"
                 .to_string(),
@@ -1690,6 +1807,7 @@ async fn submit_accepted<R>(
         update_warning.set(Some(UpdateDiagnostic {
             epoch,
             sticky: true,
+            host_changed: false,
             text: format!(
                 "update run {} ended without reporting its outcome; following the accepted run instead",
                 prior.run_id
@@ -1744,7 +1862,8 @@ struct ProgressCommit<'a> {
 /// outcome still unknown. The uncertainty outranks the explanation: the
 /// caller keeps invalidation and run adoption, but installs nothing and
 /// leaves the held diagnostic — epoch and text — untouched. Only a
-/// correlated success or removal clears what stands.
+/// correlated success or removal clears submission uncertainty; the
+/// separate connected/version rule may clear change-of-host advice.
 fn competing_run_warning(
     held: Option<&UpdateDiagnostic>,
     epoch: u64,
@@ -1756,6 +1875,7 @@ fn competing_run_warning(
     Some(UpdateDiagnostic {
         epoch,
         sticky: false,
+        host_changed: false,
         text,
     })
 }
@@ -1998,6 +2118,7 @@ fn reconcile_tracked(
         update_warning.set(Some(UpdateDiagnostic {
             epoch: epoch_now,
             sticky: true,
+            host_changed: false,
             text: format!(
                 "update run {} ended without reporting its outcome; following the latest state instead",
                 old.run_id
@@ -2085,6 +2206,7 @@ fn set_planning_diagnostic(
     update_error.set(Some(UpdateDiagnostic {
         epoch,
         sticky: false,
+        host_changed: false,
         text,
     }));
 }
@@ -2738,25 +2860,42 @@ pub(crate) fn ProvisioningPanel(
             intent_epoch.set(counter);
             intent.set(None);
         }
-        if target_changed {
-            if let Some(followed) = followed {
-                retired_runs.write().insert(followed.run_id.clone());
-            }
+        if let Some(followed) = followed.as_ref().filter(|_| target_changed) {
+            retired_runs.write().insert(followed.run_id.clone());
             tracked.set(None);
             on_running.call(false);
-            update_warning.set(Some(UpdateDiagnostic {
-                epoch: *intent_epoch.peek(),
-                sticky: true,
-                text: "the host changed while its update was being followed, so that run's \
-                     outcome is unknown; this row claims nothing from it"
-                    .to_string(),
-            }));
+            let warning = changed_host_diagnostic(
+                update_warning.peek().as_ref(),
+                *intent_epoch.peek(),
+                &followed.binding,
+                &binding,
+                false,
+            );
+            if let Some(warning) = warning {
+                update_warning.set(Some(warning));
+            }
         } else if let Some(mut followed) = followed
             && followed.binding.identity.is_none()
             && binding.identity.is_some()
         {
             followed.binding.identity = binding.identity.clone();
             tracked.set(Some(followed));
+        }
+    }));
+
+    // Subscribe to the warning as well as host/build facts: a held acceptance
+    // can install it after the host is already current. An owned snapshot
+    // releases the signal read before clearing, avoiding a read/write borrow
+    // conflict. This clears advice only; retired runs and other diagnostics
+    // keep their existing lifetimes and can never be settled by Connected.
+    use_effect(use_reactive((&host.state,), move |(state,)| {
+        let warning = update_warning();
+        let skew = crate::skew::HELM_BUILD_SKEW.read().clone();
+        let seen = *crate::skew::HELM_BUILD_SEEN.read();
+        if warning.as_ref().is_some_and(|warning| {
+            change_warning_resolved(warning, &state, known_helm_build(skew.as_ref(), seen))
+        }) {
+            update_warning.set(None);
         }
     }));
 
@@ -4058,6 +4197,176 @@ mod tests {
         assert!(!authoritative_update_success(&running, &tracked));
     }
 
+    /// Retarget advice names the changed fact and the action the user can take.
+    ///
+    /// Destination wins when both fields change. Values stay raw until the
+    /// peer renderer, so controls cannot be double-escaped and missing
+    /// identity remains the same phrase the host detail line uses.
+    #[farhelm_testtrace::test]
+    fn changed_host_advice_names_values_and_submission_boundary() {
+        let before = ssh_binding(7);
+        let moved = HostBinding {
+            destination: Some("other\u{202e}@example.invalid".to_string()),
+            identity: Some("identity-2".to_string()),
+            ..before.clone()
+        };
+        for submitting in [false, true] {
+            let text = changed_host_warning(&before, &moved, submitting);
+            assert!(text.contains("ssh destination changed from ‹e2e@example.invalid› to ‹other\u{202e}@example.invalid›"));
+            assert!(!text.contains("identity changed"));
+            assert!(text.contains(if submitting {
+                "while its update was being sent"
+            } else {
+                "while it was being updated"
+            }));
+            assert!(text.contains(if submitting {
+                "can't tell whether the update started"
+            } else {
+                "can't tell how it ended or which install it reached"
+            }));
+            assert!(text.ends_with("update it again if it isn't current"));
+        }
+        let replaced = HostBinding {
+            identity: Some("identity-2".to_string()),
+            ..before.clone()
+        };
+        let text = changed_host_warning(&before, &replaced, false);
+        assert!(text.contains("identity changed from ‹identity-1› to ‹identity-2›"));
+        assert!(text.contains("a different Farhelm install now answers"));
+
+        let missing = HostBinding {
+            identity: None,
+            ..before.clone()
+        };
+        let text = changed_host_warning(&before, &missing, true);
+        assert!(text.contains("identity changed from ‹identity-1› to ‹no identity reported›"));
+        assert!(text.contains("can no longer be identified"));
+        assert!(!text.contains("a different Farhelm install now answers"));
+        for changed in [local_binding(7), ssh_binding(8)] {
+            let text = changed_host_warning(&before, &changed, false);
+            assert!(text.starts_with("this host's entry changed"));
+            assert!(!text.contains("identity-1"));
+            assert!(!text.contains("e2e@example.invalid"));
+        }
+    }
+
+    /// A later host change must not turn unresolved update evidence into clearable advice.
+    ///
+    /// Both constructors share this priority rule because a held acceptance
+    /// and a followed run can each coexist with an older sticky warning.
+    #[farhelm_testtrace::test]
+    fn host_change_advice_preserves_existing_submission_uncertainty() {
+        let before = ssh_binding(7);
+        let after = HostBinding {
+            destination: Some("moved@example.invalid".to_string()),
+            ..before.clone()
+        };
+        let unresolved = UpdateDiagnostic {
+            epoch: 3,
+            sticky: true,
+            host_changed: false,
+            text: "earlier update ended unseen".to_string(),
+        };
+        for submitting in [false, true] {
+            assert_eq!(
+                changed_host_diagnostic(Some(&unresolved), 4, &before, &after, submitting),
+                None
+            );
+            let advice = changed_host_diagnostic(None, 4, &before, &after, submitting).unwrap();
+            assert!(advice.host_changed && advice.sticky);
+            assert_eq!(advice.epoch, 4);
+            assert!(
+                changed_host_diagnostic(Some(&advice), 5, &before, &after, submitting).is_some()
+            );
+            let transient = UpdateDiagnostic {
+                sticky: false,
+                ..unresolved.clone()
+            };
+            assert!(
+                changed_host_diagnostic(Some(&transient), 5, &before, &after, submitting).is_some()
+            );
+        }
+    }
+
+    /// A stale browser must compare against the helm, and silence proves no version.
+    ///
+    /// These inputs are injected rather than changing global signals or the
+    /// test process environment. The cases pin the existing skew evidence's
+    /// meaning, including its latched reported build.
+    #[farhelm_testtrace::test]
+    fn helm_build_evidence_distinguishes_reported_matching_and_unknown() {
+        let reported = crate::skew::Skew::Reported("helm-other-build".to_string());
+        let silent = crate::skew::Skew::Silent;
+        assert_eq!(
+            known_helm_build(Some(&reported), true),
+            Some("helm-other-build")
+        );
+        assert_eq!(
+            known_helm_build(Some(&reported), false),
+            Some("helm-other-build")
+        );
+        assert_eq!(
+            known_helm_build(None, true),
+            Some(crate::skew::CLIENT_BUILD)
+        );
+        assert_eq!(known_helm_build(None, false), None);
+        assert_eq!(known_helm_build(Some(&silent), false), None);
+        assert_eq!(known_helm_build(Some(&silent), true), None);
+    }
+
+    /// Connected at an exactly matching build clears only change-of-host advice.
+    ///
+    /// Neither older/newer hints nor a healthy connection can settle a lost
+    /// reply. Exact build comparison also matters for non-semver development
+    /// stamps and a browser bundle that differs from its helm.
+    #[farhelm_testtrace::test]
+    fn current_connection_resolves_only_a_change_host_warning() {
+        let warning = UpdateDiagnostic {
+            epoch: 3,
+            sticky: true,
+            host_changed: true,
+            text: "changed host".to_string(),
+        };
+        let connected = crate::HostPhase::Connected {
+            identity: Some("identity-2".into()),
+            build_version: "helm-build".into(),
+            old_version: false,
+            newer_version: false,
+            refresh: crate::RefreshHealth::Ok { sessions: 0 },
+        };
+        assert!(change_warning_resolved(
+            &warning,
+            &connected,
+            Some("helm-build")
+        ));
+        for build in [
+            None,
+            Some("older-build"),
+            Some("newer-build"),
+            Some("helm-build "),
+        ] {
+            assert!(!change_warning_resolved(&warning, &connected, build));
+        }
+        let disconnected = crate::HostPhase::Unreachable {
+            cause: "transport-failure".to_string(),
+            last_error: "not connected".into(),
+        };
+        assert!(!change_warning_resolved(
+            &warning,
+            &disconnected,
+            Some("helm-build")
+        ));
+        let other = UpdateDiagnostic {
+            host_changed: false,
+            ..warning
+        };
+        assert!(!change_warning_resolved(
+            &other,
+            &connected,
+            Some("helm-build")
+        ));
+    }
+
     /// A live update stays folded, while failures and unresolved outcomes keep the row open.
     ///
     /// This truth table protects the distinction between compact progress and
@@ -4086,6 +4395,7 @@ mod tests {
         let diagnostic = UpdateDiagnostic {
             epoch: 1,
             sticky: true,
+            host_changed: false,
             text: "outcome unknown".to_string(),
         };
 
@@ -4562,6 +4872,7 @@ mod tests {
         let sticky = UpdateDiagnostic {
             epoch: 3,
             sticky: true,
+            host_changed: false,
             text: "the helm accepted the update, but its run identity could not be read"
                 .to_string(),
         };
@@ -4573,6 +4884,7 @@ mod tests {
         let plain = UpdateDiagnostic {
             epoch: 2,
             sticky: false,
+            host_changed: false,
             text: "an earlier explanation".to_string(),
         };
         assert_eq!(
@@ -4580,6 +4892,7 @@ mod tests {
             Some(UpdateDiagnostic {
                 epoch: 4,
                 sticky: false,
+                host_changed: false,
                 text: "another run started".to_string(),
             }),
         );
@@ -4588,6 +4901,7 @@ mod tests {
             Some(UpdateDiagnostic {
                 epoch: 4,
                 sticky: false,
+                host_changed: false,
                 text: "another run started".to_string(),
             }),
         );

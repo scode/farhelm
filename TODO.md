@@ -163,20 +163,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   agent instructions and docs, un-ignoring the end-to-end delivery tests, and writing a new changelog fragment. SPEC.md,
   Agent-spawned sessions, keeps the design.
 
-- **Rewrite the "host changed while its update was being followed" warning.** Seen 2026-10-18 on a dev build whose host
-  (running `farhelm 0.0.0-unreleased`, 0 sessions) had also been added by accident to the maintainer's 0.29.0 helm,
-  which ran setup on it too. The dev build's host row showed an update that completed every step (create-directories,
-  upload-farhelm, install-farhelm, write-unit skipped because the unit already had the requested content, daemon-reload,
-  enable-supervisor, enable-linger, restart-supervisor, attach-supervisor), with the host green, and under it a yellow
-  warning: "the host changed while its update was being followed, so that run's outcome is unknown; this row claims
-  nothing from it". To the user that reads as nonsense: every step says completed, nothing says what "the host changed"
-  means or what to do, and "this row claims nothing from it" is internal bookkeeping language. The warning fires when
-  the row's host, connection kind, destination or install identity changes while an update is in flight (the update's
-  own reconnect does not count); which one changed here was not investigated. Say in product terms what changed and what
-  it means for the user (the update may or may not be what is running now; check the host's version), and consider
-  whether the warning should stay sticky once the host is connected and healthy. Plan:
-  `plans/queue/host-changed-update-warning.md`.
-
 - **Stop treating Restart with as a separate launch surface by default.** Launch-related features keep needing a
   separate decision for Restart with (and sometimes plain Restart and Replace), and agents default to leaving it out:
   planning the "launch guarded from the YOLO confirmation" entry on 2026-10-20, the planner recommended "the session
