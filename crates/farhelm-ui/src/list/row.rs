@@ -1022,22 +1022,13 @@ pub(super) fn SessionRow(
     // Live statuses occupy the fixed leading slot as dots. In compact mode an
     // ended status uses that same slot for an icon; noncompact rows put its
     // complete wording on the full-width detail line below the identity.
-    let (status_slot_badge, mut ended_badge) = match badge {
-        Some(badge) if badge.visible => (None, Some(badge)),
-        badge => (badge, None),
-    };
-    if let (
-        Some(detail),
-        SessionStatus::Exited {
-            exit_code: None, ..
-        },
-    ) = (&mut ended_badge, &session.status)
-    {
-        // `status_badge` is shared with the header, where its established
-        // concise wording stays intact. The sidebar's full detail contract
-        // needs this otherwise absent datum to remain explicit.
-        detail.text = detail.text.replacen("exited", "exited (code unknown)", 1);
-    }
+    let status_slot_badge = badge.filter(|badge| !badge.visible);
+    // Preserve the ordinary card/menu badge above. This shared detail helper
+    // also supplies the compact ended tooltip and causal movement comparison.
+    let crate::rows::SessionRowDetail {
+        ended: ended_badge,
+        stale_cause,
+    } = crate::rows::session_row_detail(&session, unavailable_cause);
     let ended_glyph = match (
         &session.status,
         session.annotation.as_ref().map(crate::peer::PeerText::raw),
@@ -1753,8 +1744,8 @@ pub(super) fn SessionRow(
                             if let Some(badge) = ended_badge {
                                 StatusBadgeView { badge, dot_onclick: move |_| {}, dot_title: None }
                             }
-                            if session.stale {
-                                span { class: "stale-badge", "data-tooltip": "{stale_tooltip}", "{unavailable_cause}" }
+                            if let Some(cause) = stale_cause {
+                                span { class: "stale-badge", "data-tooltip": "{stale_tooltip}", "{cause}" }
                             }
                         }
                     }

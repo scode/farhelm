@@ -2,7 +2,8 @@
 //! optimistic-rename overlay, and the count banner above the rows.
 //!
 //! Everything here is a pure function of a listing reply plus `ListView`'s
-//! own pending corrections — no signals, no rendering, no I/O — which is why
+//! own pending corrections and the current host/error state — no signals,
+//! rendering or I/O — which is why
 //! it can be unit-tested at all. `list` keeps the component, the state, and
 //! the event handlers; this module keeps the decisions those handlers and
 //! that render are made OF.
@@ -36,15 +37,23 @@
 //! count. The wording is pinned by the browser suite, so treat the
 //! strings as a contract rather than as copy.
 //!
+//! ## Contents that can move a lower row
+//!
+//! The detail helper supplies the row's actual wording to rendering and to
+//! synchronous publication comparisons. Those comparisons retain nothing:
+//! callers supply the two displayed lists at the cause boundary, before the
+//! new contents can displace an already-measured popover anchor.
+//!
 //! Session references are peer text in the reply mirror, but every identity
 //! operation here uses their raw bytes. The local maps and held-order snapshots
 //! remain operation state; display escaping must not change their membership.
 
 use std::collections::{HashMap, HashSet};
 
-use crate::Session;
 use crate::api::SessionListing;
-use crate::status::status_badge;
+use crate::hosts::{HostsRead, session_unavailable_cause};
+use crate::status::{StatusBadge, status_badge};
+use crate::{Session, SessionStatus};
 
 /// The listing as it should be RENDERED: the server's rows with this
 /// view's own just-landed renames painted over them (PLAN_M5.md item 6).
@@ -249,6 +258,141 @@ pub(crate) fn menu_rows_reordered(
             menu_row_reordered(previous, current, session.id.raw(), detail_lines_shown)
         })
         .map(|session| session.id.raw().to_owned())
+        .collect()
+}
+
+/// The sidebar detail's actual children, shared by rendering and movement.
+///
+/// The ended badge includes the sidebar's unknown-exit wording; callers must
+/// keep the ordinary badge used by the summary and menu header separate.
+/// Compact mode hides this line but retains its ended badge as a tooltip.
+pub(crate) struct SessionRowDetail {
+    pub(crate) ended: Option<StatusBadge>,
+    pub(crate) stale_cause: Option<&'static str>,
+}
+
+/// Build exactly the ended text and stale capsule the session row draws.
+///
+/// The host cause matters only while this session is stale. StatusBadgeView
+/// renders badge.text directly, so its existing escaping and the unknown-code
+/// adjustment must also be the causal comparison's source of truth.
+pub(crate) fn session_row_detail(
+    session: &Session,
+    unavailable_cause: &'static str,
+) -> SessionRowDetail {
+    let mut ended = status_badge(
+        &session.status,
+        session.annotation.as_ref().map(crate::peer::PeerText::raw),
+        session.has_unseen_output(),
+    )
+    .filter(|badge| badge.visible);
+    if let Some(detail) = &mut ended
+        && matches!(&session.status, SessionStatus::Exited { exit_code: None })
+    {
+        detail.text = detail.text.replacen("exited", "exited (code unknown)", 1);
+    }
+    SessionRowDetail {
+        ended,
+        stale_cause: session.stale.then_some(unavailable_cause),
+    }
+}
+
+/// Borrow one displayed list and the state supplying its in-flow contents.
+///
+/// These inputs exist only during a synchronous publication comparison. They
+/// neither subscribe to signals nor retain a projection that could close an
+/// opening measured after the change. Refusals remain visible in compact mode.
+#[derive(Clone, Copy)]
+pub(crate) struct SessionFlow<'a> {
+    pub(crate) shown: &'a [Session],
+    pub(crate) hosts: &'a HostsRead,
+    pub(crate) errors: &'a HashMap<String, String>,
+    pub(crate) compact: bool,
+}
+
+/// One wrapping container's text: pairing ended text with its stale capsule
+/// matters because the two children can wrap each other onto another line.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct DetailText {
+    ended: Option<String>,
+    stale_cause: Option<&'static str>,
+}
+
+/// Format each displayed contribution once, rather than copying long peer
+/// messages for every candidate anchor's prefix. Identity is routing only.
+struct FlowRow<'a> {
+    id: &'a str,
+    detail: Option<DetailText>,
+    refusal: Option<String>,
+}
+
+/// Project the same detail helper and refusal escaping used by the row.
+fn flow_rows<'a>(flow: SessionFlow<'a>) -> Vec<FlowRow<'a>> {
+    flow.shown
+        .iter()
+        .map(|session| {
+            let detail = if flow.compact {
+                None
+            } else {
+                let detail = session_row_detail(
+                    session,
+                    session_unavailable_cause(flow.hosts.lookup(session.host)),
+                );
+                (detail.ended.is_some() || detail.stale_cause.is_some()).then(|| DetailText {
+                    ended: detail.ended.map(|badge| badge.text),
+                    stale_cause: detail.stale_cause,
+                })
+            };
+            FlowRow {
+                id: session.id.raw(),
+                detail,
+                refusal: flow
+                    .errors
+                    .get(session.id.raw())
+                    .map(|error| crate::peer::display_peer(error)),
+            }
+        })
+        .collect()
+}
+
+/// Compare multisets, preserving duplicate contributions but ignoring harmless
+/// permutations wholly above an anchor. Detail and refusal containers stack
+/// independently, so their pairing among different earlier rows is immaterial.
+fn prefix_contents<'a>(rows: &'a [FlowRow<'_>]) -> (Vec<&'a DetailText>, Vec<&'a str>) {
+    let mut details: Vec<_> = rows.iter().filter_map(|row| row.detail.as_ref()).collect();
+    let mut refusals: Vec<_> = rows
+        .iter()
+        .filter_map(|row| row.refusal.as_deref())
+        .collect();
+    details.sort_unstable();
+    refusals.sort_unstable();
+    (details, refusals)
+}
+
+/// Select surviving anchors whose displayed prefix gained different in-flow
+/// contents, even when their index and detail-line count stayed unchanged.
+///
+/// This supplements the existing index/separator/detail-count predicate. A
+/// missing previous listing is a remount with fresh measurements, not movement.
+/// Own-row and below-row text do not move a top-aligned anchor; disappeared
+/// rows remain the existing row-gone reconciliation's responsibility.
+pub(crate) fn session_content_rows_moved(
+    previous: Option<SessionFlow<'_>>,
+    current: SessionFlow<'_>,
+) -> Vec<String> {
+    let Some(previous) = previous else {
+        return Vec::new();
+    };
+    let before = flow_rows(previous);
+    let after = flow_rows(current);
+    after
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| {
+            let previous_index = before.iter().position(|previous| previous.id == row.id)?;
+            (prefix_contents(&before[..previous_index]) != prefix_contents(&after[..index]))
+                .then(|| row.id.to_owned())
+        })
         .collect()
 }
 
@@ -1125,6 +1269,278 @@ mod tests {
             status: SessionStatus::Exited { exit_code: Some(0) },
             ..session(id, id)
         }
+    }
+
+    /// Supply ordinary listing inputs without reproducing the contribution
+    /// rule in the tests. Host transition tests use separate real reads below.
+    fn content_moves(
+        before: &[Session],
+        after: &[Session],
+        errors: &HashMap<String, String>,
+        compact: bool,
+    ) -> Vec<String> {
+        let hosts = HostsRead::default();
+        session_content_rows_moved(
+            Some(SessionFlow {
+                shown: before,
+                hosts: &hosts,
+                errors,
+                compact,
+            }),
+            SessionFlow {
+                shown: after,
+                hosts: &hosts,
+                errors,
+                compact,
+            },
+        )
+    }
+
+    /// The sidebar's adjusted ended wording is shared with movement detection
+    /// and compact hover, while summary cards keep the original status wording.
+    #[farhelm_testtrace::test]
+    fn row_detail_preserves_unknown_exit_escaping_and_stale_pairing() {
+        let row = Session {
+            status: SessionStatus::Exited { exit_code: None },
+            annotation: Some("peer\u{202e}message".into()),
+            stale: true,
+            ..session("a", "a")
+        };
+        let detail = session_row_detail(&row, "checking host");
+        assert!(has_detail_line(&row));
+        assert_eq!(
+            detail.ended.unwrap().text,
+            "exited (code unknown) — peer<U+202E>message"
+        );
+        assert_eq!(detail.stale_cause, Some("checking host"));
+        assert_eq!(
+            status_badge(
+                &row.status,
+                row.annotation.as_ref().map(crate::peer::PeerText::raw),
+                row.has_unseen_output()
+            )
+            .unwrap()
+            .text,
+            "exited — peer<U+202E>message"
+        );
+        let live = session("live", "live");
+        let detail = session_row_detail(&live, "host removed");
+        assert!(!has_detail_line(&live));
+        assert!(detail.ended.is_none());
+        assert!(detail.stale_cause.is_none());
+    }
+
+    /// A detail can rewrap without changing its existence or the lower row's
+    /// index. Own/below changes and compact hover updates do not move that row.
+    #[farhelm_testtrace::test]
+    fn changed_existing_detail_selects_only_strictly_lower_noncompact_rows() {
+        let before = vec![ended("a"), ended("b"), ended("c")];
+        let mut after = before.clone();
+        after[0].annotation = Some("longer ended detail".into());
+        assert!(!menu_row_reordered(Some(&before), &after, "b", true));
+        assert_eq!(
+            content_moves(&before, &after, &HashMap::new(), false),
+            ["b", "c"]
+        );
+        assert!(content_moves(&before, &after, &HashMap::new(), true).is_empty());
+        after = before.clone();
+        after[1].annotation = Some("own-row detail".into());
+        assert_eq!(
+            content_moves(&before, &after, &HashMap::new(), false),
+            ["c"]
+        );
+        after = before.clone();
+        after[2].annotation = Some("below-row detail".into());
+        assert!(content_moves(&before, &after, &HashMap::new(), false).is_empty());
+        let hosts = HostsRead::default();
+        let errors = HashMap::new();
+        assert!(
+            session_content_rows_moved(
+                None,
+                SessionFlow {
+                    shown: &after,
+                    hosts: &hosts,
+                    errors: &errors,
+                    compact: false,
+                }
+            )
+            .is_empty(),
+            "missing/failed listing recovery has no comparable row baseline"
+        );
+    }
+
+    /// An unchanged refusal can cross an unchanged-index anchor in either
+    /// direction. Compact rows still contain refusals; error-free exchanges do not.
+    #[farhelm_testtrace::test]
+    fn unchanged_refusal_crossing_selects_same_index_anchor_in_both_directions() {
+        let before = vec![session("a", "a"), session("b", "b"), session("c", "c")];
+        let after = vec![before[2].clone(), before[1].clone(), before[0].clone()];
+        let errors = HashMap::from([("a".into(), "refused\u{202e}request".into())]);
+        assert_eq!(ids(&before)[1], ids(&after)[1]);
+        assert!(!menu_row_reordered(Some(&before), &after, "b", true));
+        for compact in [false, true] {
+            assert!(content_moves(&before, &after, &errors, compact).contains(&"b".into()));
+            assert!(content_moves(&after, &before, &errors, compact).contains(&"b".into()));
+            assert!(content_moves(&before, &after, &HashMap::new(), compact).is_empty());
+        }
+    }
+
+    /// Prefix equality concerns rendered contributions, not identities or their
+    /// order, but duplicate messages still contribute height separately.
+    #[farhelm_testtrace::test]
+    fn content_prefix_ignores_permutations_but_preserves_multiplicity_and_detail_pairing() {
+        let before = vec![ended("a"), ended("c"), session("b", "b"), session("d", "d")];
+        let after = vec![
+            before[1].clone(),
+            before[0].clone(),
+            before[2].clone(),
+            before[3].clone(),
+        ];
+        let errors = HashMap::from([("a".into(), "same".into()), ("c".into(), "same".into())]);
+        assert!(!content_moves(&before, &after, &errors, false).contains(&"b".into()));
+        let crossed = vec![
+            before[0].clone(),
+            before[3].clone(),
+            before[2].clone(),
+            before[1].clone(),
+        ];
+        assert!(content_moves(&before, &crossed, &errors, true).contains(&"b".into()));
+
+        let mut paired = before.clone();
+        paired[0].stale = true;
+        paired[1].annotation = Some("different".into());
+        let mut repaired = paired.clone();
+        repaired[0].stale = false;
+        repaired[1].stale = true;
+        assert!(!menu_row_reordered(Some(&paired), &repaired, "b", true));
+        assert!(
+            content_moves(&paired, &repaired, &HashMap::new(), false).contains(&"b".into()),
+            "ended text and stale capsule share one wrapping container"
+        );
+    }
+
+    /// A served permutation is inert while held, but fresh row data still
+    /// updates in place. Ending the hold compares the newly displayed prefix.
+    #[farhelm_testtrace::test]
+    fn content_comparison_uses_displayed_hold_without_freezing_detail_updates() {
+        let before = vec![ended("a"), session("b", "b"), session("c", "c")];
+        let served = vec![before[2].clone(), before[1].clone(), before[0].clone()];
+        let held: Vec<_> = ids(&before).into_iter().map(str::to_owned).collect();
+        let errors = HashMap::from([("a".into(), "refusal".into())]);
+        let shown = held_display_order(&held, &served);
+        assert_eq!(ids(&shown), ids(&before));
+        assert!(content_moves(&before, &shown, &errors, false).is_empty());
+        let mut updated = served.clone();
+        updated[2].annotation = Some("changed while held".into());
+        let shown = held_display_order(&held, &updated);
+        assert!(content_moves(&before, &shown, &errors, false).contains(&"b".into()));
+        assert!(
+            content_moves(&before, &held_display_order(&[], &served), &errors, true)
+                .contains(&"b".into()),
+            "a new query ends the hold before its rows are displayed"
+        );
+    }
+
+    /// Use the production host fold to exercise effective lookup precedence:
+    /// failures override retained rows, and recovery restores their real cause.
+    fn host_read_moves(
+        before: &HostsRead,
+        after: &HostsRead,
+        stale: bool,
+        compact: bool,
+    ) -> Vec<String> {
+        let shown = vec![
+            Session {
+                host: Some(1),
+                stale,
+                ..ended("a")
+            },
+            session("b", "b"),
+        ];
+        let errors = HashMap::new();
+        session_content_rows_moved(
+            Some(SessionFlow {
+                shown: &shown,
+                hosts: before,
+                errors: &errors,
+                compact,
+            }),
+            SessionFlow {
+                shown: &shown,
+                hosts: after,
+                errors: &errors,
+                compact,
+            },
+        )
+    }
+
+    /// Only host state matters here. This real wire-shaped Host is folded by
+    /// HostsRead, so the test cannot bypass its retained-snapshot/error policy.
+    fn content_host(state: crate::HostPhase) -> crate::Host {
+        crate::Host {
+            id: 1,
+            kind: crate::HostKind::Ssh,
+            destination: Some("peer".into()),
+            alias: None,
+            name: "peer".into(),
+            identity: None,
+            remote_farhelm: None,
+            remote_state_dir: None,
+            state,
+            incarnation: 1,
+            yolo_without_asking: false,
+            commands_without_asking: false,
+            links_without_asking: false,
+            local_links_without_asking: false,
+            icon: Default::default(),
+            color: Default::default(),
+        }
+    }
+
+    /// Displayed stale rows have a real Pending baseline even before the first
+    /// host answer. Equal visible causes must not close them again merely
+    /// because phase details or the transport's raw failure message changed.
+    #[farhelm_testtrace::test]
+    fn host_content_tracks_pending_failure_recovery_and_effective_cause_only() {
+        let pending = HostsRead::default();
+        let mut known = pending.clone();
+        known.record(Ok(vec![content_host(crate::HostPhase::Connecting {
+            attempt: 1,
+            stage: None,
+            last_error: None,
+        })]));
+        assert_eq!(
+            session_unavailable_cause(pending.lookup(Some(1))),
+            "checking host"
+        );
+        assert_eq!(
+            session_unavailable_cause(known.lookup(Some(1))),
+            "waiting for supervisor"
+        );
+        assert_eq!(host_read_moves(&pending, &known, true, false), ["b"]);
+        let mut absent = pending.clone();
+        absent.record(Ok(Vec::new()));
+        assert_eq!(host_read_moves(&pending, &absent, true, false), ["b"]);
+        let mut failed = known.clone();
+        failed.record(Err("transport failed".into()));
+        assert_eq!(
+            session_unavailable_cause(failed.lookup(Some(1))),
+            "host state unavailable"
+        );
+        assert_eq!(host_read_moves(&known, &failed, true, false), ["b"]);
+        assert_eq!(host_read_moves(&pending, &failed, true, false), ["b"]);
+        let mut other_failure = failed.clone();
+        other_failure.record(Err("different transport error".into()));
+        assert!(host_read_moves(&failed, &other_failure, true, false).is_empty());
+        let mut recovered = failed.clone();
+        recovered.record(Ok(vec![content_host(crate::HostPhase::Unreachable {
+            cause: "offline".into(),
+            last_error: "unreachable".into(),
+        })]));
+        assert_eq!(host_read_moves(&failed, &recovered, true, false), ["b"]);
+        assert!(host_read_moves(&known, &recovered, true, false).is_empty());
+        assert!(host_read_moves(&pending, &known, false, false).is_empty());
+        assert!(host_read_moves(&pending, &known, true, true).is_empty());
     }
 
     /// A row ABOVE the open one gaining or losing its detail line pushes the
