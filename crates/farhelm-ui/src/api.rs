@@ -2404,57 +2404,99 @@ pub(crate) async fn create_session(
         .map_err(|e| CreateRefusal::from(http_error_text(e)))
 }
 
-/// A refused create, with the helm's proofs that permit changing retry state.
+/// The helm's evidence about an unsuccessful launch attempt, before display text.
 ///
-/// `stale` comes from the helm's precondition header, never from the text:
-/// the text is the helm's body, which can quote a remote supervisor
-/// verbatim, and a supervisor must not be able to make this form discard
-/// its intent key and re-read. Every other failure (transport, decoding, a
-/// refusal without the header) converts from its message with `stale` false.
+/// A refusal can quote a supervisor, so only the helm's headers authorize
+/// retiring a retry or offering YOLO consent. YOLO takes precedence over
+/// either proof of rejection: an earlier attempt under the same key may
+/// already have created a session, and approval must reconcile that attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RefusalOutcome {
+    /// No proof settles an earlier create, including transport or decoding failures.
+    Unresolved,
+    /// The helm proves nothing was created; repairing the request needs a new key.
+    DefinitelyUnaccepted,
+    /// A launcher's target incarnation changed; its retained key must be retired.
+    StalePrecondition,
+    /// Continue the same retry only after the user answers the YOLO question.
+    NeedsYoloConfirmation,
+}
+
+impl RefusalOutcome {
+    /// Decode a launcher's headers with its existing YOLO-first precedence.
+    /// The prose body is deliberately absent from this decision boundary.
+    fn for_create(headers: &reqwest::header::HeaderMap) -> Self {
+        Self::from_headers(headers, true)
+    }
+
+    /// Decode lifecycle refusals without adding a launcher-incarnation policy.
+    /// Restart and plain Replace have always ignored the stale header here.
+    fn for_action(headers: &reqwest::header::HeaderMap) -> Self {
+        Self::from_headers(headers, false)
+    }
+
+    /// Apply one precedence rule while preserving each endpoint's stale contract.
+    /// Only launcher creates interpret incarnation rejection as a new retry.
+    fn from_headers(headers: &reqwest::header::HeaderMap, recognize_stale: bool) -> Self {
+        if asks_yolo_confirmation(headers) {
+            Self::NeedsYoloConfirmation
+        } else if recognize_stale && is_stale_precondition(headers) {
+            Self::StalePrecondition
+        } else if is_definitely_unaccepted(headers) {
+            Self::DefinitelyUnaccepted
+        } else {
+            Self::Unresolved
+        }
+    }
+
+    /// Only the helm's explicit YOLO refusal can authorize a consent prompt.
+    pub(crate) fn requires_yolo(self) -> bool {
+        self == Self::NeedsYoloConfirmation
+    }
+
+    /// Whether retrying unchanged must start a fresh attempt rather than reconcile.
+    /// Unknown outcomes and YOLO continuations retain their existing identity.
+    pub(crate) fn retires_retry(self) -> bool {
+        matches!(self, Self::DefinitelyUnaccepted | Self::StalePrecondition)
+    }
+}
+
+/// A refused create whose retry policy is decoded separately from peer-authored text.
+/// Transport, authentication and success-body decoding failures remain unresolved.
 #[derive(Debug)]
 pub(crate) struct CreateRefusal {
-    pub(crate) stale: bool,
-    /// The helm proved nothing was created; an unchanged retry needs a fresh key.
-    pub(crate) definitely_unaccepted: bool,
-    /// The helm refused a YOLO launch on a host that asks before YOLO launches and will
-    /// accept it again only with an explicit confirmation ([`asks_yolo_confirmation`]).
-    /// Nothing was created.
-    pub(crate) yolo_confirmation: bool,
+    pub(crate) outcome: RefusalOutcome,
     pub(crate) text: String,
 }
 
 impl From<String> for CreateRefusal {
+    /// Display text cannot prove whether an earlier attempt created a session.
     fn from(text: String) -> Self {
         CreateRefusal {
-            stale: false,
-            definitely_unaccepted: false,
-            yolo_confirmation: false,
+            outcome: RefusalOutcome::Unresolved,
             text,
         }
     }
 }
 
 impl CreateRefusal {
+    /// Snapshot the helm's evidence before an unreadable body can obscure it.
     async fn read(method: &str, url: &str, resp: reqwest::Response) -> Self {
-        let stale = is_stale_precondition(resp.headers());
-        let yolo_confirmation = asks_yolo_confirmation(resp.headers());
+        let outcome = RefusalOutcome::for_create(resp.headers());
         CreateRefusal {
-            stale,
-            definitely_unaccepted: is_definitely_unaccepted(resp.headers()),
-            yolo_confirmation,
+            outcome,
             text: refusal_text(method, url, resp).await,
         }
     }
 }
 
-/// A session action's failure, including whether the helm answered it.
+/// A session action's failure, including the helm's proof about the create.
 /// Plain Replace preserves response origin through the HTTP funnel: transport
 /// failures, authentication refusals and success-body decoding failures leave
 /// an earlier create's outcome unknown. Only definite no-create proof settles it.
 #[derive(Debug, Clone)]
 pub(crate) struct ActionRefusal {
-    pub(crate) answered: bool,
-    pub(crate) yolo_confirmation: bool,
+    pub(crate) outcome: RefusalOutcome,
     pub(crate) text: String,
 }
 
@@ -2462,8 +2504,7 @@ impl From<String> for ActionRefusal {
     /// Text alone carries no response origin and cannot end a retry intent.
     fn from(text: String) -> Self {
         ActionRefusal {
-            answered: false,
-            yolo_confirmation: false,
+            outcome: RefusalOutcome::Unresolved,
             text,
         }
     }
@@ -2474,37 +2515,20 @@ impl From<SendError> for ActionRefusal {
     /// The funnel still applies authentication's existing global effects.
     fn from(error: SendError) -> Self {
         Self {
-            answered: false,
-            yolo_confirmation: false,
+            outcome: RefusalOutcome::Unresolved,
             text: send_error_text(error),
         }
     }
 }
 
 impl ActionRefusal {
-    /// Continue an unresolved Replace or its YOLO question under the same key.
-    ///
-    /// Only a helm reply marked definitely unaccepted settles the create.
-    /// Authentication refuses the current request without settling an earlier one.
-    /// Any other HTTP refusal may sit on top of a create that already landed
-    /// (the helm's reply from a host lost after sending, or "created X but
-    /// could not remove the original"), and the helm replays or completes a
-    /// same-key retry; a fresh key there would start a second agent. Keeping
-    /// a key whose create never ran is harmless, since the helm treats an
-    /// unknown key as new.
-    pub(crate) fn retain_replace_key(&self) -> bool {
-        !self.answered || self.yolo_confirmation
-    }
-
     /// Read a refusal's outcome from its headers before reading display text.
-    /// It counts as answered only when the helm marks the create definitely
-    /// unaccepted, the same rule [`submit_fresh_create`] applies; a lost body
-    /// cannot change that.
+    /// Only definite no-create proof settles plain Replace; other failures can
+    /// sit on top of a create that landed, so a fresh key could duplicate it.
     async fn read(method: &str, url: &str, resp: reqwest::Response) -> Self {
-        let yolo_confirmation = asks_yolo_confirmation(resp.headers());
+        let outcome = RefusalOutcome::for_action(resp.headers());
         ActionRefusal {
-            answered: is_definitely_unaccepted(resp.headers()),
-            yolo_confirmation,
+            outcome,
             text: refusal_text(method, url, resp).await,
         }
     }
@@ -5228,40 +5252,142 @@ mod tests {
             );
         }
     }
-    /// Unknown outcomes, authentication refusals and YOLO continuations must
-    /// recover the first create; only definite no-create proof retires the key.
-    /// A 401 after partial Replace must not permit a second replacement.
-    #[farhelm_testtrace::test]
-    fn replace_retains_unknown_authentication_and_yolo_refusals() {
-        let unknown = ActionRefusal::from("lost reply".to_string());
-        assert!(unknown.retain_replace_key());
-        assert!(ActionRefusal::from(SendError::Request("transport".into())).retain_replace_key());
-        for consumed in [
-            SendError::Unauthenticated,
-            SendError::Refused("unauthorized".into()),
-            SendError::Refused("unreadable refusal body".into()),
-        ] {
-            assert!(ActionRefusal::from(consumed).retain_replace_key());
-        }
-        for yolo_confirmation in [false, true] {
-            let refusal = ActionRefusal {
-                answered: true,
-                yolo_confirmation,
-                text: "answered refusal".to_string(),
-            };
-            assert_eq!(refusal.retain_replace_key(), yolo_confirmation);
-        }
-        // Only the helm's definitely-unaccepted marker settles an HTTP refusal;
-        // a bare error status may sit on top of a create that already landed.
+    /// Construct the helm's three independent markers at the HTTP boundary.
+    /// Tests supply contradictory combinations too, because their precedence
+    /// must remain stable even when a response carries more than one marker.
+    fn refusal_headers(
+        stale: bool,
+        definitely_unaccepted: bool,
+        yolo: bool,
+    ) -> reqwest::header::HeaderMap {
         let mut headers = reqwest::header::HeaderMap::new();
-        assert!(!is_definitely_unaccepted(&headers));
-        headers.insert(
+        if stale {
+            headers.insert(
+                farhelm_proto::http::PRECONDITION_HEADER,
+                reqwest::header::HeaderValue::from_static("incarnation"),
+            );
+        }
+        if definitely_unaccepted {
+            headers.insert(
+                farhelm_proto::http::CREATE_OUTCOME_HEADER,
+                reqwest::header::HeaderValue::from_static(
+                    farhelm_proto::http::CREATE_OUTCOME_DEFINITELY_UNACCEPTED,
+                ),
+            );
+        }
+        if yolo {
+            headers.insert(
+                farhelm_proto::http::YOLO_CONFIRMATION_HEADER,
+                reqwest::header::HeaderValue::from_static(
+                    farhelm_proto::http::YOLO_CONFIRMATION_REQUIRED,
+                ),
+            );
+        }
+        headers
+    }
+
+    /// YOLO consent must keep the existing key even beside rejection markers;
+    /// otherwise an earlier accepted create could be duplicated on approval.
+    /// All eight header combinations preserve the launcher's previous priority.
+    #[farhelm_testtrace::test]
+    fn create_refusal_headers_decode_with_yolo_then_stale_precedence() {
+        use RefusalOutcome::{
+            DefinitelyUnaccepted, NeedsYoloConfirmation, StalePrecondition, Unresolved,
+        };
+        for (stale, definite, yolo, expected, retires) in [
+            (false, false, false, Unresolved, false),
+            (false, false, true, NeedsYoloConfirmation, false),
+            (false, true, false, DefinitelyUnaccepted, true),
+            (false, true, true, NeedsYoloConfirmation, false),
+            (true, false, false, StalePrecondition, true),
+            (true, false, true, NeedsYoloConfirmation, false),
+            (true, true, false, StalePrecondition, true),
+            (true, true, true, NeedsYoloConfirmation, false),
+        ] {
+            let headers = refusal_headers(stale, definite, yolo);
+            let outcome = RefusalOutcome::for_create(&headers);
+            assert_eq!(
+                outcome, expected,
+                "stale={stale}, definite={definite}, yolo={yolo}"
+            );
+            assert_eq!(outcome.requires_yolo(), yolo);
+            assert_eq!(outcome.retires_retry(), retires);
+        }
+    }
+
+    /// Lifecycle errors never adopted the launcher's incarnation-header policy.
+    /// Preserve all four action combinations, with and without an extra stale
+    /// marker, so extraction cannot silently retire a plain Replace retry.
+    #[farhelm_testtrace::test]
+    fn action_refusal_headers_preserve_yolo_and_ignore_staleness() {
+        use RefusalOutcome::{DefinitelyUnaccepted, NeedsYoloConfirmation, Unresolved};
+        for (definite, yolo, expected, retires) in [
+            (false, false, Unresolved, false),
+            (false, true, NeedsYoloConfirmation, false),
+            (true, false, DefinitelyUnaccepted, true),
+            (true, true, NeedsYoloConfirmation, false),
+        ] {
+            for stale in [false, true] {
+                let headers = refusal_headers(stale, definite, yolo);
+                let outcome = RefusalOutcome::for_action(&headers);
+                assert_eq!(
+                    outcome, expected,
+                    "stale={stale}, definite={definite}, yolo={yolo}"
+                );
+                assert_eq!(outcome.requires_yolo(), yolo);
+                assert_eq!(outcome.retires_retry(), retires);
+            }
+        }
+    }
+
+    /// Header names alone convey no proof: only their recognized values may
+    /// retire a retry or offer consent. Unknown values keep both decoders inert.
+    #[farhelm_testtrace::test]
+    fn unknown_refusal_header_values_do_not_authorize_retry_changes() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        for name in [
+            farhelm_proto::http::PRECONDITION_HEADER,
             farhelm_proto::http::CREATE_OUTCOME_HEADER,
-            reqwest::header::HeaderValue::from_static(
-                farhelm_proto::http::CREATE_OUTCOME_DEFINITELY_UNACCEPTED,
-            ),
+            farhelm_proto::http::YOLO_CONFIRMATION_HEADER,
+        ] {
+            headers.insert(name, reqwest::header::HeaderValue::from_static("unknown"));
+        }
+        assert_eq!(
+            RefusalOutcome::for_create(&headers),
+            RefusalOutcome::Unresolved
         );
-        assert!(is_definitely_unaccepted(&headers));
+        assert_eq!(
+            RefusalOutcome::for_action(&headers),
+            RefusalOutcome::Unresolved
+        );
+    }
+
+    /// Text, transport and authentication failures cannot settle an earlier
+    /// create. A 401 after partial Replace must not permit a second replacement,
+    /// and formatting its error must remain independent of retry policy.
+    #[farhelm_testtrace::test]
+    fn text_transport_and_authentication_refusals_remain_unresolved() {
+        let text = "lost reply".to_string();
+        let create = CreateRefusal::from(text.clone());
+        let action = ActionRefusal::from(text.clone());
+        assert_eq!(create.outcome, RefusalOutcome::Unresolved);
+        assert_eq!(create.text, text);
+        assert_eq!(action.outcome, RefusalOutcome::Unresolved);
+        assert_eq!(action.text, text);
+        for (failure, text) in [
+            (SendError::Request("transport".into()), "transport"),
+            (SendError::Unauthenticated, "authentication is required"),
+            (SendError::Refused("unauthorized".into()), "unauthorized"),
+            (
+                SendError::Refused("unreadable refusal body".into()),
+                "unreadable refusal body",
+            ),
+        ] {
+            let refusal = ActionRefusal::from(failure);
+            assert_eq!(refusal.outcome, RefusalOutcome::Unresolved);
+            assert!(!refusal.outcome.retires_retry());
+            assert_eq!(refusal.text, text);
+        }
     }
 
     /// A successful delete reply yields its notice, `{}` yields none, and an
@@ -5899,7 +6025,7 @@ mod tests {
     /// A create refusal is stale only when the helm's precondition header
     /// says so, whatever the text contains.
     ///
-    /// Staleness asks the form to re-read, independently of definitive create
+    /// Staleness retires the form's retry key, independently of definitive create
     /// refusal. The text can quote a remote supervisor verbatim,
     /// and staleness used to be a marker at the end of that text, so a
     /// supervisor that ended its message with the marker could trigger it.
@@ -5920,8 +6046,7 @@ mod tests {
         let refusal = CreateRefusal::from(
             "ends like the old marker [farhelm:precondition/incarnation]".to_string(),
         );
-        assert!(!refusal.stale);
-        assert!(!refusal.definitely_unaccepted);
+        assert_eq!(refusal.outcome, RefusalOutcome::Unresolved);
     }
 
     /// The YOLO confirmation is offered only when the helm's header says so,
