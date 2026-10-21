@@ -134,6 +134,9 @@ use tracing::info;
 use crate::AppState;
 use crate::store::TemplateBindings;
 use crate::store::{HostId, SessionKey};
+use crate::workspace_trust::{
+    TrustResolvedLaunch, normalize_launch_workspace_trust, try_without_workspace_trust,
+};
 use farhelm_proto::SessionRef;
 
 /// Which connection an upcall arrived on — the whole of what the helm
@@ -1308,11 +1311,12 @@ impl AgentRequestDigest<'_> {
 
 /// Where an agent's create resolved to: the host chosen (with the registry's
 /// name for it, for the audit line and the approval card) and what the
-/// templates and flags produced.
-struct ResolvedCreate {
+/// templates and flags produced. Its launch parameter distinguishes local
+/// resolution from the fixed workspace policy carried through approval.
+struct ResolvedCreate<L = farhelm_proto::SessionLaunch> {
     host: HostId,
     host_name: String,
-    resolution: crate::agent_launch::Resolution,
+    resolution: crate::agent_launch::Resolution<L>,
     /// The install identity a template named the host by, when the host
     /// came from a template and from nothing else (not `--host`, not a
     /// spawn's own host). Dispatch refuses unless the connection it sends on
@@ -1704,36 +1708,53 @@ async fn create_for_agent(
         });
     }
     let mut composition_incarnation = None;
-    if resolved
-        .resolution
-        .launch
-        .agent_selection()
-        .is_some_and(|selection| selection.harness.offers_workspace_trust())
-    {
-        // Inherited launches carry the source supervisor's stored words.
-        // Check those before editing trust, just as clone does: changing
-        // the words first must not hide a forged command/selection pair.
-        crate::yolo_guard::check_agent_wrapper(
-            state,
-            resolved.host,
-            &resolved.resolution.launch,
-            resolved.resolution.agent_wrapper_supplied,
-        )
-        .await?;
-        // Resolve trust before the card. The same launch is carried through
-        // approval and dispatch, so a Settings change while the card waits
-        // cannot silently change what the user approved.
-        let (claim, client) = crate::sessions::host_client(state, resolved.host)?;
-        composition_incarnation = Some(claim.incarnation);
-        resolved.resolution.launch = crate::sessions::normalize_launch_workspace_trust(
-            state,
-            &client,
-            resolved.resolution.launch,
-            &mut resolved.resolution.cwd,
-            false,
-        )
-        .await?;
-    }
+    // No-trust launches skip this original-wrapper check and target read.
+    // Their first wrapper check remains in approve_launch, as before.
+    let launch = match try_without_workspace_trust(resolved.resolution.launch) {
+        Ok(launch) => launch,
+        Err(launch) => {
+            // Inherited launches carry the source supervisor's stored words.
+            // Check those before editing trust, just as clone does: changing
+            // the words first must not hide a forged command/selection pair.
+            crate::yolo_guard::check_agent_wrapper(
+                state,
+                resolved.host,
+                &launch,
+                resolved.resolution.agent_wrapper_supplied,
+            )
+            .await?;
+            // Resolve trust before the card. The same launch is carried through
+            // approval and dispatch, so a Settings change while the card waits
+            // cannot silently change what the user approved.
+            let (claim, client) = crate::sessions::host_client(state, resolved.host)?;
+            composition_incarnation = Some(claim.incarnation);
+            normalize_launch_workspace_trust(
+                state,
+                &client,
+                launch,
+                &mut resolved.resolution.cwd,
+                false,
+            )
+            .await?
+        }
+    };
+    // Transfer the same metadata across the trust boundary. The one launch
+    // shown on the card remains the typed value consumed at dispatch.
+    let resolved = ResolvedCreate {
+        host: resolved.host,
+        host_name: resolved.host_name,
+        template_identity: resolved.template_identity,
+        resolution: crate::agent_launch::Resolution {
+            launch,
+            prompt: resolved.resolution.prompt,
+            cwd: resolved.resolution.cwd,
+            github_repo: resolved.resolution.github_repo,
+            agent_wrapper_supplied: resolved.resolution.agent_wrapper_supplied,
+            title: resolved.resolution.title,
+            title_kind: resolved.resolution.title_kind,
+            template_host: resolved.resolution.template_host,
+        },
+    };
     let verb = match &edits.spawn {
         Some(placement) if placement.inherit_agent => LaunchVerb::SpawnInherited,
         Some(_) => LaunchVerb::Spawn,
@@ -1752,7 +1773,7 @@ async fn create_for_agent(
             cwd: resolved.resolution.cwd.clone(),
             repo: None,
             title: resolved.resolution.title.clone(),
-            launch: resolved.resolution.launch.clone(),
+            launch: resolved.resolution.launch.as_launch().clone(),
             agent_wrapper_supplied,
             source: None,
         },
@@ -1800,7 +1821,7 @@ async fn create_checkout_for_agent(
         .github_repo
         .clone()
         .expect("managed destination selected");
-    resolution.launch = crate::sessions::normalize_launch_workspace_trust(
+    let launch = normalize_launch_workspace_trust(
         state,
         &client,
         resolution.launch,
@@ -1808,13 +1829,25 @@ async fn create_checkout_for_agent(
         true,
     )
     .await?;
+    // Fresh intent resolves trust before its original-wrapper check. Keep
+    // this order, and carry this exact launch past preview and approval.
+    let mut resolution = crate::agent_launch::Resolution {
+        launch,
+        prompt: resolution.prompt,
+        cwd: resolution.cwd,
+        github_repo: resolution.github_repo,
+        agent_wrapper_supplied: resolution.agent_wrapper_supplied,
+        title: resolution.title,
+        title_kind: resolution.title_kind,
+        template_host: resolution.template_host,
+    };
     // A keyed retry still checks today's resolved request, as it does for
     // other agent creates. Recovery below also checks the retained launch
     // before it can run; neither check stands in for the other.
     crate::yolo_guard::check_agent_wrapper(
         state,
         claim.host,
-        &resolution.launch,
+        resolution.launch.as_launch(),
         resolution.agent_wrapper_supplied,
     )
     .await?;
@@ -1961,7 +1994,7 @@ async fn create_checkout_for_agent(
             cwd: preview.binding.cwd.clone(),
             repo: Some(repo.clone()),
             title: resolution.title.clone(),
-            launch: resolution.launch.clone(),
+            launch: resolution.launch.as_launch().clone(),
             agent_wrapper_supplied: resolution.agent_wrapper_supplied,
             source: None,
         },
@@ -2441,12 +2474,14 @@ fn template_host_moved(
     )))
 }
 
-/// Send one resolved agent create to its host.
+/// Send the launch whose workspace policy was fixed before approval.
+/// Destination and template checks remain dispatch-time checks; a resolved
+/// trust policy does not make either connection observation current forever.
 async fn dispatch_agent_create(
     state: &AppState,
     origin: AgentOrigin,
     asking_session: &str,
-    resolved: ResolvedCreate,
+    resolved: ResolvedCreate<TrustResolvedLaunch>,
     dispatch: AgentCreateDispatch,
 ) -> anyhow::Result<AgentReply> {
     // The claim and the client come from ONE read, which is what lets every
@@ -3117,9 +3152,7 @@ async fn clone_for_agent(
         .agent_selection()
         .is_some_and(|selection| selection.wrapper_prefix.is_some());
     crate::yolo_guard::check_agent_wrapper(state, host, &mode, agent_wrapper_supplied).await?;
-    let mode =
-        crate::sessions::normalize_launch_workspace_trust(state, &client, mode, &mut cwd, false)
-            .await?;
+    let mode = normalize_launch_workspace_trust(state, &client, mode, &mut cwd, false).await?;
     // The source's title is copied VERBATIM, empty string included: a clone
     // that let the target derive a title from the directory would silently
     // rename the copy, which is the one thing a user reading two rows side by
@@ -3137,7 +3170,7 @@ async fn clone_for_agent(
             cwd: cwd.clone(),
             repo: None,
             title: Some(title.clone()),
-            launch: mode.clone(),
+            launch: mode.as_launch().clone(),
             agent_wrapper_supplied,
             source: Some(
                 crate::approvals::describe_session(state, &source_key, &source_claim.entry_uuid)
@@ -7526,9 +7559,28 @@ mod tests {
             spawn: None,
         };
         let resolve = async || {
-            resolve_agent_create(&h.state, origin_of(&h, local), &request)
+            let resolved = resolve_agent_create(&h.state, origin_of(&h, local), &request)
                 .await
-                .expect("the template's host resolves")
+                .expect("the template's host resolves");
+            // This test holds a command launch across a host replacement.
+            // Choose its no-trust policy without adding a host observation.
+            let launch = try_without_workspace_trust(resolved.resolution.launch)
+                .expect("the fixture uses a command launch");
+            ResolvedCreate {
+                host: resolved.host,
+                host_name: resolved.host_name,
+                template_identity: resolved.template_identity,
+                resolution: crate::agent_launch::Resolution {
+                    launch,
+                    prompt: resolved.resolution.prompt,
+                    cwd: resolved.resolution.cwd,
+                    github_repo: resolved.resolution.github_repo,
+                    agent_wrapper_supplied: resolved.resolution.agent_wrapper_supplied,
+                    title: resolved.resolution.title,
+                    title_kind: resolved.resolution.title_kind,
+                    template_host: resolved.resolution.template_host,
+                },
+            }
         };
         let dispatch = || AgentCreateDispatch {
             intent_key: None,
@@ -9606,7 +9658,7 @@ mod tests {
             .await
             .unwrap();
         let (claim, client) = crate::sessions::host_client(&h.state, resolved.host).unwrap();
-        resolved.resolution.launch = crate::sessions::normalize_launch_workspace_trust(
+        let launch = normalize_launch_workspace_trust(
             &h.state,
             &client,
             resolved.resolution.launch,
@@ -9615,10 +9667,26 @@ mod tests {
         )
         .await
         .unwrap();
+        let resolved = ResolvedCreate {
+            host: resolved.host,
+            host_name: resolved.host_name,
+            template_identity: resolved.template_identity,
+            resolution: crate::agent_launch::Resolution {
+                launch,
+                prompt: resolved.resolution.prompt,
+                cwd: resolved.resolution.cwd,
+                github_repo: resolved.resolution.github_repo,
+                agent_wrapper_supplied: resolved.resolution.agent_wrapper_supplied,
+                title: resolved.resolution.title,
+                title_kind: resolved.resolution.title_kind,
+                template_host: resolved.resolution.template_host,
+            },
+        };
         assert_eq!(
             resolved
                 .resolution
                 .launch
+                .as_launch()
                 .agent_selection()
                 .unwrap()
                 .workspace_trust,
