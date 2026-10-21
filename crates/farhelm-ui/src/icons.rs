@@ -108,9 +108,9 @@ pub(crate) fn ManagedCheckoutMark(
     #[props(default = false)] show_repository: bool,
 ) -> Element {
     let repo = crate::peer::display_peer(&checkout.repo.identifier());
-    let path = crate::peer::display_peer(&checkout.canonical_path);
+    let path = checkout.canonical_path.escaped();
     let mut description = format!(" at {path}.");
-    if cwd != checkout.canonical_path {
+    if cwd != checkout.canonical_path.raw() {
         description.push_str(&format!(
             " Session folder: {}.",
             crate::peer::display_peer(&cwd)

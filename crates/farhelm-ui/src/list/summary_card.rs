@@ -52,11 +52,14 @@ pub(super) fn SessionSummarySource(
     };
     let host_known = session.host_name.is_some() || locality != HostLocality::Unknown;
     let checkout = session.working_copy.as_ref().map(|copy| {
+        // Choose the basename from the actual path before PeerLine escapes it;
+        // display notation is not part of the filesystem spelling.
         let folder = copy
             .canonical_path
+            .raw()
             .rsplit('/')
             .find(|segment| !segment.is_empty())
-            .unwrap_or(&copy.canonical_path);
+            .unwrap_or(copy.canonical_path.raw());
         vec![
             DetailPart::peer(copy.repo.identifier()),
             DetailPart::text(" · "),
@@ -248,6 +251,25 @@ mod tests {
                 "missing {expected}: {managed_text:?}"
             );
         }
+    }
+
+    /// Checkout summaries select the raw basename, then escape that peer run.
+    /// A trailing slash must not discard the real folder or expose its controls.
+    #[farhelm_testtrace::test]
+    fn checkout_summary_escapes_the_raw_basename() {
+        let mut session = row_specimen("managed");
+        session.working_copy = Some(WorkingCopyInfo {
+            id: "checkout".into(),
+            repo: GithubRepo::parse("owner/project").unwrap(),
+            canonical_path: "/srv/checkouts/project\u{202e}/".into(),
+            origin_session_id: "managed".into(),
+        });
+        let shown = text_values(&render(session, HostLocality::Unknown, None));
+        assert!(shown.contains(&"project<U+202E>".to_string()), "{shown:?}");
+        assert!(
+            shown.iter().all(|text| !text.contains('\u{202e}')),
+            "{shown:?}"
+        );
     }
 
     /// A stored guarded launch must not conceal screen evidence in the real card.

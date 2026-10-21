@@ -2704,6 +2704,8 @@ fn create_body(
 /// Capture one fresh create before dispatch, using the same agent/title shape
 /// as ordinary creates. The returned payload is retained across ambiguous
 /// outcomes; rebuilding it from a later preview would describe a new checkout.
+/// Both the top-level cwd and nested preview carry original reply bytes, never
+/// the escaped spelling shown by the composer.
 pub(crate) fn fresh_create_body(
     agent: CreateAgent<'_>,
     key: &str,
@@ -2711,7 +2713,7 @@ pub(crate) fn fresh_create_body(
     checkout: &GithubCheckoutRequest,
 ) -> serde_json::Value {
     let mut body = create_body(
-        &checkout.preview.cwd,
+        checkout.preview.cwd.raw(),
         agent,
         checkout.title.as_deref().unwrap_or_default(),
         key,
@@ -5704,6 +5706,38 @@ mod tests {
         assert_eq!(body["prompt"], message);
         assert_eq!(body["github_checkout"], serde_json::json!(checkout));
         assert!(body["launch"].get("prompt").is_none());
+    }
+
+    /// An accepted preview is round-trip evidence, not display text. The create
+    /// body must keep every decoded byte, including an empty basename and unsafe
+    /// path/identity characters, rather than submitting their visible escapes.
+    #[farhelm_testtrace::test]
+    fn fresh_create_body_preserves_decoded_preview_bytes() {
+        let wire = serde_json::json!({
+            "canonical_root": "/work/\u{200b}",
+            "basename": "",
+            "cwd": "/work/\u{200b}/bar\u{202e}",
+            "config_revision": 7,
+            "host": "3",
+            "incarnation": 5,
+            "installation_identity": "installation a\u{200b}",
+        });
+        let checkout = GithubCheckoutRequest {
+            repo: "acme/bar".into(),
+            title: None,
+            preview: serde_json::from_value(wire.clone()).unwrap(),
+        };
+        let command = crate::CommandLaunch {
+            command: "agent".into(),
+            yolo: false,
+            agent: None,
+            resume: None,
+        };
+        let body = fresh_create_body(CreateAgent::Command(&command), "intent", 3, &checkout);
+        assert_eq!(body["cwd"], "/work/\u{200b}/bar\u{202e}");
+        assert_eq!(body["github_checkout"]["preview"], wire);
+        assert_eq!(body["github_checkout"]["repo"], "acme/bar");
+        assert_eq!(body["intent_key"], "intent");
     }
 
     /// A create carries the connection it was prepared against, in both

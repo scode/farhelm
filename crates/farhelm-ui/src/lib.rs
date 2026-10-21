@@ -2360,10 +2360,10 @@ mod tests {
         let borrower: Session = serde_json::from_value(body.clone()).unwrap();
         assert_eq!(borrower.github_repo, None);
         let association = borrower.working_copy.unwrap();
-        assert_eq!(association.id, "checkout-1");
+        assert_eq!(association.id.raw(), "checkout-1");
         assert_eq!(association.repo.identifier(), "acme/bar");
-        assert_eq!(association.canonical_path, "/work/bar-1");
-        assert_eq!(association.origin_session_id, "origin");
+        assert_eq!(association.canonical_path.raw(), "/work/bar-1");
+        assert_eq!(association.origin_session_id.raw(), "origin");
         assert_eq!(borrower.cwd, "/work/bar-1/subdir");
 
         body["id"] = serde_json::json!("origin");

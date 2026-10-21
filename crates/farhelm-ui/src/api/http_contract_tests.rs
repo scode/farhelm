@@ -104,22 +104,16 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
     );
     assert_eq!(row.notifications_read_through, 3);
     let repo = row.github_repo.as_ref().expect("github_repo decodes");
-    assert_eq!(
-        (repo.owner.as_str(), repo.name.as_str()),
-        ("octo", "widgets")
-    );
+    assert_eq!((repo.owner.raw(), repo.name.raw()), ("octo", "widgets"));
     let working_copy = row.working_copy.as_ref().expect("working_copy decodes");
-    assert_eq!(working_copy.id, "wc-1");
+    assert_eq!(working_copy.id.raw(), "wc-1");
     assert_eq!(
-        (
-            working_copy.repo.owner.as_str(),
-            working_copy.repo.name.as_str()
-        ),
+        (working_copy.repo.owner.raw(), working_copy.repo.name.raw()),
         ("octo", "widgets")
     );
-    assert_eq!(working_copy.canonical_path, "/home/user/src/widgets");
+    assert_eq!(working_copy.canonical_path.raw(), "/home/user/src/widgets");
     assert_eq!(
-        working_copy.origin_session_id,
+        working_copy.origin_session_id.raw(),
         "11111111-1111-4111-8111-111111111111:fh-0123abcd"
     );
 }
