@@ -903,14 +903,14 @@ fn confirmed_submission_refusal(
 #[component]
 fn PlanStepList(confirmation: String, steps: Option<PlanSteps>) -> Element {
     let Some(steps) = steps else {
-        return rsx! { PeerBlock { class: "provisioning-plan", text: confirmation } };
+        return rsx! { PeerBlock { class: "provisioning-plan", text: confirmation.into() } };
     };
     rsx! {
         div { class: "provisioning-plan provisioning-stepper-plan",
             div { class: "provisioning-plan-heading",
                 PeerLine {
                     class: "provisioning-plan-lead",
-                    parts: vec![DetailPart::Peer(steps.lead)],
+                    parts: vec![DetailPart::peer(steps.lead)],
                 }
                 button {
                     r#type: "button",
@@ -927,7 +927,7 @@ fn PlanStepList(confirmation: String, steps: Option<PlanSteps>) -> Element {
                         div { class: "provisioning-plan-detail",
                             PeerLine {
                                 class: "provisioning-plan-step-name",
-                                parts: vec![DetailPart::Peer(step.name)],
+                                parts: vec![DetailPart::peer(step.name)],
                             }
                             if !step.paths.is_empty() {
                                 div { class: "provisioning-plan-paths",
@@ -944,7 +944,7 @@ fn PlanStepList(confirmation: String, steps: Option<PlanSteps>) -> Element {
                             if let Some(explanation) = step.explanation {
                                 PeerLine {
                                     class: "provisioning-plan-explanation",
-                                    parts: vec![DetailPart::Peer(explanation)],
+                                    parts: vec![DetailPart::peer(explanation)],
                                 }
                             }
                         }
@@ -954,7 +954,7 @@ fn PlanStepList(confirmation: String, steps: Option<PlanSteps>) -> Element {
             if let Some(kept) = steps.kept {
                 PeerLine {
                     class: "provisioning-plan-kept",
-                    parts: vec![DetailPart::Peer(kept)],
+                    parts: vec![DetailPart::peer(kept)],
                 }
             }
         }
@@ -3130,7 +3130,7 @@ pub(crate) fn ProvisioningPanel(
                                     if let Some(message) = step.message {
                                         PeerLine {
                                             class: "provisioning-step-message",
-                                            parts: vec![DetailPart::Peer(message)],
+                                            parts: vec![DetailPart::peer(message)],
                                         }
                                     }
                                 }
@@ -3139,7 +3139,7 @@ pub(crate) fn ProvisioningPanel(
                         if let Some(message) = view.message {
                             PeerLine {
                                 class: "provisioning-run-message",
-                                parts: vec![DetailPart::Peer(message)],
+                                parts: vec![DetailPart::peer(message)],
                             }
                         }
                 }
@@ -3280,19 +3280,19 @@ pub(crate) fn ProvisioningPanel(
             if let Some(error) = current_error {
                 PeerLine {
                     class: "action-error provisioning-error",
-                    parts: vec![DetailPart::Peer(error)],
+                    parts: vec![DetailPart::peer(error)],
                 }
             }
             if let Some(warning) = current_warning {
                 PeerLine {
                     class: "host-warning provisioning-warning",
-                    parts: vec![DetailPart::Peer(warning)],
+                    parts: vec![DetailPart::peer(warning)],
                 }
             }
             if let Some(error) = current_progress_error {
                 PeerLine {
                     class: "action-error provisioning-read-error",
-                    parts: vec![DetailPart::Peer(error)],
+                    parts: vec![DetailPart::peer(error)],
                 }
             }
             if local_setup && let Some(remedy) = manual_remedy {

@@ -107,9 +107,9 @@ pub(crate) fn SshHelpDialog(destination: Option<String>, on_close: EventHandler<
                     p { "We recommend taking a screenshot of this dialog and asking an agent to set up a script that automates these commands for you." }
                     match result.read().as_ref() {
                         None => rsx! { p { role: "status", "loading connection commands…" } },
-                        Some(Err(error)) => rsx! { PeerLine { class: "create-session-error", parts: vec![crate::peer::DetailPart::Peer(error.clone())] } },
+                        Some(Err(error)) => rsx! { PeerLine { class: "create-session-error", parts: vec![crate::peer::DetailPart::peer(error.clone())] } },
                         Some(Ok(help)) => rsx! {
-                            for reason in &help.unavailable { PeerLine { class: "create-session-error", parts: vec![crate::peer::DetailPart::Peer(reason.clone())] } }
+                            for reason in &help.unavailable { PeerLine { class: "create-session-error", parts: vec![crate::peer::DetailPart::peer(reason.clone())] } }
                             if extra_requested {
                                 if let Some(extra) = &help.extra { HostCommands { host: extra.clone() } }
                                 else { section { h3 { "the host you're adding" } p { "Enter an ssh destination in Add host first." } } }

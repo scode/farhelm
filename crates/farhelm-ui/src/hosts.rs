@@ -175,7 +175,7 @@ fn HostRefusalDialog(
                     p { class: "host-settings-value peer-value host-dialog-destination", dir: "ltr", "{destination}" }
                     PeerLine {
                         class: "host-refusal-reason",
-                        parts: vec![DetailPart::Peer(refusal.reason)],
+                        parts: vec![DetailPart::peer(refusal.reason)],
                     }
                 }
                 div { class: "host-settings-footer host-dialog-footer",
@@ -1999,7 +1999,7 @@ pub(crate) fn HostsPanel(
             if let Some(warning) = add_warning() {
                 PeerLine {
                     class: "host-warning add-host-warning",
-                    parts: vec![DetailPart::Peer(warning)],
+                    parts: vec![DetailPart::peer(warning)],
                 }
             }
             if let Some(error) = add_error() {
@@ -2504,9 +2504,9 @@ fn resolve_edit_submission(field: EditField, value: &str) -> Result<EditSubmissi
 fn uninstall_notice_parts(notice: &UninstallNotice) -> Vec<DetailPart> {
     vec![
         DetailPart::Text("Farhelm was removed from ".to_string()),
-        DetailPart::Peer(notice.host_name.clone()),
+        DetailPart::peer(notice.host_name.clone()),
         DetailPart::Text("; its data remains in ".to_string()),
-        DetailPart::Peer(notice.state_dir.clone()),
+        DetailPart::peer(notice.state_dir.clone()),
         DetailPart::Text(" on that host.".to_string()),
     ]
 }
@@ -2573,7 +2573,7 @@ fn peer_parts_tooltip(parts: &[DetailPart]) -> String {
         .iter()
         .map(|part| match part {
             DetailPart::Text(text) => text.clone(),
-            DetailPart::Peer(value) => format!("\u{2066}{}\u{2069}", display_peer(value)),
+            DetailPart::Peer(value) => format!("\u{2066}{}\u{2069}", value.escaped()),
         })
         .collect()
 }
@@ -2979,7 +2979,7 @@ fn UpdateProgressPopup(
                             if let Some(message) = step.message {
                                 PeerLine {
                                     class: "provisioning-step-message",
-                                    parts: vec![DetailPart::Peer(message)],
+                                    parts: vec![DetailPart::peer(message)],
                                 }
                             }
                         }
@@ -3991,7 +3991,7 @@ fn HostRow(
             if let Some(error) = error {
                 PeerLine {
                     class: "action-error host-error",
-                    parts: vec![DetailPart::Peer(error)],
+                    parts: vec![DetailPart::peer(error)],
                 }
             }
             // Distinct from an error on purpose: this one says the change
@@ -3999,7 +3999,7 @@ fn HostRow(
             if let Some(warning) = warning {
                 PeerLine {
                     class: "host-warning",
-                    parts: vec![DetailPart::Peer(warning)],
+                    parts: vec![DetailPart::peer(warning)],
                 }
             }
             {provisioning_section}
@@ -4207,7 +4207,7 @@ struct AddReopen {
 
 /// Keep probe and manual diagnostics inside the peer-text boundary.
 fn probe_error_parts(error: String) -> Vec<DetailPart> {
-    vec![DetailPart::Peer(error)]
+    vec![DetailPart::peer(error)]
 }
 
 /// The details-view "destination: ..." line an aliased host shows —
@@ -5048,7 +5048,7 @@ mod tests {
         let peers: Vec<&str> = parts
             .iter()
             .filter_map(|part| match part {
-                DetailPart::Peer(value) => Some(value.as_str()),
+                DetailPart::Peer(value) => Some(value.raw()),
                 DetailPart::Text(_) => None,
             })
             .collect();
@@ -5056,7 +5056,8 @@ mod tests {
         let text: String = parts
             .iter()
             .map(|part| match part {
-                DetailPart::Text(value) | DetailPart::Peer(value) => value.as_str(),
+                DetailPart::Text(value) => value.as_str(),
+                DetailPart::Peer(value) => value.raw(),
             })
             .collect();
         assert_eq!(
@@ -5222,7 +5223,7 @@ mod tests {
         let peers: Vec<&str> = parts
             .iter()
             .filter_map(|part| match part {
-                DetailPart::Peer(value) => Some(value.as_str()),
+                DetailPart::Peer(value) => Some(value.raw()),
                 DetailPart::Text(_) => None,
             })
             .collect();
@@ -5333,7 +5334,7 @@ mod tests {
         .expect("a skew always has a remediation to print");
         assert_eq!(
             remedy,
-            vec![DetailPart::Peer(
+            vec![DetailPart::peer(
                 "update this helm to at least 0.2.0".to_string()
             )],
         );

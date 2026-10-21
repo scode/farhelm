@@ -6052,7 +6052,7 @@ pub(super) fn CreateSessionForm(
                 // still get the same escaping and directional isolation.
                 PeerLine {
                     class: "create-session-error launch-composer-refusal".to_string(),
-                    parts: vec![DetailPart::Peer(err)],
+                    parts: vec![DetailPart::peer(err)],
                 }
             }
             if let Some((candidate, host_label)) = template_panel() {
@@ -7428,7 +7428,7 @@ pub(super) fn CreateSessionForm(
             if let Some(reason) = browse_error.read().clone() {
                 PeerLine {
                     class: "create-session-error".to_string(),
-                    parts: vec![DetailPart::Peer(reason)],
+                    parts: vec![DetailPart::peer(reason)],
                 }
             }
             if let Some((result_authority, result)) = browse_result.read().clone()

@@ -310,7 +310,7 @@ fn NotificationList(
                         }
                         PeerLine {
                             class: "session-bell-text".to_string(),
-                            parts: vec![DetailPart::Peer(notification.text.clone())],
+                            parts: vec![DetailPart::peer(notification.text.clone())],
                         }
                     }
                 }

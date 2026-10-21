@@ -528,7 +528,7 @@ fn CardDetail(row: CardRow) -> Element {
                 dd { PeerBlock {
                     class: if matches!(label, "initial prompt" | "prompt") { "approval-card-block approval-card-prompt" } else { "approval-card-block" },
                     scroll_label: matches!(label, "initial prompt" | "prompt").then(|| label.to_string()),
-                    text
+                    text: text.into()
                 } }
             }
         },

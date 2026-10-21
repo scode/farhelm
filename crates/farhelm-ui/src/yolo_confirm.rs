@@ -262,7 +262,7 @@ pub(crate) fn YoloConfirmation(
             if let Some(error) = error {
                 PeerLine {
                     class: "yolo-confirmation-error action-error".to_string(),
-                    parts: vec![DetailPart::Peer(error)],
+                    parts: vec![DetailPart::peer(error)],
                 }
             }
             div { class: "yolo-confirmation-actions",
