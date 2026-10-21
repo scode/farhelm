@@ -2652,3 +2652,45 @@ Error: element(s) not found
 Class: unknown
 
 Cause: hypothesis
+
+## 2026-10-21 — hung-save deadline wakes early (crates/farhelm-ui/src/api/save_order.rs)
+
+`api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline` failed once each in four landing-round runs on
+shared Linux x86_64, every time in a run that did not change the UI crate and every time alone (no other test failed in
+the same run). The latest is workspace run `68a7a44f-3142-4013-aaef-7d0dc5350e0c`:
+`cargo nextest run --workspace --exclude farhelm-desktop`, four nextest slots, zero retries, tested commit `de5457bb`
+with a clean tree, pinned nextest 0.9.148, tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale `C.UTF-8`, child `FARHELM_*` names only
+`FARHELM_TEST_TRACE_DIR`. The test failed fast on its assertion, in 0.135 seconds against about 0.04 seconds for its
+neighbours; contemporaneous load was not sampled beyond the full four-slot battery itself. The earlier observations:
+workspace runs `e5bf0834` (2026-10-18) and `d854fd00` (2026-10-18), whose records were lost to a reboot, and the UI
+desktop-feature run `d8ff6545-9b27-45f8-aa33-7dfac8f07108` (2026-10-21). Isolated repetitions of the exact test all
+passed: 40 of 40 (`b071b4cd`, record not retained), 10 of 10 across separate runs
+(`cf59c02f-5593-4797-9f85-fcb7d8a3860d` to `c54107ae-30a5-4f5f-ae4a-b142f0bd3980`) and 50 of 50 in one nextest stress
+run (`e1bfd2c4-f6cd-4627-8ab3-028d8dd8ca26`). The test and the code it covers have not changed since #2062 (2026-10-15).
+
+Later observation, 2026-10-22: with the desktop feature (`cargo nextest run -p farhelm-ui --features desktop --lib`,
+exact test, `--stress-count 50`, zero retries), it failed alone, not only under a loaded battery. On main `9d266e28` it
+failed 1, 4 and 5 of 50 (runs `50cdeddd-9320-48d7-9d33-b2efb94e1fbd`, `51ac110a-7dc8-47d8-ba61-1e2643522786`,
+`474fd738-d650-4dc2-afc6-c98d710bbd8f`); on a landing stack for the failed number-key save change (#2583), which does
+not change this module, it failed 10, 12, 9 and 20 of 50 (runs `25378352-1585-4c08-bd83-1164673b5089`,
+`47f8f8c9-fc3d-4935-bb2b-ed6de9ad850b`, `283d6cb7-5fd3-4c66-9f5a-cbcc9cca4958`, `bacf1ea5-34e3-46ba-b1d8-0f47865d1101`),
+alternating main and the stack back to back on the same machine. That fits the rounding hypothesis below, which predicts
+failures whenever the test's setup takes a fraction of a millisecond, independent of load, and suggests small timing
+shifts from unrelated code change how often that happens; it was not tested further.
+
+Hypothesis, not confirmed: `remaining` arms its deadline timer for `timeout - started.elapsed()` converted with
+`as_millis()`, which truncates. Any setup time between the test's `started` and the call drops the timer to 29
+milliseconds, and the timer can then complete a little under 30 milliseconds after `started`, so the error is returned
+before the test's `started.elapsed() >= 30ms` assertion holds. More setup time under a loaded battery makes that
+likelier, which fits failures seen only in full runs. If so, production can time out up to a millisecond early, which is
+harmless; the fix would be to round the timer up or to recheck the elapsed time before reporting the timeout. Open; no
+fix attempted.
+
+```text
+assertion failed: started.elapsed() >= Duration::from_millis(30)
+```
+
+Class: budget
+
+Cause: hypothesis

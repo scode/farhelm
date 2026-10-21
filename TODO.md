@@ -235,6 +235,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Hung-save deadline wakes a millisecond early.** The farhelm-ui unit test
+  `api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline` in `crates/farhelm-ui/src/api/save_order.rs`
+  asserts that a read queued behind a save that never finishes waits at least 30 milliseconds before giving up, and has
+  seen less in four loaded runs that did not touch the UI crate: workspace runs `e5bf0834` and `d854fd00` (records not
+  retained), the desktop-feature run `d8ff6545-9b27-45f8-aa33-7dfac8f07108` and workspace run
+  `68a7a44f-3142-4013-aaef-7d0dc5350e0c`. Early isolated repetitions all passed (40, 10 and 50 attempts), but on
+  2026-10-22, with the desktop feature, it failed alone too: 1, 4 and 5 of 50 in nextest stress runs on main, and 9 to
+  20 of 50 on a landing stack that does not change its module. Hypothesis: the waiter's timer is armed for the remaining
+  budget truncated to whole milliseconds, so it can fire just under 30 milliseconds after the test's start when setup
+  took a fraction of a millisecond (FLAKES.md, 2026-10-21).
+
 - **Interrupted-card Replace clicks lost under load.** The WebKit test
   `don't ask again on a refused YOLO replace marks the host, then replaces with the override` in
   `e2e/tests/terminal-restart.spec.ts` failed in full browser run `49c74525-36ad-44e1-825b-878edadfd71c`: the Replace
