@@ -16,15 +16,15 @@
 //! Three review rounds each found another way focus could leave, so the
 //! guarantee is layered:
 //!
-//! 1. **Structural (primary).** While mounted, the dialog isolates itself
-//!    with [`crate::modal_isolation`]: everything outside it is `inert`, and
+//! 1. **Structural (primary).** While mounted, [`crate::modal_dialog`] installs
+//!    [`crate::modal_isolation`]: everything outside the dialog is `inert`, and
 //!    a capture-phase `keydown` net pulls stray focus back, swallowing that
 //!    key (Escape still cancels unless busy). Other code calling `focus()`
 //!    behind the modal is a no-op, and Tab from `body` can only reach the
 //!    dialog.
 //! 2. **Per-mechanism (second layer, for engines without `inert`).**
 //!    `terminal.js` refuses to focus a terminal on reveal or on a selection
-//!    change while `.restart-with-dialog` is mounted; the dialog's own Tab
+//!    change while `.restart-with-dialog` is mounted; the shell's Tab
 //!    trap wraps at its first and last real tab stops; and the controls
 //!    follow the rule below.
 //!
@@ -54,7 +54,7 @@ use dioxus::prelude::*;
 use crate::api;
 use crate::launch_composer::{self, ModelEnterTarget, ModelOption};
 use crate::launch_controls::{LaunchControls, enter_choice};
-use crate::modal_isolation;
+use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog, TabTrap};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::{ApiBase, CommandLaunch, LaunchEffort, LaunchPermission, LaunchSelection, Session};
 
@@ -135,74 +135,6 @@ fn restart_baseline(session: &Session) -> Option<RestartEdit> {
 /// Selector for the mounted dialog, shared by its focus trap, its isolation
 /// and the session view's close path that releases that isolation.
 pub(crate) const RESTART_WITH_DIALOG_SELECTOR: &str = r#".restart-with-dialog[role="dialog"]"#;
-
-/// Take focus into the modal and isolate the page behind it.
-///
-/// Initial focus goes to cancel, then [`crate::modal_isolation`] marks
-/// everything outside the dialog `inert` and arms its keydown net (see the
-/// module docs for why this dialog needs it). The order matters: inerting an
-/// ancestor of whatever held focus before the dialog opened would blur it to
-/// `body` instead of handing it to the dialog.
-///
-/// The Tab trap below is the second layer. `aria-modal` does not trap Tab in
-/// every renderer, and with the rest of the page inert, native Tab past the
-/// last control would leave for the browser chrome instead of wrapping. If a
-/// render ever leaves nothing focusable, Tab parks focus on the dialog
-/// container (`tabindex="-1"`) rather than letting the browser walk out to
-/// the page behind it, which matters most in an engine without `inert`.
-///
-/// The container itself counts as the start of the cycle: focus parked there
-/// by the fallback or by the keydown net would otherwise leave the page on
-/// Shift+Tab, since everything before it is inert.
-///
-/// The trap counts only real tab stops. The model combobox's open option rows
-/// are `tabindex="-1"` buttons (they are reached through the input's active
-/// descendant, and blur unmounts them), so listing them would give the trap
-/// boundaries that native Tab never visits.
-///
-/// Empty space preserves the focused control. If another route parks focus
-/// on the container, Enter presses the displayed action; its native disabled
-/// state still protects an unchanged draft.
-fn install_focus_trap() {
-    let trap = r#"(() => {
-            const dialog = document.querySelector(__DIALOG__);
-            if (!dialog || dialog.__farhelmRestartWithTrap) return;
-            dialog.__farhelmRestartWithTrap = true;
-            dialog.querySelector('.restart-with-cancel')?.focus({ preventScroll: true });
-            const focusable = () => [...dialog.querySelectorAll(
-                'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"])',
-            )].filter(node => !node.hidden && node.getClientRects().length);
-            dialog.addEventListener('keydown', event => {
-                if (event.key !== 'Tab') return;
-                const nodes = focusable();
-                if (!nodes.length) {
-                    event.preventDefault();
-                    dialog.focus({ preventScroll: true });
-                    return;
-                }
-                const first = nodes[0], last = nodes[nodes.length - 1];
-                // The container precedes every control, so Shift+Tab from it
-                // (where the fallback and the isolation's keydown net park
-                // focus) wraps to the last stop like Shift+Tab from the first.
-                const atStart = document.activeElement === first || document.activeElement === dialog;
-                if (event.shiftKey ? atStart : document.activeElement === last) {
-                    event.preventDefault();
-                    (event.shiftKey ? last : first).focus();
-                }
-            });
-        })();"#
-        .replace(
-            "__DIALOG__",
-            &serde_json::to_string(RESTART_WITH_DIALOG_SELECTOR).expect("a string always serializes"),
-        );
-    let isolate =
-        modal_isolation::install_js(RESTART_WITH_DIALOG_SELECTOR, Some(".restart-with-cancel"));
-    let focus = crate::dialog_focus::install_js(
-        RESTART_WITH_DIALOG_SELECTOR,
-        crate::dialog_focus::ContainerEnter::Click(".restart-with-submit"),
-    );
-    document::eval(&format!("{trap}\n{focus}\n{isolate}"));
-}
 
 /// Keep focus inside the modal before a primary action makes its controls busy.
 ///
@@ -538,7 +470,20 @@ pub(crate) fn RestartWithDialog(
 
     rsx! {
         div { class: "restart-with-backdrop", role: "presentation",
-            div {
+            ModalDialog {
+                handle: DialogHandle::new(RESTART_WITH_DIALOG_SELECTOR),
+                focus: DialogFocus {
+                    initial_focus: ".restart-with-cancel",
+                    // Model option rows are arrow-owned tabindex=-1 buttons;
+                    // native Tab never visits them, so neither may this trap.
+                    trap: TabTrap {
+                        selector: "button:not([disabled]):not([tabindex=\"-1\"]), input:not([disabled]):not([tabindex=\"-1\"])",
+                        empty_to_root: true,
+                        reverse_from_root: true,
+                    },
+                    escape_target: ".restart-with-cancel",
+                    main_action: ".restart-with-submit",
+                },
                 class: "restart-with-dialog",
                 role: "dialog",
                 aria_modal: "true",
@@ -547,15 +492,16 @@ pub(crate) fn RestartWithDialog(
                 // fallback and the isolation's keydown net put focus back.
                 // `-1` keeps the container itself out of the Tab order.
                 tabindex: "-1",
-                onmounted: move |_| install_focus_trap(),
+                on_escape: move |evt: KeyboardEvent| {
+                    if !evt.is_composing() && !busy {
+                        on_cancel.call(());
+                    }
+                },
                 onkeydown: move |evt: KeyboardEvent| {
                     if evt.key() == Key::Enter && (evt.is_auto_repeating() || evt.is_composing()) {
                         // Native action-button activation needs the same held-key
                         // boundary as the explicit choice and text-field paths.
                         evt.prevent_default();
-                    }
-                    if evt.key() == Key::Escape && !evt.is_composing() && !busy {
-                        on_cancel.call(());
                     }
                 },
                 h2 { class: "restart-with-title", "restart with · {title}" }
