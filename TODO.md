@@ -163,10 +163,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   takes the spare, the other clones normally), building the spare in a temporary directory and moving it into place when
   done, and discarding spares when the cache is evicted, the checkout folder changes, or the post-clone command changes.
 
-- **Give the Settings dialog more structure.** Settings has grown into one long page that takes endless scrolling to get
-  through. Overhaul it with more structure, such as tabs, so related settings are grouped and any one of them is easy to
-  find. The grouping and layout are TBD. Plan: `plans/queue/structured-settings-dialog.md`.
-
 - **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
   session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
   request, and the command is hidden from agents. One gap remains where a delivered message could do something the user

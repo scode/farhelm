@@ -62,7 +62,7 @@ explains each, including **custom** for supplying your own permission flags. Swi
 clears any choice it cannot take, and the launcher tells you when it does. If that leaves a riskier permission mode
 than you had, a red banner says so and offers **undo**. [Supported agents](/docs/agents/) lists what
 each agent offers. To answer directory-trust questions automatically for directories Farhelm manages, use the
-[managed-checkout settings](/docs/using/start-a-session/#trust-in-managed-checkouts). To run something that is not one
+[agent trust settings](/docs/using/start-a-session/#trust-in-managed-checkouts). To run something that is not one
 of these agents, switch the launcher to its **command**
 tab, covered in [Custom commands](/docs/agents/custom-commands/).
 
@@ -237,17 +237,17 @@ choosing **managed checkout** asks for it.
   alt="The launcher in managed checkout mode asking for the checkout folder, with the field and its save button explained."
 />
 
-To change the directory later, or save an empty field to clear it, use the same field in **settings**, opened from the
-gear beside the version number at the top of the sidebar.
+To change the directory later, or save an empty field to clear it, use the same field under **checkouts** in **settings**,
+opened from the gear beside the version number at the top of the sidebar.
 
-Settings also has a **post-clone command** field for a shell command to run in each new clone, on its host, before the
+The same section has a **post-clone command** field for a shell command to run in each new clone, on its host, before the
 agent starts (installing dependencies, say). Save it explicitly; empty the field and save to remove it. Changes affect
 future checkouts only.
 
 ### Trust in managed checkouts
 
-Settings has separate trust switches for Codex, Muse and Pi, all off by default. Each applies on every host to
-directories Farhelm manages, including checkouts an agent requests. Enabling one lets the repository's own hooks,
+The **agent trust** section in Settings has separate trust switches for Codex, Muse and Pi, all off by default. Each
+applies on every host to directories Farhelm manages, including checkouts an agent requests. Enabling one lets the repository's own hooks,
 settings and commands run as if you had approved them. Farhelm passes an argument when starting the agent; it leaves
 the agent's saved configuration alone. Directories outside managed checkouts keep the agent's own trust behavior.
 These switches apply to the launcher's **agent** tab; [custom commands](/docs/agents/custom-commands/) keep their own
@@ -259,13 +259,13 @@ checkout. Plain **restart** and **replace** reuse the trust carried by the saved
 of its switch. Pi's switch approves project settings and extensions; Pi still runs the agent's actions without asking.
 
 When Codex or Muse asks about trust in a managed checkout while its switch is off, a hint above the terminal has a
-**Settings** button that opens the switch. **Don't show again** hides that agent's hint across windows, and Settings can restore it. × hides the hint
-for the current question.
+**Settings** button that opens **agent trust** at that agent's switch. **Don't show again** hides that agent's hint across
+windows, and the same section can restore it. × hides the hint for the current question.
 
-For Claude, Settings can also **answer Claude's "trust this folder?" for new checkouts**. This is off by default and
+For Claude, **agent trust** can also **answer Claude's "trust this folder?" for new checkouts**. This is off by default and
 applies to future managed checkouts on every host, including ones an agent requests or that start with another agent.
-Directories you choose yourself still get Claude's question. A hint above that question opens the setting and its
-caveats; **Don't show again** hides the hint across clients, and Settings can restore it.
+Directories you choose yourself still get Claude's question. The hint's **Settings and caveats** button opens **agent
+trust** at Claude's setting and its caveats; **Don't show again** hides the hint across clients, and the same section can restore it.
 
 There is no supported Claude switch for this. Farhelm edits Claude's own settings file on the session's host, normally
 `~/.claude.json`, and removes that directory's trust key when the checkout moves to the trash. The edit is best effort:

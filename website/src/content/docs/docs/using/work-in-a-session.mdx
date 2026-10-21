@@ -19,7 +19,8 @@ terminal yourself, and everything it prints shows up here. Farhelm does not sit 
 
 The slim bar under the terminal shows the session's name and host, followed by its age, directory, and command. The host
 has the same icon and color as in the [session list](/docs/using/session-list/), so you can see where you are working.
-Settings can also [color the terminal's frame](/docs/using/manage-hosts/#host-settings) to match its host.
+The **sessions** section in Settings can also [color the terminal's frame](/docs/using/manage-hosts/#host-settings) to
+match its host.
 Click the directory or command to copy it; your home directory appears as `~`.
 
 The terminal tabs and action buttons share the row above the terminal. The buttons at its right end restart, replace,
@@ -38,7 +39,7 @@ Each shell tab is named **Terminal 1**, **Terminal 2**, and so on, and runs on t
 session's directory. It belongs to the session: it keeps running when you switch to another session, and deleting the
 session closes it. Closing a tab yourself asks you to confirm first, since it ends whatever is running in it; press Enter
 to confirm, or **cancel** to keep it open. You can skip that question with
-[skip session confirmations](/docs/using/stop-restart-resume/#stop-or-delete) in settings.
+[skip session confirmations](/docs/using/stop-restart-resume/#stop-or-delete) under **sessions** in settings.
 
 **A−** and **A+** at the right end of the tab strip change the terminal's text size, as do Cmd+Shift+minus and
 Cmd+Shift+plus.
@@ -57,8 +58,8 @@ picture out. If that picture was really a separate image, paste it on its own.
 
 Clicking a web link in the terminal opens it once in your browser. Farhelm keeps that click from reaching the program,
 so an agent that opens links itself does not open a second tab. If a program needs those clicks, change
-[terminal links in settings](/docs/using/session-list/#terminal-links). File downloads keep working the same way under
-every choice.
+the link choices under [**terminal** in settings](/docs/using/session-list/#terminal-links). File downloads keep working
+the same way under every choice.
 
 Some programs print a link under text of their own; hovering over one of
 those shows where it really goes, and Farhelm warns you when the text is itself a web address that names a different
@@ -76,7 +77,7 @@ it into Downloads, chooses a new name if needed, and tells you where it went. A 
 
 In the desktop app, **Cmd-click** on your Mac (**Ctrl-click** on Linux) also opens the saved copy in its default app.
 By default, `.md`, `.txt` and `.json` files open; other types are saved without opening. You can change the list under
-**terminal links** in the [settings dialog](/docs/using/session-list/#terminal-links). Save an empty list if you want
+**terminal** in the [settings dialog](/docs/using/session-list/#terminal-links). Save an empty list if you want
 Cmd-click to download without opening. The hover shows when opening is available, and the message tells you if the file
 was saved but could not be opened. In a browser, modifier-click still only downloads. See the
 [security model](/docs/how-it-works/security-model/) before opening agent-provided files.
@@ -101,7 +102,7 @@ your browser's private-network checks. Any program on your Mac can connect to th
 `127.0.0.1` page into the browser helm are also refused; opening the helm from the address bar or a bookmark still works.
 A tunnel uses the remote service's port number on your Mac when it is free, so a Mac program expecting that port may
 reach the remote host instead.
-You can turn tunnels off in settings, which closes the ones already open.
+You can turn tunnels off under **terminal** in settings, which closes the ones already open.
 
 Open tunnels appear below the row of tabs and action buttons, with the port on your Mac, the host's port, and a close
 button. Opening another link to the same service reuses its tunnel. Deleting the session or quitting Farhelm closes it;

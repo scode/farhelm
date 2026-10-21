@@ -119,9 +119,10 @@ most programs do, so its own opener does not forward; use the explicit Farhelm c
 
 In the Mac app, a localhost link from a remote session also offers **Tunnel and open** first. That opens the service on
 the remote host; **Open** keeps the ordinary behavior of reaching the address on your Mac. The first tunnel needs your
-acceptance of a security warning, and you can close tunnels below the session's title or turn them off in settings.
-[Work in a session](/docs/using/work-in-a-session/#open-a-remote-localhost-link) explains the access you grant. A host's
-permission to open links without asking still opens the raw address; it does not create a tunnel automatically.
+acceptance of a security warning, and you can close tunnels below the session's title or turn them off under
+**terminal** in settings. [Work in a session](/docs/using/work-in-a-session/#open-a-remote-localhost-link) explains the
+access you grant. A host's permission to open links without asking still opens the raw address; it does not create a
+tunnel automatically.
 
 A login redirecting to `localhost` on the remote host is not forwarded automatically. Opening a link does not itself
 connect that remote login callback to your machine.

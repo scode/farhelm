@@ -54,7 +54,7 @@ session and its checkout directory get the same number, so you can launch the sa
 reports a clash instead. Names in existing templates are base names; a launch into an ordinary directory uses either
 kind as-is.
 
-Workspace trust comes from [managed-checkout settings](/docs/using/start-a-session/#trust-in-managed-checkouts). A trust
+Workspace trust comes from [agent trust settings](/docs/using/start-a-session/#trust-in-managed-checkouts). A trust
 choice saved in an older template is ignored and is removed when you save that template again.
 
 Templates belong to the helm, the program that shows you every host's sessions
@@ -92,7 +92,7 @@ the name; typing replaces it, and Enter saves it. Escape or **cancel** keeps the
 the new terminal. This also happens for number shortcuts, combined launch sequences and the Cmd+J list, even when a template supplied
 the name. If the session launcher opened first, it already offered the name field and Rename does not open again.
 
-In Settings, beside **skip session confirmations**, **name sessions on quick launch** turns this off. It is on by
+In Settings under **sessions**, **name sessions on quick launch** turns this off. It is on by
 default, and the choice is shared by every window using your helm. Naming a session this way leaves its managed
 checkout's directory unchanged: a directory created as `repo-N` keeps that name.
 

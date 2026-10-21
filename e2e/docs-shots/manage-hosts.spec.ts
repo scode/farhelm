@@ -111,43 +111,30 @@ test("remove dialog", async ({ page, request }) => {
 });
 
 test("app settings", async ({ page, request }) => {
-  // Tall enough that every section the callouts explain fits without
-  // scrolling: Settings scrolls its sections under a fixed heading and close
-  // button, so a section below the fold would leave its callout pointing at
-  // the close button or at nothing. The sections added since (sessions,
-  // Claude's trust question, ntfy alerts) pushed sounds so far down that
-  // showing it would take a viewport far taller than this one, so this shot no
-  // longer explains it; the page's text links to where sounds are covered.
-  await page.setViewportSize({ width: 1600, height: 1900 });
+  // Show the host questions in their section, alongside the navigation that
+  // leads to the other settings. Hidden panels still exist in the dialog,
+  // so callouts must target the selected panel rather than its hidden peers.
   const { director } = await open(page, request);
   await page.locator(".app-settings-toggle").click();
-  const dialog = page.locator(".app-settings-dialog");
+  const dialog = page.getByRole("dialog", { name: "settings", exact: true });
   await expect(dialog).toBeVisible();
-  // Down the left of the dialog, one per part, each level with what it
-  // explains; the dialog's own help text says the rest.
-  // The hosts section's first switch, not the dialog's first: the sessions
-  // section above it has a switch of its own.
+  const sections = dialog.getByRole("navigation", { name: "settings sections", exact: true });
+  await sections.getByRole("button", { name: "hosts", exact: true }).click();
+  const hosts = dialog.getByRole("region", { name: "hosts", exact: true });
+  await expect(hosts).toBeVisible();
   await director.callout(
-    dialog.getByRole("region", { name: "hosts" }).locator(".app-settings-choice").first(),
+    sections,
+    "Choose a section to see its settings.",
+    // Placement above the card keeps the widened dialog and both explanations
+    // inside the docs crop, whose width limit clips rather than scales.
+    { side: "top", dx: -80, dy: -140 },
+  );
+  await director.callout(
+    hosts.getByRole("checkbox", { name: "set up new hosts without asking", exact: true }),
     "Both questions Farhelm asks about hosts can be turned off, or back on, here.",
-    { side: "left" },
+    { side: "top", dx: -90, dy: -180 },
   );
-  await director.callout(
-    dialog.getByRole("region", { name: "terminal links" }).locator(".app-settings-choice").first(),
-    "What clicking a web link in a terminal does, for every client of this helm.",
-    { side: "left" },
-  );
-  await director.callout(
-    dialog.locator(".checkout-root-field"),
-    "The directory managed checkouts go into, on every host.",
-    { side: "left" },
-  );
-  await director.callout(
-    dialog.locator(".checkout-post-clone-field"),
-    "A command to run in each new managed checkout before its agent starts, on every host.",
-    { side: "left" },
-  );
-  await shot(page, `${PAGE}/app-settings`, [dialog, page.locator(".app-settings-toggle")], { maxWidth: 930 });
+  await shot(page, `${PAGE}/app-settings`, [dialog], { maxWidth: 930 });
 });
 
 test("details", async ({ page, request }) => {
