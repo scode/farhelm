@@ -15,6 +15,7 @@
 //! `DeleteSession` to `Supervisor::teardown_session`, leaving the handler
 //! with validation on the way in and reply shaping on the way out.
 
+use super::channels::ConnectionChannels;
 use super::connection::{
     ConnectionCtx, Forwarder, admit_or_refuse, notify_detached, reply_frame, send_reply,
     set_attachment_paused, spawn_admitted,
@@ -538,7 +539,7 @@ async fn session_info_now(
 /// connection — attach, input, another session's list/stop/
 /// delete — behind this one `ListSessions`. Spawning is safe:
 /// this handler only reads `sup.sessions` under its own lock hold
-/// and never touches `input_routes` (connection-local state,
+/// and never touches channel routes (connection-local state,
 /// never shared with a spawned task), the map-wide mutex
 /// already tolerates concurrent requests interleaving (see the
 /// `Supervisor` struct's lock-discipline docs), and replies are
@@ -1233,8 +1234,7 @@ async fn handle_delete_session(
 async fn handle_attach(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,
-    input_routes: &mut HashMap<u32, InputRoute>,
-    upload_routes: &HashMap<u32, UploadRoute>,
+    channels: &mut ConnectionChannels,
     req_id: u64,
     session_id: String,
     channel: u32,
@@ -1244,20 +1244,10 @@ async fn handle_attach(
     lease: String,
     if_unowned: bool,
 ) {
-    if channel == 0
-        || input_routes.contains_key(&channel)
-        || upload_routes
-            .get(&channel)
-            .is_some_and(UploadRoute::is_live)
-        || lease.len() > MAX_LEASE_BYTES
-    {
+    if !channels.can_begin_stream(channel) || lease.len() > MAX_LEASE_BYTES {
         let message = if channel == 0 {
             "attachment channel 0 is reserved".to_string()
-        } else if input_routes.contains_key(&channel)
-            || upload_routes
-                .get(&channel)
-                .is_some_and(UploadRoute::is_live)
-        {
+        } else if !channels.can_begin_stream(channel) {
             format!("attachment channel {channel} is already in use")
         } else {
             format!(
@@ -1484,7 +1474,7 @@ async fn handle_attach(
     // anything: exactly the pre-M4 behavior every un-leased client
     // was written against.
     //
-    // Nothing here touches the losers' `input_routes`: those are
+    // Nothing here touches the losers' input routes: those are
     // connection-local, and a connection that swept away its own
     // earlier channels (a browser reload attaching under a new
     // lease) simply carries stale routes until their next frame,
@@ -1759,7 +1749,7 @@ async fn handle_attach(
     // The route carries the same key the attachment was installed
     // under, so input, resize, and detach all address this
     // attachment by lookup rather than by search.
-    input_routes.insert(channel, InputRoute { entry, key });
+    channels.attach(channel, InputRoute { entry, key });
 }
 
 /// `Detach` names no session and no terminal, but the route
@@ -1771,10 +1761,10 @@ async fn handle_attach(
 async fn handle_detach(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,
-    input_routes: &mut HashMap<u32, InputRoute>,
+    route: Option<InputRoute>,
     channel: u32,
 ) {
-    let Some(route) = input_routes.remove(&channel) else {
+    let Some(route) = route else {
         return;
     };
     let mut attachments = sup.attachments.lock().await;
@@ -1830,13 +1820,13 @@ async fn handle_detach(
 async fn handle_resize(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,
-    input_routes: &HashMap<u32, InputRoute>,
+    route: Option<&InputRoute>,
     session_id: String,
     channel: u32,
     cols: u16,
     rows: u16,
 ) {
-    let Some(route) = input_routes.get(&channel) else {
+    let Some(route) = route else {
         return;
     };
     if route.key.session != session_id {
@@ -2018,7 +2008,7 @@ async fn handle_prompt_session(
 /// other session's attach, input, and list behind this one
 /// request. Safe for the same reasons too: this handler resolves the
 /// session through the same lock-guarded map clone, and it never
-/// touches `input_routes` (connection-local state a spawned task
+/// touches channel routes (connection-local state a spawned task
 /// must not see). Tracked and admitted like Stop — see
 /// `HANDLER_ADMISSION_PERMITS` — which means a restart on a host whose
 /// management slots are all taken is refused with a "try again" before
@@ -2113,7 +2103,7 @@ async fn handle_restart_session(
 /// multi-second stop or delete, and the reply makes a tmux round
 /// trip of its own for the live status. Awaiting either inline
 /// would stall every other request on this connection. It touches
-/// neither `input_routes` (connection-local) nor `attachments`.
+/// neither channel routes (connection-local) nor `attachments`.
 ///
 /// ## One admission slot, moved along the phases
 ///
@@ -2231,7 +2221,7 @@ async fn handle_rename_session(
 /// Spawned for the same reason the other slow handlers are: an
 /// open is a handful of tmux round trips plus a liveness probe,
 /// and awaiting it inline would stall every other request on
-/// this connection. It touches neither `input_routes` (which is
+/// this connection. It touches neither channel routes (which are
 /// connection-local) nor `attachments`.
 async fn handle_open_tab(
     sup: &Arc<Supervisor>,
@@ -2294,25 +2284,17 @@ async fn handle_begin_upload(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,
     priority: &mpsc::Sender<Frame>,
-    input_routes: &HashMap<u32, InputRoute>,
-    upload_routes: &mut HashMap<u32, UploadRoute>,
+    channels: &mut ConnectionChannels,
     req_id: u64,
     session_id: String,
     channel: u32,
     filename: String,
     size: u64,
 ) {
-    let live_uploads = upload_routes
-        .values()
-        .filter(|route| route.is_live())
-        .count();
+    let live_uploads = channels.live_uploads();
     let refusal = if channel == 0 {
         Some("attachment channel 0 is reserved".to_string())
-    } else if input_routes.contains_key(&channel)
-        || upload_routes
-            .get(&channel)
-            .is_some_and(UploadRoute::is_live)
-    {
+    } else if !channels.can_begin_stream(channel) {
         Some(format!("attachment channel {channel} is already in use"))
     } else if live_uploads >= MAX_UPLOADS_PER_CONNECTION {
         // The admission bound `BeginUpload`'s contract leaves to
@@ -2397,7 +2379,7 @@ async fn handle_begin_upload(
         outcome.clone(),
     ));
     let admitted = transfer;
-    upload_routes.insert(
+    channels.begin_upload(
         channel,
         UploadRoute {
             transfer,
@@ -2421,11 +2403,11 @@ async fn handle_begin_upload(
 /// commits from being treated as if each freed a slot.
 async fn handle_commit_upload(
     tx: &mpsc::Sender<Frame>,
-    upload_routes: &mut HashMap<u32, UploadRoute>,
+    route: Option<&mut UploadRoute>,
     req_id: u64,
     channel: u32,
 ) {
-    let refusal = match upload_routes.get_mut(&channel) {
+    let refusal = match route {
         Some(route) if route.is_live() && !route.answered => {
             route.answered = true;
             // `try_send`, not an awaiting send: this runs on the
@@ -2486,8 +2468,8 @@ async fn handle_commit_upload(
 /// client tearing down (a cancelled drop, a closed view) must
 /// never have to reason about who won a race against a
 /// concurrent completion.
-fn handle_abort_upload(upload_routes: &mut HashMap<u32, UploadRoute>, channel: u32) {
-    if let Some(route) = upload_routes.get_mut(&channel)
+fn handle_abort_upload(route: Option<&mut UploadRoute>, channel: u32) {
+    if let Some(route) = route
         && route.is_live()
     {
         route.answered = true;
@@ -2825,8 +2807,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             handle_attach(
                 sup,
                 ctx.tx,
-                ctx.input_routes,
-                ctx.upload_routes,
+                ctx.channels,
                 req_id,
                 session_id,
                 channel,
@@ -2845,7 +2826,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             set_attachment_paused(sup, ctx.tx, channel, false).await;
         }
         ControlMsg::Detach { channel } => {
-            handle_detach(sup, ctx.tx, ctx.input_routes, channel).await
+            handle_detach(sup, ctx.tx, ctx.channels.detach(channel), channel).await
         }
         ControlMsg::Resize {
             session_id,
@@ -2856,7 +2837,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             handle_resize(
                 sup,
                 ctx.tx,
-                ctx.input_routes,
+                ctx.channels.input(channel),
                 session_id,
                 channel,
                 cols,
@@ -2927,8 +2908,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 sup,
                 ctx.tx,
                 ctx.priority,
-                ctx.input_routes,
-                ctx.upload_routes,
+                ctx.channels,
                 req_id,
                 session_id,
                 channel,
@@ -2938,9 +2918,11 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             .await
         }
         ControlMsg::CommitUpload { req_id, channel } => {
-            handle_commit_upload(ctx.tx, ctx.upload_routes, req_id, channel).await
+            handle_commit_upload(ctx.tx, ctx.channels.upload_mut(channel), req_id, channel).await
         }
-        ControlMsg::AbortUpload { channel } => handle_abort_upload(ctx.upload_routes, channel),
+        ControlMsg::AbortUpload { channel } => {
+            handle_abort_upload(ctx.channels.upload_mut(channel), channel)
+        }
         // An agent request is made AS a particular session, which only that
         // session's credential can establish, so a full-authority connection
         // cannot make one. The
@@ -3679,9 +3661,7 @@ const AGENT_HOST_NAME_CAP: usize = MAX_SESSION_ID_BYTES;
 mod tests {
     use super::super::capture::CaptureState;
     use super::super::connection::CONNECTION_WRITER_QUEUE;
-    use super::super::core::tests::{
-        StateDir, declared_command, dummy_exe, entry_with, no_uploads,
-    };
+    use super::super::core::tests::{StateDir, declared_command, dummy_exe, entry_with};
     use super::super::core::{HANDLER_ADMISSION_PERMITS, LIST_ADMISSION_PERMITS};
     use super::super::core::{RunCells, SessionCells};
     use super::super::core::{SupervisorSeams, SupervisorTimeouts};
@@ -4211,7 +4191,7 @@ mod tests {
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         for (req_id, launch, inherit_agent) in [
             // Neither selector.
@@ -4260,8 +4240,7 @@ mod tests {
                 ConnectionCtx {
                     tx: &tx,
                     priority: &tx,
-                    input_routes: &mut input_routes,
-                    upload_routes: &mut no_uploads(),
+                    channels: &mut channels,
                     tasks: &mut tasks,
                 },
             )
@@ -4374,7 +4353,7 @@ mod tests {
             .insert(session_id.to_string(), Arc::new(entry));
 
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             &sup,
@@ -4385,8 +4364,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -4463,7 +4441,7 @@ mod tests {
         );
 
         let (tx, _rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             &sup,
@@ -4474,8 +4452,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -4613,7 +4590,7 @@ mod tests {
         );
 
         let (tx, _rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             &sup,
@@ -4628,8 +4605,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -4685,7 +4661,7 @@ mod tests {
         message: ControlMsg,
     ) -> (tokio::task::JoinSet<()>, mpsc::Receiver<Frame>) {
         let (tx, rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             sup,
@@ -4693,8 +4669,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -6051,7 +6026,7 @@ mod tests {
             let sup = Arc::clone(&sup);
             let id = id.clone();
             async move {
-                let mut input_routes = HashMap::new();
+                let mut channels = ConnectionChannels::default();
                 let mut tasks = tokio::task::JoinSet::new();
                 handle_control(
                     &sup,
@@ -6068,8 +6043,7 @@ mod tests {
                     ConnectionCtx {
                         tx: &tx,
                         priority: &tx,
-                        input_routes: &mut input_routes,
-                        upload_routes: &mut no_uploads(),
+                        channels: &mut channels,
                         tasks: &mut tasks,
                     },
                 )
@@ -6134,7 +6108,7 @@ mod tests {
         assert!(sup.lifecycle_locks.try_claim("session-1").is_none());
         let started = tokio::time::Instant::now();
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         let attach = tokio::spawn({
             let sup = Arc::clone(&sup);
@@ -6156,13 +6130,12 @@ mod tests {
                     ConnectionCtx {
                         tx: &tx,
                         priority: &tx,
-                        input_routes: &mut input_routes,
-                        upload_routes: &mut no_uploads(),
+                        channels: &mut channels,
                         tasks: &mut tasks,
                     },
                 )
                 .await;
-                assert!(input_routes.is_empty());
+                assert!(!channels.has_inputs());
             }
         });
         attach.await.expect("tab attach task must not panic");
@@ -6512,7 +6485,7 @@ mod tests {
 
         // Ordinary path: correlated "not supported yet" errors, and a
         // create with the payload refused before any side effect.
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             &sup,
@@ -6523,8 +6496,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -6558,8 +6530,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -6618,8 +6589,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -7837,7 +7807,7 @@ mod tests {
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         for (req_id, key, marked, expected) in [
             (71, "marked", true, DedupScope::SessionLifetime),
@@ -7865,8 +7835,7 @@ mod tests {
                 ConnectionCtx {
                     tx: &tx,
                     priority: &tx,
-                    input_routes: &mut input_routes,
-                    upload_routes: &mut no_uploads(),
+                    channels: &mut channels,
                     tasks: &mut tasks,
                 },
             )
@@ -7909,7 +7878,7 @@ mod tests {
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
 
         handle_control(
@@ -7925,8 +7894,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -8022,8 +7990,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut HashMap::new(),
-                upload_routes: &mut no_uploads(),
+                channels: &mut ConnectionChannels::default(),
                 tasks: &mut tasks,
             },
         )
@@ -8158,8 +8125,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut HashMap::new(),
-                upload_routes: &mut no_uploads(),
+                channels: &mut ConnectionChannels::default(),
                 tasks: &mut tokio::task::JoinSet::new(),
             },
         )
@@ -8226,8 +8192,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut HashMap::new(),
-                upload_routes: &mut no_uploads(),
+                channels: &mut ConnectionChannels::default(),
                 tasks: &mut tokio::task::JoinSet::new(),
             },
         )
@@ -8263,7 +8228,7 @@ mod tests {
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         let req_id = 99;
 
@@ -8291,8 +8256,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -8342,7 +8306,7 @@ mod tests {
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
 
         // Every refusal shape, including the boundary either side of the
@@ -8384,8 +8348,7 @@ mod tests {
                 ConnectionCtx {
                     tx: &tx,
                     priority: &tx,
-                    input_routes: &mut input_routes,
-                    upload_routes: &mut no_uploads(),
+                    channels: &mut channels,
                     tasks: &mut tasks,
                 },
             )
@@ -8449,8 +8412,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -8485,7 +8447,7 @@ mod tests {
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
 
         for (req_id, filler, expected) in [
@@ -8521,8 +8483,7 @@ mod tests {
                 ConnectionCtx {
                     tx: &tx,
                     priority: &tx,
-                    input_routes: &mut input_routes,
-                    upload_routes: &mut no_uploads(),
+                    channels: &mut channels,
                     tasks: &mut tasks,
                 },
             )
@@ -8643,7 +8604,7 @@ mod tests {
         );
 
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
 
         handle_control(
@@ -8652,8 +8613,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -8704,8 +8664,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -8844,7 +8803,7 @@ mod tests {
     /// sessions it carried and whether the cap cut any of them.
     async fn list_sessions(sup: &Arc<Supervisor>, req_id: u64) -> (Vec<SessionInfo>, bool) {
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             sup,
@@ -8852,8 +8811,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -9044,7 +9002,7 @@ mod tests {
         );
 
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             &sup,
@@ -9052,8 +9010,7 @@ mod tests {
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )

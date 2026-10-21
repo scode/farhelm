@@ -77,6 +77,10 @@
 //! with each other; see their own module docs for what each one is holding
 //! together.
 //!
+//! `channels` owns each connection's routes and id history. The read loop and
+//! allocating handlers consult it at their existing validation boundaries, so
+//! sharing the allocation policy does not reorder protocol refusals.
+//!
 //! `agent_relay` is the one slice that is not a carve-out of an older
 //! file: it arrived whole with `PROTOCOL_VERSION` 13 to carry requests
 //! UPWARD, from a session's own agent to the helm attached to it. It is
@@ -86,6 +90,7 @@
 
 mod agent_relay;
 mod capture;
+mod channels;
 mod connection;
 mod core;
 mod downloads;

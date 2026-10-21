@@ -8,12 +8,11 @@
 //! pumping tmux output back to the client and detecting a stalled reader.
 
 use super::capture::note_first_input;
+use super::channels::ConnectionChannels;
 use super::core::Supervisor;
 use super::handlers::{handle_control, handle_restricted_control};
-use super::terminals::{ActiveAttach, AttachmentKey, InputRoute, OutputReapOutcome, TerminalId};
-use super::uploads::{
-    UPLOAD_PRIORITY_QUEUE, UploadCommand, UploadRoute, UploadSignal, prune_finished_uploads,
-};
+use super::terminals::{ActiveAttach, AttachmentKey, OutputReapOutcome, TerminalId};
+use super::uploads::{UPLOAD_PRIORITY_QUEUE, UploadCommand, UploadRoute, UploadSignal};
 use crate::tmux::{OutputEvent, OutputStream, PaneModes};
 use anyhow::Context;
 use farhelm_proto::io::{
@@ -21,7 +20,6 @@ use farhelm_proto::io::{
     write_frame_before_stall,
 };
 use farhelm_proto::{ControlMsg, DETACH_REASON_STALLED, DetachCode, ErrorKind, Frame};
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -134,25 +132,20 @@ const HANDLER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 /// reborrowing out of a reference for no reason.
 ///
 /// Everything here belongs to ONE connection and to no other: the two
-/// reply queues that identify it, the two channel-id route maps whose
-/// numbering is per-connection, and the `JoinSet` its slow handlers are
+/// reply queues that identify it, the channel table whose numbering is
+/// per-connection, and the `JoinSet` its slow handlers are
 /// tracked in. None of it is shared with the `Supervisor`, which is
 /// exactly the line this struct draws — `handle_control` takes the
 /// supervisor and this, and nothing else it could confuse for either.
 ///
-/// A bundle rather than a positional parameter list because the list was
-/// the whole problem: five same-shaped borrows in a row (two
-/// `mpsc::Sender<Frame>`s that are NOT interchangeable, two `HashMap`s
-/// keyed by the same channel-id space) is a signature where a
-/// transposition compiles. Named fields do not make that impossible — a
-/// struct literal can still be filled in wrong — but they move the
-/// question to where a reader can answer it: `priority: &priority_tx` at
-/// the one construction site is checkable on sight, while the seventh
-/// argument of a call was not.
+/// Named queues matter even with one channel table: the two
+/// `mpsc::Sender<Frame>`s are not interchangeable, but a positional
+/// transposition would compile. `priority: &priority_tx` at the construction
+/// site makes the distinction checkable on sight.
 ///
 /// Deliberately NOT passed down to the per-message handlers. Each of them
 /// still takes exactly the pieces its message can touch, which is what
-/// makes "`ListSessions` never touches `input_routes`" a fact the
+/// makes "`ListSessions` never touches channel routes" a fact the
 /// signature enforces rather than a comment to be trusted.
 pub(crate) struct ConnectionCtx<'a> {
     /// This connection's ordinary reply queue, which also serves as its
@@ -162,8 +155,8 @@ pub(crate) struct ConnectionCtx<'a> {
     /// This connection's prioritized queue, for the upload family alone —
     /// see `uploads::send_upload_unless_cancelled`.
     pub(crate) priority: &'a mpsc::Sender<Frame>,
-    pub(crate) input_routes: &'a mut HashMap<u32, InputRoute>,
-    pub(crate) upload_routes: &'a mut HashMap<u32, UploadRoute>,
+    /// Routes and retained reservations share one allocation policy.
+    pub(crate) channels: &'a mut ConnectionChannels,
     pub(crate) tasks: &'a mut tokio::task::JoinSet<()>,
 }
 
@@ -311,30 +304,9 @@ where
         },
     );
 
-    // Which terminal each of this connection's data channels types into.
-    // Connection-local by necessity: channel ids are unique only within a
-    // connection, since every client numbers its channels from 1.
-    let mut input_routes: HashMap<u32, InputRoute> = HashMap::new();
-    // The other meaning a data channel can have as of version 6: bytes
-    // flowing the OTHER way, into an attachment upload (see
-    // [`UploadRoute`]). Connection-local for the same reason, and
-    // separate from `input_routes` because the two carry different
-    // directions and different lifetimes — an upload ends at its commit,
-    // an attachment when its terminal is taken over.
-    let mut upload_routes: HashMap<u32, UploadRoute> = HashMap::new();
-    let mut downloads: HashMap<u32, super::downloads::DownloadRoute> = HashMap::new();
-    // An aborted producer may still have frames queued in the bulk writer.
-    // Never recycle its channel on this connection, even after the task ends:
-    // an ordinary Attached reply could otherwise overtake old file bytes.
-    // Production clients already allocate once. One retained id per read
-    // avoids a drain handshake or writer-side transfer-generation machinery.
-    let mut download_channels = HashSet::new();
-    let mut relays: HashMap<u32, super::tcp_relays::RelayRoute> = HashMap::new();
-    // A relay's old bytes must never become terminal input, or another
-    // stream's output. Reserve relay ids after completion, and remember
-    // earlier non-relay requests so a relay cannot inherit their queued data.
-    let mut relay_channels = HashSet::new();
-    let mut non_relay_channels = HashSet::new();
+    // Channel numbers are meaningful only within this connection. The table
+    // owns both their routes and any history that must outlive those routes.
+    let mut channels = ConnectionChannels::default();
 
     // Tracking (not admission — that is now `sup.admission`, shared
     // across every connection this supervisor serves; see its own docs
@@ -354,13 +326,7 @@ where
             // own docs for why a long-lived connection needs this every
             // iteration, not just at shutdown.
             reap_finished_tasks(&mut tasks);
-            downloads.retain(|_, route| !route.task.is_finished());
-            relays.retain(|_, route| !route.task.is_finished());
-            // Same discipline for finished transfers: a route left behind
-            // by a completed upload would make its channel number
-            // permanently unusable on this connection (see
-            // `prune_finished_uploads`).
-            prune_finished_uploads(&mut upload_routes);
+            channels.prune_finished();
             // Either half failing ends the connection. Waiting only for
             // read EOF leaks attachments when a half-broken peer keeps
             // writing after it has stopped reading our replies.
@@ -386,8 +352,8 @@ where
                 break;
             };
             match frame.kind {
-                farhelm_proto::FrameKind::Data if relay_channels.contains(&frame.channel) => {
-                    if let Some(route) = relays.get(&frame.channel) {
+                farhelm_proto::FrameKind::Data if channels.relay_reserved(frame.channel) => {
+                    if let Some(route) = channels.relay(frame.channel) {
                         route.state.push(&frame.body);
                     }
                 }
@@ -405,13 +371,13 @@ where
                 // resolve the situation: a read loop parked on a full
                 // upload queue cannot read the frame that would drain it.
                 farhelm_proto::FrameKind::Data
-                    if upload_routes
-                        .get(&frame.channel)
+                    if channels
+                        .upload(frame.channel)
                         .is_some_and(UploadRoute::is_live) =>
                 {
                     let channel = frame.channel;
-                    let route = upload_routes
-                        .get(&channel)
+                    let route = channels
+                        .upload(channel)
                         .expect("the guard above matched this channel");
                     // Size is checked HERE rather than in the transfer's
                     // task, and the difference is memory: a frame handed
@@ -472,7 +438,7 @@ where
                     // here, and a channel that turns out to have lost its
                     // attachment is dropped from the map after the borrow
                     // ends (`stale_route` below) rather than mid-arm.
-                    let stale_route = if let Some(route) = input_routes.get(&frame.channel) {
+                    let stale_route = if let Some(route) = channels.input(frame.channel) {
                         let entry = &route.entry;
                         // Save the reading before delivering input: an Enter
                         // can dismiss a dialog before the send returns. The
@@ -589,16 +555,19 @@ where
                         // The route outlived its attachment, so stop
                         // holding the session entry alive for a channel
                         // that can never type again.
-                        input_routes.remove(&frame.channel);
+                        channels.detach(frame.channel);
                     }
                 }
                 farhelm_proto::FrameKind::Control => {
                     let msg = parse_control(&frame)?;
+                    // Record attempts before even the reservation refusals. A
+                    // malformed non-relay request may already have data behind
+                    // it, and that data must not feed a later TCP relay.
                     if restricted_auth.is_none()
                         && let ControlMsg::Attach { channel, .. }
                         | ControlMsg::BeginUpload { channel, .. }
                         | ControlMsg::BeginDownload { channel, .. } = &msg {
-                        non_relay_channels.insert(*channel);
+                        channels.note_non_relay_attempt(*channel);
                     }
                     match restricted_auth.as_ref() {
                         Some(auth) => handle_restricted_control(&sup, msg, &tx, auth).await,
@@ -616,29 +585,27 @@ where
                         // the per-message handlers.
                         None => match msg {
                             ControlMsg::BeginTcpRelay { req_id, session_id, channel, address, port } => {
-                                if channel == 0 || non_relay_channels.contains(&channel)
-                                    || relay_channels.contains(&channel) {
+                                if !channels.can_begin_relay(channel) {
                                     send_reply(&tx, &ControlMsg::Error {
                                         create_unaccepted: false, req_id,
                                         kind: farhelm_proto::ErrorKind::InvalidRequest,
                                         message: "TCP relay channel is invalid or was already used".into(),
                                     }).await;
                                 } else {
-                                    relay_channels.insert(channel);
-                                    relays.insert(channel, super::tcp_relays::start(
+                                    channels.begin_relay(channel, || super::tcp_relays::start(
                                         &mut tasks, Arc::clone(&sup), bulk_tx.clone(), priority_tx.clone(),
                                         super::tcp_relays::RelayRequest { req_id, session_id, channel, address, port },
                                     ));
                                 }
                             }
                             ControlMsg::TcpRelayAck { channel, received } => {
-                                if let Some(route) = relays.get(&channel) { route.state.ack(received); }
+                                if let Some(route) = channels.relay(channel) { route.state.ack(received); }
                             }
-                            ControlMsg::CloseTcpRelay { channel } => { relays.remove(&channel); }
+                            ControlMsg::CloseTcpRelay { channel } => { channels.close_relay(channel); }
                             ControlMsg::Attach { req_id, channel, .. }
                             | ControlMsg::BeginUpload { req_id, channel, .. }
                             | ControlMsg::BeginDownload { req_id, channel, .. }
-                                if relay_channels.contains(&channel) => {
+                                if channels.relay_reserved(channel) => {
                                 send_reply(&tx, &ControlMsg::Error {
                                     create_unaccepted: false, req_id,
                                     kind: farhelm_proto::ErrorKind::InvalidRequest,
@@ -649,24 +616,21 @@ where
                                 tasks.spawn(super::downloads::stat(Arc::clone(&sup), tx.clone(), req_id, session_id, path));
                             }
                             ControlMsg::BeginDownload { req_id, session_id, path, channel } => {
-                                if channel == 0 || input_routes.contains_key(&channel)
-                                    || upload_routes.get(&channel).is_some_and(UploadRoute::is_live)
-                                    || download_channels.contains(&channel) {
+                                if !channels.can_begin_stream(channel) {
                                     send_reply(&tx, &ControlMsg::Error {
                                         create_unaccepted: false, req_id, kind: farhelm_proto::ErrorKind::InvalidRequest,
                                         message: "download channel is invalid or in use".into() }).await;
                                 } else {
-                                    download_channels.insert(channel);
-                                    downloads.insert(channel, super::downloads::start(&mut tasks,
+                                    channels.begin_download(channel, || super::downloads::start(&mut tasks,
                                         Arc::clone(&sup), bulk_tx.clone(), req_id, session_id, path, channel));
                                 }
                             }
                             ControlMsg::DownloadAck { channel, received } => {
-                                if let Some(route) = downloads.get(&channel) { route.ack(received); }
+                                if let Some(route) = channels.download(channel) { route.ack(received); }
                             }
-                            ControlMsg::AbortDownload { channel } => { downloads.remove(&channel); }
+                            ControlMsg::AbortDownload { channel } => { channels.abort_download(channel); }
                             ControlMsg::Attach { req_id, channel, .. } | ControlMsg::BeginUpload { req_id, channel, .. }
-                                if download_channels.contains(&channel) => {
+                                if channels.download_reserved(channel) => {
                                 send_reply(&tx, &ControlMsg::Error {
                                     create_unaccepted: false, req_id, kind: farhelm_proto::ErrorKind::InvalidRequest,
                                     message: "channel was reserved for a download".into() }).await;
@@ -682,8 +646,7 @@ where
                                 let ctx = ConnectionCtx {
                                     tx: &tx,
                                     priority: &priority_tx,
-                                    input_routes: &mut input_routes,
-                                    upload_routes: &mut upload_routes,
+                                    channels: &mut channels,
                                     tasks: &mut tasks,
                                 };
                                 handle_control(&sup, msg, ctx).await
@@ -712,16 +675,14 @@ where
     // transfer stops where it stands and removes its staging file
     // (PLAN_M4.md item 4's channel-loss cleanup). Dropping the routes
     // afterwards closes the command channels behind it.
-    for route in upload_routes.values() {
+    for route in channels.uploads() {
         let _ = route.signals.try_send(UploadSignal {
             reason: "the client's connection closed".to_string(),
             tell_client: false,
             session_gone: false,
         });
     }
-    drop(upload_routes);
-    drop(downloads);
-    drop(relays);
+    channels.drop_transfers();
     drop(bulk_tx);
     // Tear down any attachments this connection owned so the next
     // attach doesn't fight a dead forwarder. Signal AND await, exactly
@@ -1957,7 +1918,7 @@ fn apply_pause_transition(pause: &watch::Sender<Option<tokio::time::Instant>>, p
 #[cfg(test)]
 mod tests {
     use super::super::core::CreateInputs;
-    use super::super::core::tests::{StateDir, dummy_exe, no_uploads};
+    use super::super::core::tests::{StateDir, dummy_exe};
     use super::*;
     use farhelm_proto::SessionLaunch;
     use farhelm_proto::{RestartOffer, SessionInfo, SessionStatus};
@@ -2911,7 +2872,7 @@ mod tests {
             .await
             .expect("supervisor construction touches only tmux, not the launch shim");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
 
         const REQUESTS: u64 = 50;
@@ -2922,8 +2883,7 @@ mod tests {
                 ConnectionCtx {
                     tx: &tx,
                     priority: &tx,
-                    input_routes: &mut input_routes,
-                    upload_routes: &mut no_uploads(),
+                    channels: &mut channels,
                     tasks: &mut tasks,
                 },
             )

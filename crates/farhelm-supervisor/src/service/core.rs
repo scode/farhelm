@@ -16176,25 +16176,13 @@ pub(crate) mod tests {
                 .contains("exceeds the launch request bound")
         );
     }
+    use super::super::channels::ConnectionChannels;
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
     use super::super::handlers::handle_control;
     use super::super::status::session_status;
-    use super::super::uploads::UploadRoute;
     use super::*;
     use farhelm_proto::{ControlMsg, Frame, LaunchHarness};
     use tokio::sync::mpsc;
-
-    /// An empty upload routing map, for the many tests that drive
-    /// `handle_control` directly with no transfer in flight.
-    ///
-    /// A helper rather than a local per test because it is always the
-    /// same empty map and always for the same reason: these tests are
-    /// about some other message entirely, and the routes exist only
-    /// because a connection's read loop owns both maps (see
-    /// [`UploadRoute`]).
-    pub(crate) fn no_uploads() -> HashMap<u32, UploadRoute> {
-        HashMap::new()
-    }
 
     /// The accept loop must distinguish retryable peer races from failures
     /// that can persist while the kernel keeps readiness asserted, including
@@ -25541,7 +25529,7 @@ exit 0
         }
 
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             &sup,
@@ -25552,8 +25540,7 @@ exit 0
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -25663,7 +25650,7 @@ exit 0
             .expect("corrupt the row before the intent transaction");
         drop(conn);
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             &sup,
@@ -25674,8 +25661,7 @@ exit 0
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -26412,7 +26398,7 @@ exit 0
         }
 
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         handle_control(
             &sup,
@@ -26438,8 +26424,7 @@ exit 0
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -27611,7 +27596,7 @@ exit 0
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         let launch_dir = state.path().join("launch");
         let request = |req_id: u64, yolo: bool| ControlMsg::CreateSession {
@@ -27652,8 +27637,7 @@ exit 0
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -27699,8 +27683,7 @@ exit 0
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -27730,8 +27713,7 @@ exit 0
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -27889,7 +27871,7 @@ exit 0
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         let launch_dir = state.path().join("launch");
         let probe = launch_dir.join("probe");
@@ -27924,8 +27906,7 @@ exit 0
                 ConnectionCtx {
                     tx: &tx,
                     priority: &tx,
-                    input_routes: &mut input_routes,
-                    upload_routes: &mut no_uploads(),
+                    channels: &mut channels,
                     tasks: &mut tasks,
                 },
             )
@@ -28569,7 +28550,7 @@ exit 0
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
 
         for (req_id, title) in [
@@ -28605,8 +28586,7 @@ exit 0
                 ConnectionCtx {
                     tx: &tx,
                     priority: &tx,
-                    input_routes: &mut input_routes,
-                    upload_routes: &mut no_uploads(),
+                    channels: &mut channels,
                     tasks: &mut tasks,
                 },
             )
@@ -28658,8 +28638,7 @@ exit 0
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -28689,7 +28668,7 @@ exit 0
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
 
         // A real directory, because `validate_create` insists the cwd
@@ -28722,8 +28701,7 @@ exit 0
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -28778,7 +28756,7 @@ exit 0
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         let request = |req_id: u64, title: &str| ControlMsg::CreateSession {
             prompt: None,
@@ -28810,8 +28788,7 @@ exit 0
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -28838,8 +28815,7 @@ exit 0
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -28858,8 +28834,7 @@ exit 0
             ConnectionCtx {
                 tx: &tx,
                 priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
+                channels: &mut channels,
                 tasks: &mut tasks,
             },
         )
@@ -34358,7 +34333,7 @@ exit 0
             sup.may_record
                 .store(may_record, std::sync::atomic::Ordering::SeqCst);
             let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-            let mut input_routes = HashMap::new();
+            let mut channels = ConnectionChannels::default();
             let mut tasks = tokio::task::JoinSet::new();
             handle_control(
                 &sup,
@@ -34369,8 +34344,7 @@ exit 0
                 ConnectionCtx {
                     tx: &tx,
                     priority: &tx,
-                    input_routes: &mut input_routes,
-                    upload_routes: &mut no_uploads(),
+                    channels: &mut channels,
                     tasks: &mut tasks,
                 },
             )

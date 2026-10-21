@@ -2073,9 +2073,10 @@ mod tests {
         assert!(!ActivitySample::reloaded().lock().unwrap().screen_yolo);
     }
 
+    use super::super::channels::ConnectionChannels;
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
     use super::super::core::RunCells;
-    use super::super::core::tests::{StateDir, a_terminal, dummy_exe, entry_with, no_uploads};
+    use super::super::core::tests::{StateDir, a_terminal, dummy_exe, entry_with};
     use super::super::core::{SupervisorSeams, SupervisorTimeouts};
     use super::super::handlers::handle_control;
     use super::super::status::live_status;
@@ -6311,8 +6312,7 @@ mod tests {
         // And a request served through the real control path is
         // completely unaffected.
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut input_routes = HashMap::new();
-        let mut uploads = no_uploads();
+        let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         tokio::time::timeout(
             Duration::from_secs(10),
@@ -6322,8 +6322,7 @@ mod tests {
                 ConnectionCtx {
                     tx: &tx,
                     priority: &tx,
-                    input_routes: &mut input_routes,
-                    upload_routes: &mut uploads,
+                    channels: &mut channels,
                     tasks: &mut tasks,
                 },
             ),
