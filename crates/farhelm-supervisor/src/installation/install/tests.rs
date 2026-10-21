@@ -66,6 +66,7 @@ impl Home {
             update_only: false,
             replace_legacy_bundle: None,
             lock_wait: Duration::ZERO,
+            expect: None,
         }
     }
 
@@ -425,6 +426,51 @@ fn update_only_runs_refuse_what_an_old_updater_must_not_do() {
     std::fs::write(&record_path, installing.render()).unwrap();
     install(&later, &mut |_| Ok(())).expect("an interrupted install is finished");
     assert_eq!(home.record().state, InstallState::Complete);
+}
+
+/// An update this release's app decided goes ahead only if the
+/// installation is still what the app read under the lock: same id (none
+/// for a two-field record), generation and Installed version. Anything
+/// else (an install or uninstall in between) changes nothing and reports
+/// the state change with its own exit status, which the app treats as
+/// "look again later". A two-field record matched by a "no id" expectation
+/// gets its id from this run, never before the comparison.
+#[farhelm_testtrace::test]
+fn an_update_runs_only_if_the_installation_is_as_expected() {
+    let home = Home::new();
+    home.install("1.2.3").unwrap();
+    let applications = home.path().join("Applications");
+    let snapshot = crate::installation::snapshot(&applications, APP_NAME).expect("unlocked");
+    let expect = snapshot.expectation().expect("an installation");
+    assert_eq!(expect.installed.as_deref(), Some("1.2.3"));
+
+    home.install("1.2.4").unwrap();
+    let mut stale = home.request("1.2.5");
+    stale.update_only = true;
+    stale.expect = Some(expect);
+    let refusal = install(&stale, &mut |_| Ok(())).expect_err("the installation changed");
+    assert_eq!(refusal.status, STATE_CHANGED);
+    assert_eq!(
+        home.read("Contents/Versions/installed"),
+        "1.2.4\n",
+        "nothing changed"
+    );
+
+    let record_path = home.app().join("Contents").join(RECORD_FILE);
+    std::fs::write(&record_path, b"farhelm-app-v2\0/old/.local/bin/farhelm\0").unwrap();
+    let snapshot = crate::installation::snapshot(&applications, APP_NAME).unwrap();
+    let expect = snapshot.expectation().unwrap();
+    assert_eq!(
+        (expect.id.as_deref(), expect.generation),
+        (None, 0),
+        "no id yet"
+    );
+    let mut current = home.request("1.2.5");
+    current.update_only = true;
+    current.expect = Some(crate::installation::Expectation::parse(&expect.render()).unwrap());
+    install(&current, &mut |_| Ok(())).expect("the expectation still holds");
+    assert!(home.record().id.is_some(), "the id is minted by the update");
+    assert_eq!(home.read("Contents/Versions/installed"), "1.2.5\n");
 }
 
 /// The record today's installers write (two fields, no id) is accepted, and
