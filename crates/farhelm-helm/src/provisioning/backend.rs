@@ -3073,6 +3073,32 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
 mod tests {
     use super::*;
 
+    /// The helper's connection progress cannot authorize provisioning or
+    /// supply a resolved executable path. Those facts still come only from
+    /// the wrapper's own records, even when both kinds share stderr.
+    #[farhelm_testtrace::test]
+    async fn connected_marker_does_not_replace_probe_wrapper_records() {
+        let connected = format!("{}\n", farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER);
+        let (signal, mut failures) = tokio::sync::mpsc::unbounded_channel();
+        let helper_only = drain_probe_stderr(connected.as_bytes(), signal).await;
+        assert!(!helper_only.command_started);
+        assert!(helper_only.resolved_farhelm.is_none());
+        assert_eq!(helper_only.prefix, connected.as_bytes());
+        assert!(failures.try_recv().is_err());
+
+        let wrapped =
+            format!("{REMOTE_PROBE_MARKER}\n{REMOTE_RESOLVED_PREFIX}/fixture/farhelm\n{connected}");
+        let (signal, mut failures) = tokio::sync::mpsc::unbounded_channel();
+        let with_wrapper = drain_probe_stderr(wrapped.as_bytes(), signal).await;
+        assert!(with_wrapper.command_started);
+        assert_eq!(
+            with_wrapper.resolved_farhelm.as_deref(),
+            Some(b"/fixture/farhelm".as_slice())
+        );
+        assert_eq!(with_wrapper.prefix, wrapped.as_bytes());
+        assert!(failures.try_recv().is_err());
+    }
+
     /// Reap an isolated child before pausing time, so OS scheduling cannot
     /// consume the virtual deadline meant only for its diagnostic reader.
     async fn reaped_probe() -> tokio::process::Child {

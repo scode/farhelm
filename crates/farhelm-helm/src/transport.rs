@@ -3,8 +3,17 @@
 
 use crate::store::{HostId, HostKind, HostRow};
 use anyhow::Context as _;
-use std::{future::Future, pin::Pin, process::Stdio};
+use std::{
+    collections::VecDeque,
+    future::Future,
+    path::PathBuf,
+    pin::Pin,
+    process::{ExitStatus, Stdio},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::{Notify, watch};
 use tracing::warn;
 
 /// One opened connection's reader/writer pair, type-erased.
@@ -19,6 +28,23 @@ pub type TransportPair = (
     Box<dyn AsyncRead + Send + Unpin>,
     Box<dyn AsyncWrite + Send + Unpin>,
 );
+
+/// An opened byte stream and, for SSH only, its attempt's process ownership.
+///
+/// The client consumes `io` without knowing its transport. The actor keeps
+/// `ssh` until connection failure has settled, so dropping the client's reader
+/// does not kill the child before its natural exit status can be observed.
+pub struct TransportConnection {
+    pub io: TransportPair,
+    pub ssh: Option<SshDiagnostics>,
+}
+
+impl TransportConnection {
+    /// Local sockets and scripted peers have no SSH evidence or child to retain.
+    pub fn plain(io: TransportPair) -> Self {
+        Self { io, ssh: None }
+    }
+}
 
 /// How an actor opens a FRESH connection to its host.
 ///
@@ -44,7 +70,7 @@ pub trait HostTransport: Send + Sync + 'static {
     fn connect<'a>(
         &'a self,
         host: &'a HostRow,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportPair>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportConnection>> + Send + 'a>>;
 }
 
 /// The production transport: unix socket for the reserved local row, the
@@ -60,6 +86,9 @@ pub struct SystemTransport {
     /// The helm's own state directory: where the local supervisor's socket
     /// lives, and where ssh ControlMaster sockets are kept.
     state_dir: std::path::PathBuf,
+    /// Injecting the executable keeps process-ordering tests independent of
+    /// the running test process's PATH and the operator's SSH configuration.
+    ssh_program: PathBuf,
 }
 
 impl SystemTransport {
@@ -71,6 +100,21 @@ impl SystemTransport {
     pub fn new(state_dir: impl Into<std::path::PathBuf>) -> SystemTransport {
         SystemTransport {
             state_dir: state_dir.into(),
+            ssh_program: PathBuf::from("ssh"),
+        }
+    }
+
+    /// Keep the real SSH transport and its argument construction in actor
+    /// tests while replacing only the process being launched. This seam is
+    /// instance-local; it never changes PATH or the test process environment.
+    #[cfg(test)]
+    pub(crate) fn with_ssh_program(
+        state_dir: impl Into<PathBuf>,
+        ssh_program: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            state_dir: state_dir.into(),
+            ssh_program: ssh_program.into(),
         }
     }
 }
@@ -91,7 +135,7 @@ impl HostTransport for SystemTransport {
     fn connect<'a>(
         &'a self,
         host: &'a HostRow,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportPair>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportConnection>> + Send + 'a>> {
         Box::pin(async move {
             match host.kind {
                 HostKind::Local => {
@@ -99,10 +143,10 @@ impl HostTransport for SystemTransport {
                         .await
                         .map_err(classify_local_dial)?;
                     let (r, w) = tokio::io::split(stream);
-                    Ok((
+                    Ok(TransportConnection::plain((
                         Box::new(r) as Box<dyn AsyncRead + Send + Unpin>,
                         Box::new(w) as Box<dyn AsyncWrite + Send + Unpin>,
-                    ))
+                    )))
                 }
                 HostKind::Ssh => {
                     let dest = host.destination.as_deref().context(
@@ -110,7 +154,7 @@ impl HostTransport for SystemTransport {
                          should have made this impossible",
                     )?;
 
-                    let mut cmd = tokio::process::Command::new("ssh");
+                    let mut cmd = tokio::process::Command::new(&self.ssh_program);
                     cmd.args(crate::ssh::ssh_stdio_args(
                         dest,
                         &self.state_dir,
@@ -132,59 +176,41 @@ impl HostTransport for SystemTransport {
                     // instead keeps ssh's genuinely actionable diagnostics
                     // (auth failure, unresolvable host) while making them
                     // bounded, escaped, and attributable to a host.
-                    let mut child = cmd
+                    let child = cmd
                         .stdin(Stdio::piped())
                         .stdout(Stdio::piped())
                         .stderr(Stdio::piped())
                         .kill_on_drop(true)
                         .spawn()
                         .context("spawning ssh")?;
-                    let stdout = child.stdout.take().expect("piped stdout");
-                    let stdin = child.stdin.take().expect("piped stdin");
-                    let stderr = child.stderr.take().expect("piped stderr");
-                    // Drained continuously rather than at exit: a pipe
-                    // nobody reads fills up, and a full stderr blocks the
-                    // ssh child's writes — which for a chatty remote means
-                    // the transport wedges for reasons no log line would
-                    // ever explain.
-                    tokio::spawn(relay_ssh_stderr(host.id, dest.to_string(), stderr));
-                    Ok((
-                        Box::new(SshChannel {
-                            stdout,
-                            _child: child,
-                        }) as Box<dyn AsyncRead + Send + Unpin>,
-                        Box::new(stdin) as Box<dyn AsyncWrite + Send + Unpin>,
-                    ))
+                    Ok(ssh_connection(child, host.id, dest.to_string()))
                 }
             }
         })
     }
 }
 
-/// An ssh exec channel's read half WITH the ssh child that produces it,
-/// so the child's lifetime is the transport's lifetime and nothing else.
+/// Keep the process alive through either an active reader or failure diagnosis.
 ///
-/// The child used to be parked in a detached `wait()` task instead, which
-/// reaped it but did not own it: closing the pipes only asks ssh to exit,
-/// and an ssh (or a remote proxy) that ignores EOF simply kept running —
-/// past a cancelled attempt, past a torn-down actor, one survivor per
-/// retry for a host that keeps failing late in the handshake. Holding the
-/// `Child` here makes teardown structural: dropping the transport pair —
-/// which is what a cancelled attempt, a lost connection, and a reconfigured
-/// row all do — drops this value, and tokio's `kill_on_drop` both signals
-/// the child and hands it to the runtime's orphan reaper, so there is
-/// nothing left to leak and no zombie to collect by hand.
-///
-/// Only the read half is wrapped: the pair is created and dropped
-/// together, so one anchor is enough, and the writer stays a plain
-/// `ChildStdin` whose close is what asks ssh to exit politely first.
-///
-/// The child's STDERR is not here — it is piped and drained by a task of
-/// its own (see [`relay_ssh_stderr`]), which ends when the child's stderr
-/// closes, i.e. when the child this value owns exits.
+/// No detached task owns or waits for the child. Dropping the last anchor
+/// aborts stderr drainage and drops the kill-on-drop child, including when an
+/// attempt is cancelled or a descendant keeps the stderr pipe open forever.
+struct SshLifetime {
+    child: tokio::sync::Mutex<tokio::process::Child>,
+    stderr_task: tokio::task::AbortHandle,
+}
+
+impl Drop for SshLifetime {
+    fn drop(&mut self) {
+        self.stderr_task.abort();
+    }
+}
+
+/// The reader keeps successful connections alive after the actor drops its
+/// diagnostics owner. Failure diagnosis temporarily holds the other anchor.
 struct SshChannel {
     stdout: tokio::process::ChildStdout,
-    _child: tokio::process::Child,
+    _lifetime: Arc<SshLifetime>,
 }
 
 impl AsyncRead for SshChannel {
@@ -194,6 +220,277 @@ impl AsyncRead for SshChannel {
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
         Pin::new(&mut self.stdout).poll_read(cx, buf)
+    }
+}
+
+/// Natural termination evidence, without inventing a numeric status for a
+/// signal or for a failed wait. `None` in a snapshot means not yet observed.
+#[derive(Clone, Debug)]
+pub(crate) enum SshExit {
+    Status(ExitStatus),
+    WaitFailed,
+}
+
+/// Raw peer bytes from one diagnostic line, never more than 512 bytes.
+///
+/// `truncated` means bytes beyond that prefix were drained and discarded.
+/// Callers may decode lossily and add a truncation suffix, but must pass the
+/// assembled failure through the manager's existing escaping boundary once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SshStderrLine {
+    pub bytes: Vec<u8>,
+    pub truncated: bool,
+}
+
+/// Evidence available now; it makes no claim that process or stderr is done.
+///
+/// The tail contains at most two lines, oldest first, including the current
+/// unterminated segment. A completed connected marker is never diagnostic
+/// text. EOF and a read error are distinct, and neither implies child exit.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SshSnapshot {
+    pub connected_marker_seen: bool,
+    pub stderr_tail: Vec<SshStderrLine>,
+    pub stderr_eof: bool,
+    pub stderr_read_failed: bool,
+    pub exit: Option<SshExit>,
+}
+
+/// Read-only observations can outlive the attempt without keeping SSH alive.
+///
+/// This is deliberately separate from `SshDiagnostics`: the manager may retain
+/// evidence of an earlier marker for capability detection, but that historical
+/// memory must not become a hidden owner of an obsolete child or drainer.
+#[derive(Clone)]
+pub struct SshObservation(Arc<SshObserved>);
+
+/// Synchronous state locks cover only bounded copies and parsing. Notification
+/// waits never hold that lock; the drainer owns no process lifetime through it.
+struct SshObserved {
+    state: Mutex<SshState>,
+    connected: watch::Sender<bool>,
+    finished: Notify,
+}
+
+/// Two complete diagnostic lines plus one capped pending segment are enough
+/// to expose the newest two without evicting a diagnostic for a marker line.
+#[derive(Default)]
+struct SshState {
+    complete: VecDeque<SshStderrLine>,
+    pending: Vec<u8>,
+    pending_truncated: bool,
+    connected_marker_seen: bool,
+    stderr_eof: bool,
+    stderr_read_failed: bool,
+    exit: Option<SshExit>,
+}
+
+impl SshObservation {
+    /// Observations hold no child, pipes, task handles, or cancellation anchor.
+    fn new() -> Self {
+        Self(Arc::new(SshObserved {
+            state: Mutex::new(SshState::default()),
+            connected: watch::channel(false).0,
+            finished: Notify::new(),
+        }))
+    }
+
+    /// Take a bounded synchronous view, without waiting for or polling a child.
+    pub(crate) fn snapshot(&self) -> SshSnapshot {
+        let state = self.0.state.lock().expect("ssh observation mutex");
+        let mut tail: Vec<_> = state.complete.iter().cloned().collect();
+        if !state.pending.is_empty() || state.pending_truncated {
+            tail.push(SshStderrLine {
+                bytes: state.pending.clone(),
+                truncated: state.pending_truncated,
+            });
+        }
+        if tail.len() > 2 {
+            tail.remove(0);
+        }
+        SshSnapshot {
+            connected_marker_seen: state.connected_marker_seen,
+            stderr_tail: tail,
+            stderr_eof: state.stderr_eof,
+            stderr_read_failed: state.stderr_read_failed,
+            exit: state.exit.clone(),
+        }
+    }
+
+    /// Consume a fixed-size read chunk without allocating uncapped lines.
+    /// Marker recognition uses the full line's truncation bit and newline,
+    /// so a long line with a marker prefix cannot impersonate progress.
+    fn observe_chunk(&self, bytes: &[u8]) -> Vec<SshStderrLine> {
+        let mut state = self.0.state.lock().expect("ssh observation mutex");
+        let mut diagnostic_lines = Vec::new();
+        let mut first_marker = false;
+        for byte in bytes {
+            if *byte != b'\n' {
+                if state.pending.len() < SSH_STDERR_LINE_CAP {
+                    state.pending.push(*byte);
+                } else {
+                    state.pending_truncated = true;
+                }
+                continue;
+            }
+            let line = SshStderrLine {
+                bytes: std::mem::take(&mut state.pending),
+                truncated: std::mem::take(&mut state.pending_truncated),
+            };
+            if !line.truncated
+                && line.bytes == farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER.as_bytes()
+            {
+                first_marker |= !state.connected_marker_seen;
+                state.connected_marker_seen = true;
+            } else {
+                state.complete.push_back(line.clone());
+                if state.complete.len() > 2 {
+                    state.complete.pop_front();
+                }
+                diagnostic_lines.push(line);
+            }
+        }
+        drop(state);
+        if first_marker {
+            self.0.connected.send_replace(true);
+        }
+        diagnostic_lines
+    }
+
+    /// Keep a final unterminated segment as diagnostics, never as a marker.
+    /// A read error preserves those bytes too, but is not reported as EOF.
+    fn finish_stderr(&self, failed: bool) -> Option<SshStderrLine> {
+        let mut state = self.0.state.lock().expect("ssh observation mutex");
+        state.stderr_read_failed = failed;
+        state.stderr_eof = !failed;
+        let pending = (!state.pending.is_empty() || state.pending_truncated).then(|| {
+            let line = SshStderrLine {
+                bytes: std::mem::take(&mut state.pending),
+                truncated: std::mem::take(&mut state.pending_truncated),
+            };
+            state.complete.push_back(line.clone());
+            if state.complete.len() > 2 {
+                state.complete.pop_front();
+            }
+            line
+        });
+        drop(state);
+        self.0.finished.notify_waiters();
+        pending
+    }
+
+    /// Record an actual wait result; absent results remain unknown.
+    fn record_exit(&self, exit: SshExit) {
+        self.0.state.lock().expect("ssh observation mutex").exit = Some(exit);
+    }
+}
+
+/// An attempt owner permits natural exit diagnosis after the reader has gone.
+/// Dropping all diagnostics and the reader cancels the child and stderr task.
+#[derive(Clone)]
+pub struct SshDiagnostics {
+    lifetime: Arc<SshLifetime>,
+    observation: SshObservation,
+}
+
+impl SshDiagnostics {
+    /// Retain historical evidence without retaining a process lifetime.
+    pub fn observation(&self) -> SshObservation {
+        self.observation.clone()
+    }
+
+    /// Opportunistically reap a completed child, without waiting or acquiring a
+    /// contended async lock. A deadline handler can call this synchronously.
+    pub(crate) fn snapshot(&self) -> SshSnapshot {
+        if self.observation.snapshot().exit.is_none()
+            && let Ok(mut child) = self.lifetime.child.try_lock()
+        {
+            match child.try_wait() {
+                Ok(Some(status)) => self.observation.record_exit(SshExit::Status(status)),
+                Err(_) => self.observation.record_exit(SshExit::WaitFailed),
+                Ok(None) => {}
+            }
+        }
+        self.observation.snapshot()
+    }
+
+    /// Wait for natural child exit and stderr completion under one allowance.
+    ///
+    /// Only early transport failures use this; the actor's unchanged whole
+    /// attempt deadline surrounds it. A deadline expiry snapshots immediately.
+    /// Cancellation of `Child::wait` leaves ownership here for kill-on-drop.
+    pub(crate) async fn settle(&self) -> SshSnapshot {
+        let _ = tokio::time::timeout(Duration::from_secs(2), async {
+            if self.observation.snapshot().exit.is_none() {
+                let result = self.lifetime.child.lock().await.wait().await;
+                self.observation.record_exit(match result {
+                    Ok(status) => SshExit::Status(status),
+                    Err(_) => SshExit::WaitFailed,
+                });
+            }
+            loop {
+                let finished = self.observation.0.finished.notified();
+                tokio::pin!(finished);
+                finished.as_mut().enable();
+                let snapshot = self.observation.snapshot();
+                if snapshot.stderr_eof || snapshot.stderr_read_failed {
+                    break;
+                }
+                finished.await;
+            }
+        })
+        .await;
+        self.snapshot()
+    }
+
+    /// Remain pending until the first exact connected line. EOF is not
+    /// progress and must not create a ready-loop while hello is still pending.
+    pub(crate) async fn wait_connected(&self) {
+        let mut connected = self.observation.0.connected.subscribe();
+        loop {
+            if *connected.borrow_and_update() {
+                return;
+            }
+            // The sender lives inside this observation, which this borrow
+            // retains. The channel cannot close while this future exists.
+            connected.changed().await.expect("ssh observation sender");
+        }
+    }
+}
+
+/// Attach exactly one drainer and one shared child anchor to piped SSH.
+/// The drainer holds observations only, so cancellation cannot form a cycle.
+fn ssh_connection(
+    mut child: tokio::process::Child,
+    host: HostId,
+    destination: String,
+) -> TransportConnection {
+    let stdout = child.stdout.take().expect("piped stdout");
+    let stdin = child.stdin.take().expect("piped stdin");
+    let stderr = child.stderr.take().expect("piped stderr");
+    let observation = SshObservation::new();
+    let stderr_task = tokio::spawn(relay_ssh_stderr(
+        host,
+        destination,
+        stderr,
+        observation.clone(),
+    ));
+    let lifetime = Arc::new(SshLifetime {
+        child: tokio::sync::Mutex::new(child),
+        stderr_task: stderr_task.abort_handle(),
+    });
+    TransportConnection {
+        io: (
+            Box::new(SshChannel {
+                stdout,
+                _lifetime: lifetime.clone(),
+            }),
+            Box::new(stdin),
+        ),
+        ssh: Some(SshDiagnostics {
+            lifetime,
+            observation,
+        }),
     }
 }
 
@@ -226,113 +523,71 @@ const SSH_STDERR_LINE_BUDGET: usize = 200;
 /// cursor moves, screen clears, an OSC sequence retitling the window —
 /// while `Debug` escapes them into something legible and inert.
 ///
-/// Ends when the child's stderr closes, which is when the child exits;
-/// there is no separate lifetime to manage, and the task cannot outlive
-/// the transport that spawned it by more than the child's own teardown.
-async fn relay_ssh_stderr(host: HostId, destination: String, stderr: tokio::process::ChildStderr) {
-    let mut reader = tokio::io::BufReader::new(stderr);
+/// Child exit and stderr EOF are independent: a descendant can retain stderr.
+/// The lifetime anchor aborts this task when its final owner drops.
+async fn relay_ssh_stderr<R>(
+    host: HostId,
+    destination: String,
+    mut stderr: R,
+    observation: SshObservation,
+) where
+    R: AsyncRead + Unpin,
+{
+    use tokio::io::AsyncReadExt as _;
+
+    let mut bytes = [0u8; 4096];
     let mut relayed = 0usize;
-    while let Some(line) = next_capped_line(&mut reader, SSH_STDERR_LINE_CAP).await {
-        relayed += 1;
-        // Past the budget the loop keeps READING and stops logging. It
-        // must not stop reading: closing this pipe early makes the child's
-        // next stderr write fail, which for ssh means the transport dies
-        // because the remote was talkative — a far worse outcome than a
-        // quiet log.
-        match relayed.cmp(&SSH_STDERR_LINE_BUDGET) {
-            std::cmp::Ordering::Greater => continue,
-            std::cmp::Ordering::Equal => {
-                warn!(
-                    host,
-                    destination = destination.as_str(),
-                    budget = SSH_STDERR_LINE_BUDGET,
-                    "the ssh child for this host has said enough; dropping the rest of its \
-                     stderr for this connection"
-                );
-                continue;
+    loop {
+        match stderr.read(&mut bytes).await {
+            Ok(0) => {
+                if let Some(line) = observation.finish_stderr(false) {
+                    log_ssh_line(host, &destination, &line, &mut relayed);
+                }
+                break;
             }
-            std::cmp::Ordering::Less => {}
+            Ok(count) => {
+                // Observation continues past the warning budget. Otherwise a
+                // chatty peer could hide its connected marker or final error.
+                for line in observation.observe_chunk(&bytes[..count]) {
+                    log_ssh_line(host, &destination, &line, &mut relayed);
+                }
+            }
+            Err(_) => {
+                if let Some(line) = observation.finish_stderr(true) {
+                    log_ssh_line(host, &destination, &line, &mut relayed);
+                }
+                break;
+            }
         }
-        let text = String::from_utf8_lossy(&line.bytes);
+    }
+}
+
+/// Warnings stop at the existing per-child budget; drainage never stops there.
+/// Saturating the count avoids growing a counter on an endless stderr flood.
+fn log_ssh_line(host: HostId, destination: &str, line: &SshStderrLine, relayed: &mut usize) {
+    if *relayed >= SSH_STDERR_LINE_BUDGET {
+        return;
+    }
+    *relayed += 1;
+    if *relayed == SSH_STDERR_LINE_BUDGET {
         warn!(
             host,
-            destination = destination.as_str(),
-            truncated = line.truncated,
-            // Debug-formatted deliberately; see this function's own docs.
-            message = ?text,
-            "ssh reported a problem for this host"
+            destination,
+            budget = SSH_STDERR_LINE_BUDGET,
+            "the ssh child for this host has said enough; dropping the rest of its \
+             stderr for this connection"
         );
+        return;
     }
-}
-
-/// One capped line of a stderr stream: at most `cap` bytes of it, plus
-/// whether more were thrown away.
-struct CappedLine {
-    bytes: Vec<u8>,
-    truncated: bool,
-}
-
-/// Read up to the next newline, RETAINING at most `cap` bytes and
-/// discarding the rest as it goes. `None` at end of stream.
-///
-/// The cap has to be applied while reading, not after. The obvious shape —
-/// `BufReader::split(b'\n')` and truncate the segment — allocates the whole
-/// segment first, so a remote that writes megabytes without a newline
-/// (a binary blob on stderr, a wedged pager, a deliberate flood) makes this
-/// process buy every byte of it before any limit is consulted. That is an
-/// unbounded allocation driven entirely by the far end of an ssh channel,
-/// which for a registered host is a machine the helm does not control.
-///
-/// `fill_buf`/`consume` is what makes the bound real: bytes past `cap` are
-/// consumed and dropped without ever being retained, so an endless
-/// newline-free stream costs the reader's fixed buffer and nothing more.
-/// Draining rather than stopping is still the rule — see this function's
-/// caller for why closing the pipe early would kill the transport.
-async fn next_capped_line<R>(reader: &mut R, cap: usize) -> Option<CappedLine>
-where
-    R: tokio::io::AsyncBufRead + Unpin,
-{
-    use tokio::io::AsyncBufReadExt as _;
-
-    let mut kept: Vec<u8> = Vec::new();
-    let mut truncated = false;
-    let mut saw_any = false;
-    // A read ERROR ends the line the same way end-of-stream does: there is
-    // nothing more to relay either way, and the caller's loop stops.
-    while let Ok(available) = reader.fill_buf().await {
-        if available.is_empty() {
-            break;
-        }
-        saw_any = true;
-        match available.iter().position(|byte| *byte == b'\n') {
-            Some(newline) => {
-                let take = cap.saturating_sub(kept.len()).min(newline);
-                kept.extend_from_slice(&available[..take]);
-                truncated |= newline > take;
-                // The newline itself is consumed but never kept: callers
-                // want the line's content, and a trailing newline in a log
-                // field would break the line the field is rendered on.
-                reader.consume(newline + 1);
-                return Some(CappedLine {
-                    bytes: kept,
-                    truncated,
-                });
-            }
-            None => {
-                let take = cap.saturating_sub(kept.len()).min(available.len());
-                kept.extend_from_slice(&available[..take]);
-                truncated |= available.len() > take;
-                let consumed = available.len();
-                reader.consume(consumed);
-            }
-        }
-    }
-    // A final segment with no trailing newline is still a line; a stream
-    // that ended with nothing pending is the end.
-    saw_any.then_some(CappedLine {
-        bytes: kept,
-        truncated,
-    })
+    let text = String::from_utf8_lossy(&line.bytes);
+    warn!(
+        host,
+        destination,
+        truncated = line.truncated,
+        // Debug-formatted deliberately; see relay_ssh_stderr's docs.
+        message = ?text,
+        "ssh reported a problem for this host"
+    );
 }
 
 /// Tag a failed local-socket dial that means "no supervisor here" with
@@ -369,64 +624,311 @@ pub(crate) fn classify_local_dial(error: anyhow::Error) -> anyhow::Error {
 mod tests {
     use super::*;
 
-    /// A stderr stream with no newline in it must cost a BOUNDED amount of
-    /// memory, however much the far end writes.
-    ///
-    /// The shape this replaced buffered a whole newline-free segment before
-    /// any cap applied, so a remote that wrote megabytes without a newline —
-    /// a binary blob on stderr, a wedged pager, a deliberate flood — made
-    /// this process allocate every byte of it first. That is unbounded
-    /// allocation driven by the far end of an ssh channel, which for a
-    /// registered host is a machine the helm does not control.
-    ///
-    /// Multi-megabyte rather than merely large: the point is that the size
-    /// of the input does not appear in the size of what is retained at all.
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    /// A timeout must see the capped current segment even before EOF. A
+    /// newline-free peer must not choose the helm's retained allocation.
     #[farhelm_testtrace::test]
     async fn a_newline_free_stderr_flood_stays_bounded() {
-        let flood = vec![b'x'; 4 * 1024 * 1024];
-        let mut reader = tokio::io::BufReader::new(std::io::Cursor::new(flood));
-        let line = super::next_capped_line(&mut reader, SSH_STDERR_LINE_CAP)
-            .await
-            .expect("a final segment with no newline is still a line");
-        assert_eq!(
-            line.bytes.len(),
-            SSH_STDERR_LINE_CAP,
-            "only the cap is retained, no matter how much arrived"
-        );
-        assert!(
-            line.truncated,
-            "and the caller is told the rest was dropped"
-        );
+        let observation = SshObservation::new();
+        let chunk = [b'x'; 4096];
+        for _ in 0..1024 {
+            assert!(observation.observe_chunk(&chunk).is_empty());
+        }
+        let snapshot = observation.snapshot();
+        assert!(!snapshot.stderr_eof);
+        assert_eq!(snapshot.stderr_tail.len(), 1);
+        assert_eq!(snapshot.stderr_tail[0].bytes.len(), SSH_STDERR_LINE_CAP);
+        assert!(snapshot.stderr_tail[0].truncated);
+        let state = observation.0.state.lock().unwrap();
+        assert!(state.complete.is_empty());
+        assert_eq!(state.pending.len(), SSH_STDERR_LINE_CAP);
     }
 
-    /// Ordinary lines survive intact, the cap applies per LINE, and the
-    /// stream ends when it ends.
-    ///
-    /// The bound above is only useful if the reader is otherwise a correct
-    /// line reader: a version that truncated every line, or lost the last
-    /// one, or never terminated, would satisfy the flood test and destroy
-    /// the diagnostics the relay exists to carry.
+    /// The current partial line participates in the newest-two view. Invalid
+    /// UTF-8 and controls remain raw until the existing failure-text boundary.
     #[farhelm_testtrace::test]
-    async fn capped_line_reading_keeps_short_lines_whole() {
-        let long = "y".repeat(SSH_STDERR_LINE_CAP + 50);
-        let input = format!("first\nsecond\n{long}\nlast-with-no-newline");
-        let mut reader = tokio::io::BufReader::new(std::io::Cursor::new(input.into_bytes()));
+    async fn stderr_tail_keeps_two_lines_including_the_current_partial() {
+        let observation = SshObservation::new();
+        observation.observe_chunk(b"old\nfirst\nsecond\n\xff\x1bpartial");
+        let snapshot = observation.snapshot();
+        assert_eq!(snapshot.stderr_tail.len(), 2);
+        assert_eq!(snapshot.stderr_tail[0].bytes, b"second");
+        assert_eq!(snapshot.stderr_tail[1].bytes, b"\xff\x1bpartial");
+        assert!(!snapshot.stderr_tail[1].truncated);
+        observation.finish_stderr(false);
+        let ended = observation.snapshot();
+        assert!(ended.stderr_eof);
+        assert!(!ended.stderr_read_failed);
+        assert_eq!(ended.stderr_tail, snapshot.stderr_tail);
+    }
 
-        let mut seen: Vec<(String, bool)> = Vec::new();
-        while let Some(line) = super::next_capped_line(&mut reader, SSH_STDERR_LINE_CAP).await {
-            seen.push((
-                String::from_utf8_lossy(&line.bytes).into_owned(),
-                line.truncated,
-            ));
-        }
-        assert_eq!(seen.len(), 4, "every line, including the unterminated tail");
-        assert_eq!(seen[0], ("first".to_string(), false));
-        assert_eq!(seen[1], ("second".to_string(), false));
-        assert_eq!(
-            (seen[2].0.len(), seen[2].1),
-            (SSH_STDERR_LINE_CAP, true),
-            "the cap is per line, and truncation is reported per line"
+    /// Only an exact, newline-terminated, untruncated line proves progress.
+    /// Chunk boundaries and an oversized preceding banner cannot hide it.
+    #[farhelm_testtrace::test]
+    async fn connected_marker_requires_exact_framing_and_survives_split_reads() {
+        let marker = farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER.as_bytes();
+        let observation = SshObservation::new();
+        let mut spoof = marker.to_vec();
+        spoof.extend(vec![b'x'; SSH_STDERR_LINE_CAP]);
+        spoof.push(b'\n');
+        observation.observe_chunk(&spoof);
+        assert!(!observation.snapshot().connected_marker_seen);
+        observation.observe_chunk(&[vec![b'y'; 4096], b"\n".to_vec()].concat());
+        observation.observe_chunk(&marker[..10]);
+        observation.observe_chunk(&marker[10..]);
+        assert!(!observation.snapshot().connected_marker_seen);
+        let lines = observation.observe_chunk(b"\n");
+        assert!(lines.is_empty(), "the marker is not warning text");
+        assert!(observation.snapshot().connected_marker_seen);
+        assert!(
+            observation
+                .snapshot()
+                .stderr_tail
+                .iter()
+                .all(|line| line.bytes != marker)
         );
-        assert_eq!(seen[3], ("last-with-no-newline".to_string(), false));
+
+        for bytes in [
+            [b"prefix-".as_slice(), marker, b"\n"].concat(),
+            [marker, b"-suffix\n"].concat(),
+            marker.to_vec(),
+        ] {
+            let invalid = SshObservation::new();
+            invalid.observe_chunk(&bytes);
+            invalid.finish_stderr(false);
+            assert!(!invalid.snapshot().connected_marker_seen);
+        }
+    }
+
+    /// A noisy peer cannot spend the log budget to prevent later progress or
+    /// error capture. Exercise the real relay, not only its line parser.
+    #[farhelm_testtrace::test]
+    async fn observation_continues_after_the_warning_budget() {
+        let mut input = b"banner\n".repeat(SSH_STDERR_LINE_BUDGET + 10);
+        input.extend_from_slice(farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER.as_bytes());
+        input.extend_from_slice(b"\nlate error\nfinal segment");
+        let observation = SshObservation::new();
+        relay_ssh_stderr(1, "fixture".into(), input.as_slice(), observation.clone()).await;
+        let snapshot = observation.snapshot();
+        assert!(snapshot.connected_marker_seen);
+        assert!(snapshot.stderr_eof);
+        assert_eq!(snapshot.stderr_tail[0].bytes, b"late error");
+        assert_eq!(snapshot.stderr_tail[1].bytes, b"final segment");
+    }
+
+    /// An I/O error preserves the partial diagnostic but must not manufacture
+    /// EOF or a connected marker from stderr merely having stopped.
+    #[farhelm_testtrace::test]
+    async fn stderr_read_error_is_not_eof_or_connected_progress() {
+        let observation = SshObservation::new();
+        observation.observe_chunk(b"partial");
+        observation.finish_stderr(true);
+        let snapshot = observation.snapshot();
+        assert!(snapshot.stderr_read_failed);
+        assert!(!snapshot.stderr_eof);
+        assert!(!snapshot.connected_marker_seen);
+        assert_eq!(snapshot.stderr_tail[0].bytes, b"partial");
+    }
+
+    /// A tiny POSIX executable controls descriptor order and blocks on its
+    /// own stdin, so tests observe a real readiness boundary instead of sleep.
+    /// The script ignores SSH argv; only this transport instance uses it.
+    fn fake_ssh(body: &str) -> (tempfile::TempDir, PathBuf) {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().unwrap();
+        let program = directory.path().join("ssh-fixture");
+        std::fs::write(&program, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        (directory, program)
+    }
+
+    /// An ordinary SSH row exercises executable injection and real argument
+    /// construction without using a real login or editing process environment.
+    fn ssh_row() -> HostRow {
+        HostRow {
+            id: 1,
+            entry_uuid: "00000000-0000-4000-8000-000000000001".into(),
+            kind: HostKind::Ssh,
+            destination: Some("fixture".into()),
+            alias: None,
+            remote_farhelm: None,
+            remote_state_dir: None,
+            host_identity: None,
+            cache_truncated: false,
+            yolo_without_asking: false,
+            commands_without_asking: false,
+            links_without_asking: false,
+            local_links_without_asking: false,
+            icon: farhelm_proto::host_appearance::HostIcon::default(),
+            color: farhelm_proto::host_appearance::HostColor::default(),
+        }
+    }
+
+    /// stdout may close before the final stderr and natural status. Keeping
+    /// diagnostics after the read half drops must preserve that late evidence.
+    #[farhelm_testtrace::test]
+    async fn stdout_closure_does_not_kill_the_child_before_failure_settles() {
+        let body = format!(
+            "exec 1>&-\nprintf '%s\\n' '{}' >&2\nIFS= read -r proceed\nprintf 'late error\\n' >&2\nexit 127",
+            farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER
+        );
+        let (directory, program) = fake_ssh(&body);
+        let transport = SystemTransport::with_ssh_program(directory.path(), program);
+        let connection = transport.connect(&ssh_row()).await.unwrap();
+        let ((mut reader, mut writer), diagnostics) = (connection.io, connection.ssh.unwrap());
+        tokio::time::timeout(Duration::from_secs(5), diagnostics.wait_connected())
+            .await
+            .expect("fixture reached its stdin gate");
+        assert!(
+            diagnostics.snapshot().exit.is_none(),
+            "the child is still gated"
+        );
+        assert_eq!(reader.read(&mut [0u8; 1]).await.unwrap(), 0);
+        drop(reader);
+        assert!(
+            diagnostics.snapshot().exit.is_none(),
+            "reader drop kept the child alive"
+        );
+        writer.write_all(b"continue\n").await.unwrap();
+        drop(writer);
+        let snapshot = diagnostics.settle().await;
+        assert!(snapshot.stderr_eof);
+        assert!(
+            matches!(snapshot.exit, Some(SshExit::Status(status)) if status.code() == Some(127))
+        );
+        assert_eq!(snapshot.stderr_tail.len(), 1);
+        assert_eq!(snapshot.stderr_tail[0].bytes, b"late error");
+    }
+
+    /// Poll only the owned child's disappearance. The readiness handshake in
+    /// the caller proves this is cancellation of a live process, not a child
+    /// that had already exited naturally before its lifetime anchor dropped.
+    async fn wait_child_gone(pid: u32) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                // SAFETY: signal zero only checks this owned child's existence.
+                if unsafe { libc::kill(pid as libc::pid_t, 0) } == -1
+                    && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+                {
+                    return;
+                }
+                // sleep-ok: bounded polling of the owned kill-on-drop child's reaping.
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("cancelled owned child was killed and reaped");
+    }
+
+    /// Historical observations must not keep a cancelled attempt alive. The
+    /// direct child is blocked on stdin when its last owner is dropped.
+    #[farhelm_testtrace::test]
+    async fn retaining_observations_does_not_retain_the_child() {
+        let body = format!(
+            "printf '%s\\n' '{}' >&2\nIFS= read -r proceed\nexit 0",
+            farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER
+        );
+        let (_directory, program) = fake_ssh(&body);
+        let child = tokio::process::Command::new(program)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let pid = child.id().unwrap();
+        let connection = ssh_connection(child, 1, "fixture".into());
+        let ((reader, writer), diagnostics) = (connection.io, connection.ssh.unwrap());
+        tokio::time::timeout(Duration::from_secs(5), diagnostics.wait_connected())
+            .await
+            .expect("fixture reached its stdin gate");
+        assert!(diagnostics.snapshot().exit.is_none());
+        let observation = diagnostics.observation();
+        let lifetime = Arc::downgrade(&diagnostics.lifetime);
+        drop(reader);
+        drop(diagnostics);
+        assert!(lifetime.upgrade().is_none());
+        // Keep stdin open: EOF is not what made this process exit.
+        wait_child_gone(pid).await;
+        assert!(observation.snapshot().connected_marker_seen);
+        drop(writer);
+    }
+
+    /// EOF without a marker must not make the progress future immediately
+    /// ready: the actor races it against hello, and a ready EOF would spin.
+    #[farhelm_testtrace::test]
+    async fn connected_wait_remains_pending_after_stderr_eof() {
+        let child = tokio::process::Command::new("true")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let connection = ssh_connection(child, 1, "fixture".into());
+        let diagnostics = connection.ssh.unwrap();
+        let snapshot = diagnostics.settle().await;
+        assert!(snapshot.stderr_eof);
+        assert!(!snapshot.connected_marker_seen);
+        tokio::select! {
+            biased;
+            _ = diagnostics.wait_connected() => panic!("EOF is not connected progress"),
+            _ = std::future::ready(()) => {}
+        }
+        drop(connection.io);
+    }
+
+    /// stderr can outlive the direct child. Reap first, then pause time so
+    /// OS scheduling cannot masquerade as the shared settle deadline expiring.
+    /// Dropping the final lifetime owner must abort this still-open drainer.
+    #[farhelm_testtrace::test]
+    async fn natural_exit_with_open_stderr_has_one_bounded_settle_allowance() {
+        let mut child = tokio::process::Command::new("true")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let status = child.wait().await.unwrap();
+        assert!(status.success());
+        let (stderr, held_open) = tokio::io::duplex(16);
+        let observation = SshObservation::new();
+        observation.record_exit(SshExit::Status(status));
+        let task = tokio::spawn(relay_ssh_stderr(
+            1,
+            "fixture".into(),
+            stderr,
+            observation.clone(),
+        ));
+        let diagnostics = SshDiagnostics {
+            lifetime: Arc::new(SshLifetime {
+                child: tokio::sync::Mutex::new(child),
+                stderr_task: task.abort_handle(),
+            }),
+            observation,
+        };
+        assert!(!diagnostics.snapshot().stderr_eof);
+        tokio::time::pause();
+        let started = tokio::time::Instant::now();
+        let snapshot = diagnostics.settle().await;
+        // Tokio rounds deadlines up to a millisecond tick, even with time
+        // paused. Permit that rounding while still rejecting an early return
+        // or an extended wait for the still-open stderr stream.
+        let elapsed = started.elapsed();
+        assert!(
+            (Duration::from_secs(2)..=Duration::from_millis(2001)).contains(&elapsed),
+            "one settle allowance, including timer rounding: {elapsed:?}"
+        );
+        assert!(!snapshot.stderr_eof);
+        assert!(matches!(snapshot.exit, Some(SshExit::Status(status)) if status.success()));
+        drop(diagnostics);
+        assert!(
+            task.await.unwrap_err().is_cancelled(),
+            "the open drainer was aborted"
+        );
+        drop(held_open);
     }
 }

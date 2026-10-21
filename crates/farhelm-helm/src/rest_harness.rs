@@ -38,10 +38,9 @@
 //! assertion in that test into a routing refusal.
 
 use crate::AppState;
-use crate::manager::{
-    Cadence, ConnectionManager, HostState, HostTransport, RefreshHealth, TransportPair,
-};
+use crate::manager::{Cadence, ConnectionManager, HostState, HostTransport, RefreshHealth};
 use crate::store::{HelmStore, HostId, HostRow};
+use crate::transport::TransportConnection;
 use farhelm_proto::io::{FrameReader, FrameWriter, parse_control};
 use farhelm_proto::{ControlMsg, PROTOCOL_VERSION, RestartOffer, SessionInfo, SessionStatus};
 use std::collections::HashMap;
@@ -372,7 +371,7 @@ impl HostTransport for ScriptedFleet {
     fn connect<'a>(
         &'a self,
         host: &'a HostRow,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportPair>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportConnection>> + Send + 'a>> {
         let id = host.id;
         Box::pin(async move {
             self.dials
@@ -426,10 +425,10 @@ impl HostTransport for ScriptedFleet {
                 }
             });
             let (r, w) = tokio::io::split(ours);
-            Ok((
+            Ok(TransportConnection::plain((
                 Box::new(r) as Box<dyn AsyncRead + Send + Unpin>,
                 Box::new(w) as Box<dyn AsyncWrite + Send + Unpin>,
-            ))
+            )))
         })
     }
 }

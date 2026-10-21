@@ -1433,8 +1433,8 @@ fn main() -> anyhow::Result<()> {
                 // but this process's stdout IS the protocol channel, so
                 // the proxy stays as close to a bare pipe as possible
                 // rather than trusting every future logging tweak to
-                // keep stdout clean. Its one diagnostic is the explicit
-                // eprintln on the error path.
+                // keep stdout clean. The connected marker and any error
+                // diagnostic are explicit stderr writes in the proxy.
                 let dir = match state_dir {
                     Some(dir) => dir,
                     None => farhelm_supervisor::default_state_dir()?,
@@ -2101,6 +2101,9 @@ async fn run_checkout_config(command: CheckoutConfigCmd) -> anyhow::Result<Strin
 /// Failure to make the initial local socket connection exits 75 only for
 /// not-found/refused. Provisioning treats that status as positive absence;
 /// every other failure remains an ordinary error and must never offer setup.
+/// A successful socket connection emits one stderr marker before either pump
+/// starts. It reports transport progress without adding bytes to the framed
+/// stdout stream or claiming that the supervisor has answered the hello.
 async fn stdio_proxy(state_dir: &std::path::Path) -> anyhow::Result<()> {
     use anyhow::Context;
     use tokio::io::AsyncWriteExt;
@@ -2124,6 +2127,7 @@ async fn stdio_proxy(state_dir: &std::path::Path) -> anyhow::Result<()> {
             eprintln!("farhelm internal stdio: {error:#}");
             std::process::exit(if absent { 75 } else { 1 });
         });
+    eprintln!("{}", farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER);
     let (mut sock_r, mut sock_w) = tokio::io::split(stream);
     let mut upstream = tokio::spawn(async move {
         let mut stdin = tokio::io::stdin();

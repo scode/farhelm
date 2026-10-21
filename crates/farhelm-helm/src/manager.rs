@@ -65,10 +65,11 @@
 
 pub use crate::feed::{FeedSeat, FleetEvents};
 pub use crate::transport::{
-    HostTransport, LocalSupervisorNotRunning, SystemTransport, TransportPair,
+    HostTransport, LocalSupervisorNotRunning, SystemTransport, TransportConnection, TransportPair,
 };
+use crate::transport::{SshDiagnostics, SshExit, SshObservation, SshSnapshot};
 
-use crate::client::{SessionListing, SupervisorClient, SupervisorError};
+use crate::client::{SessionListing, SupervisorClient, SupervisorError, SupervisorTransportError};
 use crate::session_cache::{creation_order, eviction_victim, merge_cached_session};
 use crate::store::{
     DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow, HostStoreError,
@@ -1759,6 +1760,7 @@ impl ConnectionManager {
             #[cfg(test)]
             refusal_gate: Arc::clone(&self.refusal_gate),
             destination: Mutex::new(display_destination(&row)),
+            ssh_capability: Mutex::new(None),
             cache_lock: Arc::clone(&cache_lock),
             seed_epoch: Arc::clone(&seed_epoch),
             incarnations: Arc::clone(&self.incarnations),
@@ -2922,6 +2924,10 @@ struct HostActor {
     /// attempts were going is not one — while the row itself is owned by
     /// [`Self::run`]'s stack and the logging happens several frames down.
     destination: Mutex<String>,
+    /// Only the current endpoint's marker history survives an attempt. The
+    /// observation holds no child or task, so remembering a late marker cannot
+    /// keep a failed SSH process alive. Retargeting replaces this one record.
+    ssh_capability: Mutex<Option<SshCapability>>,
     /// Shared with the manager: held across every cache write so a refresh
     /// and a create's seed cannot interleave. See
     /// [`ConnectionManager::cache_locks`].
@@ -3088,7 +3094,8 @@ enum AttemptOutcome {
     Unverified { recorded: String },
     /// The peer's identity belongs to another registry row.
     Duplicate { twin: HostId, identity: String },
-    /// The transport never got as far as a settled hello.
+    /// No usable connection was established, including a hello that succeeded
+    /// but whose identity recording or browser-link setup then failed.
     Failed {
         cause: UnreachableCause,
         error: String,
@@ -3112,6 +3119,43 @@ struct AttemptProgress {
     stage: ConnectionStage,
     active: bool,
     incarnation: u64,
+    /// Kept outside the timed future: a failed handshake drops its reader,
+    /// but natural exit and late stderr must still be observable until the
+    /// shared attempt budget expires. Cancellation drops this owner too.
+    ssh: Option<SshDiagnostics>,
+    prior_marker_seen: bool,
+}
+
+/// A bounded, process-local capability fact for exactly one dial configuration.
+///
+/// The newest observation may learn its marker after hello. Fold that fact into
+/// `seen` before replacing it, rather than treating hello as a stderr barrier.
+struct SshCapability {
+    dialed: DialedAs,
+    seen: bool,
+    latest: Option<SshObservation>,
+}
+
+impl SshCapability {
+    /// Forget proof from any different destination, executable or state directory.
+    /// Returning to an earlier endpoint does not restore a hidden endpoint map.
+    fn for_dial<'a>(slot: &'a mut Option<Self>, dialed: &DialedAs) -> &'a mut Self {
+        if slot.as_ref().is_none_or(|entry| entry.dialed != *dialed) {
+            *slot = Some(Self {
+                dialed: dialed.clone(),
+                seen: false,
+                latest: None,
+            });
+        }
+        let entry = slot
+            .as_mut()
+            .expect("the current dial has a capability record");
+        entry.seen |= entry
+            .latest
+            .as_ref()
+            .is_some_and(|observation| observation.snapshot().connected_marker_seen);
+        entry
+    }
 }
 
 /// Keep a settled dial result from crossing a retarget that arrived while it
@@ -3531,10 +3575,16 @@ impl HostActor {
         active: bool,
         incarnation: u64,
     ) -> AttemptOutcome {
+        let prior_marker_seen = {
+            let mut capability = self.ssh_capability.lock().expect("SSH capability mutex");
+            SshCapability::for_dial(&mut capability, &DialedAs::of(row)).seen
+        };
         let mut progress = AttemptProgress {
             stage: ConnectionStage::WaitingToConnect,
             active,
             incarnation,
+            ssh: None,
+            prior_marker_seen,
         };
         match tokio::time::timeout(
             self.cadence.attempt_timeout,
@@ -3543,17 +3593,29 @@ impl HostActor {
         .await
         {
             Ok(outcome) => outcome,
-            Err(_) => AttemptOutcome::Failed {
-                // Never the local-supervisor classification: a timeout
-                // does not prove "nothing is listening", the case that hint
-                // exists for. Dial, hello or placement can consume the budget.
-                cause: UnreachableCause::TransportFailure,
-                error: format!(
-                    "the connection attempt did not complete within {:?}: {}",
-                    self.cadence.attempt_timeout,
-                    progress.stage.failure_context()
-                ),
-            },
+            Err(_) => {
+                // Snapshot now, with no settlement after the deadline. The
+                // timeout has already dropped the attempt and its pipes, but
+                // this outer owner still holds any natural exit evidence.
+                let context = match progress.ssh.as_ref() {
+                    Some(ssh) => ssh_failure_detail(
+                        row,
+                        progress.stage,
+                        progress.prior_marker_seen,
+                        &ssh.snapshot(),
+                        true,
+                        None,
+                    ),
+                    None => progress.stage.failure_context().to_string(),
+                };
+                failure(
+                    row,
+                    anyhow::anyhow!(
+                        "the connection attempt did not complete within {:?}: {context}",
+                        self.cadence.attempt_timeout,
+                    ),
+                )
+            }
         }
     }
 
@@ -3563,7 +3625,10 @@ impl HostActor {
     /// unreachable/refused state. No task or timer can publish after this attempt
     /// ends, and the existing publication guard closes the withdrawal race.
     fn advance_attempt(&self, progress: &mut AttemptProgress, stage: ConnectionStage) {
-        if progress.stage == stage {
+        if progress.stage == stage
+            || (progress.stage == ConnectionStage::SettingUp
+                && stage == ConnectionStage::WaitingForHello)
+        {
             return;
         }
         progress.stage = stage;
@@ -3602,16 +3667,32 @@ impl HostActor {
         client: Arc<SupervisorClient>,
         identity: Option<String>,
         build_version: String,
+        progress: &AttemptProgress,
     ) -> AttemptOutcome {
         let enabled = match row.kind {
             HostKind::Local => false,
             HostKind::Ssh => true,
         };
         if let Err(error) = client.set_browser_forwarding(enabled).await {
-            return failure(
-                row,
-                error.context(ConnectionStage::SettingUp.failure_context()),
-            );
+            let snapshot = if let Some(ssh) = progress.ssh.as_ref() {
+                // Pending RPCs fail before the background task publishes its
+                // closed flag. The typed loss error covers that ordering gap;
+                // an ordinary refusal waits only if closure is already known.
+                let closed = request_lost_connection(&error)
+                    || tokio::select! {
+                        biased;
+                        () = client.closed() => true,
+                        () = std::future::ready(()) => false,
+                    };
+                Some(if closed {
+                    ssh.settle().await
+                } else {
+                    ssh.snapshot()
+                })
+            } else {
+                None
+            };
+            return attempt_failure(row, error, progress, false, snapshot);
         }
         AttemptOutcome::Connected {
             client,
@@ -3643,10 +3724,20 @@ impl HostActor {
             },
         );
         let dialed = DialedAs::of(row);
-        let (reader, writer) = match self.transport.connect(row).await {
-            Ok(pair) => pair,
+        let TransportConnection {
+            io: (reader, writer),
+            ssh,
+        } = match self.transport.connect(row).await {
+            Ok(connection) => connection,
             Err(error) => return failure(row, error.context(progress.stage.failure_context())),
         };
+        // Install ownership before the client can fail and drop its reader.
+        // Historical memory receives only the non-owning observation.
+        if let Some(ssh) = ssh.as_ref() {
+            let mut capability = self.ssh_capability.lock().expect("SSH capability mutex");
+            SshCapability::for_dial(&mut capability, &dialed).latest = Some(ssh.observation());
+        }
+        progress.ssh = ssh;
         if row.kind == HostKind::Local {
             self.advance_attempt(progress, ConnectionStage::WaitingForHello);
         }
@@ -3654,14 +3745,25 @@ impl HostActor {
         // agent on this host has to the helm, and it carries the host's own
         // id because the helm cannot otherwise tell which fleet member an
         // upcall came from (see `crate::agent_requests`).
-        let client = match SupervisorClient::start_for_host(
+        let hello = SupervisorClient::start_for_host(
             reader,
             writer,
             Arc::clone(&self.agent_requests),
             self.id,
-        )
-        .await
-        {
+        );
+        tokio::pin!(hello);
+        let ssh = progress.ssh.clone();
+        let hello_result = match ssh.as_ref() {
+            Some(ssh) => tokio::select! {
+                result = &mut hello => result,
+                () = ssh.wait_connected() => {
+                    self.advance_attempt(progress, ConnectionStage::WaitingForHello);
+                    hello.await
+                }
+            },
+            None => hello.await,
+        };
+        let client = match hello_result {
             Ok(client) => client,
             Err(error) => {
                 // The skew refusal reaches this side as an io::Error
@@ -3702,10 +3804,20 @@ impl HostActor {
                     );
                     return AttemptOutcome::Skew(skew.clone());
                 }
-                // An ssh channel that closed before a single byte of
-                // protocol is the "no supervisor over there" shape, and
-                // the M1 annotation is what turns it into advice; reused
-                // rather than re-derived so both paths say the same thing.
+                if let Some(ssh) = progress.ssh.as_ref() {
+                    let may_classify = handshake_termination(&error);
+                    // Pipe closure and process exit are independently scheduled.
+                    // Only an early termination gets a short settle, inside
+                    // this same 20-second budget. Protocol errors stay errors.
+                    let snapshot = if may_classify {
+                        ssh.settle().await
+                    } else {
+                        ssh.snapshot()
+                    };
+                    return attempt_failure(row, error, progress, may_classify, Some(snapshot));
+                }
+                // Scripted transports and older callers may carry no process
+                // diagnostics. Preserve their existing generic annotation.
                 let error = match row.destination.as_deref() {
                     Some(dest) if row.kind.annotates_ssh_handshake_eof() => {
                         crate::ssh::annotate_ssh_handshake_eof(
@@ -3786,7 +3898,7 @@ impl HostActor {
                 "the host's supervisor reported no identity; connecting without a session cache"
             );
             return self
-                .accepted_connection(row, client, None, build_version)
+                .accepted_connection(row, client, None, build_version, progress)
                 .await;
         };
 
@@ -3816,7 +3928,7 @@ impl HostActor {
                     destination = %self.destination(),
                     "host identity confirmed at hello"
                 );
-                self.accepted_connection(row, client, Some(identity), build_version)
+                self.accepted_connection(row, client, Some(identity), build_version, progress)
                     .await
             }
             Ok(FirstContactOutcome::Mismatch { recorded, reported }) => {
@@ -3867,11 +3979,12 @@ impl HostActor {
                 // A storage failure is not a connection failure, but the
                 // honest response is the same: this host has no settled
                 // identity, so it must not serve or cache under one.
-                failure(
+                attempt_failure(
                     row,
-                    error
-                        .context("recording the host's identity")
-                        .context(progress.stage.failure_context()),
+                    error.context("recording the host's identity"),
+                    progress,
+                    false,
+                    None,
                 )
             }
         }
@@ -4644,6 +4757,186 @@ impl HostActor {
     }
 }
 
+/// A clean pre-hello close or a failed write can expose the remote command's
+/// natural status. An incomplete/malformed frame cannot: it already provides
+/// protocol evidence that a status must not replace with a missing-supervisor hint.
+fn handshake_termination(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .any(|error| {
+            farhelm_proto::io::ClosedBeforeHello::is_cause_of(error)
+                || error.kind() == std::io::ErrorKind::BrokenPipe
+        })
+}
+
+/// A transport-lost RPC already proves closure even before `closed()` wakes.
+/// Wrong/invalid replies and remote refusals prove an answer instead; they must
+/// not acquire a settlement delay merely because their text mentions a close.
+fn request_lost_connection(error: &anyhow::Error) -> bool {
+    matches!(
+        error.downcast_ref::<SupervisorTransportError>(),
+        Some(SupervisorTransportError::NotSent | SupervisorTransportError::SentUnanswered)
+    )
+}
+
+/// Clip a raw diagnostic component without escaping it. The complete failure
+/// crosses `peer_text` once, after composition; truncation stays visible and
+/// UTF-8 boundaries remain valid even for lossy-decoded stderr.
+fn diagnostic_excerpt(text: &str, cap: usize) -> String {
+    let end = (0..=text.len().min(cap))
+        .rev()
+        .find(|end| text.is_char_boundary(*end))
+        .unwrap_or(0);
+    if end < text.len() {
+        format!("{} (truncated)", &text[..end])
+    } else {
+        text.to_string()
+    }
+}
+
+/// Give an exact pasteable remedy only when the configured arguments fit.
+/// Clipping a path inside shell quotes would silently start a different install;
+/// unusually long configuration instead gets an explicit descriptive instruction.
+fn remote_supervisor_remedy(row: &HostRow) -> String {
+    let program = row.remote_farhelm.as_deref().unwrap_or("farhelm");
+    let state_dir = row.remote_state_dir.as_deref();
+    if program.len() > 128 || state_dir.is_some_and(|path| path.len() > 128) {
+        return "start it there with `farhelm supervisor run`, using this host entry's configured Farhelm program and state directory (command shown without those arguments)".to_string();
+    }
+    let mut command = format!("{} supervisor run", crate::ssh::shell_quote(program));
+    if let Some(state_dir) = state_dir {
+        command.push_str(&format!(
+            " --state-dir {}",
+            crate::ssh::shell_quote(state_dir)
+        ));
+    }
+    if command.len() > 192 {
+        return "start it there with `farhelm supervisor run`, using this host entry's configured Farhelm program and state directory (command shown without those arguments)".to_string();
+    }
+    format!("start it there with `{command}`")
+}
+
+/// Diagnose from the highest observed boundary, retaining stderr before details
+/// that may contain long peer paths. Each displayed line gets 128 raw bytes;
+/// the original error gets 320, with its root first so EPIPE cannot be hidden
+/// behind an outer context. Retention's 512-byte parser cap is independent.
+///
+/// Numeric SSH exits classify only an otherwise unsettled hello. Marker or
+/// successful-hello evidence outranks them. Signals, wait failure and absent
+/// status never manufacture an ordinary exit code, and protocol errors request
+/// only literal status context rather than a remote-command diagnosis.
+fn ssh_failure_detail(
+    row: &HostRow,
+    stage: ConnectionStage,
+    prior_marker_seen: bool,
+    snapshot: &SshSnapshot,
+    classify_exit: bool,
+    error: Option<&anyhow::Error>,
+) -> String {
+    let stage = if snapshot.connected_marker_seen && stage == ConnectionStage::ConnectingToHost {
+        ConnectionStage::WaitingForHello
+    } else {
+        stage
+    };
+    let code = match &snapshot.exit {
+        Some(SshExit::Status(status)) => status.code(),
+        _ => None,
+    };
+    let can_classify = classify_exit && stage == ConnectionStage::ConnectingToHost;
+    let mut detail = match (can_classify, code) {
+        (true, Some(255)) => "SSH could not connect or log in to the host".to_string(),
+        (true, Some(126)) => format!(
+            "reached the host, but Farhelm could not be executed at {}",
+            diagnostic_excerpt(row.remote_farhelm.as_deref().unwrap_or("farhelm"), 128),
+        ),
+        (true, Some(127)) => format!(
+            "reached the host, but Farhelm could not be found at {}",
+            diagnostic_excerpt(row.remote_farhelm.as_deref().unwrap_or("farhelm"), 128),
+        ),
+        (true, Some(75)) => format!(
+            "Farhelm is on the host, but no supervisor is running there; {}",
+            remote_supervisor_remedy(row),
+        ),
+        (true, Some(code)) => {
+            format!("reached the host, but the remote Farhelm command failed (exit status {code})",)
+        }
+        _ if !classify_exit && stage == ConnectionStage::ConnectingToHost => {
+            "the connection failed before a supervisor hello completed".to_string()
+        }
+        _ if stage == ConnectionStage::ConnectingToHost && prior_marker_seen => {
+            "SSH had not reached Farhelm on the host: still connecting or logging in".to_string()
+        }
+        _ => stage.failure_context().to_string(),
+    };
+
+    // Keep peer output ahead of the command/error chain: a long configured
+    // path or contextual error must not consume the whole-message cap first.
+    if !snapshot.stderr_tail.is_empty() {
+        detail.push_str("; SSH stderr: ");
+        for (index, line) in snapshot.stderr_tail.iter().enumerate() {
+            if index != 0 {
+                detail.push_str(" / ");
+            }
+            let decoded = String::from_utf8_lossy(&line.bytes);
+            detail.push('"');
+            detail.push_str(&diagnostic_excerpt(&decoded, 128));
+            if line.truncated && decoded.len() <= 128 {
+                detail.push_str(" (truncated)");
+            }
+            detail.push('"');
+        }
+    }
+    match &snapshot.exit {
+        Some(SshExit::Status(status)) if code.is_none() => {
+            detail.push_str(&format!("; SSH terminated without an exit code ({status})"));
+        }
+        Some(SshExit::WaitFailed) => detail.push_str("; SSH exit status could not be read"),
+        None => detail.push_str("; SSH exit status is not yet known"),
+        Some(SshExit::Status(_)) if !can_classify => {
+            detail.push_str(&format!("; SSH exited with status {}", code.unwrap()));
+        }
+        _ => {}
+    }
+    if snapshot.stderr_read_failed {
+        detail.push_str("; SSH stderr could not be read completely");
+    }
+    if let Some(error) = error {
+        detail.push_str("; cause: ");
+        detail.push_str(&diagnostic_excerpt(
+            &format!("{}; {error:#}", error.root_cause()),
+            320,
+        ));
+    }
+    detail
+}
+
+/// Preserve setup/protocol errors while adding only the SSH evidence this
+/// attempt owns. Local failures retain their typed missing-supervisor cause;
+/// every composed SSH diagnostic is normalized exactly once by `failure`.
+fn attempt_failure(
+    row: &HostRow,
+    error: anyhow::Error,
+    progress: &AttemptProgress,
+    classify_exit: bool,
+    snapshot: Option<SshSnapshot>,
+) -> AttemptOutcome {
+    match progress.ssh.as_ref() {
+        Some(ssh) => failure(
+            row,
+            anyhow::anyhow!(ssh_failure_detail(
+                row,
+                progress.stage,
+                progress.prior_marker_seen,
+                &snapshot.unwrap_or_else(|| ssh.snapshot()),
+                classify_exit,
+                Some(&error),
+            )),
+        ),
+        None => failure(row, error.context(progress.stage.failure_context())),
+    }
+}
+
 /// Build the [`AttemptOutcome::Failed`] for `error`, classifying the local
 /// row's "nothing is listening" case (see [`UnreachableCause`]).
 ///
@@ -4755,6 +5048,580 @@ mod tests {
     use std::{future::Future, pin::Pin};
     use tokio::io::{AsyncRead, AsyncWrite};
     use tokio::sync::broadcast;
+
+    /// Stable remote configuration for SSH evidence tests; all three dial
+    /// coordinates are explicit so a remedy cannot accidentally use defaults.
+    fn diagnostic_ssh_row() -> HostRow {
+        HostRow {
+            id: 2,
+            entry_uuid: "00000000-0000-4000-8000-000000000002".into(),
+            kind: HostKind::Ssh,
+            destination: Some("diagnostic.example".into()),
+            alias: None,
+            remote_farhelm: Some("/opt/farhelm fixture".into()),
+            remote_state_dir: Some("/state/fixture's data".into()),
+            host_identity: None,
+            cache_truncated: false,
+            yolo_without_asking: false,
+            commands_without_asking: false,
+            links_without_asking: false,
+            local_links_without_asking: false,
+            icon: Default::default(),
+            color: Default::default(),
+        }
+    }
+
+    /// Construct an actual Unix exit status rather than an invented numeric
+    /// enum, exercising the same code()/signal distinction as the child wait.
+    fn diagnostic_status(code: i32) -> SshExit {
+        use std::os::unix::process::ExitStatusExt as _;
+        SshExit::Status(std::process::ExitStatus::from_raw(code << 8))
+    }
+
+    /// SSH owns only 255; all other ordinary statuses came from the remote
+    /// command, including zero before hello. Missing Farhelm and a positively
+    /// absent supervisor need different remedies, with the configured paths.
+    #[farhelm_testtrace::test]
+    fn ssh_natural_exit_categories_preserve_the_remote_evidence() {
+        let row = diagnostic_ssh_row();
+        for (code, expected) in [
+            (255, "could not connect or log in"),
+            (126, "could not be executed"),
+            (127, "could not be found"),
+            (75, "no supervisor is running"),
+            (0, "remote Farhelm command failed (exit status 0)"),
+            (23, "remote Farhelm command failed (exit status 23)"),
+        ] {
+            let snapshot = SshSnapshot {
+                exit: Some(diagnostic_status(code)),
+                ..Default::default()
+            };
+            let text = ssh_failure_detail(
+                &row,
+                ConnectionStage::ConnectingToHost,
+                false,
+                &snapshot,
+                true,
+                None,
+            );
+            assert!(text.contains(expected), "status {code}: {text}");
+            assert!(!text.contains("either no supervisor"), "{text}");
+            match code {
+                126 | 127 => {
+                    assert!(text.contains("reached the host"), "{text}");
+                    assert!(
+                        text.contains(row.remote_farhelm.as_deref().unwrap()),
+                        "{text}"
+                    );
+                }
+                75 => {
+                    assert!(text.contains("supervisor run"), "{text}");
+                    let command = remote_supervisor_remedy(&row);
+                    let pasted = command.split('`').nth(1).expect("exact quoted command");
+                    assert_eq!(
+                        shell_words::split(pasted).unwrap(),
+                        [
+                            "/opt/farhelm fixture",
+                            "supervisor",
+                            "run",
+                            "--state-dir",
+                            "/state/fixture's data"
+                        ],
+                    );
+                }
+                _ => assert!(!text.contains("supervisor run"), "{text}"),
+            }
+        }
+    }
+
+    /// A signal or unavailable wait result cannot be treated as success or as
+    /// SSH's special 255. Preserve the uncertainty alongside the current stage.
+    #[farhelm_testtrace::test]
+    fn ssh_unknown_termination_never_invents_an_exit_code() {
+        use std::os::unix::process::ExitStatusExt as _;
+        for (exit, expected) in [
+            (None, "exit status is not yet known"),
+            (Some(SshExit::WaitFailed), "exit status could not be read"),
+            (
+                Some(SshExit::Status(std::process::ExitStatus::from_raw(
+                    libc::SIGTERM,
+                ))),
+                "terminated without an exit code",
+            ),
+        ] {
+            let text = ssh_failure_detail(
+                &diagnostic_ssh_row(),
+                ConnectionStage::ConnectingToHost,
+                false,
+                &SshSnapshot {
+                    exit,
+                    ..Default::default()
+                },
+                true,
+                None,
+            );
+            assert!(text.contains(expected), "{text}");
+            assert!(!text.contains("exit status 0"), "{text}");
+            assert!(!text.contains("could not connect or log in"), "{text}");
+            assert!(!text.contains("supervisor run"), "{text}");
+        }
+    }
+
+    /// Hello and marker evidence must win over exit codes. Conversely an
+    /// unmarked timeout needs the older-remote hedge until this endpoint has
+    /// actually demonstrated marker support. Protocol failures keep their own
+    /// meaning even if the child later exits with the absence status.
+    #[farhelm_testtrace::test]
+    fn ssh_failure_uses_the_highest_boundary_and_hedges_only_without_proof() {
+        let row = diagnostic_ssh_row();
+        let mut snapshot = SshSnapshot::default();
+        let render = |stage, prior, snapshot: &SshSnapshot, classify| {
+            ssh_failure_detail(&row, stage, prior, snapshot, classify, None)
+        };
+        let unknown = render(ConnectionStage::ConnectingToHost, false, &snapshot, true);
+        assert!(
+            unknown.contains("too old to report its progress"),
+            "{unknown}"
+        );
+        let known = render(ConnectionStage::ConnectingToHost, true, &snapshot, true);
+        assert!(known.contains("still connecting or logging in"), "{known}");
+        assert!(!known.contains("too old"), "{known}");
+
+        snapshot.connected_marker_seen = true;
+        snapshot.exit = Some(diagnostic_status(75));
+        let hello = render(ConnectionStage::ConnectingToHost, false, &snapshot, true);
+        assert!(
+            hello.contains("supervisor accepted the connection"),
+            "{hello}"
+        );
+        assert!(!hello.contains("supervisor run"), "{hello}");
+        let setup = render(ConnectionStage::SettingUp, false, &snapshot, true);
+        assert!(setup.contains("supervisor answered"), "{setup}");
+        assert!(
+            !setup.contains("did not finish answering the hello"),
+            "{setup}"
+        );
+        assert!(!setup.contains("supervisor run"), "{setup}");
+
+        snapshot.connected_marker_seen = false;
+        let malformed = anyhow::anyhow!("invalid control frame");
+        let protocol = ssh_failure_detail(
+            &row,
+            ConnectionStage::ConnectingToHost,
+            false,
+            &snapshot,
+            false,
+            Some(&malformed),
+        );
+        assert!(protocol.contains("invalid control frame"), "{protocol}");
+        assert!(protocol.contains("SSH exited with status 75"), "{protocol}");
+        assert!(!protocol.contains("supervisor run"), "{protocol}");
+    }
+
+    /// Keep both recent lines ahead of a noisy error chain, then escape once
+    /// at the existing boundary. The root cause must survive long outer text;
+    /// invalid UTF-8, control bytes and each kind of clipping remain explicit.
+    #[farhelm_testtrace::test]
+    fn ssh_failure_tail_is_bounded_escaped_and_does_not_hide_the_io_error() {
+        use crate::transport::SshStderrLine;
+        let row = diagnostic_ssh_row();
+        let snapshot = SshSnapshot {
+            exit: Some(diagnostic_status(255)),
+            stderr_tail: vec![
+                SshStderrLine {
+                    bytes: b"\xff\x1b[31mpermission denied\r".to_vec(),
+                    truncated: false,
+                },
+                SshStderrLine {
+                    bytes: vec![b'x'; 512],
+                    truncated: true,
+                },
+            ],
+            ..Default::default()
+        };
+        let error = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "owned pipe broke",
+        ))
+        .context("long path ".repeat(100));
+        assert!(handshake_termination(&error));
+        let raw = ssh_failure_detail(
+            &row,
+            ConnectionStage::ConnectingToHost,
+            false,
+            &snapshot,
+            true,
+            Some(&error),
+        );
+        let AttemptOutcome::Failed { error: text, .. } = failure(&row, anyhow::anyhow!(raw)) else {
+            unreachable!("a diagnostic is a failure");
+        };
+        assert!(text.contains("permission denied"), "{text}");
+        assert!(text.contains("owned pipe broke"), "{text}");
+        assert!(text.contains("\\u{1b}"), "{text}");
+        assert!(!text.contains('\x1b'));
+        assert!(!text.contains('\r'));
+        assert!(text.contains('\u{fffd}'));
+        assert!(text.contains("truncated"), "{text}");
+        assert!(!text.contains(&"x".repeat(129)), "{text}");
+        assert!(
+            text.len() < PEER_TEXT_CAP,
+            "small excerpts should not need whole-message clipping: {text}"
+        );
+    }
+
+    /// Only the typed clean-EOF payload identifies an empty framed stream.
+    /// A mid-frame EOF has the same error kind and must keep its protocol
+    /// meaning instead of acquiring a missing-supervisor remedy.
+    #[farhelm_testtrace::test]
+    fn ssh_status_classification_does_not_mistake_midframe_eof_for_clean_close() {
+        let clean = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            farhelm_proto::io::ClosedBeforeHello,
+        ));
+        let partial = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "incomplete frame",
+        ));
+        assert!(handshake_termination(&clean));
+        assert!(!handshake_termination(&partial));
+        assert!(!handshake_termination(&anyhow::anyhow!("Broken pipe")));
+    }
+
+    /// Browser setup may lose its pending reply before the client's closed
+    /// watch is set. Only typed transport loss fills that ordering gap: a
+    /// peer's refusal text or wrong reply must not add a two-second wait.
+    #[farhelm_testtrace::test]
+    fn setup_settles_typed_connection_loss_without_matching_peer_prose() {
+        for error in [
+            SupervisorTransportError::NotSent,
+            SupervisorTransportError::SentUnanswered,
+        ] {
+            assert!(request_lost_connection(
+                &anyhow::Error::new(error).context("browser setup")
+            ));
+        }
+        for error in [
+            SupervisorTransportError::SentWrongReply {
+                request: "SetBrowserForwarding",
+                reply: "Pong",
+            },
+            SupervisorTransportError::SentInvalidReply {
+                request: "SetBrowserForwarding",
+                reply: "BrowserForwardingSet",
+                problem: "invalid response",
+            },
+        ] {
+            assert!(!request_lost_connection(&anyhow::Error::new(error)));
+        }
+        assert!(!request_lost_connection(&anyhow::anyhow!(
+            "the supervisor connection closed after the request was sent"
+        )));
+    }
+
+    /// A clipped command must never masquerade as a pasteable remedy for a
+    /// different directory. Preserve exact normal quoting and explain omitted
+    /// arguments explicitly when configuration exceeds the display budget.
+    #[farhelm_testtrace::test]
+    fn long_remote_paths_get_descriptive_instead_of_truncated_commands() {
+        let mut row = diagnostic_ssh_row();
+        row.remote_state_dir = Some(format!("/{}", "a".repeat(256)));
+        let remedy = remote_supervisor_remedy(&row);
+        assert!(
+            remedy.contains("command shown without those arguments"),
+            "{remedy}"
+        );
+        assert!(!remedy.contains(&"a".repeat(128)), "{remedy}");
+        assert!(
+            remedy.contains("configured Farhelm program and state directory"),
+            "{remedy}"
+        );
+    }
+
+    /// Marker support belongs to the entire current dial snapshot. Changing
+    /// any coordinate, then returning to the original, cannot resurrect an
+    /// endpoint map or transfer another install's proof to an older helper.
+    #[farhelm_testtrace::test]
+    fn ssh_capability_is_reset_by_every_dial_coordinate() {
+        let original = DialedAs::of(&diagnostic_ssh_row());
+        for field in 0..3 {
+            let mut slot = None;
+            SshCapability::for_dial(&mut slot, &original).seen = true;
+            assert!(SshCapability::for_dial(&mut slot, &original).seen);
+            let mut changed = original.clone();
+            match field {
+                0 => changed.destination = Some("other.example".into()),
+                1 => changed.remote_farhelm = Some("/other/program".into()),
+                2 => changed.remote_state_dir = Some("/other/state".into()),
+                _ => unreachable!(),
+            }
+            assert!(!SshCapability::for_dial(&mut slot, &changed).seen);
+            assert!(!SshCapability::for_dial(&mut slot, &original).seen);
+        }
+    }
+
+    /// Observe real SSH diagnostics without becoming another process owner.
+    /// The production transport still launches the instance-injected executable;
+    /// the test only gets readiness and late-marker observations to await.
+    struct ObservedSshTransport {
+        system: SystemTransport,
+        observations: watch::Sender<Vec<SshObservation>>,
+    }
+
+    impl HostTransport for ObservedSshTransport {
+        fn connect<'a>(
+            &'a self,
+            row: &'a HostRow,
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportConnection>> + Send + 'a>>
+        {
+            Box::pin(async move {
+                let connection = self.system.connect(row).await?;
+                if let Some(ssh) = connection.ssh.as_ref() {
+                    self.observations.send_modify(|observations| {
+                        observations.push(ssh.observation());
+                    });
+                }
+                Ok(connection)
+            })
+        }
+    }
+
+    /// A POSIX process fixture exercises the actual child/pipe lifetime and
+    /// executable-injection seam. Its shell is needed for descriptor/process
+    /// ordering; it is never a snippet added to the production SSH command.
+    fn diagnostic_ssh_program(directory: &std::path::Path, body: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt as _;
+        let program = directory.join("diagnostic-ssh");
+        std::fs::write(
+            &program,
+            format!("#!/bin/sh\nprintf 'fixture pid: %s\\n' \"$$\" >&2\n{body}\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        program
+    }
+
+    /// A specific retained line proves the owned child has executed, before
+    /// any paused-clock deadline is advanced. Keep the bounded observation in
+    /// the timeout diagnostic so fixture failure cannot look like stage failure.
+    async fn wait_for_ssh_line(observation: &SshObservation, expected: &[u8]) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let snapshot = observation.snapshot();
+                if snapshot
+                    .stderr_tail
+                    .iter()
+                    .any(|line| line.bytes == expected)
+                {
+                    assert!(
+                        snapshot.exit.is_none(),
+                        "ready child already exited: {snapshot:?}"
+                    );
+                    let pid = snapshot
+                        .stderr_tail
+                        .iter()
+                        .find_map(|line| {
+                            std::str::from_utf8(&line.bytes)
+                                .ok()?
+                                .strip_prefix("fixture pid: ")?
+                                .parse::<libc::pid_t>()
+                                .ok()
+                        })
+                        .expect("this owned fixture reports its PID before readiness");
+                    // SAFETY: signal zero observes only the child PID this
+                    // fixture just reported; it sends no signal or mutation.
+                    assert_eq!(
+                        unsafe { libc::kill(pid, 0) },
+                        0,
+                        "ready child {pid} is gone: {snapshot:?}"
+                    );
+                    return;
+                }
+                // sleep-ok: bounded readiness polling of this owned child's capped stderr observation.
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "SSH fixture did not reach readiness: {:?}",
+                observation.snapshot()
+            )
+        });
+    }
+
+    /// Live progress must come from the marker, and that proof must survive
+    /// timeout into the next attempt's older-remote decision. OS children reach
+    /// their own stderr readiness before each clock pause, so scheduler delay
+    /// cannot impersonate a silent SSH login. PR1's scripted tests separately
+    /// pin the unchanged full retry ladder and background-probe behavior.
+    #[farhelm_testtrace::test]
+    async fn ssh_marker_publishes_live_hello_and_refines_the_next_unmarked_timeout() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = crate::ssh::shell_quote(directory.path().join("first").to_str().unwrap());
+        let program = diagnostic_ssh_program(
+            directory.path(),
+            &format!(
+                "if mkdir {first} 2>/dev/null; then printf '%s\\n' '{}' >&2; fi\nprintf 'fixture ready\\n' >&2\nexec /bin/sleep 60",
+                farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER,
+            ),
+        );
+        let store = HelmStore::open(&directory.path().join("helm.db"))
+            .await
+            .unwrap();
+        let host = store
+            .add_ssh_host("marker.example", None, None)
+            .await
+            .unwrap();
+        let transport = Arc::new(ObservedSshTransport {
+            system: SystemTransport::with_ssh_program(directory.path(), program),
+            observations: watch::channel(Vec::new()).0,
+        });
+        let manager = ConnectionManager::start(store, transport.clone(), Cadence::default())
+            .await
+            .unwrap();
+        let mut observations = transport.observations.subscribe();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            manager.wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connecting {
+                        attempt: 0,
+                        stage: ConnectionStage::WaitingForHello,
+                        ..
+                    }
+                )
+            }),
+        )
+        .await
+        .expect("the marker must advance the live detail")
+        .unwrap();
+        let first = observations.borrow()[0].clone();
+        wait_for_ssh_line(&first, b"fixture ready").await;
+        assert!(first.snapshot().connected_marker_seen);
+
+        tokio::time::pause();
+        tokio::time::advance(CONNECT_ATTEMPT_TIMEOUT).await;
+        let state = manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connecting {
+                        attempt: 1,
+                        stage: ConnectionStage::WaitingToConnect,
+                        last_error: Some(_)
+                    }
+                )
+            })
+            .await
+            .unwrap();
+        let HostState::Connecting {
+            last_error: Some(error),
+            ..
+        } = state
+        else {
+            unreachable!()
+        };
+        assert!(
+            error.contains("supervisor accepted the connection"),
+            "{error}"
+        );
+        assert!(error.contains("fixture ready"), "{error}");
+        assert!(!error.contains("too old"), "{error}");
+
+        tokio::time::advance(CONNECT_BACKOFF[0]).await;
+        // Resume before waiting for another OS process. Paused time must never
+        // run ahead of a child that has not executed its fixture readiness yet.
+        tokio::time::resume();
+        let second = tokio::time::timeout(Duration::from_secs(5), async {
+            observations
+                .wait_for(|entries| entries.len() >= 2)
+                .await
+                .unwrap()[1]
+                .clone()
+        })
+        .await
+        .expect("second real SSH child was launched");
+        wait_for_ssh_line(&second, b"fixture ready").await;
+        assert!(
+            !second.snapshot().connected_marker_seen,
+            "the second child must omit the marker"
+        );
+        assert!(matches!(
+            manager.status(host).unwrap().state,
+            HostState::Connecting {
+                attempt: 1,
+                stage: ConnectionStage::ConnectingToHost,
+                ..
+            }
+        ));
+        tokio::time::pause();
+        tokio::time::advance(CONNECT_ATTEMPT_TIMEOUT).await;
+        let state = manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connecting {
+                        attempt: 2,
+                        stage: ConnectionStage::WaitingToConnect,
+                        last_error: Some(_)
+                    }
+                )
+            })
+            .await
+            .unwrap();
+        let HostState::Connecting {
+            last_error: Some(error),
+            ..
+        } = state
+        else {
+            unreachable!()
+        };
+        assert!(error.contains("still connecting or logging in"), "{error}");
+        assert!(
+            !error.contains("too old"),
+            "the first attempt proved capability: {error}"
+        );
+        assert!(
+            !error.contains("supervisor accepted"),
+            "the earlier marker is not current progress: {error}"
+        );
+        manager.shutdown();
+    }
+
+    /// History may be sampled before a marker reaches stderr, including after
+    /// hello. A non-owning observation must still fold that later fact into the
+    /// sticky proof before the next connection replaces it.
+    #[farhelm_testtrace::test]
+    async fn ssh_capability_learns_a_marker_delivered_after_the_first_snapshot() {
+        use tokio::io::AsyncWriteExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let program = diagnostic_ssh_program(
+            directory.path(),
+            &format!(
+                "printf 'fixture ready\\n' >&2\nIFS= read -r release\nprintf '%s\\n' '{}' >&2\nexec /bin/sleep 60",
+                farhelm_proto::io::SUPERVISOR_CONNECTED_MARKER,
+            ),
+        );
+        let transport = SystemTransport::with_ssh_program(directory.path(), program);
+        let row = diagnostic_ssh_row();
+        let connection = transport.connect(&row).await.unwrap();
+        let ssh = connection.ssh.unwrap();
+        let (reader, mut writer) = connection.io;
+        let observation = ssh.observation();
+        wait_for_ssh_line(&observation, b"fixture ready").await;
+        let dialed = DialedAs::of(&row);
+        let mut history = None;
+        SshCapability::for_dial(&mut history, &dialed).latest = Some(observation);
+        assert!(!SshCapability::for_dial(&mut history, &dialed).seen);
+        writer.write_all(b"release\n").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), ssh.wait_connected())
+            .await
+            .unwrap();
+        assert!(SshCapability::for_dial(&mut history, &dialed).seen);
+        drop((reader, writer, ssh));
+    }
 
     /// Why this matters: incarnation numbers are compared by clients that
     /// can outlive a helm restart, and a restarted helm that counted from 1
@@ -5483,7 +6350,8 @@ mod tests {
         fn connect<'a>(
             &'a self,
             host: &'a HostRow,
-        ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportPair>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<TransportConnection>> + Send + 'a>>
+        {
             let id = host.id;
             let destination = host.destination.clone();
             Box::pin(async move {
@@ -5520,10 +6388,10 @@ mod tests {
                 };
                 tokio::spawn(run_peer(theirs, script, peer, kill));
                 let (r, w) = tokio::io::split(ours);
-                Ok((
+                Ok(TransportConnection::plain((
                     Box::new(r) as Box<dyn AsyncRead + Send + Unpin>,
                     Box::new(w) as Box<dyn AsyncWrite + Send + Unpin>,
-                ))
+                )))
             })
         }
     }
