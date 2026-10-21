@@ -4,6 +4,8 @@
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
+import { request as independentRequest } from "@playwright/test";
+import { harnessAuthorizationHeaders } from "./helpers/device-auth";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -38,7 +40,7 @@ for (const { collide, base } of [
    * Reusing a named template must then allocate its next checkout without
    * revealing New, while the first session and checkout still exist. */
   test(`quick launch waits for a managed preview and ${collide ? "reveals its path race" : "starts directly"}${base ? " for a template base name" : ""}`, async ({ page, request }) => {
-    const fixture = await checkoutFixture(collide ? "quick-race" : "quick-managed");
+    const fixture = await checkoutFixture(collide ? "quick-race" : "quick-managed", request);
     const name = `quick-checkout-${Date.now()}`;
     const ids: string[] = [];
     const gate = routeGate();
@@ -154,7 +156,7 @@ for (const { collide, base } of [
  * successful suffix must create a different checkout and preserve them. This
  * also locks in the title/path agreement before the naming UI is exercised. */
 test("quick launch numbers a template base name when its checkout is taken", async ({ page, request }) => {
-  const fixture = await checkoutFixture("quick-base-name");
+  const fixture = await checkoutFixture("quick-base-name", request);
   const name = `quick-base-${Date.now()}`;
   const base = "app-review";
   const occupied = path.join(fixture.root, `${fixture.repoName}-${base}`);
@@ -243,7 +245,7 @@ test("quick launch numbers a template base name when its checkout is taken", asy
  * The hidden quick-launch path must reveal the same fixed-name conflict
  * without ever posting a create request. */
 test("template name numbering yields to typed and fixed names", async ({ page, request }) => {
-  const fixture = await checkoutFixture("name-policies");
+  const fixture = await checkoutFixture("name-policies", request);
   const stamp = Date.now();
   const names = [`base-policy-${stamp}`, `fixed-policy-${stamp}`, `name-only-policy-${stamp}`];
   const base = "app-review";
@@ -328,7 +330,7 @@ test("template name numbering yields to typed and fixed names", async ({ page, r
  * saving must never submit a checkout or leave the saved editor dirty. */
 for (const fixed of [false, true]) {
   test(`save as template keeps the ${fixed ? "fixed name" : "unnumbered base"} from a checkout template`, async ({ page, request }) => {
-    const fixture = await checkoutFixture("save-name-kind");
+    const fixture = await checkoutFixture("save-name-kind", request);
     const original = `save-source-${Date.now()}`;
     const saved = `${original}-copy`;
     const base = "app-review";
@@ -443,7 +445,23 @@ async function deleteSession(request: APIRequestContext, id: string) {
 /** Own the source and destination until all sessions have released them.
  * The stack runs one browser test at a time, so its private Git config can
  * be restored exactly without coordinating with another test's clone. */
-async function checkoutFixture(repoName: string) {
+async function checkoutFixture(repoName: string, request: APIRequestContext) {
+  // A failed initial read owns no filesystem or configuration mutations.
+  const spareReply = await request.get("/api/checkout-spare");
+  expect(spareReply.ok(), await spareReply.text()).toBe(true);
+  const previousSpare: { enabled: boolean } = await spareReply.json();
+  const restoreSpare = async () => {
+    // The test's request fixture may already be disposed after a timeout.
+    // Reuse the harness's current credential in a bounded, separately owned
+    // context so restoring this global choice has the CLI cleanup's lifetime.
+    const slot = currentStackSlot();
+    const cleanup = await independentRequest.newContext({ baseURL: slot.baseURL,
+      extraHTTPHeaders: harnessAuthorizationHeaders(slot.authStatePath), timeout: 10_000 });
+    try {
+      const reply = await cleanup.put("/api/checkout-spare", { data: previousSpare });
+      expect(reply.ok(), await reply.text()).toBe(true);
+    } finally { await cleanup.dispose(); }
+  };
   const stack = JSON.parse(await fs.readFile(currentStackSlot().stackInfoPath, "utf8"));
   const scratch = stackScratchDir("github-browser-");
   const root = path.join(scratch, "checkouts");
@@ -467,6 +485,11 @@ async function checkoutFixture(repoName: string) {
     await run(stack.farhelm, ["helm", "checkout-config", ...args, "--state-dir", stack.state],
       { env, timeout: 10_000 });
   };
+  let rootOwned = false;
+  let hookOwned = false;
+  // These cases specify ordinary-clone admission and archival. Opt out before
+  // creates so no background reader can outlive the private URL/source cleanup.
+  try {
   await fs.mkdir(root);
   // Archive paths use the supervisor's canonical root, which may differ from
   // the lexical stack path on systems where /tmp is a symlink.
@@ -482,7 +505,12 @@ async function checkoutFixture(repoName: string) {
   expect(await git("--git-dir", bare, "rev-parse", "--is-bare-repository")).toBe("true");
   await git("config", "--file", stack.checkout_git_config, `url.${pathToFileURL(bare).href}.insteadOf`, url);
   expect(await git("ls-remote", url, "HEAD")).toBe(`${commit}\tHEAD`);
+  const disabled = await request.put("/api/checkout-spare", { data: { enabled: false } });
+  expect(disabled.ok(), await disabled.text()).toBe(true);
+  expect(await (await request.get("/api/checkout-spare")).json()).toEqual({ enabled: false });
+  rootOwned = true;
   await config("set-root", root);
+  hookOwned = true;
   await config("set-post-clone", "test -f checkout-sentinel && printf 'CHECKOUT-HOOK-READY\\n' && printf 'once\\n' >> hook-count");
   return {
     root, repo, repoName, url, commit, git,
@@ -519,18 +547,33 @@ async function checkoutFixture(repoName: string) {
             rootCleared = true;
           }],
           ["checkout Git config", () => fs.writeFile(stack.checkout_git_config, originalConfig)],
+          ["prepared checkout setting", restoreSpare],
           ["scratch", () => rootCleared ? fs.rm(scratch, { recursive: true, force: true }) : undefined],
         ]);
       }
     },
   };
+  } catch (error) {
+    let rootCleared = !rootOwned;
+    await cleanupOwnedSteps(true, [
+      ["post-clone hook after setup failure", () => hookOwned ? config("clear-post-clone") : undefined],
+      ["checkout root after setup failure", async () => {
+        if (rootOwned) await config("clear-root");
+        rootCleared = true;
+      }],
+      ["checkout Git config after setup failure", () => fs.writeFile(stack.checkout_git_config, originalConfig)],
+      ["prepared checkout setting after setup failure", restoreSpare],
+      ["scratch after setup failure", () => rootCleared ? fs.rm(scratch, { recursive: true, force: true }) : undefined],
+    ]);
+    throw error;
+  }
 }
 
 /** The real relay must show repository and exact directory before admission.
  * Denial spends no key; approval does. A subsequent keyed retry must complete
  * while commands still require approval, preserving the clone and hook bytes. */
 test("agent managed checkout approval and keyed recovery", async ({ page, context, request }) => {
-  const fixture = await checkoutFixture("agent-checkout");
+  const fixture = await checkoutFixture("agent-checkout", request);
   const ids: string[] = [];
   let driverPage: Page | undefined;
   let bodyFailed = false;
@@ -720,7 +763,7 @@ async function assertManagedMark(page: Page, id: string, repo: string, root: str
  * click before allocating. Only delivery of the first reply is interrupted;
  * refusal, replay, the final clone and hook all use the assembled backend. */
 test("lost durable refusal refreshes the preview before an explicit new launch", async ({ page, request }) => {
-  const fixture = await checkoutFixture("browser-refusal");
+  const fixture = await checkoutFixture("browser-refusal", request);
   const ids: string[] = [];
   const bodies: { intent_key: string; github_checkout: { preview: { cwd: string } } }[] = [];
   let durableRefusals = 0;
@@ -782,7 +825,7 @@ test("lost durable refusal refreshes the preview before an explicit new launch",
 /** A name edit affects the preview only; saved setup reuse carries repo
  * intent into a second real allocation rather than borrowing the first cwd. */
 test("structured checkout previews, launches, and reuses a recent as a fresh clone", async ({ page, request }) => {
-  const fixture = await checkoutFixture("browser-structured");
+  const fixture = await checkoutFixture("browser-structured", request);
   const ids: string[] = [];
   try {
     const host = await localHostId(request);
@@ -820,7 +863,7 @@ test("structured checkout previews, launches, and reuses a recent as a fresh clo
 /** Command mode retains its command when gh is selected, under the same real
  * clone/hook/live-terminal oracles the structured launches use. */
 test("a typed command survives a real managed checkout", async ({ page, request }) => {
-  const fixture = await checkoutFixture("browser-raw");
+  const fixture = await checkoutFixture("browser-raw", request);
   const ids: string[] = [];
   try {
     const host = await localHostId(request);
@@ -847,7 +890,7 @@ test("a typed command survives a real managed checkout", async ({ page, request 
  * the agent selection. Ordinary launches must not run the configured hook
  * or acquire checkout ownership merely because a root is configured. */
 test("an unlabeled folder result replaces fresh intent without cloning", async ({ page, request }) => {
-  const fixture = await checkoutFixture("browser-folder");
+  const fixture = await checkoutFixture("browser-folder", request);
   const ids: string[] = [];
   try {
     const host = await localHostId(request);
@@ -887,7 +930,7 @@ test("an unlabeled folder result replaces fresh intent without cloning", async (
  * Stop retains a reference after ending its process. Only Delete of the
  * final borrower may move the complete checkout, including dirty work. */
 test("borrowers retain the checkout until the final stopped session is deleted", async ({ page, request }) => {
-  const fixture = await checkoutFixture("browser-lifetime");
+  const fixture = await checkoutFixture("browser-lifetime", request);
   const ids: string[] = [];
   let bodyFailed = false;
   try {
@@ -989,7 +1032,7 @@ test("borrowers retain the checkout until the final stopped session is deleted",
  * Fresh and different-directory overrides then exercise both nonfinal and
  * final release of the old checkout through the assembled helm/supervisor. */
 test("replacement preserves borrowers and archives only the released checkout", async ({ page, request }) => {
-  const fixture = await checkoutFixture("browser-replace");
+  const fixture = await checkoutFixture("browser-replace", request);
   const ids: string[] = [];
   /** Keep actual response IDs for cleanup, then prove the old ID is gone. */
   async function replace(source: string, withBody?: Record<string, unknown>) {
@@ -1093,7 +1136,7 @@ test("replacement preserves borrowers and archives only the released checkout", 
  * The untouched name is shared by display, preview and create; explicit edits
  * must retain the existing refusal instead of entering the suffix search. */
 test("clone defaults to managed checkouts and searches only untouched names", async ({ page, request }) => {
-  const fixture = await checkoutFixture("browser-clone");
+  const fixture = await checkoutFixture("browser-clone", request);
   const ids: string[] = [];
   try {
     const host = await localHostId(request);
@@ -1174,7 +1217,7 @@ test("clone defaults to managed checkouts and searches only untouched names", as
  * The real backend refuses the frozen request, and a second explicit click
  * is required after the suffix search obtains a new authoritative preview. */
 test("clone lost race re-previews a suffix and waits for another launch click", async ({ page, request }) => {
-  const fixture = await checkoutFixture("browser-clone-race");
+  const fixture = await checkoutFixture("browser-clone-race", request);
   const ids: string[] = [];
   const bodies: { intent_key: string; github_checkout: { title: string } }[] = [];
   let resolveRefusal!: (response: { status: number; text: string }) => void;
@@ -1244,7 +1287,7 @@ test("clone lost race re-previews a suffix and waits for another launch click", 
  * Lose a real accepted Clone reply, refresh the same repository, and prove
  * that reconciliation keeps the original name, request key and allocation. */
 test("clone retains its name and key after a lost success and occupied re-preview", async ({ page, request }) => {
-  const fixture = await checkoutFixture("browser-clone-retry");
+  const fixture = await checkoutFixture("browser-clone-retry", request);
   const ids: string[] = [];
   const bodies: { intent_key: string; github_checkout: { title: string; preview: { cwd: string } } }[] = [];
   let acceptedId: string | undefined;
@@ -1332,7 +1375,7 @@ test("clone retains its name and key after a lost success and occupied re-previe
  * free `repo-N` as both directory and title. Replace takes a different helm
  * path from create, so this is the one real-clone proof of the fix. */
 test("replace with into a managed checkout of the source's repository gets the next free name", async ({ page, request }) => {
-  const fixture = await checkoutFixture("browser-replace-with");
+  const fixture = await checkoutFixture("browser-replace-with", request);
   const ids: string[] = [];
   try {
     const host = await localHostId(request);
@@ -1458,7 +1501,7 @@ async function uiDelete(page: Page, id: string): Promise<{archived?: boolean}> {
 /** Borrowers and another window share archive membership, but only the window
  * whose Delete actually archived the checkout plays the finite cue. */
 test("trash count and cue follow the final reference, including another client", async ({page, request, context}, info) => {
-  const fixture = await checkoutFixture("browser-trash-cue");
+  const fixture = await checkoutFixture("browser-trash-cue", request);
   const ids: string[] = [];
   let observer: Page | undefined;
   try {
@@ -1520,7 +1563,7 @@ test("trash count and cue follow the final reference, including another client",
  * a safe refusal from a merely optimistic dialog. */
 test("trash global confirmation freezes archives and reports preserved recovery work", async ({page, request}, info) => {
   test.setTimeout(120_000);
-  const fixture = await checkoutFixture("browser-trash-delete");
+  const fixture = await checkoutFixture("browser-trash-delete", request);
   const ids: string[] = [];
   let down: number | undefined;
   try {
@@ -1607,7 +1650,7 @@ test("trash global confirmation freezes archives and reports preserved recovery 
  * selected archive; a neighbouring archive's uncommitted bytes must survive. */
 test("single trash delete removes one real archive and preserves its neighbour", async ({page, request}) => {
   test.setTimeout(90_000);
-  const fixture = await checkoutFixture("browser-trash-single");
+  const fixture = await checkoutFixture("browser-trash-single", request);
   const ids: string[] = [];
   let bodyFailed = false;
   try {

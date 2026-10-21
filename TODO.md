@@ -121,38 +121,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   through the public buffer API. Nothing has been filed upstream; filing is the maintainer's call. Farhelm vendors
   xterm.js unmodified, so an upstream fix arrives only with a stable release.
 
-- **Keep a spare checkout ready for managed-checkout launches.** Next to each host's repository cache, keep one spare
-  checkout made ahead of time with the launch's exact clone command. A launch takes it with a rename, then fetches and
-  checks out only what changed since it was made, and the next spare is built in the background. That turns the clone
-  stage into roughly rename plus fetch plus a small checkout, instead of today's several seconds of local work. Not yet
-  planned; the maintainer chose this over a scheduled repack on 2026-10-20 but has no time to finish planning it now.
-
-  Why the clone is slow today (measured on 2026-10-20 against a copy of the live `scode/farhelm` cache, git 2.43, 3 runs
-  per variant after a warm-up): the cache had 28 packs and 481 loose objects, and of its unique objects 83 MiB were
-  stored whole (79 MiB of them blobs) against 11 MiB stored as deltas, because each fetched thin pack gets its missing
-  delta bases appended whole and nothing recompresses them. `--dissociate` then repacks every borrowed object into the
-  new checkout, and git's own phase timers put most of a 4.8 s clone in that repack's delta search (2.2 s) and pack
-  writing (1.3 s). Loose objects are a small part: packing them alone saved about 0.25 s, and dropping the ones already
-  in a pack or adding a multi-pack index saved nothing. A full `git repack -a -d` of the cache (5.5 s, once) brought the
-  clone to 1.85 s against GitHub; `gc --keep-largest-pack` to 3.4 s; `repack --geometric=2` collapsed to one pack here
-  and matched the full repack. The cheap complement is to pass `-c gc.autoPackLimit=10` (or so) on the existing cache
-  fetch, so git's own foreground gc consolidates the cache under the cache lock, at the cost of one slower launch now
-  and then. A repack without that lock is not safe: git's documentation says a gc or repack running while a fetch writes
-  can delete an object the fetch just added and corrupt the repository.
-
-  Decisions this needs: (1) the spare is a plain clone made earlier and then updated, not a clone made at launch time,
-  so its reflog shows the update, unchanged files keep older modification times, and the user's hooks and checkout
-  filters (Git LFS, `filter.<name>.process`) ran when it was made and run again only for the update. An earlier
-  cheaper-clones plan, abandoned on 2026-10-18, required a checkout shown to match a plain GitHub clone; this has to
-  settle whether that difference is acceptable. (2) Building the spare is a background clone, which SPEC.md does not
-  allow today (the system never runs VCS operations implicitly, and cache refresh and clone run in the session terminal
-  so progress, credential prompts and failures are visible): decide its environment and credentials, and that a failed
-  spare just falls back to today's visible clone. (3) A rename is only instant on one filesystem, so the spare lives
-  inside the configured checkout folder, with a normal clone when that is not possible. Also: two launches at once (one
-  takes the spare, the other clones normally), building the spare in a temporary directory and moving it into place when
-  done, and discarding spares when the cache is evicted, the checkout folder changes, or the post-clone command changes.
-  Plan: `plans/queue/spare-launch-checkout.md`.
-
 - **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
   session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
   request, and the command is hidden from agents. One gap remains where a delivered message could do something the user

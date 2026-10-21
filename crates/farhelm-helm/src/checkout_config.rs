@@ -1,10 +1,13 @@
 //! Checkout configuration: WHERE fresh checkouts are created (a working-copy
 //! root) and WHAT runs after cloning (an optional post-clone shell command),
 //! plus the `farhelm helm checkout-config` CLI that edits it.
+//! Global prepared-checkout and agent-trust switches are frozen for each create;
+//! their dedicated browser routes do not change destination-preview revisions.
 //!
 //! The shape is a global setting with optional per-host overrides, stored in
-//! helm.db (schema version 27 — see [`crate::store::CHECKOUT_CONFIG_SCHEMA`]
-//! for the tables). Preview and create consume the same resolved snapshot.
+//! helm.db (tables introduced in schema 27 — see
+//! [`crate::store::CHECKOUT_CONFIG_SCHEMA`] for their current shape). Preview
+//! and create consume the same resolved snapshot.
 //! The running helm observes CLI writes and invalidates browser readers; this
 //! module deliberately touches no host, creates no directories, and never
 //! runs the configured hook.
@@ -25,7 +28,8 @@
 //!   the global `revision`, in the same transaction as the change. Writing
 //!   the value that is already there bumps nothing, so the revision is a
 //!   cheap changed-only signal for future readers.
-//!   The separate per-agent trust opt-ins change no path and leave previews valid.
+//!   The separate per-agent trust and prepared-checkout switches change no path
+//!   and leave previews valid. Accepted creates retain their resolved choices.
 //! - Overrides are config for the REGISTRY ROW: a retarget or adoption of
 //!   that row leaves them in place (they say nothing about the machine that
 //!   used to be behind it), while removing the host cascades them away.
@@ -35,6 +39,45 @@ use anyhow::Context;
 use farhelm_proto::LaunchHarness;
 use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
+
+/// One explicit all-hosts choice, without exposing other checkout configuration.
+/// Missing or extra fields are refused rather than interpreted as a default.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CheckoutSpareBody {
+    enabled: bool,
+}
+
+/// Read the choice for future creates; retained creates carry their own value.
+pub(crate) async fn get_checkout_spare(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match state.store.checkout_config_snapshot(None).await {
+        Ok(snapshot) => axum::Json(CheckoutSpareBody {
+            enabled: snapshot.keep_spare,
+        })
+        .into_response(),
+        Err(error) => crate::http_error(error),
+    }
+}
+
+/// Persist and announce the global switch under the router's mutation ownership.
+/// A disconnected caller cannot leave a committed write without invalidation;
+/// path previews and already accepted creates remain unchanged.
+pub(crate) async fn put_checkout_spare(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
+    axum::Json(body): axum::Json<CheckoutSpareBody>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match state.store.set_keep_spare(body.enabled).await {
+        Ok(()) => {
+            state.manager.events().bump();
+            axum::http::StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => crate::http_error(error),
+    }
+}
 
 /// Explicit boolean opt-in; a missing or unknown field is a refused write.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -177,6 +220,246 @@ pub(crate) async fn put_claude_trust(
             axum::http::StatusCode::NO_CONTENT.into_response()
         }
         Err(error) => crate::http_error(error),
+    }
+}
+
+#[cfg(test)]
+mod spare_tests {
+    use super::*;
+    use crate::rest_harness;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    /// Requests use the actual protected router, including typed extraction.
+    fn request(method: &str, body: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri("/api/checkout-spare")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// Global policy must affect fresh resolution without changing previews,
+    /// host overrides or trust, and every acknowledged write must wake readers.
+    #[farhelm_testtrace::test]
+    async fn spare_http_choice_is_global_typed_and_invalidates_without_changing_paths() {
+        let h = rest_harness::idle_helm().await;
+        let host = h
+            .store
+            .add_ssh_host("spare-route.invalid", None, None)
+            .await
+            .unwrap();
+        h.store
+            .set_checkout_root(Some(host), "/host-only")
+            .await
+            .unwrap();
+        h.store.set_claude_trust(true).await.unwrap();
+        let original = h.store.checkout_config_snapshot(Some(host)).await.unwrap();
+        assert!(original.keep_spare, "fresh configuration defaults on");
+        let response = h
+            .router()
+            .oneshot(request("GET", serde_json::Value::Null))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            serde_json::json!({"enabled":true})
+        );
+        let mut events = h.manager.events().subscribe();
+        for enabled in [false, true, false] {
+            let before = *events.borrow_and_update();
+            let response = h
+                .router()
+                .oneshot(request("PUT", serde_json::json!({"enabled":enabled})))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            assert!(
+                *events.borrow() > before,
+                "a committed setting must invalidate readers"
+            );
+            let mut expected = original.clone();
+            expected.keep_spare = enabled;
+            assert_eq!(
+                h.store.checkout_config_snapshot(Some(host)).await.unwrap(),
+                expected
+            );
+            assert_eq!(
+                h.store
+                    .resolve_checkout_config(Some(host))
+                    .await
+                    .unwrap()
+                    .keep_spare,
+                enabled
+            );
+        }
+        for body in [
+            serde_json::json!({}),
+            serde_json::json!({"enabled":null}),
+            serde_json::json!({"enabled":"true"}),
+            serde_json::json!({"enabled":true,"host":1}),
+        ] {
+            let before = *events.borrow_and_update();
+            let response = h.router().oneshot(request("PUT", body)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            assert!(
+                !h.store
+                    .resolve_checkout_config(None)
+                    .await
+                    .unwrap()
+                    .keep_spare
+            );
+            assert_eq!(*events.borrow(), before);
+        }
+        for method in ["GET", "PUT"] {
+            let response = h
+                .unauthenticated_router()
+                .oneshot(request(method, serde_json::json!({"enabled":true})))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+        assert!(
+            !h.store
+                .resolve_checkout_config(None)
+                .await
+                .unwrap()
+                .keep_spare
+        );
+    }
+
+    /// Real old schemas lack the column; upgrades opt future creates in but
+    /// never overwrite a later explicit opt-out on a version-only rewind.
+    #[farhelm_testtrace::test]
+    async fn spare_schema_upgrade_defaults_on_and_preserves_a_saved_opt_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        store
+            .set_checkout_root(None, "~/retained-root")
+            .await
+            .unwrap();
+        store.set_claude_trust(true).await.unwrap();
+        drop(store);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE checkout_config DROP COLUMN keep_spare; PRAGMA user_version = 66;",
+        )
+        .unwrap();
+        assert_eq!(conn.query_row("SELECT count(*) FROM pragma_table_info('checkout_config') WHERE name = 'keep_spare'", [], |row| row.get::<_, i64>(0)).unwrap(), 0,
+            "premise: this upgrade really adds a missing column");
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        let before = store.checkout_config_snapshot(None).await.unwrap();
+        assert!(before.keep_spare && before.claude_trust);
+        assert_eq!(before.global_root.as_deref(), Some("~/retained-root"));
+        store.set_keep_spare(false).await.unwrap();
+        drop(store);
+        let store = HelmStore::open(&path).await.unwrap();
+        assert!(
+            !store
+                .resolve_checkout_config(None)
+                .await
+                .unwrap()
+                .keep_spare
+        );
+        drop(store);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA user_version = 66;").unwrap();
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        let mut expected = before;
+        expected.keep_spare = false;
+        assert_eq!(
+            store.checkout_config_snapshot(None).await.unwrap(),
+            expected
+        );
+    }
+
+    /// Registering this route in the owned group matters before extraction:
+    /// cancellation at body EOF must still finish persistence and invalidation.
+    #[farhelm_testtrace::test]
+    async fn spare_save_survives_a_disconnected_caller_at_body_extraction() {
+        use axum::body::Bytes;
+        use std::time::Duration;
+        use tokio::sync::{mpsc, oneshot};
+        let h = rest_harness::idle_helm().await;
+        assert!(
+            h.store
+                .checkout_config_snapshot(None)
+                .await
+                .unwrap()
+                .keep_spare
+        );
+        let mut events = h.manager.events().subscribe();
+        let before = *events.borrow_and_update();
+        let (send, receive) = mpsc::channel::<Result<Bytes, std::io::Error>>(2);
+        send.send(Ok(Bytes::from_static(br#"{"enabled":false}"#)))
+            .await
+            .unwrap();
+        let (at_eof, waiting) = oneshot::channel();
+        let stream = futures_util::stream::unfold(
+            (receive, Some(at_eof), false),
+            |(mut receive, mut at_eof, delivered)| async move {
+                if delivered && let Some(at_eof) = at_eof.take() {
+                    let _ = at_eof.send(());
+                }
+                receive
+                    .recv()
+                    .await
+                    .map(|bytes| (bytes, (receive, at_eof, true)))
+            },
+        );
+        let req = Request::builder()
+            .method("PUT")
+            .uri("/api/checkout-spare")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(Body::from_stream(stream))
+            .unwrap();
+        let caller = tokio::spawn(h.router().oneshot(req));
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            h.store
+                .checkout_config_snapshot(None)
+                .await
+                .unwrap()
+                .keep_spare,
+            "premise: extraction is waiting, so the setting is not committed"
+        );
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        assert!(!send.is_closed(), "the owned extractor survives its waiter");
+        drop(send);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                events.changed().await.unwrap();
+                if !h
+                    .store
+                    .checkout_config_snapshot(None)
+                    .await
+                    .unwrap()
+                    .keep_spare
+                {
+                    assert!(*events.borrow_and_update() > before);
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("the disconnected save must commit and announce");
     }
 }
 
@@ -824,6 +1107,8 @@ pub const MAX_POST_CLONE_BYTES: usize = 16 * 1024;
 /// empty-string normalization.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedCheckoutConfig {
+    /// Default-on all-hosts policy, frozen per create without changing its path.
+    pub keep_spare: bool,
     /// Global opt-in, frozen on create without invalidating path previews.
     pub claude_trust: bool,
     /// Codex's per-launch opt-in; never authorizes a user-picked folder.
@@ -841,7 +1126,7 @@ pub struct ResolvedCheckoutConfig {
     /// the distinction matters.
     pub post_clone: Option<String>,
     /// The global revision at the moment of this snapshot: bumped on every
-    /// actual root or hook change, stable across no-op and trust-choice writes.
+    /// actual root or hook change, stable across no-op, trust and spare writes.
     pub config_revision: i64,
 }
 
@@ -850,6 +1135,8 @@ pub struct ResolvedCheckoutConfig {
 /// [`ResolvedCheckoutConfig`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckoutConfigSnapshot {
+    /// Global prepared-checkout switch; independent of host root/hook overrides.
+    pub keep_spare: bool,
     pub claude_trust: bool,
     /// Global switches, independent of host root and hook inheritance.
     pub codex_trust: bool,
@@ -891,6 +1178,21 @@ impl Field {
 }
 
 impl HelmStore {
+    /// Save future-create policy without invalidating a destination preview.
+    /// The supervisor acts only on a create's retained value, never this row.
+    pub async fn set_keep_spare(&self, enabled: bool) -> anyhow::Result<()> {
+        let conn = self.conn();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            conn.lock().execute(
+                "UPDATE checkout_config SET keep_spare = ?1 WHERE singleton = 1",
+                [enabled],
+            )?;
+            Ok(())
+        })
+        .await
+        .context("prepared checkout setting write task panicked")?
+    }
+
     /// This opt-in does not change the preview's destination or ownership.
     /// Keeping its write outside revision bumps preserves open path previews.
     pub async fn set_claude_trust(&self, enabled: bool) -> anyhow::Result<()> {
@@ -1131,15 +1433,15 @@ fn read_snapshot(
     let _tx = conn
         .unchecked_transaction()
         .context("opening the checkout config snapshot transaction")?;
-    let (global_root, global_post_clone, revision, claude_trust, codex_trust, muse_trust, pi_trust): (Option<String>, Option<String>, i64, bool, bool, bool, bool) = conn
+    let (global_root, global_post_clone, revision, claude_trust, codex_trust, muse_trust, pi_trust, keep_spare): (Option<String>, Option<String>, i64, bool, bool, bool, bool, bool) = conn
         .query_row(
-            "SELECT root, post_clone, revision, claude_trust, codex_trust, muse_trust, pi_trust FROM checkout_config WHERE singleton = 1",
+            "SELECT root, post_clone, revision, claude_trust, codex_trust, muse_trust, pi_trust, keep_spare FROM checkout_config WHERE singleton = 1",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
         )
         .optional()
         .context("reading the global checkout config")?
-        .unwrap_or((None, None, 0, false, false, false, false));
+        .unwrap_or((None, None, 0, false, false, false, false, true));
     let host_override = match host {
         Some(host) => conn
             .query_row(
@@ -1157,6 +1459,7 @@ fn read_snapshot(
         None => None,
     };
     Ok(CheckoutConfigSnapshot {
+        keep_spare,
         claude_trust,
         codex_trust,
         muse_trust,
@@ -1178,6 +1481,7 @@ fn resolve_snapshot(snapshot: &CheckoutConfigSnapshot) -> ResolvedCheckoutConfig
         .and_then(|o| o.post_clone.clone())
         .or_else(|| snapshot.global_post_clone.clone());
     ResolvedCheckoutConfig {
+        keep_spare: snapshot.keep_spare,
         claude_trust: snapshot.claude_trust,
         codex_trust: snapshot.codex_trust,
         muse_trust: snapshot.muse_trust,
@@ -2093,6 +2397,7 @@ mod tests {
         assert_eq!(
             store.resolve_checkout_config(None).await.unwrap(),
             ResolvedCheckoutConfig {
+                keep_spare: true,
                 claude_trust: false,
                 codex_trust: false,
                 muse_trust: false,
@@ -2101,7 +2406,7 @@ mod tests {
                 post_clone: None,
                 config_revision: 0
             },
-            "a fresh helm starts fully unset at revision 0"
+            "a fresh helm leaves root, hook and trust unset, with prepared checkouts on"
         );
 
         store.set_checkout_root(None, "~/work").await.unwrap();

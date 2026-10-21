@@ -2413,7 +2413,12 @@ retains ownership evidence; neither truncates or silently forgets old locations.
 The preparation shim can consume a complete spare when its private `keep_spare` field is true. That field defaults to
 false and is omitted when false. Protocol 62 carries the same frozen `keep_spare` field in `ResolvedGithubCheckout`:
 ignoring true changes receiver behavior, so the hello refuses older protocols. Omitted false preserves old retained
-fingerprint bytes. The staged helm producer still sends false until the default-on setting is enabled. A take runs
+fingerprint bytes. Helm schema 67 stores the global `checkout_config.keep_spare` choice with a constrained default of
+true, for fresh and upgraded databases. The configuration snapshot resolves it with root/hook/trust in one read, and the
+create constructor copies it into the retained payload. `GET`/`PUT /api/checkout-spare` exposes only an explicit
+`enabled` boolean through the protected owned-mutation router; writes announce invalidation and leave the path-preview
+revision unchanged. The Settings row uses the shared synchronous configuration-save fence, so a dismissed save finishes
+before a reopened read can seed another edit. No preference, host override or CLI setting is involved. A take runs
 inside the existing durable `CloneStarted` stage and preparation lock. It never reads the recovery record or acquires
 the repository cache lock. Git below 2.17 or unrecognized version output keeps the ordinary clone path: 2.17 is the
 floor for the take's `--prune-tags`, not a minimum for Farhelm. Local metadata queries are silent, limited to 4096

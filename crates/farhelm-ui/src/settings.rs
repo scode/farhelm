@@ -447,6 +447,7 @@ pub(crate) fn SettingsDialog(
                                 on_saved: move |_| {},
                             }
                             crate::checkout_post_clone::CheckoutPostCloneField {}
+                            crate::checkout_spare::CheckoutSpareSettings {}
                         }
                         section {
                             id: "settings-agent-trust",

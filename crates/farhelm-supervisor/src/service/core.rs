@@ -10029,7 +10029,6 @@ impl Supervisor {
                     post_clone: resolved.post_clone.clone(),
                     claude_trust: resolved.claude_trust,
                     // A pending create/retry keeps this exact frozen choice.
-                    // The staged helm producer still sends false until enabled.
                     keep_spare: resolved.keep_spare,
                     // The supervisor's own resolved shell; the hook runs
                     // under it with the checkout as its working directory.
@@ -33044,7 +33043,7 @@ exit 0
     /// A fresh-checkout reservation keeps the whole resolved launch, with
     /// its parent and title inputs, so recovery rebuilds the accepted create
     /// without a catalog lookup, and two launches differing only in a
-    /// choice their commands do not show (an agent launch's selection) never
+    /// choice their commands do not show (agent selection or spare policy) never
     /// share a fingerprint.
     ///
     /// Why: reconciliation after a lost reply recovers the create from this
@@ -33068,6 +33067,22 @@ exit 0
             resume: None,
         };
         let original = create_fingerprint(Some(&checkout), None, "", &agent(None), None, None);
+        let mut with_spare = checkout.clone();
+        with_spare.keep_spare = true;
+        assert_ne!(
+            original,
+            create_fingerprint(Some(&with_spare), None, "", &agent(None), None, None),
+            "prepared checkout policy is part of the accepted create even when argv is identical"
+        );
+        let old_wire = serde_json::to_value(&checkout).unwrap();
+        assert!(old_wire.get("keep_spare").is_none());
+        let old: farhelm_proto::ResolvedGithubCheckout = serde_json::from_value(old_wire).unwrap();
+        assert!(!old.keep_spare);
+        assert_eq!(
+            original,
+            create_fingerprint(Some(&old), None, "", &agent(None), None, None),
+            "a pre-field resolved snapshot must retain its exact fingerprint bytes"
+        );
         assert_ne!(
             original,
             create_fingerprint(
@@ -35307,7 +35322,8 @@ exit 0
     /// Each unambiguous pending boundary recovers the exact original plan
     /// under a session-lifetime key, including after reconstruction. Scope
     /// must not make reconciliation mistake a current managed checkout for
-    /// another request family or allocate a second directory.
+    /// another request family or allocate a second directory. The enabled spare
+    /// policy must survive even boundaries before a terminal exists.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn fresh_checkout_pending_boundaries_recover_original_snapshot() {
         for reopen in [false, true] {
@@ -35321,6 +35337,7 @@ exit 0
                 std::fs::create_dir(&root).unwrap();
                 let mut checkout = checkout_fixture(&root);
                 checkout.post_clone = Some("printf original-hook".into());
+                checkout.keep_spare = true;
                 let claim = IntentClaim {
                     intent_key: "recover-original".into(),
                     fingerprint: checkout_fingerprint(&checkout),

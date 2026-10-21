@@ -263,8 +263,8 @@ pub struct CheckoutPreparation {
     #[serde(default)]
     pub claude_trust: bool,
     /// Frozen permission to consume a prepared checkout. Omitted false keeps
-    /// retained launch specs unchanged; production stays off until the helm
-    /// sends the setting and the supervisor can build replacements.
+    /// retained launch specs unchanged. The helm freezes its default-on global
+    /// setting for each new create; older accepted creates remain off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub keep_spare: bool,
     /// The resolved shell the hook runs under.
