@@ -28,13 +28,32 @@
 //!   direction-isolated element. That is category-free: it bounds strong-RTL
 //!   letters, which carry no control character for an escape rule to catch.
 //!
-//! Both layers are applied at RENDER time, which is what [`DetailPart::Peer`]
-//! carrying its value raw is for — the escaping cannot be baked in earlier
-//! without losing the ability to isolate each value as its own element. What
-//! holds instead is narrower and is the invariant that matters: the adopt
-//! request body is the only place a relayed value is sent BACK raw, because
-//! it is a comparison the helm performs rather than anything a person reads.
-//! Everything a user sees has been through [`display_peer`].
+//! [`PeerText`] enforces an explicit choice at the UI's decoded-reply boundary.
+//! The UI-owned mirrors carry host- and agent-controlled text in this type,
+//! which has no `Display`, string dereference or implicit conversion back to
+//! `String`. A renderer chooses escaped presentation; an identity comparison
+//! label chooses the stricter identity spelling. Editable seeds use the existing
+//! [`editable_peer`] contract, which preserves empty and blank fields without
+//! inventing placeholder text.
+//!
+//! Storage and serialization retain original bytes. URLs, request bodies,
+//! clipboard contents, search, comparison keys and untouched editor seeds must
+//! use those bytes through the explicit raw accessor. A raw display still needs
+//! a documented reason; the type makes that choice visible to review rather
+//! than proving that every use of raw data is correct. `Debug` deliberately
+//! retains String's spelling because existing ownership keys depend on it.
+//!
+//! The direction-isolation layer accepts typed values and escapes each run at
+//! render time. Keeping the value raw inside [`DetailPart::Peer`] preserves both
+//! that per-value structure and the original bytes needed elsewhere. A whole
+//! plan block recovers its structural line boundaries before escaping each line.
+//!
+//! This compiler boundary covers UI-owned decoded replies. Directly decoded
+//! `farhelm-proto` types keep using the presentation helpers at their access
+//! sites; local drafts, operation snapshots and composed diagnostics can still
+//! be plain strings. Their adapters must preserve the same distinction between
+//! presentation and raw operational values. The type does not replace those
+//! contracts or direction isolation.
 //!
 //! ## Why this is its own module
 //!

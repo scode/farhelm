@@ -3905,19 +3905,20 @@ pub(crate) async fn fetch_hosts(base: &str) -> Result<Vec<Host>, String> {
 /// destination from Add host. Clients never infer socket paths or SSH options.
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct SshConnectionHelp {
-    pub(crate) unavailable: Vec<String>,
+    pub(crate) unavailable: Vec<PeerText>,
     pub(crate) hosts: Vec<SshHostCommands>,
     pub(crate) extra: Option<SshHostCommands>,
 }
 
-/// A display label and exact pasteable bytes are separate: peer escaping must
-/// not alter the command placed on the clipboard.
+/// Labels and commands retain peer provenance until their consumer chooses a
+/// presentation. Command display must escape controls, while copying must use
+/// the original bytes so a pasted command still addresses the same destination.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub(crate) struct SshHostCommands {
-    pub(crate) name: String,
-    pub(crate) destination: String,
-    pub(crate) sessions: Option<String>,
-    pub(crate) setup: Option<String>,
+    pub(crate) name: PeerText,
+    pub(crate) destination: PeerText,
+    pub(crate) sessions: Option<PeerText>,
+    pub(crate) setup: Option<PeerText>,
 }
 
 /// Fetch help when its dialog opens; this request never probes or adds a host.
@@ -4581,17 +4582,21 @@ pub(crate) enum AnswerOutcome {
 #[cfg(native_desktop)]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 pub(crate) struct TunnelInfo {
+    /// Helm-minted listener identity, used only for keys and close requests.
+    /// This is an opaque token, not host-authored display text.
     pub id: String,
     pub local_port: u16,
     pub remote_port: u16,
 }
 
-/// Availability is independent of consent and host connectivity.
+/// Availability is independent of consent and host connectivity. Serialization
+/// also publishes this snapshot to terminal JavaScript, so the host name keeps
+/// its original wire bytes; each renderer applies its own presentation escaping.
 #[cfg(native_desktop)]
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub(crate) struct SessionTunnels {
     pub available: bool,
-    pub host_name: String,
+    pub host_name: PeerText,
     pub consent: bool,
     #[serde(skip_serializing)]
     pub tunnels: Vec<TunnelInfo>,
@@ -4845,6 +4850,76 @@ mod http_contract_tests;
 
 #[cfg(test)]
 mod tests {
+    /// Decode the SSH reply before checking both consumers' contracts:
+    /// visible controls on screen, original command bytes for the clipboard.
+    /// Optional commands and the add-host snapshot retain their wire shape.
+    #[farhelm_testtrace::test]
+    fn ssh_help_decode_preserves_command_bytes_and_peer_presentation() {
+        let sessions = "ssh 'host\u{202e}'";
+        let setup = "ssh 'setup\npath'";
+        let help: super::SshConnectionHelp = serde_json::from_value(serde_json::json!({
+            "unavailable": ["path\nunsupported"],
+            "hosts": [{
+                "name": "host\u{202e}",
+                "destination": "user@host\nname",
+                "sessions": sessions,
+                "setup": null
+            }],
+            "extra": {
+                "name": "draft\u{2066}",
+                "destination": "draft-host",
+                "sessions": null,
+                "setup": setup
+            }
+        }))
+        .unwrap();
+        assert_eq!(help.unavailable[0].escaped(), "path<U+000A>unsupported");
+        assert_eq!(help.hosts.len(), 1);
+        let host = &help.hosts[0];
+        assert_eq!(host.name.escaped(), "host<U+202E>");
+        assert_eq!(host.destination.escaped(), "user@host<U+000A>name");
+        let command = host.sessions.as_ref().unwrap();
+        assert_eq!(command.escaped(), "ssh 'host<U+202E>'");
+        assert_eq!(command.raw(), sessions);
+        assert!(host.setup.is_none());
+        let extra = help.extra.as_ref().unwrap();
+        assert_eq!(extra.name.escaped(), "draft<U+2066>");
+        assert_eq!(extra.destination.raw(), "draft-host");
+        assert!(extra.sessions.is_none());
+        let command = extra.setup.as_ref().unwrap();
+        assert_eq!(command.escaped(), "ssh 'setup<U+000A>path'");
+        assert_eq!(command.raw(), setup);
+    }
+
+    /// The terminal-JavaScript snapshot must carry the decoded raw host name,
+    /// even though the Rust strip shows an escaped spelling. Listener ids stay
+    /// opaque close-request tokens and are omitted from this published snapshot.
+    #[cfg(native_desktop)]
+    #[farhelm_testtrace::test]
+    fn tunnel_snapshot_serialization_keeps_raw_host_name() {
+        let host_name = "remote\u{202e}\n<U+202E>";
+        let state: super::SessionTunnels = serde_json::from_value(serde_json::json!({
+            "available": true,
+            "host_name": host_name,
+            "consent": false,
+            "tunnels": [{"id": "listener-token", "local_port": 8080, "remote_port": 8081}]
+        }))
+        .unwrap();
+        assert_eq!(state.host_name.escaped(), "remote<U+202E><U+000A><U+202E>");
+        assert_eq!(state.tunnels.len(), 1);
+        assert_eq!(state.tunnels[0].id, "listener-token");
+        assert_eq!(state.tunnels[0].local_port, 8080);
+        assert_eq!(state.tunnels[0].remote_port, 8081);
+        assert_eq!(
+            serde_json::to_value(&state).unwrap(),
+            serde_json::json!({
+                "available": true,
+                "host_name": host_name,
+                "consent": false
+            })
+        );
+    }
+
     /// Diagnostic paths must hide opaque references without making an error
     /// about the wrong operation. Percent-encoded slashes belong to the ID,
     /// while a real slash starts the operation suffix. Parent queries carry

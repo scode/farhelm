@@ -513,6 +513,8 @@ pub(crate) fn TunnelStrip(session: String) -> Element {
     });
     let publish_session = session.clone();
     use_effect(move || {
+        // The terminal hover escapes host names itself. Publish raw wire text
+        // so this bridge does not escape it twice or change its lookup snapshot.
         let mut value = serde_json::to_value(&*state.read()).unwrap();
         value["generation"] = serde_json::json!(generation);
         let id = serde_json::to_string(&publish_session).unwrap();
@@ -535,7 +537,7 @@ pub(crate) fn TunnelStrip(session: String) -> Element {
                 for tunnel in state.read().tunnels.iter() {
                     span { key: "{tunnel.id}", class: "session-tunnel-chip",
                         span { ":{tunnel.local_port} → " }
-                        span { class: "peer-value", dir: "ltr", "{display_peer(&state.read().host_name)}" }
+                        span { class: "peer-value", dir: "ltr", "{state.read().host_name.escaped()}" }
                         span { ":{tunnel.remote_port}" }
                         button { r#type: "button", class: "session-tunnel-close",
                             aria_label: "close tunnel from local port {tunnel.local_port} to remote port {tunnel.remote_port}",
