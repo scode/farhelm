@@ -1,12 +1,13 @@
 //! Running a helper program asynchronously with a deadline, bounded output,
-//! and a kill that reaches everything the program started.
+//! and group-signal cleanup for ordinary descendants.
 //!
 //! The supervisor shells out to small helpers (`systemctl --user`, `git`)
 //! whose output it parses and whose runtime it cannot predict: a wedged user
 //! manager or a misconfigured Git can hang, print without end, or fork a
 //! child that keeps the pipes open after the parent exits. [`GroupChild`]
 //! holds the three limits every such call needs. The program runs in its own
-//! process group, so one signal kills whatever it forked. Each output stream
+//! process group, so one signal requests termination of same-group descendants.
+//! Deliberate session/group escape is outside this contract. Each output stream
 //! is read up to a byte cap, and one byte past it counts as a refusal rather
 //! than a truncation. And the whole run, reading included, ends at a
 //! deadline.
@@ -17,7 +18,7 @@
 use std::io;
 use std::process::{ExitStatus, Output, Stdio};
 use tokio::io::{AsyncRead, AsyncReadExt as _};
-use tokio::process::{Child, Command};
+use tokio::process::{Child, ChildStdin, Command};
 use tokio::time::Instant;
 
 /// How much of each output stream a run keeps.
@@ -44,20 +45,22 @@ pub enum Ended {
 
 /// A spawned program leading its own process group.
 ///
-/// Dropping one that has not been reaped kills the whole group, so a
-/// cancelled caller never leaves the program or its descendants running.
-/// The kill is a signal, which `Drop` can send without awaiting; reaping the
+/// Dropping one that has not been reaped signals the whole group. This is a
+/// termination request, not proof that every descendant has exited. Reaping the
 /// leader is then left to tokio (`kill_on_drop`), and the caller that needs
 /// to know the child is gone must reap it through [`GroupChild::kill_and_reap`]
 /// or [`GroupChild::finish`] instead of dropping it.
 #[derive(Debug)]
 pub struct GroupChild {
     child: Child,
-    /// The group id, which `process_group(0)` makes equal to the leader's
-    /// pid. `None` only if the OS reported no pid for a live spawn.
+    /// The group id, which `process_group(0)` or detached `setsid` makes equal
+    /// to the leader's pid. `None` only if the OS reported no pid for a live spawn.
     group: Option<i32>,
     reaped: bool,
     stdout_open: bool,
+    /// The spare guard's lifetime pipe must outlive `Child::wait`, which closes
+    /// Child.stdin automatically. Never clone this writer into another process.
+    _tether: Option<ChildStdin>,
 }
 
 impl GroupChild {
@@ -82,6 +85,43 @@ impl GroupChild {
             group,
             reaped: false,
             stdout_open: true,
+            _tether: None,
+        })
+    }
+
+    /// Start the spare guard without a controlling terminal, at low CPU priority.
+    /// Its stdin is an owner-lifetime pipe, not user input. `setsid` supplies the
+    /// group identity itself: setting a process group first would prevent it.
+    /// Ordinary callers retain [`Self::spawn`]'s existing process-group policy.
+    pub fn spawn_detached_tethered(command: &mut Command, caps: OutputCaps) -> io::Result<Self> {
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(if caps.stderr.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .kill_on_drop(true);
+        // SAFETY: only async-signal-safe libc calls run between fork and exec;
+        // no allocation, logging, mutex or captured Rust state is touched.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 || libc::setpriority(libc::PRIO_PROCESS, 0, 10) == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = command.spawn()?;
+        let group = child.id().and_then(|pid| i32::try_from(pid).ok());
+        let tether = child.stdin.take();
+        Ok(Self {
+            child,
+            group,
+            reaped: false,
+            stdout_open: true,
+            _tether: tether,
         })
     }
 

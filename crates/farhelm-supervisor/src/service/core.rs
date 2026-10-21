@@ -4659,6 +4659,9 @@ pub struct Supervisor {
     /// How long create, delete, and restart hold it differs; the lock-order
     /// table in this struct's docs describes those lifetimes.
     pub(crate) working_copy_operations: Arc<tokio::sync::Mutex<()>>,
+    /// Fresh accepted creates owe coalesced spare work; only the serve-owned
+    /// worker mutates records, independently of directory admission.
+    pub(super) spare_builder: Arc<super::spare_builder::Builder>,
     /// All discovery requests share this scanner's two-child budget. It is
     /// independent of directory admission: slow Git inspection must not hold
     /// up checkout allocation or last-reference deletion.
@@ -5679,6 +5682,7 @@ impl Supervisor {
             lifecycle_locks: Arc::new(KeyedLocks::default()),
             agent_request_locks: Arc::new(KeyedLocks::default()),
             working_copy_operations: Arc::new(tokio::sync::Mutex::new(())),
+            spare_builder: Arc::new(super::spare_builder::Builder::default()),
             repository_scanner: crate::repository_discovery::RepositoryScanner::new("git"),
             user_home,
             capture_locks: Arc::new(KeyedLocks::default()),
@@ -7077,6 +7081,9 @@ impl Supervisor {
         let cache_state_dir = self.state_dir.clone();
         let live_claims = self.spare_claims_at_startup().await;
         match tokio::task::spawn_blocking(move || {
+            if let Err(error) = crate::spare_build::sweep_specs(&cache_state_dir) {
+                warn!(%error, "spare private artifact sweep failed; no old job is adopted");
+            }
             crate::repo_cache::sweep(&cache_state_dir, &live_claims)
         })
         .await
@@ -7109,6 +7116,7 @@ impl Supervisor {
         // the accept loop below never returns, so the ticker's lifetime is
         // this call's.
         let mut ticker = start_ticker(self);
+        let mut spare_builder = super::spare_builder::start(self, self.farhelm_exe.clone());
         // Beside the ticker and for the same lifetime: turns marks from any
         // path into "sessions changed" hints (see `hints`). Bound to a name
         // because dropping the handle stops the task.
@@ -7134,6 +7142,7 @@ impl Supervisor {
                 // would be a worse answer than serving without a ticker
                 // and saying so.
                 () = ticker.watch() => continue,
+                () = spare_builder.watch() => continue,
                 accepted = listener.accept() => accepted,
             };
             match accepted {
@@ -10019,9 +10028,9 @@ impl Supervisor {
                     directory_inode: accepted.identity.1,
                     post_clone: resolved.post_clone.clone(),
                     claude_trust: resolved.claude_trust,
-                    // Take support is private until the frozen public setting
-                    // and replacement builder arrive together.
-                    keep_spare: false,
+                    // A pending create/retry keeps this exact frozen choice.
+                    // The staged helm producer still sends false until enabled.
+                    keep_spare: resolved.keep_spare,
                     // The supervisor's own resolved shell; the hook runs
                     // under it with the checkout as its working directory.
                     shell: shell.clone(),
@@ -10031,6 +10040,24 @@ impl Supervisor {
             _ => None,
         };
 
+        // Carry only frozen origin inputs across physical launch settlement.
+        // Replaying an existing terminal never reaches this registration path.
+        let spare_trigger =
+            preparation
+                .as_ref()
+                .zip(fresh_plan.as_ref())
+                .map(|(preparation, plan)| super::spare_builder::Trigger {
+                    repo: farhelm_proto::GithubRepo {
+                        owner: plan.repo_owner.clone(),
+                        name: plan.repo_name.clone(),
+                    },
+                    root: PathBuf::from(&plan.canonical_root),
+                    shell: preparation.shell.clone(),
+                    enabled: preparation.keep_spare,
+                    session: id.clone(),
+                    generation,
+                    working_copy: plan.id.clone(),
+                });
         if preparation.is_some() {
             self.simulate_crash(CreateStage::AfterPreparationPublication)?;
         }
@@ -10585,6 +10612,11 @@ impl Supervisor {
             return Err(result);
         }
 
+        // Register only a successfully launched physical create. In particular,
+        // settle_and_replay and Restart must not retry work or restore old policy.
+        if let Some(trigger) = spare_trigger {
+            self.spare_builder.register(trigger);
+        }
         info!(session = %id, tmux = %tmux_name, %pane, "session created");
         self.sessions.lock().await.insert(
             id,
@@ -32580,6 +32612,7 @@ exit 0
             root: canonical_root.to_string_lossy().into_owned(),
             post_clone: None,
             claude_trust: false,
+            keep_spare: false,
             preview: farhelm_proto::CheckoutPreviewBinding {
                 canonical_root: canonical_root.to_string_lossy().into_owned(),
                 basename: "bar-1".to_string(),
@@ -33848,6 +33881,408 @@ exit 0
             claim,
         )
         .await
+    }
+
+    /// These spare fixtures need ordinary Restart to be an available operation,
+    /// independent of the preparation gate. Use a reporting launch and install
+    /// its captured conversation before restarting; a plain command cannot resume.
+    fn spare_resumable_launch() -> SessionLaunch {
+        declared_command(
+            "agent {farhelm_args}",
+            LaunchHarness::Claude,
+            Some("agent --resume {conversation} {farhelm_args}"),
+        )
+    }
+
+    /// Keep the actual create path and its frozen snapshot while supplying the
+    /// reporting launch needed by these tests' later Restart operations.
+    async fn spare_resumable_create(
+        sup: &Arc<Supervisor>,
+        checkout: &farhelm_proto::ResolvedGithubCheckout,
+        claim: Option<IntentClaim>,
+    ) -> anyhow::Result<SessionInfo> {
+        sup.create_session(
+            CreateInputs {
+                prompt: None,
+                named_start: None,
+                cwd: "",
+                parent: None,
+                github_checkout: Some(checkout.clone()),
+                launch: spare_resumable_launch(),
+                title: None,
+                cols: 80,
+                rows: 24,
+            },
+            claim,
+        )
+        .await
+    }
+
+    /// Frozen spare policy belongs to physical fresh creates. An accepted-key
+    /// replay or Restart of an older on launch cannot undo a later off/root event.
+    /// Gate reads use real origin/generation and preparation files, not a mock.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn spare_builder_frozen_gate_replay_and_restart_keep_later_policy() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        let other_root = state.path().join("other-checkouts");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&other_root).unwrap();
+        let mut checkout = checkout_fixture(&root);
+        checkout.keep_spare = true;
+        let claim = IntentClaim {
+            intent_key: "spare-on".into(),
+            fingerprint: create_fingerprint(
+                Some(&checkout),
+                None,
+                "",
+                &spare_resumable_launch(),
+                None,
+                None,
+            ),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            scopeless_seams(),
+        )
+        .await
+        .unwrap();
+        let first = spare_resumable_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .unwrap();
+        let origin = sup
+            .store
+            .origin_working_copy(&first.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let frozen: crate::working_copies::PreparationSnapshot =
+            serde_json::from_str(origin.preparation_snapshot.as_deref().unwrap()).unwrap();
+        assert!(frozen.resolved.keep_spare);
+        assert!(
+            super::super::spare_builder::next(&sup).await.is_none(),
+            "NotStarted is pending"
+        );
+        let path = crate::launch::preparation_state_path(state.path(), &origin.id);
+        crate::launch::write_preparation_state(
+            &path,
+            &origin.id,
+            &crate::launch::PreparationState::CloneStarted,
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        assert!(super::super::spare_builder::next(&sup).await.is_none());
+        crate::launch::write_preparation_state(
+            &path,
+            &origin.id,
+            &crate::launch::PreparationState::Failed {
+                stage: "clone".into(),
+                detail: "network".into(),
+            },
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        assert!(
+            super::super::spare_builder::next(&sup).await.is_some(),
+            "failed clone exited too"
+        );
+        crate::launch::write_preparation_state(
+            &path,
+            &origin.id,
+            &crate::launch::PreparationState::Failed {
+                stage: "validate".into(),
+                detail: "invalid".into(),
+            },
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        assert!(super::super::spare_builder::next(&sup).await.is_none());
+        assert!(
+            sup.spare_builder.policy(&checkout.repo).is_none(),
+            "terminal refusal cannot poison a later create"
+        );
+        let off = checkout_fixture(&other_root);
+        let later = fresh_create(&sup, &off, None).await.unwrap();
+        let expected = Some((false, other_root.canonicalize().unwrap(), later.id.clone()));
+        assert_eq!(sup.spare_builder.policy(&checkout.repo), expected);
+        assert_eq!(
+            spare_resumable_create(&sup, &checkout, Some(claim))
+                .await
+                .unwrap()
+                .id,
+            first.id
+        );
+        assert_eq!(sup.spare_builder.policy(&checkout.repo), expected);
+        crate::launch::write_preparation_state(
+            &path,
+            &origin.id,
+            &crate::launch::PreparationState::Ready,
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        sup.record_conversation_for_test(&first.id, TEST_CONVERSATION)
+            .await;
+        sup.restart_session(&first.id, true, None, None)
+            .await
+            .unwrap();
+        assert_eq!(sup.spare_builder.policy(&checkout.repo), expected);
+    }
+
+    /// Missing/corrupt evidence or a newer Restart generation refuses the old
+    /// trigger once, without permanently coalescing later valid creates into it.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn spare_builder_unknown_and_stale_gates_allow_a_later_valid_create() {
+        for disposition in ["missing", "corrupt", "stale"] {
+            let state = StateDir::new();
+            let root = state.path().join("first");
+            let later_root = state.path().join("later");
+            std::fs::create_dir(&root).unwrap();
+            std::fs::create_dir(&later_root).unwrap();
+            let sup = Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                scopeless_seams(),
+            )
+            .await
+            .unwrap();
+            let mut first_checkout = checkout_fixture(&root);
+            first_checkout.keep_spare = true;
+            let first = spare_resumable_create(&sup, &first_checkout, None)
+                .await
+                .unwrap();
+            let origin = sup
+                .store
+                .origin_working_copy(&first.id)
+                .await
+                .unwrap()
+                .unwrap();
+            let path = crate::launch::preparation_state_path(state.path(), &origin.id);
+            match disposition {
+                "missing" => std::fs::remove_file(&path).unwrap(),
+                "corrupt" => std::fs::write(&path, "not preparation JSON").unwrap(),
+                "stale" => {
+                    crate::launch::write_preparation_state(
+                        &path,
+                        &origin.id,
+                        &crate::launch::PreparationState::Ready,
+                        &crate::files::RealFs,
+                    )
+                    .unwrap();
+                    sup.record_conversation_for_test(&first.id, TEST_CONVERSATION)
+                        .await;
+                    sup.restart_session(&first.id, true, None, None)
+                        .await
+                        .unwrap();
+                    assert!(
+                        sup.store
+                            .session(&first.id)
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .generation
+                            > 0
+                    );
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                super::super::spare_builder::next(&sup).await.is_none(),
+                "{disposition}"
+            );
+            assert!(
+                sup.spare_builder.policy(&first_checkout.repo).is_none(),
+                "old {disposition} trigger consumed"
+            );
+            let mut later = checkout_fixture(&later_root);
+            later.keep_spare = true;
+            let next = fresh_create(&sup, &later, None).await.unwrap();
+            let next_origin = sup
+                .store
+                .origin_working_copy(&next.id)
+                .await
+                .unwrap()
+                .unwrap();
+            crate::launch::write_preparation_state(
+                &crate::launch::preparation_state_path(state.path(), &next_origin.id),
+                &next_origin.id,
+                &crate::launch::PreparationState::Ready,
+                &crate::files::RealFs,
+            )
+            .unwrap();
+            assert!(
+                super::super::spare_builder::next(&sup).await.is_some(),
+                "fresh gate after {disposition}"
+            );
+        }
+    }
+
+    /// All readiness polling for the worker fixture stays bounded and inside
+    /// the owning StateDir lifetime. A held process is an intentional boundary,
+    /// not a reason to sleep until background work probably completed.
+    async fn spare_worker_until(label: &str, mut ready: impl FnMut() -> bool) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while !ready() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "spare worker timed out: {label}"
+            );
+            // sleep-ok: shared bounded polling of explicit worker fixture readiness.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Exercise the real worker, not a second scheduler model. Its existing
+    /// executable argument points to an owned held command: one repo must keep
+    /// the next from starting until cancellation has reaped the first leader.
+    /// The outer process supplies hostile credentials only to this test child,
+    /// proving the actual pre-login spawn boundary removes inherited authority.
+    /// Actual guard/helper behavior is covered separately by the CLI tests.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn spare_builder_worker_serializes_repositories_and_scrubs_spawn() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if std::env::var_os("SPARE_WORKER_CHILD").is_none() {
+            let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+            let module = module_path!().split_once("::").unwrap().1;
+            command
+                .args([
+                    "--exact",
+                    &format!(
+                        "{module}::spare_builder_worker_serializes_repositories_and_scrubs_spawn"
+                    ),
+                    "--nocapture",
+                ])
+                .env("SPARE_WORKER_CHILD", "1")
+                .env("FARHELM_SESSION_TOKEN", "fixture-only-secret")
+                .env("FARHELM_SESSION_ID", "fixture-session")
+                .env("FARHELM_AGENT_ID", "fixture-agent")
+                .env("FARHELM_TAB_ID", "fixture-tab")
+                .env("FARHELM_SUPERVISOR_SOCK", "/fixture/socket");
+            let caps = crate::bounded_command::OutputCaps {
+                stdout: 65_536,
+                stderr: Some(65_536),
+            };
+            let mut child = crate::bounded_command::GroupChild::spawn(&mut command, caps).unwrap();
+            let ended = child
+                .finish(tokio::time::Instant::now() + Duration::from_secs(90), caps)
+                .await
+                .unwrap();
+            assert!(
+                matches!(ended, crate::bounded_command::Ended::Exited(ref output) if output.status.success()),
+                "{ended:?}"
+            );
+            return;
+        }
+        assert_eq!(
+            std::env::var("FARHELM_SESSION_TOKEN").unwrap(),
+            "fixture-only-secret",
+            "premise: worker inherited authority"
+        );
+        let state = StateDir::new();
+        let first_root = state.path().join("first-root");
+        let next_root = state.path().join("next-root");
+        std::fs::create_dir(&first_root).unwrap();
+        std::fs::create_dir(&next_root).unwrap();
+        let starts = state.path().join("guard-starts");
+        let executable = state.path().join("held-guard");
+        let quote = farhelm_proto::text::shell_quote;
+        std::fs::write(&executable, format!("#!/bin/sh\n\
+            test -z \"${{FARHELM_SESSION_TOKEN-}}${{FARHELM_SESSION_ID-}}${{FARHELM_AGENT_ID-}}${{FARHELM_TAB_ID-}}${{FARHELM_SUPERVISOR_SOCK-}}\" || exit 97\n\
+            printf '%s\\n' \"$$\" >> {}\nread lifetime\n", quote(starts.to_str().unwrap()))).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let sup = Supervisor::new(state.path()).await.unwrap();
+        let mut first_checkout = checkout_fixture(&first_root);
+        first_checkout.keep_spare = true;
+        let first = fresh_create(&sup, &first_checkout, None).await.unwrap();
+        let first_origin = sup
+            .store
+            .origin_working_copy(&first.id)
+            .await
+            .unwrap()
+            .unwrap();
+        crate::launch::write_preparation_state(
+            &crate::launch::preparation_state_path(state.path(), &first_origin.id),
+            &first_origin.id,
+            &crate::launch::PreparationState::Ready,
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        let worker = super::super::spare_builder::start(&sup, executable);
+        spare_worker_until("first child reaches held stdin", || {
+            std::fs::read_to_string(&starts).is_ok_and(|text| text.lines().count() == 1)
+        })
+        .await;
+        let first_pid = std::fs::read_to_string(&starts)
+            .unwrap()
+            .trim()
+            .parse::<i32>()
+            .unwrap();
+        assert_eq!(
+            unsafe { libc::kill(first_pid, 0) },
+            0,
+            "premise: first child alive"
+        );
+        let mut second_checkout = checkout_fixture(&next_root);
+        second_checkout.keep_spare = true;
+        second_checkout.repo.owner = "another".into();
+        let second = fresh_create(&sup, &second_checkout, None).await.unwrap();
+        let second_origin = sup
+            .store
+            .origin_working_copy(&second.id)
+            .await
+            .unwrap()
+            .unwrap();
+        crate::launch::write_preparation_state(
+            &crate::launch::preparation_state_path(state.path(), &second_origin.id),
+            &second_origin.id,
+            &crate::launch::PreparationState::Ready,
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        sup.spare_builder.wake.notify_one();
+        // sleep-ok: deliberate observation window while the positively live first child holds its tether; a concurrent worker would announce a second start.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(std::fs::read_to_string(&starts).unwrap().lines().count(), 1);
+        assert_eq!(
+            unsafe { libc::kill(first_pid, 0) },
+            0,
+            "premise: first child still held"
+        );
+        let mut off = first_checkout.clone();
+        off.keep_spare = false;
+        off.preview.basename = "bar-2".into();
+        off.preview.cwd = first_root.join("bar-2").to_string_lossy().into_owned();
+        fresh_create(&sup, &off, None).await.unwrap();
+        spare_worker_until("second child after first cancellation", || {
+            std::fs::read_to_string(&starts).is_ok_and(|text| text.lines().count() == 2)
+        })
+        .await;
+        assert_eq!(
+            unsafe { libc::kill(first_pid, 0) },
+            -1,
+            "first leader must be reaped before next build"
+        );
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
+        let mut second_off = second_checkout.clone();
+        second_off.keep_spare = false;
+        second_off.preview.basename = "bar-2".into();
+        second_off.preview.cwd = next_root.join("bar-2").to_string_lossy().into_owned();
+        fresh_create(&sup, &second_off, None).await.unwrap();
+        // Off entries disappear only after their attempts finish reap/cleanup.
+        // Settle those owned resources before the temporary state is removed.
+        spare_worker_until("both canceled builds finish cleanup", || {
+            sup.spare_builder.policy(&first_checkout.repo).is_none()
+                && sup.spare_builder.policy(&second_checkout.repo).is_none()
+        })
+        .await;
+        assert_eq!(std::fs::read_to_string(&starts).unwrap().lines().count(), 2);
+        drop(worker);
     }
 
     /// How many checkout directories the root now holds (any `bar*`

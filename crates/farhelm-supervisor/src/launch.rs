@@ -1235,18 +1235,44 @@ fn launch_child_command(
     program: impl AsRef<std::ffi::OsStr>,
     spec: &LaunchSpec,
 ) -> std::process::Command {
+    preparation_child_command(program, &spec.farhelm_bin_dir, Some(&spec.session_id))
+}
+
+/// Share preparation PATH and credential hygiene without inventing a session for
+/// background Git. The login shell has already established the user's environment.
+fn preparation_child_command(
+    program: impl AsRef<std::ffi::OsStr>,
+    farhelm_bin_dir: &Path,
+    session: Option<&str>,
+) -> std::process::Command {
     let mut command = std::process::Command::new(program);
     let inherited_path = std::env::var_os("PATH").unwrap_or_default();
-    let mut path = spec.farhelm_bin_dir.as_os_str().to_os_string();
+    let mut path = farhelm_bin_dir.as_os_str().to_os_string();
     if !inherited_path.is_empty() {
         path.push(":");
         path.push(inherited_path);
     }
+    command.env("PATH", path);
+    scrub_preparation_authority(&mut command);
+    if let Some(session) = session {
+        command
+            .env(SESSION_ID_ENV_VAR, session)
+            .env(AGENT_ID_ENV_VAR, session)
+            .env("COLORTERM", "truecolor");
+    }
+    // Removed after login initialization, matching the visible launch contract.
+    for name in PRIVATE_TMUX_ENV_VARS {
+        command.env_remove(name);
+    }
     command
-        .env("PATH", path)
-        .env(SESSION_ID_ENV_VAR, &spec.session_id)
-        .env(AGENT_ID_ENV_VAR, &spec.session_id)
-        .env("COLORTERM", "truecolor")
+}
+
+/// Credentials and reporter identity never belong to Git, hooks or background
+/// login initialization, including a supervisor nested inside another session.
+fn scrub_preparation_authority(command: &mut std::process::Command) {
+    command
+        .env_remove(SESSION_ID_ENV_VAR)
+        .env_remove(AGENT_ID_ENV_VAR)
         // A nested supervisor can inherit another session's credential.
         // Preparation children must lose it; agent_command installs only
         // this launch's credential after the shared environment is built.
@@ -1263,14 +1289,26 @@ fn launch_child_command(
         // in-support consumer is the OMP asset itself, which reads it from
         // the agent command's environment, installed separately.
         .env_remove(OMP_REPORTER_EXE_ENV_VAR);
-    // Removed here, after the user's shell startup files have run in the
-    // login shell that execs this shim, rather than before: an rc snippet
-    // such as `[ -z "$TMUX" ] && exec tmux` would otherwise replace the
-    // agent launch itself. See `PRIVATE_TMUX_ENV_VARS`.
-    for name in PRIVATE_TMUX_ENV_VARS {
-        command.env_remove(name);
-    }
+}
+
+/// Start the background guard without inherited session authority. Preserve
+/// ambient TMUX through rc files for the same reason visible login startup does;
+/// the post-login Git constructor removes it. PATH projection also waits for rc.
+pub(crate) fn background_guard_command(program: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    scrub_preparation_authority(&mut command);
+    disable_git_prompts(&mut command);
     command
+}
+
+/// Apply ordinary Git/SSH askpass controls both before startup and again after
+/// it. User startup can overwrite environment, so the latter is indispensable.
+fn disable_git_prompts(command: &mut std::process::Command) {
+    command
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "/bin/false")
+        .env("SSH_ASKPASS", "/bin/false")
+        .env("SSH_ASKPASS_REQUIRE", "never");
 }
 
 /// The durable state of one checkout preparation, advanced ONLY by the
@@ -1803,6 +1841,24 @@ fn run_checkout_preparation(
 /// repository; ordinary config, credentials and URL rewrites remain available.
 /// Agent and post-clone commands retain their separate ordinary environment.
 fn git_preparation_command(spec: &LaunchSpec) -> std::process::Command {
+    let mut command = launch_child_command(std::ffi::OsStr::new("git"), spec);
+    command.env("GIT_TERMINAL_PROMPT", "1");
+    scrub_git_repository_environment(&mut command);
+    command
+}
+
+/// Background Git shares clone configuration and executable selection with a
+/// terminal preparation, but never session authority or credential prompts.
+pub(crate) fn background_git_command(farhelm_bin_dir: &Path) -> std::process::Command {
+    let mut command = preparation_child_command("git", farhelm_bin_dir, None);
+    scrub_git_repository_environment(&mut command);
+    disable_git_prompts(&mut command);
+    command
+}
+
+/// Repository redirections must not outrank our explicit paths. Configuration
+/// variables deliberately remain: credential helpers and URL rewrites are user policy.
+fn scrub_git_repository_environment(command: &mut std::process::Command) {
     // `git rev-parse --local-env-vars`, excluding its configuration variables:
     // -C and explicit paths cannot protect the cache when GIT_DIR or another
     // repository-local override takes precedence. Keep configuration so URL
@@ -1821,12 +1877,9 @@ fn git_preparation_command(spec: &LaunchSpec) -> std::process::Command {
         "GIT_SHALLOW_FILE",
         "GIT_COMMON_DIR",
     ];
-    let mut command = launch_child_command(std::ffi::OsStr::new("git"), spec);
-    command.env("GIT_TERMINAL_PROMPT", "1");
     for name in REPOSITORY_ENV_VARS {
         command.env_remove(name);
     }
-    command
 }
 
 /// Refresh the cache under its existing lock and produce an independent clone.
@@ -1837,23 +1890,40 @@ fn clone_with_repo_cache(
     spec: &LaunchSpec,
     preparation: &CheckoutPreparation,
 ) -> Result<(), String> {
-    let cache = &preparation.repo_cache_path;
+    clone_from_repo_cache(
+        &preparation.repo_cache_path,
+        &preparation.clone_url,
+        Path::new(&preparation.cwd),
+        || git_preparation_command(spec),
+        || Ok(()),
+    )
+}
+
+/// Run the one cache/clone sequence for visible launches and background builds.
+/// A delayed builder verifies its still-owned target only after the existing
+/// flock, before *any* Git child; it must never recreate startup-removed content.
+pub(crate) fn clone_from_repo_cache(
+    cache: &Path,
+    clone_url: &str,
+    target: &Path,
+    mut make_git: impl FnMut() -> std::process::Command,
+    verify_target_after_lock: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
     let result = (|| {
         if !cache.is_absolute() {
             return Err("repository cache path must be absolute; this launch spec may predate repository caching".to_string());
         }
         let lock =
             crate::repo_cache::acquire(cache).map_err(|e| format!("could not lock cache: {e}"))?;
+        verify_target_after_lock()?;
 
         // argv, never shell text. init is deliberately idempotent, including
         // after an interrupted first fetch; no staging or cache repair policy.
-        let mut init = git_preparation_command(spec);
-        init.args(["init", "--bare", "-q"])
-            .arg(cache)
-            .env("GIT_TERMINAL_PROMPT", "1");
+        let mut init = make_git();
+        init.args(["init", "--bare", "-q"]).arg(cache);
         run_preparation_child_process(&mut init, "cache init")?;
 
-        let mut fetch = git_preparation_command(spec);
+        let mut fetch = make_git();
         // This is our own bare cache, named explicitly so Git's
         // safe.bareRepository=explicit policy need not be relaxed. Consolidate
         // accumulated fetch packs sooner: dissociation otherwise repeats the
@@ -1873,28 +1943,22 @@ fn clone_with_repo_cache(
             .args([
                 "fetch",
                 "--prune",
-                &preparation.clone_url,
+                clone_url,
                 "+refs/heads/*:refs/heads/*",
                 "+refs/tags/*:refs/tags/*",
-            ])
-            .env("GIT_TERMINAL_PROMPT", "1");
+            ]);
         run_preparation_child_process(&mut fetch, "cache fetch")?;
 
         // Git before 2.55.0 can lose a cached commit's tree during dissociation
         // when the reference's commit-graph covers it ("unable to parse commit").
         // Upstream fix 3d8e4004c6 restores that lookup; remove this workaround once
         // Git 2.55 is Farhelm's minimum. Neither repository's config is changed.
-        let mut clone = git_preparation_command(spec);
+        let mut clone = make_git();
         clone
             .args(["-c", "core.commitGraph=false", "clone", "--reference"])
             .arg(cache)
-            .args([
-                "--dissociate",
-                "--",
-                &preparation.clone_url,
-                &preparation.cwd,
-            ])
-            .env("GIT_TERMINAL_PROMPT", "1");
+            .args(["--dissociate", "--", clone_url])
+            .arg(target);
         run_preparation_child_process(&mut clone, "clone")?;
         lock.mark_used()
             .map_err(|e| format!("could not record cache use: {e}"))?;
@@ -2149,6 +2213,52 @@ mod tests {
 
     const EXEC_FAILURE_CHILD_SPEC: &str = "FARHELM_LAUNCH_EXEC_FAILURE_CHILD_SPEC";
     const EXEC_FAILURE_CHILD_KIND: &str = "FARHELM_LAUNCH_EXEC_FAILURE_CHILD_KIND";
+
+    /// The target callback is the late-orphan fence, so moving it before the
+    /// cache flock or after even bare init would make startup removal unsafe.
+    /// A second open description contests the actual lock inside the callback;
+    /// refusal then proves no Git factory was invoked and no target recreated.
+    #[farhelm_testtrace::test]
+    fn clone_core_verifies_target_under_cache_lock_before_any_git() {
+        use std::os::fd::AsRawFd as _;
+        let directory = tempfile::tempdir().unwrap();
+        let cache = directory.path().join("state/acme/repo.git");
+        let target = directory.path().join("removed-building");
+        let git_marker = directory.path().join("git-started");
+        let result = clone_from_repo_cache(
+            &cache,
+            "https://github.com/acme/repo.git",
+            &target,
+            || {
+                std::fs::write(&git_marker, "factory invoked").unwrap();
+                std::process::Command::new("false")
+            },
+            || {
+                let other = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(cache.with_extension("lock"))
+                    .unwrap();
+                assert_eq!(
+                    unsafe { libc::flock(other.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+                    -1
+                );
+                assert_eq!(
+                    std::io::Error::last_os_error().kind(),
+                    std::io::ErrorKind::WouldBlock,
+                    "verification must run while the clone core holds the same cache flock"
+                );
+                Err("deliberately removed target".into())
+            },
+        );
+        assert!(result.unwrap_err().contains("deliberately removed target"));
+        assert!(
+            !git_marker.exists(),
+            "not even cache init may precede verification"
+        );
+        assert!(!target.exists());
+        assert!(!cache.exists());
+    }
 
     /// Store the failed exec's error for the parent, then leave immediately.
     ///

@@ -218,7 +218,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_61` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_62` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -229,7 +229,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 61;
+pub const PROTOCOL_VERSION: u32 = 62;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -4984,6 +4984,7 @@ mod tests {
             root: "/checkouts".to_string(),
             post_clone: Some("cargo fetch".to_string()),
             claude_trust: false,
+            keep_spare: false,
             preview: CheckoutPreviewBinding {
                 canonical_root: "/checkouts".to_string(),
                 basename: "bar".to_string(),
@@ -5154,8 +5155,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_61() {
-        assert_eq!(PROTOCOL_VERSION, 61);
+    fn protocol_version_is_pinned_at_62() {
+        assert_eq!(PROTOCOL_VERSION, 62);
     }
 
     /// A follow-up is an approved mutation even though its success has no

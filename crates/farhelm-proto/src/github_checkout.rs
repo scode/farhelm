@@ -504,6 +504,10 @@ pub struct ResolvedGithubCheckout {
     /// managed-checkout retry crossing the upgrade into a refused key reuse.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub claude_trust: bool,
+    /// Freeze spare consumption and replenishment for this create. Off omits
+    /// the key so retained fingerprints from before this field stay byte-identical.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_spare: bool,
     /// The preview binding this resolution came from.
     pub preview: CheckoutPreviewBinding,
 }
@@ -966,12 +970,32 @@ mod tests {
             root: "/srv/checkouts".to_string(),
             post_clone: Some("npm install".to_string()),
             claude_trust: false,
+            keep_spare: false,
             preview: binding.clone(),
         };
         let decoded: ResolvedGithubCheckout =
             serde_json::from_value(serde_json::to_value(&resolved).expect("serialize"))
                 .expect("decode");
         assert_eq!(decoded, resolved);
+
+        // Old retained snapshots cannot accidentally opt into background work;
+        // true must survive the same serde path used by preparation recovery.
+        let off = serde_json::to_value(&resolved).unwrap();
+        assert!(off.get("keep_spare").is_none());
+        assert!(
+            !serde_json::from_value::<ResolvedGithubCheckout>(off)
+                .unwrap()
+                .keep_spare
+        );
+        let on = ResolvedGithubCheckout {
+            keep_spare: true,
+            ..resolved.clone()
+        };
+        assert_eq!(
+            serde_json::from_value::<ResolvedGithubCheckout>(serde_json::to_value(&on).unwrap())
+                .unwrap(),
+            on
+        );
 
         // Off encodes exactly as before the field existed, which keeps
         // stored create fingerprints matching across the upgrade.

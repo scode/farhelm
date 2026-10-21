@@ -1207,6 +1207,9 @@ async fn tick(
     budget: usize,
     stop: &mut oneshot::Receiver<()>,
 ) {
+    // Preparation state is already durable; a wake lets the separate worker
+    // examine only owed origins without putting Git or fsync on the ticker.
+    sup.spare_builder.wake.notify_one();
     let _permit = Arc::clone(&sup.sampling_admission)
         .acquire_owned()
         .await

@@ -1,4 +1,4 @@
-//! Recovery ownership for ready checkouts beneath a reserved checkout root.
+//! Owned production and recovery of spares beneath a reserved checkout root.
 //!
 //! The supervisor remembers each outstanding owner namespace, not every build
 //! and claim transition. A verified namespace owns only this repository's strict
@@ -6,6 +6,8 @@
 //! identity. A ready slot has separate recorded identity and is never adopted.
 //! Takes need none of these records: their atomic rename preserves identity,
 //! and their session/generation name lets startup protect surviving clone panes.
+//! The runtime worker alone prepares and records builds; final publication is a
+//! separate short operation so registration never waits for record durability.
 
 use std::collections::HashSet;
 use std::ffi::{CStr, CString};
@@ -138,6 +140,39 @@ fn sweep_with_namespace_sync(
     evict: bool,
     sync_namespace: &mut impl FnMut(&fs::File) -> std::io::Result<()>,
 ) -> anyhow::Result<()> {
+    sweep_locations(cache, repo, live, &|_| evict, sync_namespace)
+}
+
+/// Runtime never guesses whether a claim is abandoned: a shim can claim after
+/// any pane snapshot. Keep all claims until startup's exact reconciliation.
+pub(crate) fn discard_except(
+    cache: &Path,
+    repo: &GithubRepo,
+    root: Option<&Path>,
+) -> anyhow::Result<()> {
+    sweep_locations(
+        cache,
+        repo,
+        &LiveClaims {
+            uncertain: true,
+            ..Default::default()
+        },
+        &|location| {
+            root.is_none_or(|root| location.path.parent().and_then(Path::parent) != Some(root))
+        },
+        &mut |namespace| namespace.sync_all(),
+    )
+}
+
+/// Apply one writer's retention policy without changing the recovery record's
+/// authority or the durability barrier before forgetting removed directories.
+fn sweep_locations(
+    cache: &Path,
+    repo: &GithubRepo,
+    live: &LiveClaims,
+    evict: &impl Fn(&Namespace) -> bool,
+    sync_namespace: &mut impl FnMut(&fs::File) -> std::io::Result<()>,
+) -> anyhow::Result<()> {
     let record_path = cache.with_extension("spare.json");
     let file = match fs::File::open(&record_path) {
         Ok(file) => file,
@@ -155,7 +190,8 @@ fn sweep_with_namespace_sync(
     let mut failures = Vec::new();
     for original in record.locations {
         let mut location = original.clone();
-        match sweep_namespace(&mut location, repo, live, evict, sync_namespace) {
+        let remove_ready = evict(&location);
+        match sweep_namespace(&mut location, repo, live, remove_ready, sync_namespace) {
             Ok(false) => {}
             Ok(true) => retained.push(location),
             Err(error) => {
@@ -187,6 +223,248 @@ fn sweep_with_namespace_sync(
         );
     }
     Ok(())
+}
+
+/// A private builder's expected target, independent of session credentials and
+/// scheduling. The helper checks it after the cache flock, so startup can remove
+/// an orphan safely even if its login initialization finishes much later.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct BuildTarget {
+    namespace: PathBuf,
+    namespace_identity: DirectoryEvidence,
+    name: String,
+    identity: DirectoryEvidence,
+    repo: GithubRepo,
+}
+
+impl BuildTarget {
+    /// Git receives only the path whose opened identity the helper verified.
+    pub(crate) fn path(&self) -> PathBuf {
+        self.namespace.join(&self.name)
+    }
+
+    /// Refuse a removed/replaced target without creating anything. This must be
+    /// called under the existing cache flock before init, fetch or clone.
+    pub(crate) fn verify(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            matches!(
+                private_name(&self.repo.name, &self.name),
+                Some(PrivateName::Building)
+            ),
+            "invalid building name"
+        );
+        let location = Namespace {
+            path: self.namespace.clone(),
+            identity: self.namespace_identity,
+            ready: None,
+        };
+        let namespace =
+            open_namespace(&location, &self.repo)?.context("building namespace disappeared")?;
+        let directory = open_child_dir(&namespace, &CString::new(self.name.as_str())?, true)?;
+        self.identity.verify(&directory)?;
+        Ok(())
+    }
+}
+
+/// Opened producer handles stay private to the supervisor. The shell/clone
+/// helper receives only immutable target evidence and cannot publish or delete.
+pub(crate) struct PreparedBuild {
+    pub(crate) target: BuildTarget,
+    namespace: fs::File,
+}
+
+impl PreparedBuild {
+    /// Recheck the opened building and publish with no replacement. Its caller
+    /// serializes this short identity/rename step with policy registration;
+    /// record persistence and the namespace durability barrier stay outside.
+    pub(crate) fn publish(&self) -> anyhow::Result<()> {
+        self.publish_using(|namespace, from, to| {
+            rename_at_noreplace(namespace.as_raw_fd(), from, namespace.as_raw_fd(), to)
+        })
+    }
+
+    /// Mediate the actual rename so tests can take its result before this call
+    /// returns. Success is irreversible: a shim may immediately remove the ready
+    /// name, so a later path lookup cannot revoke publication or token retirement.
+    fn publish_using(
+        &self,
+        rename: impl FnOnce(&fs::File, &CStr, &CStr) -> std::io::Result<()>,
+    ) -> anyhow::Result<()> {
+        let source = open_child_dir(
+            &self.namespace,
+            &CString::new(self.target.name.as_str())?,
+            true,
+        )?;
+        self.target.identity.verify(&source)?;
+        rename(
+            &self.namespace,
+            &CString::new(self.target.name.as_str())?,
+            &CString::new(self.target.repo.name.as_str())?,
+        )?;
+        Ok(())
+    }
+
+    /// Record intent durably before the slot can exist. A stale policy can still
+    /// reject the rename afterwards; recovery then removes the private building.
+    pub(crate) fn record_ready(
+        &self,
+        cache: &Path,
+        seam: &dyn crate::files::FaultSeam,
+    ) -> anyhow::Result<()> {
+        self.target.verify()?;
+        let mut record = read_record(cache)?;
+        let location = record
+            .locations
+            .iter_mut()
+            .find(|location| location.path == self.target.namespace)
+            .context("building namespace ownership disappeared")?;
+        location.identity.verify(&self.namespace)?;
+        location.ready = Some(self.target.identity);
+        write_record_with(cache, &record, seam)
+    }
+
+    /// Durability follows publication outside the short policy gate. The ready
+    /// identity was already durable, so a failed barrier retains cleanup authority.
+    /// A take may already have moved ready to its claim; sync the retained parent
+    /// without requiring that consumable name to remain present.
+    pub(crate) fn sync_published(&self) -> anyhow::Result<()> {
+        self.namespace.sync_all()?;
+        Ok(())
+    }
+}
+
+/// Bound producer reads exactly as recovery does. There is one runtime record
+/// writer, and startup finishes before that worker starts.
+fn read_record(cache: &Path) -> anyhow::Result<SpareRecord> {
+    let file = match fs::File::open(cache.with_extension("spare.json")) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(SpareRecord {
+                locations: Vec::new(),
+            });
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let mut bytes = Vec::new();
+    file.take(MAX_RECORD_BYTES + 1).read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= MAX_RECORD_BYTES,
+        "spare ownership record exceeds its limit"
+    );
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+/// Producer updates preserve every outstanding old location. Unlike a job
+/// record, these bytes only authorize recovery of filesystem objects.
+fn write_record(cache: &Path, record: &SpareRecord) -> anyhow::Result<()> {
+    write_record_with(cache, record, &crate::files::RealFs)
+}
+
+/// The existing file seam lets lifecycle tests hold the real durability barrier,
+/// rather than a parallel readiness flag that could drift from publication.
+fn write_record_with(
+    cache: &Path,
+    record: &SpareRecord,
+    seam: &dyn crate::files::FaultSeam,
+) -> anyhow::Result<()> {
+    let bytes = serde_json::to_vec(record)?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= MAX_RECORD_BYTES,
+        "spare ownership record exceeds its limit"
+    );
+    crate::files::write_durable_sync(&cache.with_extension("spare.json"), &bytes, seam)?;
+    Ok(())
+}
+
+/// Create/open a reserved child without accepting a symlink or mount crossing.
+/// mkdir's EEXIST is only permission to open and verify, never to follow it.
+fn ensure_child(parent: &fs::File, name: &CStr) -> anyhow::Result<fs::File> {
+    // SAFETY: the descriptor is owned and the component is NUL-terminated.
+    if unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) } != 0 {
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::AlreadyExists {
+            return Err(error.into());
+        }
+    }
+    Ok(open_child_dir(parent, name, true)?)
+}
+
+/// Remember namespace authority before mkdir can strand a building directory.
+/// An occupied ready slot starts no work. Old-root cleanup is the worker's prior
+/// step; this operation never silently forgets old locations or adopts a ready slot.
+pub(crate) fn prepare(
+    cache: &Path,
+    repo: &GithubRepo,
+    root: &Path,
+    expected_root: DirectoryEvidence,
+) -> anyhow::Result<Option<PreparedBuild>> {
+    anyhow::ensure!(root.is_absolute(), "checkout root must be absolute");
+    let root_file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(root)?;
+    expected_root
+        .verify(&root_file)
+        .context("accepted checkout root was replaced")?;
+    let reserved = ensure_child(&root_file, &CString::new(SPARE_DIR_NAME)?)?;
+    let namespace = ensure_child(&reserved, &CString::new(repo.owner.as_str())?)?;
+    let identity = DirectoryEvidence::capture(&namespace)?;
+    let path = root.join(SPARE_DIR_NAME).join(&repo.owner);
+    let mut record = read_record(cache)?;
+    if let Some(existing) = record
+        .locations
+        .iter()
+        .find(|location| location.path == path)
+    {
+        existing
+            .identity
+            .verify(&namespace)
+            .context("spare namespace was replaced")?;
+    } else {
+        record.locations.push(Namespace {
+            path: path.clone(),
+            identity,
+            ready: None,
+        });
+    }
+    match open_child_dir(&namespace, &CString::new(repo.name.as_str())?, true) {
+        Ok(ready) => {
+            let expected = record
+                .locations
+                .iter()
+                .find(|location| location.path == path)
+                .and_then(|location| location.ready)
+                .context("occupied spare has no recorded identity")?;
+            expected.verify(&ready)?;
+            return Ok(None);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    fs::create_dir_all(cache.parent().context("cache parent missing")?)?;
+    // Parent namespace entries must survive before the independent state-tree
+    // record can claim them. A crash after the record then has a valid anchor.
+    root_file.sync_all()?;
+    reserved.sync_all()?;
+    namespace.sync_all()?;
+    write_record(cache, &record)?;
+    let name = format!(".{}:building-{}", repo.name, uuid::Uuid::new_v4());
+    let component = CString::new(name.as_str())?;
+    // A fresh building UUID is exclusive, unlike shared reserved ancestors.
+    // SAFETY: namespace is owned and component is a single NUL-terminated name.
+    if unsafe { libc::mkdirat(namespace.as_raw_fd(), component.as_ptr(), 0o700) } != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    let building = open_child_dir(&namespace, &component, true)?;
+    let target = BuildTarget {
+        namespace: path,
+        namespace_identity: identity,
+        name,
+        identity: DirectoryEvidence::capture(&building)?,
+        repo: repo.clone(),
+    };
+    namespace.sync_all()?;
+    Ok(Some(PreparedBuild { target, namespace }))
 }
 
 /// Open the accepted checkout root, then confine every reserved child lookup
@@ -335,6 +613,133 @@ mod tests {
     use super::*;
     use std::time::{Duration, SystemTime};
 
+    /// Producer publication must leave either private building content or an
+    /// identity-recorded ready slot, never an unrecorded partially built slot.
+    #[farhelm_testtrace::test]
+    fn producer_records_before_publication_and_skips_occupied_slot() {
+        let fixture = Fixture::new(1);
+        let root = fixture.location.path.parent().unwrap().parent().unwrap();
+        let root_identity = DirectoryEvidence::capture(&fs::File::open(root).unwrap()).unwrap();
+        let prepared = prepare(&fixture.cache, &fixture.repo, root, root_identity)
+            .unwrap()
+            .unwrap();
+        let record = fixture.record();
+        assert_eq!(record.locations.len(), 1);
+        assert!(record.locations[0].ready.is_none());
+        assert!(prepared.target.path().is_dir());
+        assert!(!fixture.location.path.join(&fixture.repo.name).exists());
+        fs::write(prepared.target.path().join("content"), "complete clone").unwrap();
+        prepared
+            .record_ready(&fixture.cache, &crate::files::RealFs)
+            .unwrap();
+        assert!(fixture.record().locations[0].ready.is_some());
+        prepared.publish().unwrap();
+        prepared.sync_published().unwrap();
+        assert_eq!(
+            fs::read_to_string(
+                fixture
+                    .location
+                    .path
+                    .join(&fixture.repo.name)
+                    .join("content")
+            )
+            .unwrap(),
+            "complete clone"
+        );
+        assert!(
+            prepare(&fixture.cache, &fixture.repo, root, root_identity)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// A slow record fsync is not permission to publish a replacement observed
+    /// later at the same generated name. Final rename retains the identity check.
+    #[farhelm_testtrace::test]
+    fn producer_refuses_building_replaced_after_ready_record() {
+        let fixture = Fixture::new(1);
+        let root = fixture.location.path.parent().unwrap().parent().unwrap();
+        let expected = DirectoryEvidence::capture(&fs::File::open(root).unwrap()).unwrap();
+        let prepared = prepare(&fixture.cache, &fixture.repo, root, expected)
+            .unwrap()
+            .unwrap();
+        prepared
+            .record_ready(&fixture.cache, &crate::files::RealFs)
+            .unwrap();
+        let old = fixture
+            .location
+            .path
+            .join(format!(".repo:trash-{}", uuid::Uuid::new_v4()));
+        fs::rename(prepared.target.path(), &old).unwrap();
+        fs::create_dir(prepared.target.path()).unwrap();
+        fs::write(prepared.target.path().join("foreign"), "replacement").unwrap();
+        assert!(prepared.publish().is_err());
+        assert!(!fixture.location.path.join(&fixture.repo.name).exists());
+        assert_eq!(
+            fs::read_to_string(prepared.target.path().join("foreign")).unwrap(),
+            "replacement"
+        );
+        assert!(old.is_dir());
+    }
+
+    /// The ready name belongs to takers immediately after rename, even before
+    /// publication returns. A successful claim must not turn publication into
+    /// failure or skip its later parent barrier, which would lose replenishment.
+    #[farhelm_testtrace::test]
+    fn publication_and_barrier_accept_a_slot_taken_before_publish_returns() {
+        let fixture = Fixture::new(1);
+        let root = fixture.location.path.parent().unwrap().parent().unwrap();
+        let identity = DirectoryEvidence::capture(&fs::File::open(root).unwrap()).unwrap();
+        let prepared = prepare(&fixture.cache, &fixture.repo, root, identity)
+            .unwrap()
+            .unwrap();
+        fs::write(prepared.target.path().join("complete"), "owned clone").unwrap();
+        prepared
+            .record_ready(&fixture.cache, &crate::files::RealFs)
+            .unwrap();
+        let claim = claim_name(&fixture.repo.name, &uuid::Uuid::new_v4().to_string(), 0).unwrap();
+        prepared
+            .publish_using(|namespace, from, to| {
+                rename_at_noreplace(namespace.as_raw_fd(), from, namespace.as_raw_fd(), to)?;
+                // This seam owns the real publication syscall, then performs the
+                // shim's real claim before publication can make any later lookup.
+                rename_at_noreplace(namespace.as_raw_fd(), to, namespace.as_raw_fd(), &claim)
+            })
+            .unwrap();
+        assert!(!fixture.location.path.join(&fixture.repo.name).exists());
+        assert_eq!(
+            fs::read(
+                fixture
+                    .location
+                    .path
+                    .join(claim.to_str().unwrap())
+                    .join("complete")
+            )
+            .unwrap(),
+            b"owned clone"
+        );
+        prepared.sync_published().unwrap();
+    }
+
+    /// Runtime off/root cleanup cannot prove a claim abandoned: a live shim may
+    /// claim after any snapshot. Keep its location until exact startup cleanup.
+    #[farhelm_testtrace::test]
+    fn runtime_discard_keeps_all_claims_for_startup() {
+        let mut fixture = Fixture::new(1);
+        let ready = fixture.ready();
+        let claim = fixture.claim(&uuid::Uuid::new_v4().to_string(), 0);
+        let building = fixture.building();
+        fixture.remember(vec![fixture.location.clone()]);
+        discard_except(&fixture.cache, &fixture.repo, None).unwrap();
+        assert!(!ready.exists());
+        assert!(!building.exists());
+        assert!(claim.join("partial").is_file());
+        assert_eq!(fixture.record().locations.len(), 1);
+        sweep(&fixture.cache, &fixture.repo, &LiveClaims::default(), false).unwrap();
+        assert!(!claim.exists());
+        assert!(!fixture.cache.with_extension("spare.json").exists());
+    }
+
     /// Keep cache locks, private records, checkout roots and all retained
     /// content in one owned temporary tree. No child or test environment changes.
     struct Fixture {
@@ -419,8 +824,8 @@ mod tests {
             path
         }
 
-        /// Publish fixtures in the actual private record format. Production
-        /// initialization belongs to the later builder unit and is not added here.
+        /// Write only the ownership premise needed by recovery tests. Producer
+        /// tests above use prepare/record_ready rather than this fixture shortcut.
         fn remember(&self, locations: Vec<Namespace>) {
             fs::write(
                 self.cache.with_extension("spare.json"),
