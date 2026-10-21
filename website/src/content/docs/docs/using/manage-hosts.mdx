@@ -77,7 +77,7 @@ Uninstall never stops a session for you. If any session on the host has not ende
 its status is not known yet), or still has a terminal tab open, it says which ones and does nothing. Stop those sessions
 and close their terminal tabs first, as in [Stop, restart, and resume](/docs/using/stop-restart-resume/). Do not start a
 session on the host while the uninstall runs: one started then can end along with Farhelm. Uninstall also needs Farhelm
-to be connected to the host so it can check, so fix a host that shows as unreachable first. A few less common setups are
+to be connected to the host so it can check; if it shows needs update, too new, an identity problem or the same machine as another entry, follow its row's advice first; **remove** still works. A few less common setups are
 refused too, with the reason shown in a dialog: a host where Farhelm was set up by running `farhelm helm setup` on the
 host itself (its own `farhelm uninstall` removes it), one whose Farhelm runs from somewhere unexpected, and one whose
 `~/.local/lib/farhelm` directory is a symbolic link. **remove** still works for all of them.

@@ -24,6 +24,7 @@ mod payloads;
 mod plan;
 mod release_payloads;
 mod service;
+mod uninstall_refusal;
 
 pub use backend::{LocalSupervisorDiscovery, discover_local_supervisor};
 pub(crate) use http::{
@@ -4003,8 +4004,8 @@ mod tests {
     /// would strand a half-removed host.
     ///
     /// Spec: an unconnected host whose unit file is still there is refused
-    /// with "get it connected first". Once the unit file is gone, and the
-    /// probe shows no supervisor answering, the same host plans only what is
+    /// with a concrete instruction to reconnect it. Once the unit file is gone,
+    /// and the probe shows no supervisor answering, the same host plans only what is
     /// left: reload, stop, remove the lib directory if it is still there,
     /// and forget the host; confirming that plan runs it to the end.
     #[farhelm_testtrace::test]
@@ -4028,7 +4029,7 @@ mod tests {
         let service = service(&harness, backend.clone(), root.path());
 
         let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
-        assert!(refusal.contains("Get it connected first"), "{refusal}");
+        assert!(refusal.contains("Once the host is connected"), "{refusal}");
 
         *backend.present.lock().unwrap() = Some(vec![root.path().join("lib")]);
         let retry = service.plan_uninstall(host).await.unwrap();
@@ -4260,7 +4261,7 @@ mod tests {
     ///
     /// Spec: a host frozen in identity mismatch is refused even when its
     /// unit file is absent, the case that otherwise lets an unconnected
-    /// host continue, and nothing on the host is acted on.
+    /// host continue. The typed refusal offers Remove without acting on the host.
     #[farhelm_testtrace::test]
     async fn uninstall_refuses_a_host_with_an_identity_problem() {
         let (builder, host) = FleetBuilder::new()
@@ -4292,10 +4293,138 @@ mod tests {
         *backend.present.lock().unwrap() = Some(vec![root.path().join("lib")]);
         let service = service(&harness, backend.clone(), root.path());
 
-        let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
-
-        assert!(refusal.contains("identity-mismatch"), "{refusal}");
+        let error = service.plan_uninstall(host).await.unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<ProvisioningRequestError>(),
+            Some(ProvisioningRequestError::RemoveInstead(_))
+        ));
+        let refusal = refusal_text(error);
+        assert!(refusal.contains("choose adopt"), "{refusal}");
+        assert!(
+            refusal.contains("identity-old") && refusal.contains("identity-new"),
+            "{refusal}"
+        );
+        assert!(!refusal.contains("identity-mismatch"), "{refusal}");
         assert!(backend.operations.lock().unwrap().is_empty());
+    }
+
+    /// A duplicate entry must name the owning entry as users see it, rather
+    /// than its destination or internal ID. If that entry was removed, the
+    /// frozen duplicate snapshot still refuses safely with a missing-name fallback.
+    #[farhelm_testtrace::test]
+    async fn uninstall_duplicate_refusal_uses_the_twin_alias_and_missing_twin_fallback() {
+        let shared = || HostScript {
+            identity: Some("shared-uninstall-identity".into()),
+            ..HostScript::default()
+        };
+        let (builder, first) = FleetBuilder::new()
+            .await
+            .ssh("first.example", shared())
+            .await;
+        let (builder, second) = builder.ssh("second.example", shared()).await;
+        let harness = builder.start().await;
+        let (duplicate, twin) = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                for host in [first, second] {
+                    if let Some(HostState::Duplicate { twin, .. }) = harness.manager.state(host) {
+                        return (host, twin);
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "one entry must reach the duplicate fixture state; first={:?}, second={:?}",
+                harness.manager.state(first),
+                harness.manager.state(second)
+            )
+        });
+        harness
+            .store
+            .update_alias(twin, Some("build box"))
+            .await
+            .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        for expected in [
+            "\"build box\"".to_string(),
+            format!("another entry (host {twin})"),
+        ] {
+            assert!(
+                matches!(harness.manager.state(duplicate), Some(HostState::Duplicate { twin: owner, .. }) if owner == twin),
+                "fixture premise: the duplicate snapshot still names the original twin"
+            );
+            let error = service.plan_uninstall(duplicate).await.unwrap_err();
+            assert!(matches!(
+                error.downcast_ref::<ProvisioningRequestError>(),
+                Some(ProvisioningRequestError::RemoveInstead(_))
+            ));
+            let text = refusal_text(error);
+            assert!(
+                text.contains(&format!("choose uninstall on {expected}")),
+                "{text}"
+            );
+            assert!(backend.operations.lock().unwrap().is_empty());
+            if expected == "\"build box\"" {
+                // Deliberately retain the manager snapshot to exercise the same
+                // race as a removal between reading that snapshot and naming it.
+                harness.store.remove_ssh_host(twin).await.unwrap();
+            }
+        }
+    }
+
+    /// An SSH entry can reach the helm's own machine, whose reserved local
+    /// entry has no uninstall action in the panel. The refusal must name it
+    /// but direct the user to the command-line uninstall rather than a missing button.
+    #[farhelm_testtrace::test]
+    async fn uninstall_duplicate_of_the_local_host_names_its_command_line_remedy() {
+        let shared_identity = "local-uninstall-identity";
+        let builder = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                identity: Some(shared_identity.into()),
+                ..HostScript::default()
+            })
+            .await;
+        let (builder, remote) = builder
+            .ssh("same-machine.example", HostScript::default())
+            .await;
+        let harness = builder.start().await;
+        let local = local_row(&harness).await;
+        harness.await_state(local, HostState::is_connected).await;
+        harness.await_state(remote, HostState::is_connected).await;
+        // Establish the local identity claim before the SSH destination changes,
+        // so the fixture does not depend on which actor wins first contact.
+        harness.fleet.edit(remote, |script| {
+            script.identity = Some(shared_identity.into());
+        });
+        harness.fleet.kill_connection(remote);
+        let state = harness
+            .await_state(remote, |state| matches!(state, HostState::Duplicate { .. }))
+            .await;
+        assert!(matches!(state, HostState::Duplicate { twin, .. } if twin == local));
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        for (alias, shown) in [(None, "local (this machine)"), (Some("desk"), "desk")] {
+            harness.store.update_alias(local, alias).await.unwrap();
+            let error = service.plan_uninstall(remote).await.unwrap_err();
+            assert!(matches!(
+                error.downcast_ref::<ProvisioningRequestError>(),
+                Some(ProvisioningRequestError::RemoveInstead(_))
+            ));
+            let text = refusal_text(error);
+            assert!(
+                text.contains(&format!("same machine as \"{shown}\"")),
+                "{text}"
+            );
+            assert!(text.contains("run farhelm uninstall there"), "{text}");
+            assert!(!text.contains("choose uninstall on"), "{text}");
+            assert!(backend.operations.lock().unwrap().is_empty());
+        }
     }
 
     /// Why this matters: the probe dials the destination afresh, and a
