@@ -98,32 +98,15 @@ impl OpLock {
     ///
     /// Move the guard into the spawned future. Dropping that future then
     /// releases the claim before a removed component can strand it.
+    /// Explicitly drop it where an operation must release before a callback.
+    /// Only the guard can release a claim, so an older task cannot clear a
+    /// later operation's token after handing ownership back.
+    ///
+    /// The test-and-set happens synchronously under one write borrow. A
+    /// refused claimant constructs no guard and gains no release authority.
     pub(crate) fn claim_guard(&mut self) -> Option<OpGuard> {
-        claimed_owner(self.claim(), || OpGuard { held: self.held })
-    }
-
-    /// Claim the token, or report that someone else holds it.
-    ///
-    /// The whole mechanism is in this one function being a test-and-SET
-    /// under a single write borrow, called synchronously at handler entry:
-    /// there is no await, no render, and no other handler able to interleave
-    /// between the check and the claim. A caller that gets `false` must
-    /// return without side effects — it has not started an operation and
-    /// must not undo one.
-    ///
-    /// Callers pair this with [`Self::release`] on every path out of the
-    /// operation, success and failure alike. A leaked token would leave the
-    /// page permanently inert, which is why the release sits at the end of
-    /// the spawned task rather than beside any one of its outcomes.
-    pub(crate) fn claim(&mut self) -> bool {
-        claim_in(&mut self.held.write())
-    }
-
-    /// Release the token. Idempotent, so a path that releases twice is
-    /// harmless — the failure worth preventing is a path that releases
-    /// never.
-    pub(crate) fn release(&mut self) {
-        self.held.set(false);
+        let claimed = claim_in(&mut self.held.write());
+        claimed_owner(claimed, || OpGuard { held: self.held })
     }
 
     /// Whether an operation is live, for a HANDLER.
@@ -435,7 +418,7 @@ fn take_in<K: PartialEq, P>(slot: &mut Option<(K, P)>, key: &K) -> Option<P> {
 
 /// The test-and-set itself, over a plain `&mut bool`.
 ///
-/// Split out from [`OpLock::claim`] so the RULE can be exercised without a
+/// Split out from [`OpLock::claim_guard`] so the RULE can be exercised without a
 /// Dioxus runtime to own a signal in. That split is not only for testing:
 /// it also makes the atomicity visible in one place — the check and the set
 /// are one expression over one borrow, and the signal is nothing but where
@@ -757,9 +740,8 @@ mod tests {
             "a second handler in the same frame must be refused"
         );
 
-        // Release is a plain clear, so the next operation may proceed. It is
-        // idempotent by construction — the failure worth preventing is a
-        // path that never releases at all, not one that releases twice.
+        // Model the owner's drop: clearing its cell lets the next operation
+        // claim. The public API hands that release authority only to a guard.
         held = false;
         assert!(claim_in(&mut held));
     }
