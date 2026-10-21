@@ -346,14 +346,19 @@ impl From<&Host> for HostBinding {
 /// it after acceptance would drop a healthy run just before completion.
 /// What identifies the target is the registry id, the kind, and the dial
 /// coordinates with the recorded identity; incarnation churn and learned
-/// install paths do not break continuity. Anything else is a real target
-/// change, and old run evidence must not be reinterpreted as the new
-/// target's history.
+/// install paths do not break continuity. An update can also learn the
+/// first identity: a protocol-skewed host was registered without an
+/// established identity, and the update's reconnect supplies it. This is a
+/// directional allowance, not permission to replace or lose a known
+/// identity. Callers retaining a run must pin that first learned identity
+/// so a later replacement cannot reuse the allowance. Anything else is a
+/// real target change, and old run evidence must not be reinterpreted as
+/// the new target's history.
 fn same_update_target(before: &HostBinding, now: &HostBinding) -> bool {
     before.id == now.id
         && before.kind == now.kind
         && before.destination == now.destination
-        && before.identity == now.identity
+        && (before.identity.is_none() || before.identity == now.identity)
 }
 
 /// Where one accepted automatic-update click stands before its POST.
@@ -402,6 +407,8 @@ struct UpdateIntent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OutstandingSubmission {
     epoch: u64,
+    /// Keep the first learned identity even after the intent is invalidated:
+    /// acceptance must reject a second identity learned while the POST waits.
     binding: HostBinding,
 }
 
@@ -431,6 +438,8 @@ struct TrackedRun {
     operation: Option<ProvisioningOperation>,
     source: RunSource,
     /// The binding that submitted or adopted the run; the continuity anchor.
+    /// A first learned identity is pinned here by the binding watcher, so
+    /// later identity changes cannot inherit the unknown-identity allowance.
     binding: HostBinding,
     /// Aggregate status of the newest applicable read naming this run, so a
     /// superseding observation can tell a finished run from one whose
@@ -1593,7 +1602,15 @@ async fn submit_accepted<R>(
     // Owned snapshot, not a borrowed peek: guards must not outlive the
     // statement that takes them (see the consumption closure's comment).
     let current = current_binding.peek().clone();
-    if !same_update_target(&plan.binding, &current) {
+    let submitted_binding = outstanding
+        .peek()
+        .as_ref()
+        .filter(|submission| submission.epoch == epoch)
+        .map_or_else(
+            || plan.binding.clone(),
+            |submission| submission.binding.clone(),
+        );
+    if !same_update_target(&submitted_binding, &current) {
         // The accepted run belongs to the old target, but the progress
         // route is host-scoped: without this, the reread below adopts the
         // old run as the new target's history (the binding watcher only
@@ -1684,7 +1701,10 @@ async fn submit_accepted<R>(
         run_id: accepted.run_id,
         operation: Some(ProvisioningOperation::Update),
         source: RunSource::Submitted { epoch },
-        binding: plan.binding.clone(),
+        // Acceptance may be the first time the row knows its identity.
+        // Anchor that checked identity now rather than retaining the plan's
+        // unknown identity and allowing a later replacement to pass too.
+        binding: current,
         last_status: None,
         started_at: Instant::now(),
     }));
@@ -2684,9 +2704,23 @@ pub(crate) fn ProvisioningPanel(
     // Incarnation churn alone breaks nothing: the update changing its own
     // connection is normal. Detached run ids retire so the host-scoped
     // progress route cannot reintroduce old-target evidence as the new
-    // target's history.
+    // target's history. Learning the first identity can be the update's own
+    // reconnect, but pin it immediately: otherwise a later replacement
+    // would keep comparing against the original unknown identity.
     let watcher_progress = request_progress.clone();
     use_effect(use_reactive((&binding,), move |(binding,)| {
+        // The intent can already be gone while its POST waits. Preserve the
+        // first identity in the longer-lived submission too, so None→A→B
+        // before acceptance cannot be mistaken for a single first contact.
+        let submission = outstanding_submission.peek().clone();
+        if let Some(mut submission) = submission
+            && submission.binding.identity.is_none()
+            && binding.identity.is_some()
+            && same_update_target(&submission.binding, &binding)
+        {
+            submission.binding.identity = binding.identity.clone();
+            outstanding_submission.set(Some(submission));
+        }
         let followed = tracked.peek().clone();
         let target_changed = followed
             .as_ref()
@@ -2717,6 +2751,12 @@ pub(crate) fn ProvisioningPanel(
                      outcome is unknown; this row claims nothing from it"
                     .to_string(),
             }));
+        } else if let Some(mut followed) = followed
+            && followed.binding.identity.is_none()
+            && binding.identity.is_some()
+        {
+            followed.binding.identity = binding.identity.clone();
+            tracked.set(Some(followed));
         }
     }));
 
@@ -3918,8 +3958,9 @@ mod tests {
 
     /// An update normally changes its own connection incarnation mid-run,
     /// so incarnation churn — and learned install paths — must not break
-    /// run continuity. A new id, kind, destination, or identity is a real
-    /// target change, and old run evidence must not follow it.
+    /// run continuity. A new id, kind, destination, or replacement of a
+    /// known identity is a real target change; old run evidence must not
+    /// follow it.
     #[farhelm_testtrace::test]
     fn run_continuity_survives_reconnects_but_not_retargets() {
         let host_id = 7;
@@ -3936,6 +3977,26 @@ mod tests {
         let mut reidentified = before.clone();
         reidentified.identity = Some("identity-2".to_string());
         assert!(!same_update_target(&before, &reidentified));
+    }
+
+    /// A protocol-skewed host can first report its identity on the update's
+    /// reconnect. That permits continuity in one direction only: once the
+    /// identity is learned and retained, losing or replacing it must detach
+    /// the run. Exact equality for an unsubmitted plan stays stricter.
+    #[farhelm_testtrace::test]
+    fn run_continuity_allows_only_the_first_learned_identity() {
+        let known = ssh_binding(7);
+        let mut unknown = known.clone();
+        unknown.identity = None;
+        assert!(same_update_target(&unknown, &unknown));
+        assert!(same_update_target(&unknown, &known));
+        assert_ne!(unknown, known);
+        assert!(same_update_target(&known, &known));
+        assert!(!same_update_target(&known, &unknown));
+
+        let mut replacement = known.clone();
+        replacement.identity = Some("identity-2".to_string());
+        assert!(!same_update_target(&known, &replacement));
     }
 
     /// Authoritative success is exact: the tracked nonempty run id, UPDATE
