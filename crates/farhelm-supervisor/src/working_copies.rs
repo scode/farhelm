@@ -75,6 +75,21 @@ use thiserror::Error;
 /// same-device directory.
 pub const ARCHIVE_DIR_NAME: &str = "farhelm-archived-working-copies";
 
+/// Ready checkouts and their private recovery names share this reserved root.
+/// Ordinary checkout names and discovery must never treat it as a repository.
+pub(crate) const SPARE_DIR_NAME: &str = ".farhelm-spares";
+const RESERVED_CHECKOUT_NAMES: [&str; 2] = [ARCHIVE_DIR_NAME, SPARE_DIR_NAME];
+
+/// Recognize infrastructure even on a case-insensitive checkout filesystem.
+/// Keep discovery and allocation on the same set when another container is added.
+pub(crate) fn reserved_checkout_name(name: &std::ffi::OsStr) -> bool {
+    name.to_str().is_some_and(|name| {
+        RESERVED_CHECKOUT_NAMES
+            .iter()
+            .any(|reserved| name.eq_ignore_ascii_case(reserved))
+    })
+}
+
 /// The longest checkout path, in bytes, that admission accepts: short enough
 /// that its longest archive destination still fits the platform's path limit.
 ///
@@ -580,6 +595,43 @@ fn same_directory(observed: &Observed, identity: DirectoryIdentity, birth: Optio
             Some(recorded) => observed.birth_ns == Some(recorded),
             None => observed.dev == dev,
         }
+}
+
+/// Ownership evidence for a directory outside the working-copy registry.
+/// Spares use the same replacement/remount rule as managed checkout rows;
+/// duplicating observation would lose Linux musl's creation-time support.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct DirectoryEvidence {
+    device: u64,
+    inode: u64,
+    birth_ns: Option<i64>,
+}
+
+impl DirectoryEvidence {
+    /// Capture all identity fields from the directory handle that will be used.
+    /// An open non-directory cannot supply ownership evidence for cleanup.
+    pub(crate) fn capture(directory: &fs::File) -> std::io::Result<Self> {
+        let observed = observe_open_directory(directory)?;
+        if !observed.is_dir {
+            return Err(std::io::Error::from(std::io::ErrorKind::NotADirectory));
+        }
+        Ok(Self {
+            device: observed.dev,
+            inode: observed.ino,
+            birth_ns: observed.birth_ns,
+        })
+    }
+
+    /// Refuse replacement rather than adopting whatever now occupies a name.
+    /// A recorded creation time permits the same remounts as registry checks.
+    pub(crate) fn verify(self, directory: &fs::File) -> std::io::Result<()> {
+        let observed = observe_open_directory(directory)?;
+        if observed.is_dir && same_directory(&observed, (self.device, self.inode), self.birth_ns) {
+            Ok(())
+        } else {
+            Err(std::io::Error::other("recorded directory identity changed"))
+        }
+    }
 }
 
 /// Observe the object that an already-open directory descriptor identifies.
@@ -1157,10 +1209,10 @@ pub struct OccupiedScan {
 /// files, directories, and symlinks alike, including DANGLING ones (a name
 /// claimed on disk is claimed as far as mkdir is concerned).
 ///
-/// [`ARCHIVE_DIR_NAME`] is reported as occupied whenever it is related to
-/// `basename`, whether or not it exists yet: it is reserved for archived
-/// checkouts, and ordinary titles produce it exactly (repo `farhelm`,
-/// title "archived working copies"). A checkout that took the name became
+/// Infrastructure names are reported as occupied whenever related to
+/// `basename`, whether or not they exist yet. Ordinary titles produce the
+/// archive name exactly (repo `farhelm`, title "archived working copies").
+/// A checkout that took the name became
 /// the archive directory for every later delete in that root, and its own
 /// delete tried to move it into itself. Reserving it here, rather than
 /// relying on the nesting guard, holds even in a root whose registry has
@@ -1200,8 +1252,10 @@ where
 {
     let mut names = std::collections::HashSet::new();
     let basename_prefix = format!("{basename}-");
-    if ARCHIVE_DIR_NAME == basename || ARCHIVE_DIR_NAME.starts_with(&basename_prefix) {
-        names.insert(ARCHIVE_DIR_NAME.to_owned());
+    for reserved in RESERVED_CHECKOUT_NAMES {
+        if reserved == basename || reserved.starts_with(&basename_prefix) {
+            names.insert(reserved.to_owned());
+        }
     }
     for _ in 0..cap {
         let entry = match entries.next() {
@@ -1854,18 +1908,29 @@ fn rename_exclusive_into(
 fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
     let from = cstring(from)?;
     let to = cstring(to)?;
+    rename_at_noreplace(libc::AT_FDCWD, &from, libc::AT_FDCWD, &to)
+}
+
+/// Rename between already-open parents without replacing an existing entry.
+/// Spare cleanup keeps its authority on opened directories, not a second path
+/// lookup after verifying the reserved namespace.
+pub(crate) fn rename_at_noreplace(
+    from_parent: std::os::fd::RawFd,
+    from: &std::ffi::CStr,
+    to_parent: std::os::fd::RawFd,
+    to: &std::ffi::CStr,
+) -> std::io::Result<()> {
     let rc;
     #[cfg(target_os = "linux")]
     {
-        // SAFETY: both CStrings outlive the call; the syscall number and
-        // flag are the platform's own constants, and renameat2 with
-        // AT_FDCWD + RENAME_NOREPLACE creates or fails, never replaces.
+        // SAFETY: both C strings and parent descriptors outlive the call;
+        // the platform's RENAME_NOREPLACE creates or fails, never replaces.
         rc = unsafe {
             libc::syscall(
                 libc::SYS_renameat2,
-                libc::AT_FDCWD,
+                from_parent,
                 from.as_ptr(),
-                libc::AT_FDCWD,
+                to_parent,
                 to.as_ptr(),
                 libc::RENAME_NOREPLACE,
             )
@@ -1873,13 +1938,13 @@ fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
     }
     #[cfg(target_os = "macos")]
     {
-        // SAFETY: both CStrings outlive the call; RENAME_EXCL makes the
-        // rename fail rather than replace.
+        // SAFETY: both C strings and parent descriptors outlive the call;
+        // RENAME_EXCL makes the rename fail rather than replace.
         rc = unsafe {
             libc::renameatx_np(
-                libc::AT_FDCWD,
+                from_parent,
                 from.as_ptr(),
-                libc::AT_FDCWD,
+                to_parent,
                 to.as_ptr(),
                 libc::RENAME_EXCL,
             )
@@ -2317,6 +2382,26 @@ mod tests {
     }
 
     // -- occupancy scan ---------------------------------------------------
+
+    /// Infrastructure is reserved before its first creation, so an ordinary
+    /// allocation cannot turn a future spare/archive container into a checkout.
+    #[farhelm_testtrace::test]
+    fn infrastructure_names_are_occupied_even_before_they_exist() {
+        let root = tempfile::tempdir().unwrap();
+        for name in RESERVED_CHECKOUT_NAMES {
+            assert!(!root.path().join(name).exists());
+            let scan = occupied_related_names(root.path(), name, 1).unwrap();
+            assert!(scan.complete);
+            assert!(scan.names.contains(name));
+            assert!(reserved_checkout_name(std::ffi::OsStr::new(name)));
+            assert!(reserved_checkout_name(std::ffi::OsStr::new(
+                &name.to_uppercase()
+            )));
+        }
+        assert!(!reserved_checkout_name(std::ffi::OsStr::new(
+            "ordinary-repository"
+        )));
+    }
 
     /// Titled and numeric aliases both occupy generated names, while the
     /// reserved archive entry remains outside the naming namespace.
