@@ -7519,7 +7519,15 @@ pub(super) fn CreateSessionForm(
                                     wrapper_is_explicit.set(true);
                                     intent_key.set(None);
                                 },
-                                on_permission_flags: move |text| { structured_permission_flags.set(text); intent_key.set(None); structured_permissions_is_explicit.set(true); },
+                                on_permission_flags: move |text| {
+                                    // A queued input can outlive the render that
+                                    // enabled this editor. Keep the admitted
+                                    // launch and its retry key unchanged.
+                                    if !draft_transition_allowed(ops) { return; }
+                                    structured_permission_flags.set(text);
+                                    intent_key.set(None);
+                                    structured_permissions_is_explicit.set(true);
+                                },
                                 catalog: catalog_models.clone(),
                                 busy,
                                 model_draft: model_draft(),
