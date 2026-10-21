@@ -323,9 +323,6 @@ are not.
   page behind them, return of focus on close and keyboard-reachable scroll regions, and focus fixes kept landing one
   dialog at a time. Every modal dialog gets isolation and a Tab trap through the shell. Plan:
   `plans/queue/modal-dialog-shell.md`.
-- **Workspace trust as a launch type in the helm.** Each launch route normalizes workspace trust itself before handing
-  the launch to the supervisor, and an inherited trust choice once escaped its destination (#2349). Only the trust step
-  can produce the launch the helm's create and restart paths accept. Plan: `plans/queue/helm-launch-admission.md`.
 - **One owner for closing popovers when their row moves.** Each change that can move a sidebar or host row closes the
   open menu itself, and every new popover kind had to be added at each of those places. Changes report to one owner, and
   the three gaps left open in a code comment are closed. Plan: `plans/queue/popover-anchor-close.md`.
