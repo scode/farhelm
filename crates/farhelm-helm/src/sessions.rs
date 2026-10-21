@@ -1361,7 +1361,14 @@ pub(crate) async fn record_session(
     claim: &manager::SessionClaim,
     session: &farhelm_proto::SessionInfo,
 ) {
-    let Err(error) = state.manager.remember_session(claim, session).await else {
+    let checked = store::CachedRow::new(claim.host, session.clone());
+    let result = match checked {
+        Ok(checked) => state.manager.remember_session(claim, &checked).await,
+        Err(problem) => Err(anyhow::anyhow!(
+            "{problem}; this helm cannot record or address its session references"
+        )),
+    };
+    let Err(error) = result else {
         return;
     };
     // The id is the PEER's text — escaped and bounded before it reaches a
@@ -1777,25 +1784,32 @@ async fn accept_created_session(
     // A database failure here must not turn a successful supervisor create
     // into an HTTP error that tempts the caller to submit it again.
     if let Some(identity) = claim.identity.as_deref() {
-        match state
-            .store
-            .record_create_history_with_destination(
-                claim.host,
-                identity,
-                &session,
-                crate::store::HistoryPaths {
-                    canonical_cwd: session.canonical_cwd.as_deref().unwrap_or(&session.cwd),
-                    display_cwd: if github_repo.is_some() {
-                        &session.cwd
-                    } else {
-                        &requested_cwd
-                    },
-                },
-                github_repo.as_ref(),
-                explicit_selection.as_ref(),
-            )
-            .await
-        {
+        let history = match store::CachedRow::new(claim.host, session.clone()) {
+            Ok(checked) => {
+                state
+                    .store
+                    .record_create_history_with_destination(
+                        claim.host,
+                        identity,
+                        &checked,
+                        crate::store::HistoryPaths {
+                            canonical_cwd: session.canonical_cwd.as_deref().unwrap_or(&session.cwd),
+                            display_cwd: if github_repo.is_some() {
+                                &session.cwd
+                            } else {
+                                &requested_cwd
+                            },
+                        },
+                        github_repo.as_ref(),
+                        explicit_selection.as_ref(),
+                    )
+                    .await
+            }
+            Err(problem) => Err(anyhow::anyhow!(
+                "{problem}; this helm cannot record or address its session references"
+            )),
+        };
+        match history {
             Ok(true) => state.manager.events().bump(),
             Ok(false) => {}
             Err(error) => warn!(
@@ -2624,9 +2638,14 @@ pub(crate) async fn get_session(
             None => http_error(no_such_session()),
         };
     };
-    match manager::drain_sessions(&client).await {
+    match manager::drain_sessions(&client, host).await {
         Ok(drained) => {
-            match drained.sessions.into_iter().find(|s| s.id == *id) {
+            match drained
+                .sessions
+                .into_iter()
+                .map(store::CachedRow::into_info)
+                .find(|s| s.id == *id)
+            {
                 Some(mut info) => {
                     let notifications_read_through =
                         aggregate::apply_notification_marks(&mut info, marks);
@@ -2801,10 +2820,11 @@ async fn do_restart_session_named(
                     // Restart with cannot change cwd. Its owner's live
                     // membership projection answers exactly this question,
                     // without inferring anything about another directory.
-                    manager::drain_sessions(&client)
+                    manager::drain_sessions(&client, claim.host)
                         .await?
                         .sessions
                         .into_iter()
+                        .map(store::CachedRow::into_info)
                         .find(|session| session.id == id)
                         .ok_or_else(|| {
                             invalid_request("the session to restart no longer exists".into())
@@ -3518,10 +3538,11 @@ pub(crate) async fn do_replace_session(
     // source that has vanished from its own host's list is refused the same
     // way regardless of which form of replace was asked for; only the
     // FIELDS the create half launches with, resolved right below, differ.
-    let source = manager::drain_sessions(&client)
+    let source = manager::drain_sessions(&client, claim.host)
         .await?
         .sessions
         .into_iter()
+        .map(store::CachedRow::into_info)
         .find(|session| session.id == id)
         .ok_or_else(|| {
             anyhow::Error::new(SupervisorError {
@@ -3675,11 +3696,11 @@ async fn replace_with_fresh_checkout(
     )?;
     // Lookup may resume an accepted pending create, so establish the source's
     // continued existence first. This read does not resolve launch settings.
-    if !manager::drain_sessions(client)
+    if !manager::drain_sessions(client, claim.host)
         .await?
         .sessions
         .iter()
-        .any(|session| session.id == id)
+        .any(|session| session.info().id == id)
     {
         return Err(SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,

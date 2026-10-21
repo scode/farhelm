@@ -69,9 +69,7 @@ pub use crate::transport::{
 };
 
 use crate::client::{SessionListing, SupervisorClient, SupervisorError};
-use crate::session_cache::{
-    creation_order, ensure_recordable_session, eviction_victim, merge_cached_session, merged_status,
-};
+use crate::session_cache::{creation_order, eviction_victim, merge_cached_session};
 use crate::store::{
     DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow, HostStoreError,
 };
@@ -333,7 +331,7 @@ enum LiveSessions {
     /// when it becomes the only one available.
     Retain,
     /// This host has no identity and just drained cleanly; serve this.
-    Set(Arc<Vec<SessionInfo>>),
+    Set(Vec<crate::store::CachedRow>),
     /// This host's sessions are in helm.db (or it is not connected at all),
     /// so nothing is retained here.
     Clear,
@@ -724,7 +722,10 @@ pub fn peer_text_capped(text: &str, cap: usize) -> String {
 /// ignoring the one bound on what this side retains). Order is NOT checked: the
 /// helm sorts every host's rows itself, in memory, for whichever order a
 /// client asks, so nothing here depends on the sequence the host chose.
-pub async fn drain_sessions(client: &SupervisorClient) -> anyhow::Result<SessionListing> {
+pub async fn drain_sessions(
+    client: &SupervisorClient,
+    host: HostId,
+) -> anyhow::Result<SessionListing<crate::store::CachedRow>> {
     let listing = client
         .list_sessions()
         .await
@@ -737,35 +738,37 @@ pub async fn drain_sessions(client: &SupervisorClient) -> anyhow::Result<Session
             farhelm_proto::LIST_SESSIONS_CAP
         );
     }
-    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    for entry in &listing.sessions {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut checked = Vec::with_capacity(listing.sessions.len());
+    for entry in listing.sessions {
         // Checked at ingress, where the value first enters this process,
         // rather than at each of the places it is later embedded, and by the
         // same rule a create's reply gets. One bad row refuses the whole
         // list: dropping just that row would make the cache read the
         // session as ended.
-        if let Some(problem) = crate::session_cache::session_reference_problem(entry) {
-            anyhow::bail!(
-                "the host reported an unusable session id ({problem}, {} bytes); refusing a \
-                 list this side could not address",
-                entry.id.len()
-            );
-        }
+        let id_len = entry.id.len();
+        let entry = crate::store::CachedRow::new(host, entry).map_err(|problem| anyhow::anyhow!(
+            "the host reported an unusable session id ({problem}, {id_len} bytes); refusing a list this side could not address"
+        ))?;
         // Uniqueness is checked HERE, before either publication branch,
         // rather than at the cache write. The durable path has always
         // refused a duplicate, but the in-memory path an identity-less
         // host publishes through never touched the store, so the same
         // malformed reply used to be accepted there. One check on the
         // drain covers both.
-        if !seen.insert(entry.id.as_str()) {
+        if !seen.insert(entry.info().id.clone()) {
             anyhow::bail!(
                 "the host listed session id {:?} more than once; refusing a list that \
                  contradicts itself",
-                entry.id
+                entry.info().id
             );
         }
+        checked.push(entry);
     }
-    Ok(listing)
+    Ok(SessionListing {
+        sessions: checked,
+        truncated: listing.truncated,
+    })
 }
 
 // ---- The manager -----------------------------------------------------
@@ -1265,14 +1268,14 @@ impl Drop for AbortOnDrop {
 /// Keep a host's last in-memory status when a fresh list has no status
 /// evidence for that session yet. Other fields remain from the new list;
 /// an identity-less host has no durable cache to perform this merge for it.
-fn retain_unknown_list_status(previous: &[SessionInfo], incoming: &mut [SessionInfo]) {
+fn retain_unknown_list_status(previous: &[SessionInfo], incoming: &mut [crate::store::CachedRow]) {
     let statuses: HashMap<_, _> = previous
         .iter()
         .map(|session| (session.id.as_str(), &session.status))
         .collect();
     for entry in incoming {
-        if let Some(status) = statuses.get(entry.id.as_str()) {
-            entry.status = merged_status(status, entry.status.clone());
+        if let Some(status) = statuses.get(entry.info().id.as_str()) {
+            entry.retain_status(status);
         }
     }
 }
@@ -1939,12 +1942,10 @@ impl ConnectionManager {
     /// actor, or its published generation has moved on. The alternative is
     /// worse than a missed write, which merely costs one refresh interval.
     ///
-    /// Refuses references [`ensure_recordable_session`] refuses (empty, past
-    /// [`crate::session_cache::MAX_SESSION_ID_BYTES`], a control character,
-    /// a dot segment), including parent and checkout-origin references, before
-    /// either cache path can publish it. The mutation
-    /// caller records this best-effort failure separately, so refusing a
-    /// local seed does not revise the remote mutation's successful result.
+    /// Accepts only payloads whose own, parent, and checkout-origin IDs were
+    /// admitted by [`crate::store::CachedRow`]. The caller retains its existing
+    /// best-effort reporting when constructing that payload fails; a cache seed
+    /// cannot revise a remote mutation's successful result.
     ///
     /// Takes this host's cache lock and bumps its seed epoch, which is how
     /// a refresh whose drain predates this write learns not to overwrite it
@@ -1952,9 +1953,8 @@ impl ConnectionManager {
     pub async fn remember_session(
         &self,
         claim: &SessionClaim,
-        session: &SessionInfo,
+        session: &crate::store::CachedRow,
     ) -> anyhow::Result<()> {
-        ensure_recordable_session(session)?;
         let (status, cache_lock, seed_epoch) = {
             let map = self.actors.lock().expect("actor map mutex poisoned");
             let Some(handle) = map.actors.get(&claim.host) else {
@@ -2036,7 +2036,7 @@ impl ConnectionManager {
                     // predicate, so the two storage shapes cannot come to
                     // disagree about what a mutation's reply is evidence
                     // of.
-                    let mut session = session.clone();
+                    let mut session = session.info().clone();
                     if let Some(previous) =
                         entries.iter().find(|existing| existing.id == session.id)
                     {
@@ -2099,7 +2099,7 @@ impl ConnectionManager {
             self.events.bump();
         }
         // A status of `Unknown` is the one thing a reply cannot tell this
-        // side anything with (see [`merged_status`]): it is declined when
+        // side anything with (see [`crate::session_cache::merged_status`]): it is declined when
         // something definite is already known, and recorded as the absence
         // of knowledge when nothing is. Either way the answer the caller
         // actually wants is one `ListSessions` away, so ask for it NOW
@@ -2113,7 +2113,7 @@ impl ConnectionManager {
         // woken drain samples the epoch when it starts, so it starts after
         // the bump and therefore COMMITS, where a pre-seed snapshot would
         // correctly decline and leave the lag exactly where it was.
-        if session.status == SessionStatus::Unknown {
+        if session.info().status == SessionStatus::Unknown {
             self.refresh_now(claim.host);
         }
         Ok(())
@@ -3787,7 +3787,7 @@ impl HostActor {
         // answer: nothing is known about this host yet, which is exactly
         // what the persisted scope showed for it before.
         let live = if identity.is_none() {
-            LiveSessions::Set(Arc::new(Vec::new()))
+            LiveSessions::Set(Vec::new())
         } else {
             LiveSessions::Clear
         };
@@ -4052,7 +4052,10 @@ impl HostActor {
         // taken before that session existed. The epoch is how a stale
         // snapshot recognizes that it lost.
         let epoch_before = self.seed_epoch.load(std::sync::atomic::Ordering::Acquire);
-        let drained = tokio::time::timeout(self.cadence.refresh_timeout, drain_sessions(client));
+        let drained = tokio::time::timeout(
+            self.cadence.refresh_timeout,
+            drain_sessions(client, self.id),
+        );
         let SessionListing {
             sessions: mut entries,
             truncated,
@@ -4139,7 +4142,10 @@ impl HostActor {
                 };
             }
             // The durable branch performs this inside its cache transaction.
-            let observations = entries.iter().map(crate::ntfy::Observation::from).collect();
+            let observations = entries
+                .iter()
+                .map(|entry| crate::ntfy::Observation::from(entry.info()))
+                .collect();
             // An identity-less host has only the actor's published list,
             // which the lock above protects from concurrent seed writes.
             if let Some(previous) = self.status.borrow().live_sessions.as_ref() {
@@ -4149,7 +4155,7 @@ impl HostActor {
                 alert_observations: Some(observations),
                 health: RefreshHealth::Ok { sessions },
                 end_connection: None,
-                live: LiveSessions::Set(Arc::new(entries)),
+                live: LiveSessions::Set(entries),
                 truncated: Some(truncated),
                 cache_changed: false,
                 discarded: false,
@@ -4182,7 +4188,10 @@ impl HostActor {
                 discarded: true,
             };
         }
-        let observations: Vec<_> = entries.iter().map(crate::ntfy::Observation::from).collect();
+        let observations: Vec<_> = entries
+            .iter()
+            .map(|entry| crate::ntfy::Observation::from(entry.info()))
+            .collect();
         match self
             .store
             .replace_host_sessions(self.id, identity, entries, truncated)
@@ -4392,7 +4401,12 @@ impl HostActor {
             let published_live = status.live_sessions.clone();
             let live_sessions = match live {
                 LiveSessions::Retain => status.live_sessions.take(),
-                LiveSessions::Set(entries) => Some(entries),
+                LiveSessions::Set(entries) => Some(Arc::new(
+                    entries
+                        .into_iter()
+                        .map(crate::store::CachedRow::into_info)
+                        .collect(),
+                )),
                 LiveSessions::Clear => None,
             };
             // A fresh token whenever the CLIENT changes — including when it
@@ -4877,15 +4891,17 @@ mod tests {
         let mut fresh = session("s1", 100);
         fresh.title = "new title".to_string();
         fresh.status = SessionStatus::Unknown;
-        let mut incoming = vec![fresh];
+        let mut incoming = vec![crate::store::CachedRow::new(1, fresh).unwrap()];
 
         retain_unknown_list_status(&[old.clone()], &mut incoming);
-        assert_eq!(incoming[0].status, SessionStatus::Waiting);
-        assert_eq!(incoming[0].title, "new title");
+        assert_eq!(incoming[0].info().status, SessionStatus::Waiting);
+        assert_eq!(incoming[0].info().title, "new title");
 
-        incoming[0].status = SessionStatus::Idle;
+        let mut definite = incoming.pop().unwrap().into_info();
+        definite.status = SessionStatus::Idle;
+        incoming.push(crate::store::CachedRow::new(1, definite).unwrap());
         retain_unknown_list_status(&[old], &mut incoming);
-        assert_eq!(incoming[0].status, SessionStatus::Idle);
+        assert_eq!(incoming[0].info().status, SessionStatus::Idle);
     }
 
     /// A row that has LEARNED an identity, met by a peer that reports none,
@@ -4997,7 +5013,7 @@ mod tests {
         let (r, w) = tokio::io::split(ours);
         let client = SupervisorClient::start(r, w).await.expect("connect");
 
-        let error = drain_sessions(&client)
+        let error = drain_sessions(&client, 1)
             .await
             .expect_err("a self-contradicting list must be refused whole");
         assert!(
@@ -5040,7 +5056,7 @@ mod tests {
         let (r, w) = tokio::io::split(ours);
         let client = SupervisorClient::start(r, w).await.expect("connect");
 
-        let error = drain_sessions(&client)
+        let error = drain_sessions(&client, 1)
             .await
             .expect_err("an unusable session id must be refused");
         assert!(
@@ -5865,11 +5881,16 @@ mod tests {
                 .manager
                 .remember_session(
                     &claim,
-                    &SessionInfo {
-                        last_activity_at: activity,
-                        last_work_started_at: work_start,
-                        ..listed.clone()
-                    },
+                    &crate::store::CachedRow::new(
+                        claim.host,
+                        (SessionInfo {
+                            last_activity_at: activity,
+                            last_work_started_at: work_start,
+                            ..listed.clone()
+                        })
+                        .clone(),
+                    )
+                    .unwrap(),
                 )
                 .await
                 .expect("record the reply");
@@ -5938,16 +5959,17 @@ mod tests {
         let boundary_id = "b".repeat(MAX_SESSION_ID_BYTES);
         fixture
             .manager
-            .remember_session(&claim, &session(&boundary_id, 200))
+            .remember_session(
+                &claim,
+                &crate::store::CachedRow::new(claim.host, (session(&boundary_id, 200)).clone())
+                    .unwrap(),
+            )
             .await
             .expect("the helm-sized id remains addressable");
 
         let overlong_id = "x".repeat(MAX_SESSION_ID_BYTES + 1);
-        fixture
-            .manager
-            .remember_session(&claim, &session(&overlong_id, 300))
-            .await
-            .expect_err("an id no request can carry must not enter the in-memory list");
+        crate::store::CachedRow::new(claim.host, session(&overlong_id, 300))
+            .expect_err("an id no request can carry cannot become an admitted memory seed");
         let live = fixture
             .manager
             .status(host)
@@ -6031,7 +6053,11 @@ mod tests {
 
         fixture
             .manager
-            .remember_session(&claim, &session("z-fresh", 1_000))
+            .remember_session(
+                &claim,
+                &crate::store::CachedRow::new(claim.host, (session("z-fresh", 1_000)).clone())
+                    .unwrap(),
+            )
             .await
             .expect("the seed must land, not be refused at the cap");
 
@@ -6589,7 +6615,10 @@ mod tests {
                 .replace_host_sessions(
                     host,
                     "identity-original",
-                    vec![session("ghost", 100), session("phantom", 90)],
+                    (vec![session("ghost", 100), session("phantom", 90)])
+                        .into_iter()
+                        .map(|info| crate::store::CachedRow::new(host, info).unwrap())
+                        .collect(),
                     false,
                 )
                 .await
@@ -6905,7 +6934,11 @@ mod tests {
         };
         fixture
             .manager
-            .remember_session(&claim, &session("seeded", 200))
+            .remember_session(
+                &claim,
+                &crate::store::CachedRow::new(claim.host, (session("seeded", 200)).clone())
+                    .unwrap(),
+            )
             .await
             .expect("the seed commits");
         let seeded_revision = fixture.manager.events().revision();
@@ -6984,7 +7017,11 @@ mod tests {
         };
         fixture
             .manager
-            .remember_session(&claim, &session("seeded", 200))
+            .remember_session(
+                &claim,
+                &crate::store::CachedRow::new(claim.host, (session("seeded", 200)).clone())
+                    .unwrap(),
+            )
             .await
             .expect("the seed commits while the first refresh is in flight");
         gate.add_permits(2);
@@ -7178,7 +7215,10 @@ mod tests {
                 .replace_host_sessions(
                     host,
                     "identity-original",
-                    vec![session("ghost", 100)],
+                    (vec![session("ghost", 100)])
+                        .into_iter()
+                        .map(|info| crate::store::CachedRow::new(host, info).unwrap())
+                        .collect(),
                     false,
                 )
                 .await
@@ -10789,7 +10829,7 @@ mod tests {
         let (r, w) = tokio::io::split(ours);
         let client = SupervisorClient::start(r, w).await.expect("connect");
 
-        let error = drain_sessions(&client)
+        let error = drain_sessions(&client, 1)
             .await
             .expect_err("a list past the cap must be refused, not retained");
         assert!(
@@ -10839,7 +10879,7 @@ mod tests {
             let (r, w) = tokio::io::split(ours);
             let client = SupervisorClient::start(r, w).await.expect("connect");
 
-            let listing = drain_sessions(&client)
+            let listing = drain_sessions(&client, 1)
                 .await
                 .expect("a full-cap reply is legal and must be retained whole");
             assert_eq!(listing.sessions.len(), farhelm_proto::LIST_SESSIONS_CAP);

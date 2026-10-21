@@ -7331,7 +7331,10 @@ async fn a_create_with_another_entries_suffix_returns_its_own_prefix() {
             assert!(
                 harness
                     .manager
-                    .remember_session(&claim, &reply)
+                    .remember_session(
+                        &claim,
+                        &crate::store::CachedRow::new(claim.host, (reply).clone()).unwrap()
+                    )
                     .await
                     .is_err(),
                 "premise: this reply cannot be seeded through its stale connection claim"
@@ -10202,7 +10205,11 @@ async fn github_repository_rest_routes_config_and_preserves_incomplete_status() 
             .record_create_history_with_destination(
                 claim.host,
                 "local-identity",
-                &rest_harness::session(&format!("recent-{index}"), index as i64),
+                &crate::store::CachedRow::new(
+                    claim.host,
+                    (rest_harness::session(&format!("recent-{index}"), index as i64)).clone(),
+                )
+                .unwrap(),
                 crate::store::HistoryPaths {
                     canonical_cwd: "/ephemeral",
                     display_cwd: "/ephemeral",
@@ -10326,7 +10333,8 @@ async fn github_repository_rest_preserves_recents_offline() {
         .record_create_history_with_destination(
             host,
             "repo-installation",
-            &rest_harness::session("fresh", 1),
+            &crate::store::CachedRow::new(host, (rest_harness::session("fresh", 1)).clone())
+                .unwrap(),
             crate::store::HistoryPaths {
                 canonical_cwd: "/checkouts/bar-1",
                 display_cwd: "/checkouts/bar-1",

@@ -569,7 +569,7 @@ async fn session_list_staged(
     let mut seen_ids: Vec<store::SessionKey> = slice
         .rows
         .iter()
-        .map(|cached| store::SessionKey::new(cached.host, &cached.info.id))
+        .map(|cached| store::SessionKey::new(cached.host, &cached.info().id))
         .collect();
     for snapshot in &snapshots {
         if let Some(live) = &snapshot.live_sessions {
@@ -589,14 +589,14 @@ async fn session_list_staged(
             // is a window during removal; its rows have nowhere to hang.
             continue;
         };
-        let key = store::SessionKey::new(cached.host, &cached.info.id);
+        let key = store::SessionKey::new(cached.host, &cached.info().id);
         let seen = seen_activity.get(&key).copied();
         let pinned = pins.contains(&key);
         let marks = notification_marks.get(&key).copied().unwrap_or_default();
         view.push(row_of(
             host,
             identities.get(&cached.host).and_then(Option::as_deref),
-            cached.info,
+            cached.into_info(),
             seen,
             pinned,
             marks,

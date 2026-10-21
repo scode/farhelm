@@ -28,7 +28,7 @@ pub const MAX_SESSION_ID_BYTES: usize = farhelm_proto::MAX_BARE_SESSION_ID_BYTES
 /// The one rule every peer ingress applies: a listing
 /// (`manager::drain_sessions`), a create's reply
 /// (`client::created_session_from`), and a mutation reply before either
-/// cache records it ([`ensure_recordable_session`]). A supervisor mints UUIDs,
+/// cache records it ([`crate::store::CachedRow::new`]). A supervisor mints UUIDs,
 /// so anything this refuses comes from a broken or hostile peer, and each
 /// clause is about what the id goes on to do on this side:
 ///
@@ -70,7 +70,9 @@ pub fn session_reference_problem(info: &SessionInfo) -> Option<&'static str> {
     None
 }
 
-/// Refuse a row before either cache records references the public boundary cannot carry.
+/// Reject old cached rows whose references cannot cross the public boundary.
+/// New writes require [`crate::store::CachedRow`] instead, so malformed legacy
+/// state keeps its existing skip-and-log read policy without a write bypass.
 pub fn ensure_recordable_session(info: &SessionInfo) -> anyhow::Result<()> {
     if let Some(problem) = session_reference_problem(info) {
         anyhow::bail!("{problem}; this helm cannot record or address its session references");

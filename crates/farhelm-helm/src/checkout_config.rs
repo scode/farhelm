@@ -2886,7 +2886,15 @@ mod tests {
         }
         let cached = migration_session("cached-migration", 1_700_000_042);
         store
-            .replace_host_sessions(host, identity, vec![cached.clone()], false)
+            .replace_host_sessions(
+                host,
+                identity,
+                (vec![cached.clone()])
+                    .into_iter()
+                    .map(|info| crate::store::CachedRow::new(host, info).unwrap())
+                    .collect(),
+                false,
+            )
             .await
             .unwrap();
         for sequence in 1..=100 {

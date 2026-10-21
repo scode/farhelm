@@ -488,7 +488,7 @@ mod tests {
             .replace_host_sessions(
                 row.id,
                 "identity-known",
-                vec![farhelm_proto::SessionInfo {
+                (vec![farhelm_proto::SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
                     workspace_trust_prompt: false,
@@ -511,7 +511,10 @@ mod tests {
                     github_repo: None,
                     working_copy: None,
                     notifications: Vec::new(),
-                }],
+                }])
+                .into_iter()
+                .map(|info| crate::store::CachedRow::new(row.id, info).unwrap())
+                .collect(),
                 false,
             )
             .await

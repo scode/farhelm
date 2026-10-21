@@ -769,8 +769,10 @@ impl BrowserPermission {
     }
 }
 
-/// One decodable row of the session cache as [`HelmStore::cached_rows`]
-/// reads it: which host filed it and its payload.
+/// An admitted session payload and its caller-established host entry.
+///
+/// Private payload references cannot change after admission. Cache and history
+/// writers require this type; client projection may consume it into a raw row.
 ///
 /// Only rows that DECODE come back as one of these. A cache row is
 /// last-known display data, so a payload that no longer decodes (or that
@@ -783,7 +785,37 @@ impl BrowserPermission {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachedRow {
     pub host: HostId,
-    pub info: SessionInfo,
+    info: SessionInfo,
+}
+
+impl CachedRow {
+    /// Admit references before a supervisor row can enter a cache or create history.
+    ///
+    /// The host remains caller-established metadata, not an ownership proof. This
+    /// checks only the row's own references; matching a mutation reply to its request
+    /// and keeping a connection claim current remain the ingress caller's duties.
+    pub fn new(host: HostId, info: SessionInfo) -> Result<Self, &'static str> {
+        if let Some(problem) = crate::session_cache::session_reference_problem(&info) {
+            return Err(problem);
+        }
+        Ok(Self { host, info })
+    }
+
+    /// Read the admitted payload without permitting a caller to replace its references.
+    pub fn info(&self) -> &SessionInfo {
+        &self.info
+    }
+
+    /// Return the raw payload once it leaves the checked write boundary.
+    pub fn into_info(self) -> SessionInfo {
+        self.info
+    }
+
+    /// Retain a previously sampled status when a listing has no fresh evidence.
+    /// This existing merge changes no references, so admission remains valid.
+    pub(crate) fn retain_status(&mut self, previous: &SessionStatus) {
+        self.info.status = crate::session_cache::merged_status(previous, self.info.status.clone());
+    }
 }
 
 /// One consistent read of the cache for a set of hosts: the rows, and
@@ -6832,12 +6864,9 @@ impl HelmStore {
         &self,
         host: HostId,
         identity: &str,
-        entries: Vec<SessionInfo>,
+        entries: Vec<CachedRow>,
         truncated: bool,
     ) -> anyhow::Result<bool> {
-        for entry in &entries {
-            crate::session_cache::ensure_recordable_session(entry)?;
-        }
         let identity = identity.to_string();
         self.conn.call("replace host sessions task panicked", move |conn: &mut Connection| -> anyhow::Result<bool> {
             let tx = conn
@@ -6903,7 +6932,8 @@ impl HelmStore {
             )
             .context("clearing the stale cache")?;
             let mut changed = false;
-            for mut entry in entries {
+            for entry in entries {
+                let mut entry = entry.into_info();
                 // A reloaded supervisor can identify a live pane before
                 // its sampler has enough evidence to classify the agent.
                 // `Unknown` carries no newer status claim, so keep this
@@ -6979,10 +7009,10 @@ impl HelmStore {
     /// Idempotent within this entry: a later reply replaces its own row. The
     /// same bare ID on another entry is independent and never consulted here.
     ///
-    /// Every session reference is checked through
-    /// [`crate::session_cache::ensure_recordable_session`], including parent
-    /// and working-copy origin. A mutation's reply is peer ingress just like
-    /// a listing; both must remain representable as entry-bound public IDs.
+    /// The admitted payload has representable own, parent, and working-copy
+    /// origin references. A mutation reply and a listing use the same admission
+    /// constructor before reaching this writer; the host/identity transaction
+    /// still establishes where the payload may be recorded.
     ///
     /// The cap holds here by EVICTION: a seed that would leave the slice
     /// past `farhelm_proto::LIST_SESSIONS_CAP` rows drops the oldest OTHER
@@ -6999,11 +7029,10 @@ impl HelmStore {
         &self,
         host: HostId,
         identity: &str,
-        entry: &SessionInfo,
+        entry: &CachedRow,
     ) -> anyhow::Result<bool> {
-        crate::session_cache::ensure_recordable_session(entry)?;
         let identity = identity.to_string();
-        let entry = entry.clone();
+        let entry = entry.info().clone();
         self.conn
             .call(
                 "remember session task panicked",
@@ -7163,7 +7192,11 @@ impl HelmStore {
         self.record_create_history_with_destination(
             host,
             identity,
-            entry,
+            &CachedRow::new(host, entry.clone()).map_err(|problem| {
+                anyhow::anyhow!(
+                    "{problem}; this helm cannot record or address its session references"
+                )
+            })?,
             HistoryPaths {
                 canonical_cwd: folder_identity,
                 display_cwd: &entry.cwd,
@@ -7218,7 +7251,7 @@ impl HelmStore {
         &self,
         host: HostId,
         identity: &str,
-        entry: &SessionInfo,
+        entry: &CachedRow,
         paths: HistoryPaths<'_>,
         github_repo: Option<&farhelm_proto::GithubRepo>,
         explicit_selection: Option<&LaunchSelection>,
@@ -7235,7 +7268,7 @@ impl HelmStore {
             display_cwd,
         } = paths;
         let identity = identity.to_string();
-        let entry = entry.clone();
+        let entry = entry.info().clone();
         let explicit_selection = explicit_selection.cloned();
         let canonical_cwd = canonical_cwd.to_string();
         let display_cwd = display_cwd.to_string();
@@ -8194,6 +8227,25 @@ impl HelmStore {
 mod tests {
     use super::*;
 
+    /// Fixture rows must cross the same admission boundary as production writes.
+    /// A rejection here is invalid fixture data; tests of malformed references
+    /// call the constructor directly and assert refusal instead.
+    fn admitted_row(host: HostId, info: &SessionInfo) -> CachedRow {
+        CachedRow::new(host, info.clone()).expect("fixture references must be representable")
+    }
+
+    /// Preserve a fixture batch's order and duplicates while admitting each payload.
+    /// Duplicate IDs remain the transaction's concern, so rollback tests still
+    /// exercise the real mid-batch database failure rather than failing setup.
+    fn admitted_rows(host: HostId, entries: Vec<SessionInfo>) -> Vec<CachedRow> {
+        entries
+            .into_iter()
+            .map(|info| {
+                CachedRow::new(host, info).expect("fixture references must be representable")
+            })
+            .collect()
+    }
+
     /// Open a fresh store in a throwaway directory. The `TempDir` guard
     /// must outlive the store in every caller — dropping it deletes the
     /// backing file out from under an open `Connection`.
@@ -8378,7 +8430,7 @@ mod tests {
                 .record_create_history_with_destination(
                     host,
                     "identity-a",
-                    &entry,
+                    &admitted_row(host, &(entry)),
                     HistoryPaths {
                         canonical_cwd: "/work/bar-1",
                         display_cwd: "/work/bar-1"
@@ -8394,7 +8446,7 @@ mod tests {
                 .record_create_history_with_destination(
                     host,
                     "identity-a",
-                    &entry,
+                    &admitted_row(host, &(entry)),
                     HistoryPaths {
                         canonical_cwd: "/changed",
                         display_cwd: "/changed"
@@ -8413,7 +8465,7 @@ mod tests {
                 .record_create_history_with_destination(
                     host,
                     "identity-a",
-                    &entry,
+                    &admitted_row(host, &(entry)),
                     HistoryPaths {
                         canonical_cwd: "/work/bar-2",
                         display_cwd: "/work/bar-2"
@@ -8454,7 +8506,7 @@ mod tests {
             .record_create_history_with_destination(
                 host,
                 "identity-a",
-                &entry,
+                &admitted_row(host, &(entry)),
                 HistoryPaths {
                     canonical_cwd: "/work/bar-1",
                     display_cwd: "/work/bar-1",
@@ -8488,7 +8540,7 @@ mod tests {
                 .record_create_history_with_destination(
                     host,
                     "identity-a",
-                    &original,
+                    &admitted_row(host, &(original)),
                     HistoryPaths {
                         canonical_cwd: "/work/bar-1",
                         display_cwd: "/work/bar-1"
@@ -8536,7 +8588,7 @@ mod tests {
                 .record_create_history_with_destination(
                     host,
                     "identity-a",
-                    &original,
+                    &admitted_row(host, &(original)),
                     HistoryPaths {
                         canonical_cwd: "/work/bar-1",
                         display_cwd: "/work/bar-1"
@@ -8552,7 +8604,7 @@ mod tests {
             .record_create_history_with_destination(
                 host,
                 "identity-a",
-                &fresh,
+                &admitted_row(host, &(fresh)),
                 HistoryPaths {
                     canonical_cwd: "/work/bar-2",
                     display_cwd: "/work/bar-2",
@@ -8778,7 +8830,7 @@ mod tests {
             .record_create_history_with_destination(
                 host,
                 "identity-a",
-                &agent_origin,
+                &admitted_row(host, &(agent_origin)),
                 HistoryPaths {
                     canonical_cwd: &agent_origin.cwd,
                     display_cwd: &agent_origin.cwd,
@@ -8816,7 +8868,7 @@ mod tests {
             .record_create_history_with_destination(
                 host,
                 "identity-a",
-                &user_origin,
+                &admitted_row(host, &(user_origin)),
                 HistoryPaths {
                     canonical_cwd: &user_origin.cwd,
                     display_cwd: &user_origin.cwd,
@@ -8864,7 +8916,7 @@ mod tests {
             .record_create_history_with_destination(
                 host,
                 "identity-a",
-                &custom,
+                &admitted_row(host, &(custom)),
                 HistoryPaths {
                     canonical_cwd: &custom.cwd,
                     display_cwd: &custom.cwd,
@@ -8914,7 +8966,7 @@ mod tests {
             .record_create_history_with_destination(
                 host,
                 "identity-a",
-                &divergent,
+                &admitted_row(host, &(divergent)),
                 HistoryPaths {
                     canonical_cwd: &divergent.cwd,
                     display_cwd: &divergent.cwd,
@@ -8972,7 +9024,7 @@ mod tests {
                 .record_create_history_with_destination(
                     host,
                     "identity-a",
-                    &entry,
+                    &admitted_row(host, &(entry)),
                     HistoryPaths {
                         canonical_cwd: &entry.cwd,
                         display_cwd: &entry.cwd,
@@ -9056,7 +9108,7 @@ mod tests {
                 .record_create_history_with_destination(
                     host,
                     "identity-a",
-                    &entry,
+                    &admitted_row(host, &(entry)),
                     HistoryPaths {
                         canonical_cwd: &entry.cwd,
                         display_cwd: &entry.cwd,
@@ -10574,7 +10626,12 @@ mod tests {
             let store = HelmStore::open(&db_path).await.expect("open");
             let host = host_with_identity(&store, "capped@host", "capped-identity").await;
             let first = store
-                .replace_host_sessions(host, "capped-identity", vec![session("s-1", 100)], true)
+                .replace_host_sessions(
+                    host,
+                    "capped-identity",
+                    admitted_rows(host, vec![session("s-1", 100)]),
+                    true,
+                )
                 .await
                 .expect("first drain");
             assert!(first);
@@ -10585,7 +10642,12 @@ mod tests {
             );
 
             let same = store
-                .replace_host_sessions(host, "capped-identity", vec![session("s-1", 100)], true)
+                .replace_host_sessions(
+                    host,
+                    "capped-identity",
+                    admitted_rows(host, vec![session("s-1", 100)]),
+                    true,
+                )
                 .await
                 .expect("same drain again");
             assert!(
@@ -10593,7 +10655,12 @@ mod tests {
                 "the same rows under the same flag are not a change the feed should announce"
             );
             let cleared = store
-                .replace_host_sessions(host, "capped-identity", vec![session("s-1", 100)], false)
+                .replace_host_sessions(
+                    host,
+                    "capped-identity",
+                    admitted_rows(host, vec![session("s-1", 100)]),
+                    false,
+                )
                 .await
                 .expect("uncut drain");
             assert!(
@@ -10602,7 +10669,12 @@ mod tests {
             );
             assert!(!row(store.list_hosts().await.unwrap()).cache_truncated);
             store
-                .replace_host_sessions(host, "capped-identity", vec![session("s-1", 100)], true)
+                .replace_host_sessions(
+                    host,
+                    "capped-identity",
+                    admitted_rows(host, vec![session("s-1", 100)]),
+                    true,
+                )
                 .await
                 .expect("cut again");
             host
@@ -10671,7 +10743,12 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "adopt@host", "old-identity").await;
         store
-            .replace_host_sessions(host, "old-identity", vec![session("old-1", 100)], true)
+            .replace_host_sessions(
+                host,
+                "old-identity",
+                admitted_rows(host, vec![session("old-1", 100)]),
+                true,
+            )
             .await
             .expect("capped drain under the old identity");
         let row = |rows: Vec<HostRow>| rows.into_iter().find(|r| r.id == host).unwrap();
@@ -10987,12 +11064,16 @@ mod tests {
             .map(|n| session(&format!("s-{n:04}"), 1_000 + n as i64))
             .collect();
         store
-            .replace_host_sessions(host, "full-identity", full, false)
+            .replace_host_sessions(host, "full-identity", admitted_rows(host, full), false)
             .await
             .expect("fill the cache to the cap");
 
         let changed = store
-            .remember_session(host, "full-identity", &session("fresh", 10_000))
+            .remember_session(
+                host,
+                "full-identity",
+                &admitted_row(host, &(session("fresh", 10_000))),
+            )
             .await
             .expect("seed past the cap");
         assert!(changed, "an eviction is a change clients must re-read for");
@@ -11740,7 +11821,11 @@ mod tests {
         let first = host_with_identity(&store, "first.example", "first").await;
         let second = host_with_identity(&store, "second.example", "second").await;
         store
-            .remember_session(first, "first", &session("shared", 100))
+            .remember_session(
+                first,
+                "first",
+                &admitted_row(first, &(session("shared", 100))),
+            )
             .await
             .unwrap();
         let a = SessionKey::new(first, "shared");
@@ -11780,7 +11865,12 @@ mod tests {
                 .contains(&a)
         );
         store
-            .replace_host_sessions(second, "second", vec![session("shared", 200)], false)
+            .replace_host_sessions(
+                second,
+                "second",
+                admitted_rows(second, vec![session("shared", 200)]),
+                false,
+            )
             .await
             .unwrap();
         assert!(store.has_cached_session(&b).await.unwrap());
@@ -11806,7 +11896,7 @@ mod tests {
         let mut renamed = session("shared", 100);
         renamed.title = "first entry renamed".into();
         store
-            .remember_session(first, "first", &renamed)
+            .remember_session(first, "first", &admitted_row(first, &(renamed)))
             .await
             .unwrap();
         assert_eq!(
@@ -11844,7 +11934,7 @@ mod tests {
         let host = host_with_identity(&store, "admission.example", "identity").await;
         let good = session(&"é".repeat(20), 1);
         store
-            .remember_session(host, "identity", &good)
+            .remember_session(host, "identity", &admitted_row(host, &(good)))
             .await
             .unwrap();
         assert_eq!(
@@ -11863,21 +11953,13 @@ mod tests {
         let bad_id = session(&"x".repeat(farhelm_proto::MAX_BARE_SESSION_ID_BYTES + 1), 4);
         for entry in [&parent, &origin, &bad_id] {
             assert!(
-                store
-                    .remember_session(host, "identity", entry)
-                    .await
-                    .is_err()
-            );
-            assert!(
-                store
-                    .replace_host_sessions(host, "identity", vec![entry.clone()], false)
-                    .await
-                    .is_err()
+                CachedRow::new(host, entry.clone()).is_err(),
+                "unrepresentable references must be refused before any write API can receive the row"
             );
             assert_eq!(
                 store.cached_rows(&[host]).await.unwrap().len(),
                 1,
-                "a refused wholesale write must keep the previous cache"
+                "refused admission must leave the previous cache intact"
             );
         }
         let raw = [parent, origin, bad_id];
@@ -12023,7 +12105,7 @@ mod tests {
             .replace_host_sessions(
                 first,
                 "first",
-                vec![session("owned", 1), session("duplicate", 2)],
+                admitted_rows(first, vec![session("owned", 1), session("duplicate", 2)]),
                 false,
             )
             .await
@@ -12204,11 +12286,16 @@ mod tests {
                 .contains(&SessionKey::new(second, "replacement"))
         );
         store
-            .replace_host_sessions(first, "first", vec![session("same:bare", 1)], false)
+            .replace_host_sessions(
+                first,
+                "first",
+                admitted_rows(first, vec![session("same:bare", 1)]),
+                false,
+            )
             .await
             .unwrap();
         store
-            .replace_host_sessions(first, "first", vec![], false)
+            .replace_host_sessions(first, "first", admitted_rows(first, vec![]), false)
             .await
             .unwrap();
         assert!(
@@ -12216,7 +12303,12 @@ mod tests {
             "premise: cache membership is gone"
         );
         store
-            .replace_host_sessions(first, "first", vec![session("same:bare", 1)], false)
+            .replace_host_sessions(
+                first,
+                "first",
+                admitted_rows(first, vec![session("same:bare", 1)]),
+                false,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -12640,7 +12732,12 @@ mod tests {
         let (dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "migrated@host", "identity-kept").await;
         store
-            .replace_host_sessions(host, "identity-kept", vec![session("kept", 123)], false)
+            .replace_host_sessions(
+                host,
+                "identity-kept",
+                admitted_rows(host, vec![session("kept", 123)]),
+                false,
+            )
             .await
             .unwrap();
         assert_eq!(store.cached_sessions(host).await.unwrap().len(), 1);
@@ -15448,7 +15545,12 @@ mod tests {
             .await
             .unwrap();
         store
-            .replace_host_sessions(host, "identity-full", vec![session("s1", 100)], false)
+            .replace_host_sessions(
+                host,
+                "identity-full",
+                admitted_rows(host, vec![session("s1", 100)]),
+                false,
+            )
             .await
             .unwrap();
 
@@ -15576,7 +15678,12 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "cascade@host", "cascade-identity").await;
         store
-            .replace_host_sessions(host, "cascade-identity", vec![session("s1", 100)], false)
+            .replace_host_sessions(
+                host,
+                "cascade-identity",
+                admitted_rows(host, vec![session("s1", 100)]),
+                false,
+            )
             .await
             .expect("seed cache");
         assert_eq!(store.cached_sessions(host).await.unwrap().len(), 1);
@@ -16711,7 +16818,12 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "stable@host", "identity-x").await;
         store
-            .replace_host_sessions(host, "identity-x", vec![session("s1", 100)], false)
+            .replace_host_sessions(
+                host,
+                "identity-x",
+                admitted_rows(host, vec![session("s1", 100)]),
+                false,
+            )
             .await
             .unwrap();
 
@@ -16803,7 +16915,12 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "mismatch@host", "identity-old").await;
         store
-            .replace_host_sessions(host, "identity-old", vec![session("s1", 100)], false)
+            .replace_host_sessions(
+                host,
+                "identity-old",
+                admitted_rows(host, vec![session("s1", 100)]),
+                false,
+            )
             .await
             .unwrap();
 
@@ -16915,7 +17032,7 @@ mod tests {
             .replace_host_sessions(
                 mismatched,
                 "identity-old",
-                vec![session("kept", 100)],
+                admitted_rows(mismatched, vec![session("kept", 100)]),
                 false,
             )
             .await
@@ -17045,11 +17162,21 @@ mod tests {
         let host = host_with_identity(&store, "adopt@host", "identity-old").await;
         let other = host_with_identity(&store, "other@host", "other-identity").await;
         store
-            .replace_host_sessions(host, "identity-old", vec![session("s1", 100)], false)
+            .replace_host_sessions(
+                host,
+                "identity-old",
+                admitted_rows(host, vec![session("s1", 100)]),
+                false,
+            )
             .await
             .unwrap();
         store
-            .replace_host_sessions(other, "other-identity", vec![session("s2", 200)], false)
+            .replace_host_sessions(
+                other,
+                "other-identity",
+                admitted_rows(other, vec![session("s2", 200)]),
+                false,
+            )
             .await
             .unwrap();
 
@@ -17097,7 +17224,12 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "stale-adopt@host", "identity-x").await;
         store
-            .replace_host_sessions(host, "identity-x", vec![session("s1", 100)], false)
+            .replace_host_sessions(
+                host,
+                "identity-x",
+                admitted_rows(host, vec![session("s1", 100)]),
+                false,
+            )
             .await
             .unwrap();
 
@@ -17151,7 +17283,12 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let live = host_with_identity(&store, "live3@host", "live-identity").await;
         store
-            .replace_host_sessions(live, "live-identity", vec![session("s1", 100)], false)
+            .replace_host_sessions(
+                live,
+                "live-identity",
+                admitted_rows(live, vec![session("s1", 100)]),
+                false,
+            )
             .await
             .unwrap();
         let ghost = store.add_ssh_host("ghost3@host", None, None).await.unwrap();
@@ -17218,7 +17355,12 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "atomic@host", "identity-before").await;
         store
-            .replace_host_sessions(host, "identity-before", vec![session("s1", 100)], false)
+            .replace_host_sessions(
+                host,
+                "identity-before",
+                admitted_rows(host, vec![session("s1", 100)]),
+                false,
+            )
             .await
             .unwrap();
 
@@ -17283,7 +17425,7 @@ mod tests {
             .replace_host_sessions(
                 host,
                 "rollback-identity",
-                vec![session("old-1", 100), session("old-2", 200)],
+                admitted_rows(host, vec![session("old-1", 100), session("old-2", 200)]),
                 false,
             )
             .await
@@ -17295,7 +17437,12 @@ mod tests {
             session("dup", 500), // collides with the row just inserted above
         ];
         store
-            .replace_host_sessions(host, "rollback-identity", poisoned, false)
+            .replace_host_sessions(
+                host,
+                "rollback-identity",
+                admitted_rows(host, poisoned),
+                false,
+            )
             .await
             .expect_err("a duplicate id within one batch must fail the whole replace");
 
@@ -17328,7 +17475,7 @@ mod tests {
 
         for (label, entries) in [("empty", vec![]), ("non-empty", vec![session("s1", 100)])] {
             let err = store
-                .replace_host_sessions(ghost, "any-identity", entries, false)
+                .replace_host_sessions(ghost, "any-identity", admitted_rows(ghost, entries), false)
                 .await
                 .unwrap_err();
             assert!(
@@ -17356,7 +17503,7 @@ mod tests {
             .replace_host_sessions(
                 host,
                 "identity-before",
-                vec![session("pre-adopt", 100)],
+                admitted_rows(host, vec![session("pre-adopt", 100)]),
                 false,
             )
             .await
@@ -17374,7 +17521,7 @@ mod tests {
             .replace_host_sessions(
                 host,
                 "identity-after",
-                vec![session("post-adopt", 200)],
+                admitted_rows(host, vec![session("post-adopt", 200)]),
                 false,
             )
             .await
@@ -17386,7 +17533,7 @@ mod tests {
             .replace_host_sessions(
                 host,
                 "identity-before",
-                vec![session("delayed", 300)],
+                admitted_rows(host, vec![session("delayed", 300)]),
                 false,
             )
             .await
@@ -17431,7 +17578,7 @@ mod tests {
             .replace_host_sessions(
                 host,
                 "order-identity",
-                vec![session("first", 100), session("second", 200)],
+                admitted_rows(host, vec![session("first", 100), session("second", 200)]),
                 false,
             )
             .await
@@ -17473,14 +17620,24 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "overlap@host", "overlap-identity").await;
         store
-            .replace_host_sessions(host, "overlap-identity", vec![session("s1", 100)], false)
+            .replace_host_sessions(
+                host,
+                "overlap-identity",
+                admitted_rows(host, vec![session("s1", 100)]),
+                false,
+            )
             .await
             .unwrap();
 
         let mut newer = session("s1", 100);
         newer.title = "renamed".to_string();
         store
-            .replace_host_sessions(host, "overlap-identity", vec![newer], false)
+            .replace_host_sessions(
+                host,
+                "overlap-identity",
+                admitted_rows(host, vec![newer]),
+                false,
+            )
             .await
             .unwrap();
 
@@ -17500,7 +17657,12 @@ mod tests {
         let mut initial = session("s1", 100);
         initial.status = SessionStatus::Idle;
         store
-            .replace_host_sessions(host, "startup-identity", vec![initial], false)
+            .replace_host_sessions(
+                host,
+                "startup-identity",
+                admitted_rows(host, vec![initial]),
+                false,
+            )
             .await
             .unwrap();
 
@@ -17508,7 +17670,12 @@ mod tests {
         provisional.title = "fresh title".to_string();
         provisional.status = SessionStatus::Unknown;
         let changed = store
-            .replace_host_sessions(host, "startup-identity", vec![provisional.clone()], false)
+            .replace_host_sessions(
+                host,
+                "startup-identity",
+                admitted_rows(host, vec![provisional.clone()]),
+                false,
+            )
             .await
             .unwrap();
         assert!(changed, "the fresh title still changes the cached row");
@@ -17518,7 +17685,12 @@ mod tests {
 
         provisional.status = SessionStatus::Running;
         store
-            .replace_host_sessions(host, "startup-identity", vec![provisional], false)
+            .replace_host_sessions(
+                host,
+                "startup-identity",
+                admitted_rows(host, vec![provisional]),
+                false,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -17545,7 +17717,10 @@ mod tests {
             .replace_host_sessions(
                 host,
                 "shrink-identity",
-                vec![session("a", 100), session("b", 200), session("c", 300)],
+                admitted_rows(
+                    host,
+                    vec![session("a", 100), session("b", 200), session("c", 300)],
+                ),
                 false,
             )
             .await
@@ -17559,7 +17734,12 @@ mod tests {
         );
 
         store
-            .replace_host_sessions(host, "shrink-identity", vec![session("b", 200)], false)
+            .replace_host_sessions(
+                host,
+                "shrink-identity",
+                admitted_rows(host, vec![session("b", 200)]),
+                false,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -17569,7 +17749,7 @@ mod tests {
         );
 
         store
-            .replace_host_sessions(host, "shrink-identity", vec![], false)
+            .replace_host_sessions(host, "shrink-identity", admitted_rows(host, vec![]), false)
             .await
             .unwrap();
         assert_eq!(
@@ -17604,7 +17784,10 @@ mod tests {
             .replace_host_sessions(
                 a,
                 "tie-a-identity",
-                vec![session("c", 100), session("b", 100), session("a", 100)],
+                admitted_rows(
+                    a,
+                    vec![session("c", 100), session("b", 100), session("a", 100)],
+                ),
                 false,
             )
             .await
@@ -17638,10 +17821,13 @@ mod tests {
             .replace_host_sessions(
                 host,
                 "poison-identity",
-                vec![
-                    session("good-1", 100),
-                    session("cached-sessions-poisoned", 200),
-                ],
+                admitted_rows(
+                    host,
+                    vec![
+                        session("good-1", 100),
+                        session("cached-sessions-poisoned", 200),
+                    ],
+                ),
                 false,
             )
             .await
@@ -17706,7 +17892,7 @@ mod tests {
             .replace_host_sessions(
                 poisoned_host,
                 "poison-all-identity",
-                vec![session("cached-rows-poisoned", 100)],
+                admitted_rows(poisoned_host, vec![session("cached-rows-poisoned", 100)]),
                 false,
             )
             .await
@@ -17715,7 +17901,7 @@ mod tests {
             .replace_host_sessions(
                 healthy_host,
                 "healthy-all-identity",
-                vec![session("healthy-1", 200)],
+                admitted_rows(healthy_host, vec![session("healthy-1", 200)]),
                 false,
             )
             .await
@@ -17794,7 +17980,7 @@ mod tests {
                 .replace_host_sessions(
                     local_id,
                     "local-identity",
-                    vec![session("local-1", 100)],
+                    admitted_rows(local_id, vec![session("local-1", 100)]),
                     false,
                 )
                 .await
@@ -17803,7 +17989,7 @@ mod tests {
                 .replace_host_sessions(
                     ssh_id,
                     "remote-identity",
-                    vec![session("remote-1", 200)],
+                    admitted_rows(ssh_id, vec![session("remote-1", 200)]),
                     false,
                 )
                 .await
@@ -17860,13 +18046,23 @@ mod tests {
         let host = host_with_identity(&store, "user@host", "identity-1").await;
 
         let first = store
-            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)], false)
+            .replace_host_sessions(
+                host,
+                "identity-1",
+                admitted_rows(host, vec![session("s-1", 100)]),
+                false,
+            )
             .await
             .unwrap();
         assert!(first, "filling an empty cache is a change by any reading");
 
         let repeat = store
-            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)], false)
+            .replace_host_sessions(
+                host,
+                "identity-1",
+                admitted_rows(host, vec![session("s-1", 100)]),
+                false,
+            )
             .await
             .unwrap();
         assert!(
@@ -17883,7 +18079,12 @@ mod tests {
             ..session("s-1", 100)
         };
         let changed = store
-            .replace_host_sessions(host, "identity-1", vec![flipped], false)
+            .replace_host_sessions(
+                host,
+                "identity-1",
+                admitted_rows(host, vec![flipped]),
+                false,
+            )
             .await
             .unwrap();
         assert!(changed, "a status flip is a change");
@@ -17891,7 +18092,7 @@ mod tests {
         // And so is losing a session, which no per-row comparison of the
         // NEW list against itself would ever notice.
         let emptied = store
-            .replace_host_sessions(host, "identity-1", Vec::new(), false)
+            .replace_host_sessions(host, "identity-1", admitted_rows(host, Vec::new()), false)
             .await
             .unwrap();
         assert!(emptied, "a session disappearing is a change");
@@ -17914,7 +18115,12 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "user@host", "identity-1").await;
         store
-            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)], false)
+            .replace_host_sessions(
+                host,
+                "identity-1",
+                admitted_rows(host, vec![session("s-1", 100)]),
+                false,
+            )
             .await
             .unwrap();
 
@@ -17936,7 +18142,12 @@ mod tests {
         }
 
         let repaired = store
-            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)], false)
+            .replace_host_sessions(
+                host,
+                "identity-1",
+                admitted_rows(host, vec![session("s-1", 100)]),
+                false,
+            )
             .await
             .unwrap();
         assert!(
@@ -17947,7 +18158,12 @@ mod tests {
         // no-op again — so this is a comparison rather than a permanent
         // "changed" latch.
         let settled = store
-            .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)], false)
+            .replace_host_sessions(
+                host,
+                "identity-1",
+                admitted_rows(host, vec![session("s-1", 100)]),
+                false,
+            )
             .await
             .unwrap();
         assert!(!settled);
@@ -17995,14 +18211,23 @@ mod tests {
 
         // A drain commits a fresh observation.
         store
-            .replace_host_sessions(host, "identity-1", vec![stamped(900, 900_000)], false)
+            .replace_host_sessions(
+                host,
+                "identity-1",
+                admitted_rows(host, vec![stamped(900, 900_000)]),
+                false,
+            )
             .await
             .expect("drain");
         assert_eq!(cached_stamps(&store).await, (900, 900_000));
 
         // A mutation reply built before that drain landed.
         store
-            .remember_session(host, "identity-1", &stamped(500, 500_000))
+            .remember_session(
+                host,
+                "identity-1",
+                &admitted_row(host, &(stamped(500, 500_000))),
+            )
             .await
             .expect("stale reply");
         assert_eq!(
@@ -18013,7 +18238,7 @@ mod tests {
 
         // And one from a sender that does not know the field at all.
         store
-            .remember_session(host, "identity-1", &stamped(0, 0))
+            .remember_session(host, "identity-1", &admitted_row(host, &(stamped(0, 0))))
             .await
             .expect("reply from an old sender");
         assert_eq!(
@@ -18024,7 +18249,11 @@ mod tests {
 
         // Forward is still allowed — the merge is monotonic, not frozen.
         store
-            .remember_session(host, "identity-1", &stamped(1_500, 1_500_000))
+            .remember_session(
+                host,
+                "identity-1",
+                &admitted_row(host, &(stamped(1_500, 1_500_000))),
+            )
             .await
             .expect("fresh reply");
         assert_eq!(cached_stamps(&store).await, (1_500, 1_500_000));
@@ -18043,14 +18272,22 @@ mod tests {
 
         assert!(
             store
-                .remember_session(host, "identity-1", &session("s-1", 100))
+                .remember_session(
+                    host,
+                    "identity-1",
+                    &admitted_row(host, &(session("s-1", 100)))
+                )
                 .await
                 .unwrap(),
             "seeding a session nobody had is a change"
         );
         assert!(
             !store
-                .remember_session(host, "identity-1", &session("s-1", 100))
+                .remember_session(
+                    host,
+                    "identity-1",
+                    &admitted_row(host, &(session("s-1", 100)))
+                )
                 .await
                 .unwrap(),
             "re-recording an identical session must wake nobody"
@@ -18075,7 +18312,11 @@ mod tests {
         // `created_at` moves the row in the merged order while leaving its
         // payload untouched.
         store
-            .remember_session(host, "identity-1", &session("s-2", 100))
+            .remember_session(
+                host,
+                "identity-1",
+                &admitted_row(host, &(session("s-2", 100))),
+            )
             .await
             .unwrap();
         {
@@ -18093,7 +18334,11 @@ mod tests {
         }
         assert!(
             store
-                .remember_session(host, "identity-1", &session("s-2", 100))
+                .remember_session(
+                    host,
+                    "identity-1",
+                    &admitted_row(host, &(session("s-2", 100)))
+                )
                 .await
                 .unwrap(),
             "a seed that moves the row in the merged order is a change"
@@ -18120,29 +18365,32 @@ mod tests {
             .replace_host_sessions(
                 host,
                 "poison-identity",
-                vec![
-                    SessionInfo {
-                        screen_yolo: false,
-                        claude_trust_prompt: false,
-                        workspace_trust_prompt: false,
-                        title: "keeper".to_string(),
-                        ..session("good-1", 500)
-                    },
-                    SessionInfo {
-                        screen_yolo: false,
-                        claude_trust_prompt: false,
-                        workspace_trust_prompt: false,
-                        title: "keeper".to_string(),
-                        ..session("undecodable", 400)
-                    },
-                    SessionInfo {
-                        screen_yolo: false,
-                        claude_trust_prompt: false,
-                        workspace_trust_prompt: false,
-                        title: "keeper".to_string(),
-                        ..session("mislabelled", 300)
-                    },
-                ],
+                admitted_rows(
+                    host,
+                    vec![
+                        SessionInfo {
+                            screen_yolo: false,
+                            claude_trust_prompt: false,
+                            workspace_trust_prompt: false,
+                            title: "keeper".to_string(),
+                            ..session("good-1", 500)
+                        },
+                        SessionInfo {
+                            screen_yolo: false,
+                            claude_trust_prompt: false,
+                            workspace_trust_prompt: false,
+                            title: "keeper".to_string(),
+                            ..session("undecodable", 400)
+                        },
+                        SessionInfo {
+                            screen_yolo: false,
+                            claude_trust_prompt: false,
+                            workspace_trust_prompt: false,
+                            title: "keeper".to_string(),
+                            ..session("mislabelled", 300)
+                        },
+                    ],
+                ),
                 false,
             )
             .await
@@ -18213,14 +18461,19 @@ mod tests {
         let alpha = host_with_identity(&store, "user@alpha", "identity-alpha").await;
         let beta = host_with_identity(&store, "user@beta", "identity-beta").await;
         store
-            .replace_host_sessions(alpha, "identity-alpha", vec![session("a-1", 300)], false)
+            .replace_host_sessions(
+                alpha,
+                "identity-alpha",
+                admitted_rows(alpha, vec![session("a-1", 300)]),
+                false,
+            )
             .await
             .unwrap();
         store
             .replace_host_sessions(
                 beta,
                 "identity-beta",
-                vec![session("b-1", 200), session("b-2", 100)],
+                admitted_rows(beta, vec![session("b-1", 200), session("b-2", 100)]),
                 false,
             )
             .await
@@ -18434,7 +18687,12 @@ mod tests {
         };
 
         store
-            .replace_host_sessions(host, "reflect-identity", vec![session("a", 100)], false)
+            .replace_host_sessions(
+                host,
+                "reflect-identity",
+                admitted_rows(host, vec![session("a", 100)]),
+                false,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -18443,7 +18701,11 @@ mod tests {
         );
 
         store
-            .remember_session(host, "reflect-identity", &session("b", 200))
+            .remember_session(
+                host,
+                "reflect-identity",
+                &admitted_row(host, &(session("b", 200))),
+            )
             .await
             .unwrap();
         assert_eq!(
