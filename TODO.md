@@ -307,9 +307,31 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 ### Turning rules into structure
 
 A 2026-10-19 assessment of about 530 recent product fixes found that most were an agent missing a rule, written as prose
-or per-call-site discipline, at one place when a sibling path already followed it. After an adversarial review, the
-maintainer chose these five behavior-preserving refactors, each of which makes one such rule something a type, an
-exhaustive match or a default enforces. A clear fix of the targeted bug class is allowed in its own PR.
+or per-call-site discipline, at one place when a sibling path already followed it. The five refactors chosen from it
+landed on 2026-10-21. A second assessment that day found that recurring fixes had since moved mostly to UI state and
+interaction. After an adversarial review, the maintainer chose the five behavior-preserving refactors below, each of
+which makes one such rule something a type, a single owner or a default enforces. A behavior change aligned with the
+problem a refactor targets (making drifted copies consistent, say) is allowed in its own `fix:` PR; unrelated changes
+are not.
+
+- **One draft value for the session launcher.** The launcher splits one launch choice across about 95 separately written
+  pieces of state, and each handler resets the dependent ones and checks the in-flight lock itself; it was the
+  most-fixed file after 2026-10-15, and one handler still skips that check. The draft becomes one value whose only
+  mutator applies those rules. Restart with stays out (see "Stop treating Restart with as a separate launch surface by
+  default"). Plan: `plans/queue/launcher-draft-model.md`.
+- **One modal dialog shell that owns focus.** About twenty dialogs each assemble their own Tab trap, isolation of the
+  page behind them, return of focus on close and keyboard-reachable scroll regions, and focus fixes kept landing one
+  dialog at a time. Every modal dialog gets isolation and a Tab trap through the shell. Plan:
+  `plans/queue/modal-dialog-shell.md`.
+- **One owner for a launch's leftover files.** Create and restart each remove a failed launch's spec, status and
+  progress files with a different subset; the progress file added on 2026-10-21 already missed create's path. Plan:
+  `plans/queue/launch-attempt-owner.md`.
+- **Workspace trust as a launch type in the helm.** Each launch route normalizes workspace trust itself before handing
+  the launch to the supervisor, and an inherited trust choice once escaped its destination (#2349). Only the trust step
+  can produce the launch the helm's create and restart paths accept. Plan: `plans/queue/helm-launch-admission.md`.
+- **One owner for closing popovers when their row moves.** Each change that can move a sidebar or host row closes the
+  open menu itself, and every new popover kind had to be added at each of those places. Changes report to one owner, and
+  the three gaps left open in a code comment are closed. Plan: `plans/queue/popover-anchor-close.md`.
 
 ## Maybe later
 
