@@ -1,11 +1,12 @@
-# Closing a session menu can dismiss newly opened notifications
+# Popup handback can dismiss a new notification list
 
 Reviewed commit: 738598601c142e9e184ee7f0427e8995b2d89e0f
 
 ## TLDR
 
-Clicking another session's notification bell while an actions menu is open can immediately close the new list and mark
-its displayed notifications read before the user reads them. The event ordering on this revision remains unverified.
+Switching from a session menu or another notification list to a notification bell may immediately close the new list and
+mark its displayed entries read. The source paths share a focus-return guard; actual event ordering and premature
+marking remain unverified.
 
 ## Details
 
@@ -37,3 +38,28 @@ filter requires a person to win a timing window; that premise is not established
 
 Provenance: separate UI reviewer in the trailing review through the reviewed commit, followed by commissioner source
 inspection. Surrounding UI and specification context was read selectively; browser/native behavior was not exercised.
+
+## Notification-list handback extension
+
+Additional reviewed commit: `8a9b9b3de5abaa82738866543366f92247273fa3`.
+
+Switching directly between two notification lists adds another caller of the same insufficient popup-identity guard. The
+old list's new close effect calls the shared helper using `data-session-id`
+(`crates/farhelm-ui/src/list/bell.rs:112–120`). `menu_panel.rs:872–877` rejects another popup's focus only for
+`data-row-menu-key` callers; the next guard permits the class used by the new notification panel (`bell.rs:269–284`).
+One callback replaces the open bell identity (`list/view.rs:3137–3150`). If the new panel's mount focus precedes the old
+handback while its inside-focus flag survives, the old list takes focus and the new focus-leaving check closes it
+(`bell.rs:335–351`). If the parent already observed the new list, read-on-close can mark its displayed entries read
+(`view.rs:3184–3202`). Preserve the closing popup's identity for bell callers as well as actions-menu callers.
+
+Suggested bucket remains **other**. Confidence: **likely**; caller/helper mismatch is confirmed, but renderer/focus and
+parent-observation ordering, frequency and actual premature marking remain unverified. Read state is convenience state;
+no security, command execution or user-owned-work loss was established. This extends the existing underlying helper
+defect, not a second queue item.
+
+Possible cover: competing-input acceptance at `SPEC.md:1392–1397` does not establish acceptance of one click followed by
+automatic handbacks. The subsecond filter needs a human timing window, unestablished here. Rarity alone would not filter
+a wrong durable read mark. No exact Planned, BUGS or ledger acceptance for the new claimant was found. Proposed drop:
+none; merge the new substance into this item. Provenance: `notifications-whole-1/f2`, later synthesis and empty
+discovery in the trailing review through `fe0348ef8d4fabc3c6140a4fd89fb19dd34178b1`. No runtime reproduction was
+performed.
