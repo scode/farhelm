@@ -41,7 +41,8 @@ absolutely catastrophically major mistake with huge user impact."
   session is agent-centric: it has one main agent terminal, plus optional additional terminal tabs (plain shells) that
   open in the same working directory. Session metadata — title, parent reference, stop annotations, captured
   conversation identity — is durable and lives with the session's supervisor, so it survives helm loss and
-  re-registration; terminal contents live only as long as the host-side terminal does (see Terminal experience).
+  re-registration. Farhelm avoids storing terminal output except where it directly helps the user, such as a bounded
+  excerpt in a startup error (see Terminal experience).
 - **Launch**: what a session runs, as the user chose it in the launcher. Every launch has one of two launch kinds. An
   **agent launch** names an agent type Farhelm knows (Claude Code, Codex, and the other harnesses under Topology) plus
   that agent type's own choices, such as model and permissions. Custom permission flags replace Farhelm's permission
@@ -1751,10 +1752,14 @@ whatever the agent renders is what you see. There is no composer, no message abs
   screen in front of the user, not a choice every client should share. Only the terminal text changes; the rest of the
   UI keeps its size.
 - Scrollback is whatever the host-side terminal naturally retains, and it survives client disconnects: detach, reconnect
-  a day later, and the buffer is still there. There is no separate history store — when a host reboots, terminal
-  contents are gone, and recovering the conversation is the agent's job (resume). A stopped or exited session's terminal
-  stays viewable while its host is up, since the terminal outlives the process. Viewable means what the terminal itself
-  holds: a full-screen program's last frame is not retained after it exits, and no snapshot of it is taken or stored.
+  a day later, and the buffer is still there. Farhelm avoids storing terminal output except where it directly helps the
+  user, such as error reporting. When an agent never starts, its durable error may include the failed launch's last five
+  nonblank lines, bounded to 500 UTF-8 bytes after unsafe characters are escaped. Farhelm omits the excerpt when it
+  cannot safely attribute the text to that launch. This is an error detail, not a separate conversation history: a host
+  reboot loses the terminal's contents, and recovering the conversation is the agent's job (resume). A stopped or exited
+  session's terminal stays viewable while its host is up, since the terminal outlives the process. Viewable means what
+  the terminal itself holds: a full-screen program's last frame is not retained after it exits, and no snapshot of it is
+  taken or stored.
 - Opening a session attaches to it — and opening a CLIENT counts as opening a session. A freshly loaded client and a
   client whose open session disappears use the same choice: the first currently listed session in the helm's shared
   visit history, excluding the session just removed, else the newest-created listed session. While history is empty, the
@@ -2105,13 +2110,13 @@ cannot know, and interrupted says exactly that. Sessions already known exited (i
 status; an exit during supervisor downtime with no reboot involved shows as exited — with the true exit code when the
 surviving terminal still holds it, unknown code otherwise (reporting a code the terminal genuinely retains is not
 guessing; inventing one where nothing retains it would be). Interrupted sessions' terminal contents are gone — there is
-no history store (see Terminal experience) — but the conversation itself is recoverable. Opening an interrupted session
-shows a centered neutral card in the empty terminal area explaining that the host restart paused the session and that it
-needs an intentional restart. The card offers Restart when the session can resume its conversation (see Lifecycle
-operations), and Replace, which starts a fresh session under the same settings and keeps its inline destructive
-confirmation; a session that cannot resume offers only Replace and says why. Nothing respawns unattended — an agent
-(especially one launched with permissive flags) only restarts or replaces when the user chooses and confirms. The system
-must not presume the original OS process survived the reboot.
+no conversation history store (see Terminal experience) — but the conversation itself is recoverable. Opening an
+interrupted session shows a centered neutral card in the empty terminal area explaining that the host restart paused the
+session and that it needs an intentional restart. The card offers Restart when the session can resume its conversation
+(see Lifecycle operations), and Replace, which starts a fresh session under the same settings and keeps its inline
+destructive confirmation; a session that cannot resume offers only Replace and says why. Nothing respawns unattended —
+an agent (especially one launched with permissive flags) only restarts or replaces when the user chooses and confirms.
+The system must not presume the original OS process survived the reboot.
 
 The resume promise is per-session: for agents with conversation-identity integration, the supervisor captures which
 agent conversation belongs to each session, and restart resumes exactly that conversation (e.g.

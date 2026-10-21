@@ -1572,30 +1572,59 @@ SPEC.md's one-attachment rule itself.
 
 Exited-session semantics: `remain-on-exit on` keeps dead panes viewable per SPEC.md, and exit codes come from the dead
 pane's status. What a dead pane shows is exactly what tmux holds for it and nothing more: the supervisor takes no screen
-capture at stop, stores none, and appends nothing to a dead pane's replay. A restart into a surviving pane goes straight
-to `respawn-pane`, which keeps history and reinitializes the visible grid; the supervisor neither shrinks the window to
-push the grid into history first nor hands the launch shim a frame to paint before `exec`. SPEC.md forbids all three
-(the restart rules under Lifecycle operations, the no-snapshot rule under Terminal experience) because a painted frame
-with no process behind it is worse than a blank pane; do not reintroduce them. The one trace left is a startup sweep
-that deletes a `<state>/snapshots/` directory an older build wrote (`sweep_legacy_snapshots_dir`), so an upgrade does
-not strand captured frames on disk. Exec failure versus ran-and-died cannot be told apart by exit code alone (a missing
-command yields 127 and a non-executable file 126 — both indistinguishable from a program exiting with that code), so
-classification does not rely on exit codes: the shell execs `farhelm internal launch`, a shim that always exists, which
-resolves and execs the session's invocation and, on exec failure, writes a sentinel with the errno detail to a
-per-launch status file (named by session and launch generation, so a sentinel left by a failed earlier launch can never
-describe a later relaunch) before exiting. The supervisor classifies **error** on that sentinel; the one sentinel-less
-error path is a launch whose login shell or `systemd-run` scope wrapper died before the shim ever ran, recognized only
-by its full evidence shape (owned dead pane, launch spec still unconsumed, no sentinel). An absent or unattributed pane
-does not qualify, and a completed user Stop keeps its annotation. A scoped window command first execs
-`farhelm internal launch-wrapped`, which creates an empty generation-named `.waypoint` file without following symlinks
-and then execs the wrapper with the ordinary shim command appended. No waypoint means the login shell exited before
-Farhelm's command; a waypoint means the systemd scope wrapper exited before starting the agent. The error names that
-step and includes the pane's exit code when known. New specs carry `scope_waypoint_expected`; an older scoped spec
-without that bit retains the two-suspect explanation because it never promised a waypoint. An unscoped command has no
-wrapper, so its unconsumed spec already identifies the shell, including for older launches. A failed wrapper exec
-records the ordinary sentinel with the wrapper and errno. NOTE: a sentinel written by the shell after a failed `exec`
-was audited and rejected — interactive bash survives a failed exec, but zsh terminates on it in every mode, so
-shell-side code after `exec` never runs for zsh users; the shim works identically under any `$SHELL`.
+snapshot before stopping a live process, stores no frame, and appends nothing to a dead pane's replay. A restart into a
+surviving pane goes straight to `respawn-pane`, which keeps history and reinitializes the visible grid; the supervisor
+neither shrinks the window to push the grid into history first nor hands the launch shim a frame to paint before `exec`.
+SPEC.md forbids all three (the restart rules under Lifecycle operations, the no-snapshot rule under Terminal experience)
+because a painted frame with no process behind it is worse than a blank pane; do not reintroduce them. The one trace
+left is a startup sweep that deletes a `<state>/snapshots/` directory an older build wrote
+(`sweep_legacy_snapshots_dir`), so an upgrade does not strand captured frames on disk. Exec failure versus ran-and-died
+cannot be told apart by exit code alone (a missing command yields 127 and a non-executable file 126 — both
+indistinguishable from a program exiting with that code), so classification does not rely on exit codes: the shell execs
+`farhelm internal launch`, a shim that always exists, which resolves and execs the session's invocation and, on exec
+failure, writes a sentinel with the errno detail to a per-launch status file (named by session and launch generation, so
+a sentinel left by a failed earlier launch can never describe a later relaunch) before exiting. The supervisor
+classifies **error** on that sentinel; the one sentinel-less error path is a launch whose login shell or `systemd-run`
+scope wrapper died before the shim ever ran, recognized only by its full evidence shape (owned dead pane, launch spec
+still unconsumed, no sentinel). An absent or unattributed pane does not qualify, and a completed user Stop keeps its
+annotation. A scoped window command first execs `farhelm internal launch-wrapped`, which creates an empty
+generation-named `.waypoint` file without following symlinks and then execs the wrapper with the ordinary shim command
+appended. No waypoint means the login shell exited before Farhelm's command; a waypoint means the systemd scope wrapper
+exited before starting the agent. The error names that step and includes the pane's exit code when known. New specs
+carry `scope_waypoint_expected`; an older scoped spec without that bit retains the two-suspect explanation because it
+never promised a waypoint. An unscoped command has no wrapper, so its unconsumed spec already identifies the shell,
+including for older launches. A failed wrapper exec records the ordinary sentinel with the wrapper and errno. NOTE: a
+sentinel written by the shell after a failed `exec` was audited and rejected — interactive bash survives a failed exec,
+but zsh terminates on it in every mode, so shell-side code after `exec` never runs for zsh users; the shim works
+identically under any `$SHELL`.
+
+Never-started errors may retain the failed terminal's last five nonblank physical lines, at most 500 UTF-8 bytes after
+presentation-unsafe characters are escaped. The excerpt follows Farhelm's diagnosis in the existing durable error
+detail, with `|` between lines so the existing peer-text escaping in the badge and tooltip does not turn framing
+newlines into visible control-character escapes. The separators count toward the byte bound. It is not a replay snapshot
+or a conversation history store. A fresh pane starts its process-local fence at history position zero. Pane reuse
+samples the old history size, stamps a random launch token and a separate validity token, then respawns in one
+synchronous tmux command group. Respawn clears the old visible grid and preserves history. Every resize empties the
+validity token immediately before resizing in the same group, so even a queued resize from an old attachment invalidates
+a reused fence when it actually executes. A resize executed after pane death also clears generation eligibility: the
+death banner can move away from the final row when the dead grid grows. Fresh resizes while the process is alive keep
+generation eligibility because their later death draws the banner at the new bottom row. Reload and ambiguous launches
+have no fence and omit the optional quote.
+
+Capture uses `if-shell -F` to check exact session and pane identity, deadness, launch token and, for reuse, validity,
+then captures in that same non-waiting command group. Its start is the recorded history position minus current
+`history_size`, expanded by tmux at capture time. A history count below the recorded boundary omits the quote; history
+trimming otherwise only skips additional new text. The final visible row is excluded conservatively because tmux draws
+its death banner there. A one-row pane qualifies only when history extends beyond the boundary, preventing tmux from
+swapping an empty numeric interval. The driver streams and reduces nonblank lines without retaining the full grid;
+rendered attributes are omitted and the shared presentation-unsafe predicate escapes controls and invisible formatting.
+These groups contain no waiting commands or hooks. Window tokens, like the existing window markers, describe Farhelm's
+own private-server operations; arbitrary direct tmux commands are not an authenticated lifecycle interface.
+
+Only the background observer and an already-dead Stop classification request this quote, after proving the unconsumed
+spec/no-sentinel shape. Session lists never capture. Each capture has the existing tmux-driver timeout; the first
+capture error disables optional quotes for the rest of that observer pass while ordinary errors still persist. A live
+Stop never captures, and reboot and shim-reached classifications are unchanged.
 
 Motivation for never rendering through a normal attach: a rendering tmux client takes over the outer terminal on the
 alternate screen and draws everything itself, which kills native scrolling — xterm.js would accumulate no scrollback,

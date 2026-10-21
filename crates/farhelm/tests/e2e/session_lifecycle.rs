@@ -6277,6 +6277,8 @@ async fn a_failed_scope_wrapper_classifies_as_error_rather_than_a_plain_exit() {
 /// launch command. The unscoped path must report that failure and its code,
 /// rather than claiming the requested agent ran and exited. An explicit
 /// rcfile keeps the fixture independent of the operator's startup files.
+/// Its own explanation must survive removal of the dead terminal: persisting
+/// the verdict alone would lose the useful part of this startup diagnosis.
 #[farhelm_testtrace::test]
 async fn an_unscoped_login_shell_startup_failure_classifies_as_error() {
     use std::os::unix::fs::PermissionsExt;
@@ -6349,13 +6351,36 @@ async fn an_unscoped_login_shell_startup_failure_classifies_as_error() {
         detail.contains("your login shell exited (code 23)"),
         "{detail}"
     );
+    assert!(
+        detail.contains("; last terminal output: startup failed"),
+        "the real shell's startup output must follow Farhelm's diagnosis: {detail:?}"
+    );
     let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await
         .unwrap();
-    assert!(matches!(
+    assert_eq!(
         store.session(&session.id).await.unwrap().unwrap().outcome,
-        LastOutcome::Error { .. }
-    ));
+        LastOutcome::Error {
+            detail: detail.clone()
+        },
+        "the quote must be durable, not only a live-pane diagnostic"
+    );
+    let removed = tmux_query(
+        &h.state.path().join("tmux.sock"),
+        &["kill-session", "-t", &format!("=fh-{}", session.id)],
+    )
+    .await;
+    assert!(
+        removed.status.success(),
+        "remove this fixture's dead terminal"
+    );
+    assert_eq!(
+        store.session(&session.id).await.unwrap().unwrap().outcome,
+        LastOutcome::Error {
+            detail: detail.clone()
+        },
+        "removing the terminal must leave its bounded startup explanation intact"
+    );
 }
 
 /// Stop during interactive startup is an intentional stop even though the

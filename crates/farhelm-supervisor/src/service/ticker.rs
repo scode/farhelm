@@ -139,7 +139,9 @@
 
 use super::core::{SampleRead, SessionEntry, Supervisor};
 use super::launch_artifacts::cleanup_launch_artifacts;
+#[cfg(test)]
 use super::status::observe_entry;
+use super::status::observe_entry_with_capture_budget;
 use super::terminals::{Terminal, tabs_from_pane_states};
 use crate::agent_kind::screen_reader::{
     QUIET_SAMPLES_BEFORE_IDLE, Reading, SAMPLE_TAIL_BYTES, SampleCounts, Screen, ScreenReader,
@@ -1264,8 +1266,14 @@ pub(super) async fn observe_entries(
     let mut observations = Vec::new();
     let mut sentinel_hits = HashSet::new();
     let mut negative_reads = Vec::new();
+    // One wedged optional capture must not turn N never-started sessions
+    // into N tmux deadlines. Pane classification and durable writes continue
+    // after this budget is spent; only the terminal quote is omitted.
+    let mut capture_available = true;
     for entry in entries {
-        match observe_entry(sup, entry, states, known).await {
+        match observe_entry_with_capture_budget(sup, entry, states, known, &mut capture_available)
+            .await
+        {
             Ok(observed) => {
                 if observed.settled_error {
                     cleanup_error_once(sup, entry).await;
@@ -2292,6 +2300,87 @@ mod tests {
             .find(|row| row.id == id)
             .expect("the session row survives the tick")
             .outcome
+    }
+
+    /// One timed-out optional quote must not charge every failed launch a
+    /// separate tmux deadline. The wrapper stalls only capture invocations;
+    /// real tmux panes establish owned deadness, and all rows must still gain
+    /// their durable never-started error after the first capture fails.
+    #[farhelm_testtrace::test]
+    async fn one_excerpt_timeout_disables_the_rest_of_the_observer_pass() {
+        use std::os::unix::fs::PermissionsExt;
+        let state = StateDir::new();
+        let attempts = state.path().join("capture-attempts");
+        let wrapper = state.path().join("capture-timeout-tmux");
+        std::fs::write(
+            &wrapper,
+            format!(
+                "#!/bin/sh\nfor arg do\n case \"$arg\" in\n *capture-pane*) printf 'attempt\\n' >> {}; exec /usr/bin/sleep 60;;\n esac\ndone\nexec tmux \"$@\"\n",
+                shell_words::quote(&attempts.to_string_lossy())
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                tmux_program: wrapper,
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        let mut entries = Vec::new();
+        for id in ["first-startup", "second-startup"] {
+            let name = format!("fh-{id}");
+            let pane = spawn_pane(&sup, &name, "printf 'fixture startup failure\\n'; exit 9").await;
+            wait_for_dead_pane(&sup, &pane).await;
+            let fence = sup
+                .tmux
+                .establish_launch_excerpt_fence(&name, &pane)
+                .await
+                .unwrap();
+            let entry = install_durable_running_entry(
+                &sup,
+                id,
+                Terminal {
+                    tmux_name: name,
+                    pane,
+                },
+            )
+            .await;
+            *entry.run.launch_excerpt.lock().unwrap() = Some(fence);
+            let spec = crate::launch::spec_path_for_launch(state.path(), id, entry.generation);
+            std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+            std::fs::write(&spec, br#"{"scope_waypoint_expected":false}"#).unwrap();
+            entries.push(entry);
+        }
+        let states = sup.tmux.pane_states().await.unwrap();
+        for entry in &entries {
+            let terminal = entry.terminal.as_ref().unwrap();
+            let pane = &states[&terminal.pane];
+            assert!(pane.dead && pane.session_name == terminal.tmux_name);
+            assert!(entry.run.launch_excerpt.lock().unwrap().is_some());
+        }
+        assert!(
+            !attempts.exists(),
+            "no capture has been attempted during setup"
+        );
+        let known =
+            super::super::status::KnownTmuxNames::from_sessions(entries.iter().map(|entry| {
+                (
+                    entry.info.id.as_str(),
+                    entry.terminal.as_ref().map(|t| t.tmux_name.as_str()),
+                )
+            }));
+        observe_entries(&sup, &entries, &states, &known).await;
+        assert_eq!(std::fs::read_to_string(&attempts).unwrap(), "attempt\n");
+        for entry in &entries {
+            let LastOutcome::Error { detail } = stored_outcome(&sup, &entry.info.id).await else {
+                panic!("a capture timeout must not discard the never-started verdict");
+            };
+            assert!(detail.contains("your login shell exited (code 9)"));
+            assert!(!detail.contains("last terminal output:"));
+        }
     }
 
     /// What a `ListSessions` reply would say about this session right now,
@@ -5967,6 +6056,7 @@ mod tests {
                 resume_template: None,
             },
             run: RunCells {
+                launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                 launch_error: Arc::new(std::sync::Mutex::new(None)),
                 activity: ActivitySample::reloaded(),
                 ..base.run
