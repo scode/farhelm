@@ -177,13 +177,18 @@ fn run_with_inputs(
     // Held until the removal below has finished, and released before the
     // report is written, so a blocked output pipe cannot keep them; see
     // `locks`.
-    let held = lock_and_recheck(inputs, home, &state, &plan, services.as_ref(), manager)?;
+    let mut held = lock_and_recheck(inputs, home, &state, &plan, services.as_ref(), manager)?;
     let mut report = String::new();
     let result = (|| {
         if let Some(services) = &services {
             crate::setup::remove_selected_services_locked(services, false, manager, &mut report)?;
         }
-        removal::remove(&plan, &held.running_records, &mut report)
+        match &plan {
+            ownership::OwnershipPlan::App(app) => remove_app_locked(app, &mut held, &mut report),
+            ownership::OwnershipPlan::Flat(_) => {
+                removal::remove(&plan, &held.running_records, &mut report)
+            }
+        }
     })();
     drop(held);
     if result.is_err() {
@@ -216,6 +221,113 @@ fn run_with_inputs(
 /// the install lock goes last, so an installer cannot slip in between the
 /// release of the install lock and that of the app lock and commit
 /// binaries only to refuse at its app step.
+/// Remove the app with every lock held (design, section 6): each version
+/// still having its program locked exclusively (this uninstall's own version
+/// by converting the shared lock it holds as a running `farhelm`), the
+/// ownership record moved to "removing" and flushed, then the removal
+/// through the app's held folders in today's order.
+///
+/// A version something still uses refuses before anything is removed, and
+/// says how to find what uses it: the lock cannot tell which process holds
+/// it, and it need not be Farhelm.
+fn remove_app_locked(app: &app::AppPlan, held: &mut HeldLocks, report: &mut String) -> Result<()> {
+    let mut folders = held
+        .app_folder
+        .take()
+        .context("internal error: the app folder was not held")?;
+    let _versions = hold_versions(app, &folders)?;
+    if let Some(contents) = folders
+        .contents()
+        .with_context(|| format!("opening {}; nothing was removed", path_text(&app.root)))?
+    {
+        use std::os::fd::AsFd as _;
+        farhelm_supervisor::installation::mark_removing(contents.as_fd()).with_context(|| {
+            format!(
+                "recording that {} is being removed; nothing was removed",
+                path_text(&app.root)
+            )
+        })?;
+    }
+    let applications = held
+        .installation
+        .as_ref()
+        .map(|locks| locks.lock.applications());
+    removal::remove_app_held(
+        app,
+        &mut folders,
+        applications,
+        &held.running_records,
+        report,
+    )
+}
+
+/// Take every version's lock exclusively, without waiting, and keep them
+/// (the returned files) until the removal is done. A version whose program
+/// is already gone is removal already done and needs no lock.
+fn hold_versions(app: &app::AppPlan, folders: &removal::HeldFs) -> Result<Vec<std::fs::File>> {
+    use std::fs::TryLockError;
+    let in_use = |version: &app::VersionProgram| {
+        anyhow::anyhow!(
+            "Farhelm {} is still in use: some running program (not necessarily Farhelm) holds it, \
+             so nothing was removed; `lsof {}` shows which. Quit it, then run uninstall again",
+            version.name.to_string_lossy(),
+            path_text(&version.program)
+        )
+    };
+    let refuse = |version: &app::VersionProgram, error: std::io::Error| {
+        anyhow::anyhow!(
+            "locking Farhelm {} ({}) for removal failed: {error}; nothing was removed. Where files \
+             cannot be locked, uninstall cannot tell what still uses Farhelm",
+            version.name.to_string_lossy(),
+            path_text(&version.program)
+        )
+    };
+    let same_file = |a: &std::fs::File, b: &std::fs::File| -> std::io::Result<bool> {
+        use std::os::unix::fs::MetadataExt as _;
+        let (a, b) = (a.metadata()?, b.metadata()?);
+        Ok((a.dev(), a.ino()) == (b.dev(), b.ino()))
+    };
+    let mut held = Vec::new();
+    for version in &app.versions {
+        // Through the held app folder, never following a link.
+        let program = match folders.open_file(&version.program) {
+            Ok(Some(program)) => program,
+            Ok(None) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(refuse(version, error)),
+        };
+        // This uninstall's own version: the one shared lock it holds as a
+        // running farhelm is converted, never a second one opened (two
+        // holders in one process would refuse each other). Only when that
+        // lock is on this very program: a running farhelm from another app
+        // that Finder put at the same place has the same version names, and
+        // converting its own lock there would leave this app's program
+        // unlocked.
+        if version.name == app.own_version
+            && let Some(own) = farhelm_supervisor::version_lock::process_hold()
+        {
+            if !same_file(own, &program).map_err(|error| refuse(version, error))? {
+                anyhow::bail!(
+                    "{} is no longer the app this uninstall runs from (it was moved or replaced \
+                     after you confirmed); nothing was removed; run uninstall again",
+                    path_text(&app.root)
+                );
+            }
+            match own.try_lock() {
+                Ok(()) => continue,
+                Err(TryLockError::WouldBlock) => return Err(in_use(version)),
+                Err(TryLockError::Error(error)) => return Err(refuse(version, error)),
+            }
+        }
+        match program.try_lock() {
+            Ok(()) => held.push(program),
+            Err(TryLockError::WouldBlock) => return Err(in_use(version)),
+            Err(TryLockError::Error(error)) => return Err(refuse(version, error)),
+        }
+    }
+    Ok(held)
+}
+
 struct HeldLocks {
     /// The Running records of the state directories whose runtime locks are
     /// held, for removal: with those locks held no supervisor can be
@@ -223,7 +335,12 @@ struct HeldLocks {
     running_records: Vec<PathBuf>,
     _runtime: Option<locks::RuntimeLocks>,
     _setup: Option<crate::setup::SetupLock>,
-    _bundle: Option<locks::BundleLock>,
+    /// The installation lock and the older installers' lock folder (macOS),
+    /// whose `~/Applications` descriptor the removal uses for leftovers
+    /// beside the app.
+    installation: Option<locks::InstallationLocks>,
+    /// The app folder every step after the re-check goes through.
+    app_folder: Option<removal::HeldFs>,
     _install: Option<locks::InstallLock>,
 }
 
@@ -251,10 +368,23 @@ fn lock_and_recheck(
         ownership::OwnershipPlan::Flat(flat) => Some(locks::InstallLock::acquire(&flat.root)?),
         ownership::OwnershipPlan::App(_) => None,
     };
-    let bundle = if macos {
-        locks::BundleLock::acquire(&home.join("Applications"))?
-    } else {
-        None
+    let installation = match plan {
+        ownership::OwnershipPlan::App(_) if macos => Some(locks::InstallationLocks::acquire(
+            &home.join("Applications"),
+        )?),
+        _ => None,
+    };
+    // The app folder, held before the re-check below so that the folder the
+    // re-check reads is the one every later step locks and changes; it is
+    // opened without following a link and compared with what the re-check
+    // saw at the app's path.
+    let app_folder = match plan {
+        ownership::OwnershipPlan::App(app) => {
+            Some(removal::HeldFs::open(&app.root).with_context(|| {
+                format!("opening {}; nothing was removed", path_text(&app.root))
+            })?)
+        }
+        ownership::OwnershipPlan::Flat(_) => None,
     };
     let setup = match services {
         Some(services) => crate::setup::lock_for_selected_services(services)?,
@@ -286,6 +416,11 @@ fn lock_and_recheck(
     };
     let fresh = ownership::inspect(&inputs.ownership)
         .context("re-checking the installation after confirmation; nothing was removed")?;
+    if let (Some(folder), ownership::OwnershipPlan::App(app)) = (&app_folder, plan)
+        && !folder.is_at(&app.root)
+    {
+        return Err(changed(&format!("the app at {}", path_text(&app.root))));
+    }
     if fresh != *plan {
         let root = match plan {
             ownership::OwnershipPlan::Flat(flat) => &flat.root,
@@ -311,7 +446,8 @@ fn lock_and_recheck(
     Ok(HeldLocks {
         running_records,
         _install: install,
-        _bundle: bundle,
+        installation,
+        app_folder,
         _setup: setup,
         _runtime: runtime,
     })
@@ -377,6 +513,178 @@ mod tests {
         }
     }
 
+    /// The app's ownership record, parsed.
+    fn record_of(fixture: &AppFixture) -> farhelm_supervisor::installation::OwnershipRecord {
+        let bytes = std::fs::read(fixture.app.join("Contents/.farhelm-installation")).unwrap();
+        farhelm_supervisor::installation::OwnershipRecord::parse(&bytes).expect("a valid record")
+    }
+
+    /// A version some program still runs from refuses the uninstall before
+    /// anything is removed or recorded, and says how to find the program.
+    ///
+    /// Why: removing a version under a running program is the race this
+    /// design closes (design, section 6); and the lock cannot say which
+    /// process holds it, which need not even be Farhelm, so the refusal
+    /// points at `lsof` rather than guessing. Spec: with a shared lock held
+    /// on an old version's program, uninstall refuses naming that version
+    /// and `lsof` with its path; every file stays, and the record is not
+    /// moved to "removing".
+    #[test]
+    fn a_version_in_use_refuses_naming_it_and_removes_nothing() {
+        let fixture = AppFixture::new();
+        let state = tempfile::tempdir().expect("state");
+        let program = fixture.app.join("Contents/Versions/1.2.3/farhelm");
+        let user = std::fs::File::open(&program).expect("open");
+        user.lock_shared()
+            .expect("a running 1.2.3 holds its version");
+        let error = run_with_inputs(
+            &inputs(&fixture, state.path()),
+            &Options {
+                dry_run: false,
+                yes: true,
+            },
+            &mut NoUnits,
+            &mut std::io::Cursor::new(Vec::new()),
+            &mut Vec::new(),
+        )
+        .expect_err("a version in use refuses");
+        let text = format!("{error:#}");
+        assert!(text.contains("Farhelm 1.2.3 is still in use"), "{text}");
+        assert!(
+            text.contains(&format!("lsof {}", path_text(&program))),
+            "names lsof with the program's path, quoted for pasting: {text}"
+        );
+        assert!(program.exists(), "nothing removed");
+        assert!(fixture.app.join("Contents/MacOS/farhelm-desktop").exists());
+        assert_eq!(
+            record_of(&fixture).state,
+            farhelm_supervisor::installation::InstallState::Complete,
+            "nothing recorded"
+        );
+    }
+
+    /// Run a confirmed uninstall of `fixture` with `state` as its state root.
+    fn uninstall_now(fixture: &AppFixture, state: &Path) -> Result<()> {
+        run_with_inputs(
+            &inputs(fixture, state),
+            &Options {
+                dry_run: false,
+                yes: true,
+            },
+            &mut NoUnits,
+            &mut std::io::Cursor::new(Vec::new()),
+            &mut Vec::new(),
+        )
+    }
+
+    /// The record says "removing" before the first piece of the app is
+    /// removed, and an uninstall stopped at any point is finished by a
+    /// retry.
+    ///
+    /// Why: the record's "removing" state is what keeps an update already on
+    /// its way from finishing into a half-removed app and what lets the app
+    /// and its updater say an uninstall was interrupted (design, sections 4
+    /// and 6), so it must be durable before anything goes. Two stops prove
+    /// it: one at the very first removal (the oldest version's program,
+    /// whose folder cannot be written), where nothing is gone yet and the
+    /// record already says "removing"; and one at the app program, where the
+    /// early version is gone and the retry command's pieces remain. Each
+    /// stop is a folder whose entries cannot be removed, which root removes
+    /// anyway, so the check needs an ordinary user.
+    #[test]
+    fn an_interrupted_uninstall_records_removing_first_and_a_retry_finishes() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("skipped: root ignores the folder permissions this test stops removal with");
+            return;
+        }
+        for (stop, gone, kept) in [
+            (
+                "Contents/Versions/1.2.3",
+                None,
+                "Contents/Versions/1.2.3/farhelm",
+            ),
+            (
+                "Contents/MacOS",
+                Some("Contents/Versions/1.2.3"),
+                "Contents/MacOS/farhelm-desktop",
+            ),
+        ] {
+            let fixture = AppFixture::new();
+            let state = tempfile::tempdir().expect("state");
+            let folder = fixture.app.join(stop);
+            std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o500)).unwrap();
+            let error = uninstall_now(&fixture, state.path()).expect_err("stopped");
+            let text = format!("{error:#}");
+            assert!(
+                text.contains(&path_text(&fixture.app.join(kept))) && text.contains("ermission"),
+                "{stop}: the stop is the expected removal, for the expected reason: {text}"
+            );
+            assert_eq!(
+                record_of(&fixture).state,
+                farhelm_supervisor::installation::InstallState::Removing,
+                "{stop}: recorded before anything went"
+            );
+            if let Some(gone) = gone {
+                assert!(
+                    !fixture.app.join(gone).exists(),
+                    "{stop}: earlier pieces are gone"
+                );
+            }
+            assert!(
+                fixture.app.join(kept).exists(),
+                "{stop}: the failing piece stays"
+            );
+            assert!(
+                fixture.app.join("Contents/Versions/1.2.4/farhelm").exists(),
+                "{stop}: the retry command's own version stays"
+            );
+            std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+            uninstall_now(&fixture, state.path()).expect("a retry finishes");
+            assert!(!fixture.app.exists(), "{stop}: the app is gone");
+        }
+    }
+
+    /// A temporary file an installer or an earlier uninstall left inside
+    /// the app (a regular `.farhelm-new.*` file, which is how both write
+    /// files) does not refuse the uninstall: it is removed with the rest.
+    ///
+    /// Why: an uninstall killed while it wrote the "removing" record leaves
+    /// exactly such a file in `Contents/`, and refusing it as foreign would
+    /// make the documented retry impossible. A link with that name is still
+    /// not the installer's, and still refuses.
+    #[test]
+    fn installer_temporaries_inside_the_app_are_removed_not_refused() {
+        let fixture = AppFixture::new();
+        let state = tempfile::tempdir().expect("state");
+        std::fs::write(
+            fixture
+                .app
+                .join("Contents/.farhelm-new.abc.farhelm-installation"),
+            b"half written",
+        )
+        .unwrap();
+        std::fs::write(
+            fixture.app.join("Contents/MacOS/.farhelm-new.abc.farhelm"),
+            b"x",
+        )
+        .unwrap();
+        uninstall_now(&fixture, state.path()).expect("the temporaries are removed with the app");
+        assert!(!fixture.app.exists());
+
+        let fixture = AppFixture::new();
+        std::os::unix::fs::symlink(
+            "/nonexistent",
+            fixture.app.join("Contents/.farhelm-new.link"),
+        )
+        .unwrap();
+        let error = uninstall_now(&fixture, state.path()).expect_err("a link is not a temporary");
+        assert!(
+            format!("{error:#}").contains("unexpected entry"),
+            "{error:#}"
+        );
+    }
+
     /// An installation that changes between the confirmation and the
     /// removal is not removed.
     ///
@@ -418,6 +726,66 @@ mod tests {
             "the CLI was not removed"
         );
         assert!(!fixture.home.join("Applications/.farhelm-app.lock").exists());
+    }
+
+    /// An app put at the same place while the confirmation waited (Finder
+    /// moving the confirmed app aside and an identical-looking copy taking
+    /// its place) is not removed, and neither is the confirmed one.
+    ///
+    /// Why: the copy has the same version names and record, so a re-check
+    /// of files alone passes, and the version locks would then be taken on
+    /// the wrong app: this uninstall's own lock is on the confirmed app's
+    /// program, and a program of the copy that something runs would be
+    /// removed unlocked (design, section 6: open the app's folder and check
+    /// it is the installation, then lock every version). The plan carries
+    /// the app folder's identity, so the swap reads as a change.
+    #[test]
+    fn an_app_swapped_in_after_confirmation_refuses_without_removing() {
+        let fixture = AppFixture::new();
+        let state = tempfile::tempdir().expect("state");
+        let aside = fixture.home.join("Applications/Aside.app");
+        let (app, moved) = (fixture.app.clone(), aside.clone());
+        let mut input = ConfirmWhile {
+            answer: std::io::Cursor::new(b"y\n".to_vec()),
+            meanwhile: Some(move || {
+                std::fs::rename(&app, &moved).expect("fixture: moving the app aside");
+                let copied = std::process::Command::new("cp")
+                    .arg("-Rp")
+                    .arg(&moved)
+                    .arg(&app)
+                    .status()
+                    .expect("fixture: running cp");
+                assert!(copied.success(), "fixture: copying the app back");
+            }),
+        };
+        let error = run_with_inputs(
+            &inputs(&fixture, state.path()),
+            &Options {
+                dry_run: false,
+                yes: false,
+            },
+            &mut NoUnits,
+            &mut input,
+            &mut Vec::new(),
+        )
+        .expect_err("a swapped app refuses");
+        assert!(
+            format!("{error:#}").contains("nothing was removed"),
+            "{error:#}"
+        );
+        for app in [&fixture.app, &aside] {
+            assert!(
+                app.join("Contents/Versions/1.2.4/farhelm").exists()
+                    && app.join("Contents/Versions/1.2.3/farhelm").exists(),
+                "{} kept every version",
+                app.display()
+            );
+        }
+        assert_eq!(
+            record_of(&fixture).state,
+            farhelm_supervisor::installation::InstallState::Complete,
+            "nothing was recorded either"
+        );
     }
 
     /// A user unit manager that is not there, for the Linux path: with no
