@@ -111,3 +111,87 @@ accepted: the final cases establish real attached terminals, pending uploads, cr
 before sending their controls. The same reviewers accepted the correction. No review finding was rejected or left open.
 Separate scope assessments kept the declaration descriptive and the new panic handoff bounded. Documentation passes
 covered every touched file, and all commit/PR wording passed fresh cold reads.
+
+### Landing
+
+Landed as #2446, #2449, #2451, #2456 and #2457, merged bottom-up, with the same content the report describes, rebased
+onto this round's main. It was the third of four plans in this landing round, after structured-settings-dialog and
+launcher-enter-feedback.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained round 109's six plans, the browser suite's move to three stacks run in parallel, a
+TLS certificate fix, documentation and plan bookkeeping. A fresh-context reviewer and I read them and the other plans of
+this round against this plan. Round 109 changed no supervisor or protocol code, so it added no request kinds, and the
+plan's table of every control message still covers them all. Round 108's tab-attach-no-wait was already in this plan's
+base, and the declared contract for tab attachment matches it: a contested tab is refused without waiting.
+helm-owned-by-default, later in this round, keeps Stop and tab operations cancellable on the helm side while this plan
+has the supervisor own an accepted Stop; the two agree, since a helm caller that disconnects only loses the reply. Once
+the conflicts below it in the stack were resolved, this plan's own commits applied cleanly; its removal of its two
+TODO.md entries is kept.
+
+#### Fixes made during the landing
+
+None.
+
+#### Things to know
+
+- As the report says, when every one of a host's management slots is taken, a new create or checkout reconciliation is
+  now refused at once with the existing "try again" message instead of waiting. (The review named concurrent stops or
+  deletes as one way that happens.)
+
+#### Possible follow-ups
+
+- The terminal backpressure test with an open deflake entry now fails nearly every time on main on this machine (nine
+  runs in ten alone; see Checks), against one in five during round 109. That is too often to tell whether this plan
+  changes it, and the deflake entry or FLAKES.md should be updated with the new rate.
+
+#### Checks
+
+Every plan in this round was executed before round 109's six plans landed, so none had been tested against them, and
+while this round ran, main also moved the browser suite onto three stacks run in parallel (each test worker runs its own
+helm and supervisors). The plans were stacked again onto that main before the checks that count, so the browser evidence
+below comes from the harness they land on. Together the four change how the supervisor runs every request, which helm
+actions finish after a client disconnects, the Settings dialog and the launcher's Enter key; that reach is why this
+round ran the whole Rust workspace and the full browser suite. All of the following ran on all four plans stacked
+together on that main, including the fixes made while landing them:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed Markdown, JSON and TOML file,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`,
+  `scripts/check-desktop-assets.sh`, and the website build (`bun run build` in `website/`): all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `fa6052db-ebdf-4204-8d20-25b8780367ec` (kept): 3977 passed, 1 failed:
+  `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay`, which has an open TODO deflake entry ("Shallow
+  pause resets under load"). Because supervisor-request-modes changes how the supervisor reads messages from a host
+  connection, I ran that test alone ten times on main without this round and ten times on this round's stack, minutes
+  apart on the same machine: 9 and 10 failures. Both sides fail almost every time, so that comparison cannot show
+  whether the plan changes the test; it does show the test is now close to always failing on main on this machine, where
+  round 109 saw it fail one time in five. See the possible follow-up in supervisor-request-modes' notes.
+- `cargo nextest run -p farhelm-ui --features desktop`, run `d8ff6545-9b27-45f8-aa33-7dfac8f07108` (kept): 724 passed, 1
+  failed: a timing assertion in the tests of how the UI orders preference saves, code no plan here touches. Ten
+  repetitions alone all passed, so I judge it machine load during the full run; on one observation it is not recorded as
+  a flake. `node --test` in `crates/farhelm-ui/js-tests`, run `b88528dc-6d84-4d63-996d-56eb15c69510`: 328 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers, no retries, run
+  `ac3bef42-b713-4f70-8e6e-0fd7b86e0a16` (kept): 2227 passed, 14 skipped by design (WebKit clipboard cases and tests
+  that need a real signed-in agent or run on one engine only), 3 failed, all on WebKit:
+  - a terminal test and a two-host test each saw a session marked as having new output where they expected a plain
+    status. Neither test file is changed by this round, and three repeats of each on both engines then passed (run
+    `8158eb60-714f-4b18-bf7f-51c8654840b8`), so I judge both timing under load with three stacks running; on one
+    observation neither is recorded as a flake;
+  - "the sidebar app bar explains the helm and window builds", which fails inside the browser tests' own way of faking
+    the helm's build stamp: a faked reply arrives after its request was already settled. It fails on main without this
+    round too, two runs in five (run `db0c82af-6a1e-4359-8724-7fa17c65dbba`), and first showed up on round 109's landed
+    code, so it is not from this round; see the possible follow-up in structured-settings-dialog's notes.
+- Before the parallel suite landed, the plans also ran on the earlier main. A narrow run there (run
+  `87ee3a27-84d7-4a4e-ab9f-8d478f5f4b35`) found the Settings test failure fixed in structured-settings-dialog, and a
+  full browser pass, stopped part-way when the parallel change landed (run `b8b3e14f-b202-4015-b7d9-1ef15efb820d`),
+  showed the app-bar test above and a launcher search test fixed in launcher-enter-feedback.
+- Skipped: the workspace and desktop doctests (no plan adds or changes a documentation example),
+  `cargo check -p farhelm-desktop` and the desktop smoke test (the desktop app's own crate is unchanged), the native Mac
+  app (not runnable here) and the installer (unchanged).
+
+The report's checks ran on a main from before round 109's landings and were focused on the supervisor; its note that the
+evidence is not a full browser-suite verdict is superseded, since the landing ran the full browser suite above. Nothing
+else in the executor's report became untrue at landing.
