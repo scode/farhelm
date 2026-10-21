@@ -695,11 +695,10 @@ pub(crate) async fn observe_entry(
     // standing to store — which is why `sentinel` and `transition`
     // below are set independently.
     let mut settle_launch_reads = false;
-    // A spec stat that failed proves nothing either way. The observation
+    // A failed spec or waypoint read proves nothing either way. The observation
     // still goes ahead, as it did before reads could settle, so the exit is
-    // recorded from the pane; only the settlement waits for a stat that
-    // succeeds.
-    let mut spec_stat_inconclusive = false;
+    // recorded from the pane; only settlement waits for successful evidence reads.
+    let mut launch_evidence_inconclusive = false;
     if sentinel_could_still_apply(&recorded)
         && dead_or_absent
         && !entry
@@ -723,12 +722,13 @@ pub(crate) async fn observe_entry(
                 entry.generation,
                 entry.scope.is_some(),
                 pane_dead,
+                live.and_then(|state| state.exit_code),
             )
             .await
             {
                 Ok(detail) => detail,
                 Err(_) => {
-                    spec_stat_inconclusive = true;
+                    launch_evidence_inconclusive = true;
                     None
                 }
             },
@@ -768,7 +768,7 @@ pub(crate) async fn observe_entry(
         // equivalent proof for rows migrated without the new boot-finality bit.
         settle_launch_reads = sup.may_record()
             && !unattributed
-            && !spec_stat_inconclusive
+            && !launch_evidence_inconclusive
             && (pane_dead
                 || entry.run.launch_boot_ended
                 || matches!(recorded, LastOutcome::Interrupted));

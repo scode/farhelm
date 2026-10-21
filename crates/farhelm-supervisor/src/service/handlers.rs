@@ -934,24 +934,29 @@ async fn handle_stop_session(
                 // The wrapper-failure shape outranks the plain exit
                 // for the same reason a sentinel does: an agent that
                 // never started did not "run and finish".
-                Ok(None) => match wrapper_failure_detail(
-                    &sup.state_dir,
-                    &session_id,
-                    entry.generation,
-                    entry.scope.is_some(),
-                    pane_state.is_some_and(|state| state.dead),
-                )
-                .await
-                {
-                    Ok(Some(detail)) => Transition::SentinelError {
-                        detail,
-                        pane: entry.terminal.as_ref().map(|t| t.pane.clone()),
-                    },
-                    Ok(None) | Err(_) => Transition::ObservedExit {
-                        exit_code: dead_pane_exit_code(&sup, entry.terminal.as_ref(), &session_id)
-                            .await,
-                    },
-                },
+                Ok(None) => {
+                    // pane_process supplies only liveness. Reuse the richer
+                    // exit-code probe for either classification rather than
+                    // querying again after a negative launch-evidence read.
+                    let exit_code =
+                        dead_pane_exit_code(&sup, entry.terminal.as_ref(), &session_id).await;
+                    match wrapper_failure_detail(
+                        &sup.state_dir,
+                        &session_id,
+                        entry.generation,
+                        entry.scope.is_some(),
+                        pane_state.is_some_and(|state| state.dead),
+                        exit_code,
+                    )
+                    .await
+                    {
+                        Ok(Some(detail)) => Transition::SentinelError {
+                            detail,
+                            pane: entry.terminal.as_ref().map(|t| t.pane.clone()),
+                        },
+                        Ok(None) | Err(_) => Transition::ObservedExit { exit_code },
+                    }
+                }
                 Err(e) => {
                     // Loud propagation (item 1's discipline,
                     // extended to this call site): refuse the

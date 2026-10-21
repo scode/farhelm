@@ -1221,6 +1221,15 @@ enum InternalCmd {
     /// this exists (zsh terminates on failed exec; a shell-side sentinel
     /// can never fire there).
     Launch { spec: PathBuf },
+    /// Record shell handoff before execing the scope wrapper. The exact executable
+    /// path is carried through so a bundle forwarder retains its launch semantics.
+    LaunchWrapped {
+        spec: PathBuf,
+        #[arg(long)]
+        farhelm_exe: PathBuf,
+        #[arg(last = true, required = true)]
+        wrapper: Vec<std::ffi::OsString>,
+    },
     /// Enter the session directory before starting a tab's login shell. This runs
     /// inside the tab scope, so shell startup retains the tab's cleanup contract.
     TabShell { directory: PathBuf, shell: PathBuf },
@@ -1445,6 +1454,15 @@ fn main() -> anyhow::Result<()> {
                 // On success exec never returns; reaching here is failure.
                 Err(farhelm_supervisor::launch::exec_launch_spec(&spec))
             }
+            InternalCmd::LaunchWrapped {
+                spec,
+                farhelm_exe,
+                wrapper,
+            } => Err(farhelm_supervisor::launch::exec_wrapped_launch(
+                &spec,
+                &farhelm_exe,
+                &wrapper,
+            )),
             InternalCmd::TabShell { directory, shell } => Err(
                 farhelm_supervisor::launch::exec_tab_shell(&directory, &shell),
             ),
