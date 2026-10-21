@@ -820,4 +820,5 @@ exhaustive match or a default enforces. A clear fix of the targeted bug class is
   session relies on to know which session is asking) and may run outside the session's processes, which Farhelm uses to
   tell which session a process belongs to. Start by checking, on the installed Codex, whether a command run by a Codex
   session that Farhelm launched sees the session's environment and runs under the session's processes, with and without
-  `--no-daemon`; then decide whether Farhelm should pass `--no-daemon` or otherwise adapt.
+  `--no-daemon`; then decide whether Farhelm should pass `--no-daemon` or otherwise adapt. Plan:
+  `plans/queue/codex-no-daemon.md`.
