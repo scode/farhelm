@@ -323,9 +323,6 @@ are not.
   page behind them, return of focus on close and keyboard-reachable scroll regions, and focus fixes kept landing one
   dialog at a time. Every modal dialog gets isolation and a Tab trap through the shell. Plan:
   `plans/queue/modal-dialog-shell.md`.
-- **One owner for a launch's leftover files.** Create and restart each remove a failed launch's spec, status and
-  progress files with a different subset; the progress file added on 2026-10-21 already missed create's path. Plan:
-  `plans/queue/launch-attempt-owner.md`.
 - **Workspace trust as a launch type in the helm.** Each launch route normalizes workspace trust itself before handing
   the launch to the supervisor, and an inherited trust choice once escaped its destination (#2349). Only the trust step
   can produce the launch the helm's create and restart paths accept. Plan: `plans/queue/helm-launch-admission.md`.

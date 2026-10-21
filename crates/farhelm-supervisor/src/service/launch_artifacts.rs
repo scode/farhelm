@@ -12,10 +12,12 @@
 //! This never runs on the list path. See `service::sweep` for the process-tree
 //! side of a launch's failure classification.
 
+use super::core::{SessionEntry, Supervisor};
 use crate::launch::LaunchArtifacts;
 use crate::store::{LastOutcome, SessionStore};
 use anyhow::Context;
 use std::path::Path;
+use std::sync::atomic::Ordering;
 use tracing::{debug, warn};
 
 /// Append terminal evidence only after the caller has proved never-started.
@@ -260,6 +262,24 @@ pub(crate) async fn cleanup_launch_artifacts(
         .await
 }
 
+/// Retire a durable Error's artifacts only after preservation and removal succeed.
+/// Callers establish the Error outcome before requesting cleanup; failed reads,
+/// settlements and unlinks leave the generation-local latch clear for retry.
+/// Rename shares this latch, while relaunch replaces it.
+///
+/// Tick and wake share sampling admission, but Stop holds its lifecycle claim
+/// independently. Concurrent callers may both attempt cleanup: this is a
+/// success cache, not an in-flight claim or an exactly-once guarantee.
+pub(super) async fn cleanup_error_once(sup: &Supervisor, entry: &SessionEntry) {
+    if sup.may_record()
+        && !entry.run.launch_cleanup_done.load(Ordering::Relaxed)
+        && cleanup_launch_artifacts(&sup.state_dir, &sup.store, &entry.info.id, entry.generation)
+            .await
+    {
+        entry.run.launch_cleanup_done.store(true, Ordering::Relaxed);
+    }
+}
+
 /// Clear the launch artifacts sitting at ONE launch's generation-named
 /// paths, FAIL-CLOSED, before something writes its own there.
 ///
@@ -292,11 +312,31 @@ pub(crate) async fn clear_launch_artifacts_fail_closed(
 }
 
 impl LaunchArtifacts {
-    /// Preserve create's strict spec-only unwind after tmux confirms absence.
-    /// Unlike ordinary settlement, this existing operation reports even absence
-    /// as an error. The caller adds its exact context before settling the retry key.
-    pub(super) async fn remove_failed_create_spec_strict(&self) -> std::io::Result<()> {
-        tokio::fs::remove_file(self.spec()).await
+    /// Retain every file-removal failure before a refused create settles its key.
+    /// The caller has confirmed tmux absence and swept this attempt's processes;
+    /// no consumer remains for its spec, sentinel or waypoint. Attempt every file
+    /// so one obstruction cannot strand the other leftovers. Missing files are
+    /// already clean, and every other failure joins the error recorded for retry.
+    pub(super) async fn remove_failed_create_fail_closed(
+        &self,
+        mut error: anyhow::Error,
+    ) -> anyhow::Error {
+        if let Err(cleanup) =
+            Self::remove_file_fail_closed(self.spec(), "the failed create's spec").await
+        {
+            error = error.context(cleanup);
+        }
+        if let Err(cleanup) =
+            Self::remove_file_fail_closed(self.status(), "the failed create's sentinel").await
+        {
+            error = error.context(cleanup);
+        }
+        if let Err(cleanup) =
+            Self::remove_file_fail_closed(self.waypoint(), "the failed create's waypoint").await
+        {
+            error = error.context(cleanup);
+        }
+        error
     }
 
     /// Remove a failed create's files after its process and tmux cleanup attempts.

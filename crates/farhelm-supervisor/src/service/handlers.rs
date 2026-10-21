@@ -25,8 +25,8 @@ use super::core::{
     ensure_title_printable, error_kind, truncate_for_error, unknown_pane_owner_refusal,
 };
 use super::launch_artifacts::{
-    append_launch_excerpt, cleanup_launch_artifacts, read_launch_sentinel,
-    sentinel_could_still_apply, wrapper_failure_detail,
+    append_launch_excerpt, cleanup_error_once, read_launch_sentinel, sentinel_could_still_apply,
+    wrapper_failure_detail,
 };
 use super::listing::list_all;
 use super::status::{KnownTmuxNames, dead_pane_exit_code, entry_info};
@@ -995,18 +995,19 @@ async fn handle_stop_session(
                 .await;
                 return;
             }
-            // A durable Error can clean up its artifacts now, including
-            // residue from an earlier failed settlement. `record` returns
-            // Ok without writing when recording is disabled, so its result
-            // alone cannot authorize cleanup's reservation write or unlink.
+            // A durable Error can finish cleanup now, including residue
+            // from an earlier failed settlement. Share the ticker's success
+            // latch so repeated Stops do not redo evidence preservation
+            // after successful removal. `record` returns Ok without writing
+            // when recording is disabled, so its result alone cannot
+            // authorize cleanup's reservation write or unlink.
             if sup.may_record()
                 && matches!(
                     &*entry.run.outcome.lock().expect("outcome mutex poisoned"),
                     LastOutcome::Error { .. }
                 )
             {
-                cleanup_launch_artifacts(&sup.state_dir, &sup.store, &session_id, entry.generation)
-                    .await;
+                cleanup_error_once(&sup, &entry).await;
             }
             // The reap still runs with no live pid to walk from:
             // SPEC.md assigns reaping a PAST run's leftover

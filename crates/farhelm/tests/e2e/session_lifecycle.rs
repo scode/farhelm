@@ -6632,6 +6632,10 @@ async fn wait_for_shim_to_consume_spec(spec_path: &std::path::Path) {
 /// that looked like the shim consuming the replacement, but the test had
 /// never synchronized with the real `<id>.0.json` spec at all.
 ///
+/// Only the spec remains when directory writes are blocked. Scoped launches
+/// also leave a waypoint, and Delete's directory enumeration has no fixed order;
+/// with both files blocked, a correct refusal may name the waypoint first.
+///
 /// Skipped under euid 0: root bypasses directory permission checks
 /// entirely, which would make this test pass trivially without
 /// exercising the fail-closed path it exists to pin.
@@ -6656,6 +6660,26 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
     // session, so that shim has already passed its sole consume step and
     // cannot take the replacement planted at the same generation path.
     std::fs::write(&spec_path, b"{}").expect("plant a launch spec");
+
+    // basic_session waited for the agent's post-exec readiness, so any scoped
+    // wrapper has already created its waypoint and cannot recreate it later.
+    // Leave one blocked file: the exact-path assertion below must identify the
+    // intended unlink without assuming an order among multiple owned artifacts.
+    let waypoint = farhelm_supervisor::launch::waypoint_path_for_spec(&spec_path);
+    match std::fs::remove_file(&waypoint) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("remove the fixture's completed wrapper waypoint: {error}"),
+    }
+    let entries: Vec<_> = std::fs::read_dir(&launch_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(
+        entries.as_slice(),
+        std::slice::from_ref(&spec_path),
+        "only the planted spec is blocked"
+    );
 
     use std::os::unix::fs::PermissionsExt;
     let original_mode = std::fs::metadata(&launch_dir)

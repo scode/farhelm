@@ -10308,20 +10308,12 @@ impl Supervisor {
                                  rather than deleted"
                             )));
                         }
-                        // The shim unlinks the spec once it has read it,
-                        // so a launch that never happened would strand a
-                        // file holding the agent's full command line —
-                        // credentials included — with nothing left to
-                        // clean it up. Removed BEFORE the row is abandoned
-                        // so whatever this adds to the error is part of
-                        // what gets recorded against the intent key.
-                        if let Err(cleanup) = artifacts.remove_failed_create_spec_strict().await {
-                            error = error.context(format!(
-                                "could not remove launch spec {} after tmux creation failed: \
-                                 {cleanup}",
-                                artifacts.spec().display()
-                            ));
-                        }
+                        // No consumer remains for this absent attempt's
+                        // files after its process sweep. Remove the whole
+                        // set BEFORE the row is abandoned or its refusal
+                        // is retained, so every cleanup failure is part of
+                        // the error recorded against the intent key.
+                        error = artifacts.remove_failed_create_fail_closed(error).await;
                         // A FRESH checkout that already allocated keeps its
                         // directory and its registry ownership (Design C /
                         // R1.2): the row is retained as a visible error, not
@@ -29336,6 +29328,200 @@ exit 0
         );
     }
 
+    /// A confirmed-absent create must remove the whole attempt before its
+    /// Failed reservation makes the error final. The fake refuses tmux only
+    /// after witnessing the real published spec and planting its companion
+    /// files, so a missing waypoint cannot pass merely because none was made.
+    /// It never executes the window command: no shim can consume the evidence
+    /// or turn this preterminal refusal into an accepted session.
+    /// A blocked sentinel unlink must not skip the waypoint, and its exact
+    /// removal context must become part of the same durable replayed refusal.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_confirmed_absent_create_cleans_every_artifact_before_replaying_failure() {
+        for obstruct_status in [false, true] {
+            let state = StateDir::new();
+            let failing_tmux = state.path().join("failing-tmux");
+            // Match command words anywhere after the driver's private socket and
+            // config flags, as the existing post-allocation refusal fixture does.
+            // Only new-session and has-session fail; startup/preflight commands
+            // retain their ordinary empty successful answers.
+            std::fs::write(
+                &failing_tmux,
+                br#"#!/bin/sh
+fixture_dir=${0%/*}
+for arg in "$@"; do
+  if [ "$arg" = -V ]; then echo "tmux 3.7c"; exit 0; fi
+  if [ "$arg" = '#{version}' ]; then echo "3.7c"; exit 0; fi
+  if [ "$arg" = new-session ]; then
+    found=0
+    for spec in "$fixture_dir"/launch/*.json; do
+      [ -f "$spec" ] || continue
+      found=$((found + 1))
+      [ "$found" -eq 1 ] || exit 91
+      stem=${spec%.json}
+      cat "$spec" > "$fixture_dir/refused-launch.json" || exit 92
+      printf '%s\n' 'exec_failed argv0=fixture-agent errno=2' > "$stem.status" || exit 93
+      : > "$stem.waypoint" || exit 94
+      [ -f "$spec" ] && [ -f "$stem.status" ] && [ -f "$stem.waypoint" ] || exit 95
+      if [ -f "$fixture_dir/obstruct-status" ]; then
+        rm "$stem.status" || exit 99
+        mkdir "$stem.status" || exit 100
+        [ -f "$spec" ] && [ -d "$stem.status" ] && [ -f "$stem.waypoint" ] || exit 101
+      fi
+      printf '%s\n' "$spec" >> "$fixture_dir/new-session-attempts" || exit 96
+    done
+    [ "$found" -eq 1 ] || exit 97
+    exit 1
+  fi
+  if [ "$arg" = has-session ]; then
+    if [ -f "$fixture_dir/new-session-attempts" ]; then
+      printf '%s\n' absent >> "$fixture_dir/absence-probes" || exit 98
+    fi
+    echo "no current target" >&2
+    exit 1
+  fi
+done
+exit 0
+"#,
+            )
+            .unwrap();
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                std::fs::set_permissions(&failing_tmux, std::fs::Permissions::from_mode(0o755))
+                    .unwrap();
+            }
+            let sup = Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    tmux_program: failing_tmux,
+                    ..scopeless_seams()
+                },
+            )
+            .await
+            .unwrap();
+            let attempts = state.path().join("new-session-attempts");
+            let probes = state.path().join("absence-probes");
+            assert!(
+                !attempts.exists(),
+                "startup must not attempt the fixture create"
+            );
+            assert_eq!(
+                std::fs::read_dir(state.path().join("launch"))
+                    .unwrap()
+                    .count(),
+                0
+            );
+            if obstruct_status {
+                // An owned flag selects the real unlink failure without changing
+                // the test process's environment or relying on filesystem modes.
+                std::fs::write(state.path().join("obstruct-status"), b"").unwrap();
+            }
+            let claim = IntentClaim {
+                intent_key: "absent-create".into(),
+                fingerprint: command_fingerprint("/", "agent", None),
+                dedup_scope: DedupScope::Permanent,
+            };
+            let refusal = sup
+                .create_session_without_overrides("/", "agent", None, 80, 24, Some(claim.clone()))
+                .await
+                .expect_err("the fake refuses new-session and confirms absence");
+            let first_kind = error_kind(&refusal);
+            let first_message = format!("{refusal:#}");
+            let reservation = sup
+                .store
+                .reservation(&claim.intent_key)
+                .await
+                .unwrap()
+                .unwrap();
+            let spec =
+                crate::launch::spec_path_for_launch(state.path(), &reservation.session_id, 0);
+            let sentinel = crate::launch::status_path_for_spec(&spec);
+            let waypoint = crate::launch::waypoint_path_for_spec(&spec);
+            let attempted = std::fs::read(&attempts).expect("the fake witnessed all three files");
+            assert_eq!(attempted, format!("{}\n", spec.display()).as_bytes());
+            let probed = std::fs::read(&probes).expect("the failed spawn was probed for absence");
+            assert_eq!(probed, b"absent\n");
+            let published: LaunchSpec = serde_json::from_slice(
+                &std::fs::read(state.path().join("refused-launch.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(published.session_id, reservation.session_id);
+            assert_eq!(published.status_file, sentinel);
+            assert_eq!(published.argv, ["agent"]);
+            assert!(
+                published.preparation.is_none(),
+                "this is an ordinary create"
+            );
+            assert!(!spec.exists() && !waypoint.exists());
+            if obstruct_status {
+                assert!(
+                    sentinel.is_dir(),
+                    "the fake's proven obstruction must survive unlink"
+                );
+                let cleanup_context = format!(
+                    "removing the failed create's sentinel ({}):",
+                    sentinel.display()
+                );
+                assert!(
+                    first_message.contains(&cleanup_context),
+                    "the create failure must retain its removal label and exact path: {first_message}"
+                );
+            } else {
+                assert!(!sentinel.exists());
+            }
+            assert!(
+                sup.store
+                    .session(&reservation.session_id)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(sup.sessions.lock().await.is_empty());
+            let ReservationOutcome::Failed { kind, message } = &reservation.outcome else {
+                panic!("a proven preterminal refusal must settle Failed: {reservation:?}");
+            };
+            assert_eq!(kind, &first_kind);
+            assert_eq!(
+                message, &first_message,
+                "cleanup context must be recorded before reply"
+            );
+
+            let replay = sup
+                .create_session_without_overrides("/", "agent", None, 80, 24, Some(claim.clone()))
+                .await
+                .expect_err("the same key replays the settled refusal");
+            assert_eq!(error_kind(&replay), first_kind);
+            assert_eq!(format!("{replay:#}"), first_message);
+            assert_eq!(
+                std::fs::read(&attempts).unwrap(),
+                attempted,
+                "retry must not spawn"
+            );
+            assert_eq!(
+                std::fs::read(&probes).unwrap(),
+                probed,
+                "retry must not reconcile a spent key"
+            );
+            assert_eq!(
+                sup.store
+                    .reservation(&claim.intent_key)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                reservation
+            );
+            assert!(sup.store.load_all().await.unwrap().is_empty());
+            assert!(sup.sessions.lock().await.is_empty());
+            assert!(!spec.exists() && !waypoint.exists());
+            assert_eq!(sentinel.is_dir(), obstruct_status);
+            if !obstruct_status {
+                assert!(!sentinel.exists());
+            }
+        }
+    }
+
     /// Evidence that cannot be READ is never read as absence (PLAN_M3.md
     /// item 6, and the same no-guessing stance item 3 takes for a deferred
     /// sentinel).
@@ -35097,9 +35283,50 @@ exit 0
         }
     }
 
-    /// Stop still reaps processes when observation recording is disabled,
-    /// but must retain the pending key and its last launch witness. Driving
-    /// the dispatcher catches cleanup that escapes `record`'s no-write gate.
+    /// Finish the owned Stop mutation before changing its evidence fixture.
+    /// A reply alone does not join the connection's waiter; draining it keeps
+    /// every assertion and repair outside the lifecycle task it exercises.
+    async fn stop_error_fixture(sup: &Arc<Supervisor>, session_id: &str) {
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut channels = ConnectionChannels::default();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            sup,
+            ControlMsg::StopSession {
+                req_id: 42,
+                session_id: session_id.to_string(),
+            },
+            ConnectionCtx {
+                panics: &mpsc::channel(1).0,
+                tx: &tx,
+                priority: &tx,
+                channels: &mut channels,
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("Stop must finish its owned mutation")
+            .expect("Stop reply channel");
+        let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
+        assert!(
+            matches!(decoded, ControlMsg::SessionStopped { req_id: 42 }),
+            "{decoded:?}"
+        );
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(result) = tasks.join_next().await {
+                result.expect("Stop task must finish without panicking");
+            }
+        })
+        .await
+        .expect("Stop dispatcher must reap its task");
+    }
+
+    /// Stop must preserve accepted-create evidence while recording is disabled
+    /// or cleanup fails, then share its successful-cleanup latch with later
+    /// Stops and observers. Otherwise this request path repeatedly consumes
+    /// evidence that the ticker already knows has been retired for this run.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn stop_error_cleanup_respects_recording_authority() {
         let PendingSentinelFixture {
@@ -35123,9 +35350,20 @@ exit 0
         let row = sup.store.session(&row.id).await.unwrap().unwrap();
         sup.publish_retained_stored_session(&row, false).await;
         assert!(sup.sessions.lock().await[&row.id].terminal.is_none());
+        let entry = sup.sessions.lock().await[&row.id].clone();
+        assert!(matches!(row.outcome, LastOutcome::Error { .. }));
+        assert_eq!(*entry.run.outcome.lock().unwrap(), row.outcome);
         let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
         let sentinel = crate::launch::status_path_for_spec(&spec);
-        assert!(spec.exists() && sentinel.exists());
+        let waypoint = crate::launch::waypoint_path_for_spec(&spec);
+        std::fs::write(&waypoint, b"").unwrap();
+        assert!(spec.is_file() && sentinel.is_file() && waypoint.is_file());
+        assert!(
+            !entry
+                .run
+                .launch_cleanup_done
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
         assert_eq!(
             sup.store
                 .reservation(&claim.intent_key)
@@ -35139,42 +35377,62 @@ exit 0
         for may_record in [false, true] {
             sup.may_record
                 .store(may_record, std::sync::atomic::Ordering::SeqCst);
-            let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-            let mut channels = ConnectionChannels::default();
-            let mut tasks = tokio::task::JoinSet::new();
-            handle_control(
-                &sup,
-                ControlMsg::StopSession {
-                    req_id: 42,
-                    session_id: row.id.clone(),
-                },
-                ConnectionCtx {
-                    panics: &mpsc::channel(1).0,
-                    tx: &tx,
-                    priority: &tx,
-                    channels: &mut channels,
-                    tasks: &mut tasks,
-                },
-            )
-            .await;
-            let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
-                .await
-                .expect("Stop must finish its owned mutation")
-                .expect("Stop reply channel");
-            let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
-            assert!(
-                matches!(decoded, ControlMsg::SessionStopped { req_id: 42 }),
-                "{decoded:?}"
-            );
-            tokio::time::timeout(Duration::from_secs(5), async {
-                while let Some(result) = tasks.join_next().await {
-                    result.expect("Stop task must finish without panicking");
-                }
-            })
-            .await
-            .expect("Stop dispatcher must reap its task");
+            if may_record {
+                // An unreadable sole acceptance witness must stop cleanup
+                // before any unlink, without turning Stop's sweep into an
+                // error. A directory fails even for privileged runners.
+                let evidence = std::fs::read(&sentinel).unwrap();
+                std::fs::remove_file(&sentinel).unwrap();
+                std::fs::create_dir(&sentinel).unwrap();
+                assert!(spec.is_file() && sentinel.is_dir() && waypoint.is_file());
+                assert!(
+                    read_launch_sentinel(state.path(), &row.id, 0)
+                        .await
+                        .is_err()
+                );
+                stop_error_fixture(&sup, &row.id).await;
+                assert!(spec.is_file() && sentinel.is_dir() && waypoint.is_file());
+                assert!(
+                    !entry
+                        .run
+                        .launch_cleanup_done
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                );
+                assert_eq!(
+                    sup.store
+                        .reservation(&claim.intent_key)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .outcome,
+                    ReservationOutcome::Pending,
+                    "failed preservation must leave the accepted create retryable"
+                );
+                assert_eq!(
+                    sup.store.session(&row.id).await.unwrap().unwrap().outcome,
+                    row.outcome
+                );
+                std::fs::remove_dir(&sentinel).unwrap();
+                std::fs::write(&sentinel, evidence).unwrap();
+                assert!(
+                    read_launch_sentinel(state.path(), &row.id, 0)
+                        .await
+                        .unwrap()
+                        .is_some()
+                );
+            }
+            stop_error_fixture(&sup, &row.id).await;
             assert_eq!(spec.exists(), !may_record);
             assert_eq!(sentinel.exists(), !may_record);
+            assert_eq!(waypoint.exists(), !may_record);
+            assert_eq!(
+                entry
+                    .run
+                    .launch_cleanup_done
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                may_record,
+                "only confirmed preservation and complete removal retire this run's cleanup"
+            );
             assert_eq!(
                 sup.store
                     .reservation(&claim.intent_key)
@@ -35191,6 +35449,45 @@ exit 0
             );
         }
         assert_sentinel_replay(&sup, &claim, checkout.as_ref(), &row).await;
+
+        // The real shim cannot recreate files after successful retirement.
+        // Replanting detectors distinguishes skipped cleanup from another
+        // successful unlink, including through the ticker's shared latch.
+        std::fs::write(&spec, b"cleanup detector").unwrap();
+        std::fs::write(&sentinel, b"exec_failed argv0=cleanup-detector errno=2").unwrap();
+        std::fs::write(&waypoint, b"").unwrap();
+        assert!(spec.is_file() && sentinel.is_file() && waypoint.is_file());
+        assert!(
+            read_launch_sentinel(state.path(), &row.id, 0)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        stop_error_fixture(&sup, &row.id).await;
+        assert!(spec.is_file() && sentinel.is_file() && waypoint.is_file());
+        sup.reconcile_for_test().await;
+        assert!(spec.is_file() && sentinel.is_file() && waypoint.is_file());
+        assert_eq!(std::fs::read(&spec).unwrap(), b"cleanup detector");
+        assert!(
+            entry
+                .run
+                .launch_cleanup_done
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+        assert_eq!(
+            sup.store.session(&row.id).await.unwrap().unwrap().outcome,
+            row.outcome
+        );
+        assert_eq!(
+            sup.store
+                .reservation(&claim.intent_key)
+                .await
+                .unwrap()
+                .unwrap()
+                .outcome,
+            ReservationOutcome::Created,
+            "repeated cleanup opportunities must preserve the accepted create's replay"
+        );
     }
 
     /// Error durability and create settlement are separate writes. A failed
