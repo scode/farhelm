@@ -292,7 +292,7 @@ const REPLAY_COMPLETE_TEXT_MESSAGE: &str = r#"{"type":"replay_complete"}"#;
 fn refused_as_taken_over(error: &anyhow::Error) -> bool {
     error
         .downcast_ref::<SupervisorError>()
-        .is_some_and(|supervised| supervised.kind == ErrorKind::TakenOver)
+        .is_some_and(|supervised| supervised.kind() == ErrorKind::TakenOver)
 }
 
 /// Whether this failure says the TAB being attached does not exist, which
@@ -318,7 +318,7 @@ fn refused_as_missing_tab(error: &anyhow::Error, q: &TermQuery) -> bool {
     q.tab.is_some()
         && error
             .downcast_ref::<SupervisorError>()
-            .is_some_and(|supervised| supervised.kind == ErrorKind::NotFound)
+            .is_some_and(|supervised| supervised.kind() == ErrorKind::NotFound)
 }
 
 /// The browser's `{"type":"detached","reason":...,"code":...}` notice.

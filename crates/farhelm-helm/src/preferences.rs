@@ -111,11 +111,10 @@ pub(crate) async fn put_preferences(
         let list = match farhelm_proto::open_extensions::OpenExtensions::parse(raw) {
             Ok(list) => list,
             Err(message) => {
-                return http_error(anyhow::Error::new(SupervisorError {
-                    origin: crate::client::ErrorOrigin::Helm,
-                    kind: ErrorKind::InvalidRequest,
+                return http_error(anyhow::Error::new(SupervisorError::helm(
+                    ErrorKind::InvalidRequest,
                     message,
-                }));
+                )));
             }
         };
         // Store one spelling so every client's next read shows what the
@@ -140,12 +139,10 @@ pub(crate) async fn put_preferences(
                 .is_ok()
         });
         if !valid {
-            return http_error(anyhow::Error::new(SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::InvalidRequest,
-                message: "template_shortcuts needs digit keys and distinct valid template names"
-                    .into(),
-            }));
+            return http_error(anyhow::Error::new(SupervisorError::helm(
+                ErrorKind::InvalidRequest,
+                "template_shortcuts needs digit keys and distinct valid template names".into(),
+            )));
         }
     }
     // Like last_selected, a template name can become stale after a write. The
@@ -154,31 +151,28 @@ pub(crate) async fn put_preferences(
     if let Some(Some(name)) = &patch.quick_launch_template
         && name.len() > farhelm_proto::launcher::TEMPLATE_NAME_CAP
     {
-        return http_error(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: "quick_launch_template exceeds the template name limit".into(),
-        }));
+        return http_error(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            "quick_launch_template exceeds the template name limit".into(),
+        )));
     }
     if let Some(Some(sort)) = &patch.list_sort
         && store::parse_sort_key(sort).is_none()
     {
-        return http_error(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: format!(
+        return http_error(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            format!(
                 "{sort:?} is not a session list order; this helm serves created, activity, and \
                  title"
             ),
-        }));
+        )));
     }
     if let Some(Some(word)) = &patch.remembered_permissions
         && !store::is_known_remembered_permissions_word(word)
     {
-        return http_error(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: format!(
+        return http_error(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            format!(
                 "{word:?} is not a remembered structured-launch permissions mode; this helm \
                  serves {}",
                 farhelm_proto::LaunchPermission::ALL
@@ -188,35 +182,32 @@ pub(crate) async fn put_preferences(
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-        }));
+        )));
     }
     if let Some(Some(selected)) = &patch.last_selected
         && selected.parse::<SessionRef>().is_err()
     {
-        return http_error(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: "last_selected must be a full session ID; reload the session list".into(),
-        }));
+        return http_error(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            "last_selected must be a full session ID; reload the session list".into(),
+        )));
     }
     if let Some(Some(contact)) = &patch.feedback_contact
         && contact.chars().count() > FEEDBACK_CONTACT_MAX_CHARS
     {
-        return http_error(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
+        return http_error(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
             // The UI logs preference refusals. Never put the contact into one.
-            message: format!("feedback_contact exceeds {FEEDBACK_CONTACT_MAX_CHARS} characters"),
-        }));
+            format!("feedback_contact exceeds {FEEDBACK_CONTACT_MAX_CHARS} characters"),
+        )));
     }
     if let Some(Some(mode)) = &patch.terminal_link_click
         && !store::is_known_terminal_link_click_word(mode)
     {
-        return http_error(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: ErrorKind::InvalidRequest,
-            message: "terminal_link_click must be intercept, both, or program".into(),
-        }));
+        return http_error(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            "terminal_link_click must be intercept, both, or program".into(),
+        )));
     }
     // SQLite can commit after an HTTP caller disappears. Both consent cleanup
     // and trust-hint invalidation must finish on the task that owns that write.

@@ -198,13 +198,14 @@ const AGENT_ANSWER_SLOTS: usize = 4;
 /// live again.
 static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
 
-/// A supervisor-side request failure, carried through as a distinct type
+/// A classified refusal whose origin only its constructors can choose, carried as a distinct type
 /// (rather than a bare string `anyhow` error) so callers above this client
 /// — the HTTP layer's `http_error`, in particular — can recover `kind`
 /// without parsing `message`. `request()` builds it from the `kind` a
 /// `ControlMsg::Error` reply already carries, and helm code that refuses a
 /// request itself (a validation failure in `sessions`, say) builds one
-/// directly. `origin` records which of the two it was: most consumers treat
+/// through its helm constructor. `origin` records which of the two it was:
+/// most consumers treat
 /// them alike, but the HTTP layer must not, because a remote supervisor is
 /// untrusted and a kind it chose means something at the supervisor's level
 /// of abstraction, not at the helm's (see [`ErrorOrigin`]). From there it rides the ordinary `anyhow::Error` chain, so a
@@ -218,9 +219,61 @@ static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct SupervisorError {
-    pub origin: ErrorOrigin,
-    pub kind: ErrorKind,
-    pub message: String,
+    origin: ErrorOrigin,
+    kind: ErrorKind,
+    message: String,
+}
+
+impl SupervisorError {
+    /// Record a refusal whose classification the helm chose for its own caller.
+    ///
+    /// A supervisor's same-named wire kind carries a different meaning. Callers
+    /// cannot supply an origin: only the reply decoder may attribute a refusal
+    /// to a supervisor. The message is retained verbatim for Display and error chains.
+    pub fn helm(kind: ErrorKind, message: String) -> Self {
+        Self {
+            origin: ErrorOrigin::Helm,
+            kind,
+            message,
+        }
+    }
+
+    /// Preserve a correlated supervisor refusal without giving it helm authority.
+    ///
+    /// This constructor stays inside the client module, where replies are decoded;
+    /// HTTP handlers and agent verbs can create only helm-decided refusals.
+    fn from_reply(kind: ErrorKind, message: String) -> Self {
+        Self {
+            origin: ErrorOrigin::SupervisorReply,
+            kind,
+            message,
+        }
+    }
+
+    /// Identify who chose the kind, so a peer's refusal cannot become a helm signal.
+    pub fn origin(&self) -> ErrorOrigin {
+        self.origin
+    }
+
+    /// Return the unchanged classification; interpreting it still depends on origin.
+    pub fn kind(&self) -> ErrorKind {
+        self.kind
+    }
+
+    /// Borrow the original refusal text, also used verbatim by Display.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+/// Build a peer refusal for pure boundary tests without exposing a production origin setter.
+///
+/// Sibling tests exercise HTTP and discovery translation without transport setup.
+/// They use the same constructor as the correlated-reply decoder; production
+/// siblings cannot access either this fixture or that private constructor.
+#[cfg(test)]
+pub(crate) fn supervisor_reply_error_for_test(kind: ErrorKind, message: String) -> SupervisorError {
+    SupervisorError::from_reply(kind, message)
 }
 
 /// Who decided a [`SupervisorError`]'s `kind`.
@@ -2594,11 +2647,7 @@ impl SupervisorClient {
                 create_unaccepted,
                 ..
             } => {
-                let error = anyhow::Error::new(SupervisorError {
-                    origin: ErrorOrigin::SupervisorReply,
-                    kind,
-                    message,
-                });
+                let error = anyhow::Error::new(SupervisorError::from_reply(kind, message));
                 // Only a create can use this proof. A peer cannot attach it
                 // to Delete's failure and make a successful replacement look
                 // unaccepted to the browser.
@@ -3982,11 +4031,10 @@ impl UploadGuard {
     pub async fn commit(mut self) -> anyhow::Result<String> {
         if let Some(reason) = self.terminal_reason() {
             self.retire().await;
-            return Err(anyhow::Error::new(SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: ErrorKind::Internal,
-                message: reason,
-            }));
+            return Err(anyhow::Error::new(SupervisorError::helm(
+                ErrorKind::Internal,
+                reason,
+            )));
         }
         let client = Arc::clone(&self.client);
         let channel = self.channel;
@@ -4004,17 +4052,16 @@ impl UploadGuard {
         // answer, which is the case this arm exists for — it reached the
         // demultiplexer before any reply could.
         let reply = tokio::select! {
-                   biased;
-                   reply = client.request(req_id, ControlMsg::CommitUpload { req_id, channel }) => reply,
-                   reason = wait_ended(&mut progress) => {
-                       self.retire().await;
-                       return Err(anyhow::Error::new(SupervisorError {
-        origin: crate::client::ErrorOrigin::Helm,
-                           kind: ErrorKind::Internal,
-                           message: reason,
-                       }));
-                   }
-               };
+            biased;
+            reply = client.request(req_id, ControlMsg::CommitUpload { req_id, channel }) => reply,
+            reason = wait_ended(&mut progress) => {
+                self.retire().await;
+                return Err(anyhow::Error::new(SupervisorError::helm(
+                    ErrorKind::Internal,
+                    reason,
+                )));
+            }
+        };
         self.retire().await;
         match reply? {
             ControlMsg::UploadCommitted { path, .. } => Ok(path),
@@ -7046,7 +7093,7 @@ mod tests {
     /// ANSWERED, and both answers are terminal by `ControlMsg::
     /// CommitUpload`'s docs — and passes each outcome through unchanged:
     /// the published path on success, the supervisor's own
-    /// [`SupervisorError`] (message AND kind) on a refusal, since a size
+    /// [`SupervisorError`] (message, kind and supervisor origin) on a refusal, since a size
     /// mismatch has to reach the browser as a 400 with the supervisor's
     /// words rather than a locally invented failure.
     ///
@@ -7105,8 +7152,9 @@ mod tests {
                     let supervisor = e
                         .downcast_ref::<SupervisorError>()
                         .expect("a commit refusal must stay a SupervisorError, kind and all");
-                    assert_eq!(supervisor.message, SENTINEL);
-                    assert_eq!(supervisor.kind, ErrorKind::InvalidRequest);
+                    assert_eq!(supervisor.message(), SENTINEL);
+                    assert_eq!(supervisor.origin(), ErrorOrigin::SupervisorReply);
+                    assert_eq!(supervisor.kind(), ErrorKind::InvalidRequest);
                 }
             }
             assert!(
@@ -7152,7 +7200,7 @@ mod tests {
 
     /// A `BeginUpload` the supervisor REFUSES must leave nothing behind —
     /// no `uploads` entry, and the refusal preserved as a
-    /// [`SupervisorError`] with its kind intact.
+    /// [`SupervisorError`] with its kind and supervisor origin intact.
     ///
     /// The peer is kept ALIVE past the assertions, which is the whole
     /// point of this test existing separately from the route-level
@@ -7200,8 +7248,9 @@ mod tests {
         let supervisor = error
             .downcast_ref::<SupervisorError>()
             .expect("a begin refusal must stay a SupervisorError");
-        assert_eq!(supervisor.message, SENTINEL);
-        assert_eq!(supervisor.kind, ErrorKind::NotFound);
+        assert_eq!(supervisor.message(), SENTINEL);
+        assert_eq!(supervisor.kind(), ErrorKind::NotFound);
+        assert_eq!(supervisor.origin(), ErrorOrigin::SupervisorReply);
         assert!(
             client.uploads.lock().await.is_empty(),
             "a refused begin must leave no upload bookkeeping behind"
@@ -7797,7 +7846,8 @@ mod tests {
         let supervisor = error
             .downcast_ref::<SupervisorError>()
             .expect("an abort must reach the caller as a mappable SupervisorError");
-        assert_eq!(supervisor.message, SENTINEL);
+        assert_eq!(supervisor.message(), SENTINEL);
+        assert_eq!(supervisor.origin(), ErrorOrigin::Helm);
         let _peer = (peer_reader, peer_writer);
     }
 

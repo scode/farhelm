@@ -538,11 +538,7 @@ pub(crate) async fn close_tunnel(
 
 /// Keep refusal classification shared with ordinary session REST and agent responses.
 fn refusal(kind: ErrorKind, message: &str) -> anyhow::Error {
-    anyhow::Error::new(SupervisorError {
-        origin: crate::client::ErrorOrigin::Helm,
-        kind,
-        message: message.to_string(),
-    })
+    anyhow::Error::new(SupervisorError::helm(kind, message.to_string()))
 }
 
 /// Malformed or ineligible targets are caller-correctable request errors.

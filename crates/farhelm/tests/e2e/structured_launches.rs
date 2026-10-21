@@ -897,7 +897,7 @@ async fn assert_restart_refused(h: &Harness, id: &str) {
         error
             .downcast_ref::<SupervisorError>()
             .expect("the refusal carries its classification")
-            .kind,
+            .kind(),
         ErrorKind::Conflict
     );
     assert_eq!(

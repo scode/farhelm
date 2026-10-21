@@ -1782,7 +1782,7 @@ async fn an_unhooked_claude_session_cannot_be_restarted_after_input() {
     let err = err
         .downcast_ref::<SupervisorError>()
         .expect("the refusal carries its classification");
-    assert_eq!(err.kind, ErrorKind::Conflict, "{}", err.message);
+    assert_eq!(err.kind(), ErrorKind::Conflict, "{}", err.message());
 
     let after = snapshot_of(&h, &session.id).await;
     assert_eq!(after.captured_conversation, None);

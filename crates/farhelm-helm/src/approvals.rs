@@ -541,11 +541,7 @@ pub(crate) async fn describe_session(
 }
 
 fn refusal(kind: ErrorKind, message: String) -> anyhow::Error {
-    anyhow::Error::new(crate::SupervisorError {
-        origin: crate::client::ErrorOrigin::Helm,
-        kind,
-        message,
-    })
+    anyhow::Error::new(crate::SupervisorError::helm(kind, message))
 }
 
 /// Wall-clock now in Unix milliseconds, for the card's expiry stamp only;
@@ -1247,8 +1243,8 @@ mod tests {
             .downcast_ref::<crate::SupervisorError>()
             .unwrap_or_else(|| panic!("refused with the helm's own error, got {error:#}"));
         Refusal {
-            kind: refusal.kind,
-            message: refusal.message.clone(),
+            kind: refusal.kind(),
+            message: refusal.message().to_owned(),
         }
     }
 

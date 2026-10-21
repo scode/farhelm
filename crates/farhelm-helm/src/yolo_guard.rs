@@ -153,17 +153,16 @@ pub(crate) async fn check_agent_wrapper(
                 row.destination.as_deref(),
                 row.alias.as_deref(),
             );
-            Err(anyhow::Error::new(crate::SupervisorError {
-                origin: crate::client::ErrorOrigin::Helm,
-                kind: farhelm_proto::ErrorKind::Unauthorized,
-                message: format!(
+            Err(anyhow::Error::new(crate::SupervisorError::helm(
+                farhelm_proto::ErrorKind::Unauthorized,
+                format!(
                     "{host_name} asks before YOLO launches, so an agent may not start a YOLO \
                      launch, a command launch, or an agent launch whose command line Farhelm \
                      did not compose itself (such as a copy of a session an older Farhelm \
                      started) there: nothing was started. To let agents do this, turn on \
                      \"start YOLO sessions here without asking\" in {host_name}'s settings"
                 ),
-            }))
+            )))
         }
         None => Err(crate::sessions::no_such_host(host)),
     }
@@ -182,13 +181,11 @@ pub(crate) async fn check_agent_approved(
     match check_agent_wrapper(state, host, launch, agent_wrapper_supplied).await? {
         AgentVerdict::Vouched => Ok(()),
         AgentVerdict::ApprovalRequired if wrapper_approved => Ok(()),
-        AgentVerdict::ApprovalRequired => Err(anyhow::Error::new(crate::SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: farhelm_proto::ErrorKind::Unauthorized,
-            message:
-                "the agent's wrapper needs an Allow answer for this launch; nothing was started"
-                    .to_string(),
-        })),
+        AgentVerdict::ApprovalRequired => Err(anyhow::Error::new(crate::SupervisorError::helm(
+            farhelm_proto::ErrorKind::Unauthorized,
+            "the agent's wrapper needs an Allow answer for this launch; nothing was started"
+                .to_string(),
+        ))),
     }
 }
 
@@ -304,9 +301,9 @@ mod tests {
         let refusal = refused
             .downcast_ref::<crate::SupervisorError>()
             .unwrap_or_else(|| panic!("refused with the helm's own error, got: {refused:#}"));
-        assert_eq!(refusal.kind, crate::ErrorKind::NotFound);
+        assert_eq!(refusal.kind(), crate::ErrorKind::NotFound);
         assert_eq!(
-            refusal.message,
+            refusal.message(),
             format!("no such host: {missing}"),
             "the same text as any launch to an unknown host"
         );

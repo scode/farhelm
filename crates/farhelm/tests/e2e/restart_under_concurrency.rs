@@ -149,7 +149,7 @@ async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
         refusal
             .downcast_ref::<SupervisorError>()
             .expect("classified")
-            .kind,
+            .kind(),
         ErrorKind::Conflict
     );
     // The whole point: something is still running when the dust settles.
@@ -312,13 +312,13 @@ async fn a_repointed_working_directory_refuses_the_restart() {
     let err = err
         .downcast_ref::<SupervisorError>()
         .expect("a precondition failure carries its classification");
-    assert_eq!(err.kind, ErrorKind::InvalidRequest);
+    assert_eq!(err.kind(), ErrorKind::InvalidRequest);
     let canonical_decoy = std::fs::canonicalize(decoy.path()).expect("canonicalize");
     assert!(
-        err.message
+        err.message()
             .contains(&canonical_decoy.to_string_lossy().into_owned()),
         "the refusal must name where the path leads NOW: {}",
-        err.message
+        err.message()
     );
     assert_eq!(
         listed(&h.client, &session.id).await.annotation.as_deref(),

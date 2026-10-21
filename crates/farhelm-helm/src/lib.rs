@@ -2440,7 +2440,7 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
         return ErrorKind::Conflict;
     }
     find_cause::<SupervisorError>(e)
-        .map(|s| s.kind)
+        .map(|s| s.kind())
         .unwrap_or(ErrorKind::Internal)
 }
 
@@ -2585,7 +2585,7 @@ fn error_kind_is_a_supervisor_reply(e: &anyhow::Error) -> bool {
     find_cause::<store::HostStoreError>(e).is_none()
         && find_cause::<manager::ManagerError>(e).is_none()
         && find_cause::<SupervisorError>(e)
-            .is_some_and(|s| s.origin == ErrorOrigin::SupervisorReply)
+            .is_some_and(|s| s.origin() == ErrorOrigin::SupervisorReply)
 }
 
 /// The HTTP status for a kind a remote supervisor chose.
@@ -2650,7 +2650,7 @@ pub(crate) struct SettledCreateUnaccepted;
 
 #[cfg(test)]
 mod tests {
-    use super::{ErrorOrigin, SupervisorError};
+    use super::SupervisorError;
 
     /// A `#[derive(Parser)]` shim purely so this test can call
     /// `try_parse_from` — `HelmArgs` itself is `#[derive(Args)]`, meant to
@@ -3320,11 +3320,10 @@ mod tests {
     /// `NotFound` → 404 regardless of how many context layers sit on top.
     #[farhelm_testtrace::test]
     fn http_error_maps_context_wrapped_not_found_to_404() {
-        let err = anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: farhelm_proto::ErrorKind::NotFound,
-            message: "no such session: s1".to_string(),
-        })
+        let err = anyhow::Error::new(SupervisorError::helm(
+            farhelm_proto::ErrorKind::NotFound,
+            "no such session: s1".to_string(),
+        ))
         .context("attaching to terminal");
         let response = super::http_error(err);
         assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
@@ -3336,11 +3335,10 @@ mod tests {
     /// `InvalidRequest` mapping to their own codes above.
     #[farhelm_testtrace::test]
     fn http_error_maps_internal_supervisor_error_to_500() {
-        let err = anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: farhelm_proto::ErrorKind::Internal,
-            message: "tmux hiccup".to_string(),
-        });
+        let err = anyhow::Error::new(SupervisorError::helm(
+            farhelm_proto::ErrorKind::Internal,
+            "tmux hiccup".to_string(),
+        ));
         let response = super::http_error(err);
         assert_eq!(
             response.status(),
@@ -3355,11 +3353,10 @@ mod tests {
     /// function's own docstring for the mapping table).
     #[farhelm_testtrace::test]
     fn http_error_maps_conflict_supervisor_error_to_409() {
-        let err = anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: farhelm_proto::ErrorKind::Conflict,
-            message: "intent key already used with a different request".to_string(),
-        });
+        let err = anyhow::Error::new(SupervisorError::helm(
+            farhelm_proto::ErrorKind::Conflict,
+            "intent key already used with a different request".to_string(),
+        ));
         let response = super::http_error(err);
         assert!(
             !response.headers().contains_key("x-farhelm-create-outcome"),
@@ -3372,11 +3369,10 @@ mod tests {
     /// unaccepted fresh request from an identically coded spent-key conflict.
     #[farhelm_testtrace::test]
     fn fresh_unaccepted_marker_preserves_status_and_exposes_outcome() {
-        let error = anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: farhelm_proto::ErrorKind::Conflict,
-            message: "checkout settings changed".into(),
-        })
+        let error = anyhow::Error::new(SupervisorError::helm(
+            farhelm_proto::ErrorKind::Conflict,
+            "checkout settings changed".into(),
+        ))
         .context(super::FreshCreateUnaccepted);
         let response = super::http_error(error);
         assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
@@ -3391,11 +3387,10 @@ mod tests {
     /// without relying on user-facing message text.
     #[farhelm_testtrace::test]
     fn supervisor_checkout_conflict_exposes_unaccepted_outcome() {
-        let response = super::http_error(anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: farhelm_proto::ErrorKind::CheckoutConflict,
-            message: "checkout path occupied".into(),
-        }));
+        let response = super::http_error(anyhow::Error::new(SupervisorError::helm(
+            farhelm_proto::ErrorKind::CheckoutConflict,
+            "checkout path occupied".into(),
+        )));
         assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
         assert_eq!(
             response.headers()["x-farhelm-create-outcome"],
@@ -3428,14 +3423,13 @@ mod tests {
     /// sessions. The translation must hold whatever the message says.
     #[farhelm_testtrace::test]
     fn http_error_never_maps_a_supervisor_unauthorized_to_401() {
-        let err = anyhow::Error::new(SupervisorError {
-            origin: ErrorOrigin::SupervisorReply,
-            kind: farhelm_proto::ErrorKind::Unauthorized,
-            message: format!(
+        let err = anyhow::Error::new(crate::client::supervisor_reply_error_for_test(
+            farhelm_proto::ErrorKind::Unauthorized,
+            format!(
                 r#"{{"code":"{}"}}"#,
                 farhelm_proto::http::AUTH_REQUIRED_CODE
             ),
-        });
+        ));
         let response = super::http_error(err);
         assert_eq!(response.status(), axum::http::StatusCode::BAD_GATEWAY);
     }
@@ -3448,11 +3442,10 @@ mod tests {
     /// too; a conflict from a supervisor must come back as a plain 409.
     #[farhelm_testtrace::test]
     fn a_supervisor_conflict_never_carries_the_stale_create_header() {
-        let err = anyhow::Error::new(SupervisorError {
-            origin: ErrorOrigin::SupervisorReply,
-            kind: farhelm_proto::ErrorKind::Conflict,
-            message: "refused [farhelm:precondition/incarnation]".to_string(),
-        });
+        let err = anyhow::Error::new(crate::client::supervisor_reply_error_for_test(
+            farhelm_proto::ErrorKind::Conflict,
+            "refused [farhelm:precondition/incarnation]".to_string(),
+        ));
         let response = super::http_error(err);
         assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
         assert!(
@@ -3506,11 +3499,10 @@ mod tests {
     /// without meaning to.
     #[farhelm_testtrace::test]
     fn error_kind_prefers_the_host_store_family_over_a_supervisor_error_in_the_same_chain() {
-        let inner = anyhow::Error::new(SupervisorError {
-            origin: crate::client::ErrorOrigin::Helm,
-            kind: farhelm_proto::ErrorKind::Internal,
-            message: "an inner, less specific classification".to_string(),
-        });
+        let inner = anyhow::Error::new(SupervisorError::helm(
+            farhelm_proto::ErrorKind::Internal,
+            "an inner, less specific classification".to_string(),
+        ));
         let chain = inner.context(crate::store::HostStoreError::HostNotFound(42));
         let response = super::http_error(chain);
         assert_eq!(
