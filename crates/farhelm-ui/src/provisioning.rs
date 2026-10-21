@@ -534,15 +534,23 @@ pub(crate) struct UpdateStepLine {
     pub(crate) current: bool,
 }
 
-/// The helm's readable step name, with the stable id as a compatibility fallback.
+/// Borrow the readable name's original bytes, or the stable id for old snapshots.
+///
+/// The folded summary still owns plain strings and the expanded rail escapes
+/// this borrow at render time. Empty names retain the existing id fallback;
+/// whitespace-only names are data and must not be trimmed into that fallback.
 fn progress_step_name(step: &crate::api::ProvisioningStep) -> &str {
     step.name
-        .as_deref()
+        .as_ref()
+        .map(crate::peer::PeerText::raw)
         .filter(|name| !name.is_empty())
         .unwrap_or(&step.step)
 }
 
 /// Use a result word that distinguishes no-op and degraded work from failure.
+///
+/// These words come from the helm's finite StepStatus enum, not command output.
+/// Preserve unknown future words verbatim rather than refusing a whole snapshot.
 pub(crate) fn progress_step_status(status: &str) -> &str {
     match status {
         "skipped" => "unchanged",
@@ -703,7 +711,12 @@ fn summarize_running_view(
             id: step.step.clone(),
             name: progress_step_name(step).to_string(),
             status: step.status.clone(),
-            message: step.message.clone(),
+            // The popup's local snapshot still owns raw strings and escapes
+            // them through PeerLine. Do not cache a display spelling here.
+            message: step
+                .message
+                .as_ref()
+                .map(|message| message.raw().to_owned()),
             current: Some(index) == current_index,
         })
         .collect();
@@ -810,6 +823,9 @@ fn update_owned(intent: Option<&UpdateIntent>, tracked: Option<&TrackedRun>) -> 
 }
 
 /// The opaque id and server-rendered text that must stay paired until POST.
+///
+/// Local confirmation and notice state retain raw strings: the plan renderer
+/// escapes the confirmation and Copy plan needs its exact original bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingPlan {
     operation: ProvisioningOperation,
@@ -945,8 +961,8 @@ fn PlanStepList(confirmation: String, steps: Option<PlanSteps>) -> Element {
                                         span {
                                             class: "provisioning-plan-path peer-value",
                                             dir: "ltr",
-                                            "data-tooltip": "{display_peer(&path.full)}",
-                                            "{display_peer(&path.short)}"
+                                            "data-tooltip": "{path.full.escaped()}",
+                                            "{path.short.escaped()}"
                                         }
                                     }
                                 }
@@ -1165,7 +1181,7 @@ async fn prepare(
                 operation,
                 binding,
                 probe_id: planned.probe_id,
-                confirmation: planned.confirmation,
+                confirmation: planned.confirmation.raw().to_owned(),
                 steps: planned.steps,
                 kept_state_dir: None,
             })))
@@ -1176,9 +1192,11 @@ async fn prepare(
                 operation,
                 binding,
                 probe_id: planned.probe_id,
-                confirmation: planned.confirmation,
+                confirmation: planned.confirmation.raw().to_owned(),
                 steps: planned.steps,
-                kept_state_dir: Some(planned.plan.state_dir),
+                // The success notice owns a local raw path for clipboard copy;
+                // its visible and accessible labels still use peer rendering.
+                kept_state_dir: Some(planned.plan.state_dir.raw().to_owned()),
             })))
         }
         ProvisioningOperation::Add => {
@@ -1222,11 +1240,13 @@ async fn prepare(
                     operation,
                     binding,
                     probe_id,
-                    confirmation,
+                    confirmation: confirmation.raw().to_owned(),
                     steps,
                     kept_state_dir: None,
                 })),
-                ProbeResponse::Manual { reason } => Preparation::Manual(reason),
+                // The local diagnostic state shares transport-error strings;
+                // every presentation of this state still enters PeerLine.
+                ProbeResponse::Manual { reason } => Preparation::Manual(reason.raw().to_owned()),
                 ProbeResponse::Unvalidated(problem) => Preparation::Unvalidated(problem),
             })
         }
@@ -3360,6 +3380,142 @@ fn operation_label(operation: Option<ProvisioningOperation>) -> &'static str {
 mod tests {
     use super::*;
 
+    /// A decoded plan must keep its copyable bytes while both production
+    /// renderers show hostile text visibly. The fallback also preserves blank
+    /// lines and spaces instead of inventing the single-line placeholders.
+    #[farhelm_testtrace::test]
+    fn decoded_plan_text_keeps_raw_bytes_and_escapes_rendered_values() {
+        /// Mount the production renderer with the local confirmation snapshot;
+        /// neither branch gets a test-only presentation path.
+        fn render((confirmation, steps): (String, Option<PlanSteps>)) -> Element {
+            rsx! { PlanStepList { confirmation, steps } }
+        }
+
+        let raw = "heading\r\n- remove path\u{202e}\r\n   \r\n\t\n";
+        let plan: crate::api::UninstallPlan = serde_json::from_value(serde_json::json!({
+            "probe_id": "opaque-plan",
+            "confirmation": raw,
+            "steps": {
+                "lead": "target\u{200b}",
+                "steps": [{
+                    "id": "remove-unit",
+                    "name": "remove\u{202e}",
+                    "paths": [{"full": "/home/host/\u{200b}unit", "short": "~/\u{200b}unit"}],
+                    "explanation": "reason\u{2066}"
+                }],
+                "kept": "keep\u{200b}"
+            },
+            "plan": {"state_dir": "/home/host/\u{200b}data"}
+        }))
+        .unwrap();
+        assert_eq!(plan.probe_id, "opaque-plan");
+        assert_eq!(plan.confirmation.raw(), raw);
+        assert_eq!(plan.plan.state_dir.raw(), "/home/host/\u{200b}data");
+
+        for (steps, expected) in [
+            (
+                plan.steps,
+                vec![
+                    "target<U+200B>",
+                    "remove<U+202E>",
+                    "~/<U+200B>unit",
+                    "reason<U+2066>",
+                    "keep<U+200B>",
+                ],
+            ),
+            (
+                None,
+                vec!["heading", "- remove path<U+202E>", "   ", "<U+0009>"],
+            ),
+        ] {
+            // This is the same raw local snapshot the confirmation and Copy
+            // plan handlers receive; rendering must never rewrite its source.
+            let confirmation = plan.confirmation.raw().to_owned();
+            assert_eq!(confirmation.as_bytes(), raw.as_bytes());
+            let structured = steps.is_some();
+            let mut dom = VirtualDom::new_with_props(render, (confirmation, steps));
+            let edits = dom.rebuild_to_vec().edits;
+            let texts = edits
+                .iter()
+                .filter_map(|edit| match edit {
+                    dioxus::core::Mutation::CreateTextNode { value, .. }
+                    | dioxus::core::Mutation::SetText { value, .. } => Some(value.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            for expected in expected {
+                assert!(texts.contains(&expected), "missing {expected:?}: {texts:?}");
+            }
+            if structured {
+                assert!(edits.iter().any(|edit| matches!(edit,
+                    dioxus::core::Mutation::SetAttribute {
+                        name: "data-tooltip",
+                        value: dioxus::core::AttributeValue::Text(value),
+                        ..
+                    } if value == "/home/host/<U+200B>unit"
+                )));
+            }
+            assert!(
+                texts
+                    .iter()
+                    .all(|text| !text.contains(['\u{200b}', '\u{202e}', '\u{2066}', '\r', '\t']))
+            );
+            assert!(!texts.iter().any(|text| text.contains("whitespace only")));
+        }
+    }
+
+    /// Names and diagnostics remain peer data even when copied into the
+    /// folded row's local summary. Missing and empty names fall back to the
+    /// stable step label; whitespace and unknown finite status words do not.
+    #[farhelm_testtrace::test]
+    fn decoded_progress_keeps_name_fallbacks_and_raw_summary_diagnostics() {
+        let view: ProvisioningView = serde_json::from_value(serde_json::json!({
+            "run_id": "opaque-run",
+            "operation": "update",
+            "status": "running",
+            "steps": [{
+                "step": "upload-farhelm",
+                "name": " \t ",
+                "paths": [{"full": "/host/\u{200b}path", "short": "~/\u{200b}path"}],
+                "explanation": "reason\u{202e}",
+                "status": "future-status",
+                "message": "command\u{200b}\r\nfailed"
+            }],
+            "message": "aggregate\u{2066}"
+        }))
+        .unwrap();
+        let summary = summarize_running_view(
+            &view,
+            "opaque-run".to_owned(),
+            Instant::now(),
+            ProvisioningOperation::Update,
+        );
+        assert_eq!(summary.run_id, "opaque-run");
+        assert_eq!(summary.steps[0].id, "upload-farhelm");
+        assert_eq!(summary.steps[0].name, " \t ");
+        assert_eq!(summary.steps[0].status, "future-status");
+        assert_eq!(
+            summary.steps[0].message.as_deref(),
+            Some("command\u{200b}\r\nfailed")
+        );
+        assert_eq!(view.message.as_ref().unwrap().raw(), "aggregate\u{2066}");
+        let mut step = view.steps[0].clone();
+        assert_eq!(progress_step_name(&step), " \t ");
+        assert_eq!(progress_step_status(&step.status), "future-status");
+        assert_eq!(step.paths[0].full.raw(), "/host/\u{200b}path");
+        assert_eq!(step.explanation.as_ref().unwrap().raw(), "reason\u{202e}");
+        assert_eq!(
+            step.message.as_ref().unwrap().raw(),
+            "command\u{200b}\r\nfailed"
+        );
+        step.name = Some("name\u{200b}".into());
+        assert_eq!(display_peer(progress_step_name(&step)), "name<U+200B>");
+        step.name = Some("".into());
+        assert_eq!(progress_step_name(&step), "upload-farhelm");
+        step.name = None;
+        assert_eq!(progress_step_name(&step), "upload-farhelm");
+    }
+
     /// A requested plan's failure opens the matching modal, while the
     /// trusted Remove marker survives only uninstall planning. This pins
     /// the client routing separately from the helm's header producer.
@@ -3971,7 +4127,7 @@ mod tests {
                 },
                 crate::api::ProvisioningStep {
                     step: "upload-farhelm".to_string(),
-                    name: Some("upload the farhelm binary".to_string()),
+                    name: Some("upload the farhelm binary".into()),
                     status: "running".to_string(),
                     message: None,
                     ..Default::default()
@@ -3991,7 +4147,7 @@ mod tests {
                 crate::api::ProvisioningStep {
                     step: "degraded-step".to_string(),
                     status: "degraded".to_string(),
-                    message: Some("starts at login instead".to_string()),
+                    message: Some("starts at login instead".into()),
                     ..Default::default()
                 },
                 crate::api::ProvisioningStep {
