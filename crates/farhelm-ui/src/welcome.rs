@@ -8,8 +8,8 @@
 
 use dioxus::prelude::*;
 
-use crate::hosts::settings_dialog::install_dialog_with_focus;
-use crate::{app_bar::open_external_page, modal_isolation};
+use crate::app_bar::open_external_page;
+use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog};
 
 /// The gate publishes its successful-read decision before children mount.
 /// AppBar seeds its own open state from this once; later preference changes
@@ -23,51 +23,29 @@ pub(crate) struct WelcomeOnLoad(pub(crate) Signal<bool>);
 #[derive(Clone, Copy)]
 pub(crate) struct WelcomeDecided(pub(crate) Signal<bool>);
 
-/// Where dismissal hands the keyboard, based on how this card was opened.
-pub(crate) enum CloseFocus {
-    InitialPage,
-    Help,
-    Feedback,
-}
-
 const DIALOG_SELECTOR: &str = r#".welcome-dialog[role="dialog"]"#;
+/// AppBar chooses the destination from first-open, Help and Feedback ownership.
+pub(crate) const DIALOG: DialogHandle = DialogHandle::new(DIALOG_SELECTOR);
 const GET_STARTED_URL: &str = "https://farhelm.io/docs/get-started/first-session/";
-
-/// Release isolation before the parent removes the card or opens feedback.
-/// A menu dismissal returns to its toggle after the closing render. First-open
-/// dismissal restores the currently selected, revealed terminal. A terminal
-/// still preparing takes focus on its ordinary reveal; an empty fleet keeps
-/// its initial body focus. A feedback handoff lets the new modal own focus.
-pub(crate) fn release(target: CloseFocus) {
-    let focus = match target {
-        CloseFocus::Help => {
-            "requestAnimationFrame(() => document.querySelector('.app-help-toggle')?.focus({ preventScroll: true }));"
-        }
-        CloseFocus::InitialPage => {
-            "requestAnimationFrame(() => window.farhelmTerm?.focusSelected());"
-        }
-        CloseFocus::Feedback => "",
-    };
-    document::eval(&format!(
-        "{} {focus}",
-        modal_isolation::release_js(DIALOG_SELECTOR)
-    ));
-}
 
 /// The introduction uses the existing framed modal and safe Escape fallback.
 /// Every dismissal is unconditional, including while a preference write fails;
 /// only Get started leaves the card open. Its owner distinguishes first-open
-/// dismissal from reopening and performs the shared write when needed.
+/// dismissal from reopening, chooses the corresponding keyboard destination,
+/// and performs the shared write when needed. Feedback takes focus itself.
 #[component]
 pub(crate) fn WelcomeDialog(on_close: EventHandler<()>, on_feedback: EventHandler<()>) -> Element {
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
-            div {
+            ModalDialog {
+                handle: DIALOG,
+                focus: DialogFocus::remembered(
+                    ".welcome-got-it", Some(".welcome-got-it"), true, Some(".welcome-got-it"),
+                ),
                 class: "app-settings-dialog welcome-dialog host-dialog-framed",
                 role: "dialog", aria_modal: "true", aria_label: "welcome to farhelm", tabindex: "-1",
-                onmounted: move |_| install_dialog_with_focus(DIALOG_SELECTOR, ".welcome-got-it", Some(".welcome-got-it"), true, Some(".welcome-got-it")),
-                onkeydown: move |event: KeyboardEvent| {
-                    if event.key() == Key::Escape && !event.is_composing() {
+                on_escape: move |event: KeyboardEvent| {
+                    if !event.is_composing() {
                         on_close.call(());
                     }
                 },

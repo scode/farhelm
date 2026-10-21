@@ -1,40 +1,20 @@
 //! One read-only dialog for the help menu and the still-mounted add-host form.
 //! The helm composes commands; this component only presents and copies them.
+//! Each owner closes through the shared boundary before removing help, and
+//! Add restores its existing isolation after focus returns to the intact form.
 
 use crate::{
     ApiBase,
     api::{SshHostCommands, fetch_ssh_connection_help},
-    hosts::settings_dialog::{HostDialogHeader, install_dialog_with_selector},
-    modal_isolation,
+    hosts::settings_dialog::HostDialogHeader,
+    modal_dialog::{DialogFocus, DialogHandle, ModalDialog},
     peer::PeerLine,
 };
 use dioxus::prelude::*;
 
 const SELECTOR: &str = r#".ssh-help-dialog[role="dialog"]"#;
-
-/// Release the child modal before returning focus to its opener. Add host
-/// remains mounted with its draft intact; it must regain isolation too. A probe
-/// can replace the opener with a setup offer while help is open, so Cancel is
-/// the safe surviving target when that happens.
-pub(crate) fn return_focus(add_host: bool) {
-    let parent = if add_host {
-        modal_isolation::install_js(
-            r#".host-add-dialog[role="dialog"]"#,
-            Some(".add-host-cancel"),
-        )
-    } else {
-        String::new()
-    };
-    let target = if add_host {
-        ".add-host-ssh-help, .host-add-dialog .add-host-cancel"
-    } else {
-        ".app-help-toggle"
-    };
-    document::eval(&format!(
-        "{} requestAnimationFrame(() => {{ document.querySelector('{target}')?.focus({{preventScroll:true}}); {parent} }});",
-        modal_isolation::release_js(SELECTOR)
-    ));
-}
+/// Each surviving owner chooses its Help or hidden Add-form return contract.
+pub(crate) const DIALOG: DialogHandle = DialogHandle::new(SELECTOR);
 
 /// Fetch once per opening, never block dismissal on HTTP, and preserve an
 /// unregistered destination as a snapshot of the add form's draft.
@@ -82,11 +62,13 @@ pub(crate) fn SshHelpDialog(destination: Option<String>, on_close: EventHandler<
     }));
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
-            div { class: "app-settings-dialog ssh-help-dialog host-dialog-framed", role: "dialog",
+            ModalDialog {
+                handle: DIALOG,
+                focus: DialogFocus::remembered(".ssh-help-close", Some(".ssh-help-close"), false, None),
+                class: "app-settings-dialog ssh-help-dialog host-dialog-framed", role: "dialog",
                 aria_modal: "true", aria_label: "ssh needs 2FA?", tabindex: "-1",
-                onmounted: move |_| install_dialog_with_selector(SELECTOR, ".ssh-help-close", Some(".ssh-help-close"), None),
-                onkeydown: move |event: KeyboardEvent| {
-                    if event.key() == Key::Escape && !event.is_composing() { on_close.call(()); }
+                on_escape: move |event: KeyboardEvent| {
+                    if !event.is_composing() { on_close.call(()); }
                 },
                 HostDialogHeader {
                     title: rsx! { "ssh needs 2FA?" }, summary: "start a host's ssh connections yourself",

@@ -51,7 +51,6 @@ use dioxus::prelude::*;
 use super::{EditField, HostDestinationForm, gui_host_name, phase_class, phase_display_label};
 use crate::icons::HostMark;
 use crate::modal_dialog::{DialogFocus, DialogHandle, FocusTarget, ModalDialog};
-use crate::modal_isolation;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::{Host, HostId, HostKind, HostPhase};
 
@@ -61,6 +60,8 @@ const DIALOG_SELECTOR: &str = r#".host-settings-dialog[role="dialog"]"#;
 pub(crate) const DIALOG: DialogHandle = DialogHandle::new(DIALOG_SELECTOR);
 /// Add form and row setup share a selector while retaining different mount focus.
 pub(crate) const ADD_DIALOG_SELECTOR: &str = r#".host-add-dialog[role="dialog"]"#;
+/// The panel and nested SSH help share the mounted Add form's boundary.
+pub(crate) const ADD_DIALOG: DialogHandle = DialogHandle::new(ADD_DIALOG_SELECTOR);
 /// Uninstall's root installs independently of the generic host close handle.
 pub(crate) const UNINSTALL_DIALOG_SELECTOR: &str = r#".host-uninstall-dialog[role="dialog"]"#;
 
@@ -142,30 +143,10 @@ pub(crate) fn focus_remove_refusal() {
     );
 }
 
-/// Focus and isolate the add-host dialog, whose first control is the SSH
-/// destination rather than a destructive action.
-pub(crate) fn install_add_dialog() {
-    install_dialog_with_selector(
-        ADD_DIALOG_SELECTOR,
-        ".add-host-ssh",
-        Some(".add-host-cancel"),
-        Some(".provisioning-confirm, .add-host-submit"),
-    );
-}
-
-/// Release the add-host modal and return focus to the heading's add button.
-pub(crate) fn return_focus_to_add_button() {
-    let selector = serde_json::to_string(".add-host-button").expect("a string always serializes");
-    document::eval(&format!(
-        "{} requestAnimationFrame(() => document.querySelector({selector})?.focus({{ preventScroll: true }}))",
-        modal_isolation::release_js(ADD_DIALOG_SELECTOR),
-    ));
-}
-
 /// Install focus isolation and container keyboard behavior for a dialog.
 ///
-/// The add-host dialog shares this helper but has a different cancel control;
-/// keeping the selector beside the dialog setup prevents the document-level
+/// QuickSwitcher still mounts through this bridge while its root awaits
+/// conversion. Keeping its cancel selector explicit prevents the document-level
 /// Escape fallback from silently swallowing Escape when focus has escaped.
 /// A main action is separate from initial focus: destructive dialogs can open
 /// on Cancel yet still let container Enter press their visible confirmation.
@@ -186,9 +167,8 @@ pub(crate) fn install_dialog_with_selector(
 
 /// Set initial focus and the optional main action without coupling them.
 ///
-/// Roots still using this bridge share the shell's remembered focus policy.
-/// Welcome requests quiet initial confirming focus; Add keeps its destination
-/// field first and uses the shared target operation when a setup offer arrives.
+/// QuickSwitcher still using this bridge shares the shell's remembered focus
+/// policy, including its independent search and Escape targets.
 /// If the container gets focus later, Enter clicks the caller's main button;
 /// a disabled button retains its native refusal.
 pub(crate) fn install_dialog_with_focus(
@@ -198,9 +178,9 @@ pub(crate) fn install_dialog_with_focus(
     quiet_initial_focus: bool,
     main_action_selector: Option<&str>,
 ) {
-    // Unconverted host roots use the same installation as the shell, including
-    // focus memory and its two-eval order. Their later conversion changes the
-    // rendered root owner without leaving another copy of the focus rules.
+    // The remaining QuickSwitcher root uses the same installation as the shell,
+    // including focus memory and its two-eval order. Its later conversion can
+    // change the root owner without leaving another copy of the focus rules.
     let focus = crate::modal_dialog::DialogFocus::remembered(
         initial_focus,
         escape_selector,

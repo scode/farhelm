@@ -556,13 +556,17 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
             preferences.0.write().welcome_seen = Some(true);
             crate::api::store_preference(&base, crate::api::PreferenceValue::WelcomeSeen(true));
         }
-        crate::welcome::release(if open_feedback {
-            crate::welcome::CloseFocus::Feedback
+        if open_feedback {
+            crate::welcome::DIALOG.release();
         } else if first_open {
-            crate::welcome::CloseFocus::InitialPage
+            // Initial reveal withheld terminal focus behind Welcome. Restore
+            // only a selected, revealed terminal; an empty page has no opener.
+            crate::welcome::DIALOG.close("window.farhelmTerm?.focusSelected();");
         } else {
-            crate::welcome::CloseFocus::Help
-        });
+            crate::welcome::DIALOG.close(
+                &crate::modal_dialog::FocusTarget::new(".app-help-toggle", None, false).script(),
+            );
+        }
         welcome_open.set(false);
         if open_feedback {
             feedback_notice.set(String::new());
@@ -785,7 +789,12 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
         if ssh_help_open() {
             crate::ssh_help::SshHelpDialog {
                 destination: None,
-                on_close: move |_| { crate::ssh_help::return_focus(false); ssh_help_open.set(false); },
+                on_close: move |_| {
+                    crate::ssh_help::DIALOG.close(
+                        &crate::modal_dialog::FocusTarget::new(".app-help-toggle", None, false).script(),
+                    );
+                    ssh_help_open.set(false);
+                },
             }
         }
         if feedback_open() {
