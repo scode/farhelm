@@ -101,6 +101,8 @@ impl TrustAgent {
 
 /// Page-owned closes survive keyed views and transient read failures. An accepted
 /// observation clears only an ended question, never navigation or a missing row.
+/// Raw routing references identify occurrences; presentation spelling must not
+/// merge or separate the page's remembered dismissals.
 #[derive(Clone, Copy)]
 pub(crate) struct OccurrenceDismissals(pub Signal<HashSet<(String, TrustAgent)>>);
 
@@ -110,11 +112,12 @@ impl OccurrenceDismissals {
     pub(crate) fn observe(mut self, session: &Session) {
         let agent = TrustAgent::for_session(session);
         let should_remove = self.0.peek().iter().any(|(id, closed_agent)| {
-            id == &session.id && (!session.workspace_trust_prompt || Some(*closed_agent) != agent)
+            id == session.id.raw()
+                && (!session.workspace_trust_prompt || Some(*closed_agent) != agent)
         });
         if should_remove {
             self.0.write().retain(|(id, closed_agent)| {
-                id != &session.id
+                id != session.id.raw()
                     || (session.workspace_trust_prompt && Some(*closed_agent) == agent)
             });
         }
@@ -255,7 +258,7 @@ fn AgentTrustBand(session: ReadSignal<Session>, agent_visible: bool, agent: Trus
         .as_ref()
         .and_then(|value| value.as_ref().ok())
         .cloned();
-    let occurrence = (session.id.clone(), agent);
+    let occurrence = (session.id.raw().to_owned(), agent);
     let visible = show_hint(
         session.workspace_trust_prompt,
         session.working_copy.is_some(),

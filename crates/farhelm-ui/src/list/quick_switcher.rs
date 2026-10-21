@@ -451,7 +451,9 @@ pub(super) fn QuickSwitcher(
                                   let ended = badge.as_ref().is_some_and(|badge| badge.visible);
                                   rsx! {
                                     button {
-                                        key: "{session.id}", class: "quick-switcher-row", r#type: "button", role: "option", tabindex: "-1",
+                                        // Component ownership follows raw routing identity,
+                                        // independently of the escaped labels below.
+                                        key: "{session.id.raw()}", class: "quick-switcher-row", r#type: "button", role: "option", tabindex: "-1",
                                         id: "quick-switcher-result-{position}", aria_selected: position == selected_index,
                                         "data-tooltip": "open this session",
                                         onclick: move |_| on_pick.call(SwitcherPick::Session(Box::new(session.clone()))),
@@ -625,7 +627,7 @@ mod tests {
         let ids = |query| {
             session_matches(&sessions, query)
                 .iter()
-                .map(|row| sessions[row.index].id.as_str())
+                .map(|row| sessions[row.index].id.raw())
                 .collect::<Vec<_>>()
         };
         assert_eq!(ids("api"), ["scattered", "contiguous", "host", "folder"]);

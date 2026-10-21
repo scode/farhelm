@@ -11,6 +11,8 @@ use std::{cell::Cell, rc::Rc};
 /// Page-local occurrence dismissals survive keyed session views and temporary
 /// stale surfaces. Only accepted observations of an ended question clear them;
 /// navigation, a filtered list, and a failed read are not that evidence.
+/// Keys are exact routing references, including any unsafe suffix characters;
+/// escaping one would give the same session a different dismissal identity.
 #[derive(Clone, Copy)]
 pub(crate) struct OccurrenceDismissals(pub Signal<std::collections::HashSet<String>>);
 
@@ -18,8 +20,8 @@ impl OccurrenceDismissals {
     /// Apply a current session observation without subscribing its reader to
     /// dismissal changes (which would otherwise cause redundant fetches).
     pub(crate) fn observe(mut self, session: &Session) {
-        if !session.claude_trust_prompt && self.0.peek().contains(&session.id) {
-            self.0.write().remove(&session.id);
+        if !session.claude_trust_prompt && self.0.peek().contains(session.id.raw()) {
+            self.0.write().remove(session.id.raw());
         }
     }
 }
@@ -156,9 +158,9 @@ pub(crate) fn ClaudeTrustBand(session: ReadSignal<Session>, agent_visible: bool)
         agent_visible,
         value.as_ref().map(|value| value.enabled),
         value.as_ref().is_some_and(|value| value.hint_dismissed),
-        occurrences.0.read().contains(&session.id),
+        occurrences.0.read().contains(session.id.raw()),
     );
-    let id = session.id.clone();
+    let id = session.id.raw().to_owned();
     rsx! {
         // A mounted band may be hidden either by a saved choice or by an
         // unanswered settings read. Keep that distinction observable without

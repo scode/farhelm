@@ -44,7 +44,9 @@ pub(super) fn SessionSummarySource(
     activity: Option<ActivityStamp>,
     badge: Option<StatusBadge>,
 ) -> Element {
-    let source_id = format!("session-summary-{}", session.id);
+    // The row's tooltip targets this exact DOM identity. Escaping it as visible
+    // text would disconnect the source from the row that owns it.
+    let source_id = format!("session-summary-{}", session.id.raw());
     let card_class = if session.stale {
         "session-summary stale"
     } else {

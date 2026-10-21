@@ -19,6 +19,29 @@ const SESSION_LIST_JSON: &str =
     include_str!("../../../farhelm-helm/http-contract/session-list.json");
 const HOST_LIST_JSON: &str = include_str!("../../../farhelm-helm/http-contract/host-list.json");
 
+/// Full session references retain the peer's suffix at the decode-to-routing
+/// boundary. Visible escape markers must never become URL identity bytes,
+/// including when the suffix contains invisible characters or URL delimiters.
+#[farhelm_testtrace::test]
+fn decoded_session_references_keep_raw_bytes_in_terminal_routes() {
+    let raw = "11111111-1111-4111-8111-111111111111:name\u{200B}\u{202E}:?#";
+    let session: crate::Session = serde_json::from_value(serde_json::json!({
+        "id": raw, "title": "routing", "cwd": "/work", "invocation": "command"
+    }))
+    .unwrap();
+    assert_eq!(session.id.raw(), raw);
+    assert_ne!(session.id.escaped(), raw, "the fixture needs unsafe text");
+    assert_eq!(serde_json::to_value(&session.id).unwrap(), raw);
+    assert_eq!(
+        crate::tabs::terminal_ws_path(session.id.raw(), None, "lease"),
+        "/api/sessions/11111111-1111-4111-8111-111111111111%3Aname%E2%80%8B%E2%80%AE%3A%3F%23/term?lease=lease"
+    );
+    assert_eq!(
+        crate::tabs::terminal_ws_unowned_path(session.id.raw(), Some("tab"), "lease"),
+        "/api/sessions/11111111-1111-4111-8111-111111111111%3Aname%E2%80%8B%E2%80%AE%3A%3F%23/term/unowned?tab=tab&lease=lease"
+    );
+}
+
 /// Decoding must not bake presentation markers into data that rename, clone
 /// and status interpretation still consume raw. These three fields cross the
 /// same wire boundary, including values with no ordinary visible characters.
@@ -54,7 +77,10 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
     let [row] = body.sessions.as_slice() else {
         panic!("the fixture holds exactly one row");
     };
-    assert_eq!(row.id, "11111111-1111-4111-8111-111111111111:fh-0123abcd");
+    assert_eq!(
+        row.id.raw(),
+        "11111111-1111-4111-8111-111111111111:fh-0123abcd"
+    );
     assert_eq!(row.title.raw(), "Fix the widget");
     assert_eq!(row.cwd.raw(), "~/src/widgets");
     assert_eq!(

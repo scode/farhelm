@@ -877,7 +877,7 @@ pub(crate) fn forget_menu_focus<A: Copy, Id: 'static, const N: usize>(
 /// the element holding focus and drops them at the top of the document,
 /// several dozen Tab presses from the row they were working on.
 ///
-/// `id_attr`/`id_value` name the row: `("data-session-id", &session.id)`
+/// `id_attr`/`id_value` name the row: `("data-session-id", session.id.raw())`
 /// for the session row, `("data-host-id", &host.id.to_string())` for the
 /// host row — the DOM marker every row already carries for the browser
 /// suite, reused here instead of adding a second one. `toggle_selector` is

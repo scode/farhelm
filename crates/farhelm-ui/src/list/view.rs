@@ -150,7 +150,7 @@ fn listed_rename_unavailable(
         !listing
             .sessions
             .iter()
-            .any(|session| session.id == editor.id)
+            .any(|session| session.id.raw() == editor.id)
     })
 }
 
@@ -384,7 +384,7 @@ fn newest_created_fallback<'a>(
 ) -> Option<&'a Session> {
     let mut eligible = sessions
         .iter()
-        .filter(|session| Some(session.id.as_str()) != excluded);
+        .filter(|session| Some(session.id.raw()) != excluded);
     eligible
         .clone()
         .filter(|session| session.created_at > 0)
@@ -410,7 +410,7 @@ fn automatic_selection<'a>(
         .map(String::as_str)
         .chain(last_selected.filter(|_| history.is_empty()))
         .filter(|id| Some(*id) != excluded)
-        .find_map(|id| sessions.iter().find(|session| session.id == id))
+        .find_map(|id| sessions.iter().find(|session| session.id.raw() == id))
         .or_else(|| newest_created_fallback(sessions, excluded))
 }
 
@@ -878,7 +878,9 @@ pub(crate) fn ListView(
     // consults to refuse ITS claims while a row op runs. Paired helpers
     // rather than open-coded at each site so no exit path can forget the
     // decrement (a stuck count would leave the session view inert).
-    let mut begin_row_op = move |id: &String| -> bool {
+    // Borrow raw identity so decoded references and local action snapshots
+    // enter the same gate without changing the map's owned keys.
+    let mut begin_row_op = move |id: &str| -> bool {
         if ops.busy_now() {
             return false;
         }
@@ -887,7 +889,7 @@ pub(crate) fn ListView(
             if phases.contains_key(id) {
                 return false;
             }
-            phases.insert(id.clone(), RowPhase::Pending);
+            phases.insert(id.to_owned(), RowPhase::Pending);
         }
         row_ops += 1;
         true
@@ -1403,7 +1405,7 @@ pub(crate) fn ListView(
             let menu_vanished = menu_open
                 .read()
                 .as_ref()
-                .is_some_and(|id| !listing.sessions.iter().any(|s| s.id == *id));
+                .is_some_and(|id| !listing.sessions.iter().any(|s| s.id.raw() == *id));
             if menu_vanished {
                 menu_open.set(None);
             }
@@ -1415,7 +1417,7 @@ pub(crate) fn ListView(
                 !listing
                     .sessions
                     .iter()
-                    .any(|s| s.id == open.id && !s.notifications.is_empty())
+                    .any(|s| s.id.raw() == open.id && !s.notifications.is_empty())
             });
             if bell_vanished {
                 bell_open.set(None);
@@ -1491,7 +1493,7 @@ pub(crate) fn ListView(
                 let newest = listing
                     .sessions
                     .iter()
-                    .find(|session| session.id == open.id)
+                    .find(|session| session.id.raw() == open.id)
                     .and_then(Session::newest_notification_seq)?;
                 (newest > open.shown).then(|| OpenBell {
                     shown: newest,
@@ -1526,7 +1528,10 @@ pub(crate) fn ListView(
                 .is_some_and(|previous| {
                     previous.sessions.iter().any(|session| {
                         session.working_copy.is_some()
-                            && !listing.sessions.iter().any(|next| next.id == session.id)
+                            && !listing
+                                .sessions
+                                .iter()
+                                .any(|next| next.id.raw() == session.id.raw())
                     })
                 });
             if managed_disappeared {
@@ -1540,7 +1545,9 @@ pub(crate) fn ListView(
             // another client while this one sat mid-confirmation, an
             // externally-imposed departure the `retain` below cannot
             // distinguish from the id simply never having existed).
-            let live_ids: HashSet<&str> = listing.sessions.iter().map(|s| s.id.as_str()).collect();
+            // These keys reconcile local operation state against routing identities,
+            // never against the escaped spelling a user sees in a label.
+            let live_ids: HashSet<&str> = listing.sessions.iter().map(|s| s.id.raw()).collect();
             row_phases
                 .write()
                 .retain(|id, phase| *phase == RowPhase::Pending || live_ids.contains(id.as_str()));
@@ -1586,7 +1593,7 @@ pub(crate) fn ListView(
                 Some(held) if answers_listing_query(&requested, ordered_by) => Some(
                     rows::held_display_order(held, &listing.sessions)
                         .into_iter()
-                        .map(|session| session.id)
+                        .map(|session| session.id.raw().to_owned())
                         .collect::<Vec<_>>(),
                 ),
                 _ => None,
@@ -2334,17 +2341,22 @@ pub(crate) fn ListView(
     let mut yolo_questions = use_context::<ReplaceYoloQuestions>().0;
     use_drop(move || {
         if let Some(question) = yolo_replace.current_key() {
-            yolo_questions.write().remove(&question.pending.source.id);
+            yolo_questions
+                .write()
+                .remove(question.pending.source.id.raw());
         }
     });
     // Acquire before retiring the old opening: a duplicate leaves its owner intact.
     // Its question and failure reason change together only after admission succeeds.
     let mut open_yolo_replace = move |pending: PendingYoloReplace, error: Option<String>| {
-        if !yolo_questions.write().insert(pending.source.id.clone()) {
+        if !yolo_questions
+            .write()
+            .insert(pending.source.id.raw().to_owned())
+        {
             return;
         }
         if let Some(old) = yolo_replace.current_key() {
-            yolo_questions.write().remove(&old.pending.source.id);
+            yolo_questions.write().remove(old.pending.source.id.raw());
         }
         let opening = *yolo_openings.peek() + 1;
         yolo_openings.set(opening);
@@ -2371,7 +2383,7 @@ pub(crate) fn ListView(
     // before, with no await in between, so that start is not refused.
     let mut do_replace =
         move |source: Session, guard: crate::DeleteGuard, answered: Option<YoloReplaceAnswer>| {
-            let id = source.id.clone();
+            let id = source.id.raw().to_owned();
             errors.write().remove(&id);
             let base = replace_base.clone();
             let refresh = replace_refresh.clone();
@@ -2445,7 +2457,7 @@ pub(crate) fn ListView(
                         // The source row's host fields: the reply is bare,
                         // and the row may be gone from the listing by now.
                         let session = super::with_source_host(session, &source);
-                        remember_selection(&base, preferences, &session.id);
+                        remember_selection(&base, preferences, session.id.raw());
                         on_open.call(session);
                         refresh(Trigger::Explicit);
                     }
@@ -2510,7 +2522,7 @@ pub(crate) fn ListView(
     let on_replace = move |session: Session| {
         if clone_is_refused(
             ops.busy_now(),
-            &session.id,
+            session.id.raw(),
             &row_phases.read(),
             rename_editor
                 .read()
@@ -2522,19 +2534,19 @@ pub(crate) fn ListView(
         if replace_key
             .peek()
             .as_ref()
-            .is_some_and(|(id, _)| id != &session.id)
+            .is_some_and(|(id, _)| id != session.id.raw())
         {
             replace_key.set(None);
         }
         if skip_session_confirmations {
             let guard = crate::status::delete_guard(&session.status, session.tabs.len());
-            if begin_row_op(&session.id) {
+            if begin_row_op(session.id.raw()) {
                 direct_do_replace(session, guard, None);
             }
         } else {
             row_phases
                 .write()
-                .insert(session.id, RowPhase::ConfirmingReplace);
+                .insert(session.id.raw().to_owned(), RowPhase::ConfirmingReplace);
         }
     };
     // The loud YOLO confirmation's own way back into the same replace.
@@ -2551,9 +2563,9 @@ pub(crate) fn ListView(
         }
         if leave_phase(
             &mut row_phases.write(),
-            &source.id,
+            source.id.raw(),
             RowPhase::ConfirmingReplace,
-        ) && begin_row_op(&source.id)
+        ) && begin_row_op(source.id.raw())
         {
             let guard = crate::status::delete_guard(&source.status, source.tabs.len());
             do_replace(source, guard, None);
@@ -2606,7 +2618,7 @@ pub(crate) fn ListView(
     let on_clone = move |session: Session| {
         if clone_is_refused(
             ops.busy_now(),
-            &session.id,
+            session.id.raw(),
             &row_phases.read(),
             rename_editor
                 .read()
@@ -2671,7 +2683,7 @@ pub(crate) fn ListView(
     let on_replace_with = move |session: Session| {
         if clone_is_refused(
             ops.busy_now(),
-            &session.id,
+            session.id.raw(),
             &row_phases.read(),
             rename_editor
                 .read()
@@ -2712,7 +2724,7 @@ pub(crate) fn ListView(
         };
         if clone_is_refused(
             ops.busy_now(),
-            &session.id,
+            session.id.raw(),
             &row_phases.read(),
             rename_editor
                 .read()
@@ -2925,7 +2937,7 @@ pub(crate) fn ListView(
         {
             return false;
         }
-        remember_selection(&open_base, preferences, &session.id);
+        remember_selection(&open_base, preferences, session.id.raw());
         on_open.call(session);
         true
     };
@@ -2972,7 +2984,7 @@ pub(crate) fn ListView(
         if !listing_ok
             .sessions
             .iter()
-            .any(|session| last_opened.peek().as_deref() != Some(session.id.as_str()))
+            .any(|session| last_opened.peek().as_deref() != Some(session.id.raw()))
             || *resolving_selection.read()
         {
             return;
@@ -3013,7 +3025,7 @@ pub(crate) fn ListView(
                         .cloned()
                     });
                 if let Some(session) = candidate {
-                    remember_selection(&base, preferences, &session.id);
+                    remember_selection(&base, preferences, session.id.raw());
                     on_open.call(session);
                 }
             }
@@ -3085,7 +3097,11 @@ pub(crate) fn ListView(
                 return;
             }
             let ids: Vec<String> = match listing.peek().as_ref() {
-                Some(Ok(current)) => current.sessions.iter().map(|s| s.id.clone()).collect(),
+                Some(Ok(current)) => current
+                    .sessions
+                    .iter()
+                    .map(|s| s.id.raw().to_owned())
+                    .collect(),
                 _ => return,
             };
             order_hold.set(Some(ids));
@@ -3689,7 +3705,7 @@ pub(crate) fn ListView(
             let mut restore = true;
             match pick {
                 Some(super::quick_switcher::SwitcherPick::Session(session)) => {
-                    let same = selected.peek().as_deref() == Some(session.id.as_str());
+                    let same = selected.peek().as_deref() == Some(session.id.raw());
                     let hidden = filter
                         .peek()
                         .host
@@ -4154,7 +4170,7 @@ pub(crate) fn ListView(
                         // can trigger reconciliation against a late old reply.
                         listing_reads.write().fence();
                         // Creation is a user-initiated selection too.
-                        remember_selection(&created_base, preferences, &session.id);
+                        remember_selection(&created_base, preferences, session.id.raw());
                         // Mirror the structured launch THIS client submitted
                         // (never the reply's `session.launch`, which the
                         // remote host writes: SPEC.md allows only explicit
@@ -4191,7 +4207,7 @@ pub(crate) fn ListView(
                         let naming = name_created_session(
                             new_was_never_shown,
                             preferences.0.peek().name_session_on_quick_launch,
-                        ).then(|| (session.id.clone(), session.title.raw().to_owned()));
+                        ).then(|| (session.id.raw().to_owned(), session.title.raw().to_owned()));
                         on_open.call(session);
                         if let Some((id, title)) = naming {
                             // Selection and the modal mount share this completion
@@ -4330,14 +4346,14 @@ pub(crate) fn ListView(
                         // mounts fresh (scrolled into view, cancel focused)
                         // instead of reusing this one's element.
                         crate::yolo_confirm::YoloConfirmation {
-                            key: "{question.pending.source.id}",
+                            key: "{question.pending.source.id.raw()}",
                             ask: question.pending.ask.clone(),
                             // This flow holds a row operation rather than
                             // the page's token (`begin_row_op`), so its own
                             // in-flight replace shows as the source row's
                             // pending phase, not as `ops.busy()`.
                             busy: ops.busy()
-                                || row_is(&row_phases.read(), &question.pending.source.id, RowPhase::Pending),
+                                || row_is(&row_phases.read(), question.pending.source.id.raw(), RowPhase::Pending),
                             error: yolo_replace_error(),
                             confirm_submits: false,
                             // Both answers continue the Replace the user
@@ -4353,7 +4369,7 @@ pub(crate) fn ListView(
                                 let mut do_replace = yolo_do_replace.clone();
                                 let question = question.clone();
                                 move |_| {
-                                    let id = question.pending.source.id.clone();
+                                    let id = question.pending.source.id.raw().to_owned();
                                     if let Some(answer) = take_yolo_answer(
                                         &mut yolo_replace,
                                         &question,
@@ -4361,7 +4377,7 @@ pub(crate) fn ListView(
                                         || begin_row_op(&id),
                                         || end_row_op(&id),
                                     ) {
-                                        yolo_questions.write().remove(&answer.pending.source.id);
+                                        yolo_questions.write().remove(answer.pending.source.id.raw());
                                         yolo_replace_error.set(None);
                                         let pending = answer.pending.clone();
                                         do_replace(pending.source, pending.guard, Some(answer));
@@ -4372,7 +4388,7 @@ pub(crate) fn ListView(
                                 let mut do_replace = yolo_do_replace.clone();
                                 let question = question.clone();
                                 move |_| {
-                                    let id = question.pending.source.id.clone();
+                                    let id = question.pending.source.id.raw().to_owned();
                                     if let Some(answer) = take_yolo_answer(
                                         &mut yolo_replace,
                                         &question,
@@ -4380,7 +4396,7 @@ pub(crate) fn ListView(
                                         || begin_row_op(&id),
                                         || end_row_op(&id),
                                     ) {
-                                        yolo_questions.write().remove(&answer.pending.source.id);
+                                        yolo_questions.write().remove(answer.pending.source.id.raw());
                                         yolo_replace_error.set(None);
                                         let pending = answer.pending.clone();
                                         do_replace(pending.source, pending.guard, Some(answer));
@@ -4394,9 +4410,9 @@ pub(crate) fn ListView(
                                     // an earlier question leaves a later one
                                     // (and its error) alone.
                                     if yolo_replace.take(&question).is_some() {
-                                        yolo_questions.write().remove(&question.pending.source.id);
+                                        yolo_questions.write().remove(question.pending.source.id.raw());
                                         let owns_source = replace_key.peek().as_ref().is_some_and(|(source, key)| {
-                                            source == &question.pending.source.id && key.as_ref() == Some(&question.pending.key)
+                                            source == question.pending.source.id.raw() && key.as_ref() == Some(&question.pending.key)
                                         });
                                         if owns_source {
                                             replace_key.set(None);
@@ -4452,11 +4468,11 @@ pub(crate) fn ListView(
                             &renamed.read(),
                         ) {
                             SessionRow {
-                                key: "{session.id}",
+                                key: "{session.id.raw()}",
                                 compact,
-                                pin_separator: pin_separator.as_deref() == Some(session.id.as_str()),
+                                pin_separator: pin_separator.as_deref() == Some(session.id.raw()),
                                 state: RowState {
-                                    error: errors.read().get(&session.id).cloned(),
+                                    error: errors.read().get(session.id.raw()).cloned(),
                                     // The shared token counts as busy for
                                     // every row's action buttons, not just
                                     // this row's own in-flight op: while
@@ -4464,17 +4480,17 @@ pub(crate) fn ListView(
                                     // holds it, `begin_row_op` refuses row
                                     // ops anyway, and the disabled state is
                                     // that refusal made visible.
-                                    busy: busy || row_is(&row_phases.read(), &session.id, RowPhase::Pending),
-                                    confirming: row_is(&row_phases.read(), &session.id, RowPhase::ConfirmingDelete),
-                                    deleting: deleting.read().contains(&session.id),
-                                    confirming_replace: row_is(&row_phases.read(), &session.id, RowPhase::ConfirmingReplace),
+                                    busy: busy || row_is(&row_phases.read(), session.id.raw(), RowPhase::Pending),
+                                    confirming: row_is(&row_phases.read(), session.id.raw(), RowPhase::ConfirmingDelete),
+                                    deleting: deleting.read().contains(session.id.raw()),
+                                    confirming_replace: row_is(&row_phases.read(), session.id.raw(), RowPhase::ConfirmingReplace),
                                     renaming: rename_editor
                                         .read()
                                         .as_ref()
-                                        .is_some_and(|editor| editor.id == session.id),
+                                        .is_some_and(|editor| editor.id == session.id.raw()),
                                     nav_disabled: nav_locked,
                                     menu_open: menu_open.read().as_deref()
-                                        == Some(session.id.as_str()),
+                                        == Some(session.id.raw()),
                                     // A prefill WITHOUT its dialog (or a
                                     // blank New) is not a transfer: only
                                     // the two together mean this row's
@@ -4484,7 +4500,7 @@ pub(crate) fn ListView(
                                     composer_transfer_open: *show_create.read()
                                         && clone_prefill.read().is_some(),
                                     selected: selected.read().as_deref()
-                                        == Some(session.id.as_str()),
+                                        == Some(session.id.raw()),
                                     locality: session_locality(session.host, local_host),
                                     host_icon: hosts.read().hosts().unwrap_or_default().iter()
                                         .find(|host| Some(host.id) == session.host).map(|host| host.icon).unwrap_or_default(),
@@ -4502,7 +4518,7 @@ pub(crate) fn ListView(
                                     bell_open: bell_open
                                         .read()
                                         .as_ref()
-                                        .filter(|open| open.id == session.id)
+                                        .filter(|open| open.id == session.id.raw())
                                         .map(|open| open.read_through),
                                 },
                                 on_open: row_open,
@@ -4651,7 +4667,7 @@ fn listed_state(
         Some(Ok(listing)) => listing
             .sessions
             .iter()
-            .find(|session| session.id == id)
+            .find(|session| session.id.raw() == id)
             .map(|session| (session.status.clone(), session.tabs.len())),
         _ => None,
     }
@@ -5172,7 +5188,7 @@ mod tests {
         // first-row fallback would miss it.
         let by_title = [row("aaa", 300), row("mmm", 100), row("zzz", 500)];
         assert_eq!(
-            newest_created_fallback(&by_title, None).map(|s| s.id.as_str()),
+            newest_created_fallback(&by_title, None).map(|s| s.id.raw()),
             Some("zzz")
         );
 
@@ -5181,7 +5197,7 @@ mod tests {
         // — and would change its answer as unrelated rows were appended.
         let tied = [row("first", 500), row("second", 100), row("third", 500)];
         assert_eq!(
-            newest_created_fallback(&tied, None).map(|s| s.id.as_str()),
+            newest_created_fallback(&tied, None).map(|s| s.id.raw()),
             Some("first"),
             "equal creation stamps must resolve to the listing's own head"
         );
@@ -5191,7 +5207,7 @@ mod tests {
         // one an ordering over zeroes would single out.
         let stampless = [row("head", 0), row("tail", 0)];
         assert_eq!(
-            newest_created_fallback(&stampless, None).map(|s| s.id.as_str()),
+            newest_created_fallback(&stampless, None).map(|s| s.id.raw()),
             Some("head")
         );
 
@@ -5199,7 +5215,7 @@ mod tests {
         // allowed to beat it by being earlier in the list.
         let mixed = [row("unknown", 0), row("stamped", 1)];
         assert_eq!(
-            newest_created_fallback(&mixed, None).map(|s| s.id.as_str()),
+            newest_created_fallback(&mixed, None).map(|s| s.id.raw()),
             Some("stamped"),
             "a real timestamp outranks a missing one wherever the row sits"
         );
@@ -5228,7 +5244,8 @@ mod tests {
         ];
         let history = ["missing", "b", "a"].map(String::from);
         let pick = |listed: &[Session], history: &[String], removed| {
-            automatic_selection(listed, history, None, removed).map(|session| session.id.clone())
+            automatic_selection(listed, history, None, removed)
+                .map(|session| session.id.raw().to_owned())
         };
         assert_eq!(pick(&rows, &history, None).as_deref(), Some("b"));
         assert_eq!(pick(&rows, &history, Some("b")).as_deref(), Some("a"));
@@ -5268,7 +5285,7 @@ mod tests {
             },
         ];
         let pick = |history: &[String], legacy, removed| {
-            automatic_selection(&rows, history, legacy, removed).map(|session| session.id.as_str())
+            automatic_selection(&rows, history, legacy, removed).map(|session| session.id.raw())
         };
         assert_eq!(pick(&[], Some("a"), None), Some("a"));
         assert_eq!(pick(&[], Some("a"), Some("a")), Some("c"));
@@ -5375,7 +5392,7 @@ mod tests {
             // mark.
             let answer = take_yolo_answer(&mut slot, &question(2), false, admit, release)
                 .expect("a genuine confirmation dispatches");
-            assert_eq!(answer.pending.source.id, "source");
+            assert_eq!(answer.pending.source.id.raw(), "source");
             assert_eq!(answer.stop_asking, None);
             assert!(!slot.is_open(), "the answer took the question down");
             assert_eq!(held.get(), 1, "the dispatched replace holds the row");

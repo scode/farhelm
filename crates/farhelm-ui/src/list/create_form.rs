@@ -2049,8 +2049,10 @@ fn replace_with_warning(
 /// built from: the source id that routes the submit to the replace endpoint,
 /// plus the status snapshot the launcher falls back to while the live listing
 /// lacks the row (see [`CreatePrefill::replace_source_opened`]).
+/// The source reference remains raw operation data, even when its suffix needs
+/// escaping for presentation; the submit must address the original session.
 pub(super) fn mark_replace_with(prefill: &mut CreatePrefill, session: &Session) {
-    prefill.replace_source = Some(session.id.clone());
+    prefill.replace_source = Some(session.id.raw().to_owned());
     prefill.replace_source_opened = Some((session.status.clone(), session.tabs.len()));
 }
 

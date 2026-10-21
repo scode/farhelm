@@ -35,6 +35,10 @@
 //! not serve whole must SAY so, in the same place a complete one says its
 //! count. The wording is pinned by the browser suite, so treat the
 //! strings as a contract rather than as copy.
+//!
+//! Session references are peer text in the reply mirror, but every identity
+//! operation here uses their raw bytes. The local maps and held-order snapshots
+//! remain operation state; display escaping must not change their membership.
 
 use std::collections::{HashMap, HashSet};
 
@@ -65,7 +69,7 @@ pub(crate) fn apply_optimistic_renames(
 ) -> Vec<Session> {
     sessions
         .iter()
-        .map(|session| match renamed.get(&session.id) {
+        .map(|session| match renamed.get(session.id.raw()) {
             Some((title, _)) => Session {
                 title: title.clone().into(),
                 ..session.clone()
@@ -118,7 +122,10 @@ pub(crate) fn settle_optimistic_renames(
     index: u64,
 ) {
     renamed.retain(|id, (title, observed_from)| {
-        match server.iter().find(|session| &session.id == id) {
+        match server
+            .iter()
+            .find(|session| session.id.raw() == id.as_str())
+        {
             Some(session) if session.title.raw() == title.as_str() => false,
             Some(_) => index < *observed_from,
             // Absence proves nothing here — see `retire_vanished_renames`.
@@ -148,7 +155,7 @@ pub(crate) fn retire_vanished_renames(
     index: u64,
 ) {
     renamed.retain(|id, (_, observed_from)| {
-        server.iter().any(|session| &session.id == id) || index < *observed_from
+        server.iter().any(|session| session.id.raw() == id.as_str()) || index < *observed_from
     });
 }
 
@@ -198,8 +205,12 @@ pub(crate) fn menu_row_reordered(
     let Some(previous) = previous else {
         return false;
     };
-    let previous_index = previous.iter().position(|session| session.id == open_id);
-    let current_index = current.iter().position(|session| session.id == open_id);
+    let previous_index = previous
+        .iter()
+        .position(|session| session.id.raw() == open_id);
+    let current_index = current
+        .iter()
+        .position(|session| session.id.raw() == open_id);
     if previous_index != current_index {
         return true;
     }
@@ -210,7 +221,7 @@ pub(crate) fn menu_row_reordered(
     // fixed. If it appears/disappears above the anchor, the popup is detached.
     let separator_above = |rows: &[Session]| {
         pin_separator_after(rows)
-            .is_some_and(|boundary| rows[..index].iter().any(|s| s.id == boundary))
+            .is_some_and(|boundary| rows[..index].iter().any(|s| s.id.raw() == boundary))
     };
     if separator_above(previous) != separator_above(current) {
         return true;
@@ -233,10 +244,10 @@ pub(crate) fn any_shown_above<'a>(
     open_id: &str,
     ids: impl IntoIterator<Item = &'a str>,
 ) -> bool {
-    let Some(index) = shown.iter().position(|session| session.id == open_id) else {
+    let Some(index) = shown.iter().position(|session| session.id.raw() == open_id) else {
         return false;
     };
-    let above: HashSet<&str> = shown[..index].iter().map(|s| s.id.as_str()).collect();
+    let above: HashSet<&str> = shown[..index].iter().map(|s| s.id.raw()).collect();
     ids.into_iter().any(|id| above.contains(id))
 }
 
@@ -281,7 +292,7 @@ pub(crate) fn held_display_order(held: &[String], served: &[Session]) -> Vec<Ses
     }
     let by_id: HashMap<&str, &Session> = served
         .iter()
-        .map(|session| (session.id.as_str(), session))
+        .map(|session| (session.id.raw(), session))
         .collect();
     let held_ids: std::collections::HashSet<&str> = held.iter().map(String::as_str).collect();
     held.iter()
@@ -289,7 +300,7 @@ pub(crate) fn held_display_order(held: &[String], served: &[Session]) -> Vec<Ses
         .chain(
             served
                 .iter()
-                .filter(|session| !held_ids.contains(session.id.as_str()))
+                .filter(|session| !held_ids.contains(session.id.raw()))
                 .cloned(),
         )
         .collect()
@@ -307,7 +318,7 @@ pub(crate) fn pinned_first(sessions: &mut [Session]) {
 pub(crate) fn pin_separator_after(sessions: &[Session]) -> Option<&str> {
     let leading = sessions.iter().take_while(|session| session.pinned).count();
     (leading > 0 && sessions[leading..].iter().any(|session| !session.pinned))
-        .then(|| sessions[leading - 1].id.as_str())
+        .then(|| sessions[leading - 1].id.raw())
 }
 
 /// Remove `removed` from `sessions` (this client's own optimistic delete)
@@ -334,11 +345,11 @@ pub(crate) fn remove_row_reporting_menu_move(
     held: &[String],
 ) -> bool {
     let Some(open_id) = open_id else {
-        sessions.retain(|session| session.id != removed);
+        sessions.retain(|session| session.id.raw() != removed);
         return false;
     };
     let before = held_display_order(held, sessions);
-    sessions.retain(|session| session.id != removed);
+    sessions.retain(|session| session.id.raw() != removed);
     // Removing a row changes no remaining row's detail line, so the
     // detail-line half cannot fire here and the flag's value is immaterial.
     menu_row_reordered(
@@ -657,9 +668,10 @@ mod tests {
     use super::*;
     use crate::SessionStatus;
 
-    /// The ids of `sessions`, in order, for comparing display orders.
+    /// Compare display order by exact routing references, without turning peer
+    /// text into a visible spelling that could conceal an identity mismatch.
     fn ids(sessions: &[Session]) -> Vec<&str> {
-        sessions.iter().map(|session| session.id.as_str()).collect()
+        sessions.iter().map(|session| session.id.raw()).collect()
     }
 
     /// Pinning must preserve the chosen sort within both groups, including

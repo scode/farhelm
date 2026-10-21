@@ -357,7 +357,9 @@ pub struct Session {
     /// launch identifying its agent; older cached snapshots omit this hint.
     #[serde(default)]
     pub workspace_trust_prompt: bool,
-    pub id: String,
+    /// Entry-bound routing identity. The supervisor controls its suffix, so
+    /// presentation still requires escaping; operation adapters retain raw bytes.
+    pub id: peer::PeerText,
     /// Peer-authored label. Presentation must choose escaping; operational
     /// adapters such as rename retain its exact raw bytes.
     pub title: peer::PeerText,
@@ -1677,7 +1679,12 @@ fn AppBody() -> Element {
     let row_ops = use_signal(|| 0_u32);
     // The selected id as a memo so `ListView` can consult it at reply
     // time and track it in effects (a plain prop would be a stale copy).
-    let selected_id = use_memo(move || current.read().as_ref().map(|session| session.id.clone()));
+    let selected_id = use_memo(move || {
+        current
+            .read()
+            .as_ref()
+            .map(|session| session.id.raw().to_owned())
+    });
     // Whether the last committed listing proved an empty fleet — the ONLY
     // state in which the right pane may claim there is nothing to select
     // (see the placeholder below). Written by `ListView`'s commit path.
@@ -1821,7 +1828,7 @@ fn AppBody() -> Element {
                             // and automatic picks share its preference writer); this
                             // handler records the selection and its raw Rename seed.
                             on_open: move |session: Session| {
-                                open_session_title.set(Some((session.id.clone(), session.title.raw().to_owned())));
+                                open_session_title.set(Some((session.id.raw().to_owned(), session.title.raw().to_owned())));
                                 current.set(Some(session));
                             },
                             // The selected session survives sidebar filtering.
@@ -1843,7 +1850,7 @@ fn AppBody() -> Element {
                             on_renamed: move |(id, title): (String, String)| {
                                 let mut current = current;
                                 let selected_matches =
-                                    current.peek().as_ref().is_some_and(|session| session.id == id);
+                                    current.peek().as_ref().is_some_and(|session| session.id.raw() == id);
                                 if selected_matches
                                     && let Some(session) = current.write().as_mut()
                                 {
@@ -1858,7 +1865,7 @@ fn AppBody() -> Element {
                             // right pane would keep a terminal/detail surface
                             // for an object this client knows is gone.
                             on_removed: move |id: String| {
-                                if current.peek().as_ref().is_some_and(|session| session.id == id) {
+                                if current.peek().as_ref().is_some_and(|session| session.id.raw() == id) {
                                     open_session_title.set(None);
                                     current.set(None);
                                 }
@@ -1922,11 +1929,11 @@ fn AppBody() -> Element {
                             },
                             Some(session) => rsx! {
                                 SessionView {
-                                    key: "{session.id}",
+                                    key: "{session.id.raw()}",
                                     session: session.clone(),
                                     gate: ops::PaneGate::new(page_ops, row_ops),
                                     on_replaced: move |replacement: Session| {
-                                        open_session_title.set(Some((replacement.id.clone(), replacement.title.raw().to_owned())));
+                                        open_session_title.set(Some((replacement.id.raw().to_owned(), replacement.title.raw().to_owned())));
                                         current.set(Some(replacement));
                                     },
                                     selection: current,
@@ -2900,7 +2907,7 @@ mod tests {
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
-            id: "s1".to_string(),
+            id: "s1".into(),
             title: "demo".into(),
             cwd: "/tmp".into(),
             canonical_cwd: None,
@@ -2969,7 +2976,7 @@ mod tests {
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
-            id: "s1".to_string(),
+            id: "s1".into(),
             title: "demo".into(),
             cwd: "/tmp".into(),
             canonical_cwd: None,
