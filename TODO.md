@@ -419,9 +419,6 @@ exhaustive match or a default enforces. A clear fix of the targeted bug class is
 - **Type the helm's trust boundary.** Session data from supervisors, parsed agent verbs and the origin of the helm's
   errors become types only the checking code constructs, replacing checks repeated per call site (#1491, #1128, #1083,
   #1036). Plan: `plans/queue/helm-ingress-types.md`.
-- **Make text from other machines its own UI type.** Showing host- or agent-controlled text without escaping stops
-  compiling, instead of relying on about 236 call sites to remember the helper; the unescaped sites it exposes are fixed
-  in the same plan. Plan: `plans/queue/ui-peer-text-type.md`.
 - **One Replace/YOLO controller in the UI.** The sidebar's and header's copied Replace flows, YOLO questions and
   retry-key decisions become one controller with an outcome enum, and the operation lock becomes guard-only. The same
   cancel race was fixed three times (#1658 to #1660). Plan: `plans/queue/ui-session-actions.md`.

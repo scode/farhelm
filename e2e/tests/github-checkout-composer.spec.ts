@@ -7,6 +7,7 @@ import { chooseLauncherHost } from "./helpers/host-picker";
  */
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { drainedRoute } from "./helpers/drained-route";
 import {
   cleanupSession,
   createSession,
@@ -620,6 +621,124 @@ test("checkout folder shows pending and failed preview states without a stale pa
     await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
   } finally {
     release();
+  }
+});
+
+/** Clone trusts the session's repository association without the search
+ * parser. A supervisor can therefore supply formatting controls in that
+ * identity. Hold its actual preview request to check the pending boundary,
+ * then refuse it: both states must disclose the same escaped repository,
+ * retain its raw request bytes, and require an explicit clear before editing.
+ * The real source lives in the owned stack; intercepted checkout replies
+ * prevent any clone from reaching GitHub. */
+test("Clone discloses unsafe inherited repository text without changing its preview identity", async ({ page, request }) => {
+  const host = await localHost(request);
+  const source = await createSession(request, { title: "checkout-peer-source" });
+  const repo = { owner: "acme", name: "repo\u202e\u200b" };
+  const raw = `${repo.owner}/${repo.name}`;
+  const shown = "acme/repo<U+202E><U+200B>";
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const previews: PreviewInput[] = [];
+  let sourceListed = false;
+  let creates = 0;
+  let bodyFailed = true;
+  let stopListing = async () => {};
+  try {
+    await unavailableDiscovery(page, host);
+    stopListing = await drainedRoute(page, "**/api/sessions?*", async (route) => {
+      // The listing helper uses independent HTTP for body rewrites: Playwright's
+      // APIResponse can be disposed while json() still reads it. Drain this
+      // callback before context teardown as well, retaining live listing data.
+      const response = await fetch(route.request().url(), { headers: await route.request().allHeaders() });
+      expect(response.ok).toBe(true);
+      const body = await response.json() as { sessions: Record<string, unknown>[] };
+      const row = body.sessions.find((candidate) => candidate.id === source.id);
+      if (row) {
+        // Exercise the association path and its precedence over launch provenance.
+        row.github_repo = { owner: "other", name: "provenance" };
+        row.working_copy = {
+          id: "fixture-checkout", repo, canonical_path: "/checkout-fixture/source",
+          origin_session_id: source.id,
+        };
+        sourceListed = true;
+      }
+      await fulfill(route, { status: response.status, json: body });
+    });
+    await page.route("**/api/github-checkout-preview", async (route) => {
+      const input = route.request().postDataJSON() as PreviewInput;
+      previews.push(input);
+      if (input.repo === raw) await gate;
+      try {
+        await fulfill(route, { status: 400, json: { error: "fixture invalid repository" } });
+      } catch (error) {
+        if (!route.request().failure()) throw error;
+      }
+    });
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      creates += 1;
+      await unaccepted(route);
+    });
+    await page.goto("/");
+    const sourceRow = page.locator(`.session-row[data-session-id="${source.id}"]`);
+    await expect(sourceRow).toBeVisible();
+    await expect.poll(() => sourceListed, { message: "the source listing must carry the hostile association" }).toBe(true);
+    await expect(sourceRow).toContainText(shown);
+    await openRowMenu(sourceRow);
+    await sourceRow.locator(".session-row-clone").click();
+    const form = page.locator('.create-session-form[role="dialog"]');
+    await expect(form).toBeVisible();
+    const repository = form.getByRole("combobox", { name: "repository", exact: true });
+    const preview = form.locator(".launch-composer-checkout-preview");
+    const launch = form.locator(".create-session-submit");
+    await expect.poll(() => previews.length).toBeGreaterThan(0);
+    expect(previews.every((input) => input.repo === raw)).toBe(true);
+    await expect(preview).toHaveAttribute("data-preview-state", "pending");
+    await expect(preview).toContainText(`managed checkout of ${shown} on`);
+    await expect(launch).toContainText(`gh:${shown} (preview pending)`);
+    await expect(repository).toHaveValue(shown);
+    await expect(repository).toHaveJSProperty("readOnly", true);
+    await repository.focus();
+    await expect(repository).toBeFocused();
+    await repository.press("End");
+    await repository.press("X");
+    await expect(repository).toHaveValue(shown);
+    await expect(launch).toBeDisabled();
+    expect(await form.textContent()).not.toContain(repo.name);
+    release();
+    await expect(preview).toHaveAttribute("data-preview-state", "failed");
+    await expect(preview).toContainText(`managed checkout of ${shown} on`);
+    await expect(preview).toContainText("fixture invalid repository");
+    await expect(launch).toContainText(`gh:${shown} (preview pending)`);
+    await expect(repository).toHaveValue(shown);
+    await expect(repository).toHaveJSProperty("readOnly", true);
+    await expect(launch).toBeDisabled();
+    expect(previews.every((input) => input.repo === raw)).toBe(true);
+    expect(creates).toBe(0);
+
+    await form.getByRole("button", { name: "clear repository", exact: true }).click();
+    await expect(repository).toHaveValue("");
+    await expect(repository).toBeEditable();
+    await expect(preview).toHaveCount(0);
+    await repository.fill("acme/replacement");
+    await expect(repository).toBeFocused();
+    await expect(form.getByRole("option", { name: "acme/replacement", exact: true })).toBeVisible();
+    await repository.press("Enter");
+    await expect.poll(() => previews.some((input) => input.repo === "acme/replacement")).toBe(true);
+    await expect(repository).toHaveValue("acme/replacement");
+    await expect(repository).toBeEditable();
+    expect(previews.every((input) => input.repo === raw || input.repo === "acme/replacement")).toBe(true);
+    expect(creates).toBe(0);
+    bodyFailed = false;
+  } finally {
+    release();
+    // Release the response reader while its context is still alive. Attempt
+    // session cleanup even if draining fails, without hiding a body assertion.
+    await cleanupOwnedSteps(bodyFailed, [
+      ["session listing rewrite", stopListing],
+      ["source session", () => cleanupSession(request, source.id)],
+    ]);
   }
 });
 

@@ -238,6 +238,22 @@ fn folder_tail_label(path: &PeerText) -> String {
     format!("…{}", visible.chars().skip(start).collect::<String>())
 }
 
+/// Keep an inherited repository's display separate from its request identity.
+/// Clone can supply a selected repo without the search parser's validation.
+/// Unsafe selections stay read-only until explicitly cleared, so editing the
+/// visible escape markers cannot silently replace the original repository.
+/// Unselected query text remains the user's ordinary editable draft.
+fn repository_field(destination: &DestinationDraft) -> (String, bool) {
+    let raw = destination.repository_text();
+    let read_only = destination.repo().is_some()
+        && raw.chars().any(farhelm_proto::text::is_presentation_unsafe);
+    let shown = match destination.repo() {
+        Some(repo) if read_only => format!("{}/{}", repo.owner.editable(), repo.name.editable()),
+        _ => raw,
+    };
+    (shown, read_only)
+}
+
 /// What a successful create hands to `on_created`: the session the helm
 /// returned, the structured launch this form SUBMITTED, if any, and whether
 /// New stayed hidden so the caller can offer naming after acceptance.
@@ -3851,7 +3867,7 @@ pub(super) fn CreateSessionForm(
             display_peer(&query)
         ),
         DestinationDraft::Github { repo, .. } => displayed_preview.as_ref().map_or_else(
-            || format!("gh:{} (preview pending)", repo.identifier()),
+            || format!("gh:{} (preview pending)", display_peer(&repo.identifier())),
             |preview| preview.cwd.escaped(),
         ),
     };
@@ -4251,7 +4267,10 @@ pub(super) fn CreateSessionForm(
     // One identity-bound discovery worker serves both repository entry points.
     // The dedicated field owns its query; global search takes priority only
     // while the user explicitly searches with gh:.
+    // Matching keeps the raw inherited spelling. The escaped editor display
+    // is never a query or a replacement for that selected identity.
     let repository_text = destination_draft().repository_text();
+    let (repository_field_value, repository_read_only) = repository_field(&destination_draft());
     let repo_query = if search_owns_repositories {
         search_repo_query
     } else {
@@ -6482,7 +6501,7 @@ pub(super) fn CreateSessionForm(
                                                         crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => rsx! { "Browse this path: {display_peer(folder)}" },
                                                         crate::launch_composer::ComposerSearchResult::Harness(harness) => rsx! { "Harness: {crate::launch_composer::harness_label(*harness)}" },
                                                         crate::launch_composer::ComposerSearchResult::Template(name) => rsx! { "Template: {display_peer(name)}" },
-                                                        crate::launch_composer::ComposerSearchResult::Github(repo) => rsx! { "Managed checkout: {repo.identifier()}" },
+                                                        crate::launch_composer::ComposerSearchResult::Github(repo) => rsx! { "Managed checkout: {display_peer(&repo.identifier())}" },
                                                         crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({crate::launch_composer::harness_label(*harness)})" },
                                                         crate::launch_composer::ComposerSearchResult::Effort(effort) => rsx! {
                                                             "Effort: {crate::launch_composer::effort_search_word(*effort)}"
@@ -6762,15 +6781,16 @@ pub(super) fn CreateSessionForm(
                                     },
                                     span { class: "launch-composer-section-label", "repository" }
                                     input { r#type: "text", role: "combobox", aria_label: "repository", aria_autocomplete: "list",
-                                        aria_expanded: repository_open(),
-                                        aria_controls: repository_open().then_some("checkout-repository-options"),
-                                        aria_activedescendant: (repository_open() && !repository_suggestions.is_empty()).then(|| format!("checkout-repository-{repository_active}")),
-                                        value: "{repository_text}", placeholder: "owner/repo", disabled: busy,
+                                        aria_expanded: !repository_read_only && repository_open(),
+                                        aria_controls: (!repository_read_only && repository_open()).then_some("checkout-repository-options"),
+                                        aria_activedescendant: (!repository_read_only && repository_open() && !repository_suggestions.is_empty()).then(|| format!("checkout-repository-{repository_active}")),
+                                        value: "{repository_field_value}", readonly: repository_read_only,
+                                        placeholder: "owner/repo", disabled: busy,
                                         autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false", dir: "ltr",
-                                        onfocus: move |_| repository_open.set(true),
+                                        onfocus: move |_| { if !repository_read_only { repository_open.set(true); } },
                                         onblur: move |_| repository_open.set(false),
                                         oninput: move |evt| {
-                                            if !draft_transition_allowed(ops) { return; }
+                                            if !draft_transition_allowed(ops) || repository_read_only { return; }
                                             remembered_destination.set(None);
                                             invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
                                             destination_draft.set(DestinationDraft::GithubInput { query: evt.value() });
@@ -6790,7 +6810,7 @@ pub(super) fn CreateSessionForm(
                                                 }
                                                 Key::Enter => {
                                                     evt.prevent_default(); evt.stop_propagation();
-                                                    if evt.is_auto_repeating() || evt.is_composing() { return; }
+                                                    if evt.is_auto_repeating() || evt.is_composing() || repository_read_only { return; }
                                                     if !draft_transition_allowed(ops) {
                                                         template_error.set(Some("wait for the current operation to finish before choosing a repository".into()));
                                                         return;
@@ -6821,7 +6841,25 @@ pub(super) fn CreateSessionForm(
                                         },
                                     }
                                 }
-                                if repository_open() {
+                                if repository_read_only {
+                                    p { "Invisible formatting is shown escaped. Clear the repository to replace it." }
+                                    // Drop selection and preview together, as an ordinary
+                                    // repository edit does, without copying display markers.
+                                    button { r#type: "button", class: "btn btn-neutral launch-composer-repository-clear", disabled: busy,
+                                        "data-tooltip": "clear repository: remove this selection before editing",
+                                        onclick: move |_| {
+                                            if !draft_transition_allowed(ops) { return; }
+                                            remembered_destination.set(None);
+                                            invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
+                                            destination_draft.set(DestinationDraft::GithubInput { query: String::new() });
+                                            repository_index.set(0);
+                                            repository_open.set(false);
+                                            intent_key.set(None);
+                                        },
+                                        "clear repository"
+                                    }
+                                }
+                                if !repository_read_only && repository_open() {
                                     div { class: "launch-composer-repository-options", id: "checkout-repository-options",
                                         role: if repository_suggestions.is_empty() { "status" } else { "listbox" }, aria_label: "repositories",
                                         onclick: move |evt| {
@@ -6857,7 +6895,7 @@ pub(super) fn CreateSessionForm(
                                             PreviewState::Ready { .. } => "ready",
                                             PreviewState::Failed { .. } => "failed",
                                         },
-                                        "managed checkout of {repo.identifier()} on {selected_host_label}"
+                                        "managed checkout of {display_peer(&repo.identifier())} on {selected_host_label}"
                                         if let Some(preview) = &displayed_preview {
                                             div { dir: "ltr", "{preview.cwd.escaped()}" }
                                         }
@@ -8831,6 +8869,50 @@ mod tests {
         );
         session.working_copy = None;
         assert_eq!(prefill_from(&session, 3).repo, session.github_repo);
+    }
+
+    /// Session metadata bypasses repository search validation on both Clone
+    /// provenance paths. Only its editor spelling changes: the selected repo,
+    /// matching query and serialized identity must keep the peer's exact bytes.
+    /// Safe selections and unselected input keep their ordinary editing rules.
+    #[test]
+    fn cloned_repository_field_escapes_without_replacing_raw_identity() {
+        let wire = serde_json::json!({ "owner": "acme", "name": "repo\u{202e}\u{200b}" });
+        let repo: GithubRepo = serde_json::from_value(wire.clone()).unwrap();
+        let raw = "acme/repo\u{202e}\u{200b}";
+        assert!(
+            GithubRepo::parse(raw).is_err(),
+            "the fixture must bypass the search parser"
+        );
+        for working_copy in [false, true] {
+            let session = Session {
+                github_repo: (!working_copy).then(|| repo.clone()),
+                working_copy: working_copy.then(|| crate::github_checkout::WorkingCopyInfo {
+                    id: "checkout-1".into(),
+                    repo: repo.clone(),
+                    canonical_path: "/work/repo-1".into(),
+                    origin_session_id: "origin".into(),
+                }),
+                ..row_specimen("source")
+            };
+            let inherited = prefill_from(&session, 1).repo.unwrap();
+            let draft = DestinationDraft::github(inherited);
+            assert_eq!(
+                repository_field(&draft),
+                ("acme/repo<U+202E><U+200B>".into(), true)
+            );
+            assert_eq!(draft.repository_text(), raw);
+            assert_eq!(draft.repo().unwrap().identifier(), raw);
+            assert_eq!(serde_json::to_value(draft.repo().unwrap()).unwrap(), wire);
+        }
+        let safe = DestinationDraft::github(GithubRepo::parse("acme/repo").unwrap());
+        assert_eq!(repository_field(&safe), ("acme/repo".into(), false));
+        let query = DestinationDraft::GithubInput { query: raw.into() };
+        assert_eq!(repository_field(&query), (raw.into(), false));
+        let cleared = DestinationDraft::GithubInput {
+            query: String::new(),
+        };
+        assert_eq!(repository_field(&cleared), (String::new(), false));
     }
 
     // -------------------------------------------------------------
