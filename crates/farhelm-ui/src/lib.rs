@@ -166,6 +166,7 @@ mod provisioning;
 mod reader;
 mod reconnect;
 mod rename;
+mod replace;
 mod restart_with;
 mod rows;
 mod session_view;

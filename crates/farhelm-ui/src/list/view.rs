@@ -12,12 +12,12 @@ use dioxus::prelude::*;
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::api::{
     self, ListSort, Preferences, SessionFilter, SessionListing, delete_session, fetch_hosts,
-    fetch_sessions, queue_seen_write, rename_session, replace_session, stop_session,
+    fetch_sessions, queue_seen_write, rename_session, stop_session,
 };
 use crate::app_bar::AppBar;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostsPanel, HostsRead};
-use crate::ops::{ConfirmSlot, OpLock, ReadGate, use_confirm_slot};
+use crate::ops::{OpLock, ReadGate};
 use crate::peer::PeerText;
 use crate::provisioning::ProvisioningTraceShape;
 use crate::reader::{SurfaceReader, Trigger, request_read};
@@ -36,6 +36,7 @@ use super::shared::{
     host_options, matching_host_option, session_locality,
 };
 use crate::rename::RenameDialog;
+use crate::replace::{ReplaceAnswer, ReplaceController, ReplaceResult, ReplaceYoloQuestion};
 
 /// Name the shortcut only where the app installs it; browsers keep Cmd+N for windows.
 const NEW_SESSION_TOOLTIP: &str = if crate::HAS_NEW_SESSION_SHORTCUT {
@@ -511,100 +512,6 @@ fn leave_phase(row_phases: &mut HashMap<String, RowPhase>, id: &str, phase: RowP
     } else {
         false
     }
-}
-
-/// A sidebar Replace the helm refused as a YOLO launch, waiting on the
-/// user's answer to the YOLO question.
-///
-/// It carries what the row's Replace prompt was drawn from: the row's
-/// session snapshot (whose host fields become the new session's, see
-/// `with_source_host`) and whether that prompt said nothing is alive, which
-/// decides the supervisor-side "only if nothing is alive" precondition on
-/// deleting the source. Both answers to the YOLO question send these stored
-/// values. Looked up again at answer time instead, a session restarted or
-/// given a tab while the question was open dropped the precondition, and a
-/// row that had left the listing sent none at all; either way the delete
-/// could kill processes after a prompt that said none were running.
-#[derive(Clone, PartialEq)]
-struct PendingYoloReplace {
-    /// Source ids can recur after another row takes the shared intent slot.
-    /// Cancellation owns only the particular retry this question continued.
-    key: String,
-    ask: crate::yolo_confirm::YoloAsk,
-    source: Session,
-    guard: crate::DeleteGuard,
-}
-
-/// One opening of the sidebar's YOLO question: the key its
-/// [`ConfirmSlot`] is open for.
-///
-/// An answer acts only by taking the question its handler was rendered
-/// for, so Cancel followed by either answer in one event burst (both
-/// handlers were drawn before the render that removes them) dispatches
-/// nothing: the slot is empty by the time the answer runs. `opening` counts
-/// openings, so a handler drawn for an earlier question about the same row
-/// can never take a later one. The question itself is part of the key
-/// because it is all the prompt renders and all an answer sends; the slot
-/// holds nothing else.
-#[derive(Clone, PartialEq)]
-struct YoloReplaceQuestion {
-    opening: u64,
-    pending: PendingYoloReplace,
-}
-
-/// The replace an answer to the sidebar's YOLO question goes on to
-/// dispatch with YOLO allowed.
-struct YoloReplaceAnswer {
-    /// The question answered, which comes back up with the reason if
-    /// marking the host for "don't ask again" fails.
-    pending: PendingYoloReplace,
-    /// The host (id and display name) the question named, to mark safe for
-    /// YOLO launches before anything is replaced; `None` for a plain
-    /// confirmation.
-    stop_asking: Option<(crate::HostId, String)>,
-}
-
-/// Answer the sidebar's YOLO question `question` (the opening this answer's
-/// handler was rendered for): the replace to dispatch, or `None` when that
-/// question is no longer open (cancelled, already answered, or replaced by
-/// another), in which case nothing may happen, the host preference write
-/// included.
-///
-/// `admit` is the replace's row-operation admission (`begin_row_op`), asked
-/// BEFORE the question is taken: an answer the page cannot start right now
-/// (another operation holds the page, or the source row is in a prompt of
-/// its own) leaves the question up, with its error, for the user to answer
-/// again. Taken first, it would vanish with nothing started and nothing
-/// said. `release` undoes an admission whose answer then finds the question
-/// gone.
-///
-/// "Don't ask again" is only honoured when the question knows its host
-/// (`YoloAsk::host`), which is also when its button is offered; asked of a
-/// question without one, it does nothing and leaves the question open.
-fn take_yolo_answer(
-    slot: &mut ConfirmSlot<YoloReplaceQuestion>,
-    question: &YoloReplaceQuestion,
-    stop_asking: bool,
-    admit: impl FnOnce() -> bool,
-    release: impl FnOnce(),
-) -> Option<YoloReplaceAnswer> {
-    let pending = question.pending.clone();
-    let stop_asking = if stop_asking {
-        Some((pending.ask.host?, pending.ask.host_name.clone()))
-    } else {
-        None
-    };
-    if !admit() {
-        return None;
-    }
-    if slot.take(question).is_none() {
-        release();
-        return None;
-    }
-    Some(YoloReplaceAnswer {
-        pending,
-        stop_asking,
-    })
 }
 
 /// The flat session list: host, title, cwd, invocation, and a truthful
@@ -2327,180 +2234,49 @@ pub(crate) fn ListView(
     // does not do for a client that already has a page open.
     let replace_base = base.clone();
     let replace_refresh = request_listing.clone();
-    // The header and interrupted card use this same page-owned intent. Keep
-    // the source reservation and key guards here: row tasks can overlap.
-    let mut replace_key = use_context::<ReplaceIntent>().0;
-    // A replace the helm refused as a YOLO launch on a host that asks before YOLO launches
-    // (`YoloReplaceQuestion`: the question, and the row snapshot and answer
-    // it continues), shown as the loud confirmation above the list until the
-    // user confirms or cancels (see `yolo_confirm`). It is a `ConfirmSlot`
-    // so an answer acts only on a question that is still open; see
-    // `YoloReplaceQuestion`. `yolo_replace_error` is why a "don't ask again"
-    // failed at its first step; the question comes back up with it.
-    let mut yolo_replace = use_confirm_slot::<YoloReplaceQuestion, ()>();
-    let mut yolo_openings = use_signal(|| 0u64);
-    let mut yolo_replace_error = use_signal(|| None::<String>);
-    let mut yolo_questions = use_context::<ReplaceYoloQuestions>().0;
-    use_drop(move || {
-        if let Some(question) = yolo_replace.current_key() {
-            yolo_questions
-                .write()
-                .remove(question.pending.source.id.raw());
-        }
-    });
-    // Acquire before retiring the old opening: a duplicate leaves its owner intact.
-    // Its question and failure reason change together only after admission succeeds.
-    let mut open_yolo_replace = move |pending: PendingYoloReplace, error: Option<String>| {
-        if !yolo_questions
-            .write()
-            .insert(pending.source.id.raw().to_owned())
-        {
-            return;
-        }
-        if let Some(old) = yolo_replace.current_key() {
-            yolo_questions.write().remove(old.pending.source.id.raw());
-        }
-        let opening = *yolo_openings.peek() + 1;
-        yolo_openings.set(opening);
-        yolo_replace_error.set(error);
-        yolo_replace.open(YoloReplaceQuestion { opening, pending }, ());
-    };
-    // `answered` is the YOLO question's answer this replace continues, taken
-    // from the open question (`take_yolo_answer`); `None` is the row's own
-    // Replace confirmation, which does not allow YOLO. Its `stop_asking` is
-    // "start, and don't ask again on this host": the host to mark safe for
-    // YOLO launches first; nothing is replaced if that fails. It comes from
-    // the question the user answered, not from the row's current listing
-    // entry, which may have changed or gone since.
-    //
-    // `source` and `guard` are the row snapshot the confirmed prompt was
-    // drawn from and the precondition that prompt covered; see
-    // `PendingYoloReplace` for why they are passed in rather than looked up.
-    //
-    // The caller has already begun the source row's operation
-    // (`begin_row_op`); the task ends it. A YOLO answer begins it before
-    // taking the question, so a refused start leaves the question up. The
-    // row's own Replace prompt has to be left first, since a row in a prompt
-    // cannot begin an operation; its caller checked the page lock just
-    // before, with no await in between, so that start is not refused.
+    // Local question state, over the same page-owned retry and source exclusion
+    // used by the header. Admission and successful selection remain list-owned.
+    let yolo_replace = use_signal(|| None::<ReplaceYoloQuestion>);
+    let yolo_openings = use_signal(|| 0u64);
+    let yolo_replace_error = use_signal(|| None::<String>);
+    let replace_controller = ReplaceController::sidebar(
+        use_context::<ReplaceIntent>().0,
+        use_context::<ReplaceYoloQuestions>().0,
+        yolo_replace,
+        yolo_replace_error,
+        yolo_openings,
+    );
+    use_drop(move || replace_controller.release_question());
+    // The caller has already begun the source row's operation. Reserve before
+    // spawning; keep the row admitted until success callbacks and refresh finish.
+    // YOLO answers carry the originally confirmed source and delete precondition.
     let mut do_replace =
-        move |source: Session, guard: crate::DeleteGuard, answered: Option<YoloReplaceAnswer>| {
+        move |source: Session, guard: crate::DeleteGuard, answered: Option<ReplaceAnswer>| {
             let id = source.id.raw().to_owned();
             errors.write().remove(&id);
             let base = replace_base.clone();
             let refresh = replace_refresh.clone();
-            let allow_yolo = answered.is_some();
-            let retained = replace_key
-                .peek()
-                .as_ref()
-                .filter(|(source, _)| source == &id)
-                .and_then(|(_, key)| key.clone());
-            replace_key.set(Some((id.clone(), retained.clone())));
+            let attempt = replace_controller.prepare(source.clone(), guard, answered);
             spawn(async move {
-                if let Some(YoloReplaceAnswer {
-                    pending,
-                    stop_asking: Some((host, name)),
-                }) = answered
-                    && let Err(reason) = crate::yolo_confirm::stop_asking(&base, host, &name).await
-                {
-                    // The answer took the question down; it comes back with
-                    // the reason so the user can answer again. The slot is
-                    // shared by every row, so not over another row's question
-                    // raised meanwhile.
-                    if !yolo_replace.is_open() {
-                        open_yolo_replace(pending, Some(reason));
-                    }
-                    end_row_op(&id);
-                    return;
-                }
-                let key = match retained {
-                    Some(key) => key,
-                    None => match api::mint_intent_key().await {
-                        Ok(key) => {
-                            let owns_pending_key = replace_key
-                                .peek()
-                                .as_ref()
-                                .is_some_and(|(source, key)| source == &id && key.is_none());
-                            if owns_pending_key {
-                                replace_key.set(Some((id.clone(), Some(key.clone()))));
-                            }
-                            key
-                        }
-                        Err(reason) => {
-                            errors
-                                .write()
-                                .insert(id.clone(), format!("replace: {reason}"));
-                            end_row_op(&id);
-                            return;
-                        }
-                    },
-                };
-                // Same-row admission excludes another active attempt on this
-                // source. Matching its key also protects a newer row's slot.
-                let mut end_intent = || {
-                    let owns_key = replace_key
-                        .peek()
-                        .as_ref()
-                        .is_some_and(|(source, retained)| {
-                            source == &id && retained.as_ref() == Some(&key)
-                        });
-                    if owns_key {
-                        replace_key.set(None);
-                    }
-                };
-                match replace_session(&base, &id, &key, guard, allow_yolo).await {
-                    Ok((session, notice)) => {
-                        end_intent();
+                match replace_controller.run(&base, attempt).await {
+                    ReplaceResult::Replaced(session, notice) => {
                         delete_notice.publish(notice);
-                        // A pre-replace listing cannot establish the new
-                        // session's absence. Fence it before selecting the reply;
-                        // the explicit refresh supplies the authoritative view.
+                        // A pre-replace listing cannot establish the new session's
+                        // absence. Fence it before selecting the bare reply.
                         listing_reads.write().fence();
-                        // The source row's host fields: the reply is bare,
-                        // and the row may be gone from the listing by now.
-                        let session = super::with_source_host(session, &source);
+                        let session = super::with_source_host(*session, &source);
                         remember_selection(&base, preferences, session.id.raw());
                         on_open.call(session);
                         refresh(Trigger::Explicit);
                     }
-                    Err(e) => {
-                        if e.outcome.retires_retry() {
-                            end_intent();
-                        }
-                        // Keyed by the SOURCE id: the row this error belongs
-                        // beside is the one the user clicked "replace" on,
-                        // which — on a delete-after-create failure — is also
-                        // the row that is still there to show it next to. On
-                        // that same failure the message already names the new
-                        // session's id too (`api::replace_session`'s own doc),
-                        // so nothing here needs to remember it separately.
-                        if e.outcome.requires_yolo() {
-                            let ask = crate::yolo_confirm::YoloAsk {
-                                host: source.host,
-                                // The confirmation escapes this raw snapshot
-                                // itself; keep its existing presentation path.
-                                host_name: source
-                                    .host_name
-                                    .as_ref()
-                                    .map(|name| name.raw().to_owned())
-                                    .unwrap_or_else(|| "this host".to_string()),
-                                reason: crate::yolo_confirm::YoloReason::of_launch(
-                                    source.agent_selection(),
-                                ),
-                            };
-                            let pending = PendingYoloReplace {
-                                key: key.clone(),
-                                ask,
-                                source: source.clone(),
-                                guard,
-                            };
-                            open_yolo_replace(pending, None);
-                        } else {
-                            errors
-                                .write()
-                                .insert(id.clone(), format!("replace: {}", e.text));
-                        }
+                    ReplaceResult::Refused(reason) => {
+                        // Partial failure belongs beside the source row; its
+                        // endpoint text already identifies the replacement too.
+                        errors
+                            .write()
+                            .insert(id.clone(), format!("replace: {reason}"));
                     }
+                    ReplaceResult::QuestionHandled => {}
                 }
                 end_row_op(&id);
             });
@@ -2533,13 +2309,7 @@ pub(crate) fn ListView(
         ) {
             return;
         }
-        if replace_key
-            .peek()
-            .as_ref()
-            .is_some_and(|(id, _)| id != session.id.raw())
-        {
-            replace_key.set(None);
-        }
+        replace_controller.select_source(session.id.raw());
         if skip_session_confirmations {
             let guard = crate::status::delete_guard(&session.status, session.tabs.len());
             if begin_row_op(session.id.raw()) {
@@ -2574,13 +2344,8 @@ pub(crate) fn ListView(
         }
     };
     let cancel_replace = move |id: String| {
-        if leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingReplace)
-            && replace_key
-                .peek()
-                .as_ref()
-                .is_some_and(|(source, _)| source == &id)
-        {
-            replace_key.set(None);
+        if leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingReplace) {
+            replace_controller.cancel_source(&id);
         }
     };
 
@@ -2694,7 +2459,7 @@ pub(crate) fn ListView(
         ) {
             return;
         }
-        replace_key.set(None);
+        replace_controller.cancel_all();
         menu_open.set(None);
         let generation = clone_prefill
             .peek()
@@ -2746,7 +2511,7 @@ pub(crate) fn ListView(
         );
         let mut prefill = prefill_from(&session, generation);
         if replace_with {
-            replace_key.set(None);
+            replace_controller.cancel_all();
             mark_replace_with(&mut prefill, &session);
             replace_source_seen.set(None);
         }
@@ -3913,10 +3678,8 @@ pub(crate) fn ListView(
                     {
                         let mut phases = row_phases.write();
                         leave_phase(&mut phases, &id, RowPhase::ConfirmingDelete);
-                        if leave_phase(&mut phases, &id, RowPhase::ConfirmingReplace)
-                            && replace_key.peek().as_ref().is_some_and(|(source, _)| source == &id)
-                        {
-                            replace_key.set(None);
+                        if leave_phase(&mut phases, &id, RowPhase::ConfirmingReplace) {
+                            replace_controller.cancel_source(&id);
                         }
                     }
                     if menu_open.peek().as_deref() == Some(id.as_str()) {
@@ -4348,7 +4111,7 @@ pub(crate) fn ListView(
                     if let Some(line) = rows::no_match_line(listing) {
                         div { class: "status filter-empty", "{line}" }
                     }
-                    if let Some(question) = yolo_replace.current_key() {
+                    if let Some(question) = replace_controller.question() {
                         // Keyed by the source row, so another row's question
                         // mounts fresh (scrolled into view, cancel focused)
                         // instead of reusing this one's element.
@@ -4361,31 +4124,28 @@ pub(crate) fn ListView(
                             // pending phase, not as `ops.busy()`.
                             busy: ops.busy()
                                 || row_is(&row_phases.read(), question.pending.source.id.raw(), RowPhase::Pending),
-                            error: yolo_replace_error(),
+                            error: replace_controller.error(),
                             confirm_submits: false,
                             // Both answers continue the Replace the user
                             // confirmed, with the row snapshot and the
                             // nothing-alive answer that prompt carried, and
                             // only by taking this opening of the question
-                            // (`take_yolo_answer`), once the replace can
-                            // start. Taking it closes it, so "don't ask
-                            // again" leaves the question down while the host
-                            // is marked; `do_replace` brings it back with the
-                            // reason if that fails.
+                            // (`ReplaceController::answer_stamped`), once row
+                            // admission succeeds. Taking it closes it, so the
+                            // permanent answer leaves it down while the host
+                            // is marked; the controller reopens it with the
+                            // reason if that fails and no newer question exists.
                             on_confirm: {
                                 let mut do_replace = yolo_do_replace.clone();
                                 let question = question.clone();
                                 move |_| {
                                     let id = question.pending.source.id.raw().to_owned();
-                                    if let Some(answer) = take_yolo_answer(
-                                        &mut yolo_replace,
+                                    if let Some(answer) = replace_controller.answer_stamped(
                                         &question,
                                         false,
                                         || begin_row_op(&id),
                                         || end_row_op(&id),
                                     ) {
-                                        yolo_questions.write().remove(answer.pending.source.id.raw());
-                                        yolo_replace_error.set(None);
                                         let pending = answer.pending.clone();
                                         do_replace(pending.source, pending.guard, Some(answer));
                                     }
@@ -4396,15 +4156,12 @@ pub(crate) fn ListView(
                                 let question = question.clone();
                                 move |_| {
                                     let id = question.pending.source.id.raw().to_owned();
-                                    if let Some(answer) = take_yolo_answer(
-                                        &mut yolo_replace,
+                                    if let Some(answer) = replace_controller.answer_stamped(
                                         &question,
                                         true,
                                         || begin_row_op(&id),
                                         || end_row_op(&id),
                                     ) {
-                                        yolo_questions.write().remove(answer.pending.source.id.raw());
-                                        yolo_replace_error.set(None);
                                         let pending = answer.pending.clone();
                                         do_replace(pending.source, pending.guard, Some(answer));
                                     }
@@ -4413,19 +4170,7 @@ pub(crate) fn ListView(
                             on_cancel: {
                                 let question = question.clone();
                                 move |_| {
-                                    // Only this opening: a cancel drawn for
-                                    // an earlier question leaves a later one
-                                    // (and its error) alone.
-                                    if yolo_replace.take(&question).is_some() {
-                                        yolo_questions.write().remove(question.pending.source.id.raw());
-                                        let owns_source = replace_key.peek().as_ref().is_some_and(|(source, key)| {
-                                            source == question.pending.source.id.raw() && key.as_ref() == Some(&question.pending.key)
-                                        });
-                                        if owns_source {
-                                            replace_key.set(None);
-                                        }
-                                        yolo_replace_error.set(None);
-                                    }
+                                    replace_controller.cancel_stamped(&question);
                                 }
                             },
                         }
@@ -5305,111 +5050,5 @@ mod tests {
             Some("c"),
             "nonempty stale history must not append a differing legacy value"
         );
-    }
-
-    /// Spec (`YoloReplaceQuestion`): an answer to the sidebar's YOLO
-    /// question dispatches a replace only by taking the opening it was drawn
-    /// for. Cancel followed by either answer in one event burst dispatches
-    /// neither the replace nor the "don't ask again" host write; an answer
-    /// drawn for an earlier opening about the same row takes nothing from a
-    /// later one; an answer the page cannot start yet leaves the question
-    /// up; and a genuine answer still dispatches, carrying the host to mark
-    /// only for "don't ask again".
-    ///
-    /// Why: both answers launch the successor with no approval prompts and
-    /// delete the source session, and "don't ask again" also turns the
-    /// question off for the host. Cancel and an answer drawn before the
-    /// render that removes them can land in one burst; the sidebar used to
-    /// read the question it was rendered with, so an answer queued behind
-    /// Cancel still went through.
-    #[farhelm_testtrace::test]
-    fn a_cancelled_yolo_replace_question_dispatches_nothing() {
-        use std::cell::Cell;
-        std::thread_local! {
-            static SLOT: Cell<Option<ConfirmSlot<YoloReplaceQuestion>>> =
-                const { Cell::new(None) };
-        }
-
-        fn app() -> Element {
-            let slot = use_confirm_slot::<YoloReplaceQuestion, ()>();
-            SLOT.with(|cell| cell.set(Some(slot)));
-            rsx! {}
-        }
-
-        let question = |opening: u64| YoloReplaceQuestion {
-            opening,
-            pending: PendingYoloReplace {
-                key: format!("key-{opening}"),
-                ask: crate::yolo_confirm::YoloAsk {
-                    host: Some(7),
-                    host_name: "build box".to_string(),
-                    reason: crate::yolo_confirm::YoloReason::Asserted,
-                },
-                source: crate::list::row::row_specimen("source"),
-                guard: crate::DeleteGuard::NothingAlive,
-            },
-        };
-        // The row-operation admission, counted: how many admissions are
-        // still held after each answer.
-        let held = Cell::new(0);
-        let admit = || {
-            held.set(held.get() + 1);
-            true
-        };
-        let release = || held.set(held.get() - 1);
-
-        let mut dom = VirtualDom::new(app);
-        dom.rebuild_in_place();
-        let mut slot = SLOT.with(Cell::get).expect("the slot mounted");
-
-        dom.in_runtime(|| {
-            for stop_asking in [false, true] {
-                let open = question(1);
-                slot.open(open.clone(), ());
-                // Cancel's handler, then the answer's, both drawn for this
-                // opening.
-                assert!(slot.take(&open).is_some(), "premise: Cancel closes it");
-                assert!(
-                    take_yolo_answer(&mut slot, &open, stop_asking, admit, release).is_none(),
-                    "an answer queued behind Cancel (stop asking: {stop_asking}) dispatches nothing"
-                );
-                assert!(!slot.is_open());
-                assert_eq!(held.get(), 0, "a stale answer holds no admission");
-            }
-
-            // An answer drawn for an earlier opening about the same row.
-            slot.open(question(2), ());
-            assert!(take_yolo_answer(&mut slot, &question(1), false, admit, release).is_none());
-            assert!(slot.is_open(), "the later question is left alone");
-
-            // An answer the page cannot start yet (the row is in a prompt of
-            // its own) leaves the question up to answer again.
-            for stop_asking in [false, true] {
-                assert!(
-                    take_yolo_answer(&mut slot, &question(2), stop_asking, || false, release)
-                        .is_none()
-                );
-                assert!(
-                    slot.is_open(),
-                    "a refused start keeps the question (stop asking: {stop_asking})"
-                );
-            }
-            assert_eq!(held.get(), 0);
-
-            // Positive controls: genuine answers dispatch with the row's
-            // operation begun, and only "don't ask again" carries the host to
-            // mark.
-            let answer = take_yolo_answer(&mut slot, &question(2), false, admit, release)
-                .expect("a genuine confirmation dispatches");
-            assert_eq!(answer.pending.source.id.raw(), "source");
-            assert_eq!(answer.stop_asking, None);
-            assert!(!slot.is_open(), "the answer took the question down");
-            assert_eq!(held.get(), 1, "the dispatched replace holds the row");
-
-            slot.open(question(3), ());
-            let answer = take_yolo_answer(&mut slot, &question(3), true, admit, release)
-                .expect("a genuine \"don't ask again\" dispatches");
-            assert_eq!(answer.stop_asking, Some((7, "build box".to_string())));
-        });
     }
 }

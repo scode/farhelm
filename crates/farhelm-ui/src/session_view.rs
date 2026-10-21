@@ -18,9 +18,7 @@ use dioxus::prelude::*;
 use farhelm_proto::host_appearance::HostColor;
 
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
-use crate::api::{
-    close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, replace_session, restart_session,
-};
+use crate::api::{close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, restart_session};
 use crate::attachments::{attachment_policy, attachment_status_element_id};
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{
@@ -30,6 +28,7 @@ use crate::ops::{ConfirmSlot, OpGuard, ReadGate, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
 use crate::reconnect::reconnect_policy;
+use crate::replace::{ReplaceAnswer, ReplaceController, ReplaceResult, ReplaceYoloQuestion};
 use crate::restart_with::RestartWithDialog;
 use crate::status::{StatusBadge, StatusBadgeView, status_badge};
 use crate::tabs::{
@@ -480,28 +479,6 @@ fn followed_title(selected: Option<&Session>, shown: &Session) -> Option<crate::
         .then(|| selected.title.clone())
 }
 
-/// A Replace the helm refused as a YOLO launch, waiting on the user's answer
-/// to the YOLO question.
-///
-/// It carries what the Replace prompt the user confirmed was drawn from:
-/// the session snapshot (its host fields become the new session's, see
-/// `list::with_source_host`) and the precondition that prompt covered
-/// (`status::delete_guard`), which the supervisor checks before deleting the
-/// source. Both answers to the YOLO question send these stored values.
-/// Recomputed at answer time instead, a session restarted or given a tab
-/// while the question was open (from another window, an agent, or this view)
-/// changed the precondition, and the delete could kill processes the prompt
-/// never mentioned.
-#[derive(Clone, PartialEq)]
-struct PendingYoloReplace {
-    /// A later Replace on the same source can own a different page retry.
-    /// This question may cancel only the key it was originally raised for.
-    key: String,
-    ask: crate::yolo_confirm::YoloAsk,
-    source: Session,
-    guard: crate::DeleteGuard,
-}
-
 /// One opening of the YOLO question inside Restart with: the key its
 /// [`ConfirmSlot`] is open for.
 ///
@@ -685,19 +662,22 @@ pub(crate) fn SessionView(
     // before deleting this one; sharing restart state would lose the
     // endpoint's partial-failure wording or make the two operations race.
     let mut replacing = use_signal(|| false);
-    // Navigation remounts this view, but an unanswered Replace is still the
-    // same operation from the sidebar, header or interrupted card. Cancelling
-    // this source must leave a newer row's unresolved intent alone.
-    let mut replace_key = use_context::<crate::list::ReplaceIntent>().0;
+    // Navigation retains the page's retry identity. Only the local question
+    // belongs to this keyed view, including its permanent-answer mount timing.
+    let replace_yolo = use_signal(|| None::<ReplaceYoloQuestion>);
+    let replace_yolo_error = use_signal(|| None::<String>);
+    let replace_yolo_openings = use_signal(|| 0u64);
+    let replace_controller = ReplaceController::session(
+        use_context::<crate::list::ReplaceIntent>().0,
+        use_context::<crate::list::ReplaceYoloQuestions>().0,
+        replace_yolo,
+        replace_yolo_error,
+        replace_yolo_openings,
+    );
+    use_drop(move || replace_controller.release_question());
     let replace_source_id = use_signal(|| session.id.raw().to_owned());
-    let mut cancel_replace_intent = move || {
-        if replace_key
-            .peek()
-            .as_ref()
-            .is_some_and(|(id, _)| id == &*replace_source_id.peek())
-        {
-            replace_key.set(None);
-        }
+    let cancel_replace_intent = move || {
+        replace_controller.cancel_source(&replace_source_id.peek());
     };
     // Each Replace prompt is a `ConfirmSlot` holding the lifecycle claim it
     // took when it opened: confirming moves that claim into the replace
@@ -715,16 +695,6 @@ pub(crate) fn SessionView(
     // confirmed delete into a silent no-op.
     let mut confirming_header_delete: ConfirmSlot<(), OpGuard> = use_confirm_slot();
     let mut replace_error = use_signal(|| None::<String>);
-    // A replace the helm refused as a YOLO launch on a host that asks before YOLO launches, and
-    // why a "don't ask again" on it failed at its first step, if it did.
-    let mut replace_yolo = use_signal(|| None::<PendingYoloReplace>);
-    let mut replace_yolo_error = use_signal(|| None::<String>);
-    let mut yolo_questions = use_context::<crate::list::ReplaceYoloQuestions>().0;
-    use_drop(move || {
-        if let Some(pending) = replace_yolo.peek().as_ref() {
-            yolo_questions.write().remove(pending.source.id.raw());
-        }
-    });
     // One synchronously claimed token covers the restart prompt as well as
     // the request, so two clicks in one render frame cannot authorize
     // operations from two different snapshots. The token
@@ -1572,122 +1542,34 @@ pub(crate) fn SessionView(
 
     let replace_base = base.clone();
     let replace_preferences = preferences;
-    let replace_session_id = session.id.raw().to_owned();
     // A Replace deletes its source, whose notice the session list shows.
     let delete_notice = use_context::<crate::list::DeleteNotice>();
-    // Takes the lifecycle claim its confirmation handed over; the task owns
-    // it and releases it when it ends (or is cancelled with the view).
-    // `stop_asking` is "start, and don't ask again on this host": the host
-    // (id and display name) the question named, to mark safe for YOLO
-    // launches first; nothing is replaced if that fails. Taken from the
-    // question the user answered. It only ever comes with `allow_yolo`.
-    //
-    // `source` and `guard` are the snapshot the confirmed
-    // prompt was drawn from and the precondition that prompt covered; see
-    // `PendingYoloReplace` for why they are passed in rather than read here.
+    // The surface owns admission, task cancellation and successful selection;
+    // the controller owns the shared request sequence and captured consent.
     let replace = move |claim: OpGuard,
-                        allow_yolo: bool,
-                        stop_asking: Option<(crate::HostId, String)>,
                         source: Session,
-                        guard: crate::DeleteGuard| {
+                        guard: crate::DeleteGuard,
+                        answered: Option<ReplaceAnswer>| {
         if replacing() {
             return;
         }
         replacing.set(true);
         replace_error.set(None);
         let base = replace_base.clone();
-        let id = replace_session_id.clone();
         let preferences = replace_preferences;
-        let retained = replace_key
-            .peek()
-            .as_ref()
-            .filter(|(source, _)| source == &id)
-            .and_then(|(_, key)| key.clone());
-        replace_key.set(Some((id.clone(), retained.clone())));
+        let attempt = replace_controller.prepare(source.clone(), guard, answered);
         spawn(async move {
             let _claim = claim;
-            if let Some((host, name)) = stop_asking {
-                if let Err(reason) = crate::yolo_confirm::stop_asking(&base, host, &name).await {
-                    replace_yolo_error.set(Some(reason));
-                    replacing.set(false);
-                    return;
-                }
-                replace_yolo.set(None);
-                yolo_questions.write().remove(&id);
-            }
-            let key = match retained {
-                Some(key) => key,
-                None => match crate::api::mint_intent_key().await {
-                    Ok(key) => {
-                        let owns_pending_key = replace_key
-                            .peek()
-                            .as_ref()
-                            .is_some_and(|(source, key)| source == &id && key.is_none());
-                        if owns_pending_key {
-                            replace_key.set(Some((id.clone(), Some(key.clone()))));
-                        }
-                        key
-                    }
-                    Err(reason) => {
-                        replace_error.set(Some(reason));
-                        replacing.set(false);
-                        return;
-                    }
-                },
-            };
-            // A concurrent sidebar operation can replace the page's single
-            // slot. Only the intent this task sent may be settled by its reply.
-            let mut end_intent = || {
-                if replace_key
-                    .peek()
-                    .as_ref()
-                    .is_some_and(|(source, retained)| {
-                        source == &id && retained.as_ref() == Some(&key)
-                    })
-                {
-                    replace_key.set(None);
-                }
-            };
-            match replace_session(&base, &id, &key, guard, allow_yolo).await {
-                Ok((new_session, notice)) => {
-                    end_intent();
+            match replace_controller.run(&base, attempt).await {
+                ReplaceResult::Replaced(new_session, notice) => {
                     header_refresh.set(true);
                     delete_notice.publish(notice);
-                    let new_session = crate::list::with_source_host(new_session, &source);
+                    let new_session = crate::list::with_source_host(*new_session, &source);
                     crate::list::remember_selection(&base, preferences, new_session.id.raw());
                     on_replaced.call(new_session);
                 }
-                Err(error)
-                    if error.outcome.requires_yolo()
-                        && yolo_questions.write().insert(id.clone()) =>
-                {
-                    // A new question starts without an earlier one's
-                    // "don't ask again" failure.
-                    replace_yolo_error.set(None);
-                    replace_yolo.set(Some(PendingYoloReplace {
-                        key: key.clone(),
-                        ask: crate::yolo_confirm::YoloAsk {
-                            host: source.host,
-                            // YoloAsk escapes its raw snapshot at render time.
-                            host_name: source
-                                .host_name
-                                .as_ref()
-                                .map(|name| name.raw().to_owned())
-                                .unwrap_or_else(|| "this host".to_string()),
-                            reason: crate::yolo_confirm::YoloReason::of_launch(
-                                source.agent_selection(),
-                            ),
-                        },
-                        source: source.clone(),
-                        guard,
-                    }));
-                }
-                Err(error) => {
-                    if error.outcome.retires_retry() {
-                        end_intent();
-                    }
-                    replace_error.set(Some(error.text));
-                }
+                ReplaceResult::Refused(reason) => replace_error.set(Some(reason)),
+                ReplaceResult::QuestionHandled => {}
             }
             replacing.set(false);
         });
@@ -2159,7 +2041,7 @@ pub(crate) fn SessionView(
     // interrupted card's), whose consequence text is drawn from `shown`: the
     // snapshot the confirmed prompt showed and the precondition it covered.
     // A Replace that then meets the YOLO question carries both to its answer
-    // (`PendingYoloReplace`).
+    // (`replace::PendingReplace`).
     let header_replace_source = shown.clone();
     let card_replace_source = shown.clone();
     let direct_header_source = shown.clone();
@@ -2499,7 +2381,7 @@ pub(crate) fn SessionView(
                             onclick: move |_| {
                                 if let Some(claim) = lifecycle.claim_guard() {
                                     if skip_session_confirmations {
-                                        direct_header_replace(claim, false, None, direct_header_source.clone(), replace_prompt_guard);
+                                        direct_header_replace(claim, direct_header_source.clone(), replace_prompt_guard, None);
                                     } else {
                                         confirming_header_replace.open((), claim);
                                     }
@@ -2531,10 +2413,9 @@ pub(crate) fn SessionView(
                                         if let Some(claim) = confirming_header_replace.take(&()) {
                                             header_confirm_replace(
                                                 claim,
-                                                false,
-                                                None,
                                                 header_replace_source.clone(),
                                                 replace_prompt_guard,
+                                                None,
                                             );
                                         }
                                     },
@@ -2773,70 +2654,40 @@ pub(crate) fn SessionView(
                     parts: vec![DetailPart::peer(err)],
                 }
             }
-            if let Some(pending) = replace_yolo.read().clone() {
+            if let Some(question) = replace_controller.question() {
                 crate::yolo_confirm::YoloConfirmation {
-                    ask: pending.ask,
+                    ask: question.pending.ask,
                     busy: replacing(),
-                    error: replace_yolo_error(),
+                    error: replace_controller.error(),
                     confirm_submits: false,
                     // Both answers continue the Replace the user confirmed,
                     // with the snapshot and nothing-alive answer that prompt
                     // carried, not a fresh read of the session.
                     on_confirm: move |_| {
-                        let Some(pending) = replace_yolo.peek().clone() else {
+                        if replace_controller.current_question().is_none() {
                             return;
-                        };
-                        if let Some(claim) = lifecycle.claim_guard() {
-                            replace_yolo.set(None);
-                            yolo_questions.write().remove(pending.source.id.raw());
-                            replace_yolo_error.set(None);
-                            yolo_confirm_replace(
-                                claim,
-                                true,
-                                None,
-                                pending.source,
-                                pending.guard,
-                            );
+                        }
+                        if let Some(claim) = lifecycle.claim_guard()
+                            && let Some(answer) = replace_controller.answer_current(false)
+                        {
+                            let pending = answer.pending.clone();
+                            yolo_confirm_replace(claim, pending.source, pending.guard, Some(answer));
                         }
                     },
-                    // The confirmation stays up through the first step; the
-                    // replace task takes it down once the host is marked,
-                    // or leaves it with the reason.
+                    // Keep the mounted question through the host-setting write;
+                    // the controller hides it on success or keeps its reason.
                     on_confirm_and_stop_asking: move |_| {
-                        let Some(pending) = replace_yolo.peek().clone() else {
+                        if replace_controller.current_question().is_none() {
                             return;
-                        };
-                        // The host the question named; the button is only
-                        // offered when it named one.
-                        let target = pending
-                            .ask
-                            .host
-                            .map(|host| (host, pending.ask.host_name.clone()));
-                        if let Some(claim) = lifecycle.claim_guard() {
-                            replace_yolo_error.set(None);
-                            yolo_stop_asking_replace(
-                                claim,
-                                true,
-                                target,
-                                pending.source,
-                                pending.guard,
-                            );
+                        }
+                        if let Some(claim) = lifecycle.claim_guard()
+                            && let Some(answer) = replace_controller.answer_current(true)
+                        {
+                            let pending = answer.pending.clone();
+                            yolo_stop_asking_replace(claim, pending.source, pending.guard, Some(answer));
                         }
                     },
-                    on_cancel: move |_| {
-                        let pending = replace_yolo.peek().clone();
-                        replace_yolo.set(None);
-                        if let Some(pending) = pending {
-                            yolo_questions.write().remove(pending.source.id.raw());
-                            let owns_key = replace_key.peek().as_ref().is_some_and(|(source, key)| {
-                                source == pending.source.id.raw() && key.as_ref() == Some(&pending.key)
-                            });
-                            if owns_key {
-                                replace_key.set(None);
-                            }
-                        }
-                        replace_yolo_error.set(None);
-                    },
+                    on_cancel: move |_| replace_controller.cancel_current(),
                 }
             }
             if let Some(err) = replace_error.read().clone() {
@@ -2950,7 +2801,7 @@ pub(crate) fn SessionView(
                             onclick: move |_| {
                                 if let Some(claim) = lifecycle.claim_guard() {
                                     if skip_session_confirmations {
-                                        direct_card_replace(claim, false, None, direct_card_source.clone(), replace_prompt_guard);
+                                        direct_card_replace(claim, direct_card_source.clone(), replace_prompt_guard, None);
                                     } else {
                                         confirming_replace.open((), claim);
                                     }
@@ -2975,10 +2826,9 @@ pub(crate) fn SessionView(
                                     if let Some(claim) = confirming_replace.take(&()) {
                                         confirm_replace(
                                             claim,
-                                            false,
-                                            None,
                                             card_replace_source.clone(),
                                             replace_prompt_guard,
+                                            None,
                                         );
                                     }
                                 },

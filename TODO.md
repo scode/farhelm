@@ -390,10 +390,6 @@ or per-call-site discipline, at one place when a sibling path already followed i
 maintainer chose these five behavior-preserving refactors, each of which makes one such rule something a type, an
 exhaustive match or a default enforces. A clear fix of the targeted bug class is allowed in its own PR.
 
-- **One Replace/YOLO controller in the UI.** The sidebar's and header's copied Replace flows, YOLO questions and
-  retry-key decisions become one controller with an outcome enum, and the operation lock becomes guard-only. The same
-  cancel race was fixed three times (#1658 to #1660). Plan: `plans/queue/ui-session-actions.md`.
-
 ## Maybe later
 
 - **Let an agent delete its own session.** `farhelm agent delete` refuses a session's own id (plan
