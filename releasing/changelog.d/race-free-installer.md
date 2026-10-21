@@ -9,5 +9,7 @@ reopened. Inside a session, a `farhelm` command whose version has been removed n
 failing.
 
 Draft note for curation: this fragment covers the whole race-free installer change, which lands as a stack of PRs that
-ship together; later PRs in the stack edit this fragment rather than adding their own. This first PR adds version locks
-to `farhelm` and the forwarder's claim; installs and uninstall start honoring them in later PRs of the same release.
+ship together; later PRs in the stack edit this fragment rather than adding their own. So far: version locks in `farhelm`
+and the forwarder's claim; the desktop app holding its own version from startup (if that version was removed while the
+app was starting, the app now says to open Farhelm again instead of failing later). Installs and uninstall start
+honoring the locks in later PRs of the same release.
