@@ -93,3 +93,65 @@ Each PR passed two independent fresh-context reviews on gpt-6-astra at high effo
 one dedicated no-functional-change review. All four completed reviews reported no findings and no observable behavior
 change. No aligned-change exemption was used. One initial review launch hit model capacity; retrying the same required
 model succeeded. Both PRs remain drafts for the landing monitor.
+
+### Landing
+
+Landed as #2520 and #2522, merged bottom-up, with the same content the report describes, rebased onto this round's main
+with one TODO.md conflict resolution. It was the second of two plans in this landing round, after launch-attempt-owner.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained only queue bookkeeping and plan files for future work, and launch-attempt-owner
+landed just before it in this round. A fresh-context reviewer and I read the two against each other.
+
+- launch-attempt-owner changes only how the supervisor removes a failed launch's leftover files and what a refused
+  create's error says about that cleanup. This plan's create and restart routes do not interpret those refusals; they
+  pass them to the browser unchanged, so neither plan relies on the other.
+- Restart keeps its order of checks under this plan (check the edit, reach the host, resolve trust on that connection,
+  check for YOLO, send), and the supervisor's restart cleanup keeps its rules under launch-attempt-owner.
+- Plain Replace still copies the source's stored launch, including its trust choice, without consulting current
+  settings.
+
+#### Fixes made during the landing
+
+None to the plan's code. Its TODO.md removal conflicted with launch-attempt-owner's, landed just before it; the landing
+kept both removals.
+
+#### Possible follow-ups
+
+None.
+
+#### Checks
+
+Together the two plans add about 1,500 lines and remove about 500 in how the supervisor removes a failed launch's files
+and how the helm's create and restart routes resolve workspace trust, and both executors ran selected tests only; that
+is why this round ran the whole Rust workspace, plus the browser specs that drive workspace trust, Replace, Restart
+with, terminal restart and create retries end to end. All of the following ran on both plans stacked together on this
+round's main, including the TODO.md conflict resolution:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the isolated test-sleep check, `dprint check` on every changed
+  Markdown, JSON and TOML file, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, the
+  workspace debug build and the UI's release web build: all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `68a7a44f-3142-4013-aaef-7d0dc5350e0c` (kept): 4153 passed, 1 failed; 40 tests
+  marked as ignored did not run, and the output has no runtime `SKIPPED` message. The failure is a UI test,
+  `api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline`, which checks that a read queued behind a
+  save that never finishes waits at least 30 milliseconds before giving up; it gave up slightly sooner. Neither plan
+  changes the UI crate. The same test has failed this way in three earlier landing rounds, twice in the full workspace
+  run (runs `e5bf0834` and `d854fd00`) and once in the UI's desktop-feature run (`d8ff6545`), and passes on its own: 50
+  repeats on this round's code (run `e1bfd2c4-f6cd-4627-8ab3-028d8dd8ca26`) all passed. I attribute it to that
+  pre-existing timing flake. It is not recorded yet; I am opening a separate draft PR that records it in FLAKES.md, adds
+  its Deflake entry to TODO.md and its line to `deflake/known-flakes.txt`.
+- `npx playwright test` in `e2e/` for `workspace-trust`, `claude-trust`, `restart-with`, `replace`, `terminal-restart`
+  and `terminal-create-idempotency` on Chromium and WebKit, three workers each with its own helm and supervisors, no
+  retries, run `34c8e607-2f6d-44ab-b53a-7bd8f1593c35`: 170 passed, none failed.
+- Skipped: the desktop feature check and tests, the JavaScript harness and the website build (no UI, asset JavaScript or
+  docs changed), the rest of the browser suite (the browser-visible behavior both plans could affect is in the specs
+  above), the doctests (no documentation example changed), the desktop smoke test, the native Mac app (not runnable
+  here) and the installer (unchanged).
+
+The report's checks ran selected helm and lifecycle tests and skipped the full Rust workspace and the browser suite; the
+workspace and the browser specs above ran this round. The report's statement that no rebase was needed held when it was
+written; at landing the stack was rebased onto launch-attempt-owner, and the checks above cover that result. Nothing
+else in the executor's report became untrue at landing.
