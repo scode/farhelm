@@ -639,6 +639,9 @@ impl AppState {
 /// first and protected as one group; standalone mode adds the public exchange
 /// route afterwards. Keeping both boundaries structural avoids relying on each
 /// future route to remember whether it belongs inside authentication.
+/// Ordinary state changes also acquire helm ownership here, before argument
+/// extraction. Add a route to the normal group unless its cancellation is part
+/// of the contract documented beside the explicit exceptions below.
 fn api_router(state: Arc<AppState>) -> Router {
     let mode = state.mode;
     let protected = Router::new()
@@ -649,16 +652,8 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route("/api/launch-catalog", get(sessions::launch_catalog))
         .route("/api/sessions/{id}/tunnels", get(tunnels::list_tunnels))
         .route(
-            "/api/sessions/{id}/tunnels/open",
-            axum::routing::post(tunnels::open_tunnel),
-        )
-        .route(
             "/api/sessions/{id}/tunnels/{tunnel_id}",
             axum::routing::delete(tunnels::close_tunnel),
-        )
-        .route(
-            "/api/checkout-trash/list",
-            axum::routing::post(sessions::list_checkout_trash),
         )
         .route(
             "/api/checkout-trash/delete",
@@ -670,22 +665,6 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::put(templates::put_template).delete(templates::delete_template),
         )
         .route("/api/launch-history", get(sessions::launch_history))
-        .route(
-            "/api/browse-directory",
-            axum::routing::post(sessions::browse_directory),
-        )
-        .route(
-            "/api/github-checkout-preview",
-            axum::routing::post(sessions::github_checkout_preview),
-        )
-        .route(
-            "/api/github-repositories",
-            axum::routing::post(sessions::github_repositories),
-        )
-        .route(
-            "/api/sessions/{id}/stop",
-            axum::routing::post(sessions::stop_session),
-        )
         .route(
             "/api/sessions/{id}/restart",
             axum::routing::post(sessions::restart_session),
@@ -717,14 +696,6 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/sessions/{id}/notifications/cleared",
             axum::routing::put(sessions::clear_notifications),
-        )
-        .route(
-            "/api/sessions/{id}/tabs",
-            axum::routing::post(sessions::open_tab),
-        )
-        .route(
-            "/api/sessions/{id}/tabs/{tab_id}",
-            axum::routing::delete(sessions::close_tab),
         )
         .route("/api/sessions/{id}/term", get(terminal::term_ws))
         // The non-displacing attach lives at its own PATH rather than
@@ -758,15 +729,7 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/hosts/probe",
             axum::routing::post(provisioning::probe_host),
         )
-        .route(
-            "/api/hosts/provision",
-            axum::routing::post(provisioning::provision_host),
-        )
         .route("/api/hosts/{id}", axum::routing::delete(hosts::remove_host))
-        .route(
-            "/api/hosts/{id}/update",
-            axum::routing::post(provisioning::update_host),
-        )
         .route(
             "/api/hosts/{id}/uninstall",
             axum::routing::post(provisioning::uninstall_host),
@@ -805,21 +768,12 @@ fn api_router(state: Arc<AppState>) -> Router {
         )
         .route("/api/approvals", get(approvals::list_approvals))
         .route(
-            "/api/ssh-connections",
-            axum::routing::post(ssh_help::commands)
-                .layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
-        )
-        .route(
             "/api/approvals/{id}",
             axum::routing::post(approvals::answer_approval),
         )
         .route(
             "/api/hosts/{id}/adopt",
             axum::routing::post(hosts::adopt_host),
-        )
-        .route(
-            "/api/hosts/{id}/retry",
-            axum::routing::post(hosts::retry_host),
         )
         // The shared client preference (SPEC.md, Session list). An ordinary
         // protected route with no CORS wrapper — see `preferences.rs` for
@@ -853,16 +807,6 @@ fn api_router(state: Arc<AppState>) -> Router {
         // with nothing else in common: it names no session, carries no data,
         // and holds no attachment.
         .route("/api/events", get(events::events_ws))
-        // Feedback to the maintainer (SPEC.md, Feedback): the helm's one
-        // feedback connection carrying user-written text, made only when the
-        // user presses Send in the dialog. A UI route on purpose, inside the
-        // protected group, with no agent request verb behind it.
-        .route(
-            "/api/feedback",
-            axum::routing::post(feedback::send_feedback).layer(
-                axum::extract::DefaultBodyLimit::max(feedback::MAX_BODY_BYTES),
-            ),
-        )
         .route(
             "/api/ntfy-alerts",
             axum::routing::get(ntfy::get)
@@ -875,6 +819,85 @@ fn api_router(state: Arc<AppState>) -> Router {
         // index.html and looks successful until JSON decoding fails; other
         // methods inherit the static service's unrelated 405 response.
         .route("/api/{*rest}", axum::routing::any(api_not_found))
+        // Apply only to the normal group before merging the exceptions. Reads
+        // and their implicit HEAD companions pass through this layer inline.
+        .route_layer(axum::middleware::from_fn(middleware::own_state_change));
+
+    // Cancellation is an explicit route contract, not the default for a new
+    // mutation. Keep these outside ownership, then authenticate both groups
+    // together so an exception never becomes an authentication exemption.
+    let cancellable = Router::new()
+        // Admission may wait on the consent gate. A caller leaving before
+        // publication must not later create a listener or open a browser.
+        .route(
+            "/api/sessions/{id}/tunnels/open",
+            axum::routing::post(tunnels::open_tunnel),
+        )
+        // Read-only POSTs retain cancellable lookup/remote work. Browse may
+        // refine suggestion history atomically, but that is best effort and
+        // repaired by the next browse/create, not an accepted mutation tail.
+        .route(
+            "/api/checkout-trash/list",
+            axum::routing::post(sessions::list_checkout_trash),
+        )
+        .route(
+            "/api/browse-directory",
+            axum::routing::post(sessions::browse_directory),
+        )
+        .route(
+            "/api/github-checkout-preview",
+            axum::routing::post(sessions::github_checkout_preview),
+        )
+        .route(
+            "/api/github-repositories",
+            axum::routing::post(sessions::github_repositories),
+        )
+        .route(
+            "/api/ssh-connections",
+            axum::routing::post(ssh_help::commands)
+                .layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
+        )
+        // Stop and tabs issue one host request with no local follow-through;
+        // #1404 deliberately retained their cancellable request lifetime.
+        .route(
+            "/api/sessions/{id}/stop",
+            axum::routing::post(sessions::stop_session),
+        )
+        .route(
+            "/api/sessions/{id}/tabs",
+            axum::routing::post(sessions::open_tab),
+        )
+        .route(
+            "/api/sessions/{id}/tabs/{tab_id}",
+            axum::routing::delete(sessions::close_tab),
+        )
+        // Retry's lookup is cancellable; once dispatch mutates the actor map,
+        // its start gate and event bump complete without another await.
+        .route(
+            "/api/hosts/{id}/retry",
+            axum::routing::post(hosts::retry_host),
+        )
+        // ADD consumes its plan before its owned service operation; UPDATE's
+        // bodyless planner first reads/refuses a host outside ownership. Keep
+        // those admission boundaries and the service's distinct panic mapping.
+        .route(
+            "/api/hosts/provision",
+            axum::routing::post(provisioning::provision_host),
+        )
+        .route(
+            "/api/hosts/{id}/update",
+            axum::routing::post(provisioning::update_host),
+        )
+        // Only forwarding is owned. Its outer failure log is still skipped
+        // when the caller disappears; owning the whole route would change it.
+        .route(
+            "/api/feedback",
+            axum::routing::post(feedback::send_feedback).layer(
+                axum::extract::DefaultBodyLimit::max(feedback::MAX_BODY_BYTES),
+            ),
+        );
+    let protected = protected
+        .merge(cancellable)
         // Applied to the ROUTES already assembled above. The exchange route
         // is added afterwards and is therefore structurally outside the
         // authenticated boundary rather than exempted inside middleware.
@@ -898,8 +921,9 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::options(middleware::desktop_webview_preflight),
         )
         .layer(axum::middleware::from_fn(middleware::desktop_webview_cors));
-    // Upload authentication remains mandatory, but CORS must wrap that
-    // middleware so a custom-scheme webview can read its structured 401.
+    // Uploads are cancellable exceptions: dropping their handler aborts the
+    // upstream transfer, including admission. CORS must still wrap mandatory
+    // authentication so a custom-scheme webview can read its structured 401.
     let desktop_attachment = Router::new()
         .route(
             "/api/sessions/{id}/attachments",
@@ -928,6 +952,7 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/client-log",
             axum::routing::post(client_log::post_client_log),
         )
+        .route_layer(axum::middleware::from_fn(middleware::own_state_change))
         .route_layer(axum::middleware::from_fn_with_state(
             Arc::clone(&state),
             auth::require_device_session,
@@ -951,6 +976,8 @@ fn api_router(state: Arc<AppState>) -> Router {
     // same reason: the desktop webview must be able to READ a structured
     // 401 from its own fetch. The body limit is this route's own — sized
     // for one clipboard payload, not a log batch (see clipboard.rs).
+    // This is a cancellation exception: the blocking native write already owns
+    // its permit, while the outer failure log retains the waiter's lifetime.
     let desktop_clipboard = Router::new()
         .route(
             "/api/clipboard",
@@ -971,6 +998,8 @@ fn api_router(state: Arc<AppState>) -> Router {
 
     // File operations use the same auth-inside-CORS boundary as attachments.
     // Only preflight is public; a webview must read actual auth refusals too.
+    // Both are explicit cancellation exceptions: stat is read-only, and dropping
+    // a download must abort upstream and remove unfinished native staging.
     let desktop_files = Router::new()
         .route(
             "/api/sessions/{id}/files/stat",
@@ -1026,6 +1055,143 @@ fn api_router(state: Arc<AppState>) -> Router {
 /// configured UI source can reinterpret them as static or client-side paths.
 async fn api_not_found() -> axum::http::StatusCode {
     axum::http::StatusCode::NOT_FOUND
+}
+
+#[cfg(test)]
+mod request_ownership_tests {
+    use axum::body::{Body, Bytes};
+    use axum::http::{Request, StatusCode};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+    use tokio::sync::{mpsc, oneshot};
+    use tower::ServiceExt;
+
+    /// The real authenticated router owns parsing, before the trust handler's
+    /// existing task can start. A body parked at EOF separates that guarantee
+    /// from the old per-handler wrapper, which cannot protect extraction.
+    #[farhelm_testtrace::test]
+    async fn authenticated_mutation_finishes_parsing_after_its_caller_is_cancelled() {
+        let harness = crate::rest_harness::idle_helm().await;
+        assert!(
+            !harness
+                .store
+                .checkout_config_snapshot(None)
+                .await
+                .unwrap()
+                .claude_trust
+        );
+        let mut events = harness.manager.events().subscribe();
+        let before = *events.borrow_and_update();
+        let (send, receive) = mpsc::channel::<Result<Bytes, std::io::Error>>(2);
+        send.send(Ok(Bytes::from_static(br#"{"enabled":true}"#)))
+            .await
+            .unwrap();
+        let (at_eof, waiting) = oneshot::channel();
+        // All valid JSON bytes are supplied first. The named gate means only
+        // EOF remains; a cancelled/incomplete body cannot masquerade as parsing
+        // that was retained by the helm. Sender drop releases it on test failure.
+        let stream = futures_util::stream::unfold(
+            (receive, Some(at_eof), false),
+            |(mut receive, mut at_eof, delivered)| async move {
+                if delivered && let Some(at_eof) = at_eof.take() {
+                    let _ = at_eof.send(());
+                }
+                receive
+                    .recv()
+                    .await
+                    .map(|bytes| (bytes, (receive, at_eof, true)))
+            },
+        );
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/api/checkout-claude-trust")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(Body::from_stream(stream))
+            .unwrap();
+        let caller = tokio::spawn(harness.router().oneshot(request));
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("the authenticated extractor must wait for EOF")
+            .expect("the extractor must report its EOF boundary");
+        assert!(
+            !harness
+                .store
+                .checkout_config_snapshot(None)
+                .await
+                .unwrap()
+                .claude_trust
+        );
+        caller.abort();
+        let cancelled = tokio::time::timeout(Duration::from_secs(5), caller)
+            .await
+            .expect("the HTTP waiter must stop after abort")
+            .expect_err("the gated caller must be cancelled");
+        assert!(cancelled.is_cancelled());
+        assert!(!send.is_closed(), "the helm must still own the extractor");
+        drop(send);
+        // A feed event is the operation's real completion oracle. Unrelated
+        // fleet events cannot satisfy it without the persisted opt-in as well.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                events
+                    .changed()
+                    .await
+                    .expect("the fixture feed remains live");
+                if harness
+                    .store
+                    .checkout_config_snapshot(None)
+                    .await
+                    .unwrap()
+                    .claude_trust
+                {
+                    assert!(*events.borrow_and_update() > before);
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("the disconnected save must persist and announce its opt-in");
+    }
+
+    /// Authentication must reject before ownership or parsing. A body that
+    /// never becomes ready proves a 401 cannot depend on extractor completion.
+    #[farhelm_testtrace::test]
+    async fn unauthenticated_mutation_is_refused_without_polling_its_body() {
+        let harness = crate::rest_harness::idle_helm().await;
+        let polled = Arc::new(AtomicBool::new(false));
+        let body_polled = Arc::clone(&polled);
+        let body = Body::from_stream(futures_util::stream::poll_fn(move |_| {
+            body_polled.store(true, Ordering::SeqCst);
+            std::task::Poll::<Option<Result<Bytes, std::io::Error>>>::Pending
+        }));
+        let response = tokio::time::timeout(
+            Duration::from_secs(5),
+            harness.unauthenticated_router().oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/checkout-claude-trust")
+                    .header("host", "127.0.0.1:7433")
+                    .header("content-type", "application/json")
+                    .body(body)
+                    .unwrap(),
+            ),
+        )
+        .await
+        .expect("authentication must not wait for the body")
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(!polled.load(Ordering::SeqCst));
+        assert!(
+            !harness
+                .store
+                .checkout_config_snapshot(None)
+                .await
+                .unwrap()
+                .claude_trust
+        );
+    }
 }
 
 /// Where [`build_router`] gets the web UI it serves, decided once at

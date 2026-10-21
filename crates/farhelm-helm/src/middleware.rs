@@ -1,7 +1,8 @@
 //! The layers wrapped around the helm's routes: who is allowed to ask, who
-//! is allowed to read the answer, and what every answer carries.
+//! is allowed to read the answer, who owns the work, and what every answer
+//! carries.
 //!
-//! Three concerns live here rather than inside the handlers, and each is
+//! These concerns live here rather than inside the handlers, and each is
 //! here for the same reason: within whatever scope it covers, it has to
 //! hold for EVERY response, including the ones that fail. A guard a handler
 //! forgot to call is a hole; a header a handler forgot to set on its error
@@ -12,7 +13,10 @@
 //! stamp wrap the whole router, because both answer questions that have
 //! nothing to do with which route was asked for. The CORS headers wrap the
 //! four desktop-webview fetch edges, because widening them is widening what
-//! a cross-origin page may read.
+//! a cross-origin page may read. Request ownership covers the authenticated
+//! routes except for an explicitly cancellable sub-router: an action must
+//! finish even if the client leaves, while reads and cancellation-sensitive
+//! transfers must retain their connection's lifetime.
 //!
 //! ## The loopback guard is a real security boundary
 //!
@@ -43,6 +47,32 @@
 
 use crate::BUILD_STAMP_HEADER;
 use axum::response::IntoResponse;
+
+/// Own authenticated state-changing requests before typed extraction begins.
+///
+/// Authentication must wrap this layer, so a refused caller never starts
+/// owned work. Entry here is the acceptance boundary: the helm may finish
+/// parsing and carry out a valid request after the caller disconnects.
+/// Extraction rejections still produce their usual responses.
+///
+/// GET and HEAD run inline so reads, implicit HEAD handling for GET routes,
+/// and WebSocket upgrades retain their usual cancellation behavior. Routes
+/// with other methods that deliberately remain cancellable belong in the
+/// separately merged exempt sub-router, without this layer. Do not add an
+/// exception here when adding such a route; keep its reason beside the route.
+///
+/// `run_owned` preserves panic behavior by resuming a handler's panic on the
+/// awaiting task rather than turning it into an HTTP error response.
+pub(crate) async fn own_state_change(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    if request.method() == axum::http::Method::GET || request.method() == axum::http::Method::HEAD {
+        next.run(request).await
+    } else {
+        crate::run_owned(next.run(request)).await
+    }
+}
 
 /// Reject requests whose `Host` — or, for browsers, `Origin` — is not
 /// this helm's own loopback address.
@@ -392,9 +422,187 @@ pub(crate) async fn stamp_build(
 
 #[cfg(test)]
 mod tests {
-    use super::{legacy_loopback_redirect, origin_is_allowed};
-    use axum::http::HeaderMap;
+    use super::{legacy_loopback_redirect, origin_is_allowed, own_state_change};
+    use axum::http::{HeaderMap, Method, StatusCode};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+    use tokio::sync::{mpsc, watch};
+    use tower::ServiceExt;
+
     const PORT: u16 = 7433;
+
+    // Request ownership: observe the handler's lifetime, not only the caller.
+
+    /// Report when the entered handler future is dropped, independently of
+    /// the router closure's lifetime. Caller cancellation alone cannot prove
+    /// that a middleware layer also cancelled the work it was awaiting.
+    struct HandlerDropWitness(mpsc::UnboundedSender<()>);
+
+    impl Drop for HandlerDropWitness {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+
+    /// GET and its implicit HEAD handler must die with the caller.
+    ///
+    /// A detached read can retain streams or other request-scoped resources.
+    /// The gate prevents a normal return, so the drop witness proves that
+    /// aborting the caller actually drops the entered handler future.
+    #[farhelm_testtrace::test]
+    async fn ownership_layer_keeps_get_and_implicit_head_cancellable() {
+        for method in [Method::GET, Method::HEAD] {
+            let (entered_tx, mut entered_rx) = mpsc::unbounded_channel();
+            let (dropped_tx, mut dropped_rx) = mpsc::unbounded_channel();
+            // Keeping the sender alive holds the handler at its entry gate.
+            // Unwinding the test closes it too, so a broken ownership layer
+            // cannot leave detached fixture work blocked indefinitely.
+            let (_release_tx, release_rx) = watch::channel(());
+            let router = axum::Router::new()
+                .route(
+                    "/",
+                    axum::routing::get(move || {
+                        let entered_tx = entered_tx.clone();
+                        let dropped_tx = dropped_tx.clone();
+                        let mut release_rx = release_rx.clone();
+                        async move {
+                            let _witness = HandlerDropWitness(dropped_tx);
+                            entered_tx.send(()).expect("the test is awaiting entry");
+                            let _ = release_rx.changed().await;
+                            StatusCode::NO_CONTENT
+                        }
+                    }),
+                )
+                .route_layer(axum::middleware::from_fn(own_state_change));
+            let caller = tokio::spawn(
+                router.oneshot(
+                    axum::http::Request::builder()
+                        .method(method.clone())
+                        .uri("/")
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                ),
+            );
+
+            tokio::time::timeout(Duration::from_secs(5), entered_rx.recv())
+                .await
+                .expect("the read handler must enter before cancellation")
+                .expect("the read handler must report entry");
+            caller.abort();
+            let cancelled = tokio::time::timeout(Duration::from_secs(5), caller)
+                .await
+                .expect("the read caller must stop after abort")
+                .expect_err("the gated read caller must be cancelled");
+            assert!(cancelled.is_cancelled(), "{method}: {cancelled}");
+            tokio::time::timeout(Duration::from_secs(5), dropped_rx.recv())
+                .await
+                .expect("the read handler must be dropped with its caller")
+                .expect("the entered handler must report its drop");
+        }
+    }
+
+    /// An entered mutation must finish its second step after its caller dies.
+    ///
+    /// Waiting for the first write before aborting pins the half-completed
+    /// action this layer exists to protect. The completion signal and second
+    /// write distinguish owned work from a caller that merely stopped waiting.
+    #[farhelm_testtrace::test]
+    async fn ownership_layer_finishes_mutation_after_caller_cancellation() {
+        let progress = Arc::new(AtomicUsize::new(0));
+        let (first_step_tx, mut first_step_rx) = mpsc::unbounded_channel();
+        let (completed_tx, mut completed_rx) = mpsc::unbounded_channel();
+        // Closing this gate on failure also lets any detached work finish.
+        let (release_tx, release_rx) = watch::channel(());
+        let handler_progress = Arc::clone(&progress);
+        let router = axum::Router::new()
+            .route(
+                "/",
+                axum::routing::post(move || {
+                    let progress = Arc::clone(&handler_progress);
+                    let first_step_tx = first_step_tx.clone();
+                    let completed_tx = completed_tx.clone();
+                    let mut release_rx = release_rx.clone();
+                    async move {
+                        progress.store(1, Ordering::SeqCst);
+                        first_step_tx
+                            .send(())
+                            .expect("the test is awaiting the first mutation step");
+                        let _ = release_rx.changed().await;
+                        progress.store(2, Ordering::SeqCst);
+                        let _ = completed_tx.send(());
+                        StatusCode::NO_CONTENT
+                    }
+                }),
+            )
+            .route_layer(axum::middleware::from_fn(own_state_change));
+        let caller = tokio::spawn(
+            router.oneshot(
+                axum::http::Request::builder()
+                    .method(Method::POST)
+                    .uri("/")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            ),
+        );
+
+        tokio::time::timeout(Duration::from_secs(5), first_step_rx.recv())
+            .await
+            .expect("the mutation must reach its first step before cancellation")
+            .expect("the mutation must report its first step");
+        assert_eq!(progress.load(Ordering::SeqCst), 1);
+        caller.abort();
+        let cancelled = tokio::time::timeout(Duration::from_secs(5), caller)
+            .await
+            .expect("the mutation caller must stop after abort")
+            .expect_err("the gated mutation caller must be cancelled");
+        assert!(cancelled.is_cancelled(), "{cancelled}");
+        release_tx
+            .send(())
+            .expect("the owned handler must still hold the release gate");
+        tokio::time::timeout(Duration::from_secs(5), completed_rx.recv())
+            .await
+            .expect("owned work must finish after its caller is cancelled")
+            .expect("owned work must report completion");
+        assert_eq!(progress.load(Ordering::SeqCst), 2);
+    }
+
+    /// Handler panics must remain panics at the awaiting request task.
+    ///
+    /// Owning the handler introduces a task boundary, but it must not turn
+    /// that failure into a fabricated HTTP error response or a normal return.
+    #[farhelm_testtrace::test]
+    async fn ownership_layer_resumes_handler_panics() {
+        /// Give the panic fixture an explicit response type so the route has
+        /// the same handler contract as a normally returning mutation.
+        async fn panicking_handler() -> StatusCode {
+            panic!("owned middleware panic fixture");
+        }
+
+        let router = axum::Router::new()
+            .route("/", axum::routing::post(panicking_handler))
+            .route_layer(axum::middleware::from_fn(own_state_change));
+        let caller = tokio::spawn(
+            router.oneshot(
+                axum::http::Request::builder()
+                    .method(Method::POST)
+                    .uri("/")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            ),
+        );
+        let panic = tokio::time::timeout(Duration::from_secs(5), caller)
+            .await
+            .expect("the handler panic must reach its caller")
+            .expect_err("a handler panic must not become an HTTP response");
+        assert!(panic.is_panic(), "{panic}");
+        assert_eq!(
+            panic.into_panic().downcast_ref::<&str>(),
+            Some(&"owned middleware panic fixture")
+        );
+    }
+
+    // Origin admission: pin the browser and non-browser request matrix.
 
     /// Pin a matrix case to the standalone helm, whose custom-scheme arm is
     /// deliberately the stricter baseline for the loopback guard.
