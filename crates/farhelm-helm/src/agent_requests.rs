@@ -373,12 +373,18 @@ impl AgentRequestHandler for HelmAgentRequests {
                 message: "the host connection was replaced; retry".to_string(),
             };
         }
-        if let Err(message) = validate_authoritative_verb(&verb) {
-            return AgentOutcome::Err {
-                kind: ErrorKind::InvalidRequest,
-                message,
-            };
-        }
+        // Keep the wire type's exhaustive classification as the authority for
+        // lost-reply handling, even though dispatch takes only parsed fields.
+        let mutating = verb.is_mutating();
+        let verb = match ParsedAgentVerb::parse(verb) {
+            Ok(verb) => verb,
+            Err(message) => {
+                return AgentOutcome::Err {
+                    kind: ErrorKind::InvalidRequest,
+                    message,
+                };
+            }
+        };
         // Capture the caller's entry from the same published connection used by
         // the liveness check. Discovery must never recover an entry from a bare ID.
         let Some(caller_status) = state.manager.status(origin.host).filter(|status| {
@@ -393,12 +399,8 @@ impl AgentRequestHandler for HelmAgentRequests {
             };
         };
         let caller_entry_uuid = caller_status.entry_uuid;
-        // Captured before `verb` is consumed by the dispatch below, for the
-        // question only the failure arm asks: whether what was attempted
-        // CHANGES something. See [`transport_outcome`].
-        let mutating = verb.is_mutating();
         let reply = match verb {
-            AgentVerb::Hosts {} => {
+            ParsedAgentVerb::Hosts => {
                 crate::hosts::host_views(&state)
                     .await
                     .map(|views| AgentReply::Hosts {
@@ -410,13 +412,13 @@ impl AgentRequestHandler for HelmAgentRequests {
                         caller_host_id: caller_entry_uuid.clone(),
                     })
             }
-            AgentVerb::Sessions {} => {
+            ParsedAgentVerb::Sessions => {
                 session_listing(&state, origin.host, session_id, &caller_entry_uuid).await
             }
-            AgentVerb::OpenUrl { url } => {
+            ParsedAgentVerb::OpenUrl { url } => {
                 crate::browser::open_url(&state, origin, session_id, url).await
             }
-            AgentVerb::Rename {
+            ParsedAgentVerb::Rename {
                 session_id: target,
                 expected_title,
                 title,
@@ -424,7 +426,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                 let target = match resolve_target(
                     &state,
                     origin,
-                    target.expect("validated"),
+                    target.into_string(),
                     session_id,
                     "rename",
                 )
@@ -433,7 +435,6 @@ impl AgentRequestHandler for HelmAgentRequests {
                     Ok(target) => target,
                     Err(error) => return outcome_of(Err(error), mutating),
                 };
-                let expected_title = expected_title.expect("validated");
                 let (target_claim, _) = match crate::sessions::route_session(&state, &target).await
                 {
                     Ok(route) => route,
@@ -462,19 +463,14 @@ impl AgentRequestHandler for HelmAgentRequests {
                     Err(refused) => Err(refused),
                 }
             }
-            AgentVerb::Stop { session_id: target } => {
-                let target = match resolve_target(
-                    &state,
-                    origin,
-                    target.expect("validated"),
-                    session_id,
-                    "stop",
-                )
-                .await
-                {
-                    Ok(target) => target,
-                    Err(error) => return outcome_of(Err(error), mutating),
-                };
+            ParsedAgentVerb::Stop { session_id: target } => {
+                let target =
+                    match resolve_target(&state, origin, target.into_string(), session_id, "stop")
+                        .await
+                    {
+                        Ok(target) => target,
+                        Err(error) => return outcome_of(Err(error), mutating),
+                    };
                 let (target_claim, _) = match crate::sessions::route_session(&state, &target).await
                 {
                     Ok(route) => route,
@@ -495,14 +491,14 @@ impl AgentRequestHandler for HelmAgentRequests {
                     Err(refused) => Err(refused),
                 }
             }
-            AgentVerb::Delete {
+            ParsedAgentVerb::Delete {
                 session_id: target,
                 stop_if_running,
             } => {
                 let target = match resolve_target(
                     &state,
                     origin,
-                    target.expect("validated"),
+                    target.into_string(),
                     session_id,
                     "delete",
                 )
@@ -520,14 +516,14 @@ impl AgentRequestHandler for HelmAgentRequests {
                 }
                 agent_delete(&state, origin, session_id, &target, stop_if_running).await
             }
-            AgentVerb::Prompt {
+            ParsedAgentVerb::Prompt {
                 session_id: target,
                 prompt,
             } => {
                 let target = match resolve_target(
                     &state,
                     origin,
-                    target.expect("validated"),
+                    target.into_string(),
                     session_id,
                     "prompt",
                 )
@@ -546,16 +542,16 @@ impl AgentRequestHandler for HelmAgentRequests {
                         mutating,
                     );
                 }
-                agent_prompt(&state, origin, session_id, &target, &prompt).await
+                agent_prompt(&state, origin, session_id, &target, prompt.as_str()).await
             }
-            AgentVerb::Restart {
+            ParsedAgentVerb::Restart {
                 session_id: target,
                 stop_if_running,
             } => {
                 let target = match resolve_target(
                     &state,
                     origin,
-                    target.expect("validated"),
+                    target.into_string(),
                     session_id,
                     "restart",
                 )
@@ -634,8 +630,8 @@ impl AgentRequestHandler for HelmAgentRequests {
                     Err(refused) => Err(refused),
                 }
             }
-            AgentVerb::Templates {} => template_listing(&state, &caller_entry_uuid).await,
-            AgentVerb::TemplateCreate {
+            ParsedAgentVerb::Templates => template_listing(&state, &caller_entry_uuid).await,
+            ParsedAgentVerb::TemplateCreate {
                 name,
                 fields,
                 host,
@@ -646,16 +642,16 @@ impl AgentRequestHandler for HelmAgentRequests {
                     origin,
                     session_id,
                     TemplateWrite {
-                        name,
+                        name: name.into_string(),
                         fields,
-                        host,
+                        host: host.map(NonEmptyString::into_string),
                         shortcuts,
                         create: true,
                     },
                 )
                 .await
             }
-            AgentVerb::TemplateEdit {
+            ParsedAgentVerb::TemplateEdit {
                 name,
                 fields,
                 host,
@@ -666,27 +662,26 @@ impl AgentRequestHandler for HelmAgentRequests {
                     origin,
                     session_id,
                     TemplateWrite {
-                        name,
+                        name: name.into_string(),
                         fields,
-                        host,
+                        host: host.map(NonEmptyString::into_string),
                         shortcuts,
                         create: false,
                     },
                 )
                 .await
             }
-            AgentVerb::TemplateDelete { name } => {
-                delete_template_for_agent(&state, origin, session_id, name).await
+            ParsedAgentVerb::TemplateDelete { name } => {
+                delete_template_for_agent(&state, origin, session_id, name.into_string()).await
             }
             // `confirm_yolo` is ignored on both creating verbs: an agent has
             // no YOLO override (SPEC.md, Agent-spawned sessions), whatever a
             // modified CLI sends; `yolo_guard::check_agent_wrapper` decides instead.
-            AgentVerb::Create {
+            ParsedAgentVerb::Create {
                 host,
                 templates,
                 edits,
                 intent_key,
-                confirm_yolo: _,
                 spawn,
             } => {
                 create_for_agent(
@@ -695,7 +690,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                     session_id,
                     CreateRequest {
                         edits: LaunchEditsRequest {
-                            host,
+                            host: host.map(NonEmptyString::into_string),
                             templates,
                             edits,
                             spawn,
@@ -705,22 +700,21 @@ impl AgentRequestHandler for HelmAgentRequests {
                 )
                 .await
             }
-            AgentVerb::Clone {
+            ParsedAgentVerb::Clone {
                 source_session_id,
                 host,
                 cwd,
                 title,
                 intent_key,
-                confirm_yolo: _,
             } => {
                 clone_for_agent(
                     &state,
                     origin,
                     session_id,
                     CloneRequest {
-                        source_session_id: source_session_id.expect("validated"),
-                        host: host.expect("validated"),
-                        cwd,
+                        source_session_id: source_session_id.into_string(),
+                        host: host.into_string(),
+                        cwd: cwd.map(NonEmptyString::into_string),
                         title,
                         intent_key,
                     },
@@ -915,80 +909,239 @@ pub(crate) fn origin_is_live(state: &AppState, origin: AgentOrigin) -> bool {
         .is_some_and(|client| client.connection_id() == origin.connection)
 }
 
-/// Recheck consequential selectors at the helm boundary so a handcrafted
-/// or older relay request cannot regain an implicit default.
-fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
-    let required = |value: Option<&str>, flag: &str| match value {
-        Some(value) if !value.is_empty() => Ok(()),
-        _ => Err(format!("{flag} is required and must not be empty")),
-    };
-    match verb {
-        AgentVerb::Prompt { session_id, prompt } => {
-            required(session_id.as_deref(), "--session")?;
-            if session_id
-                .as_deref()
-                .is_some_and(|id| id.chars().any(char::is_control))
-            {
-                return Err("--session must not contain control characters".to_string());
-            }
-            farhelm_proto::launcher::check_agent_prompt(prompt)
+/// Original request bytes with an established nonempty-field contract.
+///
+/// Admission never trims or normalizes: host lookup and request digests must
+/// see exactly what the caller sent. This promises no syntax beyond nonempty;
+/// session routing and the prompt's stronger checks remain separate.
+#[derive(Debug)]
+struct NonEmptyString(String);
+
+impl NonEmptyString {
+    /// Preserve a present value or return the field's existing refusal.
+    fn new(value: String, refusal: &str) -> Result<Self, String> {
+        if value.is_empty() {
+            Err(refusal.to_string())
+        } else {
+            Ok(Self(value))
         }
-        AgentVerb::Rename {
-            session_id,
-            expected_title,
-            ..
-        } => {
-            required(session_id.as_deref(), "--session")?;
-            if expected_title.is_none() {
-                return Err(
-                    "--expected-title is required (an explicitly empty title is legal)".to_string(),
-                );
+    }
+
+    /// Require an explicit selector, including for deliberate self-actions.
+    fn required(value: Option<String>, flag: &str) -> Result<Self, String> {
+        let refusal = format!("{flag} is required and must not be empty");
+        let value = value.ok_or_else(|| refusal.clone())?;
+        Self::new(value, &refusal)
+    }
+
+    /// Borrow the unchanged request spelling for existing policy checks.
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Hand the checked bytes to established routing and request helpers.
+    fn into_string(self) -> String {
+        self.0
+    }
+}
+
+/// An agent request whose authoritative ingress checks cannot be forgotten.
+///
+/// Required selectors and names are nonempty values rather than wire Options.
+/// Rename's expected title remains an ordinary String because an explicitly
+/// empty title is legal. Prompt text has additionally passed check_agent_prompt;
+/// URL, launch and target semantics still belong to the existing policy helpers.
+#[derive(Debug)]
+enum ParsedAgentVerb {
+    Hosts,
+    Sessions,
+    Templates,
+    OpenUrl {
+        url: String,
+    },
+    Rename {
+        session_id: NonEmptyString,
+        expected_title: String,
+        title: String,
+    },
+    Stop {
+        session_id: NonEmptyString,
+    },
+    Prompt {
+        session_id: NonEmptyString,
+        prompt: NonEmptyString,
+    },
+    Delete {
+        session_id: NonEmptyString,
+        stop_if_running: bool,
+    },
+    Restart {
+        session_id: NonEmptyString,
+        stop_if_running: bool,
+    },
+    Create {
+        host: Option<NonEmptyString>,
+        templates: Vec<String>,
+        edits: farhelm_proto::launcher::TemplateFields,
+        intent_key: Option<String>,
+        spawn: Option<farhelm_proto::SpawnPlacement>,
+    },
+    Clone {
+        source_session_id: NonEmptyString,
+        host: NonEmptyString,
+        cwd: Option<NonEmptyString>,
+        title: Option<String>,
+        intent_key: Option<String>,
+    },
+    TemplateCreate {
+        name: NonEmptyString,
+        fields: farhelm_proto::launcher::TemplateFields,
+        host: Option<NonEmptyString>,
+        shortcuts: TemplateShortcutEdit,
+    },
+    TemplateEdit {
+        name: NonEmptyString,
+        fields: farhelm_proto::launcher::TemplateFields,
+        host: Option<NonEmptyString>,
+        shortcuts: TemplateShortcutEdit,
+    },
+    TemplateDelete {
+        name: NonEmptyString,
+    },
+}
+
+impl ParsedAgentVerb {
+    /// Check the wire fields at the same boundary and in the same refusal order.
+    ///
+    /// This runs after origin liveness, before any target resolution or await.
+    /// Optional placement stays optional: a create can obtain its host from a
+    /// template, and an absent clone cwd means to copy the source's directory.
+    fn parse(verb: AgentVerb) -> Result<Self, String> {
+        let optional_host = |host: Option<String>| {
+            host.map(|host| NonEmptyString::new(host, "--host must not be empty"))
+                .transpose()
+        };
+        Ok(match verb {
+            AgentVerb::Hosts {} => Self::Hosts,
+            AgentVerb::Sessions {} => Self::Sessions,
+            AgentVerb::Templates {} => Self::Templates,
+            AgentVerb::OpenUrl { url } => Self::OpenUrl { url },
+            AgentVerb::Prompt { session_id, prompt } => {
+                let session_id = NonEmptyString::required(session_id, "--session")?;
+                if session_id.as_str().chars().any(char::is_control) {
+                    return Err("--session must not contain control characters".to_string());
+                }
+                farhelm_proto::launcher::check_agent_prompt(&prompt)?;
+                Self::Prompt {
+                    session_id,
+                    prompt: NonEmptyString::new(
+                        prompt,
+                        "a prompt for a running agent must contain non-whitespace text",
+                    )?,
+                }
             }
-            Ok(())
-        }
-        AgentVerb::Stop { session_id }
-        | AgentVerb::Restart { session_id, .. }
-        | AgentVerb::Delete { session_id, .. } => required(session_id.as_deref(), "--session"),
-        // Everything else a create needs may come from a template, so only
-        // the helm's resolution can tell what is missing (`agent_launch`).
-        AgentVerb::Create { host, .. } => {
-            if host.as_deref() == Some("") {
-                return Err("--host must not be empty".to_string());
+            AgentVerb::Rename {
+                session_id,
+                expected_title,
+                title,
+            } => {
+                let session_id = NonEmptyString::required(session_id, "--session")?;
+                let expected_title = expected_title.ok_or_else(|| {
+                    "--expected-title is required (an explicitly empty title is legal)".to_string()
+                })?;
+                Self::Rename {
+                    session_id,
+                    expected_title,
+                    title,
+                }
             }
-            Ok(())
-        }
-        AgentVerb::Clone {
-            source_session_id,
-            host,
-            cwd,
-            ..
-        } => {
-            required(source_session_id.as_deref(), "--source-session")?;
-            required(host.as_deref(), "--host")?;
-            // Optional, but not empty: an absent cwd falls back to the source
-            // session's directory, while `Some("")` would replace it with an
-            // empty path that only the target supervisor then refuses.
-            if cwd.as_deref() == Some("") {
-                return Err(
+            AgentVerb::Stop { session_id } => Self::Stop {
+                session_id: NonEmptyString::required(session_id, "--session")?,
+            },
+            AgentVerb::Delete {
+                session_id,
+                stop_if_running,
+            } => Self::Delete {
+                session_id: NonEmptyString::required(session_id, "--session")?,
+                stop_if_running,
+            },
+            AgentVerb::Restart {
+                session_id,
+                stop_if_running,
+            } => Self::Restart {
+                session_id: NonEmptyString::required(session_id, "--session")?,
+                stop_if_running,
+            },
+            AgentVerb::Create {
+                host,
+                templates,
+                edits,
+                intent_key,
+                confirm_yolo: _,
+                spawn,
+            } => Self::Create {
+                host: optional_host(host)?,
+                templates,
+                edits,
+                intent_key,
+                spawn,
+            },
+            AgentVerb::Clone {
+                source_session_id,
+                host,
+                cwd,
+                title,
+                intent_key,
+                confirm_yolo: _,
+            } => {
+                let source_session_id =
+                    NonEmptyString::required(source_session_id, "--source-session")?;
+                let host = NonEmptyString::required(host, "--host")?;
+                let cwd = cwd.map(|cwd| NonEmptyString::new(cwd,
                     "--cwd must not be empty; omit it to use the source session's directory"
-                        .to_string(),
-                );
+                )).transpose()?;
+                Self::Clone {
+                    source_session_id,
+                    host,
+                    cwd,
+                    title,
+                    intent_key,
+                }
             }
-            Ok(())
-        }
-        AgentVerb::TemplateCreate { name, host, .. }
-        | AgentVerb::TemplateEdit { name, host, .. } => {
-            required(Some(name.as_str()), "the template name")?;
-            if host.as_deref() == Some("") {
-                return Err("--host must not be empty".to_string());
+            AgentVerb::TemplateCreate {
+                name,
+                fields,
+                host,
+                shortcuts,
+            } => {
+                let name = NonEmptyString::required(Some(name), "the template name")?;
+                let host = optional_host(host)?;
+                Self::TemplateCreate {
+                    name,
+                    fields,
+                    host,
+                    shortcuts,
+                }
             }
-            Ok(())
-        }
-        AgentVerb::TemplateDelete { name } => required(Some(name.as_str()), "the template name"),
-        AgentVerb::Hosts {}
-        | AgentVerb::Sessions {}
-        | AgentVerb::Templates {}
-        | AgentVerb::OpenUrl { .. } => Ok(()),
+            AgentVerb::TemplateEdit {
+                name,
+                fields,
+                host,
+                shortcuts,
+            } => {
+                let name = NonEmptyString::required(Some(name), "the template name")?;
+                let host = optional_host(host)?;
+                Self::TemplateEdit {
+                    name,
+                    fields,
+                    host,
+                    shortcuts,
+                }
+            }
+            AgentVerb::TemplateDelete { name } => Self::TemplateDelete {
+                name: NonEmptyString::required(Some(name), "the template name")?,
+            },
+        })
     }
 }
 
@@ -3569,7 +3722,7 @@ mod tests {
         );
     }
 
-    /// The helm's own clone validation refuses an explicitly empty cwd.
+    /// The helm's parsed clone refuses an explicitly empty cwd.
     ///
     /// Why it matters: the helm treats supervisors as untrusted, and a clone
     /// with `cwd: Some("")` would otherwise replace the source session's
@@ -3577,7 +3730,7 @@ mod tests {
     /// refuses, possibly after the request's idempotency key was recorded.
     /// Spec: `Some("")` is refused here; an absent cwd stays legal.
     #[farhelm_testtrace::test]
-    fn clone_validation_refuses_an_explicitly_empty_cwd() {
+    fn clone_parsing_refuses_an_explicitly_empty_cwd() {
         let clone = |cwd: Option<&str>| AgentVerb::Clone {
             source_session_id: Some("source".to_string()),
             host: Some("host".to_string()),
@@ -3587,12 +3740,197 @@ mod tests {
             confirm_yolo: false,
         };
         assert!(
-            validate_authoritative_verb(&clone(Some("")))
+            ParsedAgentVerb::parse(clone(Some("")))
                 .unwrap_err()
                 .contains("--cwd must not be empty")
         );
-        assert!(validate_authoritative_verb(&clone(None)).is_ok());
-        assert!(validate_authoritative_verb(&clone(Some("/work"))).is_ok());
+        assert!(ParsedAgentVerb::parse(clone(None)).is_ok());
+        assert!(ParsedAgentVerb::parse(clone(Some("/work"))).is_ok());
+    }
+
+    /// A malformed request keeps its first authoritative refusal as the wire
+    /// fields become typed. In particular, later bad fields cannot hide an
+    /// absent selector, and prompt target checks precede prompt text checks.
+    #[farhelm_testtrace::test]
+    fn parsed_verbs_preserve_refusal_precedence() {
+        let rename = |session_id: Option<&str>, expected_title: Option<&str>| AgentVerb::Rename {
+            session_id: session_id.map(str::to_string),
+            expected_title: expected_title.map(str::to_string),
+            title: String::new(),
+        };
+        let clone = |source: Option<&str>, host: Option<&str>| AgentVerb::Clone {
+            source_session_id: source.map(str::to_string),
+            host: host.map(str::to_string),
+            cwd: Some(String::new()),
+            title: None,
+            intent_key: None,
+            confirm_yolo: false,
+        };
+        let prompt = |session_id: Option<&str>, prompt: &str| AgentVerb::Prompt {
+            session_id: session_id.map(str::to_string),
+            prompt: prompt.to_string(),
+        };
+        for (verb, expected) in [
+            (
+                rename(None, None),
+                "--session is required and must not be empty",
+            ),
+            (
+                rename(Some(""), None),
+                "--session is required and must not be empty",
+            ),
+            (
+                rename(Some("target"), None),
+                "--expected-title is required (an explicitly empty title is legal)",
+            ),
+            (
+                clone(None, None),
+                "--source-session is required and must not be empty",
+            ),
+            (
+                clone(Some(""), Some("")),
+                "--source-session is required and must not be empty",
+            ),
+            (
+                clone(Some("source"), None),
+                "--host is required and must not be empty",
+            ),
+            (
+                clone(Some("source"), Some("")),
+                "--host is required and must not be empty",
+            ),
+            (
+                clone(Some("source"), Some("host")),
+                "--cwd must not be empty; omit it to use the source session's directory",
+            ),
+            (
+                prompt(None, "\u{1b}"),
+                "--session is required and must not be empty",
+            ),
+            (
+                prompt(Some("target\n"), ""),
+                "--session must not contain control characters",
+            ),
+            (
+                prompt(Some("target"), "\u{1b}"),
+                "an initial prompt cannot contain control characters other than newline and tab",
+            ),
+            (
+                prompt(Some("target"), " \t\n "),
+                "a prompt for a running agent must contain non-whitespace text",
+            ),
+            (
+                AgentVerb::TemplateCreate {
+                    name: String::new(),
+                    fields: Default::default(),
+                    host: Some(String::new()),
+                    shortcuts: Default::default(),
+                },
+                "the template name is required and must not be empty",
+            ),
+            (
+                AgentVerb::TemplateEdit {
+                    name: "name".into(),
+                    fields: Default::default(),
+                    host: Some(String::new()),
+                    shortcuts: Default::default(),
+                },
+                "--host must not be empty",
+            ),
+            (
+                AgentVerb::TemplateDelete {
+                    name: String::new(),
+                },
+                "the template name is required and must not be empty",
+            ),
+        ] {
+            assert_eq!(ParsedAgentVerb::parse(verb).unwrap_err(), expected);
+        }
+        let oversize_with_control = format!(
+            "{}\u{1b}",
+            "x".repeat(farhelm_proto::launcher::TEMPLATE_FIELDS_CAP)
+        );
+        assert_eq!(
+            ParsedAgentVerb::parse(prompt(Some("target"), &oversize_with_control)).unwrap_err(),
+            "an initial prompt must fit within the 64 KiB launch budget"
+        );
+    }
+
+    /// The parsed boundary guarantees nonempty selectors without normalizing
+    /// request bytes used by routing or digests. Other fields retain their
+    /// existing empty-value rules rather than inheriting the selector rule.
+    #[farhelm_testtrace::test]
+    fn parsed_verbs_preserve_original_bytes_and_legal_empty_fields() {
+        assert!(NonEmptyString::new(String::new(), "empty").is_err());
+        let ParsedAgentVerb::Rename {
+            session_id,
+            expected_title,
+            title,
+        } = ParsedAgentVerb::parse(AgentVerb::Rename {
+            session_id: Some(" target ".into()),
+            expected_title: Some(String::new()),
+            title: String::new(),
+        })
+        .unwrap()
+        else {
+            panic!("a valid rename remains a rename")
+        };
+        assert_eq!(session_id.as_str(), " target ");
+        assert!(expected_title.is_empty());
+        assert!(title.is_empty());
+        let ParsedAgentVerb::Prompt { prompt, .. } = ParsedAgentVerb::parse(AgentVerb::Prompt {
+            session_id: Some("target".into()),
+            prompt: " \tmessage\n ".into(),
+        })
+        .unwrap() else {
+            panic!("a valid prompt remains a prompt")
+        };
+        assert_eq!(prompt.as_str(), " \tmessage\n ");
+        let ParsedAgentVerb::Clone {
+            source_session_id,
+            host,
+            cwd,
+            title,
+            intent_key,
+        } = ParsedAgentVerb::parse(AgentVerb::Clone {
+            source_session_id: Some(" source ".into()),
+            host: Some(" host ".into()),
+            cwd: Some(" /work ".into()),
+            title: Some(String::new()),
+            intent_key: Some(String::new()),
+            confirm_yolo: true,
+        })
+        .unwrap()
+        else {
+            panic!("a valid clone remains a clone")
+        };
+        assert_eq!(source_session_id.as_str(), " source ");
+        assert_eq!(host.as_str(), " host ");
+        assert_eq!(cwd.unwrap().as_str(), " /work ");
+        assert_eq!(title.as_deref(), Some(""));
+        assert_eq!(intent_key.as_deref(), Some(""));
+        let ParsedAgentVerb::Create { host, edits, .. } =
+            ParsedAgentVerb::parse(AgentVerb::Create {
+                host: None,
+                templates: vec![],
+                edits: farhelm_proto::launcher::TemplateFields {
+                    prompt: Some(String::new()),
+                    ..Default::default()
+                },
+                intent_key: None,
+                confirm_yolo: true,
+                spawn: None,
+            })
+            .unwrap()
+        else {
+            panic!("a valid create remains a create")
+        };
+        assert!(host.is_none());
+        assert_eq!(edits.prompt.as_deref(), Some(""));
+        assert!(matches!(
+            ParsedAgentVerb::parse(AgentVerb::OpenUrl { url: String::new() }).unwrap(),
+            ParsedAgentVerb::OpenUrl { url } if url.is_empty()
+        ));
     }
 
     const TEST_ENTRY: &str = "00000001-0000-4000-8000-000000000000";
