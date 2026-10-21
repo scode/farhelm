@@ -17,6 +17,7 @@ use crate::api::{
 use crate::app_bar::AppBar;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostsPanel, HostsRead};
+use crate::modal_dialog::FocusTarget;
 use crate::ops::{OpLock, ReadGate};
 use crate::peer::PeerText;
 use crate::provisioning::ProvisioningTraceShape;
@@ -28,7 +29,8 @@ use crate::rows::{
 use crate::{ApiBase, HostId, Session, SessionStatus};
 
 use super::create_form::{
-    CreatePrefill, CreateSessionForm, CreateTarget, CreatedSession, mark_replace_with, prefill_from,
+    COMPOSER_DIALOG, CreatePrefill, CreateSessionForm, CreateTarget, CreatedSession,
+    mark_replace_with, prefill_from,
 };
 use super::row::SessionRow;
 use super::shared::{
@@ -83,19 +85,6 @@ const ORDER_HOLD_STILL_MS: u128 = 5_000;
 /// every `pointermove`, because pointer moves arrive far faster than the
 /// release needs to be precise, and a task per move would be wasted work.
 const ORDER_HOLD_POLL_MS: u64 = 250;
-
-/// Return keyboard focus to the persistent control that opened the composer.
-///
-/// Closing removes the dialog's focused descendant. Without an explicit
-/// handoff, browsers commonly leave focus on the document body, so the next
-/// Tab starts at an arbitrary page edge instead of continuing from New. The
-/// selector is constant application markup and does not interpolate peer
-/// text.
-fn focus_new_session_button() {
-    document::eval(
-        "document.querySelector('.new-session-button')?.focus({ preventScroll: true });",
-    );
-}
 
 /// One independently mounted rename editor and the source it must never lose.
 ///
@@ -3902,7 +3891,7 @@ pub(crate) fn ListView(
                             .or_else(|| prefill.replace_source_opened.clone())
                     }),
                     on_cancel: move |_| {
-                        document::eval(&crate::modal_isolation::release_js(".create-session-form"));
+                        COMPOSER_DIALOG.release();
                         opening_generation += 1;
                         auto_launch.set(false);
                         // A cancelled composer must not carry its destination
@@ -3912,7 +3901,9 @@ pub(crate) fn ListView(
                         initial_create_action.set(None);
                         ordinary_new_cwd.set(None);
                         show_create.set(false);
-                        focus_new_session_button();
+                        // Release above must precede this immediate handback;
+                        // the removed field would otherwise leave focus on body.
+                        FocusTarget::new(".new-session-button", None, false).focus();
                     },
                     on_template_saved: move |template| {
                         chosen_host.set(None);
@@ -3980,7 +3971,7 @@ pub(crate) fn ListView(
                             // it can take focus or keystrokes.
                             on_rename_start.call((id, title, false, true));
                         } else {
-                            focus_new_session_button();
+                            FocusTarget::new(".new-session-button", None, false).focus();
                         }
                         // The fence needs a fresh authoritative successor even
                         // when a healthy feed has no further notice to deliver.

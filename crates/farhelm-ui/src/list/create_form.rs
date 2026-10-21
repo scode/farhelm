@@ -13,6 +13,9 @@ use crate::github_checkout::{
     PreviewState, RepositoryAuthority, repository_choices,
 };
 use crate::launch_controls::{DestinationTypeControl, LaunchControls, enter_choice};
+use crate::modal_dialog::{
+    DialogFocus, DialogHandle, DialogRoot, FocusTarget, InitialFocus, ModalDialog, TabTrap,
+};
 use crate::ops::{ConfirmSlot, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, PeerText, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
@@ -1844,50 +1847,18 @@ fn request_directory_browse(
     });
 }
 
-/// Install the dialog-local Tab loop after the browser owns the mounted form.
-///
-/// The composer is rendered inside the sidebar rather than in a portal, so
-/// `aria-modal` alone cannot stop native Tab navigation from reaching the
-/// still-mounted page behind it. Keeping the listener on this particular DOM
-/// node makes its lifetime exactly the dialog's lifetime; no global handler
-/// can survive a close and interfere with the next open. The shared focus
-/// listener keeps a gap click on the current control, while container Enter
-/// clicks the mounted Launch button through its ordinary validation path.
-/// Loading setup has no Launch button, so container Enter cannot submit a
-/// partially replayed template; the visible loading line explains the wait.
-fn install_composer_focus_trap() {
-    document::eval(&format!(
-        "{}\n{}",
-        crate::dialog_focus::install_js(
-            ".create-session-form[role=\"dialog\"]",
-            crate::dialog_focus::ContainerEnter::Click(".create-session-submit"),
-        ),
-        r#"(() => {
-            const dialog = document.querySelector('.create-session-form[role="dialog"]');
-            if (!dialog || dialog.__farhelmComposerFocusTrap) return;
-            dialog.__farhelmComposerFocusTrap = true;
-            const focusable = () => [...dialog.querySelectorAll(
-                'button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
-            )].filter((node) => !node.hidden && node.getClientRects().length);
-            dialog.addEventListener('keydown', (event) => {
-                if (event.key !== 'Tab') return;
-                const nodes = focusable();
-                if (!nodes.length) return;
-                const first = nodes[0];
-                const last = nodes[nodes.length - 1];
-                if (event.shiftKey ? document.activeElement === first : document.activeElement === last) {
-                    event.preventDefault();
-                    const target = event.shiftKey ? last : first;
-                    // A trapped dialog is also its own scroll viewport. A
-                    // boundary wrap that leaves the new focus above or below
-                    // that viewport is technically contained but unusable:
-                    // the focus ring and the control it names have vanished.
-                    // Native focus scrolling is intentionally retained here.
-                    target.focus();
-                }
-            });
-        })();"#,
-    ));
+/// Address the same form from its shell and the list-owned completion callbacks.
+pub(super) const COMPOSER_DIALOG: DialogHandle =
+    DialogHandle::new(".create-session-form[role=\"dialog\"]");
+
+/// Search is the shared target; loading keeps Cancel as a keyboard exit.
+/// The shell supplies the visible-root check and final container fallback.
+fn composer_surface_target() -> FocusTarget {
+    FocusTarget::new(
+        ".launch-composer-search input:not([disabled])",
+        Some(".launch-composer-loading-cancel:not([disabled])"),
+        false,
+    )
 }
 
 /// Give the shared composer search focus at an explicit interaction boundary.
@@ -1899,40 +1870,28 @@ fn install_composer_focus_trap() {
 /// defers to a frame, since its effect can precede the DOM update. Ordinary
 /// interactions focus immediately so a queued handoff cannot steal later input.
 fn focus_composer_surface(defer_for_reveal: bool) {
-    let focus = r#"
-            const dialog = document.querySelector('.create-session-form[role="dialog"]');
-            if (!dialog || !dialog.getClientRects().length) return;
-            const target = dialog.querySelector('.launch-composer-search input:not([disabled])')
-                || dialog.querySelector('.launch-composer-loading-cancel:not([disabled])')
-                || dialog;
-            target.focus({ preventScroll: true });
-        "#;
-    document::eval(&if defer_for_reveal {
-        format!("requestAnimationFrame(() => {{ {focus} }})")
-    } else {
-        format!("(() => {{ {focus} }})()")
-    });
+    COMPOSER_DIALOG.focus_surface(&composer_surface_target(), defer_for_reveal);
 }
 
 /// Restore a launcher focus target only when a shortcut removed its control.
 /// A surviving field keeps its caret and selection; a later dialog opening or
 /// launcher replacement must not receive focus from this deferred check.
+/// Capture the root before the frame; the shared target script uses that node
+/// only after its connection, visibility and ownership guards have admitted it.
 fn restore_shortcut_focus_if_lost() {
-    document::eval(
-        r#"(() => {
+    let focus = composer_surface_target().surface_script();
+    document::eval(&format!(
+        r#"(() => {{
             const dialog = document.querySelector('.create-session-form[role="dialog"]');
-            requestAnimationFrame(() => {
+            requestAnimationFrame(() => {{
                 if (!dialog?.isConnected || !dialog.getClientRects().length ||
                     window.farhelmTemplateShortcutContext?.() !== 'launcher') return;
                 const active = document.activeElement;
                 if (active && active !== document.body && active !== document.documentElement) return;
-                const target = dialog.querySelector('.launch-composer-search input:not([disabled])')
-                    || dialog.querySelector('.launch-composer-loading-cancel:not([disabled])')
-                    || dialog;
-                target.focus({ preventScroll: true });
-            });
-        })()"#,
-    );
+                {focus}
+            }});
+        }})()"#,
+    ));
 }
 
 /// Keep keyboard selection visible while a long combobox result list scrolls.
@@ -5998,7 +5957,7 @@ pub(super) fn CreateSessionForm(
                             LaunchIntent::Structured(selection) => Some(selection.clone()),
                             LaunchIntent::Command(_) => None,
                         };
-                        document::eval(&crate::modal_isolation::release_js(".create-session-form"));
+                        COMPOSER_DIALOG.release();
                         on_created.call(CreatedSession {
                             session: enrich_created_session(
                                 session,
@@ -6129,6 +6088,10 @@ pub(super) fn CreateSessionForm(
             }
         }
     });
+    // A scope-owned callback allocated during every render would accumulate
+    // until this launcher closes. Keep one handle while still reading hidden
+    // state at the actual mount boundary, after trap setup is submitted.
+    let composer_hidden_now = use_callback(move |_| quick_launch_hidden());
     rsx! {
         div {
             class: if quick_launch_hidden() { "launch-composer-backdrop quick-launch-pending" } else { "launch-composer-backdrop" },
@@ -6142,7 +6105,32 @@ pub(super) fn CreateSessionForm(
                     on_cancel.call(());
                 }
             },
-        form {
+        ModalDialog {
+            handle: COMPOSER_DIALOG,
+            root: DialogRoot::Form,
+            focus: DialogFocus {
+                initial_focus: InitialFocus::Surface {
+                    target: composer_surface_target(),
+                    // Sample on mount, after trap setup is submitted. Hidden
+                    // preparation isolates without taking a field's focus.
+                    hidden_now: composer_hidden_now,
+                },
+                trap: Some(TabTrap {
+                    // Retain the existing broad branches, including controls
+                    // with tabindex=-1; narrowing them is a separate change.
+                    selector: "button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex=\"-1\"])",
+                    empty_to_root: false,
+                    reverse_from_root: false,
+                }),
+                escape_target: Some(".launch-composer-cancel, .launch-composer-loading-cancel".into()),
+                // Loading has no Launch button: the shared container Enter
+                // action must resolve the live control rather than submit early.
+                main_action: Some(".create-session-submit".into()),
+                // Ordinary visible New retains its trap without isolation.
+                // The Surface policy keeps hidden preparation isolated.
+                isolation: false,
+                gap: true,
+            },
             class: "create-session-form",
             "data-permission-escalation": permission_escalation.read().as_ref().map(|notice| if notice.generation % 2 == 0 { "even" } else { "odd" }),
             tabindex: "-1",
@@ -6168,16 +6156,7 @@ pub(super) fn CreateSessionForm(
             novalidate: true,
             aria_modal: "true",
             aria_label: "launch a session",
-            onmounted: move |_| {
-                install_composer_focus_trap();
-                if quick_launch_hidden() {
-                    // Hidden preparation cannot focus its fields. Structural
-                    // isolation still blurs/inerts the old terminal and header;
-                    // its capture safety net swallows background keyboard input.
-                    document::eval(&crate::modal_isolation::install_js(".create-session-form", Some(".launch-composer-cancel, .launch-composer-loading-cancel")));
-                } else { focus_composer_surface(false); }
-            },
-            onclick: move |evt| {
+            onclick: move |evt: MouseEvent| {
                 // A click that leaves the search surface must make its
                 // hidden results ineligible before another control handles
                 // a following Enter. The search wrapper stops its own
@@ -6189,18 +6168,20 @@ pub(super) fn CreateSessionForm(
             },
             oninput: move |_| partial_template_hint.set(false),
             onchange: move |_| partial_template_hint.set(false),
-            onkeydown: move |evt| {
+            onkeydown: move |evt: KeyboardEvent| {
                 // Native text-field and action-button submission has no choice
                 // handler. Keep a held or composing Enter from launching there.
                 if evt.key() == Key::Enter && (evt.is_auto_repeating() || evt.is_composing()) {
                     evt.prevent_default();
                 }
-                if evt.key() == Key::Escape && !ops.busy_now() && !template_saving() {
+            },
+            on_escape: move |_| {
+                if !ops.busy_now() && !template_saving() {
                     if template_panel().is_some() { template_panel.set(None); }
                     else { on_cancel.call(()); }
                 }
             },
-            onsubmit: move |evt| {
+            onsubmit: move |evt: FormEvent| {
                 evt.prevent_default();
                 submit_composer.call(());
             },
