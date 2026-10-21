@@ -256,3 +256,80 @@ literal folder-marker text and repository provenance were accepted; equivalent-c
 rechecked by the same original reviewers. No finding remains open, no reviewer was substituted, and no review swarm was
 added. Commit/PR wording passed the required cold reads. Independent resume checks reconciled the full logs and
 published diffs.
+
+### Landing
+
+Landed as #2465, #2467, #2468, #2469, #2470, #2471, #2472, #2473, #2474, #2475, #2476, #2477, #2478, #2479 and #2480,
+merged bottom-up. It was the only plan in this landing round. Its content is what the report describes, rebased onto
+this round's main, with two conflict resolutions in the launcher described below: the repository field's behavior, which
+conflicted in three places, and two tests added at the same spot.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained round 110's four plans, a change that runs the browser tests in three parallel
+workers, each with its own helm and supervisors, documentation, TODO reorganisation and plan bookkeeping. A
+fresh-context reviewer and I read them against this plan.
+
+- launcher-enter-feedback, from round 110, changed the launcher's repository field: its suggestion list now opens
+  whenever the field is focused, a message says when nothing matches, and Enter chooses the highlighted suggestion,
+  reopens a closed list, or does nothing. This plan's #2480 made that same field read-only, showing hidden characters
+  escaped, with a Clear button, when a cloned session's repository holds them. The two conflicted textually in three
+  places; the landing kept round 110's behavior and applied this plan's read-only rule wherever the plan had it: while
+  read-only, the suggestion list and message stay closed and Enter does nothing, and the raw repository name still
+  serves every request and comparison. The review checked the merge line by line.
+- The same plan added a launcher test at the place where #2477 added one; both are kept.
+- The text round 110 added to the launcher is either already escaped (the "Set session name" choice, which shows what
+  the user typed) or fixed app wording (its new messages and refusals). structured-settings-dialog moved existing
+  Settings components without adding new displays of host-supplied text. supervisor-request-modes and
+  helm-owned-by-default change no reply the UI decodes.
+- This plan's new browser test sets up its own session and shares no state between workers, so the parallel change does
+  not affect it, and it does not depend on which session a page opens; it passed on both engines in the round's full
+  run.
+
+#### Fixes made during the landing
+
+None beyond the two conflict resolutions described above.
+
+#### Possible follow-ups
+
+- Neither SPEC.md nor SPEC_impl.md says that an inherited repository with hidden characters stays read-only until it is
+  cleared, as SPEC.md already says for template messages. Possible follow-up: state it.
+
+#### Checks
+
+This plan was executed before round 110's four plans landed and before main moved the browser suite onto three stacks
+run in parallel (each test worker runs its own helm and supervisors), so it had been tested against neither. It changes
+how almost every piece of host- and agent-supplied text reaches the screen, across 34 UI files; that is why this round
+ran the whole Rust workspace and the full browser suite. All of the following ran on the plan stacked on this round's
+main, including the two conflict resolutions:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed Markdown, JSON and TOML file,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` and
+  `scripts/check-desktop-assets.sh`: all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `41a70981-4070-4fb7-81d4-3cff5e9bf8d8` (kept): 4000 passed, 1 failed:
+  `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay`, which round 110's landing found failing nine
+  runs in ten on main without any of these changes (see supervisor-request-modes' landing notes); it already has an open
+  TODO deflake entry, "Shallow pause resets under load". This plan changes only the UI, which that test does not use.
+- `cargo nextest run -p farhelm-ui --features desktop`, run `f04c4ca6-96b4-41c8-a7c7-c1acd867ffd1`: 750 passed.
+  `node --test` in `crates/farhelm-ui/js-tests`, run `dddcbe74-19fe-4c52-8f1b-68fd8b9cd94c`: 328 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers, no retries, run
+  `3093867e-d0c5-48a6-9718-cbab1452c28b` (kept): 2231 passed, 14 skipped by design (WebKit clipboard cases and tests
+  that need a real signed-in agent or run on one engine only), 1 failed: on Chromium, "a plain flood survives a sibling
+  band repeatedly changing height mid-burst" in `terminal-scroll-freeze.spec.ts` timed out scrolling back through
+  flooding output. Three repeats on each engine then passed (run `e5c6d18c-b34c-404a-bb24-02654e64e144`). It is most
+  likely load from three parallel workers rather than this plan, which does not change the terminal or its scrolling; on
+  one observation it is not recorded as a flake. This plan's new test for a cloned repository with hidden characters
+  passed on both engines.
+- The web bundle for the browser suite was built with `dx build --package farhelm-ui --platform web --release`, which
+  compiles the launcher code the landing re-resolved for the browser.
+- Skipped: Clippy for the browser build target (the web release build above compiles the same code), the workspace and
+  desktop doctests (no documentation example changed), `cargo check -p farhelm-desktop` and the desktop smoke test (the
+  desktop app's own crate is unchanged; the desktop startup refusal change is in the UI crate covered above), the native
+  Mac app (not runnable here) and the installer (unchanged).
+
+The report's checks ran on a main from before round 110's landings; its statement that the rebase onto its base left the
+PRs unchanged no longer describes what landed, and the combined runs above supersede its focused checks. Nothing else in
+the executor's report became untrue at landing.
