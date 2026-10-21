@@ -1025,7 +1025,7 @@ pub(crate) fn name_host_search_results(
     }
 }
 
-/// Find composer choices whose visible value matches a deliberate query.
+/// Find composer choices whose original value matches a deliberate query.
 ///
 /// The server owns history ordering, so the result preserves it. This does
 /// not walk a filesystem; folder search is only a lookup through prior
@@ -1181,10 +1181,15 @@ pub(crate) fn search_results(
             if query.is_empty()
                 || folder
                     .display_cwd
+                    .raw()
                     .to_ascii_lowercase()
                     .contains(&folded_query)
             {
-                results.push(ComposerSearchResult::Folder(folder.display_cwd.clone()));
+                // Search results carry a local action payload, not a label.
+                // Preserve the path bytes for its later editor/request seed.
+                results.push(ComposerSearchResult::Folder(
+                    folder.display_cwd.raw().to_owned(),
+                ));
             }
         }
     }
@@ -1452,8 +1457,8 @@ fn canonical_destination<'a>(history: &'a LaunchHistory, display_cwd: &'a str) -
     history
         .folders
         .iter()
-        .find(|folder| folder.display_cwd == display_cwd)
-        .map_or(display_cwd, |folder| folder.canonical_cwd.as_str())
+        .find(|folder| folder.display_cwd.raw() == display_cwd)
+        .map_or(display_cwd, |folder| folder.canonical_cwd.raw())
 }
 
 /// Return the immutable accepted destination for one reusable launch.
@@ -1466,15 +1471,20 @@ fn canonical_destination<'a>(history: &'a LaunchHistory, display_cwd: &'a str) -
 fn launch_destination(entry: &LaunchHistoryEntry) -> RecentDestination<'_> {
     match &entry.github_repo {
         Some(repo) => RecentDestination::Github(repo),
-        None => RecentDestination::Existing(entry.canonical_cwd.as_deref().unwrap_or(&entry.cwd)),
+        None => {
+            RecentDestination::Existing(entry.canonical_cwd.as_ref().unwrap_or(&entry.cwd).raw())
+        }
     }
 }
 
 /// Name the destination a saved setup will request, rather than the path a
 /// previous fresh allocation happened to receive.
+///
+/// The result remains raw for search matching; display callers escape this
+/// composed label after adding any repository prefix.
 pub(crate) fn recent_destination_label(entry: &LaunchHistoryEntry) -> String {
     entry.github_repo.as_ref().map_or_else(
-        || entry.cwd.clone(),
+        || entry.cwd.raw().to_owned(),
         |repo| format!("gh:{}", repo.identifier()),
     )
 }
@@ -3851,6 +3861,60 @@ mod tests {
                 ComposerSearchGroup::Folders,
             ]
         );
+    }
+
+    /// Search must distinguish a control character from literal escape text.
+    /// The folder action payload and recent destination label also retain the
+    /// original path, since applying either later seeds a real launch request.
+    #[test]
+    fn folder_and_recent_search_match_raw_paths() {
+        let paths = ["/work/left\u{202e}right", "/work/left<U+202E>right"];
+        let history = LaunchHistory {
+            checkout_config_revision: 0,
+            folders: paths
+                .iter()
+                .map(|path| FolderHistoryEntry {
+                    host: HostId::default(),
+                    canonical_cwd: (*path).into(),
+                    canonical_proven: true,
+                    display_cwd: (*path).into(),
+                    created_at: 1,
+                    creation_seq: Some(1),
+                })
+                .collect(),
+            launches: paths
+                .iter()
+                .map(|path| LaunchHistoryEntry {
+                    host: HostId::default(),
+                    github_repo: None,
+                    canonical_cwd: Some((*path).into()),
+                    cwd: (*path).into(),
+                    selection: selection(LaunchHarness::Codex, None, None),
+                    created_at: 1,
+                    creation_seq: Some(1),
+                })
+                .collect(),
+        };
+        assert_ne!(
+            paths[0], paths[1],
+            "the paths must have different raw bytes"
+        );
+        for (index, query) in ["\u{202e}", "<U+202E>"].into_iter().enumerate() {
+            assert_eq!(
+                search_results(&history, &[], &format!("folder:{query}"), None, None),
+                vec![ComposerSearchResult::Folder(paths[index].into())]
+            );
+            assert_eq!(
+                search_results(&history, &[], &format!("recent:{query}"), None, None),
+                vec![ComposerSearchResult::Recent(
+                    history.launches[index].clone()
+                )]
+            );
+            assert_eq!(
+                recent_destination_label(&history.launches[index]),
+                paths[index]
+            );
+        }
     }
 
     /// Folder search must reuse only successful folder history, while a
