@@ -138,7 +138,7 @@
 //! or until runtime drop, as an explicit close does after caller cancellation.
 
 use super::core::{SampleRead, SessionEntry, Supervisor};
-use super::launch_artifacts::cleanup_launch_artifacts;
+use super::launch_artifacts::cleanup_error_once;
 #[cfg(test)]
 use super::status::observe_entry;
 use super::status::observe_entry_with_capture_budget;
@@ -1255,6 +1255,8 @@ fn forget_tail_hinted(sup: &Supervisor, entry: &SessionEntry) {
 /// A failed artifact read defers that entry; a failed batch keeps its
 /// launch evidence for the next observation. Neither failure prevents the
 /// rest of the fleet from making progress.
+/// Error cleanup shares its per-run success latch with Stop. Sampling admission
+/// still serializes only observer passes, not those lifecycle requests.
 pub(super) async fn observe_entries(
     sup: &Supervisor,
     entries: &[Arc<SessionEntry>],
@@ -1369,20 +1371,6 @@ pub(super) async fn observe_entries(
                 .launch_reads_settled
                 .store(true, Ordering::Relaxed);
         }
-    }
-}
-
-/// Retire Error artifacts once their preservation and removal both succeeded.
-/// Tick and wake share sampling admission, so this generation-local latch needs
-/// no additional pass lock. A failed cleanup leaves the next observation free
-/// to retry; rename shares the latch and relaunch replaces it.
-async fn cleanup_error_once(sup: &Supervisor, entry: &SessionEntry) {
-    if sup.may_record()
-        && !entry.run.launch_cleanup_done.load(Ordering::Relaxed)
-        && cleanup_launch_artifacts(&sup.state_dir, &sup.store, &entry.info.id, entry.generation)
-            .await
-    {
-        entry.run.launch_cleanup_done.store(true, Ordering::Relaxed);
     }
 }
 
