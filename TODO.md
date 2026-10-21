@@ -31,17 +31,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Planned
 
-- **Keep session creation off the connection read loop.** Run creation through tracked background handlers so ordinary
-  launch work and admission waits do not delay terminal input or unrelated requests on the helm's shared connection to
-  that supervisor. Cover both full-authority and session-authenticated create paths, and the separate keyed
-  fresh-checkout reconciliation request the helm sends before such a create, which waits on the same intent and
-  directory locks inside the read loop (`checkout-reconciliation-blocks-terminal-reader.md`); preserve bounded handler
-  admission, credential revalidation after waits, keyed-create durability, and disconnect cleanup. Verify with a
-  deterministic regression that another request or terminal input progresses while creation is paused. Medium effort:
-  localized dispatch changes, with care around task ownership and existing lifecycle guards. This plans the fix
-  described in `create-runs-inline-on-read-loop.md`; it does not request immediate implementation. Plan:
-  `plans/queue/supervisor-request-modes.md`.
-
 ## Near term
 
 - **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI

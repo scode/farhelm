@@ -38,11 +38,10 @@ pub(crate) enum ExecutionClass {
     /// a contested tab lifecycle claim is refused without waiting. Spawning
     /// the whole handler would race later data, resize, detach or abort frames.
     InlineChannel,
-    /// Create or reconcile inline, acquiring intent then directory admission.
+    /// Reconcile inline, acquiring intent then directory admission.
     /// This records the existing reader stall that the later fix removes; it
     /// is not permission for new requests to adopt the same wait. There is no
-    /// general management permit on these wire paths today. A restricted
-    /// CreateSession is refused before credential or admission work instead.
+    /// general management permit on that wire path today.
     InlineCreate,
     /// Run the checkout preview's ordinarily brief filesystem and store scan
     /// inline, without taking directory admission. SPEC.md's slow-host policy
@@ -194,7 +193,7 @@ declare_execution_classes! {
             channel: c.channel, received: 0,
         };
         AbortDownload => InlineControl => |c| ControlMsg::AbortDownload { channel: c.channel };
-        CreateSession => InlineCreate => |c| ControlMsg::CreateSession {
+        CreateSession => OwnedMutation => |c| ControlMsg::CreateSession {
             prompt: None,
             req_id: c.req_id,
             named_start: None,
