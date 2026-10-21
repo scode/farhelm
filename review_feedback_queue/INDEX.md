@@ -129,9 +129,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`session-view-fallback-omits-start-time.md`](session-view-fallback-omits-start-time.md) — The promised fallback for
   clipped hover details omits a session's separate start time.
 
-- [`ssh-help-response-steals-approval-focus.md`](ssh-help-response-steals-approval-focus.md) — SSH help responses can
-  take focus from approval answers; runtime ordering is unverified.
-
 - [`timing-history-can-retain-failed-recorder-success.md`](timing-history-can-retain-failed-recorder-success.md) —
   Permanent timing history can retain recorder success after required evidence publication fails; failure injection is
   unexecuted.

@@ -12,7 +12,9 @@ use crate::ApiBase;
 use crate::api::{self, SessionTunnels};
 use crate::feed::{fallback_polls_now, fallback_sleep};
 use crate::list::SharedPreferences;
-use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog};
+use crate::modal_dialog::{
+    DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
+};
 use crate::peer::display_peer;
 use crate::reader::{SurfaceReader, Trigger, request_read};
 
@@ -371,12 +373,9 @@ pub(crate) fn TunnelControls() -> Element {
                             event.stop_propagation(); controller.finish_warning(Ok(false));
                         }
                     },
-                    div { class: "host-settings-body",
-                        // Saving disables both buttons. The warning's text must
-                        // still be reachable in WebKit's keyboard Tab order.
-                        tabindex: if (controller.saving)() { Some("0") } else { None },
-                        role: if (controller.saving)() { Some("region") } else { None },
-                        aria_label: if (controller.saving)() { Some("tunnel security warning") } else { None },
+                    ScrollRegion { class: "host-settings-body",
+                        handle: DIALOG, selector: ".host-settings-body", name: "tunnel security warning",
+                        recovery: RecoveryFocus::new(".tunnel-cancel", None, true, RecoveryDelay::OneFrame),
                         h2 { id: "tunnel-consent-heading", "Allow tunnels from remote sessions?" }
                         p { strong { "A remote page opened through a tunnel runs at 127.0.0.1 on this Mac. It can read cookies set by other services on 127.0.0.1; different ports do not keep those cookies separate." } }
                         p { "Your browser treats it as a local page, so its private-network checks do not apply. Any program on this Mac can connect to an open tunnel." }

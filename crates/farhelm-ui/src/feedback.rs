@@ -27,7 +27,9 @@ use farhelm_proto::feedback::{
 use crate::ApiBase;
 use crate::api::{PreferenceValue, store_preference};
 use crate::list::SharedPreferences;
-use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog};
+use crate::modal_dialog::{
+    DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
+};
 use crate::reader::sleep_ms;
 
 /// The app bar releases the modal before announcing a successful send outside it.
@@ -317,12 +319,14 @@ pub(crate) fn FeedbackDialog(
                         "×"
                     }
                 }
-                div { class: "host-settings-body",
-                    // Sent replaces the form with text; the form's controls
-                    // remain the body's entry points in the editing state.
-                    tabindex: if state() == SendState::Sent { Some("0") } else { None },
-                    role: if state() == SendState::Sent { Some("region") } else { None },
-                    aria_label: if state() == SendState::Sent { Some("feedback sent") } else { None },
+                ScrollRegion { class: "host-settings-body",
+                    handle: DialogHandle::new(DIALOG_SELECTOR), selector: ".host-settings-body",
+                    // Sending disables the editors too; native eligibility
+                    // keeps that retained message reachable before success.
+                    name: if state() == SendState::Sent { "feedback sent" } else { "feedback" },
+                    // A refusal returns to the retained message, including
+                    // when sending parked focus on the temporary body stop.
+                    recovery: RecoveryFocus::new(".feedback-message", Some(".feedback-cancel"), false, RecoveryDelay::OneFrame),
                     if state() == SendState::Sent {
                         p { class: "feedback-thanks", "{THANKS}" }
                     } else {

@@ -7,7 +7,9 @@ use crate::{
     ApiBase,
     api::{SshHostCommands, fetch_ssh_connection_help},
     hosts::settings_dialog::HostDialogHeader,
-    modal_dialog::{DialogFocus, DialogHandle, ModalDialog},
+    modal_dialog::{
+        DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
+    },
     peer::PeerLine,
 };
 use dioxus::prelude::*;
@@ -30,36 +32,6 @@ pub(crate) fn SshHelpDialog(destination: Option<String>, on_close: EventHandler<
             ));
         })
     });
-    // Loading, refusals and empty command sets leave this body with only
-    // text. Once copy buttons exist they provide its keyboard entry point.
-    let has_commands = result
-        .read()
-        .as_ref()
-        .and_then(|result| result.as_ref().ok())
-        .is_some_and(|help| {
-            help.hosts
-                .iter()
-                .chain(help.extra.iter().filter(|_| extra_requested))
-                .any(|host| host.sessions.is_some() || host.setup.is_some())
-        });
-    // Command arrival removes the text body's temporary tab stop. Recover
-    // focus after that render, before modal isolation has to consume a key.
-    // A still-focusable control keeps focus; this is not an opening handoff.
-    use_effect(use_reactive((&has_commands,), move |(has_commands,)| {
-        if has_commands {
-            document::eval(&format!(
-                r#"requestAnimationFrame(() => {{
-                    const dialog = document.querySelector('{SELECTOR}');
-                    if (!dialog) return;
-                    const usable = (element) => element instanceof HTMLElement && element.isConnected
-                        && dialog.contains(element) && !element.disabled && element.tabIndex >= 0
-                        && element.getClientRects().length > 0;
-                    if (!usable(document.activeElement))
-                        dialog.querySelector('.ssh-help-close')?.focus({{preventScroll: true}});
-                }})"#
-            ));
-        }
-    }));
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
             ModalDialog {
@@ -75,10 +47,11 @@ pub(crate) fn SshHelpDialog(destination: Option<String>, on_close: EventHandler<
                     dismiss_label: "close ssh help", dismiss_tooltip: "close: return without adding a host or starting ssh",
                     on_dismiss: move |_| on_close.call(()),
                 }
-                div { class: "host-settings-body ssh-help-body",
-                    tabindex: if !has_commands { Some("0") } else { None },
-                    role: if !has_commands { Some("region") } else { None },
-                    aria_label: if !has_commands { Some("ssh connection help") } else { None },
+                ScrollRegion { class: "host-settings-body ssh-help-body",
+                    handle: DIALOG, selector: ".ssh-help-body", name: "ssh connection help",
+                    // Command arrival withdraws text-only entry. Close wins
+                    // only after lost focus, never over an approval's answer.
+                    recovery: RecoveryFocus::new(".ssh-help-close", None, false, RecoveryDelay::OneFrame),
                     p {
                         "Farhelm connects without prompting, so it cannot answer a second factor or other approval on every ssh login. Run both commands in a terminal "
                         if cfg!(all(native_desktop, target_os = "macos")) { strong { "on this Mac" } }

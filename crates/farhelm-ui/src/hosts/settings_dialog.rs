@@ -41,14 +41,17 @@
 //!   on the field or checkbox once the write ends (`refocus_after_write`).
 //!
 //! The shared modal boundary wraps Tab among enabled, visible controls and
-//! keyboard scroll regions. If a write leaves no such descendant, focus stays
-//! on the dialog root until the write recovery can restore a usable control.
+//! keyboard scroll regions. A body with no usable control gains its own entry
+//! stop; write recovery later yields to explicit navigation or another usable
+//! owner before restoring a control.
 
 use dioxus::prelude::*;
 
 use super::{EditField, HostDestinationForm, gui_host_name, phase_class, phase_display_label};
 use crate::icons::HostMark;
-use crate::modal_dialog::{DialogFocus, DialogHandle, FocusTarget, ModalDialog};
+use crate::modal_dialog::{
+    DialogFocus, DialogHandle, FocusTarget, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
+};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::{Host, HostId, HostKind, HostPhase};
 
@@ -150,11 +153,12 @@ pub(crate) fn focus_remove_refusal() {
 /// still in the dialog and usable; otherwise to the open field (a refused
 /// save, so the user can correct the draft), then the YOLO checkbox. It runs
 /// two frames late so that `focus_edit_button`, which handles a field that
-/// closed on success, gets there first; if focus is already on one of the
-/// dialog's controls by then, this leaves it alone.
+/// closed on success, gets there first; a usable current owner, including an
+/// approval answer outside this dialog, keeps focus.
 /// The busy body's temporary tab stop is not a usable return target after
 /// saving ends, even if the engine has not blurred it yet. Test both current
-/// and remembered focus against the same keyboard-focusable contract.
+/// and remembered focus against the shared usable-owner contract, including
+/// deliberate programmatic headings and independent approval answers.
 ///
 /// `reset_checkbox` is set after a refused checkbox toggle. That leaves the
 /// box showing the user's click while the setting never changed, and since
@@ -168,24 +172,25 @@ fn refocus_after_write(reset_checkbox: bool) {
     } else {
         String::new()
     };
+    let recovery = settings_recovery().script();
     document::eval(&format!(
         r#"requestAnimationFrame(() => requestAnimationFrame(() => {{
             const dialog = document.querySelector({dialog});
             if (!dialog) return;
             {reset}
-            const usable = (element) => element instanceof HTMLElement && element.isConnected
-                && dialog.contains(element) && !element.disabled && element.tabIndex >= 0
-                && element.getClientRects().length > 0;
-            if (usable(document.activeElement)) return;
-            const last = dialog.__farhelmLastFocus;
-            const target = usable(last)
-                ? last
-                : (dialog.querySelector('.host-destination-input')
-                    ?? dialog.querySelector('.host-yolo-without-asking-toggle')
-                    ?? dialog);
-            target.focus({{ preventScroll: true }});
+            {recovery}
         }}))"#
     ));
+}
+
+/// Let explicit field navigation win before the existing remembered fallback.
+fn settings_recovery() -> RecoveryFocus {
+    RecoveryFocus::new(
+        ".host-destination-input",
+        Some(".host-yolo-without-asking-toggle"),
+        true,
+        RecoveryDelay::TwoFrames,
+    )
 }
 
 /// Put focus back on a field's edit button once its editor has closed.
@@ -476,12 +481,9 @@ pub(super) fn HostSettingsDialog(
                     dismiss_tooltip: "close: done with this host's settings",
                     on_dismiss: move |_| on_close.call(()),
                 }
-                div { class: "host-settings-body",
-                // Saving disables the body's controls. Keep its text reachable
-                // until those controls can serve as keyboard entry points again.
-                tabindex: if busy { Some("0") } else { None },
-                role: if busy { Some("region") } else { None },
-                aria_label: if busy { Some("host settings") } else { None },
+                ScrollRegion { class: "host-settings-body",
+                handle: DIALOG, selector: ".host-settings-body", name: "host settings",
+                recovery: settings_recovery(),
                 if manageable || alias_supported {
                 section { class: "host-settings-section", aria_label: "Connection",
                     h3 { class: "host-settings-section-title", "Connection" }
@@ -725,8 +727,9 @@ pub(super) fn HostRemoveDialog(
                         }
                     },
                 }
-                div { class: "host-settings-body",
-                    tabindex: "0", role: "region", aria_label: "host removal details",
+                ScrollRegion { class: "host-settings-body",
+                    handle: DIALOG, selector: ".host-settings-body", name: "host removal details",
+                    recovery: RecoveryFocus::new(".host-settings-close", None, true, RecoveryDelay::OneFrame),
                     p { class: "host-settings-value peer-value host-dialog-destination", dir: "ltr", "{destination}" }
                     p { class: "host-remove-explanation",
                         "Farhelm will forget this host. Its supervisor and sessions keep running, and adding the destination again finds them."

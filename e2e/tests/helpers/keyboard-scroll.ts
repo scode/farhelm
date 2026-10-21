@@ -28,3 +28,32 @@ export async function expectKeyboardScroll(
   await expect.poll(() => region.evaluate((node) => node.scrollTop),
     { message: "PageDown scrolls the focused region" }).toBeGreaterThan(before);
 }
+
+/**
+ * An enabled body control supplies scroll entry without a redundant region stop.
+ *
+ * Tab must reach that exact control from its real preceding control. Native
+ * Home and PageDown then prove that its enclosing scrollport receives keyboard
+ * scrolling even in WebKit; neither focus nor scroll offset is assigned to the
+ * scrollport. Home also removes any offset left by earlier Copy assertions.
+ */
+export async function expectKeyboardScrollFromControl(
+  page: Page,
+  adjacent: Locator,
+  entry: Locator,
+  scrollport: Locator,
+) {
+  expect(await scrollport.evaluate((node) => node.scrollHeight > node.clientHeight + 1),
+    "the control's scrollport must actually overflow").toBe(true);
+  await expect(entry).toBeEnabled();
+  await adjacent.focus();
+  await expect(adjacent).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(entry).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect.poll(() => scrollport.evaluate((node) => node.scrollTop),
+    { message: "Home reaches the start through the focused control" }).toBe(0);
+  await page.keyboard.press("PageDown");
+  await expect.poll(() => scrollport.evaluate((node) => node.scrollTop),
+    { message: "PageDown scrolls the focused control's scrollport" }).toBeGreaterThan(0);
+}

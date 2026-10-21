@@ -599,6 +599,15 @@ radio-group navigation stay native; the boundary wraps at either end, enters the
 container, and keeps focus on the container when no target is available. Initial-focus order and gap-click retention
 remain explicit policies, separate from trapping and isolation. Hidden preparation isolates without focusing fields.
 
+Modal scroll bodies use the shared `ScrollRegion` div, which adds a named sequential stop only while no usable native
+Tab target exists inside. Templates applies that rule to its existing dialog root, retaining its dialog role and name.
+The rule shares the trap's native eligibility check, including disabled fieldsets, hidden/inert ancestors and negative
+tabindex exclusion; it does not depend on measured overflow or per-dialog busy flags. Local observers reconcile the
+captured node after content, visibility or size changes and dispose independently when that node leaves the document.
+Lost-focus recovery preserves any usable current owner, including programmatic negative-tabindex children and exempt
+approval answers. A withdrawn managed stop and the dialog root parked by isolation are recovery surfaces, not chosen
+owners. Existing consumer target priorities and one- or two-frame write/navigation ordering remain explicit.
+
 The dialog owns keyboard focus structurally. While it is mounted, every sibling of every element on its path up to
 `body` is `inert`, including siblings rendered after it opened, except the agent approval cards (`data-modal-exempt`),
 which stay live so that an agent waiting on a card does not also wait on the dialog, so no other code can focus anything

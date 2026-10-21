@@ -3,12 +3,14 @@
  * WebKit. HTTP fixtures select the real renderer's empty and pending states;
  * Tab and PageDown exercise native focus and scrolling rather than DOM writes.
  */
-import { type Page } from "@playwright/test";
+import { type ElementHandle, type Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import { hostRowByName, openHostMenu, pinAutoSelect, resetPreferences, SESSION_LISTING } from "./helpers/fleet";
 import { expectKeyboardScroll } from "./helpers/keyboard-scroll";
 import { replayRecord, waitForReplayReveal, waitForSessionMounted } from "./helpers/terminal-readiness";
 import { findSessionIdByTitle, fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
+import { routeGate } from "./helpers/route-gate";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 
 installTerminalSuiteHooks();
 
@@ -31,6 +33,11 @@ async function openHelpDialog(page: Page, item: "ssh needs 2FA?" | "send feedbac
   const dialog = page.getByRole("dialog", { name: item, exact: true });
   await expect(dialog).toBeVisible();
   return dialog;
+}
+
+/** Cross the documented maximum two-frame recovery after its DOM premise exists. */
+async function afterFocusRecovery(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 }
 
 /**
@@ -72,7 +79,7 @@ test("help menu keeps keyboard focus through a late terminal reveal", async ({ p
 async function stubRemote(page: Page) {
   const remote = {
     id: HOST_ID, kind: "ssh", destination: HOST, name: HOST,
-    identity: "keyboard-scroll-identity", incarnation: 1, yolo_without_asking: false,
+    identity: "keyboard-scroll-identity", incarnation: 1, yolo_without_asking: false, commands_without_asking: false,
     remote_farhelm: null, remote_state_dir: null,
     state: { phase: "connected", identity: "keyboard-scroll-identity", build_version: "0.1.0",
       refresh: { status: "ok", sessions: 0 } },
@@ -297,11 +304,59 @@ for (const outcome of ["refused destination", "successful checkbox"] as const) {
   });
 }
 
-for (const focus of ["body", "dismiss"] as const) {
+/**
+ * Automatic busy-region focus must retain the control that started the save.
+ * Commands is deliberately different from the YOLO fallback: recovering that
+ * fallback would conceal lost focus memory. No input moves focus while held.
+ */
+test("host settings automatic busy recovery remembers the commands checkbox", async ({ page }) => {
+  const remote = await stubRemote(page);
+  const gate = routeGate();
+  let submitted: unknown;
+  await page.route(`**/api/hosts/${HOST_ID}/commands-without-asking`, async (route) => {
+    submitted = route.request().postDataJSON();
+    await gate.wait();
+    remote.commands_without_asking = true;
+    await fulfillAsHelm(route, { json: remote });
+  });
+  try {
+    await page.goto("/");
+    const row = hostRowByName(page, HOST);
+    await openHostMenu(row);
+    await row.locator(".host-settings").click();
+    const dialog = page.locator(".host-settings-refreshed");
+    const body = dialog.locator(".host-settings-body");
+    const commands = dialog.locator(".host-commands-without-asking-toggle");
+    await expect(commands).not.toBeChecked();
+    await commands.focus();
+    await expect(commands).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect.poll(() => submitted, { message: "the commands save remains held" })
+      .toEqual({ commands_without_asking: true });
+    await expect(commands).toBeDisabled();
+    await expect(body).toHaveAttribute("tabindex", "0");
+    // This focus must arrive from automatic recovery. Navigating to the
+    // region here would replace the very memory this regression protects.
+    await expect(body).toBeFocused();
+    gate.release();
+    await expect(body).not.toHaveAttribute("tabindex");
+    await expect(commands).toBeEnabled();
+    await expect(commands).toBeChecked();
+    await expect(commands).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(dialog.locator(".host-links-without-asking-toggle")).toBeFocused();
+  } finally {
+    gate.release();
+    await page.unrouteAll({ behavior: "wait" });
+  }
+});
+
+for (const focus of ["body", "dismiss", "backdrop"] as const) {
   /**
    * Command arrival removes the loading body's tab stop. Recover Close when
-   * that body held focus, but preserve a usable control the user already chose;
-   * a native Tab then proves the next key was not used to repair lost focus.
+   * that body held focus or a real scrim click left no control in charge, but
+   * preserve a usable control the user already chose. Fresh Tab or Enter must
+   * perform its normal action, rather than being consumed to repair focus.
    */
   test(`SSH command arrival keeps usable focus from ${focus}`, async ({ page }) => {
     let release!: () => void;
@@ -327,15 +382,31 @@ for (const focus of ["body", "dismiss"] as const) {
       if (focus === "body") {
         await page.keyboard.press("Tab");
         await expect(body).toBeFocused();
+      } else if (focus === "backdrop") {
+        const point = { x: 5, y: 5 };
+        expect(await page.evaluate(({ x, y }) =>
+          document.elementFromPoint(x, y)?.matches(".host-settings-backdrop") ?? false, point),
+          "the actual click target is the dialog's backdrop").toBe(true);
+        await page.mouse.click(point.x, point.y);
+        await expect(dialog).toBeVisible();
+        expect(await page.evaluate(() => document.activeElement === document.body),
+          "the native backdrop click left no chosen control").toBe(true);
       }
       release();
       await expect(dialog.getByRole("button", { name: "copy setup and updates connection", exact: true })).toBeVisible();
       await expect(body).not.toHaveAttribute("tabindex", "0");
-      await expect(focus === "body" ? dialog.locator(".ssh-help-close") : dismiss).toBeFocused();
-      await page.keyboard.press(focus === "body" ? "Shift+Tab" : "Tab");
-      await expect(dialog.getByRole("button", {
-        name: focus === "body" ? "copy setup and updates connection" : "copy sessions connection", exact: true,
-      })).toBeFocused();
+      if (focus === "backdrop") {
+        await expect(dialog.locator(".ssh-help-close")).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(dialog).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "help", exact: true })).toBeFocused();
+      } else {
+        await expect(focus === "body" ? dialog.locator(".ssh-help-close") : dismiss).toBeFocused();
+        await page.keyboard.press(focus === "body" ? "Shift+Tab" : "Tab");
+        await expect(dialog.getByRole("button", {
+          name: focus === "body" ? "copy setup and updates connection" : "copy sessions connection", exact: true,
+        })).toBeFocused();
+      }
     } finally {
       release();
       await page.unrouteAll({ behavior: "wait" });
@@ -344,8 +415,214 @@ for (const focus of ["body", "dismiss"] as const) {
 }
 
 /**
- * Sent replaces the editors with prose for only 1.5 seconds. Freeze that timer
- * before sending so keyboard assertions observe the sent state throughout.
+ * Sending retains disabled editors but no usable body control. The temporary
+ * stop must admit native scrolling, then disappear when a refusal restores
+ * the unchanged editable message and its ordinary field-to-field Tab order.
+ */
+test("sending feedback gains a body stop and refusal restores editor entry", async ({ page }) => {
+  const gate = routeGate();
+  const message = "Keep feedback reachable while the send remains pending.";
+  const submissions: unknown[] = [];
+  await page.route("**/api/feedback", async (route) => {
+    submissions.push(route.request().postDataJSON());
+    await gate.wait();
+    await fulfillAsHelm(route, { status: 503, contentType: "text/plain", body: "Couldn't send feedback: held feedback refusal" });
+  });
+  try {
+    await page.setViewportSize({ width: 360, height: 320 });
+    await page.goto("/");
+    const dialog = await openHelpDialog(page, "send feedback");
+    const body = dialog.locator(".host-settings-body");
+    const field = dialog.locator(".feedback-message");
+    await expect(body).not.toHaveAttribute("tabindex");
+    await field.fill(message);
+    await dialog.locator(".feedback-send").click();
+    await expect.poll(() => submissions.length).toBe(1);
+    expect(submissions[0]).toMatchObject({ message });
+    await expect(dialog.locator(".feedback-send")).toHaveText("sending…");
+    const controls = dialog.locator("button, input, textarea");
+    expect(await controls.count()).toBeGreaterThan(0);
+    for (const control of await controls.all()) await expect(control).toBeDisabled();
+    await expect(body).toHaveAccessibleName("feedback");
+    // Header and footer answers are disabled too. The real focusable dialog
+    // supplies the origin; Tab must enter the body rather than repair body focus.
+    await expectKeyboardScroll(page, dialog, body);
+    for (const control of await controls.all()) await expect(control).toBeDisabled();
+    expect(submissions).toHaveLength(1);
+    gate.release();
+    await expect(dialog.locator(".feedback-error")).toContainText("held feedback refusal");
+    await expect(field).toBeEnabled();
+    await expect(field).toHaveValue(message);
+    await expect(body).not.toHaveAttribute("tabindex");
+    await expect(body).not.toHaveAttribute("role");
+    await expect(body).not.toHaveAttribute("aria-label");
+    await expect(field).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(dialog.locator(".feedback-contact")).toBeFocused();
+  } finally {
+    gate.release();
+    await page.unrouteAll({ behavior: "wait" });
+  }
+});
+
+/**
+ * Command arrival may remove a focused body's stop, but it must preserve an
+ * independently usable approval answer chosen while the HTTP read is held.
+ * A post-recovery assertion prevents an early transient focus pass.
+ */
+test("SSH command arrival preserves an independent approval owner", async ({ page }) => {
+  const gate = routeGate();
+  const approvalId = "ssh-help-scroll-owner";
+  let requested = false;
+  const answers: string[] = [];
+  await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {
+    json: { sessions: [], total: 0, matching: 0, truncated: false },
+  }));
+  await page.route((url) => url.pathname === "/api/approvals", (route) => fulfillAsHelm(route, {
+    json: { approvals: [{
+      id: approvalId, host_id: 1, host_name: "fixture-host",
+      session: { id: "7c1e9a52-4b0d-4f7e-9a3c-2d81f6b0e413", title: "requester", host_name: "fixture-host" },
+      expires_at_ms: Date.now() + 540_000,
+      action: {
+        kind: "launch", verb: "create", host_name: "fixture-host", cwd: "/work/project", title: null, source: null,
+        launch: { kind: "agent", selection: { harness: "claude", model: "opus", effort: "high", permissions: "guarded" },
+          start: ["claude", "--model", "opus", "--effort", "high", "--permission-mode", "auto", "{farhelm_args}"], resume: null },
+      },
+    }] },
+  }));
+  await page.route((url) => url.pathname === `/api/approvals/${approvalId}`, async (route) => {
+    answers.push(route.request().postDataJSON().answer);
+    await fulfillAsHelm(route, { status: 204 });
+  });
+  await page.route("**/api/ssh-connections", async (route) => {
+    requested = true;
+    await gate.wait();
+    await fulfillAsHelm(route, { json: { unavailable: [], extra: null, hosts: [{
+      name: HOST, destination: HOST, sessions: "ssh sessions.example.invalid", setup: "ssh setup.example.invalid",
+    }] } });
+  });
+  try {
+    await page.goto("/");
+    const dialog = await openHelpDialog(page, "ssh needs 2FA?");
+    const body = dialog.locator(".ssh-help-body");
+    await expect.poll(() => requested).toBe(true);
+    await expect(body.getByRole("status")).toHaveText("loading connection commands…");
+    await expect(body).toHaveAttribute("tabindex", "0");
+    const answer = page.locator(`.approval-card[data-approval-id="${approvalId}"]`).getByRole("button", { name: "allow", exact: true });
+    await expect(answer).toBeVisible();
+    await expect(answer).toBeEnabled();
+    expect(await answer.evaluate((node) => node.closest("[data-modal-exempt]") !== null)).toBe(true);
+    expect(await answer.evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
+    await answer.focus();
+    await expect(answer).toBeFocused();
+    gate.release();
+    await expect(dialog.getByRole("button", { name: "copy setup and updates connection", exact: true })).toBeVisible();
+    await expect(body).not.toHaveAttribute("tabindex");
+    await expect(body).not.toHaveAttribute("role");
+    await expect(body).not.toHaveAttribute("aria-label");
+    await afterFocusRecovery(page);
+    await expect(answer, "late help recovery leaves the chosen approval answer alone").toBeFocused();
+    expect(answers, "preserving an approval owner does not answer its request").toEqual([]);
+  } finally {
+    gate.release();
+    await page.unrouteAll({ behavior: "wait" });
+  }
+});
+
+/**
+ * A closed region cannot react to its old reply or disturb a fresh opening.
+ * Two independently held reads establish the stale/current boundary, while
+ * native Tab after reopen proves the new stop and recovery remain usable.
+ */
+test("SSH help closed before its reply leaves a reopened region independent", async ({ page }) => {
+  const gates = [routeGate(), routeGate()];
+  const drained: Array<"delivered" | "cancelled" | undefined> = [];
+  let requested = 0;
+  let oldRoot: ElementHandle<HTMLElement | SVGElement> | null = null;
+  let bodyFailed = true;
+  await page.route("**/api/ssh-connections", async (route) => {
+    const opening = requested++;
+    expect(opening, "only the old and reopened help reads are expected").toBeLessThan(2);
+    await gates[opening].wait();
+    const failure = route.request().failure();
+    if (failure) {
+      expect(failure.errorText).toMatch(/abort|cancel/i);
+      // A cancelled browser fetch still owns a Playwright route invocation.
+      // Returning without an action leaves its handled promise pending, so
+      // unrouteAll(wait) cannot finish after the test's body has passed.
+      await route.abort("aborted");
+      drained[opening] = "cancelled";
+      return;
+    }
+    try {
+      await fulfillAsHelm(route, { json: { unavailable: [], extra: null, hosts: [{
+        name: HOST, destination: HOST, sessions: `ssh opening-${opening}.example.invalid`, setup: "ssh setup.example.invalid",
+      }] } });
+      drained[opening] = "delivered";
+    } catch (error) {
+      // Closing a scope can abort its fetch while the route is being drained.
+      // Only that observed cancellation is an expected alternative to delivery.
+      if (!/abort|cancel/i.test(route.request().failure()?.errorText ?? "")) throw error;
+      drained[opening] = "cancelled";
+    }
+  });
+  try {
+    await page.goto("/");
+    let dialog = await openHelpDialog(page, "ssh needs 2FA?");
+    await expect.poll(() => requested).toBe(1);
+    let body = dialog.locator(".ssh-help-body");
+    await expect(body).toHaveAttribute("tabindex", "0");
+    await dialog.locator(".host-settings-dismiss").focus();
+    await expect(dialog.locator(".host-settings-dismiss")).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(body).toBeFocused();
+    oldRoot = await dialog.elementHandle();
+    expect(oldRoot).not.toBeNull();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    expect(await oldRoot!.evaluate((node) => node.isConnected)).toBe(false);
+    await expect(page.getByRole("button", { name: "help", exact: true })).toBeFocused();
+    dialog = await openHelpDialog(page, "ssh needs 2FA?");
+    await expect.poll(() => requested).toBe(2);
+    body = dialog.locator(".ssh-help-body");
+    const dismiss = dialog.locator(".host-settings-dismiss");
+    await expect(body.getByRole("status")).toHaveText("loading connection commands…");
+    await expect(body).toHaveAttribute("tabindex", "0");
+    await dismiss.focus();
+    await expect(dismiss).toBeFocused();
+    gates[0].release();
+    await expect.poll(() => drained[0], { message: "the old request is delivered or observably cancelled" }).toBeDefined();
+    await afterFocusRecovery(page);
+    expect(await oldRoot!.evaluate((node) => node.isConnected)).toBe(false);
+    await expect(body.getByRole("status")).toHaveText("loading connection commands…");
+    await expect(body).toHaveAttribute("tabindex", "0");
+    await expect(body.getByRole("button")).toHaveCount(0);
+    await expect(dismiss).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(body).toBeFocused();
+    gates[1].release();
+    await expect(dialog.locator(".ssh-help-command pre").first()).toHaveText("ssh opening-1.example.invalid");
+    await expect(body).not.toHaveAttribute("tabindex");
+    await expect(dialog.locator(".ssh-help-close")).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(dialog.getByRole("button", { name: "copy setup and updates connection", exact: true })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "help", exact: true })).toBeFocused();
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["held help reads", () => gates.forEach((gate) => gate.release())],
+      ["help routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["old root handle", () => oldRoot?.dispose()],
+    ]);
+  }
+});
+
+/**
+ * Sent replaces the editors with prose for only 1.5 seconds. Hold that timer
+ * before sending, but advance the observer's reconciliation frames explicitly
+ * so the fixture does not freeze the keyboard entry it intends to measure.
  * The height cap supplies overflow for the short real thank-you sentence.
  */
 test("sent feedback is keyboard-scrollable without changing the editing Tab order", async ({ page }) => {
@@ -369,6 +646,10 @@ test("sent feedback is keyboard-scrollable without changing the editing Tab orde
   // content-box cap is smaller than one line; the body's padding stays intact.
   await body.evaluate((node) => { (node as HTMLElement).style.maxHeight = "8px"; });
   await expect(body).toHaveCSS("max-height", "8px");
+  // pauseAt also holds requestAnimationFrame. Fifty milliseconds lets the
+  // queued content/resize reconciliation run, well before the 1500 ms close.
+  await page.clock.runFor(50);
+  await expect(body).toHaveAccessibleName("feedback sent");
   await expectKeyboardScroll(page, dialog.locator(".feedback-dismiss"), body);
   await expect(dialog.locator(".feedback-thanks"), "the close timer remains held during keyboard input").toBeVisible();
 });

@@ -11,6 +11,7 @@ import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type APIRequestContext, type Page } from "@playwright/test";
 import { cleanupSession, createSession, listHosts, openRowMenu, patchPreferences, pinAutoSelect, readPreferences } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
+import { requireHelmBuild } from "./helpers/helm-build";
 
 /** Store a template through the helm's API, as the panel would. */
 async function putTemplate(request: APIRequestContext, name: string, fields: Record<string, unknown>) {
@@ -699,6 +700,80 @@ async function storedTemplate(request: APIRequestContext, name: string) {
   expect(response.ok()).toBe(true);
   const body = await response.json();
   return body.templates.find((template: any) => template.name === name);
+}
+
+for (const width of [1100, 390]) {
+  /**
+   * A held write disables every visible control in both responsive editors.
+   * The actual scrolling dialog must temporarily enter Tab order without
+   * losing its dialog role/name, then retire that stop and recover Save when
+   * the refusal restores the user's remembered control and unchanged draft.
+   */
+  test(`templates busy root stays keyboard-scrollable at width ${width}`, async ({ page, request }) => {
+    const name = `e2e-scroll-busy-${width}-${Date.now()}`;
+    const gate = routeGate();
+    const submitted: unknown[] = [];
+    let bodyFailed = true;
+    try {
+      await putTemplate(request, name, {
+        kind: "command", command: "echo original", resume_command: "echo resume", name: "scrolling command session",
+      });
+      const build = requireHelmBuild(await request.get("/api/templates"), "held template scroll save");
+      await page.route(`**/api/templates/${encodeURIComponent(name)}`, async (route) => {
+        if (route.request().method() !== "PUT") return route.continue();
+        submitted.push(route.request().postDataJSON());
+        await gate.wait();
+        await route.fulfill({ status: 409, headers: { "x-farhelm-build": build }, contentType: "text/plain", body: "fixture keeps the template draft" });
+      });
+      await page.setViewportSize({ width, height: 320 });
+      const dialog = await openTemplates(page);
+      await dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) }).click();
+      await expect(dialog.locator(".templates-name")).toBeFocused();
+      await dialog.locator(".templates-command").fill("echo edited");
+      await expect(dialog).toHaveAttribute("tabindex", "-1");
+      expect(await dialog.evaluate((node) => node.scrollHeight > node.clientHeight + 1),
+        "the actual editor root must overflow before measuring its entry").toBe(true);
+      const save = dialog.locator(".templates-save");
+      await save.focus();
+      await expect(save).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect.poll(() => submitted.length, { message: "one actual template write remains held" }).toBe(1);
+      const visibleControls = dialog.locator("button:visible, input:visible, select:visible, textarea:visible");
+      expect(await visibleControls.count(), "the busy editor retains real visible controls").toBeGreaterThan(0);
+      for (const control of await visibleControls.all()) await expect(control).toBeDisabled();
+      await expect(dialog).toHaveAttribute("tabindex", "0");
+      await expect(dialog).toHaveAttribute("role", "dialog");
+      await expect(dialog).toHaveAccessibleName("templates");
+      await expect(dialog).toHaveAttribute("aria-modal", "true");
+      await expect(dialog.locator('[role="region"], form')).toHaveCount(0);
+      await page.keyboard.press("Tab");
+      await expect(dialog).toBeFocused();
+      // Save can scroll the editor to its bottom before disabling. Home and
+      // PageDown must move the real root without a test assigning its offset.
+      await page.keyboard.press("Home");
+      await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBe(0);
+      await page.keyboard.press("PageDown");
+      await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+      for (const control of await visibleControls.all()) await expect(control).toBeDisabled();
+      expect(submitted).toHaveLength(1);
+      gate.release();
+      await expect(dialog.locator(".templates-error").last()).toContainText("fixture keeps the template draft");
+      await expect(dialog.locator(".templates-command")).toHaveValue("echo edited");
+      await expect(save).toBeEnabled();
+      await expect(dialog).toHaveAttribute("tabindex", "-1");
+      await expect(save).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(dialog.locator(".templates-close")).toBeFocused();
+      expect((await storedTemplate(request, name)).fields.command, "the refused PUT did not change stored fields").toBe("echo original");
+      bodyFailed = false;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["held template write", () => gate.release()],
+        ["template write route", () => page.unrouteAll({ behavior: "wait" })],
+        ["owned template", () => deleteTemplate(request, name)],
+      ]);
+    }
+  });
 }
 
 /** Historical true, false and explicit-default trust values still decode.
