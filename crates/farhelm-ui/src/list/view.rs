@@ -18,6 +18,7 @@ use crate::app_bar::AppBar;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostsPanel, HostsRead};
 use crate::ops::{ConfirmSlot, OpLock, ReadGate, use_confirm_slot};
+use crate::peer::PeerText;
 use crate::provisioning::ProvisioningTraceShape;
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::rows::{
@@ -399,15 +400,16 @@ fn newest_created_fallback<'a>(
 /// Once history exists it is authoritative, even if the legacy value differs.
 /// Exited and disconnected rows count normally. Excluding the last open ID
 /// prevents a just-deleted row in a not-yet-refreshed listing from reopening.
+/// Visits are full raw references, used only for identity lookup here.
 fn automatic_selection<'a>(
     sessions: &'a [Session],
-    history: &[String],
+    history: &[PeerText],
     last_selected: Option<&str>,
     excluded: Option<&str>,
 ) -> Option<&'a Session> {
     history
         .iter()
-        .map(String::as_str)
+        .map(PeerText::raw)
         .chain(last_selected.filter(|_| history.is_empty()))
         .filter(|id| Some(*id) != excluded)
         .find_map(|id| sessions.iter().find(|session| session.id.raw() == id))
@@ -3019,7 +3021,12 @@ pub(crate) fn ListView(
                         automatic_selection(
                             &rows.sessions,
                             &preferences.0.peek().visit_history,
-                            preferences.0.peek().last_selected.as_deref(),
+                            preferences
+                                .0
+                                .peek()
+                                .last_selected
+                                .as_ref()
+                                .map(PeerText::raw),
                             last_opened.peek().as_deref(),
                         )
                         .cloned()
@@ -4073,7 +4080,7 @@ pub(crate) fn ListView(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral templates-button",
-                        "data-tooltip": preferences.0.read().quick_launch_template.as_ref().map_or_else(|| format!("templates: mark one with ⚡ for quick launch ({})", crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)), |name| format!("templates: quick launch {} ({})", crate::peer::display_peer(name), crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop))),
+                        "data-tooltip": preferences.0.read().quick_launch_template.as_ref().map_or_else(|| format!("templates: mark one with ⚡ for quick launch ({})", crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)), |name| format!("templates: quick launch {} ({})", name.escaped(), crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop))),
                         aria_haspopup: "dialog",
                         disabled: busy,
                         onclick: move |_| { opening_generation += 1; quick_launch_pending.set(false); auto_launch.set(false); initial_template.set(None); quick_launch_hint.set(false); number_shortcut_hint.set(false); templates_open.set(true); },
@@ -4578,6 +4585,8 @@ pub(crate) fn ListView(
 /// and SPEC.md allows only explicit GUI selections to shape GUI defaults.
 /// `None` (a command create) leaves the preferences alone, as the
 /// helm does. Workspace trust comes from Settings and never affects GUI defaults.
+/// Wrapper words enter the typed mirror unchanged; the next launcher owns their
+/// shell-line spelling and any inherited-value presentation guard.
 fn mirror_submitted_launch(
     preferences: &mut crate::api::Preferences,
     submitted: Option<&farhelm_proto::LaunchSelection>,
@@ -4597,7 +4606,7 @@ fn mirror_submitted_launch(
     if let Some(prefix) = &launch.wrapper_prefix {
         preferences
             .remembered_wrapper_prefixes
-            .insert(launch.harness, prefix.clone());
+            .insert(launch.harness, prefix.iter().map(PeerText::from).collect());
     } else {
         preferences
             .remembered_wrapper_prefixes
@@ -5242,8 +5251,8 @@ mod tests {
                 ..crate::list::row::row_specimen("c")
             },
         ];
-        let history = ["missing", "b", "a"].map(String::from);
-        let pick = |listed: &[Session], history: &[String], removed| {
+        let history = ["missing", "b", "a"].map(PeerText::from);
+        let pick = |listed: &[Session], history: &[PeerText], removed| {
             automatic_selection(listed, history, None, removed)
                 .map(|session| session.id.raw().to_owned())
         };
@@ -5284,7 +5293,7 @@ mod tests {
                 ..crate::list::row::row_specimen("c")
             },
         ];
-        let pick = |history: &[String], legacy, removed| {
+        let pick = |history: &[PeerText], legacy, removed| {
             automatic_selection(&rows, history, legacy, removed).map(|session| session.id.raw())
         };
         assert_eq!(pick(&[], Some("a"), None), Some("a"));

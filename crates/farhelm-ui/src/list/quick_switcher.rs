@@ -179,14 +179,20 @@ fn agent_label(session: &Session) -> &'static str {
 ///
 /// Preferences give the current assignments, while the one shortcut
 /// definition supplies the same labels used by the capture listener.
+/// Compare raw names so a displayed escape cannot become another template's key.
 fn template_shortcut_badges(name: &str, preferences: &Preferences) -> Vec<String> {
     let keys = crate::launch_sequence::TEMPLATE_SHORTCUTS;
     let mut badges = Vec::new();
-    if preferences.quick_launch_template.as_deref() == Some(name) {
+    if preferences
+        .quick_launch_template
+        .as_ref()
+        .map(crate::peer::PeerText::raw)
+        == Some(name)
+    {
         badges.push(keys.bolt.label(keys.mac_desktop));
     }
     for (number, bound_name) in &preferences.template_shortcuts {
-        if bound_name == name {
+        if bound_name.raw() == name {
             badges.push(keys.number_chord(number));
         }
     }
@@ -495,7 +501,7 @@ pub(super) fn QuickSwitcher(
                             "data-tooltip": "quick launch: start the marked template directly, or open Templates to mark one",
                             onclick: move |_| on_pick.call(SwitcherPick::QuickLaunch),
                             span { "⚡" }
-                            span { "Quick launch: " bdi { {display_peer(preferences.0.read().quick_launch_template.as_deref().unwrap_or("mark a template"))} } }
+                            span { "Quick launch: " bdi { {preferences.0.read().quick_launch_template.as_ref().map_or_else(|| display_peer("mark a template"), crate::peer::PeerText::escaped)} } }
                             span { class: "templates-quick-chord", "{crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)}" }
                         }
                     }

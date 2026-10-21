@@ -66,6 +66,7 @@ use crate::LaunchHarness;
 use crate::github_checkout::{
     FreshCreateError, GithubCheckoutRequest, GithubPreview, GithubRepositories,
 };
+use crate::peer::PeerText;
 use crate::skew;
 use crate::{CommandLaunch, Host, HostId, LaunchSelection, Session, Tab};
 use serde::Deserialize;
@@ -400,20 +401,22 @@ pub(crate) struct Preferences {
     pub(crate) welcome_seen: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) list_sort: Option<String>,
+    /// Full session reference, retained raw for entry-bound selection matching.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) last_selected: Option<String>,
+    pub(crate) last_selected: Option<PeerText>,
     /// Helm-owned visits, newest first. Empty on older replies and immediately
     /// after migration; only the selection field is sent when recording a visit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(crate) visit_history: Vec<String>,
+    pub(crate) visit_history: Vec<PeerText>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) compact: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) remembered_permissions: Option<String>,
-    /// The last successful user launch's prefix for each agent type.
+    /// The last successful user launch's prefix for each agent type. Words keep
+    /// their original shell argument bytes until the launcher seeds its draft.
     #[serde(default)]
     pub(crate) remembered_wrapper_prefixes:
-        std::collections::BTreeMap<crate::LaunchHarness, Vec<String>>,
+        std::collections::BTreeMap<crate::LaunchHarness, Vec<PeerText>>,
     /// Legacy compatibility only; workspace trust now comes from Settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) remembered_workspace_trust: Option<bool>,
@@ -432,10 +435,11 @@ pub(crate) struct Preferences {
     pub(crate) color_terminal_frames: Option<bool>,
     /// Shared quick-launch mark, separate from a template editor's fields.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) quick_launch_template: Option<String>,
+    pub(crate) quick_launch_template: Option<PeerText>,
     /// Shared whole-map number bindings; stale names are handled at each press.
+    /// Keys are the helm's finite digit vocabulary; values are peer template names.
     #[serde(default)]
-    pub(crate) template_shortcuts: std::collections::BTreeMap<String, String>,
+    pub(crate) template_shortcuts: std::collections::BTreeMap<String, PeerText>,
     /// Shared contact memory; dialogs seed this authenticated snapshot once.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) feedback_contact: Option<String>,
@@ -449,9 +453,9 @@ impl Preferences {
     /// This preserves the current window's visits when a later pre-pick read
     /// fails, without a second write or any per-client persistent state.
     pub(crate) fn record_selection(&mut self, id: &str) {
-        self.last_selected = Some(id.to_owned());
-        self.visit_history.retain(|previous| previous != id);
-        self.visit_history.insert(0, id.to_owned());
+        self.last_selected = Some(id.into());
+        self.visit_history.retain(|previous| previous.raw() != id);
+        self.visit_history.insert(0, id.into());
         self.visit_history.truncate(32);
     }
 }
@@ -830,9 +834,10 @@ pub(crate) enum PreferenceValue {
     NameSessionOnQuickLaunch(bool),
     ColorTerminalFrames(bool),
     /// Explicit clear removes the sole mark without changing template fields.
-    QuickLaunchTemplate(Option<String>),
+    /// Transparent peer-text serialization retains the name's exact wire spelling.
+    QuickLaunchTemplate(Option<PeerText>),
     /// Empty clears every key; each write replaces the entire shared map.
-    TemplateShortcuts(std::collections::BTreeMap<String, String>),
+    TemplateShortcuts(std::collections::BTreeMap<String, PeerText>),
     /// None is an explicit clear, not an omitted patch field.
     FeedbackContact(Option<String>),
     TerminalLinkClick(TerminalLinkClick),
@@ -844,8 +849,10 @@ impl PreferenceValue {
     /// the helm just freed, while unrelated number bindings remain intact.
     fn retire_template(&mut self, name: &str) {
         match self {
-            Self::QuickLaunchTemplate(value) if value.as_deref() == Some(name) => *value = None,
-            Self::TemplateShortcuts(value) => value.retain(|_, template| template != name),
+            Self::QuickLaunchTemplate(value) if value.as_ref().map(PeerText::raw) == Some(name) => {
+                *value = None
+            }
+            Self::TemplateShortcuts(value) => value.retain(|_, template| template.raw() != name),
             _ => {}
         }
     }
@@ -876,9 +883,8 @@ impl PreferenceValue {
     fn wire_value(&self) -> serde_json::Value {
         match self {
             Self::Sort(value) | Self::Selected(value) => serde_json::json!(value),
-            Self::FeedbackContact(value) | Self::QuickLaunchTemplate(value) => {
-                serde_json::json!(value)
-            }
+            Self::FeedbackContact(value) => serde_json::json!(value),
+            Self::QuickLaunchTemplate(value) => serde_json::json!(value),
             Self::TerminalLinkClick(value) => serde_json::json!(value.key()),
             Self::TemplateShortcuts(value) => serde_json::json!(value),
             Self::WelcomeSeen(value)
@@ -950,7 +956,7 @@ struct FieldWrite {
 /// Retire the matching mark entirely, or just the deleted name from a map.
 /// A failed map write may also contain unrelated choices that still need replay.
 fn retire_template_choice(slot: &mut FieldWrite, name: &str) {
-    if matches!(&slot.latest, Some(PreferenceValue::QuickLaunchTemplate(Some(value))) if value == name)
+    if matches!(&slot.latest, Some(PreferenceValue::QuickLaunchTemplate(Some(value))) if value.raw() == name)
     {
         slot.latest = None;
     } else if let Some(value) = &mut slot.latest {
@@ -1144,7 +1150,7 @@ impl PreferenceWrites {
     /// An unconfirmed explicit mark still owns this client's display. Once
     /// acknowledged, only the newly fetched helm mark decides rename or launch.
     #[cfg(test)]
-    fn quick_launch_mark_after_read(&self, mut fetched: Preferences) -> Option<String> {
+    fn quick_launch_mark_after_read(&self, mut fetched: Preferences) -> Option<PeerText> {
         fetched = self.template_bindings_after_read(fetched);
         fetched.quick_launch_template
     }
@@ -6086,9 +6092,54 @@ mod tests {
 #[cfg(test)]
 mod preference_write_tests {
     use super::{
-        PreferenceCompletion, PreferenceField, PreferenceValue, PreferenceWrites, Preferences,
-        TerminalLinkClick,
+        PeerText, PreferenceCompletion, PreferenceField, PreferenceValue, PreferenceWrites,
+        Preferences, TerminalLinkClick,
     };
+
+    /// Shared preference names and words retain their wire bytes even when
+    /// presentation requires escapes. Sparse writes must carry the same names,
+    /// not their visible spelling or a wrapper object's JSON representation.
+    #[farhelm_testtrace::test]
+    fn peer_preference_text_keeps_raw_json_and_sparse_binding_writes() {
+        let wire = serde_json::json!({
+            "last_selected": "entry:session\u{202e}",
+            "visit_history": ["entry:session\u{202e}", "entry:session\n"],
+            "quick_launch_template": "template\u{202e}",
+            "template_shortcuts": {"1": "template\u{202e}", "0": "template\n"},
+            "remembered_wrapper_prefixes": {"codex": ["wrapper\u{202e}", "argument with spaces", ""]}
+        });
+        let preferences: Preferences = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(
+            preferences.last_selected.as_ref().unwrap().raw(),
+            "entry:session\u{202e}"
+        );
+        assert_eq!(
+            preferences
+                .quick_launch_template
+                .as_ref()
+                .unwrap()
+                .escaped(),
+            "template<U+202E>"
+        );
+        let encoded = serde_json::to_value(&preferences).unwrap();
+        for key in [
+            "last_selected",
+            "visit_history",
+            "quick_launch_template",
+            "template_shortcuts",
+            "remembered_wrapper_prefixes",
+        ] {
+            assert_eq!(encoded[key], wire[key], "raw preference field {key}");
+        }
+        assert_eq!(
+            PreferenceValue::QuickLaunchTemplate(preferences.quick_launch_template).wire_value(),
+            wire["quick_launch_template"]
+        );
+        assert_eq!(
+            PreferenceValue::TemplateShortcuts(preferences.template_shortcuts).wire_value(),
+            wire["template_shortcuts"]
+        );
+    }
 
     /// Independent dismissals must survive failed writes and credential replay
     /// without borrowing an acknowledgment from another agent's queue slot.
@@ -6210,10 +6261,13 @@ mod preference_write_tests {
         assert_eq!(value.field().key(), "template_shortcuts");
         let refreshed = queue.template_bindings_after_read(seed.clone());
         assert_eq!(
-            refreshed.template_shortcuts.get("1").map(String::as_str),
+            refreshed.template_shortcuts.get("1").map(PeerText::raw),
             Some("local")
         );
-        assert_eq!(refreshed.quick_launch_template.as_deref(), Some("bolt"));
+        assert_eq!(
+            refreshed.quick_launch_template.as_ref().map(PeerText::raw),
+            Some("bolt")
+        );
         assert!(!queue.finished(field, &value, true));
         assert_eq!(queue.template_bindings_after_read(seed.clone()), seed);
         let clear = PreferenceValue::TemplateShortcuts(BTreeMap::new());
@@ -6609,21 +6663,24 @@ mod preference_write_tests {
         }
         assert_eq!(preferences.visit_history.len(), 32);
         assert_eq!(
-            preferences.visit_history.last().map(String::as_str),
+            preferences.visit_history.last().map(PeerText::raw),
             Some("session-3")
         );
         let selected = PreferenceValue::Selected("session-20".into());
         selected.overlay(&mut preferences);
-        assert_eq!(preferences.last_selected.as_deref(), Some("session-20"));
         assert_eq!(
-            preferences.visit_history.first().map(String::as_str),
+            preferences.last_selected.as_ref().map(PeerText::raw),
+            Some("session-20")
+        );
+        assert_eq!(
+            preferences.visit_history.first().map(PeerText::raw),
             Some("session-20")
         );
         assert_eq!(
             preferences
                 .visit_history
                 .iter()
-                .filter(|id| *id == "session-20")
+                .filter(|id| id.raw() == "session-20")
                 .count(),
             1
         );

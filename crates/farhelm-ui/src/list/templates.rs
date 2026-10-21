@@ -17,7 +17,7 @@ use crate::menu_panel::{
     handle_menu_key, install_row_menu_outside_dismiss, measurement_outcome, record_menu_item_focus,
     remember_menu_item, session_menu_placement_style,
 };
-use crate::peer::display_peer;
+use crate::peer::{PeerText, display_peer};
 use dioxus::prelude::*;
 pub(super) use farhelm_proto::launcher::quick_launch_eligible;
 use farhelm_proto::launcher::{
@@ -32,8 +32,9 @@ const DIALOG_SELECTOR: &str = r#".templates-dialog[role="dialog"]"#;
 
 /// Giving a key to a template moves it from its old owner and releases its
 /// previous key. This whole-map edit preserves one key per template by construction.
-fn bind_number(bindings: &mut BTreeMap<String, String>, name: &str, key: Option<&str>) {
-    bindings.retain(|_, owner| owner != name);
+/// Ownership compares original names; an escaped label is never a binding key.
+fn bind_number(bindings: &mut BTreeMap<String, PeerText>, name: &str, key: Option<&str>) {
+    bindings.retain(|_, owner| owner.raw() != name);
     if let Some(key) = key {
         bindings.insert(key.into(), name.into());
     }
@@ -59,10 +60,11 @@ enum BindingEdit {
 
 /// Move the old name's key even if the new name has a stale binding already.
 /// A rename cannot produce two keys for one template, which the helm refuses.
-fn rename_number_binding(bindings: &mut BTreeMap<String, String>, old: &str, new: &str) {
+/// Match the stored name byte-for-byte, independently of its display spelling.
+fn rename_number_binding(bindings: &mut BTreeMap<String, PeerText>, old: &str, new: &str) {
     let key = bindings
         .iter()
-        .find_map(|(key, name)| (name == old).then(|| key.clone()));
+        .find_map(|(key, name)| (name.raw() == old).then(|| key.clone()));
     if let Some(key) = key {
         bindings.remove(&key);
         bind_number(bindings, new, Some(&key));
@@ -77,14 +79,14 @@ fn NumberShortcutMenu(
     name: String,
     launchable: bool,
     disabled: bool,
-    bindings: BTreeMap<String, String>,
+    bindings: BTreeMap<String, PeerText>,
     layout_epoch: ReadSignal<u64>,
     dialog_epoch: ReadSignal<u64>,
     on_choose: EventHandler<Option<String>>,
 ) -> Element {
     let bound = bindings
         .iter()
-        .find_map(|(key, owner)| (owner == &name).then(|| key.clone()));
+        .find_map(|(key, owner)| (owner.raw() == name).then(|| key.clone()));
     let mut open = use_signal(|| false);
     let mut placement = use_signal(|| PanelPlacement::Unmeasured);
     let mut toggle = use_signal(|| None::<Rc<MountedData>>);
@@ -223,7 +225,7 @@ fn NumberShortcutMenu(
                                     span { if let Some(key) = key { "{TEMPLATE_SHORTCUTS.number_chord(key)}" } else { "no shortcut" } }
                                     if let Some(owner) = key.and_then(|key| bindings.get(key)) {
                                         span { class: "templates-number-owner peer-value", dir: "ltr",
-                                            if owner == &name { "this template" } else { "{display_peer(owner)} (moves here)" }
+                                            if owner.raw() == name { "this template" } else { "{owner.escaped()} (moves here)" }
                                         }
                                     }
                                 }
@@ -1329,9 +1331,10 @@ pub(super) fn TemplatesDialog(
                     let value = match edit {
                         BindingEdit::Bolt(name, mark) => {
                             // Already as asked (an agent marked it, or moved the mark away): leave it.
-                            let owned = current.quick_launch_template.as_ref() == Some(&name);
+                            let owned = current.quick_launch_template.as_ref().map(PeerText::raw)
+                                == Some(name.as_str());
                             (mark != owned).then(|| {
-                                let next = mark.then_some(name);
+                                let next = mark.then_some(name.into());
                                 current.quick_launch_template = next.clone();
                                 PreferenceValue::QuickLaunchTemplate(next)
                             })
@@ -1478,12 +1481,20 @@ pub(super) fn TemplatesDialog(
                     preferences.0.write().template_shortcuts = fetched.template_shortcuts;
                     // Repoint before deletion: the shared delete path clears
                     // only an old-name mark, and cannot clear the new one.
-                    if preferences.0.peek().quick_launch_template.as_ref() == Some(&old) {
-                        preferences.0.write().quick_launch_template = Some(value.name.clone());
+                    if preferences
+                        .0
+                        .peek()
+                        .quick_launch_template
+                        .as_ref()
+                        .map(PeerText::raw)
+                        == Some(old.as_str())
+                    {
+                        preferences.0.write().quick_launch_template =
+                            Some(value.name.clone().into());
                         if !crate::api::write_template_binding(
                             &base,
                             crate::api::PreferenceValue::QuickLaunchTemplate(Some(
-                                value.name.clone(),
+                                value.name.clone().into(),
                             )),
                         )
                         .await
@@ -1590,14 +1601,21 @@ pub(super) fn TemplatesDialog(
             }
             match deleting_request.await {
                 Ok(()) => {
-                    if preferences.0.peek().quick_launch_template.as_ref() == Some(&name) {
+                    if preferences
+                        .0
+                        .peek()
+                        .quick_launch_template
+                        .as_ref()
+                        .map(PeerText::raw)
+                        == Some(name.as_str())
+                    {
                         preferences.0.write().quick_launch_template = None;
                     }
                     preferences
                         .0
                         .write()
                         .template_shortcuts
-                        .retain(|_, owner| owner != &name);
+                        .retain(|_, owner| owner.raw() != name);
                     undo_generation += 1;
                     let generation = undo_generation();
                     undo.set(restorable.then_some(Undo {
@@ -1727,11 +1745,11 @@ pub(super) fn TemplatesDialog(
                                                 // become ineligible (edited through the API, say): clicking
                                                 // the lit bolt is how a mark is cleared, and a disabled one
                                                 // would leave an unusable mark with no way to turn it off.
-                                                disabled: disabled || templates.pending() || (!quick_launch_eligible(&template.fields) && preferences.0.read().quick_launch_template.as_ref() != Some(&template.name)),
+                                                disabled: disabled || templates.pending() || (!quick_launch_eligible(&template.fields) && preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) != Some(template.name.as_str())),
                                                 aria_label: "quick launch {display_peer(&template.name)}",
-                                                aria_pressed: preferences.0.read().quick_launch_template.as_ref() == Some(&template.name),
-                                                "data-tooltip": if preferences.0.read().quick_launch_template.as_ref() == Some(&template.name) { format!("{quick_launch_chord} starts a session from this template right away, without opening New. Only one template can hold ⚡. Click to turn off.") } else if !quick_launch_eligible(&template.fields) { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Can't mark this one: an agent launch needs an agent; a command launch needs a nonblank command.") } else { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Click to mark this one.") },
-                                                onclick: { let name = template.name.clone(); move |_| { let lit = preferences.0.read().quick_launch_template.as_ref() == Some(&name); edit_binding.call(BindingEdit::Bolt(name.clone(), !lit)) } },
+                                                aria_pressed: preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) == Some(template.name.as_str()),
+                                                "data-tooltip": if preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) == Some(template.name.as_str()) { format!("{quick_launch_chord} starts a session from this template right away, without opening New. Only one template can hold ⚡. Click to turn off.") } else if !quick_launch_eligible(&template.fields) { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Can't mark this one: an agent launch needs an agent; a command launch needs a nonblank command.") } else { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Click to mark this one.") },
+                                                onclick: { let name = template.name.clone(); move |_| { let lit = preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) == Some(name.as_str()); edit_binding.call(BindingEdit::Bolt(name.clone(), !lit)) } },
                                                 "⚡"
                                             }
                                             NumberShortcutMenu {
@@ -1744,7 +1762,7 @@ pub(super) fn TemplatesDialog(
                                             button { r#type: "button", class: "templates-row", disabled: disabled || templates.pending(), aria_pressed: previous().as_ref()==Some(&template.name), "data-tooltip": "edit template {display_peer(&template.name)}", onclick: move |_| depart.call(Departure::Open(Box::new(template.clone()))),
                                                 span { class: "templates-row-name peer-value", dir: "ltr", "{display_peer(&template.name)}" }
                                                 span { class: "templates-row-summary", "{template_summary(&template.fields)}" }
-                                                if preferences.0.read().quick_launch_template.as_ref() == Some(&template.name) { span { class: "templates-quick-chord", "{quick_launch_chord}" } }
+                                                if preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) == Some(template.name.as_str()) { span { class: "templates-quick-chord", "{quick_launch_chord}" } }
                                             }
                                         }
                                     }
@@ -1777,7 +1795,7 @@ pub(super) fn TemplatesDialog(
                                     onclick: move |_| { draft.with_mut(|d| d.name.clear()); focus_template_control(".templates-name"); }, "replace name" }
                             }
                             p { class: "templates-quick-state",
-                                if previous().is_some() && preferences.0.read().quick_launch_template == previous() {
+                                if previous().is_some() && preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) == previous().as_deref() {
                                     "⚡ quick launch: {quick_launch_chord} starts a session from this saved template."
                                 } else if quick_launch_eligible(&current.fields) {
                                     "Not the quick launch. The ⚡ in the list makes it one."
