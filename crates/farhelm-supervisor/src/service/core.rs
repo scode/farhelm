@@ -1555,8 +1555,8 @@ fn classify_unallocated_checkout_conflict(
 /// The raw, parented and structured tuples earlier builds wrote are no
 /// longer produced, so a reservation stored under one matches no request
 /// this build fingerprints: a retry crossing the upgrade with its old key
-/// is refused as key reuse, never duplicated, and the reservation rows
-/// themselves are kept for exactly that reason (SPEC_impl.md,
+/// is refused as key reuse while that reservation remains. Delete removes
+/// its key under the same lifetime rule as current encodings (SPEC_impl.md,
 /// "Launch-kinds reservations").
 ///
 /// ## Representation
@@ -1565,11 +1565,9 @@ fn classify_unallocated_checkout_conflict(
 /// digest: unambiguous (every element separately quoted), deterministic
 /// (the launch's own JSON is a tagged enum of fixed-order fields, with no
 /// map to have an ordering question), comparable with `==`, and readable by
-/// a human debugging a database. A digest would end the command (which
-/// may embed credentials) being retained past its session's deletion in a
-/// tombstone; that is about retention rather than exposure, since the same
-/// text sits in the session row in the same 0600 database, and it is
-/// separate work from bounding the row COUNT (see `store::Reservation`).
+/// a human debugging a database. Delete removes this snapshot with its
+/// session. A session-free refusal replays for one day; the next keyed
+/// admission or writable open prunes expired rows (see `store::Reservation`).
 ///
 /// A FRESH GitHub-checkout create gets its own versioned encoding
 /// ([`FreshCreateFingerprint`]), binding the helm's authoritative
@@ -1714,8 +1712,8 @@ pub(crate) fn agent_create_fingerprint(digest: &str, prompt: Option<&str>) -> St
     }
 }
 
-/// Hash literal message bytes for equality without retaining its text in a
-/// permanent agent-request reservation. Newline and tab remain significant.
+/// Hash literal message bytes for equality without retaining its text in an
+/// agent-request reservation. Newline and tab remain significant.
 fn prompt_digest(prompt: &str) -> String {
     use sha2::Digest as _;
     sha2::Sha256::digest(prompt.as_bytes())
@@ -2212,9 +2210,8 @@ pub(crate) struct CreateInputs<'a> {
 }
 
 /// Durable launch inputs for fresh-checkout reconciliation, independent of
-/// the helm's current settings. Permanent reservations
-/// retain this encoding even after the session disappears; live session rows
-/// therefore need not be the source of truth for a retry.
+/// the helm's current settings. The reservation retains the accepted request
+/// while its session exists, so a retry never rebuilds it from mutable settings.
 ///
 /// The version tag rejects other fingerprint families on decode. Existing
 /// directory encodings remain frozen and never deserialize through this type.
@@ -2223,7 +2220,8 @@ pub(crate) struct CreateInputs<'a> {
 enum FreshCreateFingerprint {
     /// A helm-local refusal can precede launch/config resolution. Only the
     /// original client identity exists then; this variant may accompany only
-    /// a permanent Failed/CheckoutConflict reservation, never launch recovery.
+    /// a Failed/CheckoutConflict reservation with a 24-hour refusal window,
+    /// never launch recovery.
     #[serde(rename = "github_checkout_refused_v1")]
     RefusedGithubCheckout { client_identity: String },
     /// Since protocol 39: the resolved launch replaces v3's create mode. A
@@ -2495,15 +2493,6 @@ impl Reserved {
         match self {
             Reserved::Unkeyed(identity) | Reserved::New { identity, .. } => &identity.tmux_name,
             Reserved::Retry(reservation) => &reservation.tmux_name,
-        }
-    }
-
-    /// The reservation window this launch is running under, if keyed.
-    fn dedup_scope(&self) -> Option<DedupScope> {
-        match self {
-            Reserved::Unkeyed(_) => None,
-            Reserved::New { claim, .. } => Some(claim.dedup_scope),
-            Reserved::Retry(reservation) => Some(reservation.dedup_scope),
         }
     }
 
@@ -7102,7 +7091,8 @@ impl Supervisor {
     /// original error" has no precondition exception, so a retry of the
     /// same key gets the same "working directory does not exist" answer
     /// rather than a different one derived from a filesystem that changed
-    /// in between.
+    /// in between. That session-free refusal replays for 24 hours; after
+    /// expiry, admission removes its key and validation runs afresh.
     ///
     /// ## Why a RETRY does not re-resolve its request
     ///
@@ -7130,6 +7120,9 @@ impl Supervisor {
     /// directory lock. Every create now arrives from the helm with its launch
     /// resolved (a session's own spawn is relayed there first, protocol 41),
     /// so there is no session credential or parent lifecycle to hold here.
+    /// With recording authority, expire session-free refusals under these
+    /// guards before the caller resolves its key. A read-only handoff
+    /// candidate must not turn a lookup into a retention write.
     pub(crate) async fn admit_create(
         &self,
         intent_key: Option<&str>,
@@ -7151,6 +7144,12 @@ impl Supervisor {
             result
         })
         .await;
+        if intent_key.is_some() && self.may_record() {
+            // Resolve only after expiry, including the key this request will
+            // inspect. Admission keeps replay and a new claim in one ordered
+            // operation; replay never refreshes a refusal's original clock.
+            self.store.prune_expired_create_refusals(now_unix()).await?;
+        }
         Ok(CreateGuards {
             _directory: directory,
             _intent: intent,
@@ -7190,13 +7189,14 @@ impl Supervisor {
 
     /// Recover a recorded fresh intent without consulting today's helm settings.
     ///
-    /// Ordinary lookup returns unknown keys without validation or mutation.
-    /// With `refuse_unknown`, an absent key is permanently refused under the
+    /// Ordinary lookup returns unknown keys without allocating a session or
+    /// recording a refusal; admission may still expire old refusal rows.
+    /// With `refuse_unknown`, an absent key is refused for 24 hours under the
     /// same admission guards; only the verified stored outcome proves that a
     /// fresh explicit submission is safe. No session or checkout is allocated
-    /// by that branch. A known key must be permanent and carry the same original client identity;
-    /// neither legacy fingerprints nor restricted spawn reservations can enter
-    /// this recovery path. Intent and directory admission remain held through
+    /// by that branch. A known key must carry the same original client identity
+    /// and a compatible managed-checkout fingerprint; scope alone does not
+    /// identify the request family. Intent and directory admission remain held through
     /// the ordinary settlement/relaunch state machine, closing the lookup gap.
     #[cfg(test)]
     pub(crate) async fn reconcile_github_checkout(
@@ -7340,7 +7340,7 @@ impl Supervisor {
                     client_identity: client_identity.to_owned(),
                 })?;
             // Lookup accepts a larger transport envelope for existing keys.
-            // A new permanent tombstone must fit the ordinary create budget,
+            // A new refusal must fit the ordinary create budget,
             // including JSON escaping, rather than expanding retained input.
             if fingerprint.len() > super::handlers::CREATE_FIELD_CAP {
                 return Err(RequestError::new(
@@ -7354,12 +7354,12 @@ impl Supervisor {
                 IntentClaim {
                     intent_key: intent_key.clone(),
                     fingerprint,
-                    dedup_scope: DedupScope::Permanent,
+                    dedup_scope: DedupScope::SessionLifetime,
                 },
                 &identity.session_id,
                 &identity.tmux_name,
                 ErrorKind::CheckoutConflict,
-                "this checkout request was permanently refused before allocation; obtain a new preview and explicitly resubmit",
+                "this checkout request was refused before allocation; its key replays this refusal for 24 hours; obtain a new preview and explicitly resubmit",
             ).await.context("recording the fresh refusal; its durable outcome is unresolved")?;
             // The insert deliberately tolerates a winning existing row.
             // Only its readback, still under intent/directory admission, can
@@ -7373,14 +7373,7 @@ impl Supervisor {
         let Some(reservation) = reservation else {
             return Ok((None, None));
         };
-        if reservation.dedup_scope != DedupScope::Permanent {
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                "this intent key belongs to a different create request",
-            )
-            .into());
-        }
-        // Its session was deleted, so only a digest of the request is left
+        // A legacy deleted-session record keeps only a digest of the request
         // and there is nothing to recover. The identity is still checked
         // first, as below for a live fingerprint: another request under the
         // same key must be refused, not told about this one's session.
@@ -7562,7 +7555,9 @@ impl Supervisor {
             Some(IntentClaim {
                 intent_key,
                 fingerprint: reservation.fingerprint,
-                dedup_scope: DedupScope::Permanent,
+                // Pending recovery keeps the scope of its original claim,
+                // including legacy rows retained for crash reconciliation.
+                dedup_scope: reservation.dedup_scope,
             }),
             guards,
         )
@@ -7674,6 +7669,8 @@ impl Supervisor {
     /// This is reply metadata only; the reservation still replays unchanged.
     /// Ordinary rollback settles Failed only after confirming the terminal is
     /// absent or stopped; ambiguous rollback keeps its row and Pending state.
+    /// Keyed admission has already expired session-free refusals older than
+    /// one day; this proof does not extend their original retention clock.
     pub(crate) async fn ordinary_create_was_refused(
         &self,
         claim: &IntentClaim,
@@ -8350,8 +8347,8 @@ impl Supervisor {
     ///
     /// Legacy Existing retries retain their missing-row validation fallback.
     /// A fresh retry cannot do that: losing its original resolution is not
-    /// authority to allocate a new checkout. Normal deletion is answered by
-    /// the reservation tombstone before this pending-recovery path is reached.
+    /// authority to allocate a new checkout. Normal Delete removes the key;
+    /// only a subsequent fresh request may allocate a new identity.
     async fn validate_retry(
         &self,
         inputs: CreateInputs<'_>,
@@ -8388,9 +8385,9 @@ impl Supervisor {
         // longer expands, or expands elsewhere, counts as different. A title
         // the retry leaves to the supervisor is not compared, having nothing
         // to compare. A retry that resolves to the same launch, folder and
-        // title relaunches as any other. The refusal is recorded against a
-        // permanent key; a spawn's session-lifetime key is freed instead
-        // (`record_refused_create`), so its next retry creates afresh.
+        // title relaunches as any other. The refusal is recorded for one day
+        // when rollback removes the stranded row (`record_refused_create`),
+        // just like a create refused before it reserved a session.
         if is_agent_request_fingerprint(&reservation.fingerprint) {
             let same_cwd = expand_tilde_cwd(inputs.cwd, self.user_home.as_deref())
                 .is_ok_and(|cwd| *cwd == row.cwd);
@@ -8681,9 +8678,8 @@ impl Supervisor {
         reservation: Reservation,
         claim: &IntentClaim,
     ) -> Resolution {
-        // A deleted session's reservation keeps only a digest of its
-        // fingerprint (`store::tombstone_fingerprint`); a retry of the same
-        // request still matches it and gets the deleted session's answer.
+        // Legacy digest rows remain comparable during recovery. New Delete
+        // removes the whole reservation; it never writes another digest.
         let same_agent_request = crate::store::agent_request_parts(&reservation.fingerprint)
             .zip(crate::store::agent_request_parts(&claim.fingerprint))
             .is_some_and(|(recorded, requested)| recorded.0 == requested.0);
@@ -8929,8 +8925,7 @@ impl Supervisor {
         self.replay_created_session(reservation).await
     }
 
-    /// Replay a reservation whose session was created — or say honestly
-    /// that it is gone (PLAN_M3.md item 6's tombstone rule).
+    /// Replay an accepted session without returning a dead identity.
     ///
     /// The STORE, not the session map, is what decides whether the session
     /// still exists. The map is a mirror the delete handler updates only
@@ -8940,7 +8935,10 @@ impl Supervisor {
     /// nothing.
     ///
     /// The gone case is a `Conflict`, not a `NotFound`, and the distinction
-    /// is deliberate. Nothing the client asked about is missing: the intent
+    /// is deliberate. This covers legacy records and a Delete racing an
+    /// already-read reservation. Session-lifetime resolution rechecks the
+    /// removed key and may return Fresh; this helper never invents that
+    /// authority from the session map alone. The intent
     /// key was found, and its answer is that the key is spent. `NotFound`
     /// (a 404 at the helm) on a create POST reads as "no such endpoint or
     /// resource" and invites a client to retry as if it had asked for the
@@ -10277,24 +10275,19 @@ impl Supervisor {
             // existed when it was issued — so this launch tears its own
             // work back down rather than leaving a tmux session and an
             // agent behind with no row that knows about them. Reported as
-            // the same spent-key `Conflict` a replay for a deleted session
-            // gets, because that is what the client is looking at.
-            let reusable = reserved.dedup_scope() == Some(DedupScope::SessionLifetime);
+            // Conflict because this attempt lost to Delete. A keyed retry
+            // is now fresh regardless of the deleted claim's legacy scope.
+            let retry_advice = match &reserved {
+                Reserved::Unkeyed(_) => "",
+                Reserved::New { .. } | Reserved::Retry(_) => "; its intent key is reusable",
+            };
             let mut error = anyhow::Error::new(RequestError::new(
                 ErrorKind::Conflict,
-                if reusable {
-                    format!(
-                        "session {} was deleted while it was being created, so the launch was \
-                         torn back down; its bounded intent key is reusable",
-                        truncate_for_error(&id)
-                    )
-                } else {
-                    format!(
-                        "session {} was deleted while it was being created, so the launch was \
-                         torn back down; it will not be recreated under the same intent key",
-                        truncate_for_error(&id)
-                    )
-                },
+                format!(
+                    "session {} was deleted while it was being created, so the launch was \
+                     torn back down{retry_advice}",
+                    truncate_for_error(&id)
+                ),
             ));
             // The PROCESS tree first, tmux second. Killing the tmux
             // session ends the pane's own process group and nothing else:
@@ -10337,10 +10330,9 @@ impl Supervisor {
             }
             best_effort_remove(&spec_path, "launch spec").await;
             best_effort_remove(&status_file_path, "launch status file").await;
-            // The deleter already tombstoned the reservation (its own
-            // transaction settles every pending one for this session), so
-            // there is nothing left to settle here — and settling `Failed`
-            // would be refused as non-pending anyway.
+            // Delete already removed this session's reservation. A stale
+            // settlement must neither recreate it nor affect a replacement
+            // claim under the same key; settlement also fences session identity.
             return Err(error);
         }
         if let Err(e) = confirmed {
@@ -26657,30 +26649,28 @@ exit 0
         );
     }
 
-    /// Deleting a session reduces its kept retry record to a digest, and
-    /// that digest still answers a retry of the same request and refuses a
-    /// different one.
+    /// Delete removes the retry key with its session; reusing it creates a
+    /// different session whose own live retries still replay normally.
     ///
-    /// Why it matters: an interactive create's reservation outlives its
-    /// session so the key stays spent, but its fingerprint held the raw
-    /// command line (where users sometimes put credentials) forever after
-    /// the session was deleted, while Delete is meant to remove what is
-    /// stored about the session. Specified: after a keyed create whose
-    /// command carries a marker string is deleted, the reservation's
-    /// fingerprint no longer contains the marker; replaying the same
-    /// request reports the session was deleted; the same key with a
-    /// different command is refused as a different request.
+    /// The key must stop protecting the deleted identity, including its stored
+    /// request text. A changed command after Delete distinguishes a fresh claim
+    /// from a lingering fingerprint conflict or deleted-session tombstone.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn a_deleted_sessions_retry_record_keeps_only_a_digest() {
+    async fn a_deleted_sessions_retry_key_can_create_a_new_session() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .unwrap();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            scopeless_seams(),
+        )
+        .await
+        .unwrap();
         let invocation = "sleep 300 # SECRET-TOKEN-MARKER";
         let claim = |invocation: &str| IntentClaim {
             intent_key: "deleted-key".into(),
             fingerprint: command_fingerprint("/tmp", invocation, None),
-            dedup_scope: DedupScope::Permanent,
+            dedup_scope: DedupScope::SessionLifetime,
         };
         let created = sup
             .create_session_without_overrides(
@@ -26693,6 +26683,20 @@ exit 0
             )
             .await
             .expect("keyed create");
+        assert_eq!(
+            sup.create_session_without_overrides(
+                "/tmp",
+                invocation,
+                None,
+                80,
+                24,
+                Some(claim(invocation)),
+            )
+            .await
+            .expect("live key replays")
+            .id,
+            created.id
+        );
         let entry = sup
             .sessions
             .lock()
@@ -26704,46 +26708,39 @@ exit 0
             .await
             .unwrap_or_else(|_| panic!("delete the keyed session"));
 
-        let kept = sup
-            .store
-            .reservation("deleted-key")
+        assert!(
+            sup.store
+                .reservation("deleted-key")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let next_invocation = "sleep 300 # a different request after Delete";
+        let fresh = sup
+            .create_session_without_overrides(
+                "/tmp",
+                next_invocation,
+                None,
+                80,
+                24,
+                Some(claim(next_invocation)),
+            )
             .await
-            .unwrap()
-            .expect("the key stays spent after delete")
-            .fingerprint;
-        assert!(!kept.contains("SECRET-TOKEN-MARKER"), "{kept}");
-        assert!(crate::store::is_tombstone_fingerprint(&kept), "{kept}");
-
+            .expect("Delete makes the key available for a fresh create");
+        assert_ne!(fresh.id, created.id, "a fresh claim has a fresh identity");
         let replay = sup
             .create_session_without_overrides(
                 "/tmp",
-                invocation,
+                next_invocation,
                 None,
                 80,
                 24,
-                Some(claim(invocation)),
+                Some(claim(next_invocation)),
             )
             .await
-            .expect_err("a replay of a deleted session's create must not relaunch");
-        assert!(
-            format!("{replay:#}").contains("since been deleted"),
-            "{replay:#}"
-        );
-        let reused = sup
-            .create_session_without_overrides(
-                "/tmp",
-                "sleep 1",
-                None,
-                80,
-                24,
-                Some(claim("sleep 1")),
-            )
-            .await
-            .expect_err("a different request under the spent key is refused");
-        assert!(
-            format!("{reused:#}").contains("already used for a different create request"),
-            "{reused:#}"
-        );
+            .expect("the replacement session keeps its own retry protection");
+        assert_eq!(replay.id, fresh.id);
+        assert_eq!(sup.store.load_all().await.unwrap().len(), 1);
     }
 
     /// [`create_fingerprint`] of an existing-directory create, one line per
@@ -26765,8 +26762,8 @@ exit 0
 
     /// The PERSISTED fingerprint, byte for byte.
     ///
-    /// A golden test because this string is written into a durable,
-    /// never-pruned table and compared verbatim on every replay: any change
+    /// A golden test because this string is retained with a live session
+    /// and compared verbatim on every replay: any change
     /// to the encoding — a reordered element, a renamed launch field, a
     /// switch to a digest — turns every stored fingerprint into a mismatch,
     /// so identical requests across the upgrade would be refused as key
@@ -26827,9 +26824,9 @@ exit 0
 
     /// B2/R1.4: upgrading a populated historical database must preserve all
     /// surviving session columns and the literal request fingerprints of live
-    /// sessions. A deleted session's fingerprint is reduced to its digest on
-    /// open (see `store::tombstone_fingerprint`). Their keys stay spent: a
-    /// retry crossing the launch-kinds upgrade presents a fingerprint no
+    /// sessions. First open drops deleted sessions' keys and converts live
+    /// keys to session lifetime. A live retry crossing the launch-kinds
+    /// upgrade presents a fingerprint no
     /// earlier build wrote, so it is refused as key reuse, never launched a
     /// second time (SPEC_impl.md, "Launch-kinds reservations"), and
     /// migration invents no checkout origin or membership for either.
@@ -27001,25 +26998,10 @@ exit 0
                 launches[legacy]
             );
         }
-        assert_eq!(
-            store
-                .reservation("old-success")
-                .await
-                .unwrap()
-                .unwrap()
-                .fingerprint,
-            PRE_LAUNCH_KINDS_FINGERPRINT
-        );
-        assert_eq!(
-            store
-                .reservation("old-spent")
-                .await
-                .unwrap()
-                .unwrap()
-                .fingerprint,
-            crate::store::tombstone_fingerprint(PRE_LAUNCH_KINDS_FINGERPRINT),
-            "a deleted session's request is kept only as a digest"
-        );
+        let live = store.reservation("old-success").await.unwrap().unwrap();
+        assert_eq!(live.fingerprint, PRE_LAUNCH_KINDS_FINGERPRINT);
+        assert_eq!(live.dedup_scope, DedupScope::SessionLifetime);
+        assert!(store.reservation("old-spent").await.unwrap().is_none());
         drop(store);
 
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
@@ -27035,7 +27017,7 @@ exit 0
                 Some(IntentClaim {
                     intent_key: "old-success".into(),
                     fingerprint: command_fingerprint("/", "agent", None),
-                    dedup_scope: DedupScope::Permanent,
+                    dedup_scope: DedupScope::SessionLifetime,
                 }),
             )
             .await
@@ -27048,29 +27030,10 @@ exit 0
             format!("{replay:#}").contains("already used for a different create request"),
             "{replay:#}"
         );
-        let error = sup
-            .create_session_without_overrides(
-                "/",
-                "agent",
-                None,
-                80,
-                24,
-                Some(IntentClaim {
-                    intent_key: "old-spent".into(),
-                    fingerprint: command_fingerprint("/", "agent", None),
-                    dedup_scope: DedupScope::Permanent,
-                }),
-            )
-            .await
-            .expect_err("a migrated deleted-session key must stay spent");
-        assert_eq!(
-            error.downcast_ref::<RequestError>().unwrap().kind,
-            ErrorKind::Conflict
-        );
         assert_eq!(
             sup.store.load_all().await.unwrap().len(),
             4,
-            "neither refused retry launched anything"
+            "the refused live retry launched nothing"
         );
         let omp = sup.session_snapshot("old-omp").await.unwrap().unwrap();
         assert_eq!(omp.kind, AgentKind::Omp);
@@ -27667,8 +27630,8 @@ exit 0
     /// same text, and this test would fail. The `kind` assertion pins the
     /// other half of "the same answer", independently of that text.
     /// Both initial and replayed failures carry the no-session proof, including
-    /// after reopening digests the spent key's fingerprint. A different request
-    /// must not borrow that proof from the spent key.
+    /// after reopening retains the refusal's full fingerprint within its
+    /// 24-hour window. A different request must not borrow that proof.
     #[farhelm_testtrace::test]
     async fn a_failed_create_replays_its_error_and_a_changed_override_conflicts() {
         let state = StateDir::new();
@@ -27739,6 +27702,7 @@ exit 0
         }
 
         let original = sup.store.reservation("one-intent").await.unwrap().unwrap();
+        assert_eq!(original.dedup_scope, DedupScope::SessionLifetime);
         assert!(!crate::store::is_tombstone_fingerprint(
             &original.fingerprint
         ));
@@ -27747,14 +27711,9 @@ exit 0
             .await
             .unwrap();
         assert_eq!(
-            sup.store
-                .reservation("one-intent")
-                .await
-                .unwrap()
-                .unwrap()
-                .fingerprint,
-            crate::store::tombstone_fingerprint(&original.fingerprint),
-            "the replay must exercise the real writable-open digest boundary"
+            sup.store.reservation("one-intent").await.unwrap().unwrap(),
+            original,
+            "reopening preserves the complete refusal during its replay window"
         );
 
         // Same key, same request: the ORIGINAL error, verbatim.
@@ -27822,9 +27781,10 @@ exit 0
         );
     }
 
-    /// A missing row is proof only for the exact ordinary, terminally failed
-    /// request. Unknown keys, another request or lifetime, and managed/agent
-    /// recovery encodings must never authorize a new Replace identity.
+    /// A missing session is proof only for the exact ordinary, terminally
+    /// failed request during its refusal window. Repeated replay must retain
+    /// the complete fingerprint and error; another request or scope and
+    /// managed/agent recovery encodings cannot authorize a new Replace identity.
     #[farhelm_testtrace::test]
     async fn ordinary_create_refusal_proof_requires_the_matching_failed_reservation() {
         let state = StateDir::new();
@@ -27834,7 +27794,7 @@ exit 0
         let claim = IntentClaim {
             intent_key: "proof".into(),
             fingerprint: command_fingerprint("/", "agent", None),
-            dedup_scope: DedupScope::Permanent,
+            dedup_scope: DedupScope::SessionLifetime,
         };
         assert!(!sup.ordinary_create_was_refused(&claim).await.unwrap());
         sup.store
@@ -27849,13 +27809,34 @@ exit 0
             .unwrap();
         assert!(sup.ordinary_create_was_refused(&claim).await.unwrap());
         let before = sup.store.reservation("proof").await.unwrap().unwrap();
+        assert_eq!(before.fingerprint, claim.fingerprint);
+        assert_eq!(
+            before.outcome,
+            ReservationOutcome::Failed {
+                kind: ErrorKind::InvalidRequest,
+                message: "missing folder".into(),
+            }
+        );
+        for _ in 0..2 {
+            let replay = sup
+                .create_session_without_overrides("/", "agent", None, 80, 24, Some(claim.clone()))
+                .await
+                .expect_err("a session-free bounded refusal must survive its own replay");
+            assert_eq!(error_kind(&replay), ErrorKind::InvalidRequest);
+            assert_eq!(replay.to_string(), "missing folder");
+            assert!(sup.ordinary_create_was_refused(&claim).await.unwrap());
+            assert_eq!(
+                sup.store.reservation("proof").await.unwrap().unwrap(),
+                before
+            );
+        }
         for other in [
             IntentClaim {
                 fingerprint: command_fingerprint("/elsewhere", "agent", None),
                 ..claim.clone()
             },
             IntentClaim {
-                dedup_scope: DedupScope::SessionLifetime,
+                dedup_scope: DedupScope::Permanent,
                 ..claim.clone()
             },
         ] {
@@ -27924,6 +27905,76 @@ exit 0
                 .unwrap();
             assert!(!sup.ordinary_create_was_refused(&excluded).await.unwrap());
         }
+    }
+
+    /// A legacy pending key with no session remains recoverable until its
+    /// retry fails validation. That terminal refusal must adopt the current
+    /// lifetime so an ordinary retry still receives its no-session proof.
+    #[farhelm_testtrace::test]
+    async fn a_legacy_pending_orphan_refusal_uses_the_current_lifetime() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let missing = state.path().join("missing").to_string_lossy().into_owned();
+        let claim = IntentClaim {
+            intent_key: "legacy-pending-orphan".into(),
+            fingerprint: command_fingerprint(&missing, "agent", None),
+            dedup_scope: DedupScope::SessionLifetime,
+        };
+        sup.store
+            .record_failed_intent(
+                IntentClaim {
+                    dedup_scope: DedupScope::Permanent,
+                    ..claim.clone()
+                },
+                "never-recorded",
+                "never-launched",
+                ErrorKind::InvalidRequest,
+                "placeholder",
+            )
+            .await
+            .unwrap();
+        sup.store.conn.lock().execute(
+            "UPDATE create_reservations SET state = 'pending', error_kind = NULL, error_detail = NULL WHERE intent_key = ?1",
+            [&claim.intent_key],
+        ).unwrap();
+        let pending = sup
+            .store
+            .reservation(&claim.intent_key)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(pending.outcome, ReservationOutcome::Pending);
+        assert_eq!(pending.dedup_scope, DedupScope::Permanent);
+        assert!(!std::path::Path::new(&missing).exists());
+        assert!(matches!(
+            sup.reserved_launch_evidence(&pending).await,
+            LaunchEvidence::Absent
+        ));
+        assert!(
+            sup.store
+                .session(&pending.session_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let refused = sup
+            .create_session_without_overrides(&missing, "agent", None, 80, 24, Some(claim.clone()))
+            .await
+            .expect_err("the missing directory refuses the recovered attempt");
+        assert_eq!(error_kind(&refused), ErrorKind::InvalidRequest);
+        let failed = sup
+            .store
+            .reservation(&claim.intent_key)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(failed.dedup_scope, DedupScope::SessionLifetime);
+        assert_eq!(failed.session_id, pending.session_id);
+        assert_eq!(failed.tmux_name, pending.tmux_name);
+        assert!(matches!(failed.outcome, ReservationOutcome::Failed { .. }));
+        assert!(sup.ordinary_create_was_refused(&claim).await.unwrap());
     }
 
     /// Why this matters: an agent's keyed create is retried after a lost
@@ -28175,9 +28226,11 @@ exit 0
         let state = StateDir::new();
         let db = state.path().join("supervisor.db");
         let deleted: Arc<std::sync::atomic::AtomicBool> = Arc::default();
+        let deleted_id: Arc<std::sync::OnceLock<String>> = Arc::default();
         let sup = {
             let db = db.clone();
             let deleted = Arc::clone(&deleted);
+            let deleted_id = Arc::clone(&deleted_id);
             Supervisor::new_with_seams(
                 state.path(),
                 dummy_exe(),
@@ -28185,7 +28238,9 @@ exit 0
                 SupervisorSeams {
                     faults: FaultHooks {
                         create_crash: Some(Arc::new(move |stage| {
-                            if stage != CreateStage::DuringLaunch {
+                            if stage != CreateStage::DuringLaunch
+                                || deleted.load(std::sync::atomic::Ordering::SeqCst)
+                            {
                                 return Ok(());
                             }
                             // A second connection to the same database, which
@@ -28193,10 +28248,19 @@ exit 0
                             // busy timeout covers the overlap.
                             let db = db.clone();
                             let deleted = Arc::clone(&deleted);
+                            let deleted_id = Arc::clone(&deleted_id);
                             tokio::task::block_in_place(move || {
                                 tokio::runtime::Handle::current().block_on(async move {
                                     let store = SessionStore::open(&db, false).await?;
                                     for row in store.load_all().await? {
+                                        deleted_id
+                                            .set(row.id.clone())
+                                            .expect("one deleted attempt");
+                                        assert_eq!(
+                                            store.reservation("key").await?.unwrap().outcome,
+                                            ReservationOutcome::Pending,
+                                            "Delete must land before create settlement"
+                                        );
                                         store.delete_session_settling_reservations(&row.id).await?;
                                     }
                                     deleted.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -28224,7 +28288,7 @@ exit 0
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: command_fingerprint("/", "agent", None),
-                    dedup_scope: DedupScope::Permanent,
+                    dedup_scope: DedupScope::SessionLifetime,
                 }),
             )
             .await
@@ -28248,8 +28312,9 @@ exit 0
             "the create must have torn its own tmux session down rather than orphaning it: \
              {names:?}"
         );
-        // And the intent is a tombstone, so a retry says so rather than
-        // resurrecting the session the delete removed.
+        // Delete prunes even the pending key. Only this fixture's first
+        // launch is interrupted, so the retry can prove a new identity is used.
+        assert!(sup.store.reservation("key").await.unwrap().is_none());
         let retry = sup
             .create_session_without_overrides(
                 "/",
@@ -28260,16 +28325,13 @@ exit 0
                 Some(IntentClaim {
                     intent_key: "key".to_string(),
                     fingerprint: command_fingerprint("/", "agent", None),
-                    dedup_scope: DedupScope::Permanent,
+                    dedup_scope: DedupScope::SessionLifetime,
                 }),
             )
             .await
-            .expect_err("the key is spent");
-        assert_eq!(error_kind(&retry), ErrorKind::Conflict);
-        assert!(
-            format!("{retry:#}").contains("deleted"),
-            "the retry must report the tombstone: {retry:#}"
-        );
+            .expect("the retry creates a new session");
+        assert_ne!(&retry.id, deleted_id.get().unwrap());
+        assert_eq!(sup.store.load_all().await.unwrap().len(), 1);
     }
 
     /// A keyed create refused by VALIDATION is recorded as that intent's
@@ -29586,8 +29648,8 @@ exit 0
     /// Spec: a pending reservation under an agent request fingerprint is
     /// refused as a `Conflict`, with nothing launched, when only the retry's
     /// launch, only its folder, or only its title differs from the recorded
-    /// one; the refusal settles the permanent key as that `Conflict` and
-    /// removes the stranded row. A retry that resolves to exactly what was
+    /// one; the refusal keeps that `Conflict` for 24 hours and removes the
+    /// stranded row. A retry that resolves to exactly what was
     /// recorded is not refused by this check.
     #[farhelm_testtrace::test]
     async fn an_agent_retry_whose_launch_changed_is_not_relaunched_from_the_recorded_one() {
@@ -29604,7 +29666,7 @@ exit 0
         let claim = |key: &str| IntentClaim {
             intent_key: key.to_string(),
             fingerprint: agent_request_fingerprint(&"e".repeat(64)),
-            dedup_scope: DedupScope::Permanent,
+            dedup_scope: DedupScope::SessionLifetime,
         };
         let seed = async |key: &str| {
             let id = format!("interrupted-{key}");
@@ -29697,7 +29759,7 @@ exit 0
                 .reservation(key)
                 .await
                 .expect("read the reservation")
-                .expect("the permanent key keeps its reservation");
+                .expect("the refusal keeps its key during the replay window");
             assert!(
                 matches!(
                     settled.outcome,
@@ -32907,20 +32969,12 @@ exit 0
         assert!(sup.store.session("never-launched").await.unwrap().is_none());
     }
 
-    /// A deleted fresh checkout's key still checks the caller's identity on
-    /// reconciliation, and an ordinary create's deleted key is not a fresh
-    /// checkout's.
-    ///
-    /// Why it matters: Delete reduces the kept retry record to a digest
-    /// (`store::tombstone_fingerprint`), and reconciliation is asked with the
-    /// client identity alone, so without an identity digest in the tombstone
-    /// it would tell a different request about this one's session.
-    /// Specified: for a deleted fresh checkout's tombstone, the same identity
-    /// gets the deleted-session answer, another identity gets the key-reuse
-    /// conflict, and an ordinary create's tombstone is refused as having no
-    /// fresh-checkout snapshot.
+    /// Legacy digest records still bind managed-checkout reconciliation to
+    /// the original identity. Current Delete prunes these keys, so the fixture
+    /// injects the older representation after open to exercise codec
+    /// compatibility independently of the first-open cleanup.
     #[farhelm_testtrace::test]
-    async fn fresh_reconciliation_of_a_deleted_key_still_checks_identity() {
+    async fn legacy_deleted_key_reconciliation_still_checks_identity() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -32953,8 +33007,9 @@ exit 0
                 )
                 .await
                 .unwrap();
-            // The state a Delete leaves: settled as created, session gone,
-            // fingerprint reduced to its tombstone.
+            // An older supervisor's Delete left this settled digest without
+            // a session. New writable opens prune it; this direct fixture
+            // isolates the retained decoding and identity checks.
             let conn = sup.store.conn.lock();
             conn.execute(
                 "UPDATE create_reservations SET state = 'created', error_kind = NULL, \
@@ -33012,18 +33067,23 @@ exit 0
         );
     }
 
-    /// A refusal tombstone spends the original request without creating a
-    /// session or directory. Its proof survives a lost reply and reopen; a
-    /// prebuilt create arriving later still cannot use that key to allocate.
-    #[farhelm_testtrace::test]
+    /// An identity-only refusal allocates nothing and survives lost replies
+    /// and reopen for 24 hours. Once expired, the same prebuilt request must
+    /// validate afresh and can allocate its checkout instead of replaying it.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn fresh_refusal_is_durable_without_allocating() {
         let state = StateDir::new();
         let root = tempfile::tempdir().unwrap();
         let checkout = checkout_fixture(root.path());
         let key = "refusal-key";
-        let mut sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .unwrap();
+        let mut sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            scopeless_seams(),
+        )
+        .await
+        .unwrap();
         assert!(sup.store.reservation(key).await.unwrap().is_none());
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
         assert!(!state.path().join("checkout-preparation").exists());
@@ -33033,7 +33093,7 @@ exit 0
             .expect_err("unknown key must be durably refused");
         assert_eq!(error_kind(&refused), ErrorKind::CheckoutConflict);
         let original = sup.store.reservation(key).await.unwrap().unwrap();
-        assert_eq!(original.dedup_scope, DedupScope::Permanent);
+        assert_eq!(original.dedup_scope, DedupScope::SessionLifetime);
         assert!(matches!(
             original.outcome,
             ReservationOutcome::Failed {
@@ -33045,9 +33105,14 @@ exit 0
         assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
         assert!(!state.path().join("checkout-preparation").exists());
         drop(sup);
-        sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .unwrap();
+        sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            scopeless_seams(),
+        )
+        .await
+        .unwrap();
         for refuse_unknown in [false, true] {
             let replay = sup
                 .reconcile_github_checkout(
@@ -33070,9 +33135,9 @@ exit 0
         let claim = IntentClaim {
             intent_key: key.into(),
             fingerprint: checkout_fingerprint(&checkout),
-            dedup_scope: DedupScope::Permanent,
+            dedup_scope: DedupScope::SessionLifetime,
         };
-        let late = fresh_create(&sup, &checkout, Some(claim))
+        let late = fresh_create(&sup, &checkout, Some(claim.clone()))
             .await
             .expect_err("a prebuilt create cannot revive the key");
         assert_eq!(error_kind(&late), ErrorKind::Conflict);
@@ -33080,6 +33145,21 @@ exit 0
         assert!(sup.store.load_all().await.unwrap().is_empty());
         assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        sup.store
+            .conn
+            .lock()
+            .execute(
+                "UPDATE create_reservations SET created_at = ?2 WHERE intent_key = ?1",
+                rusqlite::params![key, now_unix() - 24 * 60 * 60 - 1],
+            )
+            .unwrap();
+        let fresh = fresh_create(&sup, &checkout, Some(claim))
+            .await
+            .expect("the expired refusal must revalidate and permit a fresh create");
+        assert_ne!(fresh.id, original.session_id);
+        assert_eq!(sup.store.load_all().await.unwrap().len(), 1);
+        assert_eq!(sup.store.working_copy_rows().await.unwrap().len(), 1);
+        assert_eq!(checkout_directories(root.path()), 1);
     }
 
     /// A retained Allow belongs to one original pending launch. Inspection
@@ -33452,7 +33532,7 @@ exit 0
 
     /// A refusal-only fingerprint has no launch snapshot. Corrupt state must
     /// not make it launchable or turn an unrelated failure into non-acceptance
-    /// proof; oversized new tombstones must stay out of permanent storage.
+    /// proof; oversized refusal identities must stay out of retained storage.
     #[farhelm_testtrace::test]
     async fn fresh_refusal_rejects_invalid_outcomes_and_oversized_identity() {
         for state_value in ["pending", "created", "failed"] {
@@ -34566,9 +34646,10 @@ exit 0
         .expect("supervisor")
     }
 
-    /// Each unambiguous pending boundary recovers the exact original plan,
-    /// including after supervisor reconstruction. No changed configuration is
-    /// consulted and one accepted intent still allocates only one directory.
+    /// Each unambiguous pending boundary recovers the exact original plan
+    /// under a session-lifetime key, including after reconstruction. Scope
+    /// must not make reconciliation mistake a current managed checkout for
+    /// another request family or allocate a second directory.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn fresh_checkout_pending_boundaries_recover_original_snapshot() {
         for reopen in [false, true] {
@@ -34585,7 +34666,7 @@ exit 0
                 let claim = IntentClaim {
                     intent_key: "recover-original".into(),
                     fingerprint: checkout_fingerprint(&checkout),
-                    dedup_scope: DedupScope::Permanent,
+                    dedup_scope: DedupScope::SessionLifetime,
                 };
                 let mut sup = checkout_crash_supervisor(&state, boundary).await;
                 let crash = fresh_create(&sup, &checkout, Some(claim.clone()))
@@ -34599,6 +34680,7 @@ exit 0
                     .unwrap()
                     .unwrap();
                 assert_eq!(reservation.outcome, ReservationOutcome::Pending);
+                assert_eq!(reservation.dedup_scope, DedupScope::SessionLifetime);
                 let original = sup
                     .store
                     .origin_working_copy(&reservation.session_id)
@@ -34655,6 +34737,16 @@ exit 0
                     .unwrap()
                     .unwrap();
                 assert_eq!(replay.id, info.id);
+                assert_eq!(
+                    sup.store
+                        .reservation(&claim.intent_key)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .dedup_scope,
+                    DedupScope::SessionLifetime,
+                    "pending recovery and live replay retain the accepted scope"
+                );
                 let recovered = sup
                     .store
                     .origin_working_copy(&info.id)
@@ -36919,8 +37011,8 @@ exit 0
 
     /// A collision that arrives after planning reaches the allocator's real
     /// rollback transaction: Farhelm removes only its own plan/session
-    /// evidence, settles the permanent key Failed, and leaves the foreign
-    /// sentinel exactly as it found it.
+    /// evidence, keeps the bounded key Failed for 24 hours, and leaves the
+    /// foreign sentinel exactly as it found it.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn allocator_collision_rolls_back_its_plan_without_touching_foreign_content() {
         let state = StateDir::new();
@@ -36930,7 +37022,7 @@ exit 0
         let claim = IntentClaim {
             intent_key: "allocator-collision-key".to_string(),
             fingerprint: checkout_fingerprint(&checkout),
-            dedup_scope: DedupScope::Permanent,
+            dedup_scope: DedupScope::SessionLifetime,
         };
         let collision_root = root.clone();
         let sup = Supervisor::new_with_seams(
@@ -36990,14 +37082,14 @@ exit 0
                     .reservation(&claim.intent_key)
                     .await
                     .expect("read key")
-                    .expect("permanent key survives rollback")
+                    .expect("the refusal key survives rollback for its replay window")
                     .outcome,
                 ReservationOutcome::Failed {
                     kind: ErrorKind::CheckoutConflict,
                     ..
                 }
             ),
-            "the permanent key replays the recorded refusal"
+            "the bounded key replays the recorded refusal"
         );
         let replay = fresh_create(&sup, &checkout, Some(claim.clone()))
             .await

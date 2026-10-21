@@ -48,32 +48,6 @@ use super::uploads::{
 use crate::store::{DedupScope, IntentClaim, LastOutcome, Transition};
 use crate::tmux::PaneProbe;
 
-/// Authority-derived create policy.
-///
-/// One value controls both selector defaulting and reservation lifetime, so
-/// a caller cannot accidentally combine interactive derivation with bounded
-/// keys or spawn derivation with permanent tombstones.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum CreateAdmission {
-    /// A create on the helm's full-authority connection.
-    /// `key_lives_with_session` is the helm's marker for a `farhelm spawn`
-    /// it creates on the asking session's host (protocol 40), which gives
-    /// the key a spawn's lifetime rather than an interactive create's.
-    Interactive { key_lives_with_session: bool },
-}
-
-impl CreateAdmission {
-    fn dedup_scope(&self) -> DedupScope {
-        match self {
-            CreateAdmission::Interactive {
-                key_lives_with_session: false,
-            } => DedupScope::Permanent,
-            CreateAdmission::Interactive {
-                key_lives_with_session: true,
-            } => DedupScope::SessionLifetime,
-        }
-    }
-}
 use farhelm_proto::{
     AgentVerb, ControlMsg, DetachCode, ErrorKind, Frame, MAX_SESSION_ID_BYTES,
     ResolvedGithubCheckout, SessionInfo, SessionLaunch, TerminalSelector,
@@ -108,7 +82,7 @@ use tracing::{debug, warn};
 /// is orders of magnitude beyond any real parent, cwd, launch selector,
 /// title, or resume template. Capping the inputs this far below the frame
 /// limit makes an oversized `SessionCreated` reply structurally
-/// impossible and bounds the permanent fingerprint copy, before
+/// impossible and bounds the stored fingerprint copy, before
 /// `create_session` has touched storage, tmux, or the filesystem.
 pub(crate) const CREATE_FIELD_CAP: usize = 64 * 1024;
 
@@ -199,11 +173,10 @@ fn validate_checkout_fields(checkout: &ResolvedGithubCheckout) -> Result<usize, 
 ///
 /// Separate from that cap rather than folded into it, because what the two
 /// protect is different in kind: the field cap bounds a REPLY that would
-/// otherwise be undeliverable, while this one bounds a durable, deliberately
-/// un-pruned table (see `store::Reservation`'s tombstone docs) whose primary
-/// key is whatever the client sent. Without a bound, one client can spend
-/// unbounded disk on keys nothing will ever replay. 512 bytes is two orders
-/// of magnitude beyond a UUID — the shape the UI actually sends — while
+/// otherwise be undeliverable, while this one bounds each durable reservation's
+/// primary key (see `store::Reservation`). Session lifetime and refusal expiry
+/// bound retention, but cannot make one arbitrarily large key cheap. 512 bytes
+/// is two orders of magnitude beyond a UUID — the shape the UI actually sends — while
 /// still leaving room for a caller that prefers structured keys.
 const INTENT_KEY_CAP: usize = 512;
 
@@ -302,7 +275,6 @@ async fn handle_create_session(
     panics: &mpsc::Sender<Box<dyn std::any::Any + Send + 'static>>,
     req_id: u64,
     request: CreateRequest,
-    admission: CreateAdmission,
 ) {
     let CreateRequest {
         prompt,
@@ -404,9 +376,9 @@ async fn handle_create_session(
         // the host-wide create mutex. A client that stops reading must not freeze
         // every other create.
         // One accounting for every caller-supplied field the supervisor can
-        // copy into a durable fingerprint. Interactive rows are permanent, so
-        // omitting parent or any part of the launch would leave an
-        // unbounded write path through a cap the other fields cannot dodge.
+        // copy into a durable fingerprint. Retention bounds a row's lifetime,
+        // not its size: omitting parent or any part of the launch would leave
+        // an unbounded write path through a cap the other fields cannot dodge.
         // SPEC.md's 64 KiB create bound counts the whole launch (command,
         // resume command, and the rest), as the JSON it is stored and
         // fingerprinted as. The resume command's element count is bounded
@@ -479,7 +451,7 @@ async fn handle_create_session(
                     prompt.as_deref(),
                 ),
             },
-            dedup_scope: admission.dedup_scope(),
+            dedup_scope: DedupScope::SessionLifetime,
         });
         let refusal_claim = idempotency.clone();
         match sup
@@ -2561,7 +2533,9 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             // own create (protocol 40), checked there before it is sent.
             confirm_yolo: _,
             github_checkout,
-            key_lives_with_session,
+            // Protocol 40's spawn marker remains accepted on the wire.
+            // Every create now gives its key the created session's lifetime.
+            key_lives_with_session: _,
             request_fingerprint,
         } => {
             // The fresh-checkout payload flows straight through to the
@@ -2588,18 +2562,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 request_fingerprint,
                 github_checkout,
             };
-            handle_create_session(
-                sup,
-                ctx.tx,
-                ctx.tasks,
-                ctx.panics,
-                req_id,
-                request,
-                CreateAdmission::Interactive {
-                    key_lives_with_session,
-                },
-            )
-            .await
+            handle_create_session(sup, ctx.tx, ctx.tasks, ctx.panics, req_id, request).await
         }
         ControlMsg::ListSessions { req_id } => {
             handle_list_sessions(sup, ctx.tx, ctx.tasks, req_id).await
@@ -4120,7 +4083,7 @@ mod tests {
     }
 
     /// The create launch's shape rules, at the admission boundary before any
-    /// reservation can make a malformed request permanently uncorrectable: a
+    /// reservation can bind a retry key to a malformed request: a
     /// launch is required, the inheritance choice is refused (it is answered
     /// by the helm now), and a launch must pass its own rules (a legacy
     /// launch never does).
@@ -5082,6 +5045,123 @@ mod tests {
         }
     }
 
+    /// A repaired directory cannot change a refusal during its replay window,
+    /// including the helm's marked spawn path. Both retries must retain the
+    /// original request and definite-refusal proof; only expiry permits a
+    /// newly validated create. Backdating SQLite exercises admission's actual
+    /// prune without sleeping or replacing the process clock.
+    #[farhelm_testtrace::test]
+    async fn ordinary_and_spawn_refusals_replay_until_their_window_expires() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        for marked in [false, true] {
+            let key = format!("refused-marker-{marked}");
+            let cwd = state.path().join(&key);
+            assert!(
+                !cwd.exists(),
+                "premise: validation must refuse this directory"
+            );
+            assert!(sup.store.reservation(&key).await.unwrap().is_none());
+            let mut request = queued_create(&cwd, &key, false);
+            let ControlMsg::CreateSession {
+                key_lives_with_session,
+                ..
+            } = &mut request
+            else {
+                unreachable!("queued_create supplies a create");
+            };
+            *key_lives_with_session = marked;
+            let mut original = None;
+            for attempt in 0..3 {
+                let (mut tasks, mut replies) = dispatch_for_test(&sup, request.clone()).await;
+                let frame = recv_create_reply(&mut replies).await;
+                while let Some(joined) = tasks.join_next().await {
+                    joined.expect("the refusal waiter must finish");
+                }
+                let reply: ControlMsg = serde_json::from_slice(&frame.body).unwrap();
+                let ControlMsg::Error {
+                    kind,
+                    message,
+                    create_unaccepted,
+                    ..
+                } = reply
+                else {
+                    panic!("a retained refusal must not launch: {reply:?}");
+                };
+                assert_eq!(kind, ErrorKind::InvalidRequest);
+                assert!(
+                    create_unaccepted,
+                    "a session-free matching refusal proves non-acceptance"
+                );
+                let recorded = sup.store.reservation(&key).await.unwrap().unwrap();
+                assert_eq!(recorded.dedup_scope, DedupScope::SessionLifetime);
+                assert!(
+                    sup.store
+                        .session(&recorded.session_id)
+                        .await
+                        .unwrap()
+                        .is_none()
+                );
+                if attempt == 0 {
+                    assert!(message.contains("directory"), "{message}");
+                    original = Some((recorded, message));
+                    std::fs::create_dir(&cwd).expect("repair the refused directory");
+                    assert!(
+                        cwd.is_dir(),
+                        "premise: later requests could validate afresh"
+                    );
+                } else {
+                    let (expected, expected_message) = original.as_ref().unwrap();
+                    assert_eq!(
+                        &recorded, expected,
+                        "replay must preserve request and outcome"
+                    );
+                    assert_eq!(&message, expected_message);
+                }
+            }
+            {
+                let conn = sup.store.conn.lock();
+                let expired_at = crate::store::now_unix() - 24 * 60 * 60 - 1;
+                assert_eq!(
+                    conn.execute(
+                        "UPDATE create_reservations SET created_at = ?2 WHERE intent_key = ?1",
+                        rusqlite::params![key, expired_at],
+                    )
+                    .expect("backdate the refusal beyond its window"),
+                    1
+                );
+                let recorded_at: i64 = conn
+                    .query_row(
+                        "SELECT created_at FROM create_reservations WHERE intent_key = ?1",
+                        [&key],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    recorded_at, expired_at,
+                    "premise: admission must expire this row"
+                );
+            }
+            let refused_id = original.unwrap().0.session_id;
+            let (mut tasks, mut replies) = dispatch_for_test(&sup, request).await;
+            let frame = recv_create_reply(&mut replies).await;
+            while let Some(joined) = tasks.join_next().await {
+                joined.expect("the fresh create waiter must finish");
+            }
+            let reply: ControlMsg = serde_json::from_slice(&frame.body).unwrap();
+            let ControlMsg::SessionCreated { session, .. } = reply else {
+                panic!("expiry must validate the now-usable directory: {reply:?}");
+            };
+            assert_ne!(
+                session.id, refused_id,
+                "expiry must allocate a fresh identity"
+            );
+            assert!(sup.store.session(&session.id).await.unwrap().is_some());
+        }
+    }
+
     /// Pure shape errors keep their existing precedence over busy admission.
     /// A shaped request refused at the management cap must claim no intent,
     /// create no reservation, and leave no handler behind that could run later.
@@ -5379,7 +5459,7 @@ mod tests {
                 .expect("admission remains open"),
         );
         let recorded = sup.store.reservation(&key).await.unwrap().unwrap();
-        assert_eq!(recorded.dedup_scope, DedupScope::Permanent);
+        assert_eq!(recorded.dedup_scope, DedupScope::SessionLifetime);
         assert!(matches!(
             recorded.outcome,
             crate::store::ReservationOutcome::Failed {
@@ -7301,7 +7381,7 @@ mod tests {
         };
 
         // Restricted peers cannot use lookup to discover or recover another
-        // caller's intent or permanently refuse its key. Both lookup-only
+        // caller's intent or record a refusal against its key. Both lookup-only
         // and refusal modes must stop before reservation access.
         for refuse_unknown in [false, true] {
             handle_restricted_control(
@@ -8756,16 +8836,11 @@ mod tests {
         );
     }
 
-    /// Spec: a full-authority create carrying the helm's spawn marker
-    /// reserves its key for the child's lifetime, and one without it
-    /// reserves the key permanently.
-    ///
-    /// Why: a `farhelm spawn` with launch flags reaches its own host as the
-    /// helm's create, and SPEC.md gives a spawn's key the child's lifetime
-    /// whichever way the spawn's launch was described; the marker is the
-    /// only thing that tells this supervisor which kind of create it is.
+    /// Every helm-mediated create reserves its key for the created session's
+    /// lifetime. The older spawn marker is accepted without changing policy,
+    /// so app and agent create/clone cannot accidentally keep permanent keys.
     #[farhelm_testtrace::test]
-    async fn the_helms_spawn_marker_gives_a_key_the_childs_lifetime() {
+    async fn every_helm_create_key_has_the_created_sessions_lifetime() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -8775,7 +8850,7 @@ mod tests {
         let mut tasks = tokio::task::JoinSet::new();
         for (req_id, key, marked, expected) in [
             (71, "marked", true, DedupScope::SessionLifetime),
-            (72, "unmarked", false, DedupScope::Permanent),
+            (72, "unmarked", false, DedupScope::SessionLifetime),
         ] {
             handle_control(
                 &sup,
@@ -9003,7 +9078,7 @@ mod tests {
     /// Each path and hook limit is inclusive and independent of the total.
     /// Multibyte paths establish byte rather than character accounting; hook
     /// refusal must not disclose command content. Identity escaping must also
-    /// consume budget because the whole snapshot is permanently retained.
+    /// consume budget because storage keeps the whole snapshot.
     #[test]
     fn fresh_checkout_field_limits_cover_paths_hook_and_encoded_identity() {
         for field in 0..4 {
@@ -9261,7 +9336,7 @@ mod tests {
     }
 
     /// An intent key that could never do its job is refused at the edge,
-    /// before it can reach the durable, deliberately un-pruned reservation
+    /// before it can reach the durable reservation
     /// table (`INTENT_KEY_CAP`).
     ///
     /// The empty key is the one worth spelling out: accepted, it would
@@ -9269,7 +9344,7 @@ mod tests {
     /// into a single intent — the second such create would replay the
     /// first's session instead of making its own.
     /// Checking each key directly includes settled failures, which the
-    /// pending-reservation list omits despite their permanent storage.
+    /// pending-reservation list omits despite their retained storage.
     #[farhelm_testtrace::test]
     async fn a_degenerate_intent_key_is_rejected_before_anything_is_stored() {
         let state = StateDir::new();
@@ -9403,13 +9478,13 @@ mod tests {
     }
 
     /// A command launch's resume command is bounded on BOTH axes, before it
-    /// can reach the never-pruned reservation row that stores a copy of it.
+    /// can reach the reservation row that stores a copy of it.
     ///
     /// Two independent limits because they fail independently: a resume
     /// command of a few enormous arguments is caught by the shared byte cap
     /// (which the whole launch counts against, alongside cwd and title),
     /// while one of very many tiny arguments costs almost no bytes and is
-    /// caught by the element cap. Either shape unbounded is a permanent
+    /// caught by the element cap. Either shape unbounded is a stored
     /// write sized by the request.
     /// Each refusal has its own key and must leave no reservation in any
     /// state; a settled failure is absent from the pending-only query.
