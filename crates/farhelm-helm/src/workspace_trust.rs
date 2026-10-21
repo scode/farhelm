@@ -1,8 +1,9 @@
 //! Workspace-trust policies for launches the helm sends to a supervisor.
 //!
 //! Keeping construction here makes choosing a policy a prerequisite for create
-//! dispatch. Approval and destination liveness remain the routes' responsibility:
-//! this type neither grants permission nor holds a lease on a host or directory.
+//! and Restart with dispatch. Approval and destination liveness remain the
+//! routes' responsibility: this type neither grants permission nor holds a
+//! lease on a host or directory.
 
 use crate::sessions::invalid_request;
 use crate::{AppState, SupervisorClient, launches};

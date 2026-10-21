@@ -2724,7 +2724,7 @@ pub(crate) async fn restart_session(
             ));
         }
     };
-    match do_restart_session_named(
+    match resolve_and_restart_session(
         &state,
         &key,
         req.stop_if_running,
@@ -2758,7 +2758,7 @@ pub(crate) async fn do_restart_session(
     confirm_yolo: bool,
     expected_launch: Option<farhelm_proto::SessionLaunch>,
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
-    do_restart_session_named(
+    resolve_and_restart_session(
         state,
         key,
         stop_if_running,
@@ -2770,11 +2770,14 @@ pub(crate) async fn do_restart_session(
     .await
 }
 
-/// Resolve a named restart beside its ordinary edit, preserving the agent relay's scope.
+/// Resolve a restart's optional edit and selector before the typed dispatch tail.
 ///
 /// Only the browser supplies the selector. Agent and plain restarts continue
 /// through the value-less wrapper, with their existing identity proof gates.
-async fn do_restart_session_named(
+/// Local validation precedes routing; destination trust precedes the final
+/// selector construction. Keeping those phases here preserves their distinct
+/// refusal precedence without making dispatch accept an unresolved launch.
+async fn resolve_and_restart_session(
     state: &AppState,
     key: &store::SessionKey,
     stop_if_running: bool,
@@ -2838,6 +2841,56 @@ async fn do_restart_session_named(
             launches::named_start(launch.as_launch(), value).map_err(invalid_request)
         })
         .transpose()?;
+    let session = do_restart_session_named(
+        state,
+        &claim,
+        &client,
+        id,
+        RestartSpec {
+            stop_if_running,
+            with,
+            confirm_yolo,
+            expected_launch,
+            named_start,
+        },
+    )
+    .await?;
+    Ok((claim, session))
+}
+
+/// Inputs whose local validation and workspace policy are fixed for dispatch.
+///
+/// `with = None` is plain Restart and carries no new launch. `expected_launch`
+/// is instead the stored launch shown on an agent's approval card: it remains
+/// raw because the supervisor compares it, rather than starting it as an edit.
+struct RestartSpec {
+    stop_if_running: bool,
+    with: Option<TrustResolvedLaunch>,
+    confirm_yolo: bool,
+    expected_launch: Option<SessionLaunch>,
+    named_start: Option<farhelm_proto::NamedConversationStart>,
+}
+
+/// Guard and send a restart on the same connection used to resolve its trust.
+///
+/// Replacement launches arrive only after an explicit workspace policy; this
+/// boundary still owns the existing YOLO check and reply publication. Borrowing
+/// the captured claim/client adds no routing read or host-removal lock. The
+/// supervisor remains responsible for revalidating consent and live state.
+async fn do_restart_session_named(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    client: &SupervisorClient,
+    id: &str,
+    spec: RestartSpec,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    let RestartSpec {
+        stop_if_running,
+        with,
+        confirm_yolo,
+        expected_launch,
+        named_start,
+    } = spec;
     // Restart WITH a new launch is a new launch choice, so it gets the
     // same YOLO check a create does; a plain restart relaunches a choice
     // already made and does not (see `yolo_guard`).
@@ -2855,8 +2908,8 @@ async fn do_restart_session_named(
         )
         .await?;
     // Cache publication is best effort; the supervisor's successful reply stands.
-    record_session(state, &claim, &session).await;
-    Ok((claim, session))
+    record_session(state, claim, &session).await;
+    Ok(session)
 }
 
 /// The body of `POST /api/sessions/{id}/rename`: the verb-POST convention
