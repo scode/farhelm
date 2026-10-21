@@ -151,6 +151,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   inside the configured checkout folder, with a normal clone when that is not possible. Also: two launches at once (one
   takes the spare, the other clones normally), building the spare in a temporary directory and moving it into place when
   done, and discarding spares when the cache is evicted, the checkout folder changes, or the post-clone command changes.
+  Plan: `plans/queue/spare-launch-checkout.md`.
 
 - **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
   session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
@@ -171,10 +172,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   generic sentence, so an operator can tell an ssh tunnel problem (host down, no route, bad key, no supervisor over
   there) from a supervisor that accepts connections but never finishes its hello from a browser-forwarding placement
   hang. Per-phase deadlines would make it exact, but a phase marker on the shared deadline may be enough; decide which
-  while planning.
+  while planning. Plan: `plans/queue/connection-stall-phase.md`.
 - **Launch guarded from the YOLO confirmation.** When the session launcher shows the confirmation for a YOLO launch on a
   host that asks first, offer a one-click "launch guarded instead" button next to "start YOLO session anyway", so
   switching to a safer launch does not mean cancelling, changing the permission and launching again. UI details TBD.
+  Plan: `plans/queue/yolo-confirm-launch-guarded.md`.
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
   supervisor's `wrapper_failure_detail` (launch_artifacts.rs) records "the agent was never started: the launch never
@@ -191,7 +193,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   with no lifecycle claim across them on the list path, so a same-pane restart in between would quote a live later
   generation — revalidate atomically with the capture, and budget the capture so N never-started rows cannot cost N tmux
   timeouts on the hot list. The e2e harness already has `wait_for_agent_ready` (harness.rs), whose failure text shows
-  the same pane text for a test's own diagnosis; that is the non-durable shape to start from.
+  the same pane text for a test's own diagnosis; that is the non-durable shape to start from. Plan:
+  `plans/queue/never-started-launch-cause.md`.
 
 - Decide the reservation tombstone scope for interactive creates, then do the work the verdict leaves standing. When a
   client attaches an intent key to a create, the supervisor records it in `create_reservations` so a retried request
@@ -205,27 +208,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   double-create). The digest half is worth doing under either verdict. If the verdict bounds the scope (session-lifetime
   — defensible, since a retry outliving the session it protects is protecting nothing), the pruning half mostly
   evaporates; that reverses a durability-milestone decision, so record the reversal where that decision lives. The store
-  module's own docs describe both debts.
-
-- Run the review-cap residue pass: one targeted review (test-quality and docs lenses only) over the three largest M7
-  surfaces — auth, provisioning, packaging. During the M7 stack's reviews, the test-quality lens (often docs too) was
-  still producing ACCEPTED findings at the hard three-pass cap on every large PR (#114, #115, #117, #118, #119/#120,
-  #121, #122, #123) — those reviews ended because the budget ran out, not because the reviewers ran dry, so there are
-  almost certainly real accepted-grade findings never surfaced in security-critical code. Treat a pass that returns zero
-  accepted findings as saturation finally reached; anything it does return gets the normal fix-or-reject treatment.
-  Cheap to run, and the difference between "reviewed until done" and "reviewed until the meter ran out" — do it before
-  declaring the first real release final.
-
-- Close the HostId-reuse create-default window. The create dialog defaults its host field to the selected session's host
-  BY ROW ID, but a host row id survives a retarget (or an adopt where a new install takes over) while the machine behind
-  it changes: look at a session on the old machine, have the row retargeted, open the create dialog within one
-  listing-refresh interval, and the create lands on the successor install. The request's own install-incarnation check
-  passes — the request was genuinely built against the successor — so the system does what it was told while the user's
-  intent lands on the wrong machine. Raised as a definite security finding in #156's review; accepted there as residual
-  because selection reconciliation already narrows the window to one refresh interval. The full fix: the helm's listing
-  must denormalize install identity per session so the client binds its create default to the install the user was
-  actually looking at, not the row id. Not urgent (needs a concurrent retarget plus a one-interval race), but "accepted
-  residual" should not quietly become "permanent".
+  module's own docs describe both debts. Plan: `plans/queue/create-reservation-retention.md`.
 
 - **Rewrite the "host changed while its update was being followed" warning.** Seen 2026-10-18 on a dev build whose host
   (running `farhelm 0.0.0-unreleased`, 0 sessions) had also been added by accident to the maintainer's 0.29.0 helm,
@@ -238,7 +221,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the row's host, connection kind, destination or install identity changes while an update is in flight (the update's
   own reconnect does not count); which one changed here was not investigated. Say in product terms what changed and what
   it means for the user (the update may or may not be what is running now; check the host's version), and consider
-  whether the warning should stay sticky once the host is connected and healthy.
+  whether the warning should stay sticky once the host is connected and healthy. Plan:
+  `plans/queue/host-changed-update-warning.md`.
 
 - **Rewrite the uninstall refusal for a host with a version mismatch.** Seen 2026-10-18 on the maintainer's 0.29.0 helm
   for a test host that a dev build had updated: the row read "too new", "the host speaks protocol 60 (farhelm
@@ -249,7 +233,65 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   pasted into the sentence, "a supervisor answers there that Farhelm cannot use" is vague, and "resolve that first"
   gives no way to resolve it. The same wording covers identity-mismatch, identity-unverified and duplicate hosts. Name
   the problem in user terms (this host runs a newer or older Farhelm than this helm) and the concrete way out for each
-  case. Host refusals now appear in a dialog; this entry concerns their wording.
+  case. Host refusals now appear in a dialog; this entry concerns their wording. Plan:
+  `plans/queue/uninstall-refusal-wording.md`.
+
+- **Stop treating Restart with as a separate launch surface by default.** Launch-related features keep needing a
+  separate decision for Restart with (and sometimes plain Restart and Replace), and agents default to leaving it out:
+  planning the "launch guarded from the YOLO confirmation" entry on 2026-10-20, the planner recommended "the session
+  launcher only" and called Restart with "a second, separate wiring"; the maintainer chose to include it and asked why
+  this keeps happening. Revisit the choices that make Restart with a second implementation of launching, so a launch
+  feature covers it unless there is a product reason not to. What the code and history show (main at 2897c914): (1) New,
+  Clone, Replace with and quick launch are all one component, the session launcher (`CreateSessionForm` in
+  `crates/farhelm-ui/src/list/create_form.rs`, about 8,850 lines), so a launcher feature reaches all four at once.
+  Restart with is a separate dialog (`crates/farhelm-ui/src/restart_with.rs`, about 780 lines) mounted by the session
+  view, with its own draft state, validation, Enter handling, focus trap and modal isolation (it sits over a live agent
+  terminal, so the page behind it is made inert), its own submit (`POST /api/sessions/<id>/restart` with `with` or
+  `with_command`, `api::restart_session`) instead of a create, and no retry key. The only code the two share is the
+  model, effort and permission controls (`LaunchControls` in `launch_controls.rs`, extracted for Restart with in #976 so
+  "two copies would drift apart"). Everything around those controls is per dialog. (2) The YOLO question is wired four
+  times: `YoloConfirmation` (`yolo_confirm.rs`) is one component, but each caller owns its own question type,
+  answer-taking and resubmit (`LauncherYoloQuestion` in `create_form.rs`, `RestartYoloQuestion` and `take_restart_yolo`
+  in `session_view.rs`, and the Replace questions in `list/view.rs` and `session_view.rs`). (3) Fixes have repeatedly
+  landed once per surface: the cancel-then-answer race was fixed separately for Replace (#1658), the launcher (#1659)
+  and Restart with (#1660) on one day; Enter on choices came to Restart with on its own (#1737); the two dialogs
+  diverged on whether a failed or pending model-list fetch makes a saved choice incompatible and on how effort
+  compatibility is checked (triage outcomes for #1659's catalog fix and the custom-flags effort fix both had to say
+  "apply to Restart with too" or note that Restart with already differs). (4) SPEC.md describes Restart with as its own
+  action with its own fixed fields (agent type, host, folder) and its own Enter paragraph, and says it "does not offer
+  templates", while Replace with is the launcher with the host held fixed. So the launcher already supports fixed
+  fields; why Restart with was built as its own dialog rather than a launcher mode with agent type, host and folder held
+  fixed is not recorded (#978's description gives the live-terminal isolation and the resume request, not a reason
+  against reusing the launcher). (5) Plain Restart and plain Replace relaunch the stored launch with no editor (SPEC.md,
+  Restart; "plain Restart or Replace" keep stored words), so a feature that edits a launch has nothing to attach to
+  there; that part is a real product distinction, not an accident. Why agents scope Restart with out: an entry written
+  about "the launcher" covers four flows for the cost of one, while Restart with always costs a second wiring with its
+  own state, tests and SPEC paragraph, so "launcher only" looks like the cheap literal reading; nothing in the code
+  makes Restart with inherit a launcher feature. The queued `plans/queue/ui-session-actions.md` merges the two Replace
+  copies, the operation lock and the refusal-flag decoding, and adds Restart and Delete only if they duplicate the
+  Replace flow; it does not touch the launcher-versus-Restart-with split. Options to discuss: (a) Restart with becomes a
+  mode of the session launcher (agent type, host and folder held fixed, conversation field shown, submit sends a
+  restart), so launcher features reach it by default and SPEC.md describes one surface; costs a large change to an
+  8,850-line component and to the modal isolation; (b) a shared launch-draft model and controller (choices,
+  compatibility rules, YOLO question, Enter rules) that both dialogs drive, with the dialogs reduced to layout; (c) keep
+  two surfaces but add a standing rule in SPEC_impl.md or AGENTS.md that every launch-editing feature names its Restart
+  with behavior explicitly, plus shared helpers for the pieces that diverged (catalog compatibility, YOLO
+  answer-taking). Decide whether plain Restart and plain Replace stay outside any of these, as SPEC.md's "relaunch the
+  stored launch" suggests.
+
+- **Move the trash into a hidden folder.** Deleting a managed checkout's last session moves the checkout into
+  `farhelm-archived-working-copies` inside the checkout folder (`ARCHIVE_DIR_NAME` in
+  `crates/farhelm-supervisor/src/working_copies.rs`; SPEC.md, Managed checkouts, and the ownership statement that names
+  it), a visible folder beside the user's own checkouts. Move it into a hidden folder named in the same style as the
+  spare checkouts' `.farhelm-spares` (planned in `plans/queue/spare-launch-checkout.md`), for example `.farhelm-trash`;
+  settle the exact name with that plan's. Needs: migrating existing trash folders on every host (archived checkouts are
+  recorded by path in the registry's `archive_destination`, so the move updates those records, and a same-filesystem
+  rename keeps the identity checks intact); the reserved-name handling in the occupancy scan
+  (`occupied_related_names_from_entries`) and the nesting and overlap guards that compare against the archive path;
+  repository discovery's skip (`repository_discovery.rs`, which skips the archive folder by name); the path-length
+  margin (`ARCHIVE_PATH_GROWTH`, 82 bytes, quoted in SPEC.md, changes with the name); and the text in SPEC.md,
+  `docs/github-checkouts.md` and the docs page `website/src/content/docs/docs/using/stop-restart-resume.mdx`. Asked for
+  by the maintainer on 2026-10-20 while planning the spare checkouts.
 
 ## Doc todo
 
