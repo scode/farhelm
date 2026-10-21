@@ -6637,6 +6637,7 @@ fn refusal_text_names_every_non_connected_state() {
         (
             HostState::Connecting {
                 attempt: 2,
+                stage: crate::manager::ConnectionStage::WaitingToConnect,
                 last_error: Some("ssh: connect to host timed out".to_string()),
             },
             "connecting",

@@ -16,6 +16,8 @@
 //!
 //! The values are fully populated on purpose: an `Option` left at `None` or a
 //! defaulted field would let a rename of that field slip through both sides.
+//! Connecting uses final setup rather than its initial stage so the fixture also
+//! catches a projection that replaces observed progress with a default.
 
 use crate::aggregate::{SessionListBody, SessionRow};
 use crate::hosts::{HostStateView, HostView, RefreshView};
@@ -145,6 +147,7 @@ fn host_list_body() -> serde_json::Value {
             "ssh",
             HostStateView::Connecting {
                 attempt: 2,
+                stage: crate::manager::ConnectionStage::SettingUp,
                 last_error: Some("connection refused".to_string()),
             },
         ),

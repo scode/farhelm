@@ -30,7 +30,7 @@
 //! (`crate::ensure`) a floor rather than a probe.
 
 use crate::aggregate::host_display_name;
-use crate::manager::{HostState, RefreshHealth, UnreachableCause};
+use crate::manager::{ConnectionStage, HostState, RefreshHealth, UnreachableCause};
 use crate::store::{HostId, HostKind, HostRow, HostStoreError};
 use crate::{AppState, http_error};
 use axum::extract::{Path as AxPath, State};
@@ -124,10 +124,12 @@ pub(crate) struct HostView {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "phase")]
 pub(crate) enum HostStateView {
-    /// Inside the active-retry window — attempts are happening right now.
+    /// Inside the active-retry window, including the wait between attempts.
     #[serde(rename = "connecting")]
     Connecting {
         attempt: u32,
+        /// Closed vocabulary for the currently observed boundary; no live SSH output.
+        stage: ConnectionStage,
         last_error: Option<String>,
     },
     /// The active window is spent; background re-probing continues
@@ -263,9 +265,11 @@ impl From<&HostState> for HostStateView {
         match state {
             HostState::Connecting {
                 attempt,
+                stage,
                 last_error,
             } => HostStateView::Connecting {
                 attempt: *attempt,
+                stage: *stage,
                 last_error: last_error.clone(),
             },
             HostState::Unreachable { cause, last_error } => HostStateView::Unreachable {
@@ -1129,6 +1133,7 @@ mod tests {
         for state in [
             HostStateView::Connecting {
                 attempt: 1,
+                stage: crate::manager::ConnectionStage::WaitingToConnect,
                 last_error: None,
             },
             HostStateView::Unreachable {
