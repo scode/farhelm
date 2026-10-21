@@ -2411,6 +2411,39 @@ owner-namespace scans to 100,000 iterator calls, including EOF proof. Exhausting
 retains ownership evidence; neither truncates or silently forgets old locations. This recovery layer does not itself
 create, publish or take spares.
 
+The preparation shim can consume a complete spare when its private `keep_spare` field is true. That field defaults to
+false and is omitted when false; the create path currently leaves it off, and nothing produces spares yet. A take runs
+inside the existing durable `CloneStarted` stage and preparation lock. It never reads the recovery record or acquires
+the repository cache lock. Git below 2.17 or unrecognized version output keeps the ordinary clone path: 2.17 is the
+floor for the take's `--prune-tags`, not a minimum for Farhelm. Local metadata queries are silent, limited to 4096
+stdout bytes and one second, with stdin closed, stderr discarded and the existing bounded process-group runner owning
+kill and reap. Actual fetch and merge inherit the terminal and have no timeout.
+
+The shim derives the strict claim's session and generation from its actual launch-status filename, checks the session
+against the launch spec, and makes one no-replace rename from the ready slot to that claim. It opens both the reserved
+namespace and allocated direct-child destination below the canonical checkout root without crossing links or mounts. The
+allocation's current device/inode and empty-directory checks remain mandatory. Git's checked-out branch, configured
+remote and full upstream tracking ref come from the claimed clone itself, including non-`origin` remotes. Gitfiles, bare
+repositories, redirected worktree/common directories and remaining alternates are structural refusal, rather than
+metadata the shim rewrites. Ordinary hooks and filters remain configured; a dirty spare is not rejected merely for being
+dirty.
+
+A usable claim prints `Farhelm: updating a checkout prepared earlier from GitHub.` and runs
+`git -c remote.<remote>.followRemoteHEAD=always fetch --prune --prune-tags <remote>`. That key is unconditional on every
+take-capable Git. The saved tracking branch must survive pruning and match the remote HEAD symref afterwards. Git 2.48+
+refreshes that symref; older Git intentionally keeps its clone-time default-branch observation. Structural refusal
+before moving content leaves the claim for supervisor cleanup and uses ordinary clone into the still-empty allocation. A
+failed fetch instead fails the clone stage, with no second clone or credential prompt. A successful take makes one
+fetch; a successful fetch followed by structural refusal may subsequently use the explicitly required normal clone.
+
+Before moving, the shim rechecks destination identity and emptiness and preflights all raw top-level entries for mount
+or filesystem crossings. It moves `.git` first and then each remaining entry with fd-relative no-replace renames,
+preserving the allocated folder itself. A failed first move permits clone only if the destination is still known empty;
+every failure after any entry moved retains the partial checkout and fails preparation without rollback. The shim
+removes only the emptied claim directory. It then runs `git merge --ff-only <full tracking ref>` in the final allocated
+folder, so changed-file filters and `post-merge` see that path. The existing post-clone command, Ready publication and
+trust steps follow unchanged. Interrupted or failed preparations remain non-restartable under the existing state rule.
+
 Last-reference Delete journals the source identity and archive destination before one no-replace rename. Linux uses
 `renameat2` through its syscall with `RENAME_NOREPLACE`; macOS uses `renameatx_np(RENAME_EXCL)`. Parent fsync barriers
 precede journal retirement and atomic metadata settlement. Recovery accepts a matching already-moved destination but
