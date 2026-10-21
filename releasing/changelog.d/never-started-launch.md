@@ -2,6 +2,6 @@
 kind: fixed
 ---
 
-When an agent never starts, the error now identifies whether your login shell or the host's systemd scope wrapper
-exited first, with its exit code when known. A login shell that exits before starting the agent also shows an error on
-hosts without systemd scopes, including macOS.
+When an agent never starts, the error now names the failed startup step, includes its exit code when known, and may
+keep a short terminal excerpt. Shell startup failures also show error on hosts without systemd scopes, including
+macOS.

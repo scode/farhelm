@@ -32,7 +32,8 @@
 //!
 //! - "Nothing here does I/O" — no. `dead_pane_exit_code` takes a
 //!   `&Supervisor` precisely because it MUST ask tmux, and `observe_entry`
-//!   reads launch sentinels off disk. Both are `async` and neither belongs
+//!   reads launch sentinels off disk and may capture a fenced never-started
+//!   excerpt. Both are `async` and neither belongs
 //!   inside a lock hold; they sit here because they answer the same
 //!   question, not because they share the core's constraints.
 //! - "Lock-free" — no. `session_status` and `session_restart_offer` take
@@ -65,7 +66,7 @@
 
 use super::core::{SessionEntry, Supervisor};
 use super::launch_artifacts::{
-    read_launch_sentinel, sentinel_could_still_apply, wrapper_failure_detail,
+    append_launch_excerpt, read_launch_sentinel, sentinel_could_still_apply, wrapper_failure_detail,
 };
 use super::terminals::{Terminal, tabs_from_pane_states};
 use crate::agent_kind::screen_reader::ScreenState;
@@ -648,11 +649,14 @@ pub(crate) async fn interrupted_preparation_detail(
 /// Successful negative reads can become final only after owned pane death or
 /// proof that this launch's boot ended and durable terminal classification. The caller
 /// finishes that contract after committing any proposed outcome.
-pub(crate) async fn observe_entry(
+/// Optional terminal quotes share `capture_available` across the entire pass;
+/// a failed capture spends that budget without discarding the error itself.
+pub(crate) async fn observe_entry_with_capture_budget(
     sup: &Supervisor,
     entry: &Arc<SessionEntry>,
     pane_states: &HashMap<String, PaneState>,
     known: &KnownTmuxNames,
+    capture_available: &mut bool,
 ) -> anyhow::Result<EntryObservation> {
     let recorded = entry
         .run
@@ -726,7 +730,10 @@ pub(crate) async fn observe_entry(
             )
             .await
             {
-                Ok(detail) => detail,
+                Ok(Some(detail)) => {
+                    Some(append_launch_excerpt(sup, entry, detail, capture_available).await)
+                }
+                Ok(None) => None,
                 Err(_) => {
                     launch_evidence_inconclusive = true;
                     None
@@ -785,6 +792,21 @@ pub(crate) async fn observe_entry(
         settled_error: false,
         settle_launch_reads,
     })
+}
+
+/// Give direct test observations their own optional-capture budget.
+///
+/// Production observations share one budget across the complete pass through
+/// the ticker. This seam preserves focused tests of a single observation without
+/// accidentally teaching another production caller to reset the fleet budget.
+#[cfg(test)]
+pub(crate) async fn observe_entry(
+    sup: &Supervisor,
+    entry: &Arc<SessionEntry>,
+    pane_states: &HashMap<String, PaneState>,
+    known: &KnownTmuxNames,
+) -> anyhow::Result<EntryObservation> {
+    observe_entry_with_capture_budget(sup, entry, pane_states, known, &mut true).await
 }
 
 #[cfg(test)]

@@ -36,7 +36,7 @@ use control_codec::{
     PANE_FACT_FORMAT, PANE_MARKER_FORMAT, any_session_has_several_windows, join_pane_markers,
     parse_pane_facts,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -125,6 +125,203 @@ pub const TMUX_PAUSE_AFTER_SECS: u64 = 5;
 /// in a line or two. Reaching further would mostly harvest the blank rows
 /// a mostly-empty pane is padded with.
 const LAST_WORDS_LINES: u32 = 50;
+
+/// A launch error keeps a few final lines, never a second terminal history.
+/// These limits apply after presentation escaping, including ` | ` separators.
+pub(crate) const LAUNCH_EXCERPT_LINES: usize = 5;
+pub(crate) const LAUNCH_EXCERPT_BYTES: usize = 500;
+
+/// Generation identity survives a live resize; only a reused pane's history
+/// fence becomes invalid. A dead resize also clears generation eligibility:
+/// resizing can move its one-time death banner away from the final grid row.
+const LAUNCH_GENERATION_OPTION: &str = "@farhelm-launch-generation";
+const LAUNCH_FENCE_OPTION: &str = "@farhelm-launch-fence";
+
+/// Evidence that an excerpt can contain only this launch's terminal output.
+///
+/// The token is stamped before respawn in the same synchronous tmux group as
+/// the history sample. It is deliberately in memory only: a supervisor reload
+/// loses the optional quote rather than reconstructing a boundary from old
+/// scrollback. Window options share the same-account trust model of the other
+/// Farhelm window markers; they do not authenticate arbitrary tmux clients.
+#[derive(Clone, Debug)]
+pub(crate) struct LaunchExcerptFence {
+    token: String,
+    history_start: u32,
+    reused: bool,
+}
+
+impl LaunchExcerptFence {
+    /// Seed lifecycle-only tests without requiring a terminal fixture. The
+    /// token remains unique so sharing and replacement can be tested honestly.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self {
+            token: uuid::Uuid::new_v4().simple().to_string(),
+            history_start: 0,
+            reused: false,
+        }
+    }
+}
+
+/// Retain useful last words while draining arbitrarily tall blank pane padding.
+///
+/// Each line and pending whitespace are bounded independently. A raw byte tail
+/// cannot provide this guarantee: thousands of blank screen rows would evict
+/// the shell's complaint before the caller could trim them. UTF-8 decoding is
+/// incremental, so a character split across read boundaries is preserved.
+#[derive(Default)]
+struct LaunchExcerptReducer {
+    utf8_pending: Vec<u8>,
+    line: String,
+    whitespace: String,
+    lines: VecDeque<String>,
+}
+
+impl LaunchExcerptReducer {
+    /// Drain one stdout chunk without retaining the terminal-sized transcript.
+    fn push(&mut self, bytes: &[u8]) {
+        let mut input = std::mem::take(&mut self.utf8_pending);
+        input.extend_from_slice(bytes);
+        let mut remaining = input.as_slice();
+        loop {
+            match std::str::from_utf8(remaining) {
+                Ok(text) => {
+                    self.push_text(text);
+                    break;
+                }
+                Err(error) => {
+                    let valid = error.valid_up_to();
+                    self.push_text(std::str::from_utf8(&remaining[..valid]).expect("valid prefix"));
+                    remaining = &remaining[valid..];
+                    match error.error_len() {
+                        Some(invalid) => {
+                            self.push_text("\u{fffd}");
+                            remaining = &remaining[invalid..];
+                        }
+                        None => {
+                            self.utf8_pending.extend_from_slice(remaining);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Escape peer-controlled presentation characters before enforcing bounds.
+    /// Newlines split source rows; trailing whitespace is not evidence.
+    fn push_text(&mut self, text: &str) {
+        for ch in text.chars() {
+            if ch == '\n' {
+                self.finish_line();
+                continue;
+            }
+            let rendered = if farhelm_proto::text::is_presentation_unsafe(ch) {
+                ch.escape_default().to_string()
+            } else {
+                ch.to_string()
+            };
+            if ch.is_whitespace() {
+                push_excerpt_tail(&mut self.whitespace, &rendered);
+            } else {
+                push_excerpt_tail(&mut self.line, &self.whitespace);
+                self.whitespace.clear();
+                push_excerpt_tail(&mut self.line, &rendered);
+            }
+        }
+    }
+
+    /// Blank physical rows do not displace any actual error lines.
+    fn finish_line(&mut self) {
+        self.whitespace.clear();
+        if !self.line.is_empty() {
+            self.lines.push_back(std::mem::take(&mut self.line));
+            if self.lines.len() > LAUNCH_EXCERPT_LINES {
+                self.lines.pop_front();
+            }
+        }
+    }
+
+    /// Produce a valid UTF-8 suffix whose escaped representation meets both caps.
+    /// The badge escapes newlines, so readable separators keep the existing
+    /// tooltip useful without adding another UI surface.
+    fn finish(mut self) -> Option<String> {
+        if !self.utf8_pending.is_empty() {
+            self.push_text("\u{fffd}");
+        }
+        self.finish_line();
+        let mut excerpt = self.lines.into_iter().collect::<Vec<_>>().join(" | ");
+        trim_excerpt_tail(&mut excerpt);
+        (!excerpt.is_empty()).then_some(excerpt)
+    }
+}
+
+/// Keep bounded suffixes at UTF-8 boundaries, including during a single long row.
+fn push_excerpt_tail(tail: &mut String, text: &str) {
+    tail.push_str(text);
+    trim_excerpt_tail(tail);
+}
+
+/// Remove old bytes without splitting a retained Unicode character.
+fn trim_excerpt_tail(tail: &mut String) {
+    if tail.len() > LAUNCH_EXCERPT_BYTES {
+        let mut start = tail.len() - LAUNCH_EXCERPT_BYTES;
+        while !tail.is_char_boundary(start) {
+            start += 1;
+        }
+        tail.drain(..start);
+    }
+}
+
+/// Quote a literal operand in tmux's format grammar, not its command grammar.
+/// Expansions are not rescanned, and these are the grammar's three delimiters.
+fn tmux_format_operand(value: &str) -> String {
+    value
+        .replace('#', "##")
+        .replace(',', "#,")
+        .replace('}', "#}")
+}
+
+/// Window-option targets can fall back after a pane vanished. Check the exact
+/// pane and session before making any new diagnostic-marker mutation there.
+fn launch_excerpt_identity(session: &str, pane: &str) -> String {
+    format!(
+        "#{{&&:#{{==:#{{pane_id}},{}}},#{{==:#{{session_name}},{}}}}}",
+        tmux_format_operand(pane),
+        tmux_format_operand(session)
+    )
+}
+
+/// Serialize only the small option writes, never a respawn's credential-bearing
+/// `-e` argv. The latter must stay separate for the driver's diagnostic redaction.
+fn launch_excerpt_stamp(target: &str, token: &str) -> String {
+    [
+        "set-option",
+        "-w",
+        "-t",
+        target,
+        LAUNCH_GENERATION_OPTION,
+        token,
+        ";",
+        "set-option",
+        "-w",
+        "-t",
+        target,
+        LAUNCH_FENCE_OPTION,
+        token,
+    ]
+    .iter()
+    .map(|arg| {
+        if *arg == ";" {
+            ";".into()
+        } else {
+            shell_words::quote(arg)
+        }
+    })
+    .collect::<Vec<_>>()
+    .join(" ")
+}
 
 /// Trim pane padding and retain a valid UTF-8 suffix within `max_bytes`.
 ///
@@ -1891,6 +2088,52 @@ fn env_assignments(env: &[(String, String)]) -> Vec<String> {
         .collect()
 }
 
+/// Invalidate at the resize's execution point, including a request already
+/// queued by an old input route. Live fresh panes can keep their generation,
+/// but a dead pane's banner may move and must make every excerpt ineligible.
+/// Keeping this one synchronous group covers cancellation and later launches.
+fn resize_window_args(session: &str, pane: &str, cols: u16, rows: u16) -> Vec<String> {
+    let target = pane_in_session(session, pane);
+    let clear_generation = [
+        "set-option",
+        "-w",
+        "-F",
+        "-t",
+        &target,
+        LAUNCH_GENERATION_OPTION,
+        "#{?pane_dead,,#{@farhelm-launch-generation}}",
+    ]
+    .iter()
+    .map(|arg| shell_words::quote(arg))
+    .collect::<Vec<_>>()
+    .join(" ");
+    let clear_validity = ["set-option", "-w", "-t", &target, LAUNCH_FENCE_OPTION, ""]
+        .iter()
+        .map(|arg| shell_words::quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let clear = format!("{clear_generation} ; {clear_validity}");
+    [
+        "if-shell",
+        "-F",
+        "-t",
+        pane,
+        &launch_excerpt_identity(session, pane),
+        &clear,
+        ";",
+        "resize-window",
+        "-t",
+        &target,
+        "-x",
+        &cols.clamp(1, 10_000).to_string(),
+        "-y",
+        &rows.clamp(1, 10_000).to_string(),
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
 /// Values shorter than this are too likely to occur as ordinary diagnostic
 /// text to replace safely. Credentials are not meaningfully protected at this
 /// length, while replacing values such as `1` can mangle tmux's wording.
@@ -2959,12 +3202,84 @@ impl TmuxDriver {
         env: &[(String, String)],
         window_cmd: &[String],
     ) -> anyhow::Result<()> {
+        self.relaunch_in_pane_inner(session, pane, cwd, env, window_cmd, None)
+            .await
+            .map(|_| ())
+    }
+
+    /// Preserve a pre-respawn history boundary without racing the new process.
+    ///
+    /// Sampling, generation stamping and respawn are synchronous commands in one
+    /// tmux group. Respawn clears the visible grid but preserves history, so the
+    /// old history count is the first possible new row. A malformed sample costs
+    /// the optional excerpt, not the successfully respawned agent.
+    pub(crate) async fn relaunch_in_pane_with_excerpt_fence(
+        &self,
+        session: &str,
+        pane: &str,
+        cwd: &str,
+        env: &[(String, String)],
+        window_cmd: &[String],
+    ) -> anyhow::Result<Option<LaunchExcerptFence>> {
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        let sample = self
+            .relaunch_in_pane_inner(session, pane, cwd, env, window_cmd, Some(&token))
+            .await?;
+        Ok(sample
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .map(|history_start| LaunchExcerptFence {
+                token,
+                history_start,
+                reused: true,
+            }))
+    }
+
+    /// Both respawn APIs invalidate the previous generation before replacing its
+    /// process. Only the diagnostic API samples and establishes a new fence.
+    async fn relaunch_in_pane_inner(
+        &self,
+        session: &str,
+        pane: &str,
+        cwd: &str,
+        env: &[(String, String)],
+        window_cmd: &[String],
+        token: Option<&str>,
+    ) -> anyhow::Result<String> {
         let target = pane_in_session(session, pane);
         let env_args = env_assignments(env);
         // `-c` is format-expanded here exactly as on `new-session`; see
         // `tmux_start_directory` for what an unescaped `#` did.
         let start_dir = tmux_start_directory(cwd);
-        let mut args: Vec<&str> = vec!["respawn-pane", "-k", "-t", &target, "-c", &start_dir];
+        let identity = launch_excerpt_identity(session, pane);
+        let stamp = launch_excerpt_stamp(&target, token.unwrap_or(""));
+        let mut args: Vec<&str> = Vec::new();
+        if token.is_some() {
+            args.extend([
+                "display-message",
+                "-p",
+                "-t",
+                &target,
+                "#{history_size}",
+                ";",
+            ]);
+        }
+        args.extend([
+            "if-shell",
+            "-F",
+            "-t",
+            pane,
+            &identity,
+            &stamp,
+            ";",
+            "respawn-pane",
+            "-k",
+            "-t",
+            &target,
+            "-c",
+            &start_dir,
+        ]);
         for assignment in &env_args {
             args.push("-e");
             args.push(assignment);
@@ -2973,8 +3288,29 @@ impl TmuxDriver {
         args.extend(window_cmd.iter().map(String::as_str));
         self.run(&args)
             .await
-            .map(|_| ())
             .context("respawning the session's pane for a relaunch")
+    }
+
+    /// A newly created pane has no prior generation to exclude. Stamping after
+    /// creation is safe even if startup already died; callers publish its run
+    /// entry only after this best-effort setup has finished.
+    pub(crate) async fn establish_launch_excerpt_fence(
+        &self,
+        session: &str,
+        pane: &str,
+    ) -> anyhow::Result<LaunchExcerptFence> {
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        let target = pane_in_session(session, pane);
+        let identity = launch_excerpt_identity(session, pane);
+        let stamp = launch_excerpt_stamp(&target, &token);
+        self.run(&["if-shell", "-F", "-t", pane, &identity, &stamp])
+            .await
+            .context("establishing a fresh launch's excerpt fence")?;
+        Ok(LaunchExcerptFence {
+            token,
+            history_start: 0,
+            reused: false,
+        })
     }
 
     /// Add a window to an existing session and run `window_cmd` in it —
@@ -3221,22 +3557,13 @@ impl TmuxDriver {
         cols: u16,
         rows: u16,
     ) -> anyhow::Result<()> {
-        let cols = cols.clamp(1, 10_000);
-        let rows = rows.clamp(1, 10_000);
         // Bounded by the exchange budget: both callers (attach and resize)
         // hold `Supervisor::attachments`, and an unresponsive tmux server must
         // fail this one resize rather than freeze every terminal on the host.
         // Both callers only log a resize failure.
+        let args = resize_window_args(session, pane, cols, rows);
         self.run_bytes_within(
-            &[
-                "resize-window",
-                "-t",
-                &pane_in_session(session, pane),
-                "-x",
-                &cols.to_string(),
-                "-y",
-                &rows.to_string(),
-            ],
+            &args.iter().map(String::as_str).collect::<Vec<_>>(),
             Some(self.exchange_timeout),
         )
         .await?;
@@ -3376,14 +3703,13 @@ impl TmuxDriver {
     ///
     /// # Why history, not the visible screen
     ///
-    /// The pane this is called on is a DEAD one, and `remain-on-exit`
-    /// replaces a dead pane's visible grid with tmux's own
-    /// `remain-on-exit-format` banner ("Pane is dead (status 9, …)") —
-    /// verified against tmux 3.7b. A plain `capture-pane -p` therefore
-    /// returns that banner and nothing else, which restates the exit code
-    /// the caller already has and loses the one thing worth reporting. The
-    /// shell's actual output is one scroll back, in history, which
-    /// [`LAST_WORDS_LINES`] reaches.
+    /// On the supported tmux, `remain-on-exit` scrolls the grid by one
+    /// row and draws its banner at the bottom. An error printed on the
+    /// first row of a mostly empty pane can therefore move into history,
+    /// while subsequent lines remain visible. Reaching back with
+    /// [`LAST_WORDS_LINES`] keeps both instead of losing that first line
+    /// to a visible-grid-only capture. This tab-refusal helper does not
+    /// exclude the banner; the fenced launch excerpt has its own range.
     ///
     /// That is exactly the difference from [`Self::capture_pane_tail`],
     /// whose subject is a LIVE pane and which therefore must not reach
@@ -3396,6 +3722,67 @@ impl TmuxDriver {
     ) -> anyhow::Result<String> {
         self.capture_pane_plain(session, pane, Some(LAST_WORDS_LINES), max_bytes)
             .await
+    }
+
+    /// Quote only this generation's dead terminal, atomically with validation.
+    ///
+    /// The supported tmux queue drains a synchronous `if-shell -F` branch
+    /// without yielding. Its guard and capture therefore see one generation,
+    /// even if another client queued a same-pane restart. No shell command or
+    /// waiting tmux command belongs in this group.
+    ///
+    /// Capture starts at the pre-respawn history boundary and excludes the
+    /// bottom grid row, where remain-on-exit draws its banner. Trimming history
+    /// can only discard new lines conservatively. A resize invalidates a reused
+    /// boundary because reflow can instead expand old rows into the new range.
+    /// Fresh panes have no old rows, but a resize after death clears their
+    /// generation eligibility too because the banner is no longer at the end.
+    pub(crate) async fn capture_launch_excerpt(
+        &self,
+        session: &str,
+        pane: &str,
+        fence: &LaunchExcerptFence,
+    ) -> anyhow::Result<Option<String>> {
+        let target = pane_in_session(session, pane);
+        let mut checks = vec![
+            format!("#{{==:#{{pane_id}},{}}}", tmux_format_operand(pane)),
+            format!("#{{==:#{{session_name}},{}}}", tmux_format_operand(session)),
+            "#{==:#{pane_dead},1}".to_owned(),
+            format!("#{{==:#{{{LAUNCH_GENERATION_OPTION}}},{}}}", fence.token),
+            format!("#{{e|>=:#{{history_size}},{}}}", fence.history_start),
+            // A height-one pane has no non-banner visible row. Without new
+            // history the negative end would make tmux swap an empty range.
+            format!(
+                "#{{||:#{{e|>=:#{{pane_height}},2}},#{{e|>:#{{history_size}},{}}}}}",
+                fence.history_start
+            ),
+        ];
+        if fence.reused {
+            checks.push(format!(
+                "#{{==:#{{{LAUNCH_FENCE_OPTION}}},{}}}",
+                fence.token
+            ));
+        }
+        let condition = checks
+            .into_iter()
+            .reduce(|a, b| format!("#{{&&:{a},{b}}}"))
+            .expect("identity checks");
+        let start = format!("#{{e|-:{},#{{history_size}}}}", fence.history_start);
+        let end = "#{e|-:#{pane_height},2}";
+        let capture = ["capture-pane", "-p", "-t", &target, "-S", &start, "-E", end]
+            .iter()
+            .map(|arg| shell_words::quote(arg))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let reducer = self
+            .run_capture(
+                &["if-shell", "-F", "-t", pane, &condition, &capture],
+                LaunchExcerptReducer::default(),
+                LaunchExcerptReducer::push,
+            )
+            .await
+            .context("capturing a never-started launch's terminal excerpt")?;
+        Ok(reducer.finish())
     }
 
     /// What `pane`'s screen shows RIGHT NOW, as plain text, bounded to
@@ -3557,6 +3944,29 @@ impl TmuxDriver {
     /// `retain`, so the amortized cost is one memmove per `retain` bytes
     /// read rather than one per chunk.
     async fn run_bytes_tail(&self, args: &[&str], retain: usize) -> anyhow::Result<Vec<u8>> {
+        let mut tail = self
+            .run_capture(args, Vec::<u8>::new(), |tail, chunk| {
+                tail.extend_from_slice(chunk);
+                if tail.len() > retain.saturating_mul(2) {
+                    tail.drain(..tail.len() - retain);
+                }
+            })
+            .await?;
+        if tail.len() > retain {
+            tail.drain(..tail.len() - retain);
+        }
+        Ok(tail)
+    }
+
+    /// Share the bounded child's timeout, kill/reap and diagnostic semantics
+    /// between the sampler's byte tail and the launch error's nonblank lines.
+    /// The reducer drains every byte but retains only its own small answer.
+    async fn run_capture<T>(
+        &self,
+        args: &[&str],
+        mut retained: T,
+        mut reduce: impl FnMut(&mut T, &[u8]),
+    ) -> anyhow::Result<T> {
         let mut child = self
             .command()
             .args(args)
@@ -3582,7 +3992,6 @@ impl TmuxDriver {
         // exactly this pattern in a since-removed capture path. One
         // allocation per capture keeps the futures small.
         let mut chunk = vec![0u8; CAPTURE_READ_CHUNK];
-        let mut tail: Vec<u8> = Vec::new();
         let drained = tokio::time::timeout(self.pane_list_timeout, async {
             loop {
                 let n = stdout
@@ -3592,10 +4001,7 @@ impl TmuxDriver {
                 if n == 0 {
                     return anyhow::Ok(());
                 }
-                tail.extend_from_slice(&chunk[..n]);
-                if tail.len() > retain.saturating_mul(2) {
-                    tail.drain(..tail.len() - retain);
-                }
+                reduce(&mut retained, &chunk[..n]);
             }
         })
         .await;
@@ -3615,9 +4021,6 @@ impl TmuxDriver {
             );
         };
         drained?;
-        if tail.len() > retain {
-            tail.drain(..tail.len() - retain);
-        }
         let stderr_bytes = stderr_task.await.unwrap_or_default();
         let status = child.wait().await.context("waiting for tmux to exit")?;
         if !status.success() {
@@ -3634,7 +4037,7 @@ impl TmuxDriver {
             )))
             .context(context);
         }
-        Ok(tail)
+        Ok(retained)
     }
 
     /// Every pane's liveness state, in ONE tmux round trip.
@@ -5810,6 +6213,798 @@ mod tests {
             "expected a valid suffix within the cap, got {cut:?}"
         );
         assert_eq!(retain_pane_tail("   \n\n", 1024), "");
+    }
+
+    /// An error excerpt must keep useful text through arbitrary blank padding,
+    /// decode split UTF-8, and bound the escaped result rather than raw input.
+    #[farhelm_testtrace::test]
+    fn launch_excerpt_reduction_bounds_sanitized_nonblank_lines() {
+        let mut reducer = LaunchExcerptReducer::default();
+        reducer.push(b"old line\nline 1\nline 2\nline 3\nline 4\n");
+        for byte in "last \u{00e9}\u{202e}\u{001b} complaint".as_bytes() {
+            reducer.push(&[*byte]);
+        }
+        for _ in 0..20_000 {
+            reducer.push(b" \t\r\n");
+        }
+        let excerpt = reducer.finish().expect("the complaint survives padding");
+        assert_eq!(excerpt.split(" | ").count(), LAUNCH_EXCERPT_LINES);
+        assert_eq!(
+            excerpt,
+            "line 1 | line 2 | line 3 | line 4 | last \u{00e9}\\u{202e}\\u{1b} complaint"
+        );
+        assert!(
+            !excerpt
+                .chars()
+                .any(farhelm_proto::text::is_presentation_unsafe)
+        );
+
+        let mut reducer = LaunchExcerptReducer::default();
+        reducer.push("\u{00e9}\u{202e}".repeat(1000).as_bytes());
+        let excerpt = reducer.finish().expect("long line");
+        assert!(excerpt.len() <= LAUNCH_EXCERPT_BYTES);
+        assert!(
+            !excerpt
+                .chars()
+                .any(farhelm_proto::text::is_presentation_unsafe)
+        );
+
+        let mut reducer = LaunchExcerptReducer::default();
+        reducer.push(b"\xff\xc3");
+        assert_eq!(reducer.finish().as_deref(), Some("\u{fffd}\u{fffd}"));
+    }
+
+    /// Wait for the actual owned pane to be dead before exercising an excerpt.
+    /// A timeout reports the last ownership/process result while the fixture
+    /// still exists, rather than treating absence of output as proof of death.
+    async fn wait_for_excerpt_dead(driver: &TmuxDriver, session: &str, pane: &str) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let state = driver
+                .pane_process(session, pane)
+                .await
+                .expect("query fixture pane");
+            if matches!(state, PaneProbe::Owned(PaneProcess { dead: true, .. })) {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "fixture never became dead: {state:?}"
+            );
+            // sleep-ok: shared bounded poll of the owned pane's explicit deadness oracle.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Wait for the death banner's single scroll before measuring a numeric
+    /// boundary. Deadness can be visible before tmux has drawn that banner.
+    async fn wait_for_excerpt_history(driver: &TmuxDriver, pane: &str, wanted: u32) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let value = driver
+                .run(&["display-message", "-p", "-t", pane, "#{history_size}"])
+                .await
+                .expect("history readiness query");
+            let actual = value
+                .trim()
+                .parse::<u32>()
+                .expect("numeric fixture history");
+            if actual == wanted {
+                return;
+            }
+            assert!(
+                actual < wanted && tokio::time::Instant::now() < deadline,
+                "fixture history never reached {wanted}: last value {actual}"
+            );
+            // sleep-ok: shared bounded poll for tmux's explicit history-count readiness oracle.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Seed actual old scrollback before a reused-generation fence is sampled.
+    /// The numeric premise matters: otherwise a test could pass merely because
+    /// the previous run happened not to leave any history to leak.
+    async fn old_excerpt_pane(server: &ScratchServer, session: &str) -> String {
+        let pane = server
+            .driver
+            .create_session(
+                session,
+                "/",
+                80,
+                24,
+                &[],
+                &[
+                    "sh".into(),
+                    "-c".into(),
+                    "i=0; while [ $i -lt 40 ]; do echo OLD-CONVERSATION-$i; i=$((i+1)); done"
+                        .into(),
+                ],
+            )
+            .await
+            .expect("create old generation");
+        wait_for_excerpt_dead(&server.driver, session, &pane).await;
+        let history = server
+            .driver
+            .run(&["display-message", "-p", "-t", &pane, "#{history_size}"])
+            .await
+            .expect("old history size");
+        assert!(history.trim().parse::<u32>().expect("numeric history") > 0);
+        let old = server
+            .driver
+            .capture_pane_text(session, &pane, 4096)
+            .await
+            .expect("old output");
+        assert!(old.contains("OLD-CONVERSATION"), "history premise: {old}");
+        pane
+    }
+
+    /// A fresh dead pane can hold several useful lines in its visible grid:
+    /// remain-on-exit moves only one row into history. The guard also compares
+    /// arbitrary session text literally through both tmux grammars.
+    #[farhelm_testtrace::test]
+    async fn launch_excerpt_captures_fresh_visible_lines_with_literal_identity() {
+        let server = ScratchServer::start().await;
+        let session = "fresh #,} \u{00e9} '$HOME'";
+        let pane = server
+            .driver
+            .create_session(
+                // new-session format-expands its -s value. Escape only this
+                // fixture's creation spelling; subsequent identity checks use
+                // the intended literal name, which is asserted below.
+                &session.replace('#', "##"),
+                "/",
+                80,
+                200,
+                &[],
+                &[
+                    "sh".into(),
+                    "-c".into(),
+                    "printf 'first complaint\\nsecond complaint\\nthird complaint\\n'; exit 9"
+                        .into(),
+                ],
+            )
+            .await
+            .expect("create fresh failure");
+        let actual_owner = server
+            .driver
+            .run(&["display-message", "-p", "-t", &pane, "#{session_name}"])
+            .await
+            .expect("fixture session identity");
+        assert_eq!(actual_owner.trim_end_matches('\n'), session);
+        wait_for_excerpt_dead(&server.driver, session, &pane).await;
+        let fence = server
+            .driver
+            .establish_launch_excerpt_fence(session, &pane)
+            .await
+            .expect("fresh fence");
+        let excerpt = server
+            .driver
+            .capture_launch_excerpt(session, &pane, &fence)
+            .await
+            .expect("capture")
+            .expect("error lines");
+        assert!(
+            excerpt.contains("first complaint")
+                && excerpt.contains("second complaint")
+                && excerpt.contains("third complaint"),
+            "{excerpt:?}"
+        );
+        assert!(
+            !excerpt.contains("Pane is dead"),
+            "tmux's banner is not startup output: {excerpt:?}"
+        );
+        server
+            .driver
+            .resize_window(session, &pane, 70, 150)
+            .await
+            .expect("fresh resize");
+        assert!(
+            server
+                .driver
+                .capture_launch_excerpt(session, &pane, &fence)
+                .await
+                .expect("capture after resize")
+                .is_none(),
+            "a dead resize can move the banner, so even fresh excerpts become ineligible"
+        );
+    }
+
+    /// Numeric tmux expressions must admit 100 visible rows with no history.
+    /// Ordinary format comparisons use strcmp and would reject this height;
+    /// disabling the death banner keeps its history row from masking that bug.
+    #[farhelm_testtrace::test]
+    async fn launch_excerpt_numeric_height_accepts_a_tall_zero_history_pane() {
+        let server = ScratchServer::start().await;
+        let session = "height-excerpt";
+        let pane = server
+            .driver
+            .create_session(
+                session,
+                "/",
+                80,
+                100,
+                &[],
+                &[
+                    "sh".into(),
+                    "-c".into(),
+                    "echo HEIGHT-READY; read reply; echo HEIGHT-COMPLAINT; exit 8".into(),
+                ],
+            )
+            .await
+            .expect("controlled fresh pane");
+        tail_containing(&server.driver, session, &pane, "HEIGHT-READY").await;
+        assert!(matches!(
+            server
+                .driver
+                .pane_process(session, &pane)
+                .await
+                .expect("fixture liveness"),
+            PaneProbe::Owned(PaneProcess { dead: false, .. })
+        ));
+        server
+            .driver
+            .mark_window(session, &pane, "remain-on-exit-format", "")
+            .await
+            .expect("disable banner before death");
+        let fence = server
+            .driver
+            .establish_launch_excerpt_fence(session, &pane)
+            .await
+            .expect("fresh fence");
+        server
+            .driver
+            .type_line_for_test(&pane, "continue")
+            .await
+            .expect("release controlled failure");
+        wait_for_excerpt_dead(&server.driver, session, &pane).await;
+        let facts = server
+            .driver
+            .run(&[
+                "display-message",
+                "-p",
+                "-t",
+                &pane,
+                "#{history_size} #{pane_height}",
+            ])
+            .await
+            .expect("numeric guard premises");
+        assert_eq!(
+            facts.trim(),
+            "0 100",
+            "the height arm must establish eligibility alone"
+        );
+        let excerpt = server
+            .driver
+            .capture_launch_excerpt(session, &pane, &fence)
+            .await
+            .expect("capture tall fresh pane")
+            .expect("startup complaint");
+        assert!(excerpt.contains("HEIGHT-COMPLAINT"), "{excerpt:?}");
+    }
+
+    /// A viewer can resize a fresh live pane before the launch fails. Its
+    /// later death draws the banner at the new bottom, so this ordinary path
+    /// must keep useful output while dead-pane resizes are made ineligible.
+    #[farhelm_testtrace::test]
+    async fn launch_excerpt_fresh_live_resize_preserves_a_later_failure() {
+        let server = ScratchServer::start().await;
+        let session = "live-resize-excerpt";
+        let pane = server
+            .driver
+            .create_session(
+                session,
+                "/",
+                80,
+                24,
+                &[],
+                &[
+                    "sh".into(),
+                    "-c".into(),
+                    "echo LIVE-RESIZE-READY; read reply; echo LIVE-RESIZED-COMPLAINT; exit 8"
+                        .into(),
+                ],
+            )
+            .await
+            .expect("controlled live pane");
+        tail_containing(&server.driver, session, &pane, "LIVE-RESIZE-READY").await;
+        assert!(matches!(
+            server
+                .driver
+                .pane_process(session, &pane)
+                .await
+                .expect("fixture liveness"),
+            PaneProbe::Owned(PaneProcess { dead: false, .. })
+        ));
+        let fence = server
+            .driver
+            .establish_launch_excerpt_fence(session, &pane)
+            .await
+            .expect("fresh fence");
+        server
+            .driver
+            .resize_window(session, &pane, 100, 50)
+            .await
+            .expect("resize while alive");
+        assert!(matches!(
+            server
+                .driver
+                .pane_process(session, &pane)
+                .await
+                .expect("still alive before release"),
+            PaneProbe::Owned(PaneProcess { dead: false, .. })
+        ));
+        server
+            .driver
+            .type_line_for_test(&pane, "continue")
+            .await
+            .expect("release controlled failure");
+        wait_for_excerpt_dead(&server.driver, session, &pane).await;
+        let excerpt = server
+            .driver
+            .capture_launch_excerpt(session, &pane, &fence)
+            .await
+            .expect("capture after live resize")
+            .expect("retained complaint");
+        assert!(
+            excerpt.contains("LIVE-RESIZED-COMPLAINT") && !excerpt.contains("Pane is dead"),
+            "{excerpt:?}"
+        );
+    }
+
+    /// Growing a dead fresh pane pulls its one-time banner into the interior.
+    /// Neither a real complaint nor silence may persist that banner as startup
+    /// output; omitting after every dead resize is the bounded fallback.
+    #[farhelm_testtrace::test]
+    async fn launch_excerpt_dead_fresh_growth_omits_banners_for_silent_and_noisy_failures() {
+        let server = ScratchServer::start().await;
+        for (session, script, complaint) in [
+            ("silent-grow-excerpt", "exit 8", None),
+            (
+                "noisy-grow-excerpt",
+                "echo GROW-COMPLAINT; exit 8",
+                Some("GROW-COMPLAINT"),
+            ),
+        ] {
+            let pane = server
+                .driver
+                .create_session(
+                    session,
+                    "/",
+                    80,
+                    24,
+                    &[],
+                    &["sh".into(), "-c".into(), script.into()],
+                )
+                .await
+                .expect("fresh failing pane");
+            wait_for_excerpt_dead(&server.driver, session, &pane).await;
+            wait_for_excerpt_history(&server.driver, &pane, 1).await;
+            let fence = server
+                .driver
+                .establish_launch_excerpt_fence(session, &pane)
+                .await
+                .expect("fresh fence");
+            let before = server
+                .driver
+                .capture_launch_excerpt(session, &pane, &fence)
+                .await
+                .expect("before growth");
+            assert_eq!(
+                before.as_deref(),
+                complaint,
+                "fixture output before its banner moves"
+            );
+            server
+                .driver
+                .resize_window(session, &pane, 80, 50)
+                .await
+                .expect("grow after death");
+            let raw = server
+                .driver
+                .capture_pane_tail(session, &pane, 4096)
+                .await
+                .expect("moved banner premise");
+            let banner_row = raw
+                .lines()
+                .position(|line| line.contains("Pane is dead"))
+                .expect("fixture retains tmux's banner");
+            assert!(
+                banner_row < 48,
+                "banner must now lie inside the ordinary capture range: {raw:?}"
+            );
+            assert_eq!(
+                server
+                    .driver
+                    .capture_launch_excerpt(session, &pane, &fence)
+                    .await
+                    .expect("after dead growth"),
+                None
+            );
+        }
+    }
+
+    /// A history boundary crossing 9 to 10 distinguishes numeric comparison
+    /// from strcmp. Both exact counts are asserted before capture, so a change
+    /// in tmux's fixture layout cannot silently weaken this regression.
+    #[farhelm_testtrace::test]
+    async fn launch_excerpt_numeric_history_accepts_a_decimal_width_boundary() {
+        let server = ScratchServer::start().await;
+        let session = "numeric-history-excerpt";
+        let pane = server
+            .driver
+            .create_session(
+                session,
+                "/",
+                80,
+                24,
+                &[],
+                &[
+                    "sh".into(),
+                    "-c".into(),
+                    "i=0; while [ $i -lt 31 ]; do echo OLD-NUMERIC-$i; i=$((i+1)); done".into(),
+                ],
+            )
+            .await
+            .expect("old history generation");
+        wait_for_excerpt_dead(&server.driver, session, &pane).await;
+        wait_for_excerpt_history(&server.driver, &pane, 9).await;
+        let fence = server
+            .driver
+            .relaunch_in_pane_with_excerpt_fence(
+                session,
+                &pane,
+                "/",
+                &[],
+                &[
+                    "sh".into(),
+                    "-c".into(),
+                    "echo NUMERIC-COMPLAINT; exit 8".into(),
+                ],
+            )
+            .await
+            .expect("new generation")
+            .expect("history fence");
+        assert_eq!(fence.history_start, 9, "real sampled boundary");
+        wait_for_excerpt_dead(&server.driver, session, &pane).await;
+        wait_for_excerpt_history(&server.driver, &pane, 10).await;
+        let excerpt = server
+            .driver
+            .capture_launch_excerpt(session, &pane, &fence)
+            .await
+            .expect("numeric boundary capture")
+            .expect("new complaint");
+        assert!(
+            excerpt.contains("NUMERIC-COMPLAINT") && !excerpt.contains("OLD-NUMERIC"),
+            "{excerpt:?}"
+        );
+    }
+
+    /// Reusing a pane must never attribute the preceding conversation to a
+    /// silent failure, while a new complaint must remain available to report.
+    #[farhelm_testtrace::test]
+    async fn launch_excerpt_reused_pane_excludes_old_history_even_when_new_run_is_empty() {
+        let server = ScratchServer::start().await;
+        let pane = old_excerpt_pane(&server, "reuse-excerpt").await;
+        let empty = server
+            .driver
+            .relaunch_in_pane_with_excerpt_fence(
+                "reuse-excerpt",
+                &pane,
+                "/",
+                &[],
+                &["sh".into(), "-c".into(), "exit 7".into()],
+            )
+            .await
+            .expect("silent respawn")
+            .expect("sampled fence");
+        wait_for_excerpt_dead(&server.driver, "reuse-excerpt", &pane).await;
+        assert!(
+            empty.history_start > 0,
+            "the fence must exclude actual prior history"
+        );
+        assert_eq!(
+            server
+                .driver
+                .capture_launch_excerpt("reuse-excerpt", &pane, &empty)
+                .await
+                .expect("silent capture"),
+            None
+        );
+
+        let next = server
+            .driver
+            .relaunch_in_pane_with_excerpt_fence(
+                "reuse-excerpt",
+                &pane,
+                "/",
+                &[],
+                &[
+                    "sh".into(),
+                    "-c".into(),
+                    "echo NEW-COMPLAINT; exit 8".into(),
+                ],
+            )
+            .await
+            .expect("complaining respawn")
+            .expect("next fence");
+        wait_for_excerpt_dead(&server.driver, "reuse-excerpt", &pane).await;
+        let excerpt = server
+            .driver
+            .capture_launch_excerpt("reuse-excerpt", &pane, &next)
+            .await
+            .expect("new capture")
+            .expect("new complaint");
+        assert!(
+            excerpt.contains("NEW-COMPLAINT") && !excerpt.contains("OLD-CONVERSATION"),
+            "{excerpt:?}"
+        );
+        assert_eq!(
+            server
+                .driver
+                .capture_launch_excerpt("reuse-excerpt", &pane, &empty)
+                .await
+                .expect("old observer after rapid later death"),
+            None,
+            "deadness alone cannot distinguish a rapidly dead later generation"
+        );
+    }
+
+    /// The banner consumes the only visible row in a height-one pane. Numeric
+    /// capture bounds must not invert an empty interval and accidentally ask
+    /// tmux for a different range; an actual new history line remains quotable.
+    #[farhelm_testtrace::test]
+    async fn launch_excerpt_handles_a_one_row_terminal_without_inverting_its_range() {
+        let server = ScratchServer::start().await;
+        let pane = server
+            .driver
+            .create_session(
+                "one-row-excerpt",
+                "/",
+                80,
+                1,
+                &[],
+                &["sh".into(), "-c".into(), "exit 7".into()],
+            )
+            .await
+            .expect("one-row pane");
+        wait_for_excerpt_dead(&server.driver, "one-row-excerpt", &pane).await;
+        let fence = server
+            .driver
+            .establish_launch_excerpt_fence("one-row-excerpt", &pane)
+            .await
+            .expect("fresh fence");
+        assert_eq!(
+            server
+                .driver
+                .capture_launch_excerpt("one-row-excerpt", &pane, &fence)
+                .await
+                .expect("silent one-row capture"),
+            None
+        );
+        let next = server
+            .driver
+            .relaunch_in_pane_with_excerpt_fence(
+                "one-row-excerpt",
+                &pane,
+                "/",
+                &[],
+                &[
+                    "sh".into(),
+                    "-c".into(),
+                    "printf ONE-ROW-COMPLAINT; exit 8".into(),
+                ],
+            )
+            .await
+            .expect("new one-row run")
+            .expect("reused fence");
+        wait_for_excerpt_dead(&server.driver, "one-row-excerpt", &pane).await;
+        assert_eq!(
+            server
+                .driver
+                .capture_launch_excerpt("one-row-excerpt", &pane, &next)
+                .await
+                .expect("new one-row capture")
+                .as_deref(),
+            Some("ONE-ROW-COMPLAINT")
+        );
+    }
+
+    /// A resize already submitted by an older route invalidates at execution,
+    /// even after a new launch sampled its boundary. A tmux lock holds the
+    /// submitted production argv behind an explicit readiness acknowledgement;
+    /// restoring the width afterward cannot restore the invalidated fence.
+    #[farhelm_testtrace::test]
+    async fn launch_excerpt_late_resize_and_resize_back_invalidate_reused_history() {
+        use tokio::io::AsyncBufReadExt;
+
+        let server = ScratchServer::start().await;
+        let pane = old_excerpt_pane(&server, "resize-excerpt").await;
+        let gate = "launch-excerpt-resize";
+        server
+            .driver
+            .run(&["wait-for", "-L", gate])
+            .await
+            .expect("hold resize gate");
+        let mut args = vec![
+            "display-message".to_owned(),
+            "-p".to_owned(),
+            "RESIZE-SUBMITTED".to_owned(),
+            ";".to_owned(),
+            "wait-for".to_owned(),
+            "-L".to_owned(),
+            gate.to_owned(),
+            ";".to_owned(),
+        ];
+        args.extend(resize_window_args("resize-excerpt", &pane, 40, 24));
+        let mut submitted = server
+            .driver
+            .command()
+            .args(&args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("submit the queued resize");
+        let mut stdout = BufReader::new(submitted.stdout.take().expect("queued stdout"));
+        let mut ready = String::new();
+        tokio::time::timeout(Duration::from_secs(30), stdout.read_line(&mut ready))
+            .await
+            .expect("resize queue readiness deadline")
+            .expect("read readiness");
+        assert_eq!(ready, "RESIZE-SUBMITTED\n");
+        assert!(
+            submitted.try_wait().expect("resize liveness").is_none(),
+            "submitted resize must still be waiting on the held gate"
+        );
+        let fence = server
+            .driver
+            .relaunch_in_pane_with_excerpt_fence(
+                "resize-excerpt",
+                &pane,
+                "/",
+                &[],
+                &[
+                    "sh".into(),
+                    "-c".into(),
+                    "echo NEW-COMPLAINT; exit 8".into(),
+                ],
+            )
+            .await
+            .expect("respawn")
+            .expect("fence");
+        wait_for_excerpt_dead(&server.driver, "resize-excerpt", &pane).await;
+        assert!(
+            server
+                .driver
+                .capture_launch_excerpt("resize-excerpt", &pane, &fence)
+                .await
+                .expect("before resize")
+                .is_some()
+        );
+        server
+            .driver
+            .run(&["wait-for", "-U", gate])
+            .await
+            .expect("release queued mutation");
+        drop(stdout);
+        let output = tokio::time::timeout(Duration::from_secs(30), submitted.wait_with_output())
+            .await
+            .expect("queued resize deadline")
+            .expect("finish queued resize");
+        assert!(
+            output.status.success(),
+            "queued production resize failed: {:?}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        server
+            .driver
+            .resize_window("resize-excerpt", &pane, 80, 24)
+            .await
+            .expect("restore width");
+        assert_eq!(
+            server
+                .driver
+                .capture_launch_excerpt("resize-excerpt", &pane, &fence)
+                .await
+                .expect("after reflow"),
+            None
+        );
+    }
+
+    /// A wrong session, a vanished pane and a later run through the legacy
+    /// respawn API all fail closed. In particular, a vanished pane must never
+    /// quote its session's current sibling, whose window target can resolve.
+    #[farhelm_testtrace::test]
+    async fn launch_excerpt_rejects_foreign_vanished_and_plain_respawned_panes() {
+        let server = ScratchServer::start().await;
+        let pane = old_excerpt_pane(&server, "owner-excerpt").await;
+        let fence = server
+            .driver
+            .establish_launch_excerpt_fence("owner-excerpt", &pane)
+            .await
+            .expect("fresh fence fixture");
+        assert!(
+            server
+                .driver
+                .capture_launch_excerpt("wrong-owner", &pane, &fence)
+                .await
+                .expect("foreign guard")
+                .is_none()
+        );
+        server
+            .driver
+            .relaunch_in_pane(
+                "owner-excerpt",
+                &pane,
+                "/",
+                &[],
+                &[
+                    "sh".into(),
+                    "-c".into(),
+                    "echo LATER-GENERATION; exit 0".into(),
+                ],
+            )
+            .await
+            .expect("plain respawn");
+        wait_for_excerpt_dead(&server.driver, "owner-excerpt", &pane).await;
+        assert!(
+            server
+                .driver
+                .capture_launch_excerpt("owner-excerpt", &pane, &fence)
+                .await
+                .expect("old fence")
+                .is_none()
+        );
+        let (_, sibling) = server
+            .driver
+            .new_window(
+                "owner-excerpt",
+                "/",
+                &[],
+                &[
+                    "sh".into(),
+                    "-c".into(),
+                    "echo SIBLING-SECRET; sleep 60".into(),
+                ],
+            )
+            .await
+            .expect("sibling window");
+        tail_containing(&server.driver, "owner-excerpt", &sibling, "SIBLING-SECRET").await;
+        let live = server
+            .driver
+            .establish_launch_excerpt_fence("owner-excerpt", &sibling)
+            .await
+            .expect("live fresh fence");
+        assert!(matches!(
+            server
+                .driver
+                .pane_process("owner-excerpt", &sibling)
+                .await
+                .expect("sibling liveness"),
+            PaneProbe::Owned(PaneProcess { dead: false, .. })
+        ));
+        assert_eq!(
+            server
+                .driver
+                .capture_launch_excerpt("owner-excerpt", &sibling, &live)
+                .await
+                .expect("live capture guard"),
+            None
+        );
+        server
+            .driver
+            .kill_pane_for_test(&pane)
+            .await
+            .expect("remove old pane");
+        let captured = server
+            .driver
+            .capture_launch_excerpt("owner-excerpt", &pane, &fence)
+            .await;
+        assert!(
+            captured.as_ref().map_or(true, |quote| quote.is_none()),
+            "vanished pane quoted something: {captured:?}"
+        );
     }
 
     /// The cross-session guarantee `pane_in_session` actually delivers,

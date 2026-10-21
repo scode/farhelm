@@ -7,14 +7,65 @@
 //! `crate::launch` owns their on-disk shape, the shim-side write, and the
 //! raw sentinel read; what lives here is the service side of them — the
 //! async read wrapper, outcome classification, and the removal and sweep
-//! helpers. Nothing here touches tmux or the in-memory session map — see
-//! `service::sweep` for the process-tree side of a launch's failure
-//! classification.
+//! helpers. A never-started error may also retain a bounded terminal excerpt,
+//! using the launch's process-local fence and tmux's atomic capture guard.
+//! This never runs on the list path. See `service::sweep` for the process-tree
+//! side of a launch's failure classification.
 
 use crate::store::{LastOutcome, SessionStore};
 use anyhow::Context;
 use std::path::Path;
 use tracing::{debug, warn};
+
+/// Append terminal evidence only after the caller has proved never-started.
+///
+/// The fence belongs to this entry's launch, not its reusable pane. Reload and
+/// ambiguous starts deliberately have none. tmux revalidates ownership,
+/// generation and deadness in the same synchronous command group as capture;
+/// an obsolete observer can therefore never quote a later launch's output.
+///
+/// `capture_available` belongs to one observer pass. Any failed capture spends
+/// the rest of its budget, including a timeout, while ordinary classification
+/// keeps progressing. A missing fence or refused guard costs no capture error.
+/// Stop uses a separate budget and calls this only for a pane already dead.
+pub(crate) async fn append_launch_excerpt(
+    sup: &super::core::Supervisor,
+    entry: &super::core::SessionEntry,
+    mut detail: String,
+    capture_available: &mut bool,
+) -> String {
+    if !*capture_available {
+        return detail;
+    }
+    let fence = entry
+        .run
+        .launch_excerpt
+        .lock()
+        .expect("launch-excerpt mutex poisoned")
+        .clone();
+    let (Some(fence), Some(terminal)) = (fence, entry.terminal.as_ref()) else {
+        return detail;
+    };
+    match sup
+        .tmux
+        .capture_launch_excerpt(&terminal.tmux_name, &terminal.pane, &fence)
+        .await
+    {
+        Ok(Some(excerpt)) if !excerpt.is_empty() => {
+            detail.push_str("; last terminal output: ");
+            detail.push_str(&excerpt);
+        }
+        Ok(_) => {}
+        Err(error) => {
+            *capture_available = false;
+            // The diagnostic is optional. In particular, tmux failure must
+            // never discard the launch evidence already proved on disk.
+            debug!(session = %entry.info.id, error = %format!("{error:#}"),
+                "could not capture never-started terminal output; omitting excerpts for the rest of this pass");
+        }
+    }
+    detail
+}
 
 /// The explanation for a launch that never reached the exec shim at all,
 /// or `None` when this is not that shape (PLAN_M3.md item 10).

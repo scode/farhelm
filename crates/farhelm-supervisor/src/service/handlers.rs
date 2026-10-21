@@ -25,8 +25,8 @@ use super::core::{
     ensure_title_printable, error_kind, truncate_for_error, unknown_pane_owner_refusal,
 };
 use super::launch_artifacts::{
-    cleanup_launch_artifacts, read_launch_sentinel, sentinel_could_still_apply,
-    wrapper_failure_detail,
+    append_launch_excerpt, cleanup_launch_artifacts, read_launch_sentinel,
+    sentinel_could_still_apply, wrapper_failure_detail,
 };
 use super::listing::list_all;
 use super::status::{KnownTmuxNames, dead_pane_exit_code, entry_info};
@@ -951,7 +951,7 @@ async fn handle_stop_session(
                     .await
                     {
                         Ok(Some(detail)) => Transition::SentinelError {
-                            detail,
+                            detail: append_launch_excerpt(&sup, &entry, detail, &mut true).await,
                             pane: entry.terminal.as_ref().map(|t| t.pane.clone()),
                         },
                         Ok(None) | Err(_) => Transition::ObservedExit { exit_code },
@@ -9630,6 +9630,7 @@ mod tests {
                     pane: "%0".to_string(),
                 }),
                 run: RunCells {
+                    launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                     launch_boot_ended: false,
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -9821,6 +9822,7 @@ mod tests {
             },
             terminal: None,
             run: RunCells {
+                launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                 launch_boot_ended: false,
                 launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -10031,6 +10033,7 @@ mod tests {
                 },
                 terminal: None,
                 run: RunCells {
+                    launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                     launch_boot_ended: false,
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),

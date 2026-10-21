@@ -168,24 +168,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   switching to a safer launch does not mean cancelling, changing the permission and launching again. UI details TBD.
   Plan: `plans/queue/yolo-confirm-launch-guarded.md`.
 
-- Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
-  supervisor's `wrapper_failure_detail` (launch_artifacts.rs) records "the agent was never started: the launch never
-  reached farhelm's exec shim, so something before it — the transient cgroup scope wrapper, or the login shell itself —
-  exited first", which names two suspects and separates neither. The wrapper's stderr is still sitting in the dead pane
-  under `remain-on-exit`, so a `capture-pane` at classification time could say which. A first attempt (2026-08-23)
-  appended the pane's last words to the durable `LastOutcome::Error` detail and was withdrawn in review for three
-  reasons any retry must design around: (1) SPEC.md's terminal-retention contract — terminal content lives only as long
-  as the host-side terminal, with no separate history store — which a durable excerpt of startup/rc output contradicts,
-  so either the quote must not be persisted (log it, or surface it only while the pane exists) or the spec must
-  authorize a bounded exception first; (2) the pane is reused across relaunches and keeps its scrollback, so a
-  generation N+1 that died before printing anything would quote generation N's conversation unless the capture is fenced
-  to text written after the wrapper started; (3) the ownership-and-deadness check and the capture are separate steps
-  with no lifecycle claim across them on the list path, so a same-pane restart in between would quote a live later
-  generation — revalidate atomically with the capture, and budget the capture so N never-started rows cannot cost N tmux
-  timeouts on the hot list. The e2e harness already has `wait_for_agent_ready` (harness.rs), whose failure text shows
-  the same pane text for a test's own diagnosis; that is the non-durable shape to start from. Plan:
-  `plans/queue/never-started-launch-cause.md`.
-
 - **Rewrite the "host changed while its update was being followed" warning.** Seen 2026-10-18 on a dev build whose host
   (running `farhelm 0.0.0-unreleased`, 0 sessions) had also been added by accident to the maintainer's 0.29.0 helm,
   which ran setup on it too. The dev build's host row showed an update that completed every step (create-directories,

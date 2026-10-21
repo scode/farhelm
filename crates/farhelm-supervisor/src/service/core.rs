@@ -61,8 +61,8 @@ use crate::store::{
     Settlement, StoredSession, Transition, now_unix,
 };
 use crate::tmux::{
-    AGENT_WINDOW_OPTION, PaneProbe, PaneState, TAB_SCOPED_WINDOW_OPTION, TAB_WINDOW_OPTION,
-    TabScopeMarker, TmuxDriver,
+    AGENT_WINDOW_OPTION, LaunchExcerptFence, PaneProbe, PaneState, TAB_SCOPED_WINDOW_OPTION,
+    TAB_WINDOW_OPTION, TabScopeMarker, TmuxDriver,
 };
 use anyhow::Context;
 use farhelm_proto::{
@@ -3040,6 +3040,7 @@ fn relaunched_entry(
             launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             launch_error: Arc::new(std::sync::Mutex::new(None)),
+            launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
             outcome: Arc::new(std::sync::Mutex::new(outcome)),
             first_input: Arc::new(std::sync::Mutex::new(None)),
             capture: Arc::new(std::sync::Mutex::new(capture)),
@@ -3341,7 +3342,7 @@ fn relaunch_argv(snapshot: &SessionSnapshot) -> anyhow::Result<Vec<String>> {
 }
 
 /// What a successful [`Supervisor::spawn_agent`] produced: the pane the
-/// agent is starting in, plus the two per-launch paths it published to —
+/// agent is starting in, its optional excerpt fence, and the two per-launch paths it published to —
 /// which a caller that later fails to confirm the launch has to clean up,
 /// and which the shim itself normally consumes on its way to `exec`.
 ///
@@ -3354,6 +3355,9 @@ struct Spawned {
     pane: String,
     spec_path: PathBuf,
     status_path: PathBuf,
+    /// Proof that a later dead-pane excerpt can belong only to this launch.
+    /// Optional diagnostics never turn a successful spawn into a refusal.
+    launch_excerpt: Option<LaunchExcerptFence>,
     /// Whether this launch's argv carried the conversation hook — see
     /// [`Supervisor::with_farhelm_args`], which decided it.
     ///
@@ -3635,6 +3639,9 @@ pub(crate) fn truncate_for_error(id: &str) -> std::borrow::Cow<'_, str> {
 /// type-checking.
 struct Relaunched {
     terminal: Terminal,
+    /// The successful spawn's process-local excerpt boundary. Publication
+    /// installs it on the new generation before any observer can read it.
+    launch_excerpt: Option<LaunchExcerptFence>,
     /// The cgroup scope the NEW generation launched into.
     scope: Option<String>,
     /// The outcome that actually committed, which is not always the one
@@ -3869,8 +3876,8 @@ pub(crate) struct SessionEntry {
 }
 
 /// The mutable cells that describe ONE RUN of a session (one launch
-/// generation): its liveness verdict, first-input anchor, capture state, hook
-/// flags, and activity classification.
+/// generation): its liveness verdict, excerpt fence, first-input anchor,
+/// capture state, hook flags, and activity classification.
 ///
 /// Held by value in [`SessionEntry`] and `Clone`: mutable cells are `Arc`s,
 /// while boot-finality proof is immutable. Cloning SHARES the cells and copies
@@ -3904,6 +3911,12 @@ pub(crate) struct RunCells {
     /// lose the only classification a dead pane cannot supply. Successful Error
     /// persistence clears this mirror; a relaunch resets it, and a rename shares it.
     pub(crate) launch_error: Arc<std::sync::Mutex<Option<String>>>,
+    /// Process-local proof fencing an optional startup-error excerpt to this
+    /// launch. A rename shares the cell, but a new generation starts empty
+    /// until its own spawn supplies a fence. Reload cannot recover the proof
+    /// from retained tmux history, so it omits the excerpt rather than risk
+    /// quoting an earlier run. Never held across an await.
+    pub(crate) launch_excerpt: Arc<std::sync::Mutex<Option<LaunchExcerptFence>>>,
     /// In-memory mirror of this session's durable last-known outcome
     /// (`crate::store::LastOutcome`, PLAN_M3.md item 2), so the common
     /// case — a `ListSessions` reply for a session whose outcome has not
@@ -6483,6 +6496,7 @@ impl Supervisor {
                             launch_cleanup_done,
                         )),
                         launch_error: Arc::new(std::sync::Mutex::new(launch_error)),
+                        launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                         outcome: Arc::new(std::sync::Mutex::new(outcome)),
                         // Loaded FROM the database, so by definition
                         // already there.
@@ -9127,6 +9141,8 @@ impl Supervisor {
     /// that it is unsafe to discard its record) and `Error` for the
     /// retained-create-refusal arms (R1.2), where the launch provably never
     /// happened and the row is the retained refusal's visible evidence.
+    /// An excerpt fence is carried only when spawn actually succeeded and
+    /// confirmation failed later; an ambiguous tmux failure proves no boundary.
     #[allow(clippy::too_many_arguments)]
     async fn publish_retained_launch(
         &self,
@@ -9137,6 +9153,7 @@ impl Supervisor {
         outcome: LastOutcome,
         generation: i64,
         scope: Option<String>,
+        launch_excerpt: Option<LaunchExcerptFence>,
     ) {
         // This failed create cannot confirm its launch, so both memory and
         // reload keep its hook diagnostic unarmed. Clearing only memory would
@@ -9159,6 +9176,7 @@ impl Supervisor {
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
+                    launch_excerpt: Arc::new(std::sync::Mutex::new(launch_excerpt)),
                     outcome: Arc::new(std::sync::Mutex::new(outcome)),
                     first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
@@ -10000,6 +10018,7 @@ impl Supervisor {
                 LastOutcome::Launching,
                 generation,
                 launch_scope.clone(),
+                None,
             )
             .await;
             return Err(anyhow::anyhow!(
@@ -10050,13 +10069,14 @@ impl Supervisor {
                 }),
             )
             .await;
-        let (pane, spec_path, status_file_path, hooked) = match spawned {
+        let (pane, spec_path, status_file_path, hooked, launch_excerpt) = match spawned {
             Ok(Spawned {
                 pane,
                 spec_path,
                 status_path,
                 hooked,
-            }) => (pane, spec_path, status_path, hooked),
+                launch_excerpt,
+            }) => (pane, spec_path, status_path, hooked, launch_excerpt),
             Err(SpawnFailure::Spec(error)) => {
                 // Nothing external happened yet — the spec is the FIRST
                 // side effect and it did not land — so the launching row
@@ -10146,6 +10166,7 @@ impl Supervisor {
                                 LastOutcome::Launching,
                                 generation,
                                 launch_scope.clone(),
+                                None,
                             )
                             .await;
                             return Err(error.context(format!(
@@ -10217,6 +10238,7 @@ impl Supervisor {
                             LastOutcome::Launching,
                             generation,
                             launch_scope.clone(),
+                            None,
                         )
                         .await;
                     }
@@ -10234,6 +10256,7 @@ impl Supervisor {
                             LastOutcome::Launching,
                             generation,
                             launch_scope.clone(),
+                            None,
                         )
                         .await;
                     }
@@ -10445,6 +10468,7 @@ impl Supervisor {
                     LastOutcome::Launching,
                     generation,
                     launch_scope.clone(),
+                    launch_excerpt,
                 )
                 .await;
             }
@@ -10462,6 +10486,7 @@ impl Supervisor {
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
+                    launch_excerpt: Arc::new(std::sync::Mutex::new(launch_excerpt)),
                     outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                     // Input starts only the diagnostic timer, never identity admission.
                     first_input: Arc::new(std::sync::Mutex::new(None)),
@@ -11812,6 +11837,7 @@ impl Supervisor {
             pane,
             spec_path,
             hooked,
+            launch_excerpt,
             ..
         } = match spawned {
             Ok(spawned) => spawned,
@@ -11913,6 +11939,7 @@ impl Supervisor {
                             tmux_name: tmux_name.clone(),
                             pane: pane.clone(),
                         },
+                        launch_excerpt,
                         scope: scope.clone(),
                         outcome: LastOutcome::Launching,
                         hooked,
@@ -12027,6 +12054,7 @@ impl Supervisor {
                                 tmux_name: tmux_name.clone(),
                                 pane: pane.clone(),
                             },
+                            launch_excerpt,
                             scope,
                             outcome: other,
                             hooked,
@@ -12076,6 +12104,7 @@ impl Supervisor {
                                 tmux_name: tmux_name.clone(),
                                 pane: pane.clone(),
                             },
+                            launch_excerpt,
                             scope,
                             outcome: LastOutcome::Running,
                             hooked,
@@ -12103,6 +12132,7 @@ impl Supervisor {
                 generation,
                 Relaunched {
                     terminal: Terminal { tmux_name, pane },
+                    launch_excerpt,
                     scope,
                     outcome: LastOutcome::Running,
                     hooked,
@@ -12337,6 +12367,7 @@ impl Supervisor {
     ) -> SessionInfo {
         let Relaunched {
             terminal,
+            launch_excerpt,
             scope,
             outcome,
             hooked,
@@ -12411,6 +12442,14 @@ impl Supervisor {
             outcome,
             false,
         );
+        // The new entry is not observable until map insertion below. Install
+        // only this spawn's boundary while late writers still hold the old
+        // generation's separate cell.
+        *published
+            .run
+            .launch_excerpt
+            .lock()
+            .expect("launch excerpt mutex poisoned") = launch_excerpt;
         // Raised on the NEW entry, whose cell `relaunched_entry` has just
         // minted `false` — this launch's own injection is the ONLY thing
         // that may raise it, whatever the previous launch did. The
@@ -14383,7 +14422,7 @@ impl Supervisor {
         let started = match target {
             SpawnTarget::Reuse(terminal) => self
                 .tmux
-                .relaunch_in_pane(
+                .relaunch_in_pane_with_excerpt_fence(
                     &terminal.tmux_name,
                     &terminal.pane,
                     cwd,
@@ -14391,7 +14430,7 @@ impl Supervisor {
                     &cmd,
                 )
                 .await
-                .map(|()| terminal.pane.clone()),
+                .map(|fence| (terminal.pane.clone(), fence)),
             SpawnTarget::ExistingSession(session) => {
                 if let Some(fault) = self.seams.faults.replacement_fault()
                     && let Err(error) = fault(ReplacementStage::BeforeCreation)
@@ -14407,17 +14446,18 @@ impl Supervisor {
                 self.tmux
                     .new_window(session, cwd, &self.seams.launch_env, &cmd)
                     .await
-                    .map(|(_, pane)| pane)
+                    .map(|(_, pane)| (pane, None))
                     .map_err(|e| e.context("creating the replacement agent window"))
             }
             SpawnTarget::NewSession => self
                 .tmux
                 .create_session(tmux_name, cwd, cols, rows, &self.seams.launch_env, &cmd)
                 .await
+                .map(|pane| (pane, None))
                 .map_err(|e| e.context("creating the session's tmux session")),
         };
         match started {
-            Ok(pane) => {
+            Ok((pane, mut launch_excerpt)) => {
                 // Mark the agent's window (PLAN_M4.md item 2). Only on the
                 // fresh-session path: a REUSED pane's window was marked
                 // when its session was created, and `respawn-pane` keeps
@@ -14471,6 +14511,22 @@ impl Supervisor {
                         tmux_attempted: true,
                     });
                 }
+                // A fresh window contains no prior conversation. Stamp it
+                // after the mandatory ownership mark, before publication;
+                // failure costs only this optional diagnostic, never the
+                // launch or its lifecycle handle. Reused panes obtained their
+                // boundary atomically with respawn above.
+                if fresh_target {
+                    match self
+                        .tmux
+                        .establish_launch_excerpt_fence(tmux_name, &pane)
+                        .await
+                    {
+                        Ok(fence) => launch_excerpt = Some(fence),
+                        Err(error) => warn!(session = %id, error = %format!("{error:#}"),
+                            "could not fence this launch's optional startup-error excerpt"),
+                    }
+                }
                 // A hook Farhelm could not add, told to the user once the
                 // launch is known to be running. The store fences the record
                 // on this generation, which the row already carries (see the
@@ -14490,6 +14546,7 @@ impl Supervisor {
                     spec_path,
                     status_path,
                     hooked,
+                    launch_excerpt,
                 })
             }
             Err(error) => Err(SpawnFailure::Tmux {
@@ -14572,6 +14629,7 @@ impl Supervisor {
                     LastOutcome::Launching,
                     generation,
                     scope,
+                    None,
                 )
                 .await;
                 let removal = format!(
@@ -14763,6 +14821,7 @@ impl Supervisor {
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
+                    launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(row.outcome.clone())),
                     first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(capture)),
@@ -18850,6 +18909,7 @@ pub(crate) mod tests {
                 launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 launch_error: Arc::new(std::sync::Mutex::new(None)),
+                launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                 outcome: Arc::new(std::sync::Mutex::new(outcome)),
                 first_input: Arc::new(std::sync::Mutex::new(None)),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
@@ -19057,6 +19117,15 @@ pub(crate) mod tests {
         assert_eq!(renamed.info.title, "new title");
         assert_eq!(old.info.title, "t", "the replaced entry is left untouched");
 
+        // A failure observer may have pinned the entry before rename. Its
+        // launch boundary must remain the one the published entry reads.
+        *old.run.launch_excerpt.lock().unwrap() = Some(LaunchExcerptFence::for_test());
+        assert!(Arc::ptr_eq(
+            &old.run.launch_excerpt,
+            &renamed.run.launch_excerpt
+        ));
+        assert!(renamed.run.launch_excerpt.lock().unwrap().is_some());
+
         old.run
             .launch_reads_settled
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -19200,6 +19269,7 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test]
     fn a_relaunched_entry_gets_fresh_cells_even_when_it_carries_the_values_over() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
+        *old.run.launch_excerpt.lock().unwrap() = Some(LaunchExcerptFence::for_test());
         old.run.activity.lock().unwrap().pending_work_started_at = Some(123_456);
         let first_input = std::time::Instant::now();
         *old.run.first_input.lock().unwrap() = Some(first_input);
@@ -19223,6 +19293,19 @@ pub(crate) mod tests {
             None,
             LastOutcome::Launching,
             false,
+        );
+        assert!(
+            relaunched.run.launch_excerpt.lock().unwrap().is_none(),
+            "a new launch cannot inherit a boundary into its predecessor's conversation"
+        );
+        assert!(!Arc::ptr_eq(
+            &old.run.launch_excerpt,
+            &relaunched.run.launch_excerpt
+        ));
+        *old.run.launch_excerpt.lock().unwrap() = Some(LaunchExcerptFence::for_test());
+        assert!(
+            relaunched.run.launch_excerpt.lock().unwrap().is_none(),
+            "a late observer of the abandoned launch cannot change the replacement's fence"
         );
         assert!(
             !relaunched
@@ -20932,7 +21015,9 @@ pub(crate) mod tests {
     ///
     /// Driven against a real tmux server through the real reload, because
     /// the name-lookup path is exactly the kind of code that looks obvious
-    /// and silently matches nothing.
+    /// and silently matches nothing. Tmux-side excerpt tokens deliberately
+    /// survive in the fixture: they cannot restore the process-local boundary
+    /// needed to attribute old history, so every reloaded fence stays absent.
     #[farhelm_testtrace::test]
     async fn reload_rediscovers_the_pane_of_a_launching_row_that_did_launch() {
         let state = StateDir::new();
@@ -20946,10 +21031,18 @@ pub(crate) mod tests {
         // code readable at all).
         for (name, command) in [("fh-live", "sleep 300"), ("fh-dead", "exit 7")] {
             let argv = ["sh".to_string(), "-c".to_string(), command.to_string()];
-            sup.tmux
+            let pane = sup
+                .tmux
                 .create_session(name, "/tmp", 80, 24, &[], &argv)
                 .await
                 .expect("create a tmux session directly");
+            // The tmux-side token survives a supervisor restart, but the
+            // process-local proof of its boundary does not. Reload must not
+            // reconstruct an excerpt fence from that token alone.
+            sup.tmux
+                .establish_launch_excerpt_fence(name, &pane)
+                .await
+                .expect("stamp the previous supervisor's excerpt fence");
         }
         // Deliberately unequal to `created_at`, and deliberately in the
         // past: it is what the restore assertion below distinguishes from
@@ -21032,6 +21125,10 @@ pub(crate) mod tests {
         // would tell a most-recently-active sort that a long-lived session
         // has never done anything.
         for (id, entry) in &sessions {
+            assert!(
+                entry.run.launch_excerpt.lock().unwrap().is_none(),
+                "session {id} must omit excerpts after losing its process-local boundary"
+            );
             let sample = entry.run.activity.lock().unwrap();
             assert_eq!(
                 sample.samples, 0,
