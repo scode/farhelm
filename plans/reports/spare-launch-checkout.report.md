@@ -122,3 +122,87 @@ their review units and checked narrowly by the same reviewer. The final review f
 it was removed and verified. No finding remains open. Fresh scope reviews removed unnecessary per-temporary-tree records
 and scheduling history while retaining the required cleanup and lifecycle guarantees. Commit and PR wording passed
 separate cold reads.
+
+### Landing
+
+Landed as #2508, #2509, #2510, #2511 and #2512, merged bottom-up, with the same content the report describes. It was the
+only plan in this landing round.
+
+#### What landed since the stack was based, and whether it interacted
+
+The executor started this plan on a main that already held most of the previous landing round, including
+never-started-launch-cause, which changed the same supervisor launch code this plan extends: it records which startup
+step a launch reached and keeps a short excerpt of a failed launch's output with its error. The executor's final rebase
+brought in only the last of that round's changes (the host update warning) and queue bookkeeping, as its report says,
+and main gained only bookkeeping after that, so the stack landed without changes. Its runtime checks were a selection of
+the checkout code's own tests, though, so a fresh-context reviewer and I read this plan against all five plans of the
+previous round and against create-reservation-retention, which landed just before them and frees a create's retry key
+(described below) when its session is deleted.
+
+- Taking and updating a spare happens inside a launch's existing clone stage, after the login shell and any scope
+  wrapper have already started Farhelm's own launch step. A failed take or update therefore shows as a checkout setup
+  error at the clone stage, like a failed clone. It can never be read as the login shell or scope wrapper failing, and
+  no terminal excerpt is kept for it.
+- The spare's own files live apart from the per-launch files that deleting a session or a failed create cleans up, so
+  that cleanup and this plan's cleanup do not touch each other's files.
+- A create carries a retry key, so that repeating a create whose reply was lost does not start a second session. A
+  retried create keeps the spare setting it was first made with. Freeing the key when its session is deleted also drops
+  that create's pending replacement spare, and replaying a lost reply never prepares a second one.
+- The launcher's "start guarded session instead" answer is decided in the helm before anything reaches the supervisor,
+  and the spare setting does not invalidate the fresh checkout preview that answer waits for.
+- The previous round's SPEC.md and SPEC_impl.md changes (terminal output retention, launch and connection stages, the
+  YOLO question) and this plan's (uninstall data, managed checkouts) do not contradict each other.
+
+#### Fixes made during the landing
+
+None.
+
+#### Possible follow-ups
+
+- Found at landing; neither the report nor the executor's review mentions these:
+  - If a managed-checkout launch never starts (its login shell exits before Farhelm's launch step runs), the request to
+    prepare a replacement spare stays pending until the next create of that repository on that host, or until the
+    session is deleted. Meanwhile the supervisor re-reads that pending request every two seconds, which costs very
+    little. The unused spare stays available: the next new session can take it, and so can a restart of the failed one.
+    A restart prepares no replacement, though, so after a restart takes the spare, the next new session clones normally.
+    Possible follow-up: drop a pending preparation once its session has a stored launch error.
+  - SPEC_impl.md's "Runtime state" list of the supervisor's state directory does not mention the directory holding the
+    spare preparation's own files, or the spare ownership records kept beside each repository cache (described elsewhere
+    in SPEC_impl.md). Possible follow-up: add them to that list.
+
+#### Checks
+
+The plan adds about 7,400 lines and removes about 240, mostly in the supervisor's launch and checkout code across the
+supervisor, helm, protocol and UI crates, and the report ran only selections of the checkout code's own tests; that
+reach is why this round ran the whole Rust workspace. Its browser-visible change is one setting and its API, so the
+browser run covered the specs for checkouts, the launcher's checkout flow, Settings and tooltip coverage rather than the
+full suite. All of the following ran on the stack as it landed:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed Markdown, JSON and TOML file,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, the website build (three docs
+  pages changed), the debug build, the release web build of the UI and `scripts/check-desktop-assets.sh` (which also
+  builds the desktop app): all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `2ae960cf-92f8-463a-bcc6-f6558a91635c`: 4145 passed, none failed; 40 tests
+  marked as ignored did not run. The output has no runtime `SKIPPED` message, so the plan's spare-builder and end-to-end
+  checkout tests ran for real.
+- `cargo nextest run -p farhelm-ui --features desktop`, run `1f044010-efc5-44e1-a485-b1060f0edc04`: 773 passed.
+- `npx playwright test` in `e2e/` for `github-checkouts`, `github-checkout-composer`, `settings` and `tooltip-coverage`
+  on Chromium and WebKit, three workers each with its own helm and supervisors, no retries, run
+  `dd883f13-632e-4743-b2f1-83f3d27dd15f` (kept): 131 passed, 1 failed. On WebKit, "post-clone commands with carriage
+  returns refuse edits but can be cleared" finished all its steps in 14 seconds, then hung in its cleanup until the
+  60-second test timeout. The cleanup was waiting for the browser to report one of the test's post-clone command saves
+  as finished, but the page had already shown every save's result and the test had read each saved value back, so every
+  save had been answered. This plan does not change that test or the post-clone command save; its new switch sits in the
+  same Settings section, but it cannot hold back a save that was already answered. Ten repeats on WebKit (run
+  `bb964d0b-b35e-43e3-a2e9-e2c08cb09e0a`) and five on Chromium (run `16b8d112-1859-457a-be9c-258475b98947`) all passed.
+  I suspect machine load or the browser's request reporting rather than the product, and did not add it to FLAKES.md on
+  a single observation.
+- Skipped: the JavaScript harness (no asset JavaScript changed), the rest of the browser suite (the plan's UI change is
+  one setting), the workspace and desktop doctests (no documentation example changed), the desktop smoke test (the
+  desktop app crate is unchanged), the native Mac app (not runnable here) and the installer (unchanged).
+
+The report's runtime checks selected only the checkout code's own tests; this round ran the whole Rust workspace and the
+browser specs above on the code as it landed. Nothing in the executor's report became untrue at landing.
