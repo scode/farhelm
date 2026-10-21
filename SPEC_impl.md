@@ -2381,6 +2381,36 @@ An interrupted eviction therefore leaves only trash to finish at the next startu
 inode, and replacing it would allow two owners. One empty lock file per repository ever cached is the accepted leftover.
 A sweep failure is logged and leaves unused caches for a later startup; it does not prevent sessions from starting.
 
+Spare-checkout recovery uses a sibling `<name>.spare.json` record containing outstanding namespace locations and their
+directory identities, plus the intended or retained ready spare's identity. A namespace is the owner directory under
+`<checkout root>/.farhelm-spares/<owner>`; both `.farhelm-spares` and the archive directory are reserved in occupancy
+and repository discovery. Old locations remain recorded until this repository's ready slot and strictly generated
+private names are positively absent, including after a create selects another checkout root. The record contains no Git
+facts, credentials, durable build status or per-temporary-tree journal.
+
+The namespace's inode and creation-time evidence uses the working-copy registry's existing remount-tolerant identity
+rule. Cleanup opens the canonical checkout root without following a final symlink, confines each reserved child lookup
+below it, and verifies the opened namespace. Dedicated ownership of that namespace authorizes recovery of only
+`.<name>:building-<uuid>`, `.<name>:claimed-<session uuid>-<generation>` and `.<name>:trash-<uuid>` directories,
+including a builder interrupted before recording a per-tree identity. Unknown names and other repositories remain
+untouched. The colon is excluded by repository-name validation, so private names cannot match another repository's ready
+slot in the shared namespace. A ready `<name>` slot requires its own recorded identity; namespace ownership never adopts
+a replaced ready spare. Cleanup renames the selected directory to a fresh no-replace trash name, verifies it, then uses
+the archive's shared opened-handle confined recursive remover. It never recursively removes by checkout pathname or
+crosses links or mounts. The verified namespace is fsynced before a record can forget a removed ready identity or retire
+its location. A failed cleanup or namespace barrier retains the original identity and location, including when removal
+completed; an absence-only retry still needs that namespace barrier before retiring the evidence.
+
+Startup collects exact launch-generation, preparation-state and owned-pane evidence before the blocking cache sweep. A
+still-live clone claim is retained, including a live NotStarted preparation that can begin cloning after the sample;
+failed or uncertain liveness observations retain possible claims rather than inferring abandonment. Spare cleanup runs
+under the cache sweep's existing nonblocking repository lock, skips held locks, and evicts ready spares with the same
+thirty-day cache observation. Missing ready content alone never permits forgetting a location with a surviving claim. A
+failure is logged and retains the ownership record for later cleanup. Record reads are limited to 16 MiB and
+owner-namespace scans to 100,000 iterator calls, including EOF proof. Exhausting either limit refuses cleanup and
+retains ownership evidence; neither truncates or silently forgets old locations. This recovery layer does not itself
+create, publish or take spares.
+
 Last-reference Delete journals the source identity and archive destination before one no-replace rename. Linux uses
 `renameat2` through its syscall with `RENAME_NOREPLACE`; macOS uses `renameatx_np(RENAME_EXCL)`. Parent fsync barriers
 precede journal retirement and atomic metadata settlement. Recovery accepts a matching already-moved destination but

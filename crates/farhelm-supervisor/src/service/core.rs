@@ -6872,6 +6872,109 @@ impl Supervisor {
             .expect("an absolute farhelm executable has a parent directory")
     }
 
+    /// Protect startup's surviving clone claims before any blocking sweep.
+    /// The exact generation and owned pane matter: pane ids can be recycled,
+    /// and an unreadable preparation or unattributed pane proves no abandonment.
+    async fn spare_claims_at_startup(&self) -> crate::spare_checkouts::LiveClaims {
+        let states = match self.tmux.pane_states().await {
+            Ok(states) => states,
+            Err(error) => {
+                warn!(error = %error, "spare cleanup could not inspect panes; claims retained");
+                return crate::spare_checkouts::LiveClaims {
+                    uncertain: true,
+                    ..Default::default()
+                };
+            }
+        };
+        self.spare_claims_from_panes(&states).await
+    }
+
+    /// Combine one tmux observation with generation-fenced preparation reads.
+    /// Keeping collection separate lets tests exercise ambiguous pane ownership
+    /// without pretending a failed dummy shim is a live clone process.
+    async fn spare_claims_from_panes(
+        &self,
+        states: &HashMap<String, PaneState>,
+    ) -> crate::spare_checkouts::LiveClaims {
+        let mut live = crate::spare_checkouts::LiveClaims::default();
+        let known = self.known_tmux_names().await;
+        let entries: Vec<_> = self.sessions.lock().await.values().cloned().collect();
+        for entry in entries {
+            let may_be_live = if let Some(terminal) = &entry.terminal {
+                match super::status::pane_evidence(
+                    &terminal.pane,
+                    &terminal.tmux_name,
+                    states,
+                    &known,
+                ) {
+                    super::status::PaneEvidence::Owned(pane) => !pane.dead,
+                    super::status::PaneEvidence::Absent => false,
+                    super::status::PaneEvidence::Unattributed(_) => true,
+                }
+            } else {
+                // Error rows can retain a recorded but unattributed pane even
+                // when reload supplies no terminal. Read that provenance rather
+                // than interpreting an empty in-memory terminal as abandonment.
+                match self.store.session(&entry.info.id).await {
+                    Ok(Some(row)) if row.generation == entry.generation => {
+                        if row.pane.is_empty() {
+                            agent_pane_from_states(states, &row.tmux_name, &row.id)
+                                .is_some_and(|(_, pane)| !pane.dead)
+                        } else {
+                            match super::status::pane_evidence(
+                                &row.pane,
+                                &row.tmux_name,
+                                states,
+                                &known,
+                            ) {
+                                super::status::PaneEvidence::Owned(pane) => !pane.dead,
+                                super::status::PaneEvidence::Absent => false,
+                                super::status::PaneEvidence::Unattributed(_) => true,
+                            }
+                        }
+                    }
+                    Ok(Some(_)) => false,
+                    Ok(None) | Err(_) => {
+                        live.protected
+                            .insert((entry.info.id.clone(), entry.generation));
+                        continue;
+                    }
+                }
+            };
+            if !may_be_live {
+                continue;
+            }
+            let origin = self
+                .store
+                .preparation_origin(&entry.info.id, entry.generation)
+                .await;
+            let protect = match origin {
+                Ok(Some(origin)) => {
+                    let path = crate::launch::preparation_state_path(&self.state_dir, &origin.id);
+                    match crate::launch::read_preparation_state(&path, &origin.id) {
+                        // A surviving shim may advance NotStarted immediately
+                        // after this sample, then claim without the cache lock.
+                        // Protect that pre-clone window as well as CloneStarted.
+                        Ok(Some(record)) => matches!(
+                            record.state,
+                            crate::launch::PreparationState::NotStarted
+                                | crate::launch::PreparationState::CloneStarted
+                        ),
+                        Ok(None) | Err(_) => true,
+                    }
+                }
+                // No accepted provenance may be the publication gap above.
+                // It cannot authorize cleanup of a possibly surviving claim.
+                Ok(None) | Err(_) => true,
+            };
+            if protect {
+                live.protected
+                    .insert((entry.info.id.clone(), entry.generation));
+            }
+        }
+        live
+    }
+
     /// Accept connections forever on this supervisor's own state dir.
     /// The directory is not a parameter: a caller passing a different one
     /// would bind the socket in one place while launch specs land in
@@ -6972,7 +7075,11 @@ impl Supervisor {
         // supervisor. The sweep skips those caches; recursive removal runs
         // off the async runtime, like other potentially blocking disk work.
         let cache_state_dir = self.state_dir.clone();
-        match tokio::task::spawn_blocking(move || crate::repo_cache::sweep(&cache_state_dir)).await
+        let live_claims = self.spare_claims_at_startup().await;
+        match tokio::task::spawn_blocking(move || {
+            crate::repo_cache::sweep(&cache_state_dir, &live_claims)
+        })
+        .await
         {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
@@ -35413,6 +35520,111 @@ exit 0
                 crate::working_copies::AllocationState::Planned
             );
         }
+    }
+
+    /// Startup's cleanup authority comes from the accepted generation, its
+    /// preparation record and owned-pane evidence together. Supply pane samples
+    /// explicitly: the dummy shim creates provenance but is not a live clone.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn spare_claim_cleanup_requires_exact_clone_and_owned_pane_evidence() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir(&root).unwrap();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            scopeless_seams(),
+        )
+        .await
+        .unwrap();
+        let origin = fresh_create(&sup, &checkout_fixture(&root), None)
+            .await
+            .unwrap();
+        let row = sup.store.session(&origin.id).await.unwrap().unwrap();
+        let plan = sup
+            .store
+            .preparation_origin(&origin.id, row.generation)
+            .await
+            .unwrap()
+            .unwrap();
+        let path = crate::launch::preparation_state_path(state.path(), &plan.id);
+        let mut panes = sup.tmux.pane_states().await.unwrap();
+        let pane = panes.get_mut(&row.pane).expect("accepted pane exists");
+        assert_eq!(pane.session_name, row.tmux_name);
+        pane.dead = false;
+        for (preparation, protect) in [
+            (crate::launch::PreparationState::NotStarted, true),
+            (crate::launch::PreparationState::CloneStarted, true),
+            (crate::launch::PreparationState::HookStarted, false),
+            (crate::launch::PreparationState::Ready, false),
+            (
+                crate::launch::PreparationState::Failed {
+                    stage: "clone".into(),
+                    detail: "fixture failure".into(),
+                },
+                false,
+            ),
+        ] {
+            crate::launch::write_preparation_state(
+                &path,
+                &plan.id,
+                &preparation,
+                &crate::files::RealFs,
+            )
+            .unwrap();
+            let observed = sup.spare_claims_from_panes(&panes).await;
+            assert_eq!(
+                observed
+                    .protected
+                    .contains(&(origin.id.clone(), row.generation)),
+                protect,
+                "{preparation:?}"
+            );
+            assert!(
+                !observed
+                    .protected
+                    .contains(&(origin.id.clone(), row.generation + 1))
+            );
+        }
+        std::fs::write(&path, b"corrupt fixture state").unwrap();
+        assert!(crate::launch::read_preparation_state(&path, &plan.id).is_err());
+        assert!(
+            sup.spare_claims_from_panes(&panes)
+                .await
+                .protected
+                .contains(&(origin.id.clone(), row.generation))
+        );
+        crate::launch::write_preparation_state(
+            &path,
+            &plan.id,
+            &crate::launch::PreparationState::CloneStarted,
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        panes.get_mut(&row.pane).unwrap().session_name = "unattributed-fixture-owner".into();
+        assert!(
+            sup.spare_claims_from_panes(&panes)
+                .await
+                .protected
+                .contains(&(origin.id.clone(), row.generation))
+        );
+        panes.get_mut(&row.pane).unwrap().session_name = row.tmux_name.clone();
+        panes.get_mut(&row.pane).unwrap().dead = true;
+        assert!(
+            sup.spare_claims_from_panes(&panes)
+                .await
+                .protected
+                .is_empty()
+        );
+        panes.remove(&row.pane);
+        assert!(
+            sup.spare_claims_from_panes(&panes)
+                .await
+                .protected
+                .is_empty()
+        );
+        sup.tmux.kill_session(&row.tmux_name).await.unwrap();
     }
 
     /// A stopped accepted terminal with incomplete setup must not look like

@@ -19,7 +19,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Instant, timeout_at};
 
 use crate::bounded_command::{Ended, GroupChild, OutputCaps};
-use crate::working_copies::ARCHIVE_DIR_NAME;
+use crate::working_copies::reserved_checkout_name;
 
 /// Maximum immediate entries examined during one discovery request.
 pub const ENTRY_CAP: usize = 1024;
@@ -153,7 +153,7 @@ impl RepositoryScanner {
                 }
             };
             let path = entry.path();
-            if entry.file_name() == OsStr::new(ARCHIVE_DIR_NAME) {
+            if reserved_checkout_name(&entry.file_name()) {
                 continue;
             }
             let kind = match entry.file_type() {
@@ -471,6 +471,29 @@ mod tests {
     use std::process::Command;
 
     use super::*;
+    use crate::working_copies::{ARCHIVE_DIR_NAME, SPARE_DIR_NAME};
+
+    /// A reserved container can contain convincing Git metadata after a user
+    /// mistake. Name reservation must win before the local-origin query runs.
+    #[farhelm_testtrace::test]
+    async fn reserved_containers_are_never_discovered_as_repositories() {
+        let fixture = tempfile::tempdir().unwrap();
+        for name in [ARCHIVE_DIR_NAME, SPARE_DIR_NAME] {
+            init_repo(fixture.path(), name, "https://github.com/acme/reserved.git");
+            assert!(fixture.path().join(name).join(".git/config").is_file());
+        }
+        init_repo(
+            fixture.path(),
+            "ordinary",
+            "https://github.com/acme/visible.git",
+        );
+        let result = RepositoryScanner::new("git")
+            .scan(fixture.path(), "")
+            .await
+            .unwrap();
+        assert_eq!(repo_names(&result), ["acme/visible"]);
+        assert!(!result.truncated);
+    }
 
     /// A real repository's local config is the contract this scanner reads:
     /// accepted transports become canonical suggestions, while unsafe origins

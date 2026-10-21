@@ -5,6 +5,8 @@
 //! it would split waiting shims and new arrivals across different lock inodes.
 //! Checkouts dissociate from the cache before releasing this lock, so eviction
 //! never affects an existing checkout.
+//! Spare recovery shares the sweep's lock and age observation, but uses its
+//! own recorded namespace authority and the checkout trash's confined remover.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -38,7 +40,12 @@ pub(crate) fn acquire(cache: &Path) -> std::io::Result<PreparationLock> {
 /// held lock therefore skips both trash cleanup and eviction. Rename precedes
 /// recursive removal so interruption can leave only trash, never a live cache
 /// partially deleted. The next startup removes that trash under the same lock.
-pub(crate) fn sweep(state_dir: &Path) -> std::io::Result<()> {
+/// Spare leftovers are recovered under this same guard and ready spares share
+/// the cache's eviction decision; a failed spare cleanup retains its record.
+pub(crate) fn sweep(
+    state_dir: &Path,
+    live: &crate::spare_checkouts::LiveClaims,
+) -> std::io::Result<()> {
     let root = state_dir.join("repo-cache");
     let owners = match std::fs::read_dir(&root) {
         Ok(owners) => owners,
@@ -73,6 +80,18 @@ pub(crate) fn sweep(state_dir: &Path) -> std::io::Result<()> {
             let unused = now
                 .duration_since(lock.modified()?)
                 .is_ok_and(|age| age > retention);
+            let repo_text = format!(
+                "{}/{}",
+                owner.file_name().to_string_lossy(),
+                lock_path.file_stem().unwrap_or_default().to_string_lossy()
+            );
+            // Permanent locks also locate a spare record after its cache is
+            // already gone. Invalid foreign names never become checkout paths.
+            if let Ok(repo) = farhelm_proto::github_checkout::parse_github_repo(&repo_text)
+                && let Err(error) = crate::spare_checkouts::sweep(&cache, &repo, live, unused)
+            {
+                tracing::warn!(error = %error, "spare-checkout sweep failed; folders retained");
+            }
             if unused {
                 match std::fs::rename(&cache, &trash) {
                     Ok(()) => remove_if_present(&trash)?,
@@ -128,7 +147,7 @@ mod tests {
     fn stale_cache_is_removed_but_lock_survives() {
         let (state, cache, lock_path) = fixture(31);
         assert!(cache.join("objects").exists());
-        sweep(state.path()).unwrap();
+        sweep(state.path(), &Default::default()).unwrap();
         assert!(!cache.exists());
         assert!(lock_path.exists());
         assert!(!cache.with_extension("git.trash").exists());
@@ -138,7 +157,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn fresh_cache_is_retained() {
         let (state, cache, _) = fixture(1);
-        sweep(state.path()).unwrap();
+        sweep(state.path(), &Default::default()).unwrap();
         assert_eq!(
             std::fs::read_to_string(cache.join("objects")).unwrap(),
             "cached objects"
@@ -156,10 +175,10 @@ mod tests {
             !contender.try_acquire().unwrap(),
             "premise: the shim owns the lock"
         );
-        sweep(state.path()).unwrap();
+        sweep(state.path(), &Default::default()).unwrap();
         assert!(cache.join("objects").exists());
         drop(lock);
-        sweep(state.path()).unwrap();
+        sweep(state.path(), &Default::default()).unwrap();
         assert!(!cache.exists());
         assert!(lock_path.exists());
     }
@@ -173,7 +192,7 @@ mod tests {
         std::fs::create_dir(&trash).unwrap();
         std::fs::write(trash.join("objects"), "interrupted eviction").unwrap();
         assert!(trash.join("objects").exists());
-        sweep(state.path()).unwrap();
+        sweep(state.path(), &Default::default()).unwrap();
         assert!(!trash.exists());
         assert!(cache.join("objects").exists());
         assert!(lock_path.exists());

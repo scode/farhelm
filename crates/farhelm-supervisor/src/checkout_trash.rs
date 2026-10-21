@@ -4,6 +4,8 @@
 //! client never do. The supervisor holds directory admission through this
 //! deletion work, including after its caller stops waiting, so a new
 //! session cannot enter an archive between the live-directory check and removal.
+//! Spare recovery reuses only the confined opened-tree traversal below; its
+//! namespace ownership and trash rename remain in `spare_checkouts`.
 
 use std::collections::HashSet;
 use std::ffi::{CStr, CString};
@@ -65,7 +67,11 @@ struct OpenArchive {
 /// NO_XDEV covers same-device bind mounts too; comparing device numbers alone
 /// would delete their external contents. An old Linux kernel may still list
 /// identities, but traversal and permanent deletion require openat2 support.
-fn open_child_dir(parent: impl AsFd, name: &CStr, confined: bool) -> std::io::Result<fs::File> {
+pub(crate) fn open_child_dir(
+    parent: impl AsFd,
+    name: &CStr,
+    confined: bool,
+) -> std::io::Result<fs::File> {
     let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     #[cfg(target_os = "linux")]
     {
@@ -162,10 +168,34 @@ fn remove_archive_with(
     archive: &OpenArchive,
     open: &mut impl FnMut(std::os::fd::BorrowedFd<'_>, &CStr) -> std::io::Result<fs::File>,
 ) -> anyhow::Result<()> {
-    let metadata = rustix::fs::fstat(&archive.directory)?;
+    remove_opened_tree_with(&archive.parent, &archive.directory, &archive.name, open)
+}
+
+/// Remove a tree whose caller already established ownership on these handles.
+/// Names alone grant no authority: the caller must verify the selected object
+/// and park it under a private trash name before entering this shared traversal.
+pub(crate) fn remove_opened_tree(
+    parent: &fs::File,
+    directory: &fs::File,
+    name: &CStr,
+) -> anyhow::Result<()> {
+    remove_opened_tree_with(parent, directory, name, &mut |parent, name| {
+        open_child_dir(parent, name, true)
+    })
+}
+
+/// Keep mount-refusal injection on the same traversal used by archives and
+/// spares. No error permits an unconfined or pathname-recursive fallback.
+pub(crate) fn remove_opened_tree_with(
+    parent_directory: &fs::File,
+    directory: &fs::File,
+    name: &CStr,
+    open: &mut impl FnMut(std::os::fd::BorrowedFd<'_>, &CStr) -> std::io::Result<fs::File>,
+) -> anyhow::Result<()> {
+    let metadata = rustix::fs::fstat(directory)?;
     let mut stack = vec![RemovalFrame {
-        entries: Dir::read_from(&archive.directory)?,
-        name: archive.name.clone(),
+        entries: Dir::read_from(directory)?,
+        name: name.to_owned(),
         identity: metadata,
         rescans: 0,
     }];
@@ -213,7 +243,7 @@ fn remove_archive_with(
             let mut completed = stack.pop().expect("completed directory");
             let parent = match stack.last() {
                 Some(frame) => frame.entries.fd()?,
-                None => archive.parent.as_fd(),
+                None => parent_directory.as_fd(),
             };
             // Refuse a moved/replaced name before final rmdir. A swap after this
             // check cannot lose file contents: rmdir refuses nonempty objects.
