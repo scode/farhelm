@@ -403,6 +403,133 @@ test("a YOLO restart-with requires confirmation inside the dialog", async ({ pag
 });
 
 /**
+ * Guarded answers change the visible draft and restart without YOLO consent.
+ * Holding the guarded request establishes the busy boundary: the permission
+ * row must already show guarded and focus must survive the question's removal.
+ * No host setting is needed to take this safer path.
+ */
+test("restart with can answer the YOLO question by restarting guarded", async ({ page }) => {
+  await injectSession(page, BASELINE, "resume");
+  const restarts: any[] = [];
+  const marks: unknown[] = [];
+  const gate = routeGate();
+  await page.route(`**/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`, async (route) => {
+    const body = route.request().postDataJSON();
+    restarts.push(body);
+    if (body.with?.permissions === "yolo") {
+      await fulfillAsHelm(route, {
+        status: 409,
+        contentType: "text/plain",
+        headers: { "x-farhelm-yolo-confirmation": "confirmation-required" },
+        body: "this machine asks before YOLO launches; confirm with --confirm-yolo",
+      });
+      return;
+    }
+    await gate.wait();
+    await fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: SESSION_ID,
+        title: TITLE,
+        cwd: "/tmp",
+        invocation: "codex --sandbox workspace-write",
+        launch: agentLaunchRow({ ...BASELINE, permissions: "guarded" }),
+        status: { state: "unknown" },
+        restart_offer: "resume",
+        created_at: 0,
+        last_activity_at: 0,
+        tabs: [],
+      }),
+    });
+  });
+  await page.route("**/api/hosts/*/yolo-without-asking", async (route) => {
+    marks.push(route.request().postDataJSON());
+    await fulfillAsHelm(route, { status: 200, contentType: "application/json", body: "{}" });
+  });
+
+  try {
+    const dialog = await openInjectedDialog(page);
+    const permissions = dialog.locator(".launch-composer-permissions-choice");
+    await permissions.getByRole("button", { name: "yolo", exact: true }).click();
+    const submit = dialog.locator(".restart-with-submit");
+    await submit.click();
+    const confirmation = dialog.locator(".yolo-confirmation");
+    await expect(confirmation).toBeVisible();
+    expect(restarts).toHaveLength(1);
+    expect(restarts[0]).toMatchObject({ with: { permissions: "yolo" } });
+    await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
+    const guarded = confirmation.locator(".yolo-launch-guarded");
+    await expect(guarded).toHaveText("start guarded session instead");
+    await expect(guarded).toHaveClass(/\bbtn-primary\b/);
+    await expect(confirmation.locator("button").first()).toHaveClass(/\byolo-launch-guarded\b/);
+    await guarded.click();
+
+    await expect.poll(() => restarts.length).toBe(2);
+    await expect(submit).toHaveAttribute("aria-disabled", "true");
+    await expect(confirmation).toHaveCount(0);
+    await expect(permissions.getByRole("button", { name: "guarded", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect(permissions.locator(".launch-composer-changed-marker"))
+      .toHaveText("● changed · was agent's own setting");
+    await expect(submit).toBeFocused();
+    expect(restarts[1]).toEqual({
+      stop_if_running: false,
+      with: { harness: "codex", model: "gpt-6-astra", effort: "high", permissions: "guarded" },
+    });
+    expect(marks, "guarded answers do not mark the host safe for YOLO").toHaveLength(0);
+    gate.release();
+    await expect(dialog).toHaveCount(0);
+    expect(restarts, "one guarded answer sends one additional restart").toHaveLength(2);
+    expect(marks).toHaveLength(0);
+  } finally {
+    gate.release();
+  }
+});
+
+/**
+ * Returning only the permission to its stored guarded value would leave no
+ * edit for Restart with to submit. Another changed field makes the guarded
+ * alternative useful again, so stored guarded alone must not hide it.
+ */
+test("restart with hides guarded when it would restore the unchanged launch", async ({ page }) => {
+  await injectSession(page, { ...BASELINE, permissions: "guarded" }, "resume");
+  const restarts: unknown[] = [];
+  await page.route(`**/api/sessions/${encodeURIComponent(SESSION_ID)}/restart`, async (route) => {
+    restarts.push(route.request().postDataJSON());
+    await fulfillAsHelm(route, {
+      status: 409,
+      contentType: "text/plain",
+      headers: { "x-farhelm-yolo-confirmation": "confirmation-required" },
+      body: "this machine asks before YOLO launches; confirm with --confirm-yolo",
+    });
+  });
+  const dialog = await openInjectedDialog(page);
+  const submit = dialog.locator(".restart-with-submit");
+  await expect(submit, "the stored guarded launch starts unchanged").toBeDisabled();
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  await submit.click();
+  const confirmation = dialog.locator(".yolo-confirmation");
+  await expect(confirmation).toBeVisible();
+  expect(restarts).toHaveLength(1);
+  await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
+  await expect(confirmation.locator(".yolo-launch-guarded")).toHaveCount(0);
+  await expect(confirmation.locator(".yolo-confirm")).toBeVisible();
+  await expect(confirmation.locator(".yolo-confirm-stop-asking")).toBeVisible();
+
+  await confirmation.locator(".yolo-cancel").click();
+  await expect(confirmation).toHaveCount(0);
+  const model = dialog.locator(".launch-composer-model-choice");
+  await model.getByRole("combobox", { name: "model" }).click();
+  await model.getByRole("option", { name: "harness default" }).click();
+  await expect(model.locator(".launch-composer-changed-marker")).toBeVisible();
+  await submit.click();
+  await expect(confirmation).toBeVisible();
+  expect(restarts).toHaveLength(2);
+  await expect(confirmation.locator(".yolo-launch-guarded")).toBeVisible();
+});
+
+/**
  * "Start, and don't ask again on this host" from inside the restart-with
  * dialog keeps focus in the dialog while it runs, launches nothing when the
  * host cannot be marked, and restarts with the override once it can.
@@ -562,7 +689,7 @@ test("cancel and an answer to restart with's YOLO question in one burst restart 
   await expect(confirmation).toBeVisible();
   await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
 
-  for (const answer of [".yolo-confirm", ".yolo-confirm-stop-asking"]) {
+  for (const answer of [".yolo-confirm", ".yolo-confirm-stop-asking", ".yolo-launch-guarded"]) {
     // Both buttons are captured, then clicked in one synchronous block:
     // Cancel first, the answer second, before any render can remove the
     // answer. The answer must still be connected and enabled when clicked,
@@ -578,6 +705,8 @@ test("cancel and an answer to restart with's YOLO question in one burst restart 
     expect(answerWasLive, `premise: ${answer} was still live when clicked`).toBe(true);
     await expect(confirmation).toHaveCount(0);
     await expect(dialog, "cancelling the question keeps the dialog open").toBeVisible();
+    await expect(dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
 
     // A plain restart afterwards: a restart the stale answer had approved
     // would show up below as a body carrying the override (and a 200 reply),
@@ -593,14 +722,16 @@ test("cancel and an answer to restart with's YOLO question in one burst restart 
   expect(
     restarts.map((body) => body.confirm_yolo ?? false),
     "no restart after a burst carries the override",
-  ).toEqual([false, false, false]);
+  ).toEqual([false, false, false, false]);
+  expect(restarts.map((body) => body.with.permissions), "stale answers leave every submitted draft on YOLO")
+    .toEqual(["yolo", "yolo", "yolo", "yolo"]);
   expect(marks, "the host is never marked").toHaveLength(0);
 
   // Positive control: a genuine answer restarts with the override.
   await confirmation.locator(".yolo-confirm").click();
   await expect(dialog).toHaveCount(0);
-  expect(restarts).toHaveLength(4);
-  expect(restarts[3]).toMatchObject({
+  expect(restarts).toHaveLength(5);
+  expect(restarts[4]).toMatchObject({
     with: { harness: "codex", permissions: "yolo" },
     confirm_yolo: true,
   });

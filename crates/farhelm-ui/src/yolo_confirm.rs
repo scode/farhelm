@@ -21,7 +21,12 @@
 //! refusal sentence is not shown: it is written for the command line (it
 //! names a CLI flag), and the GUI has everything it needs to say it better.
 //!
-//! Three answers. "Start YOLO session anyway" is a one-off override. "Start,
+//! The launcher and Restart with can also offer "start guarded session instead"
+//! when the user explicitly chose YOLO on an agent that offers guarded mode.
+//! That answer changes the draft and submits it without YOLO consent or a host
+//! setting write. Plain Replace keeps the stored launch, so has no such answer.
+//!
+//! "Start YOLO session anyway" is a one-off override. "Start,
 //! and don't ask again on this host" first sets the host to start YOLO
 //! sessions without asking (the same helm write as the host settings
 //! checkbox), then starts the same way; the flow that owns the launch does both, in that order, and
@@ -33,9 +38,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
-#[cfg(test)]
-use farhelm_proto::LaunchPermission;
-use farhelm_proto::{LaunchHarness, LaunchSelection};
+use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
 
 use crate::HostId;
 use crate::peer::{DetailPart, PeerLine, display_peer};
@@ -89,6 +92,21 @@ impl YoloReason {
             }
             Some(_) => YoloReason::ChosenPermission,
         }
+    }
+
+    /// Offer a draft change only for an explicit YOLO choice with a guarded mode.
+    ///
+    /// The reason belongs to the refused request, while the selection supplies
+    /// its harness capability. An own-setting launch, custom flags or a command
+    /// must never acquire a different launch merely because it reached this box.
+    pub(crate) fn can_launch_guarded(self, selection: Option<&LaunchSelection>) -> bool {
+        self == Self::ChosenPermission
+            && selection.is_some_and(|selection| {
+                selection.permissions == Some(LaunchPermission::Yolo)
+                    && selection
+                        .harness
+                        .offers_permission(LaunchPermission::Guarded)
+            })
     }
 
     /// The sentence the confirmation shows for this reason.
@@ -195,18 +213,20 @@ fn focus_cancel(instance: u64, only_if_lost: bool) {
 
 /// The confirmation block.
 ///
-/// `busy` disables all three answers while either step of a confirmed launch
+/// `busy` disables every answer while either step of a confirmed launch
 /// is in flight. `error` is the reason a "don't ask again" failed at its
 /// first step, shown with the question so the user can pick again.
-/// `confirm_submits` makes both starting buttons form submit buttons, for the
+/// `confirm_submits` makes both YOLO answers form submit buttons, for the
 /// launcher, whose resubmit is its surrounding form's own submit; otherwise
-/// they call their handlers.
+/// they call their handlers. A supplied guarded handler owns its draft change
+/// and resubmission, including rejecting a stale opening before any mutation.
 #[component]
 pub(crate) fn YoloConfirmation(
     ask: YoloAsk,
     busy: bool,
     error: Option<String>,
     confirm_submits: bool,
+    #[props(default)] on_launch_guarded: Option<EventHandler<()>>,
     on_confirm: EventHandler<()>,
     on_confirm_and_stop_asking: EventHandler<()>,
     on_cancel: EventHandler<()>,
@@ -266,6 +286,16 @@ pub(crate) fn YoloConfirmation(
                 }
             }
             div { class: "yolo-confirmation-actions",
+                if let Some(on_launch_guarded) = on_launch_guarded {
+                    button {
+                        r#type: "button",
+                        class: "btn btn-primary yolo-launch-guarded",
+                        "data-tooltip": "start this session in guarded mode instead, where the agent's own safety checks stay on",
+                        disabled: busy,
+                        onclick: move |_| on_launch_guarded.call(()),
+                        "start guarded session instead"
+                    }
+                }
                 button {
                     r#type: start_type,
                     class: "btn btn-danger yolo-confirm",
@@ -301,6 +331,8 @@ pub(crate) fn YoloConfirmation(
 mod tests {
     use super::*;
 
+    /// Keep each case focused on permission provenance and the harness table,
+    /// without unrelated model or wrapper choices influencing availability.
     fn selection(harness: LaunchHarness, permissions: Option<LaunchPermission>) -> LaunchSelection {
         LaunchSelection {
             permission_flags: None,
@@ -311,6 +343,40 @@ mod tests {
             wrapper_prefix: None,
             workspace_trust: None,
         }
+    }
+
+    /// A guarded answer must change an explicit YOLO choice, never guess what
+    /// custom flags, an omitted permission or a command would become. Capability
+    /// comes from the shared harness table rather than another list in the UI.
+    #[test]
+    fn guarded_answers_require_an_explicit_supported_yolo_choice() {
+        let yolo = selection(LaunchHarness::Codex, Some(LaunchPermission::Yolo));
+        assert!(YoloReason::ChosenPermission.can_launch_guarded(Some(&yolo)));
+        assert!(
+            !YoloReason::ChosenPermission.can_launch_guarded(Some(&selection(
+                LaunchHarness::Pi,
+                Some(LaunchPermission::Yolo),
+            )))
+        );
+        for permission in [
+            None,
+            Some(LaunchPermission::Custom),
+            Some(LaunchPermission::Guarded),
+        ] {
+            assert!(
+                !YoloReason::ChosenPermission
+                    .can_launch_guarded(Some(&selection(LaunchHarness::Codex, permission,)))
+            );
+        }
+        for reason in [
+            YoloReason::CustomFlags,
+            YoloReason::OnlyMode(LaunchHarness::Pi),
+            YoloReason::Asserted,
+            YoloReason::OwnSetting,
+        ] {
+            assert!(!reason.can_launch_guarded(Some(&yolo)));
+        }
+        assert!(!YoloReason::ChosenPermission.can_launch_guarded(None));
     }
 
     /// The confirmation tells the user WHY the launch is YOLO, and its distinct

@@ -26,6 +26,7 @@ import {
 } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
 import { requireHelmBuild } from "./helpers/helm-build";
+import { routeGate } from "./helpers/route-gate";
 
 // Two tests here turn session confirmations off. The preference is helm-wide
 // and later specs share this helm, so reset it even when a test body is
@@ -34,7 +35,7 @@ test.afterEach(async ({ request }) => {
   await patchPreferences(request, { skip_session_confirmations: null });
 });
 
-/** Open the launcher on a Codex YOLO launch into `cwd`, ready to submit. */
+/** Establish an explicit Codex YOLO draft so the helm's refusal has a known reason. */
 async function openYoloLaunch(page: Page, cwd: string): Promise<Locator> {
   const form = page.locator(".create-session-form");
   await page.locator(".new-session-button").click();
@@ -157,9 +158,146 @@ test("a YOLO launch asks first and starts only when confirmed", async ({ page, r
 });
 
 /**
+ * Guarded is a new launch choice, not approval of the refused YOLO request.
+ * A held create makes its permission change observable before success
+ * closes the form. The real helm then proves one guarded session results,
+ * the host still asks, and the ordinary successful-launch memory is guarded.
+ */
+test("the YOLO question can launch guarded and remember that permission", async ({ page, request }) => {
+  const cwd = stackScratchDir("yolo-guarded-");
+  const template = `e2e-yolo-guarded-${Date.now()}`;
+  const gate = routeGate();
+  const createBodies: any[] = [];
+  const markPosts: unknown[] = [];
+  let guardedDone: Promise<unknown> | undefined;
+  const isCreate = (candidate: { request(): { method(): string }; url(): string }) =>
+    candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions");
+  try {
+    await setLocalYoloWithoutAsking(request, false);
+    const local = await localHostId(request);
+    const saved = await request.put(`/api/templates/${template}`, {
+      data: { kind: "agent", agent: "codex", permissions: "yolo" },
+    });
+    expect(saved.ok(), "the YOLO template must exist before the launcher loads it").toBe(true);
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      const body = route.request().postDataJSON();
+      createBodies.push(body);
+      if (body.launch?.permissions === "guarded") {
+        // Drain this actual request before listing sessions during cleanup,
+        // including when a held-boundary assertion fails before release.
+        guardedDone = route.request().response();
+        await gate.wait();
+      }
+      await route.continue();
+    });
+    page.on("request", (candidate) => {
+      if (candidate.method() === "POST" && candidate.url().endsWith(`/api/hosts/${local}/yolo-without-asking`)) {
+        markPosts.push(candidate.postData());
+      }
+    });
+    await page.goto("/");
+    const form = await openYoloLaunch(page, cwd);
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    await search.fill(`tl:${template}`);
+    await form.getByRole("option", { name: `Template: ${template}`, exact: true }).click();
+    const permissions = form.locator(".launch-composer-permissions-choice");
+    await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+    const [refused] = await Promise.all([page.waitForResponse(isCreate), form.locator(".create-session-submit").click()]);
+    expect(refused.status()).toBe(409);
+    const confirmation = form.locator(".yolo-confirmation");
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
+    const guarded = confirmation.locator(".yolo-launch-guarded");
+    await expect(guarded).toHaveText("start guarded session instead");
+    await expect(guarded).toHaveAttribute("type", "button");
+    await expect(guarded).toHaveClass(/\bbtn-primary\b/);
+    await expect(confirmation.locator("button").first()).toHaveClass(/\byolo-launch-guarded\b/);
+    expect(createBodies).toHaveLength(1);
+    expect((await listSessions(request)).sessions.filter((row) => row.cwd === cwd)).toHaveLength(0);
+
+    const launched = page.waitForResponse(isCreate);
+    await guarded.click();
+    await expect.poll(() => createBodies.length).toBe(2);
+    await expect(permissions.getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
+    // The launcher has no stored-launch baseline marker. Its selected
+    // permission and the held request expose the actual template edit.
+    expect(createBodies[1].launch).toMatchObject({ harness: "codex", permissions: "guarded" });
+    expect(createBodies[1].launch).not.toHaveProperty("permission_flags");
+    expect(createBodies[1]).not.toHaveProperty("confirm_yolo");
+    expect(createBodies[0].intent_key).toBeTruthy();
+    expect(createBodies[1].intent_key).toBeTruthy();
+    expect(createBodies[1].intent_key, "changing permission retires the refused request").not.toBe(createBodies[0].intent_key);
+    expect(markPosts).toHaveLength(0);
+    gate.release();
+    const response = await launched;
+    expect(response.ok(), `guarded launch: ${await response.text()}`).toBe(true);
+    const session = await response.json();
+    expect(session.launch.selection).toMatchObject({ harness: "codex", permissions: "guarded" });
+    await expect(form).toHaveCount(0);
+    expect((await listSessions(request)).sessions.filter((row) => row.cwd === cwd).map((row) => row.id)).toEqual([session.id]);
+    expect(createBodies, "one answer sends exactly one new create").toHaveLength(2);
+    expect(markPosts).toHaveLength(0);
+    expect((await listHosts(request)).find((host) => host.id === local)?.yolo_without_asking).toBe(false);
+
+    await page.locator(".new-session-button").click();
+    await expect(form).toBeVisible();
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
+    await form.locator(".launch-composer-cancel").click();
+  } finally {
+    gate.release();
+    await guardedDone?.catch(() => undefined);
+    await setLocalYoloWithoutAsking(request, false);
+    await patchPreferences(request, { remembered_permissions: null });
+    try {
+      for (const row of (await listSessions(request)).sessions.filter((candidate) => candidate.cwd === cwd)) {
+        await cleanupSession(request, row.id);
+      }
+    } finally {
+      const removed = await request.delete(`/api/templates/${template}`);
+      expect(removed.ok() || removed.status() === 404).toBe(true);
+    }
+  }
+});
+
+/** Custom words cannot be silently dropped by a guarded answer, even when
+ * the words themselves request a vendor safety mode. The real guard refuses
+ * them as custom; the browser must keep only its existing answers. */
+test("the YOLO question offers no guarded answer for custom permission flags", async ({ page, request }) => {
+  const cwd = stackScratchDir("yolo-custom-answer-");
+  try {
+    await setLocalYoloWithoutAsking(request, false);
+    await page.goto("/");
+    const form = await openYoloLaunch(page, cwd);
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true }).click();
+    await form.locator(".custom-permission-flags").fill("--sandbox workspace-write");
+    const [refused] = await Promise.all([
+      page.waitForResponse((candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions")),
+      form.locator(".create-session-submit").click(),
+    ]);
+    expect(refused.status()).toBe(409);
+    expect(refused.request().postDataJSON().launch).toMatchObject({ permissions: "custom", permission_flags: ["--sandbox", "workspace-write"] });
+    const confirmation = form.locator(".yolo-confirmation");
+    await expect(confirmation).toContainText("uses custom permission flags");
+    await expect(confirmation.locator(".yolo-launch-guarded")).toHaveCount(0);
+    await expect(confirmation.locator(".yolo-confirm")).toBeVisible();
+    await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
+    await confirmation.locator(".yolo-cancel").click();
+    await expect(confirmation).toHaveCount(0);
+  } finally {
+    await setLocalYoloWithoutAsking(request, false);
+    await patchPreferences(request, { remembered_permissions: null });
+    for (const row of (await listSessions(request)).sessions.filter((candidate) => candidate.cwd === cwd)) {
+      await cleanupSession(request, row.id);
+    }
+  }
+});
+
+/**
  * Cancel and an answer to the launcher's YOLO question delivered in one
  * burst, before the render that removes the question, start nothing. Why:
- * both answers launch an agent with no approval prompts (and "don't ask
+ * the YOLO answers launch an agent with no approval prompts (and "don't ask
  * again" also turns the host's question off), and the answers used to be
  * the form's submit buttons recording consent from their own copy of the
  * question, so an answer queued behind Cancel restored the consent and
@@ -167,6 +305,7 @@ test("a YOLO launch asks first and starts only when confirmed", async ({ page, r
  * burst no create carries the override, the host is not marked, nothing
  * starts, and a following plain Launch is asked about again; a genuine
  * answer afterwards still retries the same request with the override.
+ * A stale guarded answer must also leave the original YOLO draft alone.
  */
 test("cancel and an answer to the launcher's YOLO question in one burst start nothing", async ({ page, request }) => {
   const cwd = stackScratchDir("yolo-burst-");
@@ -196,7 +335,7 @@ test("cancel and an answer to the launcher's YOLO question in one burst start no
     expect(refused.status()).toBe(409);
     await expect(confirmation).toBeVisible();
 
-    for (const answer of [".yolo-confirm", ".yolo-confirm-stop-asking"]) {
+    for (const answer of [".yolo-confirm", ".yolo-confirm-stop-asking", ".yolo-launch-guarded"]) {
       // Both buttons are captured before either is clicked, then clicked in
       // one synchronous block: Cancel first, the answer second, before any
       // render can remove the answer (the technique the session list's
@@ -214,6 +353,8 @@ test("cancel and an answer to the launcher's YOLO question in one burst start no
       expect(answerWasLive, `premise: ${answer} was still live when clicked`).toBe(true);
       await expect(confirmation).toHaveCount(0);
       await expect(form, `cancel keeps the launcher open (${answer})`).toBeVisible();
+      await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }))
+        .toHaveAttribute("aria-pressed", "true");
 
       // A plain Launch is the observation point: its reply proves the page
       // has handled everything the burst could have started, and it must be
@@ -229,7 +370,9 @@ test("cancel and an answer to the launcher's YOLO question in one burst start no
     expect(
       bodies.map((body) => body.confirm_yolo ?? false),
       "no create after a burst carries the override",
-    ).toEqual([false, false, false]);
+    ).toEqual([false, false, false, false]);
+    expect(bodies.map((body) => body.launch.permissions), "stale answers do not change or submit a guarded draft")
+      .toEqual(["yolo", "yolo", "yolo", "yolo"]);
     expect(markPosts, "the host is never marked").toHaveLength(0);
     expect((await listHosts(request)).find((host) => host.id === local)?.yolo_without_asking).toBe(false);
     expect((await listSessions(request)).sessions.filter((row) => row.cwd === cwd)).toHaveLength(0);

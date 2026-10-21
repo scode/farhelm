@@ -85,6 +85,22 @@ impl RestartEdit {
             RestartEdit::Command(_) => None,
         }
     }
+
+    /// The same edit after choosing guarded, preserving a one-time target.
+    ///
+    /// This prospective value decides whether the question may offer guarded:
+    /// Restart with cannot submit an edit equal to its normalized baseline.
+    /// Command launches have no permission row to change.
+    fn guarded(&self) -> Option<Self> {
+        let mut edit = self.clone();
+        let selection = match &mut edit {
+            Self::Agent(selection) | Self::NamedAgent(selection, _) => selection,
+            Self::Command(_) => return None,
+        };
+        selection.permissions = Some(LaunchPermission::Guarded);
+        selection.permission_flags = None;
+        Some(edit)
+    }
 }
 
 /// What a session's Restart with edits, or `None` when there is nothing it
@@ -233,6 +249,9 @@ fn focus_restart_with_cancel() {
 /// mark the host safe first. The parent accepts the override only by taking the live
 /// question, and only for the settings that question was about: settings edited since are
 /// refused with a reason, and restarting again asks about them.
+/// The guarded answer instead asks `on_yolo_guarded` to consume that opening
+/// for the original draft before changing its permission. It then follows
+/// ordinary submission, with neither YOLO approval nor a host-setting write.
 #[component]
 pub(crate) fn RestartWithDialog(
     session: Session,
@@ -243,6 +262,9 @@ pub(crate) fn RestartWithDialog(
     stop_first: bool,
     offer_label: String,
     on_submit: EventHandler<(RestartEdit, bool, bool)>,
+    /// Consume exactly the question drawn for this original edit before the
+    /// dialog changes its draft. A stale or busy answer changes nothing.
+    on_yolo_guarded: Callback<RestartEdit, bool>,
     on_yolo_cancel: EventHandler<()>,
     on_cancel: EventHandler<()>,
 ) -> Element {
@@ -435,6 +457,45 @@ pub(crate) fn RestartWithDialog(
         }
     });
     let choice_primary = EventHandler::new(move |()| primary.call((false, false)));
+    // Both the permission row and the question's guarded answer make the same
+    // draft transition, including dropping custom words when leaving Custom.
+    let apply_permission = Callback::new(move |permissions: Option<LaunchPermission>| {
+        let mut after = selection();
+        after.permissions = permissions;
+        after.permission_flags =
+            launch_composer::permission_words(permissions, &permission_flags_text());
+        if permissions != Some(LaunchPermission::Custom) {
+            permission_flags_text.set(String::new());
+        }
+        selection.set(after);
+    });
+    let on_launch_guarded = yolo_confirmation.as_ref().and_then(|ask| {
+        let reason = ask.reason;
+        (reason.can_launch_guarded(edit.selection())
+            && edit.guarded().is_some_and(|guarded| guarded != opening))
+        .then(|| {
+            EventHandler::new({
+                let opening = opening.clone();
+                move |()| {
+                    let (original, _, ready) = read_edit.call(());
+                    if busy
+                        || !ready
+                        || !reason.can_launch_guarded(original.selection())
+                        || !original.guarded().is_some_and(|guarded| guarded != opening)
+                        || !on_yolo_guarded.call(original)
+                    {
+                        return;
+                    }
+                    // Admission precedes every local side effect. Cancel and
+                    // an old answer in one burst must leave the draft alone.
+                    // Keep this synchronous with primary's surviving focus
+                    // target, before the taken question can unmount.
+                    apply_permission.call(Some(LaunchPermission::Guarded));
+                    primary.call((false, false));
+                }
+            })
+        })
+    });
     // The context renderer below escapes this raw fallback/name once.
     let host = session
         .host_name
@@ -700,13 +761,7 @@ pub(crate) fn RestartWithDialog(
                         selection.set(after);
                         reset_reason.set(None);
                     },
-                    on_permissions: move |permissions: Option<LaunchPermission>| {
-                        let mut after = selection();
-                        after.permissions = permissions;
-                        after.permission_flags = crate::launch_composer::permission_words(permissions, &permission_flags_text());
-                        if permissions != Some(LaunchPermission::Custom) { permission_flags_text.set(String::new()); }
-                        selection.set(after);
-                    },
+                    on_permissions: move |permissions| apply_permission.call(permissions),
                 }
                 }
                 if let Some(message) = catalog_error.filter(|_| opening_command.is_none()) {
@@ -725,7 +780,8 @@ pub(crate) fn RestartWithDialog(
                         busy,
                         error: yolo_error,
                         confirm_submits: false,
-                        // All three hand focus to a control that outlives
+                        on_launch_guarded,
+                        // All answers hand focus to a control that outlives
                         // the question, or that stays enabled while the
                         // request runs, before the parent unmounts or
                         // disables the clicked one; see
@@ -784,5 +840,46 @@ pub(crate) fn RestartWithDialog(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A named conversation is a real edit even when guarded restores every
+    /// reusable setting. Losing that target would hide a useful answer or
+    /// restart the captured conversation instead of the one the user named.
+    #[test]
+    fn a_guarded_answer_preserves_the_named_conversation() {
+        let stored = LaunchSelection {
+            harness: crate::LaunchHarness::Codex,
+            model: Some("model".into()),
+            effort: Some(LaunchEffort::High),
+            permissions: Some(LaunchPermission::Guarded),
+            permission_flags: None,
+            wrapper_prefix: Some(vec!["wrapper".into()]),
+            workspace_trust: None,
+        };
+        let mut yolo = stored.clone();
+        yolo.permissions = Some(LaunchPermission::Yolo);
+        let baseline = RestartEdit::Agent(stored.clone());
+        assert_eq!(
+            RestartEdit::Agent(yolo.clone()).guarded(),
+            Some(baseline.clone())
+        );
+
+        let named = RestartEdit::NamedAgent(yolo, "chosen-conversation".into());
+        let guarded = named
+            .guarded()
+            .expect("agent edits have a permission choice");
+        assert_eq!(
+            guarded,
+            RestartEdit::NamedAgent(stored, "chosen-conversation".into())
+        );
+        assert_ne!(
+            guarded, baseline,
+            "the named target keeps the edit meaningful"
+        );
     }
 }

@@ -163,11 +163,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   agent instructions and docs, un-ignoring the end-to-end delivery tests, and writing a new changelog fragment. SPEC.md,
   Agent-spawned sessions, keeps the design.
 
-- **Launch guarded from the YOLO confirmation.** When the session launcher shows the confirmation for a YOLO launch on a
-  host that asks first, offer a one-click "launch guarded instead" button next to "start YOLO session anyway", so
-  switching to a safer launch does not mean cancelling, changing the permission and launching again. UI details TBD.
-  Plan: `plans/queue/yolo-confirm-launch-guarded.md`.
-
 - **Rewrite the "host changed while its update was being followed" warning.** Seen 2026-10-18 on a dev build whose host
   (running `farhelm 0.0.0-unreleased`, 0 sessions) had also been added by accident to the maintainer's 0.29.0 helm,
   which ran setup on it too. The dev build's host row showed an update that completed every step (create-directories,
