@@ -16,17 +16,58 @@ use dioxus::prelude::*;
 /// Address the same modal from its shell and from its surviving state owner.
 ///
 /// Async success can close a dialog from its parent, so release cannot depend
-/// on a child hook remaining mounted. The selector must identify the intended
-/// instance; this handle does not arbitrate multiple dialogs or queue them.
+/// on a child hook remaining mounted. A static selector may carry a numeric
+/// opening fence; it still resolves the first root before checking identity.
+/// This handle does not arbitrate multiple dialogs or queue them.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct DialogHandle {
     selector: &'static str,
+    generation: Option<(&'static str, u64)>,
 }
 
 impl DialogHandle {
     /// Bind focus operations to the root whose lifecycle the caller owns.
     pub(crate) const fn new(selector: &'static str) -> Self {
-        Self { selector }
+        Self {
+            selector,
+            generation: None,
+        }
+    }
+
+    /// Fence deferred DOM work against a later opening at the same selector.
+    ///
+    /// Resolve the first root before comparing its numeric generation. Filtering
+    /// the selector instead could skip a replacement root and find an older one.
+    pub(crate) const fn for_generation(mut self, attribute: &'static str, generation: u64) -> Self {
+        self.generation = Some((attribute, generation));
+        self
+    }
+
+    /// Compare only the already resolved root, before touching its focus state.
+    fn generation_guard(self) -> String {
+        self.generation
+            .map_or(String::new(), |(attribute, generation)| {
+                let attribute =
+                    serde_json::to_string(attribute).expect("a string always serializes");
+                format!(" || dialog.getAttribute({attribute}) !== '{generation}'")
+            })
+    }
+
+    /// Apply an existing modal operation only to the expected mounted opening.
+    fn bound_script(self, body: &str) -> String {
+        if self.generation.is_none() {
+            return body.to_owned();
+        }
+        let selector = serde_json::to_string(self.selector).expect("a string always serializes");
+        let generation_guard = self.generation_guard();
+        format!(
+            "(() => {{ const dialog = document.querySelector({selector}); if (!dialog{generation_guard}) return; {body} }})();"
+        )
+    }
+
+    /// Release only this opening; an absent or replacement root owns no release.
+    fn release_script(self) -> String {
+        self.bound_script(&crate::modal_isolation::release_js(self.selector))
     }
 
     /// Release isolation now and return focus after the closing render.
@@ -39,7 +80,7 @@ impl DialogHandle {
     pub(crate) fn close(self, return_focus_body: &str) {
         document::eval(&format!(
             "{} requestAnimationFrame(() => {{ {return_focus_body} }});",
-            crate::modal_isolation::release_js(self.selector),
+            self.release_script(),
         ));
     }
 
@@ -48,7 +89,26 @@ impl DialogHandle {
     /// The next modal owns its initial focus. Ordinary DOM-removal cleanup is
     /// still the fallback for success paths that do not explicitly close.
     pub(crate) fn release(self) {
-        document::eval(&crate::modal_isolation::release_js(self.selector));
+        document::eval(&self.release_script());
+    }
+
+    /// Return immediately after removal, unless a newer control already has focus.
+    ///
+    /// The surviving owner decides whether this return is owed and submits it
+    /// from its existing post-render effect. A missing old root must not suppress
+    /// that destination; generation fences only the release. Unlike `close`, no
+    /// frame is scheduled. The body chooses only the domain destination.
+    /// An isolated caller must still release before requesting removal, even
+    /// when no return is owed; this post-render release cannot supply that order.
+    pub(crate) fn close_immediately_if_document_focused(self, return_focus_body: &str) {
+        document::eval(&format!(
+            r#"{} (() => {{
+                const active = document.activeElement;
+                if (active !== document.body && active !== document.documentElement) return;
+                {return_focus_body}
+            }})();"#,
+            self.release_script(),
+        ));
     }
 
     /// Release isolation and wait for this captured root to leave the document.
@@ -62,17 +122,24 @@ impl DialogHandle {
     /// As with the existing handoff, an eval failure does not block the owner.
     pub(crate) async fn close_and_wait(self) {
         let selector = serde_json::to_string(self.selector).expect("a string always serializes");
+        let generation_match = self
+            .generation
+            .map_or(String::new(), |(attribute, generation)| {
+                let attribute =
+                    serde_json::to_string(attribute).expect("a string always serializes");
+                format!(" && dialog.getAttribute({attribute}) === '{generation}'")
+            });
         let js = format!(
             r#"{}
         const dialog = document.querySelector({selector});
-        if (dialog) await new Promise(resolve => {{
+        if (dialog{generation_match}) await new Promise(resolve => {{
             const observer = new MutationObserver(() => {{
                 if (!dialog.isConnected) {{ observer.disconnect(); resolve(); }}
             }});
             observer.observe(document.body, {{ childList: true, subtree: true }});
         }});
         return true;"#,
-            crate::modal_isolation::release_js(self.selector)
+            self.release_script()
         );
         let _ = document::eval(&js).join::<bool>().await;
     }
@@ -84,12 +151,15 @@ impl DialogHandle {
     /// before or after the destination action in the shared close frame,
     /// preserving each handoff's existing order without submitting another eval.
     pub(crate) fn isolation_script(self, escape_target: Option<&str>) -> String {
-        crate::modal_isolation::install_js(self.selector, escape_target)
+        self.bound_script(&crate::modal_isolation::install_js(
+            self.selector,
+            escape_target,
+        ))
     }
 
     /// Install the opening's focus policy without repeating it on rerenders.
     fn install(self, focus: &DialogFocus) {
-        install_focus(self.selector, focus);
+        install_focus(self, focus);
     }
 }
 
@@ -192,17 +262,16 @@ fn target_js(scope: &str, target: &FocusTarget, root_fallback: bool) -> String {
 ///
 /// Boundary wrapping deliberately uses native focus scrolling: a contained
 /// control outside the dialog's scroll viewport must become visible too.
-fn trap_js(dialog: &str, trap: TabTrap, initial_focus: &str) -> String {
-    let selector = serde_json::to_string(trap.selector).expect("a string always serializes");
-    let empty_to_root = trap.empty_to_root;
-    let reverse_from_root = trap.reverse_from_root;
-    format!(
-        r#"(() => {{
-                const dialog = document.querySelector({dialog});
-                if (!dialog || dialog.__farhelmDialogTrap) return;
-                dialog.__farhelmDialogTrap = true;
-                {initial_focus}
-                const focusable = () => [...dialog.querySelectorAll({selector})]
+/// A handoff without a trap still uses this guard to consume its capture once.
+fn trap_js(handle: DialogHandle, trap: Option<TabTrap>, initial_focus: &str) -> String {
+    let dialog = serde_json::to_string(handle.selector).expect("a string always serializes");
+    let generation_guard = handle.generation_guard();
+    let listener = trap.map_or(String::new(), |trap| {
+        let selector = serde_json::to_string(trap.selector).expect("a string always serializes");
+        let empty_to_root = trap.empty_to_root;
+        let reverse_from_root = trap.reverse_from_root;
+        format!(
+            r#"const focusable = () => [...dialog.querySelectorAll({selector})]
                     .filter(node => !node.hidden && node.getClientRects().length);
                 dialog.addEventListener('keydown', event => {{
                     if (event.key !== 'Tab') return;
@@ -221,8 +290,57 @@ fn trap_js(dialog: &str, trap: TabTrap, initial_focus: &str) -> String {
                         event.preventDefault();
                         (event.shiftKey ? last : first).focus();
                     }}
-                }});
+                }});"#,
+        )
+    });
+    format!(
+        r#"(() => {{
+                const dialog = document.querySelector({dialog});
+                if (!dialog{generation_guard} || dialog.__farhelmDialogTrap) return;
+                dialog.__farhelmDialogTrap = true;
+                {initial_focus}
+                {listener}
             }})();"#,
+    )
+}
+
+/// Preserve an opening's admission decision and consume its exact saved opener.
+///
+/// Sample once and compare before clearing the capture, even when unconditional
+/// naming focus wins or an unrelated control makes ordinary focus yield. The
+/// caller places this body behind the generation and once-per-node guards.
+fn handoff_js(
+    selector: &str,
+    select_all: bool,
+    captured_opener: Option<&str>,
+    admission: &FocusAdmission,
+) -> String {
+    let target = serde_json::to_string(selector).expect("a string always serializes");
+    let capture = captured_opener.map_or_else(
+        || "const capturedOpener = false;".to_owned(),
+        |key| {
+            let key = serde_json::to_string(key).expect("a string always serializes");
+            format!("const capturedOpener = active === window[{key}]; window[{key}] = null;")
+        },
+    );
+    let admitted = match admission {
+        FocusAdmission::Always => "true".to_owned(),
+        FocusAdmission::DocumentOrOpener { selector } => {
+            let selector = serde_json::to_string(selector).expect("a string always serializes");
+            format!(
+                "!active || active === document.body || active.matches({selector}) || capturedOpener"
+            )
+        }
+    };
+    let select = if select_all { "input?.select();" } else { "" };
+    format!(
+        r#"const active = document.activeElement;
+                {capture}
+                if ({admitted}) {{
+                    const input = dialog.querySelector({target});
+                    input?.focus({{ preventScroll: true }});
+                    {select}
+                }}"#,
     )
 }
 
@@ -233,17 +351,19 @@ fn trap_js(dialog: &str, trap: TabTrap, initial_focus: &str) -> String {
 /// isolation first, gap/Enter second. Direct trapped dialogs keep gap/Enter
 /// before isolation in one eval. These are mount contracts, not effects that
 /// should run again whenever a dialog's state changes.
-fn install_focus(dialog_selector: &str, focus: &DialogFocus) {
+fn install_focus(handle: DialogHandle, focus: &DialogFocus) {
+    let dialog_selector = handle.selector;
     let dialog = serde_json::to_string(dialog_selector).expect("a string always serializes");
+    let generation_guard = handle.generation_guard();
     let setup = match &focus.initial_focus {
         InitialFocus::Target(selector) => {
             let target = FocusTarget::new(selector.clone(), None, false);
             let initial = target_js("dialog", &target, false);
             if let Some(trap) = focus.trap {
-                trap_js(&dialog, trap, &initial)
+                trap_js(handle, Some(trap), &initial)
             } else {
                 format!(
-                    "(() => {{ const dialog = document.querySelector({dialog}); if (dialog) {{ {initial} }} }})();"
+                    "(() => {{ const dialog = document.querySelector({dialog}); if (!dialog{generation_guard}) return; {initial} }})();"
                 )
             }
         }
@@ -259,7 +379,7 @@ fn install_focus(dialog_selector: &str, focus: &DialogFocus) {
             let mut setup = format!(
                 r#"(() => {{
                     const dialog = document.querySelector({dialog});
-                    if (!dialog) return;
+                    if (!dialog{generation_guard}) return;
                     if (!dialog.__farhelmFocusMemory) {{
                         dialog.__farhelmFocusMemory = true;
                         dialog.addEventListener('focusin', (event) => {{
@@ -270,20 +390,37 @@ fn install_focus(dialog_selector: &str, focus: &DialogFocus) {
                 }})();"#,
             );
             if let Some(trap) = focus.trap {
-                setup.push_str(&trap_js(&dialog, trap, ""));
+                setup.push_str(&trap_js(handle, Some(trap), ""));
             }
             setup
         }
+        InitialFocus::Handoff {
+            selector,
+            select_all,
+            captured_opener,
+            admission,
+        } => trap_js(
+            handle,
+            focus.trap,
+            &handoff_js(selector, *select_all, *captured_opener, admission),
+        ),
     };
     let action = focus.main_action.as_deref().map_or(
         crate::dialog_focus::ContainerEnter::None,
         crate::dialog_focus::ContainerEnter::Click,
     );
-    let gap = crate::dialog_focus::install_js(dialog_selector, action);
-    let isolate =
-        crate::modal_isolation::install_js(dialog_selector, focus.escape_target.as_deref());
+    let gap = if focus.gap {
+        handle.bound_script(&crate::dialog_focus::install_js(dialog_selector, action))
+    } else {
+        String::new()
+    };
+    let isolate = if focus.isolation {
+        handle.isolation_script(focus.escape_target.as_deref())
+    } else {
+        String::new()
+    };
     match &focus.initial_focus {
-        InitialFocus::Target(_) => {
+        InitialFocus::Target(_) | InitialFocus::Handoff { .. } => {
             document::eval(&format!("{setup}\n{gap}\n{isolate}"));
         }
         InitialFocus::Remembered { .. } => {
@@ -319,18 +456,47 @@ pub(crate) enum InitialFocus {
     /// explicit installation, as it did for the host installers. Quiet focus
     /// suppresses the initial tooltip without depending on its asset loading.
     Remembered { selector: String, quiet: bool },
+    /// Hand off once, yielding to newer focus unless the opening owns all sources.
+    ///
+    /// A supplied capture is compared and nulled even when focus is denied.
+    /// An admitted naming handoff can select its title while ordinary editing
+    /// leaves the native selection untouched.
+    Handoff {
+        selector: String,
+        select_all: bool,
+        captured_opener: Option<&'static str>,
+        admission: FocusAdmission,
+    },
+}
+
+/// Which current focus sources an opening is allowed to replace.
+#[derive(Clone, PartialEq)]
+pub(crate) enum FocusAdmission {
+    /// The opening owns one handoff regardless of the current active control.
+    Always,
+    /// Yield to later outside focus, except for the caller's named or saved opener.
+    ///
+    /// Missing focus and body are admitted; documentElement is deliberately
+    /// excluded here, unlike the post-removal return rule.
+    DocumentOrOpener { selector: String },
 }
 
 /// Keep mount targets separate from live cancellation and request ownership.
 ///
 /// Missing trap and main action retain a dialog's current native Tab and Enter
 /// behavior; initial focus never implies that the same action handles Escape.
+/// Isolation and gap retention are independent: neither follows from a trap
+/// or from the absence of a container action. Existing constructors enable both.
 #[derive(Clone, PartialEq)]
 pub(crate) struct DialogFocus {
     pub(crate) initial_focus: InitialFocus,
     pub(crate) trap: Option<TabTrap>,
     pub(crate) escape_target: Option<String>,
     pub(crate) main_action: Option<String>,
+    /// Preserve existing page isolation independently of Tab trapping.
+    pub(crate) isolation: bool,
+    /// Preserve gap-click retention independently of a container Enter action.
+    pub(crate) gap: bool,
 }
 
 impl DialogFocus {
@@ -352,6 +518,8 @@ impl DialogFocus {
             trap: None,
             escape_target: escape_target.map(str::to_owned),
             main_action: main_action.map(str::to_owned),
+            isolation: true,
+            gap: true,
         }
     }
 }
@@ -386,6 +554,8 @@ pub(crate) enum DialogRoot {
 /// isolation, then quiet confirmation handoff, before domain mounted work.
 /// A nested consent may first release its still-mounted parent; this remains
 /// a separate eval before initial focus, rather than another mount callback.
+/// Focus ownership listeners also attach to the actual root: a wrapper would
+/// change the boundary that records whether an async close still owns focus.
 #[component]
 pub(crate) fn ModalDialog(
     handle: DialogHandle,
@@ -400,6 +570,8 @@ pub(crate) fn ModalDialog(
     #[props(default)] onresize: Option<EventHandler<ResizeEvent>>,
     #[props(default)] onsubmit: Option<EventHandler<FormEvent>>,
     #[props(default)] onclick: Option<EventHandler<MouseEvent>>,
+    #[props(default)] onfocusin: Option<EventHandler<FocusEvent>>,
+    #[props(default)] onfocusout: Option<EventHandler<FocusEvent>>,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
@@ -447,6 +619,16 @@ pub(crate) fn ModalDialog(
     if let Some(onclick) = onclick {
         root_attributes.push(dioxus::html::onclick(move |event: MouseEvent| {
             onclick.call(event);
+        }));
+    }
+    if let Some(onfocusin) = onfocusin {
+        root_attributes.push(dioxus::html::onfocusin(move |event: FocusEvent| {
+            onfocusin.call(event);
+        }));
+    }
+    if let Some(onfocusout) = onfocusout {
+        root_attributes.push(dioxus::html::onfocusout(move |event: FocusEvent| {
+            onfocusout.call(event);
         }));
     }
     match root {

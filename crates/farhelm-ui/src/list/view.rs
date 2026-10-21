@@ -176,26 +176,6 @@ fn rename_focus_return_state(generation: u64, editor: Option<&RenameEditor>) -> 
     }
 }
 
-/// Return a completed rename to its row menu or the selected terminal.
-///
-/// Callers run this only from the post-render focus-return effect, after the
-/// dialog's focus event recorded ownership and a matching generation closed.
-/// The browser-side body check is the final user-focus guard: an unrelated
-/// control reached after close must always keep focus.
-fn focus_rename_destination(id: &str, terminal: bool) {
-    let id = serde_json::to_string(id).expect("session ids serialize as JSON strings");
-    document::eval(&format!(
-        r#"(() => {{
-            const active = document.activeElement;
-            if (active !== document.body && active !== document.documentElement) return;
-            if ({terminal}) {{ window.farhelmTerm?.focusSelected(); return; }}
-            const id = {id};
-            document.querySelector(`[data-session-id="${{CSS.escape(id)}}"] .session-row-menu`)
-                ?.focus({{ preventScroll: true }});
-        }})()"#,
-    ));
-}
-
 /// The shared preference (SPEC.md, Session list) as this page holds it:
 /// the chosen list order, last user-selected session, and compact-row choice,
 /// seeded once from the helm by `PreferencesGate` and provided to this view
@@ -871,7 +851,16 @@ pub(crate) fn ListView(
             RenameFocusReturn::Ready => {}
         }
         rename_focus_return.set(None);
-        focus_rename_destination(&id, terminal);
+        // The parent owns admission and post-render timing. The shared close
+        // keeps a newer active control focused; only the destination depends
+        // on whether this opening came from a row, shortcut, or quick launch.
+        let id = serde_json::to_string(&id).expect("session ids serialize as JSON strings");
+        crate::rename::dialog_handle(generation).close_immediately_if_document_focused(&format!(
+            r#"if ({terminal}) {{ window.farhelmTerm?.focusSelected(); return; }}
+            const id = {id};
+            document.querySelector(`[data-session-id="${{CSS.escape(id)}}"] .session-row-menu`)
+                ?.focus({{ preventScroll: true }});"#,
+        ));
     });
     // The optimistic rename corrections `apply_optimistic_renames` paints
     // over the server's listing, keyed by session id and carrying the read
@@ -2544,7 +2533,7 @@ pub(crate) fn ListView(
         {
             return;
         }
-        // Rename has its own focus trap rather than shared modal isolation.
+        // Rename traps Tab without page isolation.
         // Retire a held quick read here so cancelling Rename cannot revive it.
         opening_generation += 1;
         quick_launch_pending.set(false);
