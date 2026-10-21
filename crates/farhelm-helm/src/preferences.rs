@@ -218,8 +218,8 @@ pub(crate) async fn put_preferences(
             message: "terminal_link_click must be intercept, both, or program".into(),
         }));
     }
-    // SQLite can commit after an HTTP caller disappears. A consent write owns
-    // its cleanup tail so cancellation cannot persist revocation and skip close.
+    // SQLite can commit after an HTTP caller disappears. Both consent cleanup
+    // and trust-hint invalidation must finish on the task that owns that write.
     let result = if tunnel_consent_changed {
         let state = Arc::clone(&state);
         tokio::spawn(async move {
@@ -230,21 +230,30 @@ pub(crate) async fn put_preferences(
                 state.tunnels.close_all_locked().await;
             }
             state.manager.events().bump();
+            // The hint announcement used to follow the completed consent task,
+            // after this gate was released. Keep that ordering while owning it.
+            drop(_mutation);
+            if trust_hint_changed {
+                state.manager.events().bump();
+            }
             Ok::<(), anyhow::Error>(())
         })
         .await
         .map_err(anyhow::Error::from)
         .and_then(|result| result)
+    } else if trust_hint_changed {
+        let state = Arc::clone(&state);
+        crate::run_owned(async move {
+            state.store.update_preferences(patch).await?;
+            state.manager.events().bump();
+            Ok::<(), anyhow::Error>(())
+        })
+        .await
     } else {
         state.store.update_preferences(patch).await
     };
     match result {
-        Ok(()) => {
-            if trust_hint_changed {
-                state.manager.events().bump();
-            }
-            axum::http::StatusCode::NO_CONTENT.into_response()
-        }
+        Ok(()) => axum::http::StatusCode::NO_CONTENT.into_response(),
         Err(error) => http_error(error),
     }
 }
@@ -255,6 +264,86 @@ mod tests {
     use crate::store::Preferences;
     use axum::http::StatusCode;
     use tower::ServiceExt;
+
+    /// Hint writes and their feed notification are one accepted action. Test
+    /// both a hint-only patch and the existing consent-owned path, whose second
+    /// bump used to live on the cancellable HTTP waiter.
+    #[farhelm_testtrace::test]
+    async fn cancelled_hint_saves_still_publish_the_committed_dismissal() {
+        use std::future::Future;
+        for consent in [false, true] {
+            let helm = rest_harness::idle_helm().await;
+            assert_eq!(
+                helm.store
+                    .preferences()
+                    .await
+                    .unwrap()
+                    .codex_trust_hint_dismissed,
+                None,
+                "fixture premise: this patch changes the hint dismissal"
+            );
+            let mut events = helm.state.manager.events().subscribe();
+            let revision = *events.borrow_and_update();
+            let lock_states = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let observed = std::sync::Arc::clone(&lock_states);
+            let state = std::sync::Arc::downgrade(&helm.state);
+            // Observe within each bump, before a later task can make a longer
+            // gate lifetime indistinguishable from the old release ordering.
+            helm.state.manager.events().observe_bumps(move || {
+                let state = state.upgrade().expect("the publisher still owns the helm");
+                observed
+                    .lock()
+                    .unwrap()
+                    .push(state.tunnels.mutation.try_lock().is_ok());
+            });
+            let patch = if consent {
+                serde_json::json!({"codex_trust_hint_dismissed":true,"tunnel_consent":false})
+            } else {
+                serde_json::json!({"codex_trust_hint_dismissed":true})
+            };
+            let db = helm.store.connection_for_test();
+            let mut caller = Box::pin(super::put_preferences(
+                axum::extract::State(std::sync::Arc::clone(&helm.state)),
+                axum::Json(serde_json::from_value(patch).unwrap()),
+            ));
+            {
+                let _held = db.lock();
+                let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+                // Validation is synchronous, so Pending means the write has
+                // crossed its ownership boundary and cannot finish under this lock.
+                assert!(caller.as_mut().poll(&mut context).is_pending());
+                drop(caller);
+            }
+            // Keep the mixed patch's two existing publications even when watch
+            // coalesces them before this reader gets scheduled.
+            let expected = revision + if consent { 2 } else { 1 };
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while *events.borrow_and_update() < expected {
+                    events.changed().await.unwrap();
+                }
+            })
+            .await
+            .expect("the entire hint notification tail survives cancellation");
+            assert_eq!(
+                helm.store
+                    .preferences()
+                    .await
+                    .unwrap()
+                    .codex_trust_hint_dismissed,
+                Some(true)
+            );
+            assert_eq!(*events.borrow(), expected);
+            assert_eq!(
+                *lock_states.lock().unwrap(),
+                if consent {
+                    vec![false, true]
+                } else {
+                    vec![true]
+                },
+                "consent announces under its gate; hint announces after release"
+            );
+        }
+    }
 
     /// A shared hint dismissal obeys the sparse patch contract: unrelated
     /// writes retain it, invalid types refuse atomically, and null restores it.
