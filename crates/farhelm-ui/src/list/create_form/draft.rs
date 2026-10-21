@@ -5,6 +5,11 @@
 //! Host authority, preview observations, attempt keys, confirmation and picker
 //! state stay with the form. `LaunchDraftState` is the renderer's ownership
 //! boundary; field memos are subscriptions, never live callback authority.
+//!
+//! Ordinary edit facts describe submitted changes, not admission or assignment:
+//! false still performs ownership, explicitness and dormant-buffer writes.
+//! Malformed affected word lists conservatively report change. Host/history
+//! authority and the supported explicit action exceptions remain with callers.
 
 use dioxus::prelude::*;
 
@@ -96,8 +101,9 @@ pub(super) enum ChoiceOrigin {
     Search,
 }
 
-/// A compatibility notice and the direct harness control's retry comparison.
-/// The caller additionally checks whether its active launch tab changed.
+/// Compatibility feedback and the submitted change made by an agent choice.
+/// A missing notice does not imply equality: model bytes or permission defaults
+/// can change silently. Callers separately compose tab/path/authority changes.
 pub(super) struct AgentChoiceOutcome {
     pub(super) reset_reason: Option<String>,
     pub(super) selection_changed: bool,
@@ -306,16 +312,25 @@ impl LaunchDraft {
     // current order while these related semantic assignments move together.
 
     /// A typed folder exits managed mode and deliberately owns its spelling.
-    pub(super) fn edit_folder(&mut self, text: String) {
+    /// Report operational path change, independently of editor ownership bits.
+    pub(super) fn edit_folder(&mut self, text: String) -> bool {
+        let changed =
+            !matches!(&self.destination, DestinationDraft::Existing { cwd } if cwd == &text);
         self.destination = DestinationDraft::Existing { cwd: text.clone() };
         self.cwd = text;
         self.cwd_edited = true;
         self.folder_is_explicit = true;
+        changed
     }
     /// Relayed path choices preserve exact bytes and count as explicit placement.
-    pub(super) fn choose_existing_folder(&mut self, raw: &str) {
+    /// Equality concerns the semantic destination, not raw/edited ownership;
+    /// callers separately account for invalid remembered-destination correction.
+    pub(super) fn choose_existing_folder(&mut self, raw: &str) -> bool {
+        let changed =
+            !matches!(&self.destination, DestinationDraft::Existing { cwd } if cwd == raw);
         self.seed_folder(raw);
         self.folder_is_explicit = true;
+        changed
     }
     /// Inherited placement is visible without preselecting the template checkbox.
     pub(super) fn seed_folder(&mut self, raw: &str) {
@@ -343,10 +358,16 @@ impl LaunchDraft {
         self.destination = DestinationDraft::github(repo);
     }
     /// Hand edits replace Clone/template naming while retaining dormant raw bytes.
-    pub(super) fn edit_title(&mut self, text: String) {
+    /// Ordinary retry identity follows the API's optional-name rule; managed
+    /// naming keeps its existing conservative retirement and preview contract.
+    pub(super) fn edit_title(&mut self, text: String) -> bool {
+        let before = self.effective_title();
         self.checkout_naming = CheckoutNaming::default();
         self.title = text;
         self.title_edited = true;
+        !matches!(self.destination, DestinationDraft::Existing { .. })
+            || api::optional_create_title(&before)
+                != api::optional_create_title(&self.effective_title())
     }
     /// Clone alone supplies a source repository; Replace keeps its copied name.
     pub(super) fn seed_title(&mut self, raw: &str, source_repo: Option<GithubRepo>) {
@@ -392,9 +413,17 @@ impl LaunchDraft {
     }
 
     /// Ordinary typing claims the displayed spelling but retains its old seed.
-    pub(super) fn edit_invocation(&mut self, text: String) {
+    /// Compare literal submitted bytes: an escaped label replacing a raw seed
+    /// is a real change even when the editor appears to show the same value.
+    pub(super) fn edit_invocation(&mut self, text: String) -> bool {
+        let changed = submitted_field(
+            &self.invocation,
+            self.invocation_edited,
+            self.invocation_raw_seed.as_deref(),
+        ) != text;
         self.invocation = text;
         self.invocation_edited = true;
+        changed
     }
 
     /// Template text replaces source ownership, even when its spelling matches.
@@ -412,24 +441,48 @@ impl LaunchDraft {
     }
 
     /// The user's explicit answer never infers command safety from its text.
-    pub(super) fn choose_command_yolo(&mut self, yolo: bool) {
+    /// Unanswered and explicit false are distinct, even before a valid command.
+    pub(super) fn choose_command_yolo(&mut self, yolo: bool) -> bool {
+        let changed = self.command_yolo != Some(yolo);
         self.command_yolo = Some(yolo);
+        changed
     }
 
     /// Clearing a declaration hides Resume without destroying its retained draft.
-    pub(super) fn choose_command_agent(&mut self, agent: Option<LaunchHarness>) {
+    /// The declaration itself is submitted metadata even with Resume disabled.
+    pub(super) fn choose_command_agent(&mut self, agent: Option<LaunchHarness>) -> bool {
+        let changed = self.command_agent != agent;
         self.command_agent = agent;
+        changed
     }
 
     /// Resume visibility changes independently of its retained text ownership.
-    pub(super) fn choose_command_resume(&mut self, enabled: bool) {
+    /// Report only its effective request change; hidden retained text survives.
+    pub(super) fn choose_command_resume(&mut self, enabled: bool) -> bool {
+        let before = self.effective_resume();
         self.command_resume_on = enabled;
+        before != self.effective_resume()
     }
 
     /// Ordinary resume typing claims display text without discarding its seed.
-    pub(super) fn edit_command_resume(&mut self, text: String) {
+    /// A hidden editor has no request value, but still accepts its retained text.
+    pub(super) fn edit_command_resume(&mut self, text: String) -> bool {
+        let before = self.effective_resume();
         self.command_resume = text;
         self.command_resume_edited = true;
+        before != self.effective_resume()
+    }
+
+    /// Resume has request meaning only while declared and opted in. Raw bytes
+    /// remain literal; this read also keeps no-op facts aligned with projection.
+    fn effective_resume(&self) -> Option<String> {
+        (self.command_resume_on && self.command_agent.is_some()).then(|| {
+            submitted_field(
+                &self.command_resume,
+                self.command_resume_edited,
+                self.command_resume_raw_seed.as_deref(),
+            )
+        })
     }
 
     /// A template's explicit null disables Resume and owns the empty spelling.
@@ -467,8 +520,26 @@ impl LaunchDraft {
     }
 
     /// The ordinary prompt editor represents an empty box as absence.
-    pub(super) fn edit_prompt(&mut self, text: String) {
+    /// Compare only the supported active projection; template Some("") remains
+    /// distinct from that absence and dormant prompt text still survives edits.
+    pub(super) fn edit_prompt(&mut self, text: String) -> bool {
+        let before = self.active_prompt();
         self.prompt = (!text.is_empty()).then_some(text);
+        before != self.active_prompt()
+    }
+
+    /// The same supported-agent projection used by reusable template snapshots.
+    /// Exact Some("") from a template remains distinct from ordinary absence.
+    fn active_prompt(&self) -> Option<String> {
+        active_prompt(
+            if self.tab == LaunchTab::Agent {
+                farhelm_proto::launcher::LauncherKind::Agent
+            } else {
+                farhelm_proto::launcher::LauncherKind::Command
+            },
+            self.harness,
+            &self.prompt,
+        )
     }
 
     /// Shared template application has already decided dependent prompt clearing.
@@ -483,8 +554,11 @@ impl LaunchDraft {
     }
 
     /// Preserve literal selector text; submit retains its ordered validation.
-    pub(super) fn edit_conversation(&mut self, text: String) {
+    /// Only the empty string means absence; spacing and escapes are real edits.
+    pub(super) fn edit_conversation(&mut self, text: String) -> bool {
+        let changed = self.conversation != text;
         self.conversation = text;
+        changed
     }
 
     /// Project the active intent, before its host/destination envelope exists.
@@ -528,6 +602,15 @@ impl LaunchDraft {
     pub(super) fn request(&self, context: RequestContext<'_>) -> Option<IntentBinding> {
         let (host, incarnation) = context.host?;
         let title = self.effective_title();
+        // Query/selected-repository candidates may lack an accepted checkout;
+        // only semantic Folder intent uses ordinary optional-title identity.
+        let title = if matches!(self.destination, DestinationDraft::Existing { .. }) {
+            api::optional_create_title(&title)
+                .unwrap_or_default()
+                .to_owned()
+        } else {
+            title
+        };
         let (cwd, github_checkout) = match context.checkout {
             None => (
                 match &self.destination {
@@ -603,6 +686,37 @@ impl LaunchDraft {
         }
     }
 
+    /// Reconciliation can touch the whole agent group. Compare its existing
+    /// submitted projection only when its affected editors parse successfully;
+    /// render-time leniency must not prove malformed words equal to absence.
+    fn retry_selection(&self) -> Option<LaunchSelection> {
+        super::wrapper_words(&self.wrapper).ok()?;
+        self.retry_permissions()?;
+        self.structured_selection()
+    }
+
+    /// Effective permission and Custom words share one request identity. Raw
+    /// omission and an explicit default can differ without changing that pair.
+    fn retry_permissions(&self) -> Option<(Option<LaunchPermission>, Option<Vec<String>>)> {
+        let permission =
+            crate::launch_composer::normalized_permissions(self.harness?, self.permissions);
+        let words = if self.permissions == Some(LaunchPermission::Custom) {
+            Some(farhelm_proto::split_permission_flags(&self.permission_flags).ok()?)
+        } else {
+            None
+        };
+        Some((permission, words))
+    }
+
+    /// Model choices compare accepted request bytes, never an escaped editor.
+    /// Only model and effort can change on the same-harness control paths.
+    fn model_and_effort(&self) -> (Option<String>, Option<LaunchEffort>) {
+        // editing_selection submits this accepted raw value directly; model()
+        // consumers may separately escape it for display. Do not parse unrelated
+        // wrapper/permission editors to decide a model-only change.
+        (self.model.clone(), self.effort)
+    }
+
     /// Choose an agent using the existing catalog-aware compatibility policy.
     /// A genuine owner switch loads that agent's remembered wrapper. Repeated
     /// choices retain raw flags rather than round-tripping through shell words.
@@ -613,6 +727,7 @@ impl LaunchDraft {
         remembered_wrapper: String,
         origin: ChoiceOrigin,
     ) -> AgentChoiceOutcome {
+        let submitted_before = self.retry_selection();
         let old_harness = self.harness;
         let mut before = self.editing_selection(harness);
         if origin == ChoiceOrigin::Control {
@@ -624,14 +739,8 @@ impl LaunchDraft {
             harness,
             catalog,
         );
-        let outcome = AgentChoiceOutcome {
-            reset_reason: super::draft_reconciliation_reason(
-                &before,
-                &selection,
-                self.permissions_explicit,
-            ),
-            selection_changed: old_harness != Some(selection.harness) || selection != before,
-        };
+        let reset_reason =
+            super::draft_reconciliation_reason(&before, &selection, self.permissions_explicit);
         let replace_flags = match origin {
             ChoiceOrigin::Control => old_harness != Some(harness),
             ChoiceOrigin::Search => {
@@ -646,7 +755,11 @@ impl LaunchDraft {
         if replace_flags {
             self.permission_flags = joined(selection.permission_flags.as_ref());
         }
-        outcome
+        AgentChoiceOutcome {
+            reset_reason,
+            selection_changed: submitted_before.is_none()
+                || submitted_before != self.retry_selection(),
+        }
     }
 
     /// Accept a catalog model without changing the existing path's semantics.
@@ -662,6 +775,7 @@ impl LaunchDraft {
     ) -> AgentChoiceOutcome {
         let old_harness = self.harness;
         if origin == ChoiceOrigin::Control && old_harness == Some(harness) {
+            let model_before = self.model_and_effort();
             let offered = catalog
                 .unwrap_or_default()
                 .iter()
@@ -678,9 +792,10 @@ impl LaunchDraft {
             self.model_owner = None;
             return AgentChoiceOutcome {
                 reset_reason,
-                selection_changed: true,
+                selection_changed: model_before != self.model_and_effort(),
             };
         }
+        let submitted_before = self.retry_selection();
         let mut before = self.editing_selection(harness);
         if origin == ChoiceOrigin::Control {
             before.wrapper_prefix = None;
@@ -708,7 +823,8 @@ impl LaunchDraft {
         }
         AgentChoiceOutcome {
             reset_reason,
-            selection_changed: true,
+            selection_changed: submitted_before.is_none()
+                || submitted_before != self.retry_selection(),
         }
     }
 
@@ -720,7 +836,8 @@ impl LaunchDraft {
         id: String,
         harness: LaunchHarness,
         catalog: Option<&[api::LaunchCatalogModel]>,
-    ) -> Option<String> {
+    ) -> AgentChoiceOutcome {
+        let model_before = self.model_and_effort();
         let mut before = self.editing_selection(harness);
         before.harness = harness;
         before.wrapper_prefix = None;
@@ -745,15 +862,20 @@ impl LaunchDraft {
         self.model_raw_seed = None;
         self.model_edited = true;
         self.model_owner = Some(harness);
-        reason
+        AgentChoiceOutcome {
+            reset_reason: reason,
+            selection_changed: model_before != self.model_and_effort(),
+        }
     }
 
     /// Choosing the default model does not erase an independently chosen effort.
-    pub(super) fn choose_default_model(&mut self) {
+    pub(super) fn choose_default_model(&mut self) -> bool {
+        let changed = self.model_and_effort().0.is_some();
         self.model = None;
         self.model_raw_seed = None;
         self.model_edited = false;
         self.model_owner = None;
+        changed
     }
 
     /// Report a real effort change so repeated choices can remain retries.
@@ -765,26 +887,38 @@ impl LaunchDraft {
 
     /// A deliberate mode choice owns permissions and clears unrelated flags.
     /// Custom mode retains its raw buffer so returning to its editor loses no text.
+    /// Its fact compares effective defaults and valid Custom words, so an
+    /// explicit default can be unchanged while malformed words remain conservative.
     pub(super) fn choose_permissions(&mut self, permission: Option<LaunchPermission>) -> bool {
-        let changed = self.permissions != permission;
+        let before = self.retry_permissions();
         self.permissions = permission;
         if permission != Some(LaunchPermission::Custom) {
             self.permission_flags.clear();
         }
         self.permissions_explicit = true;
-        changed
+        before.is_none() || before != self.retry_permissions()
     }
 
     /// Keep the exact editor buffer even when it is not yet a valid argument list.
-    pub(super) fn edit_permission_flags(&mut self, text: String) {
+    /// Only two successful parses can prove an unchanged word vector; invalid
+    /// Custom input retains conservative retirement while it remains repairable.
+    pub(super) fn edit_permission_flags(&mut self, text: String) -> bool {
+        let before = farhelm_proto::split_permission_flags(&self.permission_flags);
+        let after = farhelm_proto::split_permission_flags(&text);
+        let changed = !matches!((before, after), (Ok(before), Ok(after)) if before == after);
         self.permission_flags = text;
         self.permissions_explicit = true;
+        changed
     }
 
     /// Editing a remembered prefix makes it an explicit reusable choice.
-    pub(super) fn edit_wrapper(&mut self, text: String) {
+    /// Valid quoting/spacing changes preserve retry identity when literal words
+    /// match; malformed nonempty text never compares equal to an absent prefix.
+    pub(super) fn edit_wrapper(&mut self, text: String) -> bool {
+        let changed = !matches!((super::wrapper_words(&self.wrapper), super::wrapper_words(&text)), (Ok(before), Ok(after)) if before == after);
         self.wrapper = text;
         self.wrapper_explicit = true;
+        changed
     }
 
     /// Reapply New's passive permission seed while preserving launch context.
@@ -804,12 +938,15 @@ impl LaunchDraft {
 
     /// A stored launch replaces only the structured group and is explicit.
     /// The caller supplies model-owner evidence: Clone has source ownership;
-    /// a recent uses the current catalog's custom_model_owner decision.
+    /// a recent uses the current catalog's custom_model_owner decision. The
+    /// returned fact concerns normalized submitted choices, not these ownership
+    /// writes or the caller's separate destination/tab admission and UI work.
     pub(super) fn restore_launch(
         &mut self,
         selection: &LaunchSelection,
         owner: Option<LaunchHarness>,
-    ) {
+    ) -> bool {
+        let before = self.retry_selection();
         self.accept_reconciled(selection, owner, false);
         self.permissions = crate::launch_composer::normalized_permissions(
             selection.harness,
@@ -819,6 +956,7 @@ impl LaunchDraft {
         self.wrapper = joined(selection.wrapper_prefix.as_ref());
         self.permissions_explicit = true;
         self.wrapper_explicit = true;
+        before.is_none() || before != self.retry_selection()
     }
 
     /// A command/legacy prefill has no hidden structured choice to inherit.
@@ -974,6 +1112,337 @@ pub(super) fn use_launch_draft(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Choices can claim editor/template ownership without changing the create.
+    /// Exercise production facts alongside the resulting submitted selection;
+    /// a no-op fact must not skip the underlying accepted assignments.
+    #[test]
+    fn repeated_choices_preserve_requests_and_apply_ownership() {
+        let mut draft = LaunchDraft::new(None);
+        assert!(
+            draft
+                .choose_harness(
+                    LaunchHarness::Codex,
+                    None,
+                    String::new(),
+                    ChoiceOrigin::Control
+                )
+                .selection_changed
+        );
+        let before = structured(&draft);
+        assert!(!draft.choose_tab(LaunchTab::Agent));
+        for origin in [ChoiceOrigin::Control, ChoiceOrigin::Search] {
+            assert!(
+                !draft
+                    .choose_harness(LaunchHarness::Codex, None, "ignored".into(), origin)
+                    .selection_changed
+            );
+            assert_eq!(structured(&draft), before);
+        }
+        assert!(!draft.choose_default_model());
+        assert!(
+            draft
+                .choose_custom_model("private".into(), LaunchHarness::Codex, None)
+                .selection_changed
+        );
+        assert!(
+            !draft
+                .choose_custom_model("private".into(), LaunchHarness::Codex, None)
+                .selection_changed
+        );
+        assert_eq!(draft.model_owner(), Some(LaunchHarness::Codex));
+        for origin in [ChoiceOrigin::Control, ChoiceOrigin::Search] {
+            assert!(
+                !draft
+                    .choose_catalog_model(
+                        "private".into(),
+                        LaunchHarness::Codex,
+                        None,
+                        String::new(),
+                        origin
+                    )
+                    .selection_changed
+            );
+        }
+        assert!(draft.choose_effort(Some(LaunchEffort::High)));
+        assert!(!draft.choose_effort(Some(LaunchEffort::High)));
+        let outcome = draft.choose_custom_model("private".into(), LaunchHarness::Codex, Some(&[]));
+        assert!(outcome.selection_changed && outcome.reset_reason.is_some());
+        assert_eq!(
+            draft.effort(),
+            None,
+            "known catalog reconciliation is a real change"
+        );
+        assert!(draft.choose_default_model());
+        assert!(!draft.choose_default_model());
+        assert!(
+            draft
+                .choose_harness(
+                    LaunchHarness::Claude,
+                    None,
+                    String::new(),
+                    ChoiceOrigin::Control
+                )
+                .selection_changed
+        );
+    }
+
+    /// Accepted raw model bytes, rather than the escaped display, identify the
+    /// create. Claiming an identical-looking label can therefore be a real edit.
+    #[test]
+    fn custom_model_fact_compares_accepted_raw_bytes() {
+        let mut draft = LaunchDraft::new(None);
+        let raw = "private\u{202e}";
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: Some(raw.into()),
+            effort: None,
+            permissions: Some(LaunchPermission::Guarded),
+            permission_flags: None,
+            wrapper_prefix: None,
+            workspace_trust: None,
+        };
+        draft.restore_launch(&selection, Some(LaunchHarness::Codex));
+        let visible = display_peer(raw);
+        assert_ne!(visible, raw, "premise: relayed model requires escaping");
+        assert_eq!(structured(&draft).model.as_deref(), Some(raw));
+        assert!(
+            draft
+                .choose_custom_model(visible.clone(), LaunchHarness::Codex, None)
+                .selection_changed
+        );
+        assert_eq!(structured(&draft).model.as_deref(), Some(visible.as_str()));
+        assert_eq!(draft.model_raw_seed(), None);
+        assert!(draft.model_edited());
+        assert!(
+            !draft
+                .choose_custom_model(visible, LaunchHarness::Codex, None)
+                .selection_changed
+        );
+    }
+
+    /// Request defaults and successfully parsed words establish equality; raw
+    /// permission omission, quoting and explicitness are retained editor state.
+    /// Invalid parsers cannot establish that a different editor is a safe retry.
+    #[test]
+    fn permission_and_word_facts_follow_valid_submitted_values() {
+        let mut draft = LaunchDraft::new(None);
+        draft.choose_harness(
+            LaunchHarness::Codex,
+            None,
+            String::new(),
+            ChoiceOrigin::Control,
+        );
+        draft.apply_template_permissions(None, "dormant".into());
+        let before = structured(&draft);
+        assert_eq!(draft.permissions(), None);
+        assert_eq!(before.permissions, Some(LaunchPermission::Guarded));
+        assert!(!draft.choose_permissions(Some(LaunchPermission::Guarded)));
+        assert_eq!(structured(&draft), before);
+        assert!(draft.permissions_explicit());
+        assert_eq!(draft.permission_flags(), "");
+        assert!(draft.choose_permissions(Some(LaunchPermission::Yolo)));
+        assert!(!draft.choose_permissions(Some(LaunchPermission::Yolo)));
+        assert!(draft.choose_permissions(Some(LaunchPermission::Custom)));
+        assert!(draft.edit_permission_flags("--mode 'ask me'".into()));
+        let custom = structured(&draft);
+        assert!(!draft.edit_permission_flags("--mode \"ask me\" ".into()));
+        assert_eq!(structured(&draft), custom);
+        assert_eq!(draft.permission_flags(), "--mode \"ask me\" ");
+        assert!(!draft.choose_permissions(Some(LaunchPermission::Custom)));
+        assert!(draft.edit_permission_flags("--mode deny".into()));
+        assert!(draft.edit_permission_flags("'unfinished".into()));
+        assert!(draft.edit_permission_flags("'unfinished".into()));
+        assert!(draft.choose_permissions(Some(LaunchPermission::Custom)));
+        assert!(draft.edit_permission_flags("# no words".into()));
+        assert!(draft.edit_wrapper("wrapper 'two words'".into()));
+        let wrapped = structured(&draft);
+        assert!(!draft.edit_wrapper("wrapper \"two words\" ".into()));
+        assert_eq!(structured(&draft), wrapped);
+        assert!(draft.wrapper_explicit());
+        assert_eq!(draft.wrapper(), "wrapper \"two words\" ");
+        assert!(draft.edit_wrapper("wrapper other".into()));
+        assert!(draft.edit_wrapper(" ".into()));
+        assert!(draft.edit_wrapper(" ".into()));
+        assert!(draft.edit_wrapper(String::new()));
+        assert!(!draft.edit_wrapper(String::new()));
+    }
+
+    /// Ordinary relayed placement can change its ownership without changing its
+    /// operational path. Returning from managed mode is a semantic change even
+    /// when the dormant folder happens to contain the chosen raw bytes.
+    #[test]
+    fn placement_facts_keep_operational_paths_and_semantic_mode() {
+        let mut draft = LaunchDraft::new(None);
+        draft.seed_folder("/work");
+        assert!(!draft.edit_folder("/work".into()));
+        assert!(draft.cwd_edited() && draft.folder_is_explicit());
+        assert!(!draft.choose_existing_folder("/work"));
+        assert!(!draft.cwd_edited() && draft.folder_is_explicit());
+        draft.seed_folder("/work\u{202e}");
+        let visible = draft.cwd();
+        assert_ne!(visible, draft.submitted_cwd());
+        assert!(draft.edit_folder(visible.clone()));
+        assert_eq!(draft.submitted_cwd(), visible);
+        assert!(draft.choose_existing_folder("/work"));
+        draft.edit_repository_query("acme/repo".into());
+        assert!(draft.choose_existing_folder("/work"));
+        draft.select_repository(GithubRepo::parse("acme/repo").unwrap());
+        assert!(draft.edit_folder("/work".into()));
+        assert!(!draft.edit_folder("/work".into()));
+    }
+
+    /// Blank ordinary names are the same omitted API title, but a nonblank
+    /// title's spacing and every managed preview/accepted title remain literal.
+    /// Use the sole production envelope builder, including its candidate case.
+    #[test]
+    fn ordinary_optional_title_identity_does_not_normalize_managed_titles() {
+        let mut draft = LaunchDraft::new(None);
+        draft.choose_harness(
+            LaunchHarness::Codex,
+            None,
+            String::new(),
+            ChoiceOrigin::Control,
+        );
+        let blank = request(&draft);
+        assert!(!draft.edit_title(" ".into()));
+        assert_eq!(draft.title(), " ");
+        assert!(draft.title_edited());
+        assert_eq!(request(&draft), blank);
+        assert!(draft.edit_title(" work ".into()));
+        assert_eq!(request(&draft).title, " work ");
+        assert!(!draft.edit_title(" work ".into()));
+        assert!(draft.edit_title("work".into()));
+        draft.edit_repository_query("acme/repo".into());
+        assert!(draft.edit_title(" ".into()));
+        assert_eq!(
+            request(&draft).title,
+            " ",
+            "a query without accepted checkout is still managed"
+        );
+        let repo = GithubRepo::parse("acme/repo").unwrap();
+        draft.select_repository(repo.clone());
+        assert!(
+            draft.edit_title(" ".into()),
+            "managed naming keeps conservative retirement"
+        );
+        let preview = accepted_preview();
+        let managed = draft
+            .request(RequestContext {
+                host: Some((1, "fixture-incarnation")),
+                launch: draft.launch_intent().unwrap(),
+                replace_source: None,
+                checkout: Some(CheckoutInput::Preview {
+                    repo: &repo,
+                    preview: &preview,
+                }),
+            })
+            .unwrap();
+        let checkout = managed.github_checkout.as_ref().unwrap();
+        assert_eq!(checkout.title.as_deref(), Some(" "));
+        draft.edit_title("new name".into());
+        let accepted = draft
+            .request(RequestContext {
+                host: Some((1, "fixture-incarnation")),
+                launch: draft.launch_intent().unwrap(),
+                replace_source: None,
+                checkout: Some(CheckoutInput::Accepted {
+                    cwd: preview.cwd.raw(),
+                    request: checkout,
+                }),
+            })
+            .unwrap();
+        assert_eq!(accepted.github_checkout, managed.github_checkout);
+        assert_eq!(accepted.title, "new name");
+    }
+
+    /// Command strings are literal, while hidden Resume is deliberately absent
+    /// from the request. Claiming an escaped seed must still change actual bytes.
+    #[test]
+    fn command_facts_keep_literal_bytes_and_effective_resume() {
+        let mut draft = LaunchDraft::new(None);
+        draft.choose_tab(LaunchTab::Command);
+        assert!(draft.choose_command_yolo(false));
+        assert!(!draft.choose_command_yolo(false));
+        assert!(draft.edit_invocation("run".into()));
+        assert!(!draft.edit_invocation("run".into()));
+        assert!(draft.edit_invocation("run ".into()));
+        draft.seed_invocation("run\u{202e}");
+        let visible = draft.invocation();
+        assert_ne!(command(&draft).command, visible);
+        assert!(draft.edit_invocation(visible.clone()));
+        assert_eq!(command(&draft).command, visible);
+        assert!(draft.invocation_edited());
+        assert!(!draft.choose_command_agent(None));
+        assert!(!draft.edit_command_resume("resume".into()));
+        assert!(!draft.choose_command_resume(true));
+        assert_eq!(command(&draft).resume, None);
+        assert!(draft.choose_command_agent(Some(LaunchHarness::Codex)));
+        assert!(!draft.choose_command_agent(Some(LaunchHarness::Codex)));
+        assert_eq!(command(&draft).resume.as_deref(), Some("resume"));
+        assert!(!draft.edit_command_resume("resume".into()));
+        assert!(draft.edit_command_resume("resume ".into()));
+        assert!(draft.choose_command_resume(false));
+        assert!(!draft.choose_command_resume(false));
+        assert!(!draft.edit_command_resume("retained".into()));
+        assert_eq!(draft.command_resume(), "retained");
+        assert_eq!(command(&draft).resume, None);
+        draft.seed_command_fields(Some(&CommandLaunch {
+            command: "run".into(),
+            yolo: false,
+            agent: Some(LaunchHarness::Codex),
+            resume: Some("resume\u{202e}".into()),
+        }));
+        let visible = draft.command_resume();
+        assert_ne!(command(&draft).resume.as_deref(), Some(visible.as_str()));
+        assert!(draft.edit_command_resume(visible.clone()));
+        assert_eq!(command(&draft).resume.as_deref(), Some(visible.as_str()));
+    }
+
+    /// One-time text keeps literal values and template presence. A recent's
+    /// ownership refresh can likewise leave its normalized structured request
+    /// unchanged, but invalid old words cannot prove that equality.
+    #[test]
+    fn one_time_inputs_and_recent_facts_use_production_projections() {
+        let mut draft = LaunchDraft::new(None);
+        draft.choose_harness(
+            LaunchHarness::Codex,
+            None,
+            String::new(),
+            ChoiceOrigin::Control,
+        );
+        assert!(draft.edit_prompt("hello".into()));
+        assert!(!draft.edit_prompt("hello".into()));
+        assert!(draft.edit_prompt("hello ".into()));
+        draft.apply_template_prompt(Some(String::new()));
+        assert_eq!(request(&draft).prompt, Some(String::new()));
+        assert!(draft.edit_prompt(String::new()));
+        assert_eq!(request(&draft).prompt, None);
+        assert!(!draft.edit_prompt(String::new()));
+        assert!(draft.edit_conversation("conversation-1".into()));
+        assert!(!draft.edit_conversation("conversation-1".into()));
+        assert!(draft.edit_conversation("conversation-1 ".into()));
+        assert_eq!(
+            request(&draft).conversation.as_deref(),
+            Some("conversation-1 ")
+        );
+        let selection = structured(&draft);
+        assert!(!draft.restore_launch(&selection, None));
+        assert!(draft.permissions_explicit() && draft.wrapper_explicit());
+        draft.edit_wrapper("prefix --".into());
+        assert!(draft.restore_launch(&selection, None));
+        let mut custom = selection.clone();
+        custom.permissions = Some(LaunchPermission::Custom);
+        custom.permission_flags = Some(vec!["--mode".into(), "ask".into()]);
+        assert!(draft.restore_launch(&custom, None));
+        assert!(!draft.restore_launch(&custom, None));
+        assert!(draft.restore_launch(&selection, None));
+        draft.edit_wrapper("'unfinished".into());
+        assert!(draft.restore_launch(&selection, None));
+        draft.choose_tab(LaunchTab::Command);
+        assert!(!draft.edit_prompt("dormant".into()));
+        assert_eq!(draft.prompt().as_deref(), Some("dormant"));
+    }
 
     /// Initial destination resolution and post-mint raw reads must describe the
     /// same folder. Exercise actual ownership transitions before relying on the
@@ -1183,7 +1652,9 @@ mod tests {
             match operation {
                 0 => draft.reset_choices(Some(LaunchPermission::Guarded)),
                 1 => draft.clear_for_command_seed(),
-                _ => draft.restore_launch(&selection, None),
+                _ => {
+                    draft.restore_launch(&selection, None);
+                }
             }
             assert_eq!(draft.cwd(), before.cwd());
             assert_eq!(draft.cwd_raw_seed(), before.cwd_raw_seed());
@@ -1234,8 +1705,8 @@ mod tests {
     }
 
     /// The complete envelope retains raw peer bytes and one-time literal
-    /// inputs together. Default normalization belongs to the launch projection;
-    /// parsing or trimming the surrounding fields would change retry identity.
+    /// inputs together. Ordinary blank names share the API's omitted-title
+    /// identity, while the editor and every nonblank field retain their bytes.
     #[test]
     fn request_assembles_host_raw_placement_and_structured_one_time_inputs() {
         let mut draft = LaunchDraft::new(None);
@@ -1288,9 +1759,14 @@ mod tests {
         assert_eq!(request(&draft).cwd, "/work/peer<U+202E>");
         draft.edit_title(" \t".into());
         assert_eq!(
-            request(&draft).title,
+            draft.title(),
             " \t",
-            "request assembly does not normalize blank titles"
+            "the editor retains the blank spelling"
+        );
+        assert_eq!(
+            request(&draft).title,
+            "",
+            "ordinary blank titles share the API's omitted-title identity"
         );
         draft.choose_harness(
             LaunchHarness::Pi,
@@ -1930,11 +2406,21 @@ mod tests {
             |draft| {
                 draft.choose_tab(LaunchTab::Agent);
             },
-            |draft| draft.edit_invocation("different command".into()),
-            |draft| draft.choose_command_yolo(false),
-            |draft| draft.choose_command_agent(None),
-            |draft| draft.choose_command_resume(false),
-            |draft| draft.edit_command_resume("different resume".into()),
+            |draft| {
+                draft.edit_invocation("different command".into());
+            },
+            |draft| {
+                draft.choose_command_yolo(false);
+            },
+            |draft| {
+                draft.choose_command_agent(None);
+            },
+            |draft| {
+                draft.choose_command_resume(false);
+            },
+            |draft| {
+                draft.edit_command_resume("different resume".into());
+            },
         ];
         for (index, edit) in edits.into_iter().enumerate() {
             dom.in_runtime(|| owner.edit(edit));
@@ -2122,11 +2608,15 @@ mod tests {
         draft.choose_permissions(Some(LaunchPermission::Custom));
         draft.edit_permission_flags("--x 'unfinished".into());
         draft.edit_wrapper("mine --".into());
-        draft.choose_harness(
+        let outcome = draft.choose_harness(
             LaunchHarness::Codex,
             None,
             "other --".into(),
             ChoiceOrigin::Control,
+        );
+        assert!(
+            outcome.selection_changed,
+            "invalid affected flags cannot prove retry equality"
         );
         assert_eq!(draft.permission_flags(), "--x 'unfinished");
         assert_eq!(draft.wrapper(), "mine --");
@@ -2190,11 +2680,16 @@ mod tests {
             );
             assert_eq!(draft.effort(), (!known).then_some(LaunchEffort::High));
             assert_eq!(outcome.reset_reason.is_some(), known);
+            assert_eq!(outcome.selection_changed, known);
             draft.choose_effort(Some(LaunchEffort::High));
             let reason =
                 draft.choose_custom_model("private-model".into(), LaunchHarness::Codex, catalog);
             assert_eq!(draft.effort(), (!known).then_some(LaunchEffort::High));
-            assert_eq!(reason.is_some(), known);
+            assert_eq!(reason.reset_reason.is_some(), known);
+            assert!(
+                reason.selection_changed,
+                "accepting a new model changes its submitted bytes"
+            );
             assert_eq!(draft.model_owner(), Some(LaunchHarness::Codex));
         }
     }

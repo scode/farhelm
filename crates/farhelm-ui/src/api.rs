@@ -2712,6 +2712,13 @@ async fn replace_reply(resp: reqwest::Response) -> Result<(Session, Option<Strin
     Ok((session, notice))
 }
 
+/// Ordinary creates omit blank names but preserve every byte of a nonblank name.
+/// Retry bindings use this same borrowed projection so empty and whitespace-only
+/// editor text cannot identify different attempts that send the same title:null.
+pub(crate) fn optional_create_title(title: &str) -> Option<&str> {
+    (!title.trim().is_empty()).then_some(title)
+}
+
 /// One create's request body — the single builder both [`create_session`]
 /// and [`replace_session_with`] use, so a replace-with's override body can
 /// never drift from an ordinary create's own field list.
@@ -2733,7 +2740,7 @@ fn create_body(
     // field means "auto-generate", per SPEC.md's "Title: optional;
     // auto-generated when omitted" — sending `Some("")` would instead ask
     // the supervisor to name the session the empty string.
-    let title = (!title.trim().is_empty()).then_some(title);
+    let title = optional_create_title(title);
     let mut body = serde_json::json!({
         "cwd": cwd,
         "title": title,
@@ -5892,6 +5899,34 @@ mod tests {
             "an agent launch states what to run, and a body naming both is refused outright"
         );
         assert_eq!(structured["title"], serde_json::json!("named"));
+    }
+
+    /// The wire title rule is also the launcher's ordinary retry identity rule.
+    /// Blank spelling changes must remain omitted, while trimming a nonblank
+    /// name here would silently change what the user asked to create.
+    #[farhelm_testtrace::test]
+    fn create_body_omits_blank_titles_and_preserves_nonblank_bytes() {
+        let command = crate::CommandLaunch {
+            command: "command".into(),
+            yolo: false,
+            agent: None,
+            resume: None,
+        };
+        for (title, expected) in [
+            ("", serde_json::Value::Null),
+            (" \t\n", serde_json::Value::Null),
+            (" work ", serde_json::json!(" work ")),
+        ] {
+            let body = create_body(
+                "/work",
+                CreateAgent::Command(&command),
+                title,
+                "key",
+                Some(1),
+                None,
+            );
+            assert_eq!(body["title"], expected);
+        }
     }
 
     /// All supported agent selectors must carry the accepted destination and

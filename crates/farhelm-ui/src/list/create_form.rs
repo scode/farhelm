@@ -825,7 +825,7 @@ fn template_edits(
     }
     if let Some(yolo) = fields.yolo {
         edits.push(TemplateEdit::Set(Box::new(move || {
-            t.draft.edit(|draft| draft.choose_command_yolo(yolo))
+            t.draft.edit(|draft| draft.choose_command_yolo(yolo));
         })));
     }
     if let Some(resume) = fields.resume_command {
@@ -884,8 +884,9 @@ fn template_edits(
 /// Apply a clicked or keyboard-selected search result without launching.
 ///
 /// Search is only a picker. Keeping its result application in one helper
-/// makes Enter and pointer activation replace the same fields and clear the
-/// same idempotency binding. Name and host actions therefore have the same
+/// makes Enter and pointer activation replace the same fields and apply the
+/// same retry policy. Equal ordinary choices still complete acceptance and
+/// ownership changes. Name and host actions therefore have the same
 /// no-launch contract as other results. A returned path means this was the
 /// explicit browse action; the caller starts the shared guarded request after
 /// closing the search surface.
@@ -914,6 +915,12 @@ fn apply_composer_search_result(
 ) -> Option<String> {
     let catalog = catalog_answer.unwrap_or_default();
     use crate::launch_composer::ComposerSearchResult;
+    // Capture before history adoption or path override can clear the old claim.
+    let correcting_invalid = !remembered_destination_matches(
+        remembered_destination.peek().as_ref(),
+        live_destination.peek().as_ref(),
+    );
+    let changed;
     if matches!(
         &result,
         ComposerSearchResult::Folder(_) | ComposerSearchResult::Recent(_)
@@ -949,9 +956,10 @@ fn apply_composer_search_result(
             // A cloned title may have an escaped display seed. This action
             // is the user's new text, so submit and checkout preview must
             // read it rather than replay the clone's raw title.
-            draft.edit(|draft| draft.edit_title(name));
+            changed = draft.edit(|draft| draft.edit_title(name));
         }
         ComposerSearchResult::Host(host) => {
+            changed = true;
             // A host action has the same authority effects as the selector:
             // it takes over clone defaults and retires the old destination
             // before a queued history callback or submit can observe it.
@@ -963,6 +971,7 @@ fn apply_composer_search_result(
             }
         }
         ComposerSearchResult::Github(repo) => {
+            changed = true;
             remembered_destination.set(None);
             draft.edit(|draft| draft.select_repository(repo));
             preview_revision.with_mut(|value| {
@@ -971,17 +980,20 @@ fn apply_composer_search_result(
         }
         crate::launch_composer::ComposerSearchResult::UsePath(folder)
         | crate::launch_composer::ComposerSearchResult::Folder(folder) => {
-            draft.edit(|draft| draft.choose_existing_folder(&folder));
+            changed =
+                draft.edit(|draft| draft.choose_existing_folder(&folder)) || correcting_invalid;
         }
         crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => {
             // Query-path actions are treated like other relayed path choices:
             // the escaped field remains reviewable, while the browse request
             // and an untouched later create retain the exact requested bytes.
-            draft.edit(|draft| draft.choose_existing_folder(&folder));
-            intent_key.set(None);
+            if draft.edit(|draft| draft.choose_existing_folder(&folder)) || correcting_invalid {
+                intent_key.set(None);
+            }
             return Some(folder);
         }
         crate::launch_composer::ComposerSearchResult::Harness(harness) => {
+            let tab_changed = draft.snapshot().tab() != LaunchTab::Agent;
             draft.edit(|draft| {
                 draft.choose_tab(LaunchTab::Agent);
             });
@@ -994,9 +1006,11 @@ fn apply_composer_search_result(
                     ChoiceOrigin::Search,
                 )
             });
+            changed = outcome.selection_changed || tab_changed;
             composer_reset_reason.set(outcome.reset_reason);
         }
         crate::launch_composer::ComposerSearchResult::Model { id, harness } => {
+            let tab_changed = draft.snapshot().tab() != LaunchTab::Agent;
             // A model carries its harness ownership, so selecting it is also
             // an explicit return to structured mode rather than leaving a
             // structured draft hidden behind command controls.
@@ -1013,6 +1027,7 @@ fn apply_composer_search_result(
                     ChoiceOrigin::Search,
                 )
             });
+            changed = outcome.selection_changed || tab_changed;
             composer_reset_reason.set(outcome.reset_reason);
         }
         crate::launch_composer::ComposerSearchResult::Effort(effort) => {
@@ -1024,6 +1039,7 @@ fn apply_composer_search_result(
             if !draft.edit(|draft| draft.choose_effort(effort)) {
                 return None;
             }
+            changed = true;
         }
         crate::launch_composer::ComposerSearchResult::Permissions(permission) => {
             let focus_custom = permission == crate::launch_composer::ComposerPermission::Custom;
@@ -1044,9 +1060,7 @@ fn apply_composer_search_result(
                 }
                 crate::launch_composer::ComposerPermission::Chat => Some(LaunchPermission::Chat),
             };
-            draft.edit(|draft| {
-                draft.choose_permissions(permission);
-            });
+            changed = draft.edit(|draft| draft.choose_permissions(permission));
             if focus_custom {
                 document::eval(
                     "requestAnimationFrame(() => document.querySelector('.custom-permission-flags')?.focus())",
@@ -1054,6 +1068,7 @@ fn apply_composer_search_result(
             }
         }
         crate::launch_composer::ComposerSearchResult::Recent(entry) => {
+            let tab_changed = draft.snapshot().tab() != LaunchTab::Agent;
             draft.edit(|draft| {
                 draft.choose_tab(LaunchTab::Agent);
             });
@@ -1064,19 +1079,25 @@ fn apply_composer_search_result(
                 selection.permissions,
             );
             let owner = crate::launch_composer::custom_model_owner(&selection, catalog);
-            draft.edit(|draft| draft.restore_launch(&selection, owner));
+            let selection_changed = draft.edit(|draft| draft.restore_launch(&selection, owner));
             if let Some(repo) = entry.github_repo {
+                changed = true;
                 remembered_destination.set(None);
                 draft.edit(|draft| draft.select_repository(repo));
                 preview_revision.with_mut(|value| {
                     *value = value.checked_add(1).expect("preview revision exhausted")
                 });
             } else {
-                draft.edit(|draft| draft.choose_existing_folder(entry.cwd.raw()));
+                changed = draft.edit(|draft| draft.choose_existing_folder(entry.cwd.raw()))
+                    || selection_changed
+                    || tab_changed
+                    || correcting_invalid;
             }
         }
     }
-    intent_key.set(None);
+    if changed {
+        intent_key.set(None);
+    }
     None
 }
 
@@ -1245,9 +1266,10 @@ fn take_launcher_guarded_answer(
 ///   lookup may reconcile that original intent across a new incarnation on
 ///   the same installation. [`same_fresh_intent`] is that narrow exception;
 ///   a different installation must never receive the old attempt's key.
-/// - **The form's values, snapshotted.** They already start a new intent
-///   when edited (each field's `oninput` is what clears the key), but that
-///   rule has a gap the size of one await: minting is asynchronous and the
+/// - **The submitted values, snapshotted.** Ordinary edits retire the key
+///   when those values change; equal text or choices still update ownership
+///   without abandoning an unresolved retry. That eager rule has a gap the
+///   size of one await: minting is asynchronous and the
 ///   `disabled` attributes that make the form inert land one render after the
 ///   submit, so a keystroke queued at submit time can change a field while the
 ///   key is being made. The binding is re-read after minting and compared
@@ -1275,6 +1297,8 @@ struct IntentBinding {
     /// the two modes is a different intended create, which is why the mode
     /// lives inside the binding rather than beside it.
     agent: LaunchIntent,
+    /// Ordinary blank names share the API's omitted-title identity. Managed
+    /// names remain exact because accepted preview authority binds their bytes.
     title: String,
     /// `Some(source id)` when this binding is a "replace with", carried
     /// straight from the mounted [`CreatePrefill::replace_source`] — `None`
@@ -3593,6 +3617,11 @@ pub(super) fn CreateSessionForm(
             if !draft_transition_allowed(ops) {
                 return false;
             }
+            let tab_changed = draft.snapshot().tab() != LaunchTab::Agent;
+            let correcting_invalid = !remembered_destination_matches(
+                remembered_destination.peek().as_ref(),
+                live_destination.peek().as_ref(),
+            );
             if !admit_history_destination(
                 history_target.clone(),
                 live_destination,
@@ -3613,7 +3642,7 @@ pub(super) fn CreateSessionForm(
             // throw the recent away.
             permission_escalation.set(None);
             let owner = crate::launch_composer::custom_model_owner(&entry.selection, &catalog);
-            draft.edit(|draft| draft.restore_launch(&selection, owner));
+            let selection_changed = draft.edit(|draft| draft.restore_launch(&selection, owner));
             // Applying a recent is a deliberate whole-draft replacement, not
             // a passive default — its permissions choice must filter
             // further recents exactly as it always has.
@@ -3623,15 +3652,16 @@ pub(super) fn CreateSessionForm(
                 browse_result,
                 browse_error,
             );
-            if let Some(repo) = entry.github_repo {
+            let destination_changed = if let Some(repo) = entry.github_repo {
                 remembered_destination.set(None);
                 draft.edit(|draft| draft.select_repository(repo));
                 preview_revision.with_mut(|value| {
                     *value = value.checked_add(1).expect("preview revision exhausted")
                 });
+                true
             } else {
-                draft.edit(|draft| draft.choose_existing_folder(entry.cwd.raw()));
-            }
+                draft.edit(|draft| draft.choose_existing_folder(entry.cwd.raw()))
+            };
             // Admission precedes the mode transition so a stale destination
             // cannot leave the user on a partially applied structured draft.
             // Once admitted, the row's meaning is the whole structured setup;
@@ -3641,7 +3671,9 @@ pub(super) fn CreateSessionForm(
                 draft.choose_tab(LaunchTab::Agent);
             });
             composer_reset_reason.set(None);
-            intent_key.set(None);
+            if tab_changed || selection_changed || destination_changed || correcting_invalid {
+                intent_key.set(None);
+            }
             true
         }
     });
@@ -3715,14 +3747,15 @@ pub(super) fn CreateSessionForm(
                 return;
             }
             promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
-            match option {
+            let changed = match option {
                 crate::launch_composer::ModelOption::HarnessDefault => {
                     partial_template_hint.set(false);
-                    draft.edit(LaunchDraft::choose_default_model);
+                    let changed = draft.edit(LaunchDraft::choose_default_model);
                     composer_reset_reason.set(None);
                     model_draft_error.set(None);
                     model_draft.set(String::new());
                     model_open.set(false);
+                    changed
                 }
                 crate::launch_composer::ModelOption::Model { id, harness } => {
                     partial_template_hint.set(false);
@@ -3741,11 +3774,14 @@ pub(super) fn CreateSessionForm(
                     model_draft_error.set(None);
                     model_draft.set(String::new());
                     model_open.set(false);
+                    outcome.selection_changed
                 }
                 crate::launch_composer::ModelOption::ShowAll => unreachable!("handled above"),
-            }
+            };
             model_active.set(None);
-            intent_key.set(None);
+            if changed {
+                intent_key.set(None);
+            }
         }
     });
     let active_search_harness = (*launch_tab.read() == LaunchTab::Agent)
@@ -4512,13 +4548,19 @@ pub(super) fn CreateSessionForm(
         }
     };
     // Pointer and keyboard choices share admission, browse invalidation and raw
-    // reseeding. None submits. Local home is still a deliberate host pin even
-    // when that host is already selected; home changes only its folder.
+    // reseeding. None submits. Equal ordinary paths keep unresolved identity
+    // unless they correct an invalid installation claim. Local home is still
+    // a deliberate host pin even when selected; home changes only its folder.
     let choose_folder = Callback::new(move |choice: FolderChoice| {
         if !draft_transition_allowed(ops) || draft.snapshot().destination().is_managed() {
             return;
         }
         partial_template_hint.set(false);
+        let correcting_invalid = !remembered_destination_matches(
+            remembered_destination.peek().as_ref(),
+            live_destination.peek().as_ref(),
+        );
+        let host_action = matches!(&choice, FolderChoice::LocalHome);
         let path = match choice {
             FolderChoice::Recent { cwd, target } => {
                 if !admit_history_destination(
@@ -4550,8 +4592,10 @@ pub(super) fn CreateSessionForm(
             browse_result,
             browse_error,
         );
-        draft.edit(|draft| draft.choose_existing_folder(&path));
-        intent_key.set(None);
+        let path_changed = draft.edit(|draft| draft.choose_existing_folder(&path));
+        if path_changed || correcting_invalid || host_action {
+            intent_key.set(None);
+        }
         folder_open.set(false);
         folder_active.set(None);
     });
@@ -4564,12 +4608,9 @@ pub(super) fn CreateSessionForm(
         }
         partial_template_hint.set(false);
         promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
-        if draft.snapshot().permissions() != permission {
+        if draft.edit(|draft| draft.choose_permissions(permission)) {
             intent_key.set(None);
         }
-        draft.edit(|draft| {
-            draft.choose_permissions(permission);
-        });
     });
     // A guarded answer may arrive after another control's event but before
     // that control's render. Reconstruct the executable draft from its live
@@ -6650,14 +6691,17 @@ pub(super) fn CreateSessionForm(
                                     promote_fetched_history_snapshot(
                                         offered_history, create_target, fetched_history,
                                     );
-                                    draft.edit(|draft| draft.edit_folder(evt.value()));
+                                    let correcting_invalid = !remembered_destination_matches(
+                                        remembered_destination.peek().as_ref(), live_destination.peek().as_ref(),
+                                    );
+                                    let changed = draft.edit(|draft| draft.edit_folder(evt.value()));
                                     folder_active.set(None);
                                     folder_open.set(true);
                                     remembered_destination.set(None);
                                     invalidate_directory_browse(
                                         browse_generation, browse_request, browse_result, browse_error,
                                     );
-                                    intent_key.set(None);
+                                    if changed || correcting_invalid { intent_key.set(None); }
                                 },
                             }
                             // Float like model/search suggestions. In-flow history
@@ -6737,13 +6781,11 @@ pub(super) fn CreateSessionForm(
                                         if !draft_transition_allowed(ops) {
                                             return;
                                         }
-                                        draft.edit(|draft| draft.edit_title(evt.value()));
-                                        // An edit makes the next submit a DIFFERENT
-                                        // intent, so the key the last one used stops
-                                        // applying here (this component's docs carry
-                                        // the full argument for both edges of that
-                                        // rule).
-                                        intent_key.set(None);
+                                        // Ownership still changes on an equal edit; only
+                                        // a different submitted name retires its retry.
+                                        if draft.edit(|draft| draft.edit_title(evt.value())) {
+                                            intent_key.set(None);
+                                        }
                                     },
                                 }
                                 if let Some((base, true)) = &template_base {
@@ -6791,9 +6833,9 @@ pub(super) fn CreateSessionForm(
                                         promote_fetched_history_snapshot(
                                             offered_history, create_target, fetched_history,
                                         );
-                                        draft.edit(|draft| { draft.choose_tab(target); });
+                                        let changed = draft.edit(|draft| draft.choose_tab(target));
                                         partial_template_hint.set(false);
-                                        intent_key.set(None);
+                                        if changed { intent_key.set(None); }
                                         // After the render that moves the
                                         // tab stop, so focus lands on the tab
                                         // now selected.
@@ -6853,19 +6895,18 @@ pub(super) fn CreateSessionForm(
                                 }
                             }
                             // These callbacks retain the create form's history and intent
-                            // boundaries. The shared controls only report the user's edits.
+                            // boundaries. Equal edits still claim text/explicitness; their
+                            // production facts decide only eager retry retirement.
                             LaunchControls {
                                 prompt: prompt().unwrap_or_default(),
                                 on_prompt: Some(EventHandler::new(move |value: String| {
                                     if !draft_transition_allowed(ops) { return; }
-                                    draft.edit(|draft| draft.edit_prompt(value));
-                                    intent_key.set(None);
+                                    if draft.edit(|draft| draft.edit_prompt(value)) { intent_key.set(None); }
                                 })),
                                 conversation: conversation(),
                                 on_conversation: Some(EventHandler::new(move |value| {
                                     if !draft_transition_allowed(ops) { return; }
-                                    draft.edit(|draft| draft.edit_conversation(value));
-                                    intent_key.set(None);
+                                    if draft.edit(|draft| draft.edit_conversation(value)) { intent_key.set(None); }
                                 })),
                                 harness: structured_harness(),
                                 model: structured_model(),
@@ -6877,16 +6918,14 @@ pub(super) fn CreateSessionForm(
                                 wrapper_prefix: structured_wrapper(),
                                 on_wrapper_prefix: move |text| {
                                     if !draft_transition_allowed(ops) { return; }
-                                    draft.edit(|draft| draft.edit_wrapper(text));
-                                    intent_key.set(None);
+                                    if draft.edit(|draft| draft.edit_wrapper(text)) { intent_key.set(None); }
                                 },
                                 on_permission_flags: move |text| {
                                     // A queued input can outlive the render that
                                     // enabled this editor. Keep the admitted
                                     // launch and its retry key unchanged.
                                     if !draft_transition_allowed(ops) { return; }
-                                    draft.edit(|draft| draft.edit_permission_flags(text));
-                                    intent_key.set(None);
+                                    if draft.edit(|draft| draft.edit_permission_flags(text)) { intent_key.set(None); }
                                 },
                                 catalog: catalog_models.clone(),
                                 busy,
@@ -6948,13 +6987,13 @@ pub(super) fn CreateSessionForm(
                                                 // Permission text can still be an unfinished draft.
                                                 // Only model/effort compatibility may clear effort;
                                                 // an unavailable catalog cannot establish a conflict.
-                                                let reason = draft.edit(|draft| draft.choose_custom_model(model, harness, catalog_answer.as_deref()));
-                                                composer_reset_reason.set(reason);
+                                                let outcome = draft.edit(|draft| draft.choose_custom_model(model, harness, catalog_answer.as_deref()));
+                                                composer_reset_reason.set(outcome.reset_reason);
                                                 model_draft_error.set(None);
                                                 model_draft.set(String::new());
                                                 model_open.set(false);
                                                 model_active.set(None);
-                                                intent_key.set(None);
+                                                if outcome.selection_changed { intent_key.set(None); }
                                             }
                                             crate::launch_composer::ModelEnterTarget::NeedsHarness(_) => {
                                                 model_draft_error.set(Some(
@@ -6982,10 +7021,9 @@ pub(super) fn CreateSessionForm(
                                     );
                                     // Reapplying a choice with Enter is also a
                                     // retry gesture. Only a real edit retires it.
-                                    if draft.snapshot().effort() != effort {
+                                    if draft.edit(|draft| draft.choose_effort(effort)) {
                                         intent_key.set(None);
                                     }
-                                    draft.edit(|draft| { draft.choose_effort(effort); });
                                 },
                                 on_permissions: move |permission| choose_permissions.call(permission),
                             }
@@ -7012,8 +7050,7 @@ pub(super) fn CreateSessionForm(
                         if !draft_transition_allowed(ops) {
                             return;
                         }
-                        draft.edit(|draft| draft.edit_invocation(evt.value()));
-                        intent_key.set(None);
+                        if draft.edit(|draft| draft.edit_invocation(evt.value())) { intent_key.set(None); }
                     },
                 }
             }
@@ -7032,8 +7069,7 @@ pub(super) fn CreateSessionForm(
                         disabled: busy,
                         onchange: move |_| {
                             if !draft_transition_allowed(ops) { return; }
-                            draft.edit(|draft| draft.choose_command_yolo(true));
-                            intent_key.set(None);
+                            if draft.edit(|draft| draft.choose_command_yolo(true)) { intent_key.set(None); }
                         },
                     }
                     "yes (YOLO)"
@@ -7048,8 +7084,7 @@ pub(super) fn CreateSessionForm(
                         disabled: busy,
                         onchange: move |_| {
                             if !draft_transition_allowed(ops) { return; }
-                            draft.edit(|draft| draft.choose_command_yolo(false));
-                            intent_key.set(None);
+                            if draft.edit(|draft| draft.choose_command_yolo(false)) { intent_key.set(None); }
                         },
                     }
                     "no"
@@ -7064,13 +7099,12 @@ pub(super) fn CreateSessionForm(
                     disabled: busy,
                     onchange: move |evt| {
                         if !draft_transition_allowed(ops) { return; }
-                        draft.edit(|draft| draft.choose_command_agent(
+                        if draft.edit(|draft| draft.choose_command_agent(
                             LaunchHarness::ALL
                                 .iter()
                                 .copied()
                                 .find(|harness| harness_value(*harness) == evt.value()),
-                        ));
-                        intent_key.set(None);
+                        )) { intent_key.set(None); }
                     },
                     option { value: "", selected: command_agent().is_none(), "none" }
                     for harness in LaunchHarness::ALL.iter().copied() {
@@ -7096,8 +7130,7 @@ pub(super) fn CreateSessionForm(
                         disabled: busy,
                         onchange: move |evt| {
                             if !draft_transition_allowed(ops) { return; }
-                            draft.edit(|draft| draft.choose_command_resume(evt.checked()));
-                            intent_key.set(None);
+                            if draft.edit(|draft| draft.choose_command_resume(evt.checked())) { intent_key.set(None); }
                         },
                     }
                     "resume"
@@ -7117,8 +7150,7 @@ pub(super) fn CreateSessionForm(
                             disabled: busy,
                             oninput: move |evt| {
                                 if !draft_transition_allowed(ops) { return; }
-                                draft.edit(|draft| draft.edit_command_resume(evt.value()));
-                                intent_key.set(None);
+                                if draft.edit(|draft| draft.edit_command_resume(evt.value())) { intent_key.set(None); }
                             },
                         }
                     }
@@ -7170,12 +7202,15 @@ pub(super) fn CreateSessionForm(
                                 promote_fetched_history_snapshot(
                                     offered_history, create_target, fetched_history,
                                 );
-                                draft.edit(|draft| draft.choose_existing_folder(selected_cwd.raw()));
+                                let correcting_invalid = !remembered_destination_matches(
+                                    remembered_destination.peek().as_ref(), live_destination.peek().as_ref(),
+                                );
+                                let changed = draft.edit(|draft| draft.choose_existing_folder(selected_cwd.raw()));
                                 remembered_destination.set(None);
                                 invalidate_directory_browse(
                                     browse_generation, browse_request, browse_result, browse_error,
                                 );
-                                intent_key.set(None);
+                                if changed || correcting_invalid { intent_key.set(None); }
                             }
                         },
                         "use {result.cwd.escaped()}"
@@ -7200,12 +7235,15 @@ pub(super) fn CreateSessionForm(
                                 promote_fetched_history_snapshot(
                                     offered_history, create_target, fetched_history,
                                 );
-                                draft.edit(|draft| draft.choose_existing_folder(parent.raw()));
+                                let correcting_invalid = !remembered_destination_matches(
+                                    remembered_destination.peek().as_ref(), live_destination.peek().as_ref(),
+                                );
+                                let changed = draft.edit(|draft| draft.choose_existing_folder(parent.raw()));
                                 remembered_destination.set(None);
                                 invalidate_directory_browse(
                                     browse_generation, browse_request, browse_result, browse_error,
                                 );
-                                intent_key.set(None);
+                                if changed || correcting_invalid { intent_key.set(None); }
                             }
                             },
                             "parent: {parent.escaped()}"
@@ -7234,12 +7272,15 @@ pub(super) fn CreateSessionForm(
                                 promote_fetched_history_snapshot(
                                     offered_history, create_target, fetched_history,
                                 );
-                                draft.edit(|draft| draft.choose_existing_folder(child.raw()));
+                                let correcting_invalid = !remembered_destination_matches(
+                                    remembered_destination.peek().as_ref(), live_destination.peek().as_ref(),
+                                );
+                                let changed = draft.edit(|draft| draft.choose_existing_folder(child.raw()));
                                 remembered_destination.set(None);
                                 invalidate_directory_browse(
                                     browse_generation, browse_request, browse_result, browse_error,
                                 );
-                                intent_key.set(None);
+                                if changed || correcting_invalid { intent_key.set(None); }
                             }
                             },
                             "{child.escaped()}"

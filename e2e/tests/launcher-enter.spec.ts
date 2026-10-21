@@ -6,6 +6,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { clickDialogGap } from "./helpers/dialog-gap";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { cleanupSession, createSession, listHosts, openRowMenu, stubFeed } from "./helpers/fleet";
@@ -397,13 +398,29 @@ test("launcher shows a generic refusal after its target changes", async ({ page,
 });
 
 /**
- * Observe the ordinary create body without starting an agent. A numbered,
- * stamped refusal is the completion oracle for each attempt, so consecutive
- * choices cannot be asserted against an earlier request or a still-busy form.
+ * Observe ordinary creates without starting an agent. Optional catalog rows
+ * make compatibility changes deterministic; numbered, stamped refusals prove
+ * each request completed while retaining its unresolved retry identity.
+ * Permission-default templates can omit the usual explicit Guarded seed so
+ * that setup does not overwrite the raw default they are meant to establish.
  */
-async function observeChoiceCreates(page: Page, request: APIRequestContext) {
+async function observeChoiceCreates(
+  page: Page,
+  request: APIRequestContext,
+  models?: readonly { id: string; harness: string; efforts: string[] }[],
+  seedGuarded = true,
+) {
   const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"];
   expect(build, "controlled replies must retain the live helm identity").toBeTruthy();
+  if (models) {
+    await page.route("**/api/launch-catalog", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "x-farhelm-build": build, "content-type": "application/json" },
+        body: JSON.stringify(models),
+      });
+    });
+  }
   const bodies: Record<string, unknown>[] = [];
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
@@ -415,7 +432,9 @@ async function observeChoiceCreates(page: Page, request: APIRequestContext) {
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
   await form.getByLabel("folder", { exact: true }).fill("/tmp");
-  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+  if (seedGuarded) {
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+  }
   return { form, bodies, build };
 }
 
@@ -661,3 +680,525 @@ test("launcher choice Enter leaves the YOLO question's Enter rules intact", asyn
   expect(bodies, "Cancel must neither confirm nor send another create").toHaveLength(1);
   expect(bodies[0]).not.toHaveProperty("confirm_yolo");
 });
+
+const scalarRetryCatalog = [
+  { id: "scalar-alpha", harness: "codex", efforts: ["low", "high"] },
+  { id: "scalar-beta", harness: "codex", efforts: ["low"] },
+];
+
+/** Search accepts a choice without launching. Empty text and returned focus
+ * distinguish completed acceptance from an uncommitted search draft.
+ */
+async function acceptScalarSearch(form: Locator, query: string, label: string) {
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  await search.focus();
+  await expect(search).toBeFocused();
+  await search.fill(query);
+  const option = form.getByRole("option", { name: label, exact: true });
+  await expect(option).toBeVisible();
+  await option.click();
+  await expect(search).toHaveValue("");
+  await expect(search).toBeFocused();
+}
+
+/** Reopen the picker through a real focus change, then click its exact row.
+ * The accepted value and closed list prove the callback ran, even for a row
+ * that leaves the submitted model unchanged.
+ */
+async function acceptScalarModelRow(form: Locator, id: string) {
+  const folder = form.getByLabel("folder", { exact: true });
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  await folder.focus();
+  await expect(folder).toBeFocused();
+  await model.focus();
+  await expect(model).toBeFocused();
+  await model.fill(id);
+  const results = form.locator("#launch-composer-model-results");
+  await expect(results).toBeVisible();
+  await results.getByRole("option", { name: id, exact: true }).click();
+  await expect(results).toHaveCount(0);
+  await expect(model).toHaveValue(id);
+  await expect(model).toHaveAttribute("aria-expanded", "false");
+  await expect(model).toBeFocused();
+}
+
+/** An unknown exact id reaches custom-model Enter rather than a catalog row.
+ * Keep the picker un-navigated so no active option overrides the typed id.
+ */
+async function acceptScalarCustomModel(form: Locator, id: string) {
+  const folder = form.getByLabel("folder", { exact: true });
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  await folder.focus();
+  await expect(folder).toBeFocused();
+  await model.focus();
+  await expect(model).toBeFocused();
+  await model.fill(id);
+  await expect(form.locator("#launch-composer-model-results")).toBeVisible();
+  await expect(model).not.toHaveAttribute("aria-activedescendant", /.+/);
+  await model.press("Enter");
+  await expect(form.locator("#launch-composer-model-results")).toHaveCount(0);
+  await expect(model).toHaveValue(id);
+  await expect(model).toHaveAttribute("aria-expanded", "false");
+  await expect(model).not.toHaveAttribute("aria-invalid", "true");
+  await expect(model).toBeFocused();
+}
+
+/** Equal requests retain their complete unresolved identity, including a
+ * nonempty key. Comparing only keys could hide a changed request under one key.
+ */
+function expectScalarRetry(previous: Record<string, unknown>, next: Record<string, unknown>) {
+  expect(next.intent_key).toEqual(expect.any(String));
+  expect(next.intent_key).not.toBe("");
+  expect(next.intent_key).toBe(previous.intent_key);
+  expect(next).toEqual(previous);
+}
+
+/** A real choice change must change both identity and substantive body.
+ * Excluding only the key prevents a needless remint from passing this check.
+ */
+function expectScalarChange(previous: Record<string, unknown>, next: Record<string, unknown>) {
+  const { intent_key: previousKey, ...previousRequest } = previous;
+  const { intent_key: nextKey, ...nextRequest } = next;
+  expect(nextKey).toEqual(expect.any(String));
+  expect(nextKey).not.toBe("");
+  expect(nextKey).not.toBe(previousKey);
+  expect(nextRequest).not.toEqual(previousRequest);
+}
+
+/** Selecting an already selected scalar choice is an edit gesture, not a
+ * new create intent. Each acceptance stays separate from explicit Launch.
+ */
+test("unchanged launcher tab, harness, permissions and default model retain the retry", async ({ page, request }) => {
+  const { form, bodies } = await observeChoiceCreates(page, request, scalarRetryCatalog);
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  await expect(model).toHaveValue("harness default");
+  const launch = form.locator(".create-session-submit");
+  let previous = await enterCreateChoice(form, launch, bodies);
+  expect(previous.intent_key).toEqual(expect.any(String));
+  expect(previous.intent_key).not.toBe("");
+  expect(previous).toMatchObject({ launch: { harness: "codex", model: null, permissions: "guarded" } });
+
+  for (const choice of ["selected Agent Home", "same harness search", "same permissions search", "already default model"]) {
+    await test.step(choice, async () => {
+      const before = bodies.length;
+      if (choice === "selected Agent Home") {
+        const agent = form.getByRole("tab", { name: "agent", exact: true });
+        await expect(agent).toHaveAttribute("aria-selected", "true");
+        await agent.focus();
+        await expect(agent).toBeFocused();
+        await agent.press("Home");
+        await expect(agent).toHaveAttribute("aria-selected", "true");
+        await expect(agent).toBeFocused();
+      } else if (choice === "same harness search") {
+        await acceptScalarSearch(form, "harness:codex", "Harness: Codex");
+        await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }))
+          .toHaveAttribute("aria-pressed", "true");
+      } else if (choice === "same permissions search") {
+        await acceptScalarSearch(form, "perms:guarded", "Permissions: guarded");
+        await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }))
+          .toHaveAttribute("aria-pressed", "true");
+      } else {
+        await acceptScalarModelRow(form, "harness default");
+      }
+      await expect(launch).toHaveAttribute("aria-disabled", "false");
+      expect(bodies, "acceptance itself must not submit").toHaveLength(before);
+      const next = await enterCreateChoice(form, launch, bodies);
+      expectScalarRetry(previous, next);
+      previous = next;
+    });
+  }
+});
+
+/** Same model selections retain identity through search, catalog and custom
+ * Enter. Distinct catalog efforts prove that reconciliation still retires
+ * identity when a selected model really removes an incompatible effort.
+ */
+test("launcher model reselection retains retries while real scalar changes replace them", async ({ page, request }) => {
+  const { form, bodies } = await observeChoiceCreates(page, request, scalarRetryCatalog);
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  const effort = form.locator(".launch-composer-effort-choice");
+  const permissions = form.locator(".launch-composer-permissions-choice");
+  const launch = form.locator(".create-session-submit");
+  await acceptScalarModelRow(form, "scalar-alpha");
+  await effort.getByRole("button", { name: "high", exact: true }).click();
+  await expect(effort.getByRole("button", { name: "high", exact: true })).toHaveAttribute("aria-pressed", "true");
+  expect(bodies, "setting the initial choices does not launch").toEqual([]);
+  let previous = await enterCreateChoice(form, launch, bodies);
+  expect(previous.intent_key).toEqual(expect.any(String));
+  expect(previous.intent_key).not.toBe("");
+  expect(previous).toMatchObject({ launch: { model: "scalar-alpha", effort: "high", permissions: "guarded" } });
+
+  for (const surface of ["search", "catalog row"] as const) {
+    await test.step(`same model through ${surface}`, async () => {
+      const before = bodies.length;
+      if (surface === "search") {
+        await acceptScalarSearch(form, "model:scalar-alpha", "Model: scalar-alpha (Codex)");
+        await expect(model).toHaveValue("scalar-alpha");
+        await expect(form.locator("#launch-composer-model-results")).toHaveCount(0);
+      } else {
+        await acceptScalarModelRow(form, "scalar-alpha");
+      }
+      expect(bodies, "model acceptance itself must not submit").toHaveLength(before);
+      const next = await enterCreateChoice(form, launch, bodies);
+      expectScalarRetry(previous, next);
+      previous = next;
+    });
+  }
+
+  let before = bodies.length;
+  await acceptScalarModelRow(form, "scalar-beta");
+  await expect(effort.getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+  expect(bodies, "a changed model still only edits").toHaveLength(before);
+  let next = await enterCreateChoice(form, launch, bodies);
+  expect(next).toMatchObject({ launch: { model: "scalar-beta", effort: null } });
+  expectScalarChange(previous, next);
+  previous = next;
+
+  before = bodies.length;
+  await acceptScalarModelRow(form, "scalar-beta");
+  expect(bodies, "same changed-model row does not auto-submit").toHaveLength(before);
+  next = await enterCreateChoice(form, launch, bodies);
+  expectScalarRetry(previous, next);
+  previous = next;
+
+  before = bodies.length;
+  await effort.getByRole("button", { name: "low", exact: true }).click();
+  await expect(effort.getByRole("button", { name: "low", exact: true })).toHaveAttribute("aria-pressed", "true");
+  expect(bodies, "effort click does not auto-submit").toHaveLength(before);
+  next = await enterCreateChoice(form, launch, bodies);
+  expect(next).toMatchObject({ launch: { model: "scalar-beta", effort: "low" } });
+  expectScalarChange(previous, next);
+  previous = next;
+
+  for (const changed of [true, false]) {
+    before = bodies.length;
+    await acceptScalarSearch(form, "perms:yolo", "Permissions: yolo");
+    await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+    expect(bodies, "permission search does not auto-submit").toHaveLength(before);
+    next = await enterCreateChoice(form, launch, bodies);
+    expect(next).toMatchObject({ launch: { permissions: "yolo" } });
+    if (changed) expectScalarChange(previous, next);
+    else expectScalarRetry(previous, next);
+    previous = next;
+  }
+
+  for (const changed of [true, false]) {
+    before = bodies.length;
+    await acceptScalarCustomModel(form, "private-scalar-model");
+    expect(bodies, "custom-model Enter only accepts, never launches").toHaveLength(before);
+    next = await enterCreateChoice(form, launch, bodies);
+    expect(next).toMatchObject({ launch: { model: "private-scalar-model", effort: "low" } });
+    if (changed) expectScalarChange(previous, next);
+    else expectScalarRetry(previous, next);
+    previous = next;
+  }
+});
+
+/** Ordinary optional names normalize only the absent title, retaining visible
+ * text and every byte of a nonblank title. Reaccepting its current search Name
+ * must likewise leave the complete unresolved request intact.
+ */
+test("ordinary title no-ops preserve retries without trimming nonblank names", async ({ page, request }) => {
+  const { form, bodies } = await observeChoiceCreates(page, request, []);
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  const name = form.getByLabel("name (optional)", { exact: true });
+  const launch = form.locator(".create-session-submit");
+  await expect(name).toHaveValue("");
+  let previous = await enterCreateChoice(form, launch, bodies);
+  expect(previous.intent_key).toEqual(expect.any(String));
+  expect(previous.intent_key).not.toBe("");
+  expect(previous.title).toBeNull();
+
+  let count = bodies.length;
+  await name.focus();
+  await expect(name).toBeFocused();
+  await name.press("Space");
+  await expect(name).toHaveValue(" ");
+  expect(bodies, "a name keystroke does not launch").toHaveLength(count);
+  let next = await enterCreateChoice(form, launch, bodies);
+  expect(next.title).toBeNull();
+  expectScalarRetry(previous, next);
+  await expect(name, "absence normalization must not rewrite the visible draft").toHaveValue(" ");
+  previous = next;
+
+  count = bodies.length;
+  await name.fill(" work ");
+  await expect(name).toHaveValue(" work ");
+  expect(bodies).toHaveLength(count);
+  next = await enterCreateChoice(form, launch, bodies);
+  expect(next.title, "nonblank surrounding bytes remain request data").toBe(" work ");
+  expectScalarChange(previous, next);
+  previous = next;
+
+  count = bodies.length;
+  await name.fill("work");
+  expect(bodies).toHaveLength(count);
+  next = await enterCreateChoice(form, launch, bodies);
+  expect(next.title).toBe("work");
+  expectScalarChange(previous, next);
+  previous = next;
+  for (const [value, changed] of [["work", false], ["other", true]] as const) {
+    count = bodies.length;
+    await acceptScalarSearch(form, `name:${value}`, `Set session name: ${value}`);
+    await expect(name).toHaveValue(value);
+    expect(bodies, "Name search acceptance only edits").toHaveLength(count);
+    next = await enterCreateChoice(form, launch, bodies);
+    expect(next.title).toBe(value);
+    if (changed) expectScalarChange(previous, next);
+    else expectScalarRetry(previous, next);
+    previous = next;
+  }
+});
+
+for (const editor of ["wrapper", "custom flags"] as const) {
+  /** One trailing-space keystroke changes editable text without changing its
+   * literal argv. Adding a new word must still replace the request identity.
+   */
+  test(`valid ${editor} spacing preserves raw text and retry words`, async ({ page, request }) => {
+    const { form, bodies } = await observeChoiceCreates(page, request, []);
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+    if (editor === "custom flags") {
+      await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true }).click();
+    }
+    const field = form.locator(editor === "wrapper" ? ".launch-composer-wrapper" : ".custom-permission-flags");
+    const original = editor === "wrapper" ? "wrapper --" : "--mode ask";
+    const words = editor === "wrapper" ? ["wrapper", "--"] : ["--mode", "ask"];
+    const property = editor === "wrapper" ? "wrapper_prefix" : "permission_flags";
+    if (editor === "custom flags") {
+      // Observe Custom's own deferred handoff before fill can supply focus
+      // itself and leave that handoff pending when the test moves to Launch.
+      await expect(field).toBeFocused();
+    }
+    await field.fill(original);
+    await expect(field).toHaveValue(original);
+    const launch = form.locator(".create-session-submit");
+    const previous = await enterCreateChoice(form, launch, bodies);
+    expect(previous.intent_key).toEqual(expect.any(String));
+    expect(previous.intent_key).not.toBe("");
+    expect(previous).toMatchObject({ launch: { [property]: words } });
+
+    let count = bodies.length;
+    await field.focus();
+    await expect(field).toBeFocused();
+    await field.press("End");
+    await field.press("Space");
+    await expect(field).toHaveValue(`${original} `);
+    if (editor === "custom flags") await expect(form.locator(".custom-permission-words code")).toHaveText(words);
+    expect(bodies, "literal-editor spacing only edits").toHaveLength(count);
+    const same = await enterCreateChoice(form, launch, bodies);
+    expectScalarRetry(previous, same);
+    await expect(field).toHaveValue(`${original} `);
+
+    count = bodies.length;
+    await field.focus();
+    await expect(field).toBeFocused();
+    await field.press("End");
+    await field.press("x");
+    await expect(field).toHaveValue(`${original} x`);
+    expect(bodies).toHaveLength(count);
+    const changed = await enterCreateChoice(form, launch, bodies);
+    expect(changed).toMatchObject({ launch: { [property]: [...words, "x"] } });
+    expectScalarChange(same, changed);
+  });
+}
+
+/** A real template resets raw permissions to None while Codex submits its
+ * effective Guarded mode. Each surface gets a fresh template application so
+ * an earlier explicit Guarded action cannot erase the raw-default premise.
+ */
+test("effective Guarded reacceptance preserves a template-default request", async ({ page, request }) => {
+  const template = `retry-permission-default-${randomUUID()}`;
+  let bodyFailed = false;
+  try {
+    const saved = await request.put(`/api/templates/${encodeURIComponent(template)}`, { data: { permissions: null } });
+    expect(saved.ok()).toBe(true);
+    const stored = await request.get("/api/templates");
+    expect(stored.ok()).toBe(true);
+    expect((await stored.json()).templates.find((row: { name: string }) => row.name === template)?.fields)
+      .toEqual({ permissions: null });
+    // Skip the observer's usual Guarded click. The actual template below
+    // must be the last permission write before every baseline request.
+    const { form, bodies } = await observeChoiceCreates(page, request, [], false);
+    const codex = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true });
+    await codex.click();
+    await expect(form).toHaveAttribute("data-initial-templates-ready", "true");
+    const permissions = form.locator(".launch-composer-permissions-choice");
+    const guarded = permissions.getByRole("button", { name: "guarded", exact: true });
+    const launch = form.locator(".create-session-submit");
+    let previous: Record<string, unknown> | undefined;
+    for (const surface of ["pointer", "choice Enter", "search"] as const) {
+      await test.step(`raw template default to Guarded via ${surface}`, async () => {
+        let count = bodies.length;
+        await acceptScalarSearch(form, `tl:${template}`, `Template: ${template}`);
+        await expect(codex).toHaveAttribute("aria-pressed", "true");
+        await expect(guarded).toHaveAttribute("aria-pressed", "true");
+        expect(bodies, "permission-default template acceptance does not launch").toHaveLength(count);
+        const baseline = await enterCreateChoice(form, launch, bodies);
+        expect(baseline.intent_key).toEqual(expect.any(String));
+        expect(baseline.intent_key).not.toBe("");
+        expect(baseline).toMatchObject({ launch: { harness: "codex", permissions: "guarded" } });
+        count = bodies.length;
+        let next: Record<string, unknown>;
+        if (surface === "choice Enter") {
+          // Choice Enter intentionally accepts and submits through the
+          // ordinary Launch path; the existing helper checks exactly one POST.
+          next = await enterCreateChoice(form, guarded, bodies);
+        } else {
+          if (surface === "pointer") await guarded.click();
+          else await acceptScalarSearch(form, "perms:guarded", "Permissions: guarded");
+          await expect(guarded).toHaveAttribute("aria-pressed", "true");
+          expect(bodies, "pointer/search only accepts the effective permission").toHaveLength(count);
+          next = await enterCreateChoice(form, launch, bodies);
+        }
+        expectScalarRetry(baseline, next);
+        previous = next;
+      });
+    }
+    const count = bodies.length;
+    const yolo = permissions.getByRole("button", { name: "yolo", exact: true });
+    await yolo.click();
+    await expect(yolo).toHaveAttribute("aria-pressed", "true");
+    expect(bodies).toHaveLength(count);
+    const changed = await enterCreateChoice(form, launch, bodies);
+    expect(changed).toMatchObject({ launch: { permissions: "yolo" } });
+    expectScalarChange(previous!, changed);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["pending fixture routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["permission-default template", async () => {
+        const removed = await request.delete(`/api/templates/${encodeURIComponent(template)}`);
+        expect(removed.ok()).toBe(true);
+      }],
+    ]);
+  }
+});
+
+/** Observe a single native replacement without assigning or dispatching input.
+ * An engine that suppresses identical insertion fails the delivery assertion;
+ * it cannot silently count as callback coverage.
+ */
+async function replaceOwnedTextOnce(page: Page, field: Locator, value: string) {
+  await field.focus();
+  await expect(field).toBeFocused();
+  await expect(field).toBeEditable();
+  await field.press("ControlOrMeta+A");
+  const selection = await field.evaluate((element) => {
+    const node = element as HTMLInputElement | HTMLTextAreaElement;
+    return { value: node.value, start: node.selectionStart, end: node.selectionEnd };
+  });
+  expect(selection.start).toBe(0);
+  expect(selection.end).toBe(selection.value.length);
+  const capture = await field.evaluateHandle((element) => {
+    const node = element as HTMLInputElement | HTMLTextAreaElement;
+    const events: { value: string; inputType: string | null; isTrusted: boolean }[] = [];
+    const listener = (event: Event) => {
+      events.push({ value: node.value, inputType: event instanceof InputEvent ? event.inputType : null, isTrusted: event.isTrusted });
+    };
+    node.addEventListener("input", listener);
+    return { events, remove: () => node.removeEventListener("input", listener) };
+  });
+  try {
+    await page.keyboard.insertText(value);
+    await expect(field).toHaveValue(value);
+    const events = await capture.evaluate((record) => record.events);
+    expect(events, "one native input must reach the active editor").toHaveLength(1);
+    expect(events[0]).toMatchObject({ value, isTrusted: true });
+    return events;
+  } finally {
+    await capture.evaluate((record) => record.remove());
+    await capture.dispose();
+  }
+}
+
+for (const kind of ["title", "folder", "command", "resume", "prompt", "conversation"] as const) {
+  /** Already-owned same-byte replacement is one input transaction, not a
+   * series of genuinely different prefixes. A different-byte replacement
+   * proves the editor still reaches the active submitted request.
+   */
+  test(`one native same-owned ${kind} replacement retains its retry`, async ({ page, request }, info) => {
+    const { form, bodies } = await observeChoiceCreates(page, request, []);
+    let field: Locator;
+    let initial: string;
+    let edited: string;
+    if (kind === "command" || kind === "resume") {
+      await form.getByRole("tab", { name: "command", exact: true }).click();
+      await form.getByRole("radio", { name: "no", exact: true }).check();
+      const invocation = form.getByLabel("agent command", { exact: true });
+      if (kind === "resume") {
+        await form.locator(".launch-command-agent").selectOption("claude");
+        await invocation.fill("claude {farhelm_args}");
+        await form.locator(".launch-command-resume-toggle").check();
+        await expect(form.locator(".launch-command-resume-toggle")).toBeChecked();
+        field = form.getByLabel("resume command", { exact: true });
+        initial = "claude --resume {conversation} {farhelm_args}";
+      } else {
+        field = invocation;
+        initial = "printf hello";
+      }
+      // Command strings are literal request bytes. A trailing space is a
+      // real change even when a shell would happen to parse the same argv.
+      edited = `${initial} `;
+    } else {
+      await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+      if (kind === "title") {
+        field = form.getByLabel("name (optional)", { exact: true });
+        initial = "work";
+        edited = " work ";
+      } else if (kind === "folder") {
+        field = form.getByLabel("folder", { exact: true });
+        initial = "/tmp";
+        edited = "/var/tmp";
+      } else if (kind === "prompt") {
+        field = form.getByLabel("initial prompt", { exact: true });
+        initial = "hello";
+        edited = "hello ";
+        await expect(form.locator(".named-conversation")).toHaveValue("");
+      } else {
+        field = form.locator(".named-conversation");
+        initial = "conversation-1";
+        edited = "conversation-2";
+        await expect(form.getByLabel("initial prompt", { exact: true })).toHaveValue("");
+      }
+    }
+    await expect(field).toBeVisible();
+    await field.fill(initial);
+    await expect(field).toHaveValue(initial);
+    const launch = form.locator(".create-session-submit");
+    const previous = await enterCreateChoice(form, launch, bodies);
+    expect(previous.intent_key).toEqual(expect.any(String));
+    expect(previous.intent_key).not.toBe("");
+    const expectedBody = (text: string) => kind === "command" ? { command: { command: text } }
+      : kind === "resume" ? { command: { resume: text } }
+      : kind === "title" ? { title: text }
+      : kind === "folder" ? { cwd: text }
+      : kind === "prompt" ? { prompt: text }
+      : { conversation: text };
+    expect(previous).toMatchObject(expectedBody(initial));
+    if (kind === "prompt") expect(previous).not.toHaveProperty("conversation");
+    if (kind === "conversation") expect(previous).not.toHaveProperty("prompt");
+
+    let count = bodies.length;
+    const sameDelivery = await replaceOwnedTextOnce(page, field, initial);
+    await info.attach("native-same-text-input-delivery", {
+      body: JSON.stringify({ kind, events: sameDelivery }), contentType: "application/json",
+    });
+    expect(bodies, "a native text replacement alone does not launch").toHaveLength(count);
+    const same = await enterCreateChoice(form, launch, bodies);
+    expectScalarRetry(previous, same);
+
+    count = bodies.length;
+    const changedDelivery = await replaceOwnedTextOnce(page, field, edited);
+    await info.attach("native-changed-text-input-delivery", {
+      body: JSON.stringify({ kind, events: changedDelivery }), contentType: "application/json",
+    });
+    expect(bodies).toHaveLength(count);
+    const changed = await enterCreateChoice(form, launch, bodies);
+    expect(changed).toMatchObject(expectedBody(edited));
+    expectScalarChange(same, changed);
+  });
+}
