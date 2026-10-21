@@ -188,6 +188,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `docs/github-checkouts.md` and the docs page `website/src/content/docs/docs/using/stop-restart-resume.mdx`. Asked for
   by the maintainer on 2026-10-20 while planning the spare checkouts.
 
+- **Uninstall refuses on a host whose home folder is reachable at two paths.** On some machines the account's home
+  folder is bind-mounted at a second path, and the host's systemd user manager can name the supervisor's unit file by
+  the other one. Uninstall compares the unit systemd loaded with the unit file it plans to remove as text, after
+  resolving symlinks, so it concludes the unit is not one the hosts panel set up and refuses, though it is the same file
+  Farhelm installed. Reported by the maintainer on 2026-10-21. Plan: `plans/queue/uninstall-aliased-home.md`.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
