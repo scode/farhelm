@@ -4,4 +4,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight 73b85a] `launcher-draft-model.md` — Hold the session launcher's draft in one value whose only mutator applies the reset, in-flight and retry-key rules, fixing the handlers that drifted from them (structural refactor; aligned fixes in their own PRs).
 - [complete] `modal-dialog-shell.md` — Render every modal dialog through one shell that owns its Tab trap, page isolation, focus return and scroll reachability, and give every modal dialog isolation and a Tab trap (structural refactor; aligned fixes in their own PRs).
-- [pending] `popover-anchor-close.md` — Route closing anchored popovers on row movement through one owner, and close the three movements left uncovered on purpose (structural refactor; aligned fixes in their own PRs).
+- [in-flight 1852fd] `popover-anchor-close.md` — Route closing anchored popovers on row movement through one owner, and close the three movements left uncovered on purpose (structural refactor; aligned fixes in their own PRs).
