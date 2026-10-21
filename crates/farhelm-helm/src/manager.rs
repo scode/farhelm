@@ -154,8 +154,8 @@ pub const REPROBE_INTERVAL: Duration = Duration::from_secs(45);
 /// covers), which is why it keeps its cadence.
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
-/// How long ONE connection attempt — the dial AND the hello it must
-/// complete — may take before it counts as failed.
+/// How long ONE connection attempt may take, including transport, hello,
+/// identity recording and the browser-link acknowledgement, before it fails.
 ///
 /// Without a bound here the whole ladder can be parked by a transport that
 /// accepts a connection and then says nothing: ssh to a host whose network
@@ -364,6 +364,47 @@ pub enum RefreshHealth {
     Failed { error: String },
 }
 
+/// The last connection boundary actually observed during one attempt.
+///
+/// These are stable REST vocabulary, not inferred diagnoses: opening SSH's
+/// pipes alone cannot establish that a remote supervisor is listening.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConnectionStage {
+    /// No attempt is running yet, or the retry's backoff has not elapsed.
+    WaitingToConnect,
+    /// SSH has started, but no evidence yet establishes a remote supervisor connection.
+    ConnectingToHost,
+    /// The local supervisor socket has not accepted the connection yet.
+    ConnectingToSupervisor,
+    /// A supervisor socket accepted the connection; its hello is still outstanding.
+    WaitingForHello,
+    /// Hello succeeded; identity recording and browser-link setup share this final stage.
+    SettingUp,
+}
+
+impl ConnectionStage {
+    /// Name the evidence available when an attempt stops, without guessing what SSH did.
+    ///
+    /// Spawning SSH does not establish a login or a remote socket connection. Older
+    /// remotes cannot report that boundary, so that stage deliberately remains hedged.
+    fn failure_context(self) -> &'static str {
+        match self {
+            Self::WaitingToConnect => "waiting to start a connection attempt",
+            Self::ConnectingToHost => {
+                "connecting or logging in to the host, or Farhelm there is too old to report its progress"
+            }
+            Self::ConnectingToSupervisor => "connecting to the local supervisor",
+            Self::WaitingForHello => {
+                "the supervisor accepted the connection but did not finish answering the hello"
+            }
+            Self::SettingUp => {
+                "the supervisor answered, but the connection did not finish setting up (recording its identity or setting up browser links)"
+            }
+        }
+    }
+}
+
 /// Everything a registry entry's connection can be, and nothing else —
 /// the taxonomy PLAN_M6.md item 4 fixes — plus one variant that is about
 /// this side instead ([`Self::Retired`], whose own docs say why it is here
@@ -386,7 +427,7 @@ pub enum HostState {
     /// on the [`Cadence::connect_backoff`] ladder.
     ///
     /// Entered at startup, after any connection loss, and whenever a
-    /// freeze is resolved. Left for `Connected` on a successful hello, for
+    /// freeze is resolved. Left for `Connected` after hello and setup succeed, for
     /// one of the three refusal states when the hello is answered but
     /// refused, or for `Unreachable` once the ladder is spent.
     Connecting {
@@ -394,6 +435,9 @@ pub enum HostState {
         /// step — the number the diagnostic trail reports and the UI's
         /// "retrying" phase can render progress from.
         attempt: u32,
+        /// Current attempt evidence, or an explicit wait between attempts. This never
+        /// carries the finished attempt's stage forward into a retry's backoff.
+        stage: ConnectionStage,
         /// Why the previous attempt failed; `None` before the first one
         /// has been made.
         last_error: Option<String>,
@@ -1595,6 +1639,7 @@ impl ConnectionManager {
                         handle.status.send_modify(|status| {
                             status.state = HostState::Connecting {
                                 attempt: 0,
+                                stage: ConnectionStage::WaitingToConnect,
                                 last_error: None,
                             };
                             withdrawn = status.client.take();
@@ -1673,6 +1718,7 @@ impl ConnectionManager {
         let status = Arc::new(watch::Sender::new(ActorStatus {
             state: HostState::Connecting {
                 attempt: 0,
+                stage: ConnectionStage::WaitingToConnect,
                 last_error: None,
             },
             client: None,
@@ -2499,6 +2545,7 @@ impl ConnectionManager {
             }
             status.state = HostState::Connecting {
                 attempt: 0,
+                stage: ConnectionStage::WaitingToConnect,
                 last_error: None,
             };
             withdrawn = status.client.take();
@@ -2956,12 +3003,14 @@ enum PublishGuard {
     /// A refresh republishing the connection it ran on: written only while
     /// that connection is still the published one.
     WhileCurrent,
-    /// The first publish of a connection just dialed: written only while the
-    /// connection token is still the one the actor read before it reloaded
-    /// its row for this pass. A withdrawal before that read is visible to
-    /// the reload (the row commits first); one after it moves the token.
-    /// That holds when the reload succeeds; a failed reload keeps the row
-    /// the actor already had, a gap older than this guard.
+    /// Attempt progress and the first publish of a connection just dialed:
+    /// written only while the connection token is still the one the actor
+    /// read before it reloaded its row for this pass. A withdrawal before
+    /// that read is visible to the reload (the row commits first); one
+    /// after it moves the token. This also keeps an old attempt's stage
+    /// from describing a retargeted row. That holds when the reload succeeds;
+    /// a failed reload keeps the row the actor already had, a gap older than
+    /// this guard.
     WhileIncarnation(u64),
 }
 
@@ -3051,6 +3100,18 @@ enum AttemptOutcome {
     /// Produced only by [`HostActor::connect_phase`], never by a single
     /// attempt: an attempt either answers or fails.
     Interrupted { fresh_window: bool },
+}
+
+/// Attempt evidence that outlives cancellation of the work under its deadline.
+///
+/// `deadlined_attempt` owns this value and lends it to the attempt. Dropping the
+/// timed-out future therefore leaves its last observed boundary available. The
+/// incarnation was sampled before the registry reload: a retarget or adoption
+/// invalidates every later stage publication from the old configuration.
+struct AttemptProgress {
+    stage: ConnectionStage,
+    active: bool,
+    incarnation: u64,
 }
 
 /// Keep a settled dial result from crossing a retarget that arrived while it
@@ -3211,7 +3272,9 @@ impl HostActor {
             } else {
                 &[]
             };
-            let (outcome, attempt) = self.connect_phase(&row, ladder, active, &mut nudge).await;
+            let (outcome, attempt) = self
+                .connect_phase(&row, ladder, active, incarnation, &mut nudge)
+                .await;
             let Some(outcome) = take_settled_outcome(outcome, &mut active, &mut nudge) else {
                 // The manager already published the retargeted row. Reload
                 // it before doing anything with the old dial's answer.
@@ -3373,6 +3436,7 @@ impl HostActor {
         row: &HostRow,
         ladder: &[Duration],
         active: bool,
+        incarnation: u64,
         nudge: &mut watch::Receiver<Nudge>,
     ) -> (AttemptOutcome, u64) {
         let mut last: Option<AttemptOutcome> = None;
@@ -3381,17 +3445,25 @@ impl HostActor {
         // in front of it), so it is never zero on return.
         let mut number = 0;
         for attempt in 0..=ladder.len() as u32 {
-            if attempt > 0 {
-                let wait = ladder[attempt as usize - 1];
-                if active {
-                    self.set_state(HostState::Connecting {
+            if active {
+                self.publish_refresh(
+                    HostState::Connecting {
                         attempt,
+                        stage: ConnectionStage::WaitingToConnect,
                         last_error: match &last {
                             Some(AttemptOutcome::Failed { error, .. }) => Some(error.clone()),
                             _ => None,
                         },
-                    });
-                }
+                    },
+                    None,
+                    LiveSessions::Clear,
+                    None,
+                    PublishGuard::WhileIncarnation(incarnation),
+                    0,
+                );
+            }
+            if attempt > 0 {
+                let wait = ladder[attempt as usize - 1];
                 if let Some(nudge) = self.wait_or_nudge(nudge, wait).await {
                     return (
                         AttemptOutcome::Interrupted {
@@ -3400,11 +3472,6 @@ impl HostActor {
                         number,
                     );
                 }
-            } else if active {
-                self.set_state(HostState::Connecting {
-                    attempt: 0,
-                    last_error: None,
-                });
             }
             debug!(
                 attempt,
@@ -3428,7 +3495,7 @@ impl HostActor {
                 nudge = next_nudge(nudge) => AttemptOutcome::Interrupted {
                     fresh_window: nudge.fresh_window,
                 },
-                outcome = self.deadlined_attempt(row) => outcome,
+                outcome = self.deadlined_attempt(row, active, incarnation) => outcome,
             };
             match &outcome {
                 AttemptOutcome::Failed { error, .. } => {
@@ -3456,10 +3523,25 @@ impl HostActor {
     /// behave exactly as they do for a refused connection, which is the
     /// whole point — a peer that accepts a connection and then says nothing
     /// must cost this actor no more than one that refuses outright. The
-    /// diagnostic describes incomplete setup without claiming which phase
-    /// stalled: dialing, hello and the placement acknowledgement share this budget.
-    async fn deadlined_attempt(&self, row: &HostRow) -> AttemptOutcome {
-        match tokio::time::timeout(self.cadence.attempt_timeout, self.attempt(row)).await {
+    /// last observed boundary survives the cancelled future, so expiry names
+    /// the unfinished step without introducing a separate deadline for it.
+    async fn deadlined_attempt(
+        &self,
+        row: &HostRow,
+        active: bool,
+        incarnation: u64,
+    ) -> AttemptOutcome {
+        let mut progress = AttemptProgress {
+            stage: ConnectionStage::WaitingToConnect,
+            active,
+            incarnation,
+        };
+        match tokio::time::timeout(
+            self.cadence.attempt_timeout,
+            self.attempt(row, &mut progress),
+        )
+        .await
+        {
             Ok(outcome) => outcome,
             Err(_) => AttemptOutcome::Failed {
                 // Never the local-supervisor classification: a timeout
@@ -3467,12 +3549,48 @@ impl HostActor {
                 // exists for. Dial, hello or placement can consume the budget.
                 cause: UnreachableCause::TransportFailure,
                 error: format!(
-                    "the connection attempt did not complete within {:?} (dial, supervisor hello \
-                     or browser-forwarding setup did not finish)",
-                    self.cadence.attempt_timeout
+                    "the connection attempt did not complete within {:?}: {}",
+                    self.cadence.attempt_timeout,
+                    progress.stage.failure_context()
                 ),
             },
         }
+    }
+
+    /// Publish a genuine stage change only while this attempt still owns the row.
+    ///
+    /// Re-probes collect the same timeout evidence without changing their persistent
+    /// unreachable/refused state. No task or timer can publish after this attempt
+    /// ends, and the existing publication guard closes the withdrawal race.
+    fn advance_attempt(&self, progress: &mut AttemptProgress, stage: ConnectionStage) {
+        if progress.stage == stage {
+            return;
+        }
+        progress.stage = stage;
+        if !progress.active {
+            return;
+        }
+        let state = self.status.borrow().state.clone();
+        let HostState::Connecting {
+            attempt,
+            last_error,
+            ..
+        } = state
+        else {
+            return;
+        };
+        self.publish_refresh(
+            HostState::Connecting {
+                attempt,
+                stage,
+                last_error,
+            },
+            None,
+            LiveSessions::Retain,
+            None,
+            PublishGuard::WhileIncarnation(progress.incarnation),
+            0,
+        );
     }
 
     /// Apply remote/local placement only after the identity outcome permits connection.
@@ -3490,7 +3608,10 @@ impl HostActor {
             HostKind::Ssh => true,
         };
         if let Err(error) = client.set_browser_forwarding(enabled).await {
-            return failure(row, error);
+            return failure(
+                row,
+                error.context(ConnectionStage::SettingUp.failure_context()),
+            );
         }
         AttemptOutcome::Connected {
             client,
@@ -3499,9 +3620,9 @@ impl HostActor {
         }
     }
 
-    /// One connection attempt, from opening the transport through settling
-    /// the identity question — everything that has to succeed before a
-    /// host counts as connected.
+    /// One connection attempt, from opening the transport through identity
+    /// recording and acknowledged browser-link setup — everything that has
+    /// to succeed before a host counts as connected.
     ///
     /// Identity is settled HERE, on the connect path, and not on a later
     /// refresh, because the hello is the only place an identity crosses
@@ -3513,12 +3634,22 @@ impl HostActor {
     /// the identity write, so a hello that crosses the wire while the user
     /// is retargeting the row cannot commit the old endpoint's identity
     /// under the new one (see [`DialedAs`]).
-    async fn attempt(&self, row: &HostRow) -> AttemptOutcome {
+    async fn attempt(&self, row: &HostRow, progress: &mut AttemptProgress) -> AttemptOutcome {
+        self.advance_attempt(
+            progress,
+            match row.kind {
+                HostKind::Local => ConnectionStage::ConnectingToSupervisor,
+                HostKind::Ssh => ConnectionStage::ConnectingToHost,
+            },
+        );
         let dialed = DialedAs::of(row);
         let (reader, writer) = match self.transport.connect(row).await {
             Ok(pair) => pair,
-            Err(error) => return failure(row, error),
+            Err(error) => return failure(row, error.context(progress.stage.failure_context())),
         };
+        if row.kind == HostKind::Local {
+            self.advance_attempt(progress, ConnectionStage::WaitingForHello);
+        }
         // `start_for_host`, not `start`: this connection is the ONE path an
         // agent on this host has to the helm, and it carries the host's own
         // id because the helm cannot otherwise tell which fleet member an
@@ -3585,9 +3716,13 @@ impl HostActor {
                     }
                     _ => error,
                 };
-                return failure(row, error);
+                return failure(row, error.context(progress.stage.failure_context()));
             }
         };
+
+        // Identity recording can wait on the database before browser-link setup even
+        // starts. Both belong to final setup, rather than a completed hello's stage.
+        self.advance_attempt(progress, ConnectionStage::SettingUp);
 
         // The two fields, not the whole hello: the borrow has to end before
         // `client` can be moved into an outcome below, and cloning one
@@ -3732,7 +3867,12 @@ impl HostActor {
                 // A storage failure is not a connection failure, but the
                 // honest response is the same: this host has no settled
                 // identity, so it must not serve or cache under one.
-                failure(row, error.context("recording the host's identity"))
+                failure(
+                    row,
+                    error
+                        .context("recording the host's identity")
+                        .context(progress.stage.failure_context()),
+                )
             }
         }
     }
@@ -4006,6 +4146,7 @@ impl HostActor {
         self.publish(
             HostState::Connecting {
                 attempt: 0,
+                stage: ConnectionStage::WaitingToConnect,
                 last_error: None,
             },
             None,
@@ -6244,7 +6385,8 @@ mod tests {
     /// modes: the transport succeeds, so nothing errors, and the actor
     /// parks inside a single attempt forever — no ladder, no re-probe, no
     /// unreachable state, and a host that reads as "connecting" until the
-    /// helm restarts. The timing assertion is the whole test: each attempt
+    /// helm restarts. SSH pipe acceptance is not remote progress, so both live
+    /// and failed state stay honest about an older remote. Each attempt
     /// must expire after exactly [`CONNECT_ATTEMPT_TIMEOUT`] and the ladder
     /// must then step as usual, so the dials land at the deadline plus each
     /// backoff rather than at the backoffs alone.
@@ -6266,6 +6408,22 @@ mod tests {
         .await;
         let host = fixture.store.list_hosts().await.unwrap()[1].id;
 
+        fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connecting {
+                        attempt: 0,
+                        stage: ConnectionStage::ConnectingToHost,
+                        ..
+                    }
+                )
+            })
+            .await
+            .expect("fixture premise: the first SSH attempt is running");
+        assert_eq!(fixture.transport.attempts(host).len(), 1);
+
         let attempts = fixture.transport.wait_for_attempts(host, 7).await;
         assert_eq!(
             seconds(&attempts),
@@ -6279,8 +6437,94 @@ mod tests {
             .expect("actor is running");
         assert!(
             matches!(&state, HostState::Unreachable { last_error, .. }
-                if last_error.contains("did not complete")),
-            "the state must say the attempt timed out rather than blaming the network: {state:?}"
+                if last_error.contains("did not complete")
+                    && last_error.contains("connecting or logging in")
+                    && last_error.contains("too old to report its progress")
+                    && !last_error.contains("supervisor accepted")),
+            "an SSH pipe with no remote progress must not prove a supervisor connection: {state:?}"
+        );
+    }
+
+    /// Local socket acceptance is enough to name a silent hello exactly, unlike
+    /// spawning SSH. The timeout must retain that boundary after cancelling the
+    /// handshake, while the retry waits with no stale in-flight stage attached.
+    /// Once the ladder is spent, a silent background probe must retain the outage
+    /// state rather than publishing its own Connecting stages.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_silent_local_supervisor_reports_hello_then_waits_to_retry() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            transport.set_script(
+                local_id(&store).await,
+                Script {
+                    silent_hello: true,
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = local_id(&fixture.store).await;
+        fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connecting {
+                        attempt: 0,
+                        stage: ConnectionStage::WaitingForHello,
+                        ..
+                    }
+                )
+            })
+            .await
+            .expect("fixture premise: the local socket accepted the first attempt");
+        assert_eq!(fixture.transport.attempts(host).len(), 1);
+        assert!(
+            fixture.transport.closures.borrow().is_empty(),
+            "the silent peer must still own its open socket"
+        );
+
+        // This observation window is inside the known live attempt, not a readiness
+        // delay. A silent peer must not cause periodic stage publications.
+        let revision = fixture.manager.events().revision();
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert_eq!(fixture.manager.events().revision(), revision);
+        tokio::time::advance(CONNECT_ATTEMPT_TIMEOUT - Duration::from_secs(1)).await;
+        let state = fixture
+            .manager
+            .wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connecting {
+                        attempt: 1,
+                        stage: ConnectionStage::WaitingToConnect,
+                        last_error: Some(_),
+                    }
+                )
+            })
+            .await
+            .expect("the timed-out local attempt enters the unchanged backoff");
+        assert!(
+            matches!(&state, HostState::Connecting { last_error: Some(error), .. }
+            if error.contains("supervisor accepted the connection")
+                && error.contains("did not finish answering the hello")
+                && !error.contains("too old")),
+            "the failure must retain positive local evidence: {state:?}"
+        );
+        let attempts = fixture.transport.wait_for_attempts(host, 7).await;
+        assert_eq!(seconds(&attempts), vec![0, 21, 43, 67, 95, 130, 180]);
+
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Unreachable { .. }))
+            .await
+            .expect("the active retry window must finish");
+        fixture.transport.wait_for_attempts(host, 8).await;
+        assert!(
+            matches!(
+                fixture.manager.status(host).unwrap().state,
+                HostState::Unreachable { .. }
+            ),
+            "a background probe waiting for hello must leave the persistent outage state alone"
         );
     }
 
@@ -6447,8 +6691,10 @@ mod tests {
         assert_eq!(&*requests.borrow(), &[(host, false), (host, false)]);
     }
 
-    /// A placement acknowledgement is part of connection readiness. A silent peer
-    /// advances the ordinary attempt deadline/ladder without publishing a usable client.
+    /// A placement acknowledgement is part of connection readiness. The fixture
+    /// records the request before going silent, proving that hello already succeeded;
+    /// both live and timed-out state must name final setup while the unchanged
+    /// attempt deadline/ladder advances without publishing a usable client.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn browser_forwarding_acknowledgement_is_required_before_connection() {
         let fixture = fixture(Cadence::default(), |store, transport| async move {
@@ -6467,7 +6713,23 @@ mod tests {
         .await;
         let host = fixture.store.list_hosts().await.unwrap()[1].id;
         let mut requests = fixture.transport.browser_requests.subscribe();
-        requests.wait_for(|log| !log.is_empty()).await.unwrap();
+        // This host's enabled request establishes its completed hello. Another
+        // host's request cannot establish which stage this connection reached.
+        requests
+            .wait_for(|log| log.contains(&(host, true)))
+            .await
+            .expect("fixture premise: the remote host requested browser-link setup");
+        assert!(
+            matches!(
+                fixture.manager.status(host).unwrap().state,
+                HostState::Connecting {
+                    stage: ConnectionStage::SettingUp,
+                    ..
+                }
+            ),
+            "this host's enabled browser request proves its hello succeeded and final setup is in flight; requests={:?}",
+            *requests.borrow()
+        );
         assert!(
             status_client(&fixture.manager, host).is_none(),
             "no client before acknowledgement"
@@ -6484,7 +6746,12 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            matches!(state, HostState::Unreachable { last_error, .. } if last_error.contains("did not complete"))
+            matches!(&state, HostState::Unreachable { last_error, .. }
+                if last_error.contains("did not complete")
+                    && last_error.contains("supervisor answered")
+                    && last_error.contains("connection did not finish setting up")
+                    && last_error.contains("browser links")),
+            "a missing browser acknowledgement is final setup, not an unanswered hello: {state:?}"
         );
         assert!(status_client(&fixture.manager, host).is_none());
     }

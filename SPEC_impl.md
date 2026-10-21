@@ -3401,11 +3401,17 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   Identity-mismatch and duplicate are deliberately the states with no timer at all, because no amount of waiting answers
   a question only a user can.
 - Two DEADLINES bound what a peer can do to an actor by saying nothing, both injectable alongside the cadences. One
-  connection attempt (dial and hello together) is bounded at 20 seconds, and expiry is an ordinary failed attempt so the
-  ladder and the re-probe cadence carry on unchanged; one cache refresh is bounded at 30 seconds, and expiry drops the
-  connection so the actor re-enters its normal loss handling. Without them a transport that accepts and then goes silent
-  parks the whole state machine indefinitely while every layer below looks healthy — no error, no EOF, and a host that
-  reads as connecting or connected forever.
+  connection attempt shares a single 20-second budget across opening the transport, exchanging hellos, recording the
+  host's identity and applying the browser-link setting. Expiry names the last observed stage and is an ordinary failed
+  attempt, so the ladder and re-probe cadence carry on unchanged. The actor retains stage evidence outside the cancelled
+  attempt future: local socket connection, waiting for hello and final setup are separate boundaries; spawning SSH alone
+  establishes only that it is connecting to the host. Without remote progress evidence, an SSH timeout hedges between
+  connecting/logging in and a remote Farhelm too old to report progress. Active attempts publish stage changes through
+  the existing changed-only host snapshot, guarded against retargeting; backoff is explicitly waiting to connect, and
+  background re-probes never publish Connecting. One cache refresh is bounded at 30 seconds, and expiry drops the
+  connection so the actor re-enters its normal loss handling. Without these deadlines a transport that accepts and then
+  goes silent parks the whole state machine indefinitely while every layer below looks healthy — no error, no EOF, and a
+  host that reads as connecting or connected forever.
 - Editing a registry row's connection-defining fields RECONNECTS the host rather than waiting for its current connection
   to end on its own: the connection is torn down, a non-connected state is published together with the new row (so a
   hosts list can never pair an edited destination with the old connection's state), and the actor gets a fresh active

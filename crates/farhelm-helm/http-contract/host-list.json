@@ -47,7 +47,8 @@
       "state": {
         "attempt": 2,
         "last_error": "connection refused",
-        "phase": "connecting"
+        "phase": "connecting",
+        "stage": "setting-up"
       }
     },
     {
