@@ -10,7 +10,7 @@
 //! identity crossing that transport is the supervisor's own, and that a
 //! genuine session on the far side lands in helm.db's cache.
 //!
-//! Two transports, one test each:
+//! Successful connections cover both transports:
 //!
 //! - An ssh row over the user's own `ssh` to `localhost`, running
 //!   `farhelm internal stdio` against an ISOLATED remote state dir (the
@@ -23,6 +23,10 @@
 //! - The reserved local row over the real unix socket in the helm's own
 //!   state directory — the production arrangement, where helm.db and
 //!   `supervisor.sock` are siblings.
+//!
+//! SSH failure fixtures separately prove that natural remote exit statuses
+//! distinguish a missing executable from a helper that ran but found no
+//! supervisor. They use private paths and start no remote supervisor.
 //!
 //! The missing-socket half of the local row's story (nothing listening →
 //! unreachable with the manual-start hint) is pinned in `farhelm-helm`'s
@@ -310,6 +314,36 @@ async fn await_refreshed(manager: &ConnectionManager, host: HostId) -> HostState
     .expect("actor is running")
 }
 
+/// Observe the first completed failure rather than inferring it from elapsed
+/// time. The caller keeps the manager and its private paths alive while this
+/// wait reports the last state and checks the expected-absent fixture path if
+/// an SSH attempt never settles.
+async fn await_unreachable(
+    manager: &ConnectionManager,
+    host: HostId,
+    absent_path: &std::path::Path,
+) -> String {
+    let state = tokio::time::timeout(
+        SETTLE_TIMEOUT,
+        manager.wait_for_state(host, |state| matches!(state, HostState::Unreachable { .. })),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "host {host} never completed its failed connection attempt; last seen {:?}; \
+             expected-absent fixture path {} exists: {:?}",
+            manager.state(host),
+            absent_path.display(),
+            absent_path.try_exists()
+        )
+    })
+    .expect("actor is running");
+    let HostState::Unreachable { last_error, .. } = state else {
+        unreachable!("filtered on an Unreachable state");
+    };
+    last_error
+}
+
 /// One registry row's recorded identity, read straight from helm.db.
 async fn recorded_identity(store: &HelmStore, host: HostId) -> Option<String> {
     store
@@ -415,6 +449,127 @@ async fn an_ssh_row_reaches_a_real_supervisor_and_caches_its_sessions() {
     // function returns: the control client keeps the supervisor's socket in
     // use, and its state dir must outlive the ssh child running against it.
     // An explicit `drop` would say nothing the scope does not already.
+}
+
+/// A real remote helper's exit 75 must establish that Farhelm ran but no
+/// supervisor was listening. The start hint must name the state directory the
+/// helper actually dialed, including shell quoting for a path with spaces.
+#[farhelm_testtrace::test]
+async fn an_ssh_row_without_a_supervisor_reports_the_remote_start_command() {
+    if !self_ssh_available().await {
+        eprintln!(
+            "SKIPPED an_ssh_row_without_a_supervisor_reports_the_remote_start_command: passwordless \
+             `ssh localhost` is unavailable on this host"
+        );
+        return;
+    }
+    let remote = farhelm_teststate::tempdir().expect("isolated remote state root");
+    let remote_state = remote.path().join("remote state");
+    std::fs::create_dir(&remote_state).expect("create the empty remote state directory");
+    let socket = remote_state.join("supervisor.sock");
+    assert!(
+        !socket
+            .try_exists()
+            .expect("inspect the remote socket premise"),
+        "the missing-supervisor fixture must have no socket"
+    );
+    let helm_state = farhelm_teststate::tempdir().expect("isolated helm state");
+    let store = HelmStore::open(&helm_state.path().join("helm.db"))
+        .await
+        .expect("open helm.db");
+    let remote_state_text = remote_state.to_str().expect("fixture state path is UTF-8");
+    let host = store
+        .add_ssh_host("localhost", Some(farhelm_bin()), Some(remote_state_text))
+        .await
+        .expect("register the absent-supervisor SSH host");
+    let manager = ConnectionManager::start(
+        store,
+        std::sync::Arc::new(SystemTransport::new(helm_state.path())),
+        Cadence {
+            // Absence is the intended result, so retrying cannot establish a
+            // stronger fixture premise. Keep the production attempt budget.
+            connect_backoff: Vec::new(),
+            ..Cadence::default()
+        },
+    )
+    .await
+    .expect("start manager");
+
+    let error = await_unreachable(&manager, host, &socket).await;
+    assert!(error.contains("no supervisor is running"), "{error}");
+    assert!(
+        !error.contains("either no supervisor"),
+        "exit 75 must establish absence, not retain the old SSH-or-supervisor hedge: {error}"
+    );
+    let remedy = format!("supervisor run --state-dir '{remote_state_text}'");
+    assert!(error.contains(&remedy), "{error}");
+    assert!(
+        !socket
+            .try_exists()
+            .expect("recheck the remote socket premise"),
+        "the fixture must remain without a supervisor while its diagnosis is checked"
+    );
+}
+
+/// A shell's real exit 127 proves the login worked even though the configured
+/// executable is absent. This must name that executable rather than blaming
+/// SSH authentication or suggesting that starting a supervisor would fix it.
+#[farhelm_testtrace::test]
+async fn an_ssh_row_with_a_missing_farhelm_reports_the_configured_executable() {
+    if !self_ssh_available().await {
+        eprintln!(
+            "SKIPPED an_ssh_row_with_a_missing_farhelm_reports_the_configured_executable: passwordless \
+             `ssh localhost` is unavailable on this host"
+        );
+        return;
+    }
+    let remote = farhelm_teststate::tempdir().expect("isolated remote paths");
+    let missing_farhelm = remote.path().join("missing farhelm");
+    assert!(
+        !missing_farhelm
+            .try_exists()
+            .expect("inspect the missing executable premise"),
+        "the remote executable must not exist before connecting"
+    );
+    let helm_state = farhelm_teststate::tempdir().expect("isolated helm state");
+    let store = HelmStore::open(&helm_state.path().join("helm.db"))
+        .await
+        .expect("open helm.db");
+    let missing_farhelm_text = missing_farhelm
+        .to_str()
+        .expect("fixture program path is UTF-8");
+    let host = store
+        .add_ssh_host(
+            "localhost",
+            Some(missing_farhelm_text),
+            Some(remote.path().to_str().expect("fixture state path is UTF-8")),
+        )
+        .await
+        .expect("register the missing-executable SSH host");
+    let manager = ConnectionManager::start(
+        store,
+        std::sync::Arc::new(SystemTransport::new(helm_state.path())),
+        Cadence {
+            // A nonexistent command will not recover during a retry ladder.
+            // Keep the shared deadline and background cadence at production values.
+            connect_backoff: Vec::new(),
+            ..Cadence::default()
+        },
+    )
+    .await
+    .expect("start manager");
+
+    let error = await_unreachable(&manager, host, &missing_farhelm).await;
+    assert!(error.contains("reached the host"), "{error}");
+    assert!(error.contains("could not be found"), "{error}");
+    assert!(error.contains(missing_farhelm_text), "{error}");
+    assert!(!error.contains("no supervisor is running"), "{error}");
+    assert!(
+        !missing_farhelm
+            .try_exists()
+            .expect("recheck the missing executable premise"),
+        "the configured executable must remain absent while its diagnosis is checked"
+    );
 }
 
 /// The reserved local row must reach a supervisor on THIS machine over its

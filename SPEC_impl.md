@@ -1630,6 +1630,13 @@ explicitly off (`ControlMaster=no`, `ControlPath=none`) instead of failing. The 
 `farhelm internal stdio` on the remote side, which proxies stdio to the supervisor's unix socket. Supervisors listen on
 that unix socket only — no network port, exactly as SPEC.md requires.
 
+The stdio helper writes one exact, newline-terminated `farhelm-supervisor-connected-v1` line to stderr after its socket
+connect succeeds, before either copy direction starts. This proves only that a supervisor socket accepted the
+connection; the framed hello still has to finish. Stdout remains exclusively the protocol stream, so the marker changes
+neither its framing nor its version. Initial not-found/refused socket errors exit 75; other initial dial failures
+exit 1. Provisioning still requires its own wrapper records before treating 75 as positive absence: the connected marker
+grants no setup permission and supplies no resolved executable path.
+
 The authenticated `POST /api/ssh-connections` composes read-only command help from registered SSH destinations and an
 optional extra destination from Add host. It does not probe or mutate hosts. The helm uses its own state directory, the
 same connection overrides, socket fit checks and ControlPath encoder as its SSH clients, then shell-quotes every local
@@ -1651,6 +1658,27 @@ host's state. Host-manager diagnostics may be noisy and may repeat indefinitely:
 remains in the stderr trail, including a peer that returns the same error on every refresh. A collision check still
 emits one summary event for that refresh, rather than one event per colliding row. The SSH stderr relay's separate
 per-connection budget still bounds which child lines it logs while it continues draining the pipe.
+
+For failed connection attempts the relay also retains the newest two diagnostic lines, each capped at 512 raw bytes,
+including a current unterminated segment. It continues observing markers and the tail after the logging budget is spent;
+exact connected markers are excluded from diagnostics. Failure display uses at most 128 raw bytes per line, followed by
+the existing bounded, control-escaped normalization of the assembled diagnostic. Live Connecting detail carries only the
+closed stage vocabulary, never the current attempt's stderr. The process and its stderr can finish independently. An
+early transport close while waiting for hello or final setup has one two-second allowance to observe natural exit and
+drain final stderr, inside the same 20-second attempt budget; expiry snapshots immediately and adds no cleanup wait. The
+read half and attempt diagnostics share child ownership, while historical observations own neither the child nor the
+drainer. Dropping the last owner aborts stderr drainage and drops the kill-on-drop child; no detached waiter can keep a
+cancelled connection alive.
+
+Before hello, natural SSH exit 255 identifies an SSH connection/login failure, 126/127 identify a remote Farhelm that
+could not be executed/found, and 75 identifies Farhelm with no supervisor running and supplies the start command. Other
+numeric statuses, including zero before hello, report a failed remote command. Missing status, a signal or a failed wait
+does not invent a numeric exit code. Already observed malformed or partial protocol data keeps its protocol diagnosis.
+Without a current connected marker, a timeout remains uncertain between connecting/logging in and an older remote that
+cannot report progress, unless this helm process already observed the marker for that host's current connection
+configuration. That capability is memory only, scoped to the existing destination/program/state-directory snapshot; a
+retarget does not borrow another endpoint's evidence. A completed hello is stronger evidence than the independently
+scheduled stderr marker and always keeps the attempt in final setup.
 
 The hello's two free-text fields carry generous LENGTH caps checked at handshake decode (256 bytes each): both are
 retained for the connection's whole life by the peer's counterpart, so an unbounded one is a memory cost a peer chooses
@@ -3405,13 +3433,13 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   host's identity and applying the browser-link setting. Expiry names the last observed stage and is an ordinary failed
   attempt, so the ladder and re-probe cadence carry on unchanged. The actor retains stage evidence outside the cancelled
   attempt future: local socket connection, waiting for hello and final setup are separate boundaries; spawning SSH alone
-  establishes only that it is connecting to the host. Without remote progress evidence, an SSH timeout hedges between
-  connecting/logging in and a remote Farhelm too old to report progress. Active attempts publish stage changes through
-  the existing changed-only host snapshot, guarded against retargeting; backoff is explicitly waiting to connect, and
-  background re-probes never publish Connecting. One cache refresh is bounded at 30 seconds, and expiry drops the
-  connection so the actor re-enters its normal loss handling. Without these deadlines a transport that accepts and then
-  goes silent parks the whole state machine indefinitely while every layer below looks healthy — no error, no EOF, and a
-  host that reads as connecting or connected forever.
+  establishes only that it is connecting to the host. A remote connected marker establishes waiting for hello; without
+  one, timeout wording follows the marker-capability evidence described in the transport section. Active attempts
+  publish stage changes through the existing changed-only host snapshot, guarded against retargeting; backoff is
+  explicitly waiting to connect, and background re-probes never publish Connecting. One cache refresh is bounded at 30
+  seconds, and expiry drops the connection so the actor re-enters its normal loss handling. Without these deadlines a
+  transport that accepts and then goes silent parks the whole state machine indefinitely while every layer below looks
+  healthy — no error, no EOF, and a host that reads as connecting or connected forever.
 - Editing a registry row's connection-defining fields RECONNECTS the host rather than waiting for its current connection
   to end on its own: the connection is torn down, a non-connected state is published together with the new row (so a
   hosts list can never pair an edited destination with the old connection's state), and the actor gets a fresh active

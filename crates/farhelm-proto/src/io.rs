@@ -11,6 +11,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+/// Stderr metadata proving that the remote stdio helper connected to its
+/// supervisor socket. The helper emits this exact line once, before proxying
+/// bytes; it does not prove that the supervisor answered the hello.
+///
+/// This is not a framed protocol message or a version negotiation. Keeping it
+/// off stdout lets older peers use the same protocol stream unchanged.
+pub const SUPERVISOR_CONNECTED_MARKER: &str = "farhelm-supervisor-connected-v1";
+
 /// An `AsyncWrite` that counts bytes the transport actually accepted, so
 /// a writer that has STALLED can be told apart from one that is merely
 /// slow.
