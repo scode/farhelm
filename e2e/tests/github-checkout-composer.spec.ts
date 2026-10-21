@@ -8,6 +8,7 @@ import { chooseLauncherHost } from "./helpers/host-picker";
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { drainedRoute } from "./helpers/drained-route";
+import { routeGate } from "./helpers/route-gate";
 import {
   cleanupSession,
   createSession,
@@ -569,6 +570,134 @@ test("manual checkout needs selection and explicit resubmit after a proven refus
   await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
   await expect(form.locator(".create-session-submit")).toContainText("/tmp");
 });
+
+for (const outcome of ["submit", "edit", "close"] as const) {
+  /** A guarded answer changes the checkout draft and therefore needs a new
+   * authoritative preview. Holding that reply proves the answer cannot send
+   * the refused YOLO body or submit before the new preview is ready. A later
+   * draft edit or dialog close withdraws the pending automatic submission.
+   * All creates stay intercepted: these cases allocate no checkout.
+   */
+  test(`guarded checkout answer waits for preview and ${outcome === "submit" ? "submits once" : `is cancelled by ${outcome}`}`, async ({ page, request }) => {
+    const host = await localHost(request);
+    await unavailableDiscovery(page, host);
+    const gate = routeGate();
+    const previews: PreviewInput[] = [];
+    const creates: any[] = [];
+    let holdRefresh = false;
+    let heldStarted = false;
+    let heldFinished = false;
+    await page.route("**/api/github-checkout-preview", async (route) => {
+      const input = route.request().postDataJSON() as PreviewInput;
+      previews.push(input);
+      const sequence = previews.length;
+      const held = holdRefresh && !input.title;
+      if (held) {
+        heldStarted = true;
+        await gate.wait();
+      }
+      try {
+        await fulfill(route, { json: previewFor(input, host, sequence) });
+      } catch (error) {
+        // Editing or closing may abort the obsolete held request. A current
+        // preview failure is a broken fixture, not evidence of cancellation.
+        if (!held || !route.request().failure()) throw error;
+      } finally {
+        if (held) heldFinished = true;
+      }
+    });
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      const body = route.request().postDataJSON();
+      creates.push(body);
+      if (body.launch?.permissions === "yolo") {
+        await fulfill(route, { status: 409, contentType: "text/plain",
+          headers: { "x-farhelm-yolo-confirmation": "confirmation-required" }, body: "fixture YOLO confirmation" });
+      } else {
+        await fulfill(route, { status: 400, json: { error: "fixture guarded create received" } });
+      }
+    });
+
+    try {
+      const form = await openComposer(page, host);
+      const name = form.getByLabel("name (optional)", { exact: true });
+      await name.fill("");
+      await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+      await selectRepo(page);
+      const preview = form.locator(".launch-composer-checkout-preview");
+      await expect(preview).toHaveAttribute("data-preview-state", "ready");
+      await expect(preview).toContainText("/checkout-fixture/bar-1");
+      const submit = form.locator(".create-session-submit");
+      await expect(submit).toBeEnabled();
+      await submit.click();
+      const confirmation = form.locator(".yolo-confirmation");
+      await expect(confirmation).toBeVisible();
+      await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
+      expect(creates).toHaveLength(1);
+      expect(creates[0]).toMatchObject({ github_checkout: { repo: "acme/bar" }, launch: { permissions: "yolo" } });
+      expect(creates[0].intent_key).toBeTruthy();
+      const previewsBefore = previews.length;
+      holdRefresh = true;
+      await confirmation.locator(".yolo-launch-guarded").click();
+      await expect.poll(() => heldStarted).toBe(true);
+      expect(previews.length, "changing permission requests a fresh checkout preview").toBeGreaterThan(previewsBefore);
+      await expect(preview).toHaveAttribute("data-preview-state", "pending");
+      await expect(submit).toBeDisabled();
+      await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }))
+        .toHaveAttribute("aria-pressed", "true");
+      expect(creates, "a guarded answer waits while its fresh preview is held").toHaveLength(1);
+
+      if (outcome === "edit") {
+        await name.fill("edited-before-preview");
+        await expect(name).toBeFocused();
+        await expect(preview).toHaveAttribute("data-preview-state", "ready");
+        await expect(preview).toContainText("/checkout-fixture/bar-edited-before-preview");
+      } else if (outcome === "close") {
+        await form.locator(".launch-composer-cancel").click();
+        await expect(form).toHaveCount(0);
+      }
+
+      gate.release();
+      await expect.poll(() => heldFinished).toBe(true);
+      if (outcome === "submit") {
+        await expect(form.locator(".create-session-error")).toContainText("fixture guarded create received");
+        expect(creates, "the refreshed preview admits one automatic guarded create").toHaveLength(2);
+        expect(creates[1]).toMatchObject({ github_checkout: { repo: "acme/bar", preview: { cwd: "/checkout-fixture/bar-2" } }, launch: { harness: "codex", permissions: "guarded" } });
+      } else {
+        if (outcome === "edit") {
+          await expect(preview).toContainText("/checkout-fixture/bar-edited-before-preview");
+          await expect(name).toHaveValue("edited-before-preview");
+          await expect(submit).toBeEnabled();
+        } else {
+          await page.locator(".new-session-button").click();
+          await expect(form).toBeVisible();
+          await form.getByLabel("folder", { exact: true }).fill("/tmp");
+          await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+          await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+          await expect(submit).toBeEnabled();
+        }
+        expect(creates, "the obsolete preview cannot submit after an edit or close").toHaveLength(1);
+        // A deliberate current launch is the positive control and ordering
+        // boundary: it must be the only additional request after the late reply.
+        await submit.click();
+        await expect(form.locator(".create-session-error")).toContainText("fixture guarded create received");
+        expect(creates).toHaveLength(2);
+        if (outcome === "edit") {
+          expect(creates[1]).toMatchObject({ github_checkout: { title: "edited-before-preview", preview: { cwd: "/checkout-fixture/bar-edited-before-preview" } } });
+        } else {
+          expect(creates[1]).toMatchObject({ cwd: "/tmp" });
+          expect(creates[1].github_checkout ?? null).toBeNull();
+        }
+      }
+      expect(creates[1].launch).toMatchObject({ permissions: "guarded" });
+      expect(creates[1]).not.toHaveProperty("confirm_yolo");
+      expect(creates[1].intent_key).toBeTruthy();
+      expect(creates[1].intent_key).not.toBe(creates[0].intent_key);
+    } finally {
+      gate.release();
+    }
+  });
+}
 
 /** A preview can be slow or fail after checkout mode has replaced an editable
  * folder. Until the helm supplies an accepted path, the folder control must

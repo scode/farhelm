@@ -883,13 +883,15 @@ launch uses the agent's own setting which Farhelm cannot override, custom flags 
 the command was asserted to be YOLO), and retries with the override only when the user confirms. Besides a one-off
 confirmation it offers to stop asking for that host: that answer first sets the host to start YOLO sessions without
 asking, exactly as its settings would, and then retries with the override; if changing that setting fails, nothing is
-started and the confirmation stays up with the reason. The `farhelm` command line has no override: a request from inside
-a session is an agent's, and agents follow their own rule under Agent-spawned sessions, whatever the request claims. A
-plain restart relaunches the session's own stored launch and needs no YOLO confirmation again. Plain Replace, agent
-clone and inherited spawn also copy the stored command; pre-upgrade no-flag sessions therefore remain own-setting, with
-plain Replace asking on hosts that ask before YOLO launches and agent copies refused there. Clone, Replace with and
-Restart with compile new choices and get the guarded flags. Remote hosts must be updated after this protocol change
-before launches resume; older releases cannot read launches stored as guarded.
+started and the confirmation stays up with the reason. In the session launcher and Restart with, an explicit YOLO choice
+on an agent that offers guarded mode also offers starting the same launch guarded instead, without YOLO confirmation;
+Restart with offers it only when the resulting draft still differs from the stored launch. The `farhelm` command line
+has no override: a request from inside a session is an agent's, and agents follow their own rule under Agent-spawned
+sessions, whatever the request claims. A plain restart relaunches the session's own stored launch and needs no YOLO
+confirmation again. Plain Replace, agent clone and inherited spawn also copy the stored command; pre-upgrade no-flag
+sessions therefore remain own-setting, with plain Replace asking on hosts that ask before YOLO launches and agent copies
+refused there. Clone, Replace with and Restart with compile new choices and get the guarded flags. Remote hosts must be
+updated after this protocol change before launches resume; older releases cannot read launches stored as guarded.
 
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on

@@ -552,6 +552,20 @@ fn take_restart_yolo(
     RestartYoloAnswer::Accepted { stop_asking }
 }
 
+/// Admit a guarded answer only for the live question's unchanged draft.
+///
+/// Unlike YOLO approval this permits a subsequent permission change, so it
+/// checks the original edit before the dialog mutates it. A mismatch leaves
+/// the question alone, as do Cancel and answers drawn for an older opening.
+/// Taking the question grants no YOLO consent and supplies no host to mark.
+fn take_restart_guarded(
+    slot: &mut ConfirmSlot<RestartYoloQuestion>,
+    question: Option<&RestartYoloQuestion>,
+    edit: &crate::restart_with::RestartEdit,
+) -> bool {
+    question.is_some_and(|question| question.edit == *edit && slot.take(question).is_some())
+}
+
 #[component]
 pub(crate) fn SessionView(
     session: Session,
@@ -2579,6 +2593,21 @@ pub(crate) fn SessionView(
                             {
                                 restart_yolo_error.set(None);
                             }
+                        }
+                    },
+                    on_yolo_guarded: {
+                        let question = restart_question.clone();
+                        move |edit| {
+                            // The dialog already holds the lifecycle claim.
+                            // Its own restart's live busy flag is the remaining
+                            // admission check; the claim itself is not a conflict.
+                            if restarting()
+                                || !take_restart_guarded(&mut restart_yolo, question.as_ref(), &edit)
+                            {
+                                return false;
+                            }
+                            restart_yolo_error.set(None);
+                            true
                         }
                     },
                     on_submit: move |(edit, allow_yolo, stop_asking): (crate::restart_with::RestartEdit, bool, bool)| {
@@ -4849,6 +4878,8 @@ mod tests {
     /// the dialog's approval whatever the state of the question, so an
     /// answer queued behind Cancel restarted anyway, and a permanent answer
     /// whose question had gone became a one-off approval.
+    /// Guarded answers likewise consume only their own live opening and the
+    /// original draft; they grant no approval and must precede draft mutation.
     #[farhelm_testtrace::test]
     fn a_cancelled_restart_with_question_approves_nothing() {
         use std::cell::Cell;
@@ -4956,6 +4987,44 @@ mod tests {
                 !slot.is_open(),
                 "the permanent answer took the question too"
             );
+
+            // Guarded admission happens before any permission mutation, so
+            // rejected admission must preserve both draft and live question.
+            let guarded_question = question(7);
+            slot.open(guarded_question.clone(), ());
+            assert!(!take_restart_guarded(&mut slot, None, &submitted));
+            assert!(!take_restart_guarded(
+                &mut slot,
+                Some(&guarded_question),
+                &edit("codex --other"),
+            ));
+            assert!(slot.is_open(), "a changed draft leaves the question alone");
+            assert!(
+                slot.take(&guarded_question).is_some(),
+                "premise: Cancel takes it"
+            );
+            assert!(!take_restart_guarded(
+                &mut slot,
+                Some(&guarded_question),
+                &submitted,
+            ));
+            let later = question(8);
+            slot.open(later.clone(), ());
+            assert!(!take_restart_guarded(
+                &mut slot,
+                Some(&guarded_question),
+                &submitted,
+            ));
+            assert!(
+                slot.current_key() == Some(later.clone()),
+                "a newer opening survives"
+            );
+            assert!(take_restart_guarded(&mut slot, Some(&later), &submitted));
+            assert!(
+                !slot.is_open(),
+                "genuine guarded admission consumes its opening"
+            );
+            assert!(!take_restart_guarded(&mut slot, Some(&later), &submitted));
         });
     }
 }
