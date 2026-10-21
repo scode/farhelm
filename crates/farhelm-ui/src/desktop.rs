@@ -1668,6 +1668,7 @@ mod tests {
                     crate::HostKind::Local,
                     crate::HostPhase::Connecting {
                         attempt: 1,
+                        stage: None,
                         last_error: None
                     }
                 )],

@@ -78,7 +78,7 @@ use crate::provisioning::{
     ProvisioningTraceShape, SetupPlanConfirmation, UninstallNotice, UpdateProgressSummary,
     UpdateStepLine,
 };
-use crate::{ApiBase, Host, HostId, HostKind, HostPhase, RefreshHealth};
+use crate::{ApiBase, ConnectionStage, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
 pub(crate) mod settings_dialog;
 
@@ -645,18 +645,40 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
     match state {
         HostPhase::Connecting {
             attempt,
+            stage,
             last_error,
-        } => match last_error {
-            Some(error) => vec![
-                DetailPart::text(format!(
-                    "attempt {attempt} is in flight; the last one failed: "
-                )),
-                DetailPart::peer(error),
-            ],
-            None => vec![DetailPart::text(
-                "the first connection attempt is in flight",
-            )],
-        },
+        } => {
+            // Only closed vocabulary becomes our own text. Failure context
+            // keeps its peer run, including when it contains SSH's last lines.
+            let progress = match stage {
+                Some(ConnectionStage::WaitingToConnect) => {
+                    Some("waiting for the next connection attempt…")
+                }
+                Some(ConnectionStage::ConnectingToHost) => Some("connecting to the host…"),
+                Some(ConnectionStage::ConnectingToSupervisor) => {
+                    Some("connecting to the local supervisor…")
+                }
+                Some(ConnectionStage::WaitingForHello) => {
+                    Some("waiting for the supervisor to answer…")
+                }
+                Some(ConnectionStage::SettingUp) => Some("finishing connection setup…"),
+                Some(ConnectionStage::Unrecognized) | None => None,
+            };
+            let lead = match (progress, last_error) {
+                (Some(progress), _) if *attempt == 0 => {
+                    format!("the first connection attempt: {progress}")
+                }
+                (Some(progress), _) => format!("attempt {attempt}: {progress}"),
+                (None, Some(_)) => format!("attempt {attempt} is in flight"),
+                (None, None) => "the first connection attempt is in flight".to_string(),
+            };
+            let mut parts = vec![DetailPart::text(lead)];
+            if let Some(error) = last_error {
+                parts.push(DetailPart::text("; the last one failed: "));
+                parts.push(DetailPart::peer(error));
+            }
+            parts
+        }
         // The one unreachable cause whose evidence and whose REMEDY are the
         // same sentence: the helm's dial failure for the local row carries
         // the exact command that fixes it, so the text belongs in the remedy
@@ -666,11 +688,9 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
         HostPhase::Unreachable { cause, .. } if cause == LOCAL_SUPERVISOR_NOT_RUNNING => {
             vec![DetailPart::text("no supervisor is running on this machine")]
         }
-        // The transport's own words, preserved raw and escaped only where
-        // they are displayed (see [`DetailPart`]). ssh's stderr is the most
-        // informative thing anyone has about why a host will not answer, and
-        // no classification this side could invent would beat it — so it is
-        // carried unaltered, and made unable to lay out the row around it.
+        // The helm bounds and control-escapes failed-attempt diagnostics,
+        // including retained SSH stderr. They still belong in a peer run:
+        // normalization does not let remote words lay out the surrounding row.
         HostPhase::Unreachable { last_error, .. } => {
             if last_error.raw().trim().is_empty() {
                 vec![DetailPart::text("the host did not answer")]
@@ -4869,6 +4889,7 @@ mod tests {
         vec![
             HostPhase::Connecting {
                 attempt: 3,
+                stage: Some(ConnectionStage::WaitingForHello),
                 last_error: Some("sentinel-connecting-error".into()),
             },
             HostPhase::Unreachable {
@@ -4938,6 +4959,133 @@ mod tests {
         assert_eq!(unique.len(), labels.len());
     }
 
+    /// Live detail names the observed step without presenting retry backoff
+    /// as work in flight. Every label is distinct so a generic placeholder or
+    /// a swapped stage cannot satisfy this table.
+    #[farhelm_testtrace::test]
+    fn connecting_detail_names_each_stage_and_keeps_previous_failure_isolated() {
+        for (stage, progress) in [
+            (
+                ConnectionStage::WaitingToConnect,
+                "waiting for the next connection attempt…",
+            ),
+            (ConnectionStage::ConnectingToHost, "connecting to the host…"),
+            (
+                ConnectionStage::ConnectingToSupervisor,
+                "connecting to the local supervisor…",
+            ),
+            (
+                ConnectionStage::WaitingForHello,
+                "waiting for the supervisor to answer…",
+            ),
+            (ConnectionStage::SettingUp, "finishing connection setup…"),
+        ] {
+            let first = HostPhase::Connecting {
+                attempt: 0,
+                stage: Some(stage),
+                last_error: None,
+            };
+            assert_eq!(
+                detail_text(&state_detail(&first)),
+                format!("the first connection attempt: {progress}")
+            );
+            let previous = "earlier SSH failure\u{202e}\u{200b}";
+            let first_retry = HostPhase::Connecting {
+                attempt: 1,
+                stage: Some(stage),
+                last_error: Some("earlier failure".into()),
+            };
+            assert_eq!(
+                detail_text(&state_detail(&first_retry)),
+                format!("attempt 1: {progress}; the last one failed: earlier failure")
+            );
+            let retry = HostPhase::Connecting {
+                attempt: 3,
+                stage: Some(stage),
+                last_error: Some(previous.into()),
+            };
+            assert_eq!(
+                state_detail(&retry),
+                vec![
+                    DetailPart::text(format!("attempt 3: {progress}")),
+                    DetailPart::text("; the last one failed: "),
+                    DetailPart::peer(previous),
+                ],
+                "failure evidence must stay a peer run for {stage:?}"
+            );
+            assert!(!detail_text(&state_detail(&retry)).contains("in flight"));
+            assert!(
+                detail_text(&state_detail(&retry)).contains("earlier SSH failure<U+202E><U+200B>")
+            );
+        }
+    }
+
+    /// Old helms send no stage, and a future helm may send one this UI does
+    /// not know. Neither is evidence for a specific step; preserve the prior
+    /// generic detail and its separately isolated earlier failure.
+    #[farhelm_testtrace::test]
+    fn unknown_or_missing_connecting_stage_keeps_the_generic_detail() {
+        for stage in [None, Some(ConnectionStage::Unrecognized)] {
+            assert_eq!(
+                detail_text(&state_detail(&HostPhase::Connecting {
+                    attempt: 1,
+                    stage,
+                    last_error: None,
+                })),
+                "the first connection attempt is in flight"
+            );
+            assert_eq!(
+                state_detail(&HostPhase::Connecting {
+                    attempt: 3,
+                    stage,
+                    last_error: Some("earlier failure".into()),
+                }),
+                vec![
+                    DetailPart::text("attempt 3 is in flight"),
+                    DetailPart::text("; the last one failed: "),
+                    DetailPart::peer("earlier failure"),
+                ]
+            );
+        }
+    }
+
+    /// Progress may replace the diagnostic tier, but must not churn the
+    /// unavailable card's cause or its automatic-recovery explanation. The
+    /// card appends precisely the detail parts used by the host row.
+    #[farhelm_testtrace::test]
+    fn connecting_stage_changes_preserve_the_outage_card_and_row_contract() {
+        for stage in [
+            ConnectionStage::WaitingToConnect,
+            ConnectionStage::ConnectingToHost,
+            ConnectionStage::ConnectingToSupervisor,
+            ConnectionStage::WaitingForHello,
+            ConnectionStage::SettingUp,
+        ] {
+            let host = host(HostPhase::Connecting {
+                attempt: 2,
+                stage: Some(stage),
+                last_error: Some("earlier failure".into()),
+            });
+            let notice = stale_session_notice("remote", HostLookup::Known(&host));
+            assert_eq!(notice.cause, "waiting for supervisor");
+            assert_eq!(
+                notice.explanation,
+                vec![
+                    DetailPart::peer("remote"),
+                    DetailPart::text(
+                        " is not answering. The session keeps running there; this view reattaches by itself."
+                    ),
+                ]
+            );
+            assert!(state_remedy(&host.state).is_none());
+            assert_eq!(
+                notice.detail[..2],
+                [DetailPart::peer("remote"), DetailPart::text(": ")]
+            );
+            assert_eq!(notice.detail[2..], state_detail(&host.state));
+        }
+    }
+
     /// Every phase's detail must carry ITS OWN evidence — the sentinels make
     /// that checkable field by field, which a per-phase spot check cannot: a
     /// detail that rendered some other variant's payload, or dropped a
@@ -4948,9 +5096,14 @@ mod tests {
             (
                 HostPhase::Connecting {
                     attempt: 3,
+                    stage: Some(ConnectionStage::SettingUp),
                     last_error: Some("sentinel-connecting-error".into()),
                 },
-                vec!["3", "sentinel-connecting-error"],
+                vec![
+                    "3",
+                    "finishing connection setup…",
+                    "sentinel-connecting-error",
+                ],
             ),
             (
                 HostPhase::Unreachable {
@@ -5459,6 +5612,7 @@ mod tests {
         assert!(
             state_remedy(&HostPhase::Connecting {
                 attempt: 2,
+                stage: Some(ConnectionStage::WaitingToConnect),
                 last_error: None,
             })
             .is_none(),
@@ -5650,6 +5804,7 @@ mod tests {
                     notice.detail.first(),
                     Some(&DetailPart::peer("<peer>\u{202e}"))
                 );
+                assert_eq!(notice.detail[2..], state_detail(&host.state));
             }
         }
         let local = host(HostPhase::Unreachable {

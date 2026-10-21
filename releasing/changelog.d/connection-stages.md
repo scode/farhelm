@@ -2,4 +2,4 @@
 kind: fixed
 ---
 
-Failed connections now distinguish SSH login problems, a missing Farhelm executable, an absent supervisor and setup that stalled after the supervisor replied. The failure detail includes the host's last SSH error lines; timeouts remain explicit when an older remote cannot report how far it got.
+Host and unavailable-session details now show which connection step is pending and distinguish SSH login problems, missing Farhelm, an absent or silent supervisor and unfinished setup after it replies. Failed attempts include the host's last SSH error lines; timeouts against older remotes remain explicit about uncertainty.

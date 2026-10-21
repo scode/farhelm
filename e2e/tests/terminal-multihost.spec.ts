@@ -3678,8 +3678,13 @@ test.describe("multi-host", () => {
       {
         id: 8001,
         phase: "connecting",
-        state: { phase: "connecting", attempt: 3, last_error: "sentinel-connecting" },
-        needles: ["3", "sentinel-connecting"],
+        state: {
+          phase: "connecting",
+          attempt: 3,
+          stage: "setting-up",
+          last_error: "sentinel-connecting",
+        },
+        needles: ["attempt 3", "finishing connection setup…", "sentinel-connecting"],
       },
       {
         id: 8002,
