@@ -35,9 +35,8 @@ const LOG_TARGET: &str = module_path!();
 use super::capture::{CaptureGate, CaptureState, CaptureStoreFault};
 use super::connection::{handle_connection, notify_detached};
 use super::launch_artifacts::{
-    best_effort_remove, cleanup_launch_artifacts, clear_launch_artifacts_fail_closed,
-    read_launch_sentinel, remove_fail_closed, sentinel_could_still_apply, sweep_launch_dir,
-    wrapper_failure_detail,
+    cleanup_launch_artifacts, clear_launch_artifacts_fail_closed, read_launch_sentinel,
+    sentinel_could_still_apply, sweep_launch_dir, wrapper_failure_detail,
 };
 use super::sweep::{
     ScopeKillFailure, ScopeUnits, StopFailure, SweepTarget, TabReapAnchor,
@@ -54,7 +53,7 @@ use super::ticker::{
 };
 use super::uploads::UploadHandle;
 use crate::agent_kind::IntegrationSnapshot;
-use crate::launch::{LaunchSpec, resolve_shell, window_command};
+use crate::launch::{LaunchArtifacts, LaunchSpec, resolve_shell, window_command};
 use crate::store::DedupScope;
 use crate::store::{
     Claimed, IntentClaim, LastOutcome, Reservation, ReservationOutcome, RetryClaim, SessionStore,
@@ -3342,19 +3341,18 @@ fn relaunch_argv(snapshot: &SessionSnapshot) -> anyhow::Result<Vec<String>> {
 }
 
 /// What a successful [`Supervisor::spawn_agent`] produced: the pane the
-/// agent is starting in, its optional excerpt fence, and the two per-launch paths it published to —
+/// agent is starting in, its optional excerpt fence, and the files this launch owns —
 /// which a caller that later fails to confirm the launch has to clean up,
-/// and which the shim itself normally consumes on its way to `exec`.
+/// and whose spec the shim normally consumes on its way to `exec`.
 ///
-/// The paths are RETURNED rather than recomputed by callers so nothing
+/// The owner is RETURNED rather than recomputed by callers so nothing
 /// downstream can derive a path the spawn did not actually use — the
 /// spec's own `status_file` field is what the shim writes to, and a caller
 /// cleaning up a differently-derived path would leave the real sentinel in
 /// place for the next launch to misread.
 struct Spawned {
     pane: String,
-    spec_path: PathBuf,
-    status_path: PathBuf,
+    artifacts: LaunchArtifacts,
     /// Proof that a later dead-pane excerpt can belong only to this launch.
     /// Optional diagnostics never turn a successful spawn into a refusal.
     launch_excerpt: Option<LaunchExcerptFence>,
@@ -3396,10 +3394,10 @@ enum SpawnFailure {
     Spec(anyhow::Error),
     /// tmux refused, or answered ambiguously. The agent may or may not be
     /// running; only a probe can say. The spec DID land, and the shim may
-    /// never run to consume it, so the caller is handed the path: it holds
-    /// the agent's full command line, credentials included.
+    /// never run to consume it. The artifact owner lets the caller remove that
+    /// credential-bearing input only after establishing what happened in tmux.
     Tmux {
-        spec_path: PathBuf,
+        artifacts: LaunchArtifacts,
         error: anyhow::Error,
         /// A replacement window that was created before a later tmux step
         /// failed. Its pane handle makes single-window cleanup safe.
@@ -10205,14 +10203,13 @@ impl Supervisor {
                 }),
             )
             .await;
-        let (pane, spec_path, status_file_path, hooked, launch_excerpt) = match spawned {
+        let (pane, artifacts, hooked, launch_excerpt) = match spawned {
             Ok(Spawned {
                 pane,
-                spec_path,
-                status_path,
+                artifacts,
                 hooked,
                 launch_excerpt,
-            }) => (pane, spec_path, status_path, hooked, launch_excerpt),
+            }) => (pane, artifacts, hooked, launch_excerpt),
             Err(SpawnFailure::Spec(error)) => {
                 // Nothing external happened yet — the spec is the FIRST
                 // side effect and it did not land — so the launching row
@@ -10255,7 +10252,7 @@ impl Supervisor {
                     .await);
             }
             Err(SpawnFailure::Tmux {
-                spec_path,
+                artifacts,
                 error,
                 created,
                 ..
@@ -10318,11 +10315,11 @@ impl Supervisor {
                         // clean it up. Removed BEFORE the row is abandoned
                         // so whatever this adds to the error is part of
                         // what gets recorded against the intent key.
-                        if let Err(cleanup) = tokio::fs::remove_file(&spec_path).await {
+                        if let Err(cleanup) = artifacts.remove_failed_create_spec_strict().await {
                             error = error.context(format!(
                                 "could not remove launch spec {} after tmux creation failed: \
                                  {cleanup}",
-                                spec_path.display()
+                                artifacts.spec().display()
                             ));
                         }
                         // A FRESH checkout that already allocated keeps its
@@ -10489,13 +10486,7 @@ impl Supervisor {
                      the agent may still be running with no session record left"
                 ));
             }
-            best_effort_remove(&spec_path, "launch spec").await;
-            best_effort_remove(&status_file_path, "launch status file").await;
-            best_effort_remove(
-                &crate::launch::waypoint_path_for_spec(&spec_path),
-                "launch waypoint",
-            )
-            .await;
+            artifacts.remove_failed_create_best_effort().await;
             // Delete already removed this session's reservation. A stale
             // settlement must neither recreate it nor affect a replacement
             // claim under the same key; settlement also fences session identity.
@@ -10552,13 +10543,7 @@ impl Supervisor {
             // holding the agent's full command line, credentials
             // included. Same reasoning for the status file, which the
             // shim may have started writing.
-            best_effort_remove(&spec_path, "launch spec").await;
-            best_effort_remove(&status_file_path, "launch status file").await;
-            best_effort_remove(
-                &crate::launch::waypoint_path_for_spec(&spec_path),
-                "launch waypoint",
-            )
-            .await;
+            artifacts.remove_failed_create_best_effort().await;
             // Only once the terminal is CONFIRMED gone: an unkillable tmux
             // session may still be running the agent, and the launching
             // row is then the sole record anyone could use to find it
@@ -11976,7 +11961,7 @@ impl Supervisor {
             .await;
         let Spawned {
             pane,
-            spec_path,
+            artifacts,
             hooked,
             launch_excerpt,
             ..
@@ -11988,7 +11973,7 @@ impl Supervisor {
                 ));
             }
             Err(SpawnFailure::Tmux {
-                spec_path,
+                artifacts,
                 error,
                 replacement,
                 tmux_attempted,
@@ -12008,7 +11993,7 @@ impl Supervisor {
                         replacement.as_ref(),
                         existing_session.is_some(),
                         tmux_attempted,
-                        &spec_path,
+                        &artifacts,
                         error,
                     )
                     .await);
@@ -12141,21 +12126,9 @@ impl Supervisor {
                 if let Err(e) = teardown_result {
                     teardown.push(e);
                 }
-                for (path, what) in [
-                    (&spec_path, "launch spec"),
-                    (
-                        &crate::launch::status_path_for_spec(&spec_path),
-                        "launch sentinel",
-                    ),
-                    (
-                        &crate::launch::waypoint_path_for_spec(&spec_path),
-                        "launch waypoint",
-                    ),
-                ] {
-                    if let Err(e) = remove_fail_closed(path, what).await {
-                        teardown.push(e);
-                    }
-                }
+                artifacts
+                    .remove_deleted_relaunch_fail_closed(&mut teardown)
+                    .await;
                 let message = if teardown.is_empty() {
                     format!(
                         "session {} was deleted while it was being relaunched, so the new \
@@ -12316,7 +12289,7 @@ impl Supervisor {
         replacement: Option<&Terminal>,
         preserved_session: bool,
         tmux_attempted: bool,
-        spec_path: &Path,
+        artifacts: &LaunchArtifacts,
         error: anyhow::Error,
     ) -> RelaunchFailure {
         let error = error.context(format!(
@@ -12399,19 +12372,12 @@ impl Supervisor {
         // spec — which holds the agent's full command line, credentials
         // included — must not be left for nothing to consume. A removal
         // that itself fails is reported rather than swallowed. Remove the
-        // empty waypoint too: nothing remains to classify this failed launch.
-        let mut error = error;
-        if let Err(cleanup) = remove_fail_closed(spec_path, "the failed relaunch's spec").await {
-            error = error.context(cleanup);
-        }
-        if let Err(cleanup) = remove_fail_closed(
-            &crate::launch::waypoint_path_for_spec(spec_path),
-            "the failed relaunch's waypoint",
-        )
-        .await
-        {
-            error = error.context(cleanup);
-        }
+        // empty waypoint too. This path retains the sentinel, contextualizes both
+        // removal failures and cleans before the sweep; retake clearing instead
+        // removes the sentinel and stops at its first failure.
+        let error = artifacts
+            .remove_unconsumed_relaunch_fail_closed(error)
+            .await;
         // The marker sweep, not just tmux: a launch that got far enough to
         // start the login shell can have left descendants even though tmux
         // now reports nothing running.
@@ -14358,13 +14324,14 @@ impl Supervisor {
     /// classes cannot be unwound the same way: a spec that never landed
     /// proves nothing external happened, while a tmux failure is AMBIGUOUS
     /// (the session can exist despite the error) and the caller must probe
-    /// before deciding anything. Both carry the spec path so a caller
-    /// unwinding can remove the credential-bearing file it left behind.
+    /// before deciding anything. Successful spawns and tmux failures carry the
+    /// artifact owner so an unwind can remove the published files; a spec failure
+    /// carries none because publication did not complete.
     #[allow(clippy::too_many_arguments)]
     #[allow(
         clippy::result_large_err,
         reason = "one launch per call, never a hot path; the tmux failure hands the caller owned \
-                  cleanup handles (spec path, replacement or created terminal) by value"
+                  cleanup handles (artifact owner, replacement or created terminal) by value"
     )]
     async fn spawn_agent(
         &self,
@@ -14456,18 +14423,16 @@ impl Supervisor {
             },
             None => Vec::new(),
         };
-        let spec_path = crate::launch::spec_path_for_launch(&self.state_dir, id, generation);
-        // Derived the SAME way the shim derives it from its own copy of
-        // `spec_path` (`launch::status_path_for_spec`) — never computed
-        // independently here — so the two sides can never disagree about
-        // where a launch failure gets recorded, including for the failure
+        let artifacts = LaunchArtifacts::for_launch(&self.state_dir, id, generation);
+        // The owner derives the same sibling path the shim will use from its
+        // spec path, so the two sides agree where a launch failure gets recorded,
+        // including for the failure
         // classes (missing/malformed spec) where the shim never gets to
         // read this struct's own `status_file` field at all.
-        let status_path = crate::launch::status_path_for_spec(&spec_path);
         let spec = LaunchSpec {
             argv,
             working_directory: Some(PathBuf::from(cwd)),
-            status_file: status_path.clone(),
+            status_file: artifacts.status().to_path_buf(),
             // The kill machinery's environment-marker sweep (see
             // `kill_process_tree`) is keyed on this exact value reaching
             // the agent's process and everything it forks.
@@ -14508,7 +14473,7 @@ impl Supervisor {
         // cosmetic: every launch writes a path no launch has used before,
         // so this can only fail on a genuine collision, never on a
         // predecessor's leftovers.
-        if let Err(e) = crate::write_private_file(&spec_path, &spec_bytes).await {
+        if let Err(e) = crate::write_private_file(artifacts.spec(), &spec_bytes).await {
             return Err(SpawnFailure::Spec(
                 anyhow::Error::new(e).context("writing launch spec"),
             ));
@@ -14554,7 +14519,7 @@ impl Supervisor {
         }
 
         let shell = self.launch_shell().await;
-        let cmd = self.shim_window_command(&shell, &spec_path, scope_prefix);
+        let cmd = self.shim_window_command(&shell, artifacts.spec(), scope_prefix);
         let fresh_target = !matches!(&target, SpawnTarget::Reuse(_));
         let existing_session = match &target {
             SpawnTarget::ExistingSession(session) => Some((*session).to_string()),
@@ -14577,7 +14542,7 @@ impl Supervisor {
                     && let Err(error) = fault(ReplacementStage::BeforeCreation)
                 {
                     return Err(SpawnFailure::Tmux {
-                        spec_path,
+                        artifacts,
                         error: error.context("injected replacement-window creation failure"),
                         replacement: None,
                         created: None,
@@ -14619,7 +14584,7 @@ impl Supervisor {
                     && let Err(error) = fault(ReplacementStage::BeforeMarking)
                 {
                     return Err(SpawnFailure::Tmux {
-                        spec_path,
+                        artifacts,
                         error: error.context("injected replacement-window marking failure"),
                         replacement: existing_session.map(|session| Terminal {
                             tmux_name: session,
@@ -14636,7 +14601,7 @@ impl Supervisor {
                         .await
                 {
                     return Err(SpawnFailure::Tmux {
-                        spec_path,
+                        artifacts,
                         error: error.context(
                             "marking the session's agent window, without which a later reload \
                             could not tell it apart from a terminal tab",
@@ -14684,14 +14649,13 @@ impl Supervisor {
                 }
                 Ok(Spawned {
                     pane,
-                    spec_path,
-                    status_path,
+                    artifacts,
                     hooked,
                     launch_excerpt,
                 })
             }
             Err(error) => Err(SpawnFailure::Tmux {
-                spec_path,
+                artifacts,
                 error,
                 replacement: None,
                 created: None,
@@ -16256,7 +16220,7 @@ pub(crate) mod tests {
                 )
                 .await;
             let Err(SpawnFailure::Tmux {
-                spec_path,
+                artifacts,
                 tmux_attempted: false,
                 ..
             }) = outcome
@@ -16264,7 +16228,7 @@ pub(crate) mod tests {
                 panic!("the fixture must stop after spec publication and before tmux");
             };
             let spec: crate::launch::LaunchSpec =
-                serde_json::from_slice(&std::fs::read(spec_path).unwrap()).unwrap();
+                serde_json::from_slice(&std::fs::read(artifacts.spec()).unwrap()).unwrap();
             assert_eq!(spec.working_directory.as_deref(), Some(state.path()));
             assert_eq!(spec.argv[1], state.path().to_str().unwrap());
             match prompt {

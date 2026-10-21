@@ -524,10 +524,9 @@ impl Supervisor {
         }
 
         // Fail-closed and sequenced deliberately: artifacts before the
-        // DB row (a leftover launch spec may hold credentials, and
-        // this is the last moment anything will ever come back to
-        // remove it — see `remove_fail_closed`'s docs), and the row
-        // only after the terminal and process tree are positively
+        // DB row (this is the last opportunity to remove a launch's
+        // leftover files — see `remove_launch_artifacts_for_session`),
+        // and the row only after the terminal and process tree are positively
         // gone (a crash here leaves a listed-but-dead session,
         // recoverable by the next delete or a manual cleanup, rather
         // than an unlisted-but-running agent, invisible and
@@ -631,13 +630,12 @@ impl Supervisor {
             // EVERY generation's launch files, not just the current
             // one: they are named per launch now
             // (`launch::spec_path_for_launch`), and a session that
-            // was restarted has one pair per launch it ever had.
+            // was restarted can have one set per launch it ever had.
             // Delete is the last moment anything comes back for
             // them, and a spec holds the agent's full command line
-            // — credentials included — so a missed generation is a
-            // credential leak, not untidiness. Fail-closed for that
-            // reason (`remove_fail_closed`), including the failure
-            // to LIST them: an unreadable directory is not evidence
+            // — credentials included. Keep the row when the owner cannot
+            // confirm cleanup (`remove_launch_artifacts_for_session`),
+            // including the failure to LIST them: an unreadable directory is not evidence
             // there was nothing in it.
             remove_launch_artifacts_for_session(&self.state_dir, session_id).await?;
             // SPEC.md: "attachment files are removed when their
