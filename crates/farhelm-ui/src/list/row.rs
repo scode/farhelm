@@ -209,8 +209,8 @@ fn row_class(stale: bool, selected: bool, menu_open: bool) -> &'static str {
 /// is plenty to tell sessions apart, and the ellipsis says something
 /// was cut. Escape before clamping so hidden characters are visible and
 /// the shared clamp can preserve whole escape tokens at its boundary.
-fn menu_label(title: &str) -> String {
-    format!("session actions for {}", clamp_title(&title.into()))
+fn menu_label(title: &crate::peer::PeerText) -> String {
+    format!("session actions for {}", clamp_title(title))
 }
 
 /// Split the header's saved launch facts into peer and app-authored runs.
@@ -661,8 +661,12 @@ fn command_basename(invocation: &str) -> String {
 /// means none can drift. The attributes are formatted values on purpose, so
 /// they reach the DOM as dynamic attributes a headless test can observe.
 #[component]
-pub(crate) fn PeerTitle(class: &'static str, title: String, quoted: bool) -> Element {
-    let shown = display_peer(&title);
+pub(crate) fn PeerTitle(
+    class: &'static str,
+    title: crate::peer::PeerText,
+    quoted: bool,
+) -> Element {
+    let shown = title.escaped();
     let text = if quoted {
         format!("\"{shown}\"")
     } else {
@@ -995,7 +999,11 @@ pub(super) fn SessionRow(
     // result is what makes that agreement structural rather than a
     // convention two call sites have to maintain by hand.
     let unseen = session.has_unseen_output();
-    let badge = status_badge(&session.status, session.annotation.as_deref(), unseen);
+    let badge = status_badge(
+        &session.status,
+        session.annotation.as_ref().map(crate::peer::PeerText::raw),
+        unseen,
+    );
     let card_badge = badge.clone();
     let card_id = format!("session-summary-{}", session.id);
     let card_session = session.clone();
@@ -1022,7 +1030,10 @@ pub(super) fn SessionRow(
         // needs this otherwise absent datum to remain explicit.
         detail.text = detail.text.replacen("exited", "exited (code unknown)", 1);
     }
-    let ended_glyph = match (&session.status, session.annotation.as_deref()) {
+    let ended_glyph = match (
+        &session.status,
+        session.annotation.as_ref().map(crate::peer::PeerText::raw),
+    ) {
         (SessionStatus::Exited { .. }, Some("stopped by user")) => Some(EndedGlyph::Stopped),
         (SessionStatus::Exited { .. }, _) => Some(EndedGlyph::Exited),
         (SessionStatus::Interrupted, _) => Some(EndedGlyph::Interrupted),
@@ -1066,7 +1077,9 @@ pub(super) fn SessionRow(
     let cancel_id = session.id.clone();
     let confirm_replace_source = session.clone();
     let cancel_replace_id = session.id.clone();
-    let rename_start = (session.id.clone(), session.title.clone());
+    // The editor owns a local String seed so unchanged submission can preserve
+    // the title even when its editable spelling contains visible escape markers.
+    let rename_start = (session.id.clone(), session.title.raw().to_owned());
     // The toggle is offered on a LIVE row (running, waiting, idle — SPEC.md;
     // an ended session has no dot and no meaningful unseen state) whose helm
     // answered the seen-state question at all (`unseen.is_some()`); staleness
@@ -1116,17 +1129,11 @@ pub(super) fn SessionRow(
     // instead. Escape before shortening, as the toggle does, so its spoken
     // title has the same spelling as the visible confirmation quote.
     let prompt_label = if confirming {
-        format!(
-            "delete confirmation for {}",
-            clamp_title(&session.title.clone().into())
-        )
+        format!("delete confirmation for {}", clamp_title(&session.title))
     } else if confirming_replace {
-        format!(
-            "replace confirmation for {}",
-            clamp_title(&session.title.clone().into())
-        )
+        format!("replace confirmation for {}", clamp_title(&session.title))
     } else {
-        format!("rename {}", clamp_title(&session.title.clone().into()))
+        format!("rename {}", clamp_title(&session.title))
     };
     // The separator earns its place only when something actually
     // precedes delete. Rename is unconditional today, so this is always
@@ -2116,11 +2123,11 @@ pub(super) fn SessionRow(
                                 class: "session-row-menu-header",
                                 div {
                                     class: "session-row-menu-title",
-                                    "data-tooltip": "{display_peer(&session.title)}",
+                                    "data-tooltip": "{session.title.escaped()}",
                                     span {
                                         class: "peer-value",
                                         dir: "ltr",
-                                        "{display_peer(&session.title)}"
+                                        "{session.title.escaped()}"
                                     }
                                 }
                                 div {
@@ -2598,7 +2605,7 @@ pub(super) fn row_specimen(id: &str) -> Session {
         claude_trust_prompt: false,
         workspace_trust_prompt: false,
         id: id.to_string(),
-        title: "stable".to_string(),
+        title: "stable".into(),
         cwd: "/tmp".to_string(),
         canonical_cwd: None,
         invocation: "agent".to_string(),
@@ -2748,10 +2755,10 @@ mod tests {
     /// The shared clamp's length, multibyte, and escape-token boundaries
     /// are covered by `menu_panel`'s tests. This test keeps the wording
     /// around a plain title stable; the real-row test below checks that
-    /// callers escape peer text before applying that shared clamp.
+    /// the typed shared clamp escapes peer text before shortening it.
     #[farhelm_testtrace::test]
     fn menu_label_wraps_the_clamped_title_in_session_wording() {
-        assert_eq!(menu_label("short"), "session actions for short");
+        assert_eq!(menu_label(&"short".into()), "session actions for short");
     }
 
     /// Every row title surface escapes peer formatting, including accessible names.
@@ -2799,7 +2806,7 @@ mod tests {
             let on_bell_clear = use_callback(|_: (String, u64)| {});
             let (confirming, confirming_replace) = PROMPT.with(std::cell::Cell::get);
             let session = Session {
-                title: TITLE.with(std::cell::Cell::get).to_string(),
+                title: TITLE.with(std::cell::Cell::get).into(),
                 cwd: CWD.with(std::cell::Cell::get).to_string(),
                 ..row_specimen("spoofed")
             };
@@ -3307,7 +3314,7 @@ mod tests {
         crate::SessionNotification {
             seq,
             at: 1_700_000_000,
-            text: text.to_string(),
+            text: text.into(),
             resolved: false,
         }
     }

@@ -248,6 +248,9 @@ pub(crate) fn RenameDialog(
     busy: bool,
     busy_now: Callback<(), bool>,
     unavailable: bool,
+    /// Exact source title retained separately from the editable draft, so
+    /// untouched submission can round-trip unsafe characters without decoding
+    /// the visible escape notation back into data.
     current_title: String,
     error: Option<String>,
     generation: u64,
@@ -288,7 +291,7 @@ pub(crate) fn RenameDialog(
                     on_cancel.call(generation);
                 }
             },
-            PeerTitle { class: "rename-current-title", title: current_title, quoted: false }
+            PeerTitle { class: "rename-current-title", title: crate::peer::PeerText::from(current_title), quoted: false }
             if unavailable {
                 p {
                     class: "rename-unavailable",

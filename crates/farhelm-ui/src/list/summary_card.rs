@@ -172,7 +172,6 @@ mod tests {
     use crate::SessionStatus;
     use crate::github_checkout::{GithubRepo, WorkingCopyInfo};
     use crate::list::row::row_specimen;
-    use crate::peer::display_peer;
     use crate::status::status_badge;
 
     std::thread_local! {
@@ -192,7 +191,7 @@ mod tests {
                 SPECIMEN.with(|cell| cell.borrow().clone().unwrap());
             let badge = status_badge(
                 &session.status,
-                session.annotation.as_deref(),
+                session.annotation.as_ref().map(crate::peer::PeerText::raw),
                 session.has_unseen_output(),
             );
             rsx! {
@@ -310,7 +309,7 @@ mod tests {
         let live_edits = render(live.clone(), HostLocality::Unknown, None);
         let live_text = text_values(&live_edits);
         assert!(live_text.contains(&"idle — new output".to_string()));
-        assert!(live_text.contains(&display_peer(&live.title)));
+        assert!(live_text.contains(&live.title.escaped()));
         assert!(
             !live_text
                 .iter()
