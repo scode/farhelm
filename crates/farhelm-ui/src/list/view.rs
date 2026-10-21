@@ -2463,9 +2463,12 @@ pub(crate) fn ListView(
                         if e.yolo_confirmation {
                             let ask = crate::yolo_confirm::YoloAsk {
                                 host: source.host,
+                                // The confirmation escapes this raw snapshot
+                                // itself; keep its existing presentation path.
                                 host_name: source
                                     .host_name
-                                    .clone()
+                                    .as_ref()
+                                    .map(|name| name.raw().to_owned())
                                     .unwrap_or_else(|| "this host".to_string()),
                                 reason: crate::yolo_confirm::YoloReason::of_launch(
                                     source.agent_selection(),

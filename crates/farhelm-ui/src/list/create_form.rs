@@ -1982,8 +1982,13 @@ pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill 
     CreatePrefill {
         generation,
         host: session.host,
-        host_identity: session.host_identity.clone(),
-        cwd: session.cwd.clone(),
+        // The form's binding compares raw registry identities. Map each layer
+        // separately so absent evidence never becomes an explicit null claim.
+        host_identity: session
+            .host_identity
+            .as_ref()
+            .map(|identity| identity.as_ref().map(|value| value.raw().to_owned())),
+        cwd: session.cwd.raw().to_owned(),
         repo: session
             .working_copy
             .as_ref()
@@ -1992,7 +1997,7 @@ pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill 
         // Clone's local draft and untouched-submit seed both start from the
         // original bytes; editable escaping happens when that seed is applied.
         title: session.title.raw().to_owned(),
-        invocation: session.invocation.clone(),
+        invocation: session.invocation.raw().to_owned(),
         launch: session.agent_selection().cloned(),
         command: match &session.launch {
             Some(crate::SessionLaunch::Command(command)) => Some(command.clone()),
@@ -8379,7 +8384,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn prefill_from_carries_the_raw_invocation_even_for_a_structured_clone() {
         let session = Session {
-            invocation: "claude --resume abc".to_string(),
+            invocation: "claude --resume abc".into(),
             launch: Some(crate::SessionLaunch::Agent {
                 start: Vec::new(),
                 resume: None,
@@ -8413,7 +8418,7 @@ mod tests {
             workspace_trust: None,
         };
         let session = Session {
-            invocation: "muse --model muse-spark-1.3-contributor --yolo".to_string(),
+            invocation: "muse --model muse-spark-1.3-contributor --yolo".into(),
             launch: Some(crate::SessionLaunch::Agent {
                 selection: launch.clone(),
                 start: Vec::new(),
@@ -8442,7 +8447,7 @@ mod tests {
             resume: Some("claude --resume {conversation} {farhelm_args}".to_string()),
         };
         let session = Session {
-            invocation: command.command.clone(),
+            invocation: command.command.clone().into(),
             launch: Some(crate::SessionLaunch::Command(command.clone())),
             ..row_specimen("command")
         };
@@ -8451,7 +8456,7 @@ mod tests {
         assert_eq!(prefill.launch, None);
 
         let legacy = Session {
-            invocation: "claude --model opus".to_string(),
+            invocation: "claude --model opus".into(),
             launch: Some(crate::SessionLaunch::Legacy {
                 invocation: "claude --model opus".to_string(),
                 agent_kind: farhelm_proto::AgentKind::Claude,
@@ -8477,10 +8482,10 @@ mod tests {
     #[farhelm_testtrace::test]
     fn prefill_from_carries_title_cwd_host_and_identity_verbatim() {
         let session = Session {
-            cwd: "/work/api".to_string(),
+            cwd: "/work/api".into(),
             title: "my session".into(),
             host: Some(7),
-            host_identity: Some(Some("install-7".to_string())),
+            host_identity: Some(Some("install-7".into())),
             ..row_specimen("s1")
         };
         let prefill = prefill_from(&session, 3);
@@ -8787,7 +8792,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn prefill_from_checkout_metadata_keeps_existing_subdirectory() {
         let mut session = Session {
-            cwd: "/work/bar-1/subdir".to_string(),
+            cwd: "/work/bar-1/subdir".into(),
             working_copy: Some(crate::github_checkout::WorkingCopyInfo {
                 id: "checkout-1".into(),
                 repo: GithubRepo::parse("acme/bar").unwrap(),
@@ -8964,13 +8969,23 @@ mod tests {
         }
     }
 
-    /// item2-review2.md F5's untouched-vs-edited submission rule, exercised
-    /// through this file's own field handling (a clone's directory,
-    /// invocation and title) with a value a clone could plausibly carry: a
-    /// right-to-left override inside an otherwise ordinary invocation.
+    /// A clone must preserve original bytes from the session adapter through
+    /// untouched submission, while an edit submits the user's draft verbatim.
+    /// A directional override makes raw and displayed spellings differ, so
+    /// accidentally copying escaped text into a raw seed cannot pass unnoticed.
     #[farhelm_testtrace::test]
     fn a_cloned_fields_untouched_submission_sends_the_original_bytes_not_the_escaped_display() {
         let raw = "claude --resume \u{202E}reversed-arg";
+        let source = Session {
+            cwd: raw.into(),
+            title: raw.into(),
+            invocation: raw.into(),
+            ..row_specimen("clone-source")
+        };
+        let prefill = prefill_from(&source, 1);
+        assert_eq!(prefill.cwd, raw);
+        assert_eq!(prefill.title, raw);
+        assert_eq!(prefill.invocation, raw);
         let display = display_peer(raw);
         assert_ne!(
             display, raw,

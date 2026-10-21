@@ -87,6 +87,8 @@ fn focus_restart_with_trigger() {
 fn NativeTunnelStrip(session: Session) -> Element {
     #[cfg(native_desktop)]
     {
+        // PeerText's Debug deliberately matches String. This ownership key is
+        // comparison data, so typed metadata must not change listener lifetime.
         let owner = format!("{:?}:{:?}", session.host, session.host_identity);
         rsx! { crate::tunnels::TunnelStrip { key: "{owner}", session: session.id } }
     }
@@ -1452,9 +1454,12 @@ pub(crate) fn SessionView(
                             let shown = current.peek();
                             crate::yolo_confirm::YoloAsk {
                                 host: shown.host,
+                                // The confirmation owns a raw snapshot and
+                                // escapes it when rendering its host label.
                                 host_name: shown
                                     .host_name
-                                    .clone()
+                                    .as_ref()
+                                    .map(|name| name.raw().to_owned())
                                     .unwrap_or_else(|| "this host".to_string()),
                                 reason: crate::yolo_confirm::YoloReason::of_launch(
                                     with.as_ref()
@@ -1655,9 +1660,11 @@ pub(crate) fn SessionView(
                         key: key.clone(),
                         ask: crate::yolo_confirm::YoloAsk {
                             host: source.host,
+                            // YoloAsk escapes its raw snapshot at render time.
                             host_name: source
                                 .host_name
-                                .clone()
+                                .as_ref()
+                                .map(|name| name.raw().to_owned())
                                 .unwrap_or_else(|| "this host".to_string()),
                             reason: crate::yolo_confirm::YoloReason::of_launch(
                                 source.agent_selection(),
@@ -2074,7 +2081,11 @@ pub(crate) fn SessionView(
     let host_read_now = host_read.read();
     let stale_notice = shown.stale.then(|| {
         stale_session_notice(
-            shown.host_name.as_deref().unwrap_or_default(),
+            shown
+                .host_name
+                .as_ref()
+                .map(crate::peer::PeerText::raw)
+                .unwrap_or_default(),
             host_read_now.lookup(shown.host),
         )
     });
@@ -3277,12 +3288,12 @@ pub(crate) fn SessionView(
                 button {
                     r#type: "button",
                     class: if copied_directory().is_some() { "header-copy copied" } else { "header-copy" },
-                    "data-tooltip": "{display_peer(&shown.cwd)} — click to copy",
+                    "data-tooltip": "{shown.cwd.escaped()} — click to copy",
                     "aria-describedby": COPY_DIRECTORY_DESCRIPTION_ID,
                     // The clipboard gets the raw bytes (a copy that differed
                     // from the value would be useless); the feedback says
                     // when those bytes hold characters the display escaped.
-                    onclick: { let cwd = shown.cwd.clone(); move |_| copy_value("folder", cwd.clone(), copied_directory) },
+                    onclick: { let cwd = shown.cwd.raw().to_owned(); move |_| copy_value("folder", cwd.clone(), copied_directory) },
                     // The short feedback replaces the value while it shows;
                     // a hidden-characters warning does NOT live in here,
                     // because this button shrinks and clips in a crowded
@@ -3301,23 +3312,23 @@ pub(crate) fn SessionView(
                 button {
                     r#type: "button",
                     class: if copied_command().is_some() { "header-copy copied" } else { "header-copy" },
-                    "data-tooltip": "{display_peer(&shown.invocation)} — click to copy",
+                    "data-tooltip": "{shown.invocation.escaped()} — click to copy",
                     "aria-describedby": COPY_COMMAND_DESCRIPTION_ID,
-                    onclick: { let invocation = shown.invocation.clone(); move |_| copy_value("command", invocation.clone(), copied_command) },
+                    onclick: { let invocation = shown.invocation.raw().to_owned(); move |_| copy_value("command", invocation.clone(), copied_command) },
                     if copied_command().is_some() {
                         span { class: "copy-feedback", "✓ copied" }
                     } else {
                         span { class: "copy-glyph", "📋" }
-                        span { class: "peer-value", dir: "ltr", "{display_peer(&shown.invocation)}" }
+                        span { class: "peer-value", dir: "ltr", "{shown.invocation.escaped()}" }
                     }
                 }
                 // The two copy buttons' accessible descriptions (see the
                 // id constants for why they exist beside the tooltips).
                 span { id: COPY_DIRECTORY_DESCRIPTION_ID, class: "visually-hidden",
-                    "{display_peer(&shown.cwd)} — click to copy"
+                    "{shown.cwd.escaped()} — click to copy"
                 }
                 span { id: COPY_COMMAND_DESCRIPTION_ID, class: "visually-hidden",
-                    "{display_peer(&shown.invocation)} — click to copy"
+                    "{shown.invocation.escaped()} — click to copy"
                 }
                 // The warning floats upward from the details bar rather than
                 // inside the copy button, so no amount
@@ -3762,18 +3773,19 @@ fn restart_button_label(offer: RestartOffer) -> &'static str {
 /// SPEC.md has the bar abbreviate the home directory the way the session list
 /// does. The fold is skipped when the account segment it would remove holds a
 /// presentation-unsafe character, so abbreviating a path cannot hide the
-/// escaped spelling of a character that will be copied literally.
-fn directory_label(cwd: &str) -> String {
+/// escaped spelling of a character that will be copied literally. Unlike the
+/// sidebar's blank empty folder, this label keeps display_peer's empty marker.
+fn directory_label(cwd: &crate::peer::PeerText) -> String {
     let unsafe_count = |text: &str| {
         text.chars()
             .filter(|c| farhelm_proto::text::is_presentation_unsafe(*c))
             .count()
     };
     let folded = crate::list::abbreviate_home(cwd);
-    let shown = if unsafe_count(&folded) == unsafe_count(cwd) {
+    let shown = if unsafe_count(&folded) == unsafe_count(cwd.raw()) {
         folded
     } else {
-        cwd.to_string()
+        cwd.raw().to_owned()
     };
     display_peer(&shown)
 }
@@ -3896,16 +3908,19 @@ mod tests {
     /// a hidden character in the folded-away account keeps the full path.
     #[farhelm_testtrace::test]
     fn the_details_bar_folds_home_without_hiding_escaped_characters() {
-        assert_eq!(directory_label("/home/alice/src/api"), "~/src/api");
-        assert_eq!(directory_label("/Users/alice/src/api"), "~/src/api");
-        assert_eq!(directory_label("/tmp/work"), "/tmp/work");
-        assert_eq!(directory_label("/home/alice/a\u{202E}b"), "~/a<U+202E>b");
+        assert_eq!(directory_label(&"/home/alice/src/api".into()), "~/src/api");
+        assert_eq!(directory_label(&"/Users/alice/src/api".into()), "~/src/api");
+        assert_eq!(directory_label(&"/tmp/work".into()), "/tmp/work");
+        assert_eq!(
+            directory_label(&"/home/alice/a\u{202E}b".into()),
+            "~/a<U+202E>b"
+        );
         let hidden_account = "/home/a\u{202E}b/src";
         assert_eq!(
-            directory_label(hidden_account),
+            directory_label(&hidden_account.into()),
             display_peer(hidden_account)
         );
-        assert!(directory_label(hidden_account).contains("<U+202E>"));
+        assert!(directory_label(&hidden_account.into()).contains("<U+202E>"));
     }
 
     /// This dialog changes an agent or command launch with a captured
@@ -4113,9 +4128,9 @@ mod tests {
             workspace_trust_prompt: false,
             id: "sess".to_string(),
             title: "sess".into(),
-            cwd: "/tmp".to_string(),
+            cwd: "/tmp".into(),
             canonical_cwd: None,
-            invocation: "agent".to_string(),
+            invocation: "agent".into(),
             agent_kind: crate::SessionAgentKind::Unrecognized,
             launch: None,
             status: crate::SessionStatus::Running,
@@ -4126,7 +4141,7 @@ mod tests {
             tabs: Vec::new(),
             host: Some(1),
             host_identity: None,
-            host_name: Some("this machine".to_string()),
+            host_name: Some("this machine".into()),
             stale: false,
             github_repo: None,
             working_copy: None,
@@ -4614,6 +4629,8 @@ mod tests {
     /// another session, or no selection → leave the view alone.
     #[farhelm_testtrace::test]
     fn the_view_follows_a_rename_of_its_own_session() {
+        /// Keep metadata fixed so the follow decision depends only on id/title.
+        /// Reconstructing a fixture must not introduce an unrelated difference.
         fn titled(id: &str, title: &str) -> Session {
             Session {
                 screen_yolo: false,
@@ -4621,9 +4638,9 @@ mod tests {
                 workspace_trust_prompt: false,
                 id: id.to_string(),
                 title: title.into(),
-                cwd: "/tmp".to_string(),
+                cwd: "/tmp".into(),
                 canonical_cwd: None,
-                invocation: "agent".to_string(),
+                invocation: "agent".into(),
                 agent_kind: crate::SessionAgentKind::Unrecognized,
                 launch: None,
                 status: SessionStatus::Running,
@@ -4671,6 +4688,8 @@ mod tests {
     /// ever looked at one side.
     #[farhelm_testtrace::test]
     fn status_badge_destination_never_targets_both_surfaces_at_once() {
+        /// Vary only status and reachability in each badge-routing scenario.
+        /// The remaining fields must not contribute a second reason to hide it.
         fn session(status: SessionStatus, stale: bool) -> Session {
             Session {
                 screen_yolo: false,
@@ -4678,9 +4697,9 @@ mod tests {
                 workspace_trust_prompt: false,
                 id: "sess".to_string(),
                 title: "sess".into(),
-                cwd: "/tmp".to_string(),
+                cwd: "/tmp".into(),
                 canonical_cwd: None,
-                invocation: "agent".to_string(),
+                invocation: "agent".into(),
                 agent_kind: crate::SessionAgentKind::Unrecognized,
                 launch: None,
                 status,
@@ -4775,9 +4794,9 @@ mod tests {
             workspace_trust_prompt: false,
             id: "sess".to_string(),
             title: "sess".into(),
-            cwd: "/tmp".to_string(),
+            cwd: "/tmp".into(),
             canonical_cwd: None,
-            invocation: "agent".to_string(),
+            invocation: "agent".into(),
             agent_kind: crate::SessionAgentKind::Unrecognized,
             launch: None,
             status: SessionStatus::Unknown,
@@ -4841,6 +4860,8 @@ mod tests {
     /// restores eligibility.
     #[farhelm_testtrace::test]
     fn seen_effect_eligibility_gates_on_staleness_ended_and_capability() {
+        /// Start eligible so each case can remove one independent prerequisite.
+        /// Missing seen metadata must be an explicit case, not a fixture default.
         fn base() -> Session {
             Session {
                 screen_yolo: false,
@@ -4848,9 +4869,9 @@ mod tests {
                 workspace_trust_prompt: false,
                 id: "sess".to_string(),
                 title: "t".into(),
-                cwd: "/tmp".to_string(),
+                cwd: "/tmp".into(),
                 canonical_cwd: None,
-                invocation: "agent".to_string(),
+                invocation: "agent".into(),
                 agent_kind: crate::SessionAgentKind::Unrecognized,
                 launch: None,
                 status: crate::SessionStatus::Idle,
@@ -4924,9 +4945,9 @@ mod tests {
             workspace_trust_prompt: false,
             id: "sess".to_string(),
             title: "t".into(),
-            cwd: "/tmp".to_string(),
+            cwd: "/tmp".into(),
             canonical_cwd: None,
-            invocation: "agent".to_string(),
+            invocation: "agent".into(),
             agent_kind: crate::SessionAgentKind::Unrecognized,
             launch: None,
             status: crate::SessionStatus::Idle,

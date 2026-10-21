@@ -267,7 +267,7 @@ pub(crate) fn SessionHostIcon(locality: HostLocality, icon: HostIcon, color: Hos
 
 /// Show a session's own host name with the GUI's local wording and peer isolation.
 ///
-/// Pass the raw name carried by the session, not the registry's current name.
+/// Pass the session's peer-text name, not the registry's current name.
 /// Only confirmed local sessions earn the local wording; unknown locality
 /// still shows an available name. Callers omit this component when the legacy
 /// session has no host name at all rather than inventing one. A row or card
@@ -275,14 +275,14 @@ pub(crate) fn SessionHostIcon(locality: HostLocality, icon: HostIcon, color: Hos
 /// redundant hover text; other surfaces keep the existing tooltip.
 #[component]
 pub(crate) fn SessionHostName(
-    name: String,
+    name: crate::peer::PeerText,
     locality: HostLocality,
     #[props(default = true)] tooltip: bool,
 ) -> Element {
-    // gui_host_name escapes peer controls itself; only its fixed local label
-    // bypasses that path. When a tooltip is wanted, it must use the same
-    // escaped value as the visible text.
-    let shown_name = gui_host_name(&name, locality == HostLocality::Local);
+    // gui_host_name compares the raw local-name sentinel before escaping;
+    // only its fixed local label bypasses that escape path. Passing escaped
+    // input would change its comparison. The tooltip uses the same final value.
+    let shown_name = gui_host_name(name.raw(), locality == HostLocality::Local);
     rsx! {
         span {
             class: "session-host peer-value",
@@ -398,7 +398,12 @@ impl OpenHost {
     pub(crate) fn of_session(session: &Session) -> Option<OpenHost> {
         Some(OpenHost {
             id: session.host?,
-            identity: session.host_identity.clone(),
+            // This is comparison evidence, including both kinds of absence;
+            // the host selector's local snapshot retains exact wire bytes.
+            identity: session
+                .host_identity
+                .as_ref()
+                .map(|identity| identity.as_ref().map(|value| value.raw().to_owned())),
         })
     }
 }
@@ -419,7 +424,8 @@ impl OpenDestination {
     pub(crate) fn of_session(session: &Session) -> Option<Self> {
         Some(Self {
             host: OpenHost::of_session(session)?,
-            cwd: session.cwd.clone(),
+            // Destination inheritance sends the folder back unchanged.
+            cwd: session.cwd.raw().to_owned(),
         })
     }
 }
@@ -577,7 +583,9 @@ pub(super) fn enrich_created_session(
 ) -> Session {
     Session {
         host: reply.host.or(Some(host)),
-        host_identity: reply.host_identity.or(identity),
+        host_identity: reply
+            .host_identity
+            .or(identity.map(|identity| identity.map(Into::into))),
         ..reply
     }
 }
@@ -883,8 +891,8 @@ pub(super) mod tests {
     fn a_replace_reply_takes_the_source_rows_host() {
         let mut source = row_specimen("old");
         source.host = Some(5);
-        source.host_identity = Some(Some("install-5".to_string()));
-        source.host_name = Some("builder".to_string());
+        source.host_identity = Some(Some("install-5".into()));
+        source.host_name = Some("builder".into());
         let filled = with_source_host(row_specimen("new"), &source);
         assert_eq!(
             (
@@ -896,8 +904,8 @@ pub(super) mod tests {
             (
                 "new",
                 Some(5),
-                Some(Some("install-5".to_string())),
-                Some("builder".to_string())
+                Some(Some("install-5".into())),
+                Some("builder".into())
             )
         );
 
@@ -922,15 +930,15 @@ pub(super) mod tests {
         let bare = row_specimen("made");
         let enriched = enrich_created_session(bare, 7, Some(Some("install-7".to_string())));
         assert_eq!(enriched.host, Some(7));
-        assert_eq!(enriched.host_identity, Some(Some("install-7".to_string())));
+        assert_eq!(enriched.host_identity, Some(Some("install-7".into())));
 
         let mut already = row_specimen("made");
         already.host = Some(3);
-        already.host_identity = Some(Some("install-3".to_string()));
+        already.host_identity = Some(Some("install-3".into()));
         let kept = enrich_created_session(already, 7, Some(Some("install-7".to_string())));
         assert_eq!(
             (kept.host, kept.host_identity),
-            (Some(3), Some(Some("install-3".to_string()))),
+            (Some(3), Some(Some("install-3".into()))),
             "a reply that names its own host fields is authoritative over the stamp"
         );
     }
@@ -950,8 +958,8 @@ pub(super) mod tests {
     fn the_identity_survives_both_adapters_into_the_comparison() {
         let mut session = row_specimen("sess");
         session.host = Some(7);
-        session.host_identity = Some(Some("install-7".to_string()));
-        session.cwd = "/selected/project".to_string();
+        session.host_identity = Some(Some("install-7".into()));
+        session.cwd = "/selected/project".into();
         let destination = OpenDestination::of_session(&session).expect("a hosted session adapts");
         assert_eq!(destination.cwd, "/selected/project");
         let open = destination.host;
