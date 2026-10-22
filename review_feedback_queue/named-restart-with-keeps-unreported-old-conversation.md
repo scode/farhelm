@@ -1,6 +1,6 @@
 # After a named Restart with that cannot report, Resume keeps reopening the previous conversation
 
-Reviewed commit: 08ab6e08f9ddd40b5494f2cbbeaaeb9d4e3332b7
+Reviewed commit: 9d266e28595e8c2c07b378174f35eedf84258a70
 
 ## TLDR
 
@@ -13,15 +13,19 @@ and Resume reopen the earlier conversation instead, and you continue in the wron
 ## Details
 
 Found by the 2026-10-22 prioritized persistent review, group `109-supervisor-core-11of15` (finding f3, revised).
+Original review: `08ab6e08f9ddd40b5494f2cbbeaaeb9d4e3332b7`. Group `A24-relaunch-commit` (f1), the recording agent and
+an independent reviewer added the backend handoff and publication trace against the reviewed commit above.
 
 Suggested bucket: highest (resuming the wrong agent conversation after the user moved to another), or high if triage
 judges the hooks-off case a deliberate setup.
 
 Confidence: confirmed for the window before a report arrives, which matches the spec. Likely for the never-reports
-variant. Unverified premise: that the Restart with spawn path really proceeds unhooked under the opt-out or an
-unavailable reporter for Claude and Codex. The expansion code shows it can; the reviewer did not trace it end to end
-through `relaunch_into_terminal`. Recording rechecked `clear_capture` and `captures_named_conversation` at the reviewed
-commit.
+variant. The relaunch/spawn/publication trace now establishes that the backend does not require a hooked launch or
+withdraw old capture when hooking is false. Per-harness policy, successful vendor execution of the named conversation
+and observed later Resume into the old one remain unverified. This is source evidence, not runtime confirmation. In
+particular, `hooked=false` describes Farhelm's injection decision; it does not prove that no other reporting path can
+produce an accepted report. The generic no-report/no-capture sentence alone does not establish that previously valid
+capture must be withdrawn.
 
 Mechanism:
 
@@ -46,6 +50,15 @@ Scenario: a Claude session with captured conversation A; the user turns off Farh
 the reporter is unavailable on that host); the user does Restart with naming conversation B and works there; the host
 reboots; opening the session offers Resume, which runs `claude --resume A`.
 
+The added backend trace closes the earlier untraced-handoff caveat. `service/core.rs:11383-11388` decides capture
+clearing from the harness capability before the actual hook result. `relaunch_into_terminal` calls `spawn_agent` with
+Resume phase (`11922-11960`) and accepts its result including `hooked` (`11963-11969`). `spawn_agent` computes that flag
+(`14395-14396`), records it best-effort (`14513-14520`), dispatches the launch (`14529`) and can return success with the
+flag false (`14651-14656`). No reporting requirement gates those paths. Publication builds the Restart offer from the
+existing capture (`12484-12490`), while `hooked` only marks the new run's hook state (`12568-12573`); `relaunched_entry`
+copies the selected capture (`3019-3055`). No later withdrawal based on false hooking was found in this chain. The
+independent reviewer agreed this extends the existing finding while preserving its coverage question.
+
 How to verify: in a service test, capture conversation A for a Claude session, turn hooks off for Claude, Restart with
 naming B, and check that the session snapshot still offers A and that a following plain Restart's argv names A.
 
@@ -53,6 +66,10 @@ Fix sketch: decide `clear_capture` after the hook decision, and clear capture (a
 not hooked; or have the spawn report that it is unhooked so the generation transaction withdraws capture.
 
 Possible cover, for triage to judge:
+
+- `TRIAGE_OUTCOMES.md:13117-13141`, `restart-drain-skips-newly-published-conversation.md`, records the acceptance of
+  following an existing capture after tracking silently stops. This is the decision behind the specification below; the
+  added backend evidence does not resolve its applicability to a known unhooked named launch.
 
 - SPEC.md "Durability and resume", conversation-identity paragraph (around SPEC.md:2178-2180): "A named Restart with
   keeps the old capture until that report replaces it; Codex reports at the first prompt, so plain Restart before then
