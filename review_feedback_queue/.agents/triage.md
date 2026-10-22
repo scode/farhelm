@@ -69,10 +69,20 @@ undecided item. This is an exception to the per-item decision question in `revie
 
 ## Presenting items on one page
 
-By default, undecided items are triaged on one page rather than one at a time in conversation. The maintainer chose this
-on 2026-10-16. Prepare every item first ("Preparing each item" in this file, including the immediate removal of covered,
-filtered and already-fixed items), then publish one `scode-snippets` snippet holding every item still undecided, and
-give the maintainer its link. Walk through items one at a time in conversation only when the maintainer asks for it.
+By default, undecided items are triaged on one local interactive page rather than one at a time in conversation. The
+maintainer chose one page on 2026-10-16, and on 2026-10-21 moved it from a published `scode-snippets` snippet to a page
+served from this machine, the way the planning flow asks its up-front questions (`plans/.agents/planning.md`, "Asking
+the up-front questions on a local page"). Prepare every item first ("Preparing each item" in this file, including the
+immediate removal of covered, filtered and already-fixed items), then write one page holding every item still undecided,
+serve it, and give the maintainer its URL. Walk through items one at a time in conversation only when the maintainer
+asks for it. Do not publish the page as a snippet or anywhere else unless the maintainer asks.
+
+Write the page in your scratch directory (`AGENTS.md`, "Agent scratch space") and serve it with any static file server
+bound to `127.0.0.1` on port 14003, the todo picker's port, for example
+`python3 -m http.server 14003 --bind 127.0.0.1 -d <dir>` as a background command. Never bind anything other than
+loopback. If something else holds the port, use the next free port above it and give the maintainer that URL instead,
+without asking; never stop a process you did not start. Put the page's URL in the last message of the turn, after every
+tool call. Stop the server when no undecided item is left on the page.
 
 The page groups items by topic and keeps index order within a group. Each item says, in this order, what goes in a
 conversation under "Asking for a decision" in this file: its number, bucket and feedback filename; a short
@@ -81,10 +91,11 @@ remains unverified; the bucket and why; and the recommendation with its reason. 
 one radio option per plausible outcome. Each option has a short label, its outcome value (`discard`, `fix spec`,
 `fix code`, `fix spec+code`, `other`), and a line on what it would change and roughly how much work it is. The
 recommended option comes first and is marked, a "leave for later" option comes last, and a free-text comment field
-follows. Picks and comments survive a reload (per-browser storage is enough). A button at the bottom copies every
-answered item as one `triage-answers` block of text, giving each item's filename, its pick (outcome and label) and its
-comment; items with neither are left out. The `farhelm-triage-judgement-2026-10-15` and
-`farhelm-triage-judgement-2026-10-16` snippets are working examples of the layout and the copy format.
+follows. Picks and comments survive a reload (per-browser storage is enough). A "Copy code" button beside every question
+copies every answered item on the page as one `triage-answers` block of text, giving each item's filename, its pick
+(outcome and label) and its comment; items with neither are left out. Show the block on the page as well, since the
+clipboard can be refused. The `farhelm-triage-judgement-2026-10-15` and `farhelm-triage-judgement-2026-10-16` snippets,
+published before the page moved local, are working examples of the layout and the copy format.
 
 Act on the pasted block item by item:
 
@@ -96,7 +107,8 @@ Act on the pasted block item by item:
 - "leave for later", or neither a pick nor a comment, leaves the item undecided in the queue. It is never a `discard`.
 
 Ask in conversation only where a comment is unclear. The pasted block is the decision, so do not ask the maintainer to
-confirm picks before recording them.
+confirm picks before recording them. Then update the same page in place: items still undecided stay, follow-up questions
+are added, and decided items leave the page.
 
 ## Asking for a decision
 
