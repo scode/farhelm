@@ -5593,11 +5593,44 @@ impl SessionStore {
         id: &str,
         settlement: Option<Settlement>,
     ) -> anyhow::Result<()> {
+        self.rollback_delete(id, settlement, false).await.map(drop)
+    }
+
+    /// [`delete_session`](Self::delete_session) for a refused create retry,
+    /// only while the row is still the untouched attempt: its reservation
+    /// still `Pending` for this session and the row (if any) at generation
+    /// zero. Returns `false`, having changed nothing, when that check fails.
+    ///
+    /// The retry holds no lifecycle lock, so a Restart can run first; it opens
+    /// generation 1 (`begin_relaunch`) and leaves the reservation pending.
+    /// Checking in the deleting transaction keeps either ordering from
+    /// deleting the restarted session's row.
+    pub async fn delete_untouched_retry(&self, settlement: Settlement) -> anyhow::Result<bool> {
+        let id = settlement.session_id.clone();
+        self.rollback_delete(&id, Some(settlement), true).await
+    }
+
+    /// The one rollback transaction behind both deletes above.
+    async fn rollback_delete(
+        &self,
+        id: &str,
+        settlement: Option<Settlement>,
+        untouched_only: bool,
+    ) -> anyhow::Result<bool> {
         let id = id.to_string();
-        self.conn.call("session delete task panicked", move |conn: &mut Connection| -> anyhow::Result<()> {
+        self.conn.call("session delete task panicked", move |conn: &mut Connection| -> anyhow::Result<bool> {
             let tx = conn
                 .transaction()
                 .context("beginning the launch rollback transaction")?;
+            let key = settlement.as_ref().map_or("", |s| s.intent_key.as_str());
+            if untouched_only && !tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM create_reservations \
+                   WHERE intent_key = ?1 AND session_id = ?2 AND state = 'pending') \
+                 AND NOT EXISTS(SELECT 1 FROM sessions WHERE id = ?2 AND generation != 0)",
+                [key, id.as_str()], |row| row.get::<_, bool>(0),
+            ).context("checking the retried attempt is untouched")? {
+                return Ok(false);
+            }
             // Ordinary rollback may remove a borrower, but cannot discard
             // the last reference to an allocation whose filesystem outcome
             // still needs explicit archival or reconciliation.
@@ -5623,7 +5656,7 @@ impl SessionStore {
                 settle_within(&tx, settlement)?;
             }
             tx.commit().context("committing the launch rollback")?;
-            Ok(())
+            Ok(true)
         })
 .await
     }
@@ -10711,6 +10744,43 @@ mod tests {
             ReservationOutcome::Pending,
             "and its intent key must survive with the session to prevent a duplicate create"
         );
+    }
+
+    /// A refused create retry rolls back without the session's lifecycle
+    /// lock, so a Restart can take the row over first; the rollback must then
+    /// leave the restarted session and its pending reservation alone, while
+    /// an untouched generation-zero attempt is still removed and its refusal
+    /// recorded. Losing the row would leave the restarted agent unlisted.
+    #[farhelm_testtrace::test]
+    async fn a_refused_retry_rollback_spares_a_restarted_session() {
+        let (_dir, store) = fresh_store().await;
+        insert_reserved(&store, "untouched", "k1", "fp").await;
+        insert_reserved(&store, "restarted", "k2", "fp").await;
+        // Restart's own transaction: generation 1, reservation left pending.
+        let restart = store.begin_relaunch("restarted", uncaptured_basis(), false);
+        claimed(restart.await.unwrap());
+        let restarted = store.session("restarted").await.unwrap().unwrap();
+        assert_eq!(restarted.generation, 1);
+
+        for (id, key, removes) in [("restarted", "k2", false), ("untouched", "k1", true)] {
+            let failed = ReservationOutcome::Failed {
+                kind: farhelm_proto::ErrorKind::InvalidRequest,
+                message: "the retry no longer validates".to_string(),
+            };
+            let after = removes.then(|| failed.clone());
+            let removed = store
+                .delete_untouched_retry(settlement(key, id, failed))
+                .await
+                .unwrap();
+            assert_eq!(removed, removes, "{id}");
+            assert_eq!(store.session(id).await.unwrap().is_none(), removes, "{id}");
+            let outcome = reservation_of(&store, key).await.outcome;
+            assert_eq!(
+                outcome,
+                after.unwrap_or(ReservationOutcome::Pending),
+                "{id}"
+            );
+        }
     }
 
     /// The create path's ROLLBACK delete settles what the caller tells it
