@@ -6,16 +6,18 @@
 //! module keeps preview observations, reactive subscriptions and the ordered
 //! host/submission guards. The draft assembles every complete request from the
 //! caller's accepted facts, including the variant and checkout frozen at a press.
-//! Ordinary leaf/scalar, placement/history/browse and finite source/naming edits
-//! own their publication/key rules in draft; search/template, agent/model and
-//! recovery composites retain caller policies during this migration.
+//! Every semantic edit enters a concrete draft operation. The owner alone
+//! publishes changes and settles edit-induced retry retirement; this module
+//! keeps submission lifetime, observations and ordered renderer completion.
 
 mod draft;
+use draft::{ModelTargets, PermissionUndo, RecoveryTargets, SearchInputs, SearchTargets};
 
+#[cfg(test)]
+use draft::ChoiceOrigin;
 use draft::{
-    CheckoutInput, ChoiceOrigin, ChoiceTargets, DraftFields, FolderTargets, LaunchDraft,
-    LaunchDraftState, PlacementTargets, RepositoryTargets, RequestContext, SourceTargets,
-    use_launch_draft,
+    CheckoutInput, ChoiceTargets, DraftFields, FolderTargets, LaunchDraft, LaunchDraftState,
+    PlacementTargets, RepositoryTargets, RequestContext, SourceTargets, use_launch_draft,
 };
 
 use dioxus::prelude::*;
@@ -388,42 +390,6 @@ fn template_host<'a>(hosts: &'a [HostOption], identity: &str) -> Option<&'a Host
         .find(|host| !host.identity_mismatch && host.identity.as_deref() == Some(identity))
 }
 
-/// One edit a template makes, in the order it makes them: either a search
-/// action the launcher already has (so it has exactly the effects of the
-/// same action taken by hand), or a direct setting for a field no search
-/// action covers (the launch kind, the command fields, a choice reset to
-/// its default). The whole template preserves the old retry binding for
-/// submit to compare, even when an individual search action clears it.
-enum TemplateEdit {
-    Search(crate::launch_composer::ComposerSearchResult),
-    Set(Box<dyn FnOnce()>),
-}
-
-/// The launcher's ownership handles for template replay. Accepted choices,
-/// one-time inputs and placement use one owner; authority and UI stay outside.
-/// All handles are Copy so deferred edits keep one owner rather than mirrors.
-#[derive(Clone, Copy)]
-struct TemplateTargets {
-    draft: LaunchDraftState,
-    composer_reset_reason: Signal<Option<String>>,
-    chosen_host: Signal<Option<HostId>>,
-    preview_revision: Signal<u64>,
-    template_error: Signal<Option<String>>,
-    intent_key: Signal<Option<(String, IntentBinding)>>,
-}
-
-/// Undo also restores the external host choice and its selection context.
-/// Preview evidence, cache reads and async generations must be checked afresh;
-/// they never become part of the plain draft's restoration snapshot.
-#[derive(Clone, Copy)]
-struct PermissionUndoTargets {
-    fields: TemplateTargets,
-    clone_host_state: Signal<CloneHostState>,
-    remembered_destination: Signal<Option<CreateTarget>>,
-    model_draft: Signal<String>,
-    model_draft_error: Signal<Option<String>>,
-}
-
 /// One immutable pre-switch draft, kept only if the completed user action
 /// escalates permissions. Raw editor seeds and ownership are part of the
 /// draft: restoring displayed text alone could change peer-provided bytes.
@@ -431,7 +397,7 @@ struct PermissionSwitchBefore {
     harness: Option<LaunchHarness>,
     permission: Option<LaunchPermission>,
     tab: LaunchTab,
-    restore: std::rc::Rc<dyn Fn()>,
+    undo: std::rc::Rc<PermissionUndo>,
 }
 
 /// At most one banner owns recovery within one launcher opening. The opening
@@ -442,52 +408,7 @@ struct PermissionEscalation {
     generation: u64,
     opening_generation: u64,
     message: String,
-    restore: std::rc::Rc<dyn Fn()>,
-}
-
-/// Capture user-editable values, never an old retry key or authority cache.
-/// Accepted choices, editor ownership, destination and naming are one plain
-/// snapshot. Host-selection context and picker drafts retain their immutable
-/// restoration values separately; no preview result or authority is captured.
-#[allow(
-    clippy::clone_on_copy,
-    reason = "the snapshot macro handles Copy and Clone signal values together"
-)]
-fn capture_permission_switch(targets: PermissionUndoTargets) -> PermissionSwitchBefore {
-    let t = targets.fields;
-    let draft_before = t.draft.snapshot();
-    let harness = draft_before.harness();
-    let permission = harness.and_then(|h| h.request_permission(draft_before.permissions()));
-    let tab = draft_before.tab();
-    macro_rules! capture {
-        (($($field:ident),*); ($($extra:ident),*)) => {{
-            $(let $field = t.$field.peek().clone();)*
-            $(let $extra = targets.$extra.peek().clone();)*
-            std::rc::Rc::new(move || {
-                let mut t = t;
-                let mut targets = targets;
-                t.draft.edit(|draft| draft.restore(draft_before.clone()));
-                $(t.$field.set($field.clone());)*
-                $(targets.$extra.set($extra.clone());)*
-                // Ordinary create/replace must reacquire submission authority.
-                // An ambiguous managed-checkout attempt remains outside this
-                // snapshot: matching retries still reconcile its existing key.
-                t.intent_key.set(None);
-            }) as std::rc::Rc<dyn Fn()>
-        }};
-    }
-    let restore = capture!((
-        composer_reset_reason, chosen_host
-    ); (
-        clone_host_state, remembered_destination,
-        model_draft, model_draft_error
-    ));
-    PermissionSwitchBefore {
-        harness,
-        permission,
-        tab,
-        restore,
-    }
+    undo: std::rc::Rc<PermissionUndo>,
 }
 
 /// Rank the shown mode, including an agent's unclassified own-setting mode.
@@ -514,6 +435,47 @@ fn permission_mode_name(permission: Option<LaunchPermission>) -> &'static str {
     }
 }
 
+/// Observe one completed published transaction, preserving conditional signal
+/// reads from opening replay. Recovery is immutable data, never a callback.
+fn note_completed_permission_switch(
+    draft: LaunchDraftState,
+    before: PermissionSwitchBefore,
+    automatic: bool,
+    mut permission_escalation: Signal<Option<PermissionEscalation>>,
+    mut permission_escalation_generation: Signal<u64>,
+    opening_generation: Signal<u64>,
+) {
+    let current = draft.snapshot();
+    let after = current.harness();
+    if before.harness == after {
+        return;
+    }
+    permission_escalation.set(None);
+    if !automatic || before.tab != LaunchTab::Agent || current.tab() != LaunchTab::Agent {
+        return;
+    }
+    let (Some(_), Some(harness)) = (before.harness, after) else {
+        return;
+    };
+    let permission = harness.request_permission(current.permissions());
+    if permission_danger(permission) <= permission_danger(before.permission) {
+        return;
+    }
+    permission_escalation_generation += 1;
+    permission_escalation.set(Some(PermissionEscalation {
+        generation: permission_escalation_generation(),
+        opening_generation: *opening_generation.peek(),
+        message: format!(
+            "Permission changed: {} → {}, because {} does not support {}.",
+            permission_mode_name(before.permission),
+            permission_mode_name(permission),
+            crate::launch_composer::harness_label(harness),
+            permission_mode_name(before.permission)
+        ),
+        undo: before.undo,
+    }));
+}
+
 /// Project the agent tab's first message into templates and supported requests.
 /// Visiting a command or unsupported agent keeps the dormant text in the form,
 /// but it cannot silently become an argument to that unrelated launch.
@@ -537,12 +499,11 @@ fn active_prompt(
 /// A template source contributes its unnumbered base and kind; a resolved
 /// suffix belongs to one launch and must not become the next saved base.
 fn launcher_snapshot(
-    t: TemplateTargets,
+    draft: &LaunchDraft,
     hosts: &[HostOption],
     selected: Option<HostId>,
 ) -> farhelm_proto::launcher::LauncherState {
     use farhelm_proto::launcher::{LauncherKind, LauncherState, TemplateDestination};
-    let draft = t.draft.snapshot();
     let kind_now = match draft.tab() {
         LaunchTab::Agent => LauncherKind::Agent,
         LaunchTab::Command => LauncherKind::Command,
@@ -625,7 +586,8 @@ fn validated_template_batch(
     hosts: &[HostOption],
     catalog: &[crate::api::LaunchCatalogModel],
     host_fixed: bool,
-    t: TemplateTargets,
+    draft: &LaunchDraft,
+    chosen_host: Option<HostId>,
 ) -> Result<
     (
         farhelm_proto::launcher::LauncherState,
@@ -634,10 +596,10 @@ fn validated_template_batch(
     String,
 > {
     use farhelm_proto::launcher::TemplateDestination;
-    let mut state = launcher_snapshot(t, hosts, *t.chosen_host.peek());
+    let mut state = launcher_snapshot(draft, hosts, chosen_host);
     // A partial template may fill an agent later in this same batch. Preserve
     // its dormant prompt while checking the projected sequence.
-    state.prompt = t.draft.snapshot().prompt();
+    state.prompt = draft.prompt();
     let known_hosts: Vec<String> = hosts
         .iter()
         .filter(|host| !host.identity_mismatch)
@@ -679,456 +641,12 @@ fn validated_template_batch(
     Ok((state, repositories))
 }
 
-/// Turn an accepted search result into the edits it makes: itself, unless it
-/// is a template (`tl:name`), which becomes the edits that template contains.
-///
-/// SPEC.md: "Applying a template makes the edits it contains, in the same
-/// way and with the same effects as making them by hand, in a fixed order",
-/// all or nothing. So the template is first applied to a snapshot of the
-/// launcher with `validated_template_batch`, which uses the same
-/// `farhelm_proto::launcher::apply_template` rule as the helm's `--template`.
-/// A refusal sets `template_error` and makes no edit at all. Only then is it replayed as
-/// the launcher's own actions, so remembered defaults, recent setups and a
-/// pending checkout preview react exactly as they would to the same clicks.
-/// The retained retry binding survives the whole batch: submit already mints
-/// a new key when its final request differs, while unchanged retries must recover.
-/// `host_fixed` is Replace with, which keeps the source's host.
-fn template_edits(
-    result: crate::launch_composer::ComposerSearchResult,
-    templates: &[farhelm_proto::launcher::LaunchTemplate],
-    hosts: &[HostOption],
-    catalog: &[crate::api::LaunchCatalogModel],
-    host_fixed: bool,
-    t: TemplateTargets,
-) -> Vec<TemplateEdit> {
-    use crate::launch_composer::{ComposerPermission, ComposerSearchResult};
-    use farhelm_proto::launcher::{LauncherKind, TemplateDestination};
-    let mut template_error = t.template_error;
-    let ComposerSearchResult::Template(name) = result else {
-        template_error.set(None);
-        return vec![TemplateEdit::Search(result)];
-    };
-    let Some(template) = templates
-        .iter()
-        .find(|template| template.name == name)
-        .cloned()
-    else {
-        template_error.set(Some(format!(
-            "no template is named {name:?}; it may have been deleted"
-        )));
-        return Vec::new();
-    };
-    let (applied, repositories) = match validated_template_batch(
-        std::slice::from_ref(&template),
-        hosts,
-        catalog,
-        host_fixed,
-        t,
-    ) {
-        Ok(result) => result,
-        Err(refusal) => {
-            template_error.set(Some(refusal));
-            return Vec::new();
-        }
-    };
-    let repository = repositories.into_iter().next().flatten();
-    template_error.set(None);
-    let fields = template.fields;
-    let kind = applied.kind.unwrap_or(LauncherKind::Agent);
-    let mut edits = Vec::new();
-    let mut t = t;
-    let retry = t.intent_key.peek().clone();
-    // Shared application may clear an incompatible prompt when changing the
-    // agent. Replay its result too; an absent prompt field otherwise leaves
-    // the current first message intact, including a deliberate empty edit.
-    let applied_prompt = applied.prompt.clone();
-    // 1. The launch kind.
-    if let Some(kind) = fields.kind {
-        edits.push(TemplateEdit::Set(Box::new(move || {
-            t.draft.edit(|draft| {
-                draft.choose_tab(match kind {
-                    LauncherKind::Agent => LaunchTab::Agent,
-                    LauncherKind::Command => LaunchTab::Command,
-                });
-            });
-        })));
-    }
-    // 2. The agent type: the agent tab's, through the same action as a
-    // click, or the command tab's declared type.
-    if let Some(agent) = fields.agent {
-        match kind {
-            LauncherKind::Agent => {
-                edits.push(TemplateEdit::Search(ComposerSearchResult::Harness(agent)))
-            }
-            LauncherKind::Command => edits.push(TemplateEdit::Set(Box::new(move || {
-                t.draft
-                    .edit(|draft| draft.choose_command_agent(Some(agent)));
-            }))),
-        }
-    }
-    // 3. The agent launch's choices.
-    match fields.model {
-        Some(Some(id)) => edits.push(TemplateEdit::Search(ComposerSearchResult::Model {
-            id,
-            harness: applied
-                .harness
-                .expect("a model applies only with an agent type"),
-        })),
-        // As choosing "harness default" by hand: no model, no owner for one,
-        // and no notice about a choice that was cleared.
-        Some(None) => edits.push(TemplateEdit::Set(Box::new(move || {
-            t.draft.edit(LaunchDraft::choose_default_model);
-            t.composer_reset_reason.set(None);
-        }))),
-        None => {}
-    }
-    match fields.effort {
-        Some(Some(effort)) => edits.push(TemplateEdit::Search(ComposerSearchResult::Effort(Some(
-            effort,
-        )))),
-        Some(None) => edits.push(TemplateEdit::Set(Box::new(move || {
-            t.draft.edit(|draft| {
-                draft.choose_effort(None);
-            });
-        }))),
-        None => {}
-    }
-    let template_flags = fields
-        .permission_flags
-        .as_ref()
-        .map(shell_words::join)
-        .unwrap_or_default();
-    match fields.permissions {
-        Some(Some(LaunchPermission::Yolo)) => edits.push(TemplateEdit::Search(
-            ComposerSearchResult::Permissions(ComposerPermission::Yolo),
-        )),
-        Some(None) => edits.push(TemplateEdit::Set(Box::new(move || {
-            t.draft
-                .edit(|draft| draft.apply_template_permissions(None, String::new()));
-        }))),
-        Some(Some(permission)) => edits.push(TemplateEdit::Set(Box::new(move || {
-            t.draft.edit(|draft| {
-                draft.apply_template_permissions(Some(permission), template_flags.clone())
-            });
-        }))),
-        None => {}
-    }
-    if let Some(prefix) = fields.wrapper_prefix {
-        edits.push(TemplateEdit::Set(Box::new(move || {
-            t.draft.edit(|draft| {
-                draft.edit_wrapper(prefix.as_ref().map(shell_words::join).unwrap_or_default())
-            });
-        })));
-    }
-    // 4. The command launch's fields, typed text the user owns from here.
-    if let Some(command) = fields.command {
-        edits.push(TemplateEdit::Set(Box::new(move || {
-            t.draft
-                .edit(|draft| draft.apply_template_invocation(command));
-        })));
-    }
-    if let Some(yolo) = fields.yolo {
-        edits.push(TemplateEdit::Set(Box::new(move || {
-            t.draft.edit(|draft| draft.choose_command_yolo(yolo));
-        })));
-    }
-    if let Some(resume) = fields.resume_command {
-        edits.push(TemplateEdit::Set(Box::new(move || {
-            t.draft.edit(|draft| draft.apply_template_resume(resume));
-        })));
-    }
-    // 5. Destination uses its ordinary actions. A template name additionally
-    // retains its source policy; routing it through the hand-edit action would
-    // turn a Base into an exact name before the preview can number it.
-    if let Some(identity) = &fields.host
-        && let Some(host) = template_host(hosts, identity)
-    {
-        edits.push(TemplateEdit::Search(ComposerSearchResult::Host(
-            crate::launch_composer::ComposerHost {
-                id: host.id,
-                name: host.name.clone(),
-                label: host.label(),
-                local: host.local,
-            },
-        )));
-    }
-    match (fields.destination, repository) {
-        (Some(TemplateDestination::Folder(folder)), _) => {
-            edits.push(TemplateEdit::Search(ComposerSearchResult::UsePath(folder)));
-        }
-        (Some(TemplateDestination::Github(_)), Some(repo)) => {
-            edits.push(TemplateEdit::Search(ComposerSearchResult::Github(repo)));
-        }
-        _ => {}
-    }
-    if let Some(name) = fields.name {
-        let kind = applied
-            .name_kind
-            .expect("an applied name carries its template policy");
-        edits.push(TemplateEdit::Set(Box::new(move || {
-            t.draft.edit(|draft| draft.apply_template_name(name, kind));
-            // A name-only template can change Fixed to Base without changing
-            // the text. Re-preview that policy change instead of keeping an
-            // already-failed offer whose authority has the same title bytes.
-            t.preview_revision.with_mut(|revision| {
-                *revision = revision.checked_add(1).expect("preview revision exhausted")
-            });
-        })));
-    }
-    edits.push(TemplateEdit::Set(Box::new(move || {
-        t.draft
-            .edit(|draft| draft.apply_template_prompt(applied_prompt.clone()));
-        // Search edits may clear this along the way. Compare the completed
-        // request at submit, not an intermediate template field transition.
-        t.intent_key.set(retry);
-    })));
-    edits
-}
-
-/// Apply a clicked or keyboard-selected search result without launching.
-///
-/// Search is only a picker. Keeping its result application in one helper
-/// makes Enter and pointer activation replace the same fields and apply the
-/// same retry policy. Equal ordinary choices still complete acceptance and
-/// ownership changes. Name and host actions therefore have the same
-/// no-launch contract as other results. A returned path means this was the
-/// explicit browse action; the caller starts the shared guarded request after
-/// closing the search surface.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "search acceptance combines plain draft edits with independent host, history and UI ownership"
-)]
-fn apply_composer_search_result(
-    result: crate::launch_composer::ComposerSearchResult,
-    mut chosen_host: Signal<Option<HostId>>,
-    hosts: &[HostOption],
-    mut clone_host_state: Signal<CloneHostState>,
-    history_target: Option<CreateTarget>,
-    mut live_destination: Signal<Option<CreateTarget>>,
-    mut remembered_destination: Signal<Option<CreateTarget>>,
-    history_activation_attempts: Signal<u64>,
-    mut preview_revision: Signal<u64>,
-    draft: LaunchDraftState,
-    preferences: SharedPreferences,
-    mut composer_reset_reason: Signal<Option<String>>,
-    mut action_error: Signal<Option<String>>,
-    // `None` while the catalog read is pending or failed; see
-    // `launch_composer::selection_fits_catalog`.
-    catalog_answer: Option<&[crate::api::LaunchCatalogModel]>,
-    mut intent_key: Signal<Option<(String, IntentBinding)>>,
-) -> Option<String> {
-    let catalog = catalog_answer.unwrap_or_default();
-    use crate::launch_composer::ComposerSearchResult;
-    // Capture before history adoption or path override can clear the old claim.
-    let correcting_invalid = !remembered_destination_matches(
-        remembered_destination.peek().as_ref(),
-        live_destination.peek().as_ref(),
-    );
-    let changed;
-    if matches!(
-        &result,
-        ComposerSearchResult::Folder(_) | ComposerSearchResult::Recent(_)
-    ) && !admit_history_destination(
-        history_target,
-        live_destination,
-        remembered_destination,
-        history_activation_attempts,
-    ) {
-        // A retained result can outlive its installation. Keep the existing
-        // admission fence, but explain the rejected activation where other
-        // search/template failures already appear.
-        action_error.set(Some(
-            "that result belongs to an earlier host; choose a current result".into(),
-        ));
-        return None;
-    }
-    if matches!(
-        &result,
-        ComposerSearchResult::UsePath(_) | ComposerSearchResult::BrowsePath(_)
-    ) {
-        // An explicit path action replaces the remembered destination, even
-        // when the person deliberately chooses the same spelling again.
-        remembered_destination.set(None);
-    }
-    match result {
-        // A template is expanded into the edits it contains before it gets
-        // here (`template_edits`), and none of those edits is a template.
-        ComposerSearchResult::Template(_) => {
-            unreachable!("template_edits expands every template result")
-        }
-        ComposerSearchResult::Name(name) => {
-            // A cloned title may have an escaped display seed. This action
-            // is the user's new text, so submit and checkout preview must
-            // read it rather than replay the clone's raw title.
-            changed = draft.edit(|draft| draft.edit_title(name));
-        }
-        ComposerSearchResult::Host(host) => {
-            changed = true;
-            // A host action has the same authority effects as the selector:
-            // it takes over clone defaults and retires the old destination
-            // before a queued history callback or submit can observe it.
-            if hosts.iter().any(|offered| offered.id == host.id) {
-                chosen_host.set(Some(host.id));
-                live_destination.set(self::history_target(hosts, Some(host.id)));
-                remembered_destination.set(None);
-                clone_host_state.set(CloneHostState::UserTookOver);
-            }
-        }
-        ComposerSearchResult::Github(repo) => {
-            changed = true;
-            remembered_destination.set(None);
-            draft.edit(|draft| draft.select_repository(repo));
-            preview_revision.with_mut(|value| {
-                *value = value.checked_add(1).expect("preview revision exhausted")
-            });
-        }
-        crate::launch_composer::ComposerSearchResult::UsePath(folder)
-        | crate::launch_composer::ComposerSearchResult::Folder(folder) => {
-            changed =
-                draft.edit(|draft| draft.choose_existing_folder(&folder)) || correcting_invalid;
-        }
-        crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => {
-            // Query-path actions are treated like other relayed path choices:
-            // the escaped field remains reviewable, while the browse request
-            // and an untouched later create retain the exact requested bytes.
-            if draft.edit(|draft| draft.choose_existing_folder(&folder)) || correcting_invalid {
-                intent_key.set(None);
-            }
-            return Some(folder);
-        }
-        crate::launch_composer::ComposerSearchResult::Harness(harness) => {
-            let tab_changed = draft.snapshot().tab() != LaunchTab::Agent;
-            draft.edit(|draft| {
-                draft.choose_tab(LaunchTab::Agent);
-            });
-            observe_search_agent_fields(draft.fields());
-            let outcome = draft.edit(|draft| {
-                draft.choose_harness(
-                    harness,
-                    catalog_answer,
-                    remembered_wrapper(&preferences.0.peek(), Some(harness)),
-                    ChoiceOrigin::Search,
-                )
-            });
-            changed = outcome.selection_changed || tab_changed;
-            composer_reset_reason.set(outcome.reset_reason);
-        }
-        crate::launch_composer::ComposerSearchResult::Model { id, harness } => {
-            let tab_changed = draft.snapshot().tab() != LaunchTab::Agent;
-            // A model carries its harness ownership, so selecting it is also
-            // an explicit return to structured mode rather than leaving a
-            // structured draft hidden behind command controls.
-            draft.edit(|draft| {
-                draft.choose_tab(LaunchTab::Agent);
-            });
-            observe_search_agent_fields(draft.fields());
-            let outcome = draft.edit(|draft| {
-                draft.choose_catalog_model(
-                    id,
-                    harness,
-                    catalog_answer,
-                    remembered_wrapper(&preferences.0.peek(), Some(harness)),
-                    ChoiceOrigin::Search,
-                )
-            });
-            changed = outcome.selection_changed || tab_changed;
-            composer_reset_reason.set(outcome.reset_reason);
-        }
-        crate::launch_composer::ComposerSearchResult::Effort(effort) => {
-            // An unchanged choice is a retry gesture, just like pressing its
-            // button again. Preserve the key after an ambiguous reply so that
-            // accepting effort:default cannot create a second session. A real
-            // edit reaches the shared key reset below; harness and model stay
-            // put, so no reconciliation runs.
-            if !draft.edit(|draft| draft.choose_effort(effort)) {
-                return None;
-            }
-            changed = true;
-        }
-        crate::launch_composer::ComposerSearchResult::Permissions(permission) => {
-            let focus_custom = permission == crate::launch_composer::ComposerPermission::Custom;
-            let permission = match permission {
-                crate::launch_composer::ComposerPermission::Custom => {
-                    Some(LaunchPermission::Custom)
-                }
-                crate::launch_composer::ComposerPermission::Guarded => {
-                    Some(LaunchPermission::Guarded)
-                }
-                crate::launch_composer::ComposerPermission::OwnSetting => None,
-                crate::launch_composer::ComposerPermission::Yolo => Some(LaunchPermission::Yolo),
-                crate::launch_composer::ComposerPermission::Approve => {
-                    Some(LaunchPermission::Approve)
-                }
-                crate::launch_composer::ComposerPermission::SmartApprove => {
-                    Some(LaunchPermission::SmartApprove)
-                }
-                crate::launch_composer::ComposerPermission::Chat => Some(LaunchPermission::Chat),
-            };
-            changed = draft.edit(|draft| draft.choose_permissions(permission));
-            if focus_custom {
-                document::eval(
-                    "requestAnimationFrame(() => document.querySelector('.custom-permission-flags')?.focus())",
-                );
-            }
-        }
-        crate::launch_composer::ComposerSearchResult::Recent(entry) => {
-            let tab_changed = draft.snapshot().tab() != LaunchTab::Agent;
-            draft.edit(|draft| {
-                draft.choose_tab(LaunchTab::Agent);
-            });
-            composer_reset_reason.set(None);
-            let mut selection = crate::launch_composer::select_recent(&entry);
-            selection.permissions = crate::launch_composer::normalized_permissions(
-                selection.harness,
-                selection.permissions,
-            );
-            let owner = crate::launch_composer::custom_model_owner(&selection, catalog);
-            let selection_changed = draft.edit(|draft| draft.restore_launch(&selection, owner));
-            if let Some(repo) = entry.github_repo {
-                changed = true;
-                remembered_destination.set(None);
-                draft.edit(|draft| draft.select_repository(repo));
-                preview_revision.with_mut(|value| {
-                    *value = value.checked_add(1).expect("preview revision exhausted")
-                });
-            } else {
-                changed = draft.edit(|draft| draft.choose_existing_folder(entry.cwd.raw()))
-                    || selection_changed
-                    || tab_changed
-                    || correcting_invalid;
-            }
-        }
-    }
-    if changed {
-        intent_key.set(None);
-    }
-    None
-}
-
-/// Search replay can run synchronously inside the initial-template effect.
-/// Keep precisely its former structured subscriptions even though mutation
-/// now reads the live plain draft. Subscribing to the aggregate here would
-/// make unrelated ownership/editor changes replay pending opening work.
-fn observe_search_agent_fields(fields: DraftFields) {
-    let _ = (
-        (fields.structured_permissions)(),
-        (fields.structured_permission_flags)(),
-        (fields.structured_wrapper)(),
-        (fields.structured_harness)(),
-        (fields.structured_model)(),
-        (fields.structured_effort)(),
-        (fields.structured_permissions_is_explicit)(),
-    );
-}
-
-/// Refuse a draft transition once the shared operation token is held.
+/// Keep UI-only interactions behind the live page token where they were gated.
 ///
 /// HTML's disabled state is rendered asynchronously, while a create claims
-/// the token synchronously before its key-mint await. Every handler that can
-/// alter a composite intent still consults this live predicate during the
-/// staged migration. Ordinary leaf/scalar handlers instead call a concrete
-/// owner operation whose private wrapper checks the same live token. A queued
-/// callback must not clear the key or change the accepted resolving request.
+/// the token synchronously before its key-mint await. Picker input, keyboard
+/// routing and observation requests retain their UI checks here. Semantic edits
+/// independently enter the owner's private gate and fixed retry policy.
 fn draft_transition_allowed(ops: OpLock) -> bool {
     !ops.busy_now()
 }
@@ -2742,9 +2260,9 @@ pub(super) fn CreateSessionForm(
     } = draft.fields();
     // Compatibility clears are intentional, but defaults must never make an
     // earlier explicit choice vanish without telling the person what changed.
-    let mut composer_reset_reason = use_signal(|| None::<String>);
+    let composer_reset_reason = use_signal(|| None::<String>);
     let mut permission_escalation = use_signal(|| None::<PermissionEscalation>);
-    let mut permission_escalation_generation = use_signal(|| 0_u64);
+    let permission_escalation_generation = use_signal(|| 0_u64);
     use_effect(move || {
         let opening = opening_generation();
         if permission_escalation
@@ -3629,54 +3147,37 @@ pub(super) fn CreateSessionForm(
             )
         }
     });
-    let template_targets = TemplateTargets {
-        draft,
+    let recovery_targets = RecoveryTargets {
         composer_reset_reason,
-        chosen_host,
-        preview_revision,
-        template_error,
-        intent_key,
-    };
-    let undo_targets = PermissionUndoTargets {
-        fields: template_targets,
         clone_host_state,
         remembered_destination,
         model_draft,
         model_draft_error,
     };
+    let model_targets = ModelTargets {
+        reset_reason: composer_reset_reason,
+        draft: model_draft,
+        error: model_draft_error,
+        open: model_open,
+        active: model_active,
+    };
+    let search_targets = SearchTargets {
+        placement: placement_targets,
+        recovery: recovery_targets,
+        template_error,
+    };
     // Observe completed user transactions, not inner template edits: an
     // explicit template permission can replace an intermediate fallback.
     let note_permission_switch =
         use_callback(move |(before, automatic): (PermissionSwitchBefore, bool)| {
-            let current = draft.snapshot();
-            let after = current.harness();
-            if before.harness == after {
-                return;
-            }
-            permission_escalation.set(None);
-            if !automatic || before.tab != LaunchTab::Agent || current.tab() != LaunchTab::Agent {
-                return;
-            }
-            let (Some(_), Some(harness)) = (before.harness, after) else {
-                return;
-            };
-            let permission = harness.request_permission(current.permissions());
-            if permission_danger(permission) <= permission_danger(before.permission) {
-                return;
-            }
-            permission_escalation_generation += 1;
-            permission_escalation.set(Some(PermissionEscalation {
-                generation: permission_escalation_generation(),
-                opening_generation: *opening_generation.peek(),
-                message: format!(
-                    "Permission changed: {} → {}, because {} does not support {}.",
-                    permission_mode_name(before.permission),
-                    permission_mode_name(permission),
-                    crate::launch_composer::harness_label(harness),
-                    permission_mode_name(before.permission)
-                ),
-                restore: before.restore,
-            }));
+            note_completed_permission_switch(
+                draft,
+                before,
+                automatic,
+                permission_escalation,
+                permission_escalation_generation,
+                opening_generation,
+            );
         });
     // Apply every catalog-row choice through one path so pointer and keyboard
     // activation cannot drift on reconciliation, error cleanup, or intent-key
@@ -3695,44 +3196,28 @@ pub(super) fn CreateSessionForm(
                 model_active.set(None);
                 return;
             }
-            if !draft_transition_allowed(ops) {
-                return;
-            }
-            promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
-            let changed = match option {
+            match option {
                 crate::launch_composer::ModelOption::HarnessDefault => {
-                    partial_template_hint.set(false);
-                    let changed = draft.edit(LaunchDraft::choose_default_model);
-                    composer_reset_reason.set(None);
-                    model_draft_error.set(None);
-                    model_draft.set(String::new());
-                    model_open.set(false);
-                    changed
+                    draft.choose_default_model(choice_targets, model_targets);
                 }
                 crate::launch_composer::ModelOption::Model { id, harness } => {
-                    partial_template_hint.set(false);
-                    let switch_before = capture_permission_switch(undo_targets);
-                    let outcome = draft.edit(|draft| {
-                        draft.choose_catalog_model(
-                            id,
-                            harness,
-                            catalog_answer.as_deref(),
-                            remembered_wrapper(&preferences.0.peek(), Some(harness)),
-                            ChoiceOrigin::Control,
-                        )
-                    });
-                    composer_reset_reason.set(outcome.reset_reason);
-                    note_permission_switch.call((switch_before, true));
+                    let Some(before) = draft.choose_catalog_model(
+                        id,
+                        harness,
+                        catalog_answer.as_deref(),
+                        preferences,
+                        choice_targets,
+                        recovery_targets,
+                    ) else {
+                        return;
+                    };
+                    note_permission_switch.call((before, true));
                     model_draft_error.set(None);
                     model_draft.set(String::new());
                     model_open.set(false);
-                    outcome.selection_changed
+                    model_active.set(None);
                 }
                 crate::launch_composer::ModelOption::ShowAll => unreachable!("handled above"),
-            };
-            model_active.set(None);
-            if changed {
-                intent_key.set(None);
             }
         }
     });
@@ -4026,71 +3511,26 @@ pub(super) fn CreateSessionForm(
             Option<farhelm_proto::launcher::LaunchTemplate>,
             bool,
         )| {
-            if !draft_transition_allowed(ops) {
-                return false;
-            }
-            let switch_before = capture_permission_switch(undo_targets);
-            // Ordinary search follows its current list. Quick launch instead
-            // supplies the exact definition its fresh-read opening accepted.
-            let available_templates = captured
-                .as_ref()
-                .map(std::slice::from_ref)
-                .unwrap_or(&templates_now);
-            if captured.is_none() || from_shortcut {
-                partial_template_hint.set(false);
-            }
-            let automatic_permission = match &result {
-                crate::launch_composer::ComposerSearchResult::Template(name) => available_templates
-                    .iter()
-                    .find(|template| &template.name == name)
-                    .is_some_and(|template| template.fields.permissions.is_none()),
-                crate::launch_composer::ComposerSearchResult::Recent(_)
-                | crate::launch_composer::ComposerSearchResult::Permissions(_) => false,
-                _ => true,
-            };
-            invalidate_directory_browse(
-                browse_generation,
-                browse_request,
-                browse_result,
-                browse_error,
-            );
-            promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
-            let mut browse_path = None;
-            let is_template = matches!(
-                &result,
-                crate::launch_composer::ComposerSearchResult::Template(_)
-            );
-            for edit in template_edits(
+            let Some(accepted) = draft.accept_search_result(
                 result,
-                available_templates,
-                &action_hosts,
-                action_catalog.as_deref().unwrap_or_default(),
-                is_replace_with,
-                template_targets,
-            ) {
-                match edit {
-                    TemplateEdit::Set(set) => set(),
-                    TemplateEdit::Search(result) => {
-                        browse_path = apply_composer_search_result(
-                            result,
-                            chosen_host,
-                            &action_hosts,
-                            clone_host_state,
-                            action_history_target.clone(),
-                            live_destination,
-                            remembered_destination,
-                            history_activation_attempts,
-                            preview_revision,
-                            draft,
-                            preferences,
-                            composer_reset_reason,
-                            template_error,
-                            action_catalog.as_deref(),
-                            intent_key,
-                        );
-                    }
-                }
-            }
+                captured.as_ref(),
+                from_shortcut,
+                SearchInputs {
+                    templates: &templates_now,
+                    hosts: &action_hosts,
+                    catalog: action_catalog.as_deref(),
+                    host_fixed: is_replace_with,
+                    history_target: action_history_target.clone(),
+                    preferences,
+                },
+                search_targets,
+            ) else {
+                return false;
+            };
+            let switch_before = accepted.before;
+            let automatic_permission = accepted.automatic_permission;
+            let browse_path = accepted.browse_path;
+            let is_template = accepted.is_template;
             // Reconcile only the completed template, after its prompt and full
             // retry pair are restored. Inner choices may temporarily differ.
             // All reads stay untracked even when this runs inside opening replay.
@@ -4268,7 +3708,8 @@ pub(super) fn CreateSessionForm(
                     &shortcut_hosts,
                     shortcut_catalog.as_deref().unwrap_or_default(),
                     is_replace_with,
-                    template_targets,
+                    &draft.snapshot(),
+                    *chosen_host.peek(),
                 ) {
                     Err(refusal) => template_error.set(Some(refusal)),
                     Ok(_) => {
@@ -4299,32 +3740,16 @@ pub(super) fn CreateSessionForm(
     let choose_harness = EventHandler::<LaunchHarness>::new({
         let catalog = catalog_for_harness.clone();
         move |harness| {
-            if !draft_transition_allowed(ops) {
+            let Some(before) = draft.choose_harness(
+                harness,
+                catalog.as_deref(),
+                preferences,
+                choice_targets,
+                recovery_targets,
+            ) else {
                 return;
-            }
-            partial_template_hint.set(false);
-            let switch_before = capture_permission_switch(undo_targets);
-            promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
-            // Enter also applies the already-selected harness. Keep an
-            // ambiguous launch's retry key unless reconciliation changes
-            // the effective request; real edits still retire its YOLO question.
-            let outcome = draft.edit(|draft| {
-                draft.choose_harness(
-                    harness,
-                    catalog.as_deref(),
-                    remembered_wrapper(&preferences.0.peek(), Some(harness)),
-                    ChoiceOrigin::Control,
-                )
-            });
-            let changed = outcome.selection_changed || draft.snapshot().tab() != LaunchTab::Agent;
-            composer_reset_reason.set(outcome.reset_reason);
-            draft.edit(|draft| {
-                draft.choose_tab(LaunchTab::Agent);
-            });
-            note_permission_switch.call((switch_before, true));
-            if changed {
-                intent_key.set(None);
-            }
+            };
+            note_permission_switch.call((before, true));
             focus_composer_surface(false);
         }
     });
@@ -5513,20 +4938,8 @@ pub(super) fn CreateSessionForm(
                         "data-tooltip": "undo: restore the draft from before this agent switch",
                         disabled: busy,
                         onclick: move |_| {
-                            // Expired or replaced controls have no remaining
-                            // authority, even if their click was already queued.
-                            let current = permission_escalation.peek().clone();
-                            if let Some(current) = current
-                                && current.generation == notice.generation
-                                && current.opening_generation == *opening_generation.peek()
-                                && draft_transition_allowed(ops)
-                            {
-                                (current.restore)();
-                                invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
-                                // Undo restores semantics, never an old offer. Invalidate
-                                // before a queued submit can use the retained Ready slot.
-                                preview_revision += 1;
-                                permission_escalation.set(None);
+                            if draft.undo_permission_switch(notice.generation, recovery_targets,
+                                permission_escalation, opening_generation, placement_targets) {
                                 focus_composer_surface(false);
                             }
                         },
@@ -5608,34 +5021,8 @@ pub(super) fn CreateSessionForm(
                         "data-tooltip": "reset choices: clear the agent, model and effort; remember permissions and the next agent's wrapper prefix",
                         disabled: busy,
                         onclick: move |_| {
-                            if !draft_transition_allowed(ops) {
-                                return;
-                            }
-                            // Reset only the declarative launch choices. The
-                            // host and folder are launch context, often
-                            // supplied by the selected session, and clearing
-                            // them would turn a quick correction into a new
-                            // destination decision.
-                            partial_template_hint.set(false);
-                            // Reset returns the segment to the REMEMBERED
-                            // value, not to "default" — it does not clear
-                            // the memory itself, only re-applies it (SPEC.md's
-                            // launch-composer carve-out). A fresh `peek` here
-                            // rather than the value this dialog seeded from,
-                            // since "reset" means "as if freshly opened now".
-                            draft.edit(|draft| draft.reset_choices(initial_structured_permissions(&preferences.0.peek())));
-                            // Back to a passive seed, exactly like a fresh
-                            // open: reset does not turn the remembered value
-                            // into a deliberate choice, so it must not start
-                            // filtering recents either (see
-                            // `structured_permissions_is_explicit`).
-                            composer_reset_reason.set(None);
-                            promote_fetched_history_snapshot(
-                                offered_history, create_target, fetched_history,
-                            );
-                            composer_search.set(String::new());
-                            composer_search_open.set(false);
-                            intent_key.set(None);
+                            draft.reset_choices(preferences, choice_targets, composer_reset_reason,
+                                composer_search, composer_search_open);
                         },
                         "reset choices"
                     }
@@ -5655,7 +5042,7 @@ pub(super) fn CreateSessionForm(
                                 error.set(Some(reason));
                                 return;
                             }
-                            let state = launcher_snapshot(template_targets, &hosts_for_template_save, selected);
+                            let state = launcher_snapshot(&draft.snapshot(), &hosts_for_template_save, selected);
                             let placement = draft.snapshot();
                             template_panel.set(Some((super::save_template::Candidate::from_state(&state,
                                 super::save_template::ExplicitChoices {
@@ -6727,9 +6114,9 @@ pub(super) fn CreateSessionForm(
                                     }
                                 }
                             }
-                            // Ordinary editors/choices delegate live admission and retry
-                            // retirement to their concrete owner operations. Model/harness
-                            // composites still retain their staged form-side policy below.
+                            // Semantic edits delegate live admission and retry retirement
+                            // to concrete owner operations. The form retains picker UI
+                            // and focus completion after those operations finish.
                             LaunchControls {
                                 prompt: prompt().unwrap_or_default(),
                                 on_prompt: Some(EventHandler::new(move |value: String| {
@@ -6810,25 +6197,11 @@ pub(super) fn CreateSessionForm(
                                                 apply_model_option.call(option);
                                             }
                                             crate::launch_composer::ModelEnterTarget::Custom { id: model, harness } => {
-                                                promote_fetched_history_snapshot(
-                                                    offered_history, create_target, fetched_history,
-                                                );
-                                                // Permission text can still be an unfinished draft.
-                                                // Only model/effort compatibility may clear effort;
-                                                // an unavailable catalog cannot establish a conflict.
-                                                let outcome = draft.edit(|draft| draft.choose_custom_model(model, harness, catalog_answer.as_deref()));
-                                                composer_reset_reason.set(outcome.reset_reason);
-                                                model_draft_error.set(None);
-                                                model_draft.set(String::new());
-                                                model_open.set(false);
-                                                model_active.set(None);
-                                                if outcome.selection_changed { intent_key.set(None); }
+                                                draft.choose_custom_model(model, harness, catalog_answer.as_deref(),
+                                                    choice_targets, model_targets);
                                             }
                                             crate::launch_composer::ModelEnterTarget::NeedsHarness(_) => {
-                                                model_draft_error.set(Some(
-                                                    "choose a harness before a custom model id".to_string(),
-                                                ));
-                                                intent_key.set(None);
+                                                draft.report_model_harness_required(model_draft_error);
                                             }
                                             // Typing never switches a selected harness: the
                                             // draft stays for the person to correct, and the
@@ -7058,41 +6431,74 @@ mod tests {
     /// not a parallel draft, retry comparison or confirmation implementation.
     #[derive(Clone, Copy)]
     struct TemplateQuestionFixture {
-        targets: super::TemplateTargets,
+        owner: super::LaunchDraftState,
+        targets: super::SearchTargets,
+        preferences: super::SharedPreferences,
+        key: dioxus::prelude::Signal<Option<(String, super::IntentBinding)>>,
         slot: crate::ops::ConfirmSlot<super::LauncherYoloQuestion>,
     }
-
     std::thread_local! {
         static TEMPLATE_QUESTION_FIXTURE: std::cell::Cell<Option<TemplateQuestionFixture>> = const { std::cell::Cell::new(None) };
     }
 
-    /// Mount only the production ownership handles needed by template replay.
-    /// Host/network/preview admission remain explicit facts supplied by each test.
-    /// Template targets and ordinary owner edits share the same retry slot.
+    /// Mount the same owner/key/host and actual replay dependencies. Each tab
+    /// case mounts fresh; no arbitrary snapshot installation establishes it.
     fn template_question_fixture() -> dioxus::prelude::Element {
         use super::*;
         let ops = crate::ops::use_op_lock();
-        let intent_key = use_signal(|| None);
+        let key = use_signal(|| None);
         let chosen_host = use_signal(|| Some(1));
-        let targets = TemplateTargets {
-            draft: use_launch_draft(None, None, ops, intent_key, chosen_host),
-            composer_reset_reason: use_signal(|| None),
-            chosen_host,
-            preview_revision: use_signal(|| 0),
-            template_error: use_signal(|| None),
-            intent_key,
+        let owner = use_launch_draft(None, None, ops, key, chosen_host);
+        let choices = ChoiceTargets {
+            partial_template_hint: use_signal(|| false),
+            offered_history: use_signal(|| None),
+            create_target: use_signal(|| None),
+            fetched_history: use_signal(|| None),
         };
+        let clone_host_state = use_signal(|| CloneHostState::Unconfirmable);
+        let remembered_destination = use_signal(|| None);
+        let recovery = RecoveryTargets {
+            composer_reset_reason: use_signal(|| None),
+            clone_host_state,
+            remembered_destination,
+            model_draft: use_signal(String::new),
+            model_draft_error: use_signal(|| None),
+        };
+        let placement = PlacementTargets {
+            choices,
+            clone_host_state,
+            remembered_destination,
+            live_destination: use_signal(|| None),
+            history_activation_attempts: use_signal(|| 0),
+            preview_revision: use_signal(|| 0),
+            browse_generation: use_signal(|| 0),
+            browse_request: use_signal(|| None),
+            browse_result: use_signal(|| None),
+            browse_error: use_signal(|| None),
+        };
+        let targets = SearchTargets {
+            placement,
+            recovery,
+            template_error: use_signal(|| None),
+        };
+        let preferences = SharedPreferences(use_signal(api::Preferences::default));
         let slot = use_confirm_slot();
-        TEMPLATE_QUESTION_FIXTURE
-            .with(|value| value.set(Some(TemplateQuestionFixture { targets, slot })));
+        TEMPLATE_QUESTION_FIXTURE.with(|value| {
+            value.set(Some(TemplateQuestionFixture {
+                owner,
+                targets,
+                preferences,
+                key,
+                slot,
+            }))
+        });
         rsx! {}
     }
 
-    /// These finite fixtures use direct template fields. Execute the actual
-    /// validated Set actions, including the final prompt/pair restoration;
-    /// search semantics are covered by the full form's browser regression.
+    /// Run actual validated owner replay; the assertions below exercise the
+    /// existing completed-question functions immediately after publication.
     fn replay_template_question_sets(
-        targets: super::TemplateTargets,
+        fixture: TemplateQuestionFixture,
         hosts: &[super::HostOption],
         fields: farhelm_proto::launcher::TemplateFields,
     ) {
@@ -7101,21 +6507,25 @@ mod tests {
             name: "fixture".into(),
             fields,
         };
-        for edit in template_edits(
-            crate::launch_composer::ComposerSearchResult::Template(template.name.clone()),
-            &[template],
-            hosts,
-            &[],
-            false,
-            targets,
-        ) {
-            match edit {
-                TemplateEdit::Set(set) => set(),
-                TemplateEdit::Search(_) => {
-                    panic!("the fixture deliberately uses direct template fields")
-                }
-            }
-        }
+        assert!(
+            fixture
+                .owner
+                .accept_search_result(
+                    crate::launch_composer::ComposerSearchResult::Template("fixture".into()),
+                    Some(&template),
+                    false,
+                    SearchInputs {
+                        templates: &[],
+                        hosts,
+                        catalog: Some(&[]),
+                        host_fixed: false,
+                        history_target: None,
+                        preferences: fixture.preferences
+                    },
+                    fixture.targets
+                )
+                .is_some()
+        );
     }
 
     /// An unchanged completed Agent or Command retains the actual opening and
@@ -7128,30 +6538,43 @@ mod tests {
         use farhelm_proto::launcher::{LauncherKind, TemplateFields};
         let hosts = [option(1, "local", true)];
         let target = CreateTarget::new(1, hosts[0].incarnation.clone());
-        let mut dom = VirtualDom::new(template_question_fixture);
-        dom.rebuild_in_place();
-        let mut fixture = TEMPLATE_QUESTION_FIXTURE
-            .with(std::cell::Cell::get)
-            .unwrap();
-        dom.in_runtime(|| {
-            for tab in [LaunchTab::Agent, LaunchTab::Command] {
-                fixture.targets.draft.edit(|draft| {
-                    draft.restore(LaunchDraft::new(Some(LaunchPermission::Yolo)));
-                    draft.choose_harness(
-                        LaunchHarness::Codex,
-                        None,
-                        String::new(),
-                        ChoiceOrigin::Control,
-                    );
-                    draft.choose_tab(tab);
-                    draft.edit_invocation("safe-command".into());
-                    draft.choose_command_yolo(true);
-                    if tab == LaunchTab::Command {
-                        draft.edit_wrapper("'unfinished dormant wrapper".into());
-                        draft.edit_permission_flags("'unfinished dormant flags".into());
-                    }
-                });
-                let before = fixture.targets.draft.snapshot();
+        for tab in [LaunchTab::Agent, LaunchTab::Command] {
+            let mut dom = VirtualDom::new(template_question_fixture);
+            dom.rebuild_in_place();
+            let mut fixture = TEMPLATE_QUESTION_FIXTURE
+                .with(std::cell::Cell::get)
+                .unwrap();
+            dom.in_runtime(|| {
+                assert!(
+                    fixture
+                        .owner
+                        .choose_harness(
+                            LaunchHarness::Codex,
+                            None,
+                            fixture.preferences,
+                            fixture.targets.placement.choices,
+                            fixture.targets.recovery
+                        )
+                        .is_some()
+                );
+                fixture.owner.choose_permissions(
+                    Some(LaunchPermission::Yolo),
+                    fixture.targets.placement.choices,
+                );
+                fixture
+                    .owner
+                    .choose_launch_tab(tab, fixture.targets.placement.choices);
+                fixture.owner.edit_invocation("safe-command".into());
+                fixture.owner.choose_command_yolo(true);
+                if tab == LaunchTab::Command {
+                    fixture
+                        .owner
+                        .edit_wrapper("'unfinished dormant wrapper".into());
+                    fixture
+                        .owner
+                        .edit_permission_flags("'unfinished dormant flags".into());
+                }
+                let before = fixture.owner.snapshot();
                 let refused = before
                     .request(RequestContext {
                         host: Some((1, &hosts[0].incarnation)),
@@ -7161,7 +6584,7 @@ mod tests {
                     })
                     .unwrap();
                 let retained = ("refused-key".to_string(), refused.clone());
-                fixture.targets.intent_key.set(Some(retained.clone()));
+                fixture.key.set(Some(retained.clone()));
                 let question = LauncherYoloQuestion {
                     opening: 1,
                     refused_key: retained.0.clone(),
@@ -7189,11 +6612,11 @@ mod tests {
                         ..Default::default()
                     }
                 };
-                replay_template_question_sets(fixture.targets, &hosts, unchanged);
+                replay_template_question_sets(fixture, &hosts, unchanged);
                 assert!(fixture.targets.template_error.peek().is_none());
-                assert_eq!(*fixture.targets.intent_key.peek(), Some(retained.clone()));
+                assert_eq!(*fixture.key.peek(), Some(retained.clone()));
                 let current = completed_template_question_binding(
-                    &fixture.targets.draft.snapshot(),
+                    &fixture.owner.snapshot(),
                     &hosts,
                     Some(1),
                     Some(&target),
@@ -7208,11 +6631,11 @@ mod tests {
                 ));
                 assert!(fixture.slot.peek_key() == Some(question.clone()));
 
-                // A rejected template runs no Set actions and has no successful
+                // A rejected template runs no semantic replay and has no successful
                 // completion. It must not alter this mounted question or pair.
-                let snapshot = fixture.targets.draft.snapshot();
+                let snapshot = fixture.owner.snapshot();
                 replay_template_question_sets(
-                    fixture.targets,
+                    fixture,
                     &hosts,
                     TemplateFields {
                         kind: Some(LauncherKind::Command),
@@ -7221,9 +6644,9 @@ mod tests {
                     },
                 );
                 assert!(fixture.targets.template_error.peek().is_some());
-                assert_eq!(fixture.targets.draft.snapshot(), snapshot);
+                assert_eq!(fixture.owner.snapshot(), snapshot);
                 assert!(fixture.slot.peek_key() == Some(question.clone()));
-                assert_eq!(*fixture.targets.intent_key.peek(), Some(retained.clone()));
+                assert_eq!(*fixture.key.peek(), Some(retained.clone()));
 
                 let changed = if tab == LaunchTab::Agent {
                     TemplateFields {
@@ -7236,10 +6659,10 @@ mod tests {
                         ..Default::default()
                     }
                 };
-                replay_template_question_sets(fixture.targets, &hosts, changed);
+                replay_template_question_sets(fixture, &hosts, changed);
                 assert!(fixture.targets.template_error.peek().is_none());
                 let current = completed_template_question_binding(
-                    &fixture.targets.draft.snapshot(),
+                    &fixture.owner.snapshot(),
                     &hosts,
                     Some(1),
                     Some(&target),
@@ -7257,14 +6680,28 @@ mod tests {
                     "the real slot is empty before any render"
                 );
                 assert_eq!(
-                    *fixture.targets.intent_key.peek(),
+                    *fixture.key.peek(),
                     Some(retained.clone()),
                     "template completion preserves submit's whole pair"
                 );
 
-                fixture.targets.draft.edit(|draft| draft.restore(before));
+                replay_template_question_sets(
+                    fixture,
+                    &hosts,
+                    if tab == LaunchTab::Agent {
+                        TemplateFields {
+                            permissions: Some(Some(LaunchPermission::Yolo)),
+                            ..Default::default()
+                        }
+                    } else {
+                        TemplateFields {
+                            command: Some("safe-command".into()),
+                            ..Default::default()
+                        }
+                    },
+                );
                 let restored = completed_template_question_binding(
-                    &fixture.targets.draft.snapshot(),
+                    &fixture.owner.snapshot(),
                     &hosts,
                     Some(1),
                     Some(&target),
@@ -7339,8 +6776,8 @@ mod tests {
                     fixture.slot.peek_key().is_none(),
                     "binding equality alone cannot keep a different key's opening"
                 );
-            }
-        });
+            });
+        }
     }
 
     /// A managed template's identity uses its refused accepted checkout, not a

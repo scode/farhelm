@@ -4,16 +4,16 @@
 //! it back would lose unfinished quotes and change untouched peer values.
 //! Preview observations, confirmation and picker state stay with the form.
 //! `LaunchDraftState` shares the form's existing host, operation lock and retry
-//! handles for ordinary edits, placement and finite source/naming reconciliation;
+//! handles for all editing and finite source/naming reconciliation;
 //! submission still owns mint/reply lifetime.
 //! Field memos are subscriptions, never live callback authority.
 //!
 //! Ordinary edit facts describe submitted changes, not admission or assignment:
 //! false still performs ownership, explicitness and dormant-buffer writes.
 //! Malformed affected word lists conservatively report change. Host/history
-//! authority is passed through existing handles; concrete placement operations
-//! own their supported explicit-action exceptions. Search/template, agent/model
-//! and recovery composites retain their caller policies during this migration.
+//! authority is passed through existing handles. Concrete operations select
+//! their fixed rules; private template replay never recursively publishes or
+//! retires a pair. Permission recovery stores immutable values, not edit code.
 
 use dioxus::prelude::*;
 
@@ -25,9 +25,11 @@ use super::{
     BrowseAuthority, CheckoutNameSource, CheckoutNaming, CloneHostAction, CloneHostState,
     CommandLaunch, CreatePrefill, CreateTarget, DestinationDraft, FolderChoice,
     GithubCheckoutRequest, GithubRepo, HostId, HostOption, IntentBinding, LaunchIntent, LaunchTab,
-    PermissionEscalation, active_prompt, admit_history_destination, browse_activation_is_current,
-    command_intent, display_peer, effective_title, history_target, invalidate_directory_browse,
-    promote_history_snapshot, remembered_destination_matches, resolve_clone_host, submitted_field,
+    PermissionEscalation, PermissionSwitchBefore, SharedPreferences, active_prompt,
+    admit_history_destination, browse_activation_is_current, command_intent, display_peer,
+    effective_title, history_target, initial_structured_permissions, invalidate_directory_browse,
+    promote_history_snapshot, remembered_destination_matches, remembered_wrapper,
+    resolve_clone_host, submitted_field,
 };
 
 /// External or deliberately frozen facts for one envelope projection.
@@ -1156,12 +1158,85 @@ pub(super) struct FolderTargets {
     pub(super) active: Signal<Option<usize>>,
 }
 
+/// Recovery stores values only; it cannot execute an edit or install itself.
+/// Authority, caches, epochs and retained attempts deliberately stay external.
+#[derive(Clone)]
+pub(super) struct PermissionUndo {
+    draft: LaunchDraft,
+    composer_reset_reason: Option<String>,
+    chosen_host: Option<HostId>,
+    clone_host_state: CloneHostState,
+    remembered_destination: Option<CreateTarget>,
+    model_draft: String,
+    model_draft_error: Option<String>,
+}
+
+/// The existing external edit context captured at each actual switch boundary.
+#[derive(Clone, Copy)]
+pub(super) struct RecoveryTargets {
+    pub(super) composer_reset_reason: Signal<Option<String>>,
+    pub(super) clone_host_state: Signal<CloneHostState>,
+    pub(super) remembered_destination: Signal<Option<CreateTarget>>,
+    pub(super) model_draft: Signal<String>,
+    pub(super) model_draft_error: Signal<Option<String>>,
+}
+
+/// Default/custom cleanup may complete inside its concrete operation. Catalog
+/// cleanup stays in the renderer after its completed permission observer, so
+/// passing this bundle must not move that capture/completion boundary.
+#[derive(Clone, Copy)]
+pub(super) struct ModelTargets {
+    pub(super) reset_reason: Signal<Option<String>>,
+    pub(super) draft: Signal<String>,
+    pub(super) error: Signal<Option<String>>,
+    pub(super) open: Signal<bool>,
+    pub(super) active: Signal<Option<usize>>,
+}
+
+impl ModelTargets {
+    /// Equal admitted choices still discard the pending picker candidate.
+    fn complete(mut self) {
+        self.error.set(None);
+        self.draft.set(String::new());
+        self.open.set(false);
+        self.active.set(None);
+    }
+}
+
+/// Immutable existing facts for one acceptance, never another authority.
+/// Preferences remain a handle for the original application-time peek.
+pub(super) struct SearchInputs<'a> {
+    pub(super) templates: &'a [farhelm_proto::launcher::LaunchTemplate],
+    pub(super) hosts: &'a [HostOption],
+    pub(super) catalog: Option<&'a [api::LaunchCatalogModel]>,
+    pub(super) host_fixed: bool,
+    pub(super) history_target: Option<CreateTarget>,
+    pub(super) preferences: SharedPreferences,
+}
+
+/// Search shares existing placement and immutable recovery aliases.
+#[derive(Clone, Copy)]
+pub(super) struct SearchTargets {
+    pub(super) placement: PlacementTargets,
+    pub(super) recovery: RecoveryTargets,
+    pub(super) template_error: Signal<Option<String>>,
+}
+
+/// Returned after publication/key settlement, before renderer completion.
+pub(super) struct SearchAcceptance {
+    pub(super) before: PermissionSwitchBefore,
+    pub(super) automatic_permission: bool,
+    pub(super) browse_path: Option<String>,
+    pub(super) is_template: bool,
+}
+
 /// Only concrete owner operations choose a rule; callers cannot bypass the gate.
 /// Source reconciliation and checkout naming are observations, allowed while a
 /// submit is busy, with different publication and ordinary-key consequences.
 #[derive(Clone, Copy)]
 enum EditRule {
     Ordinary,
+    Template,
     SourceReconciliation,
     CheckoutNaming,
 }
@@ -1174,10 +1249,10 @@ struct EditFacts {
     changed: bool,
 }
 
-/// Live publication and edit admission share the form's original handles.
-/// Concrete leaf/scalar, placement and finite source/naming operations own rules.
-/// The raw edit entry remains temporarily for unconverted composite operations;
-/// their callers still own those policies until the next migration.
+/// The only mounted draft publisher, sharing the form's original live handles.
+/// Callers can observe fields or edit owned snapshots, but cannot install one.
+/// Concrete operations choose gate/key rules internally; submission still owns
+/// mint/reply lifetime through the same external retry slot.
 #[derive(Clone, Copy)]
 pub(super) struct LaunchDraftState {
     value: Signal<LaunchDraft>,
@@ -1196,22 +1271,19 @@ impl LaunchDraftState {
     pub(super) fn fields(self) -> DraftFields {
         self.fields
     }
-    /// Unconverted composite routes retain their existing caller policy.
-    /// New ordinary handlers must use a concrete operation, never this closure.
-    pub(super) fn edit<R>(mut self, edit: impl FnOnce(&mut LaunchDraft) -> R) -> R {
-        edit(&mut self.value.write())
-    }
 
     /// Keep all converted publication and edit-induced retirement in one place.
-    /// Ordinary admission precedes every read/preamble; the two finite system
-    /// rules remain available while busy. A local copy avoids borrowing the live
-    /// signal during internal observations. Equal system work publishes nothing.
+    /// Ordinary/template admission precedes every read/preamble inside this
+    /// wrapper; finite system rules remain available while busy. A local copy
+    /// permits conditional Memo observations without a live write borrow.
+    /// Template/name rules preserve the complete pair; domain refusals publish
+    /// nothing, while equal accepted assignments can still claim raw ownership.
     fn apply_edit<R>(
         mut self,
         rule: EditRule,
         apply: impl FnOnce(&mut LaunchDraft) -> (R, EditFacts),
     ) -> Option<R> {
-        if matches!(rule, EditRule::Ordinary) && self.ops.busy_now() {
+        if matches!(rule, EditRule::Ordinary | EditRule::Template) && self.ops.busy_now() {
             return None;
         }
         let mut current = self.snapshot();
@@ -1219,7 +1291,7 @@ impl LaunchDraftState {
         if facts.publish {
             self.value.set(current);
         }
-        if facts.changed && !matches!(rule, EditRule::CheckoutNaming) {
+        if facts.changed && !matches!(rule, EditRule::CheckoutNaming | EditRule::Template) {
             self.intent_key.set(None);
         }
         Some(result)
@@ -1744,6 +1816,662 @@ impl LaunchDraftState {
         .unwrap_or(false)
     }
 
+    /// Capture the actual switch boundary once, with no executable recovery.
+    fn capture_permission_switch(
+        self,
+        draft: &LaunchDraft,
+        targets: RecoveryTargets,
+    ) -> PermissionSwitchBefore {
+        PermissionSwitchBefore {
+            harness: draft.harness(),
+            permission: draft
+                .harness()
+                .and_then(|h| h.request_permission(draft.permissions())),
+            tab: draft.tab(),
+            undo: std::rc::Rc::new(PermissionUndo {
+                draft: draft.clone(),
+                composer_reset_reason: targets.composer_reset_reason.peek().clone(),
+                chosen_host: *self.chosen_host.peek(),
+                clone_host_state: *targets.clone_host_state.peek(),
+                remembered_destination: targets.remembered_destination.peek().clone(),
+                model_draft: targets.model_draft.peek().clone(),
+                model_draft_error: targets.model_draft_error.peek().clone(),
+            }),
+        }
+    }
+
+    /// Direct harness switches capture before history promotion. The renderer
+    /// observes the completed switch only after publication and key settlement.
+    pub(super) fn choose_harness(
+        self,
+        harness: LaunchHarness,
+        catalog: Option<&[api::LaunchCatalogModel]>,
+        preferences: SharedPreferences,
+        mut choices: ChoiceTargets,
+        mut recovery: RecoveryTargets,
+    ) -> Option<PermissionSwitchBefore> {
+        self.apply_edit(EditRule::Ordinary, |draft| {
+            choices.partial_template_hint.set(false);
+            let before = self.capture_permission_switch(draft, recovery);
+            choices.promote_history();
+            let outcome = draft.choose_harness(
+                harness,
+                catalog,
+                remembered_wrapper(&preferences.0.peek(), Some(harness)),
+                ChoiceOrigin::Control,
+            );
+            let changed = outcome.selection_changed || draft.tab() != LaunchTab::Agent;
+            recovery.composer_reset_reason.set(outcome.reset_reason);
+            draft.choose_tab(LaunchTab::Agent);
+            (
+                before,
+                EditFacts {
+                    publish: true,
+                    changed,
+                },
+            )
+        })
+    }
+
+    /// Catalog selection's capture follows history/hint and precedes cleanup.
+    /// Keep this distinct from direct harness capture and Search reconciliation.
+    pub(super) fn choose_catalog_model(
+        self,
+        id: String,
+        harness: LaunchHarness,
+        catalog: Option<&[api::LaunchCatalogModel]>,
+        preferences: SharedPreferences,
+        mut choices: ChoiceTargets,
+        mut recovery: RecoveryTargets,
+    ) -> Option<PermissionSwitchBefore> {
+        self.apply_edit(EditRule::Ordinary, |draft| {
+            choices.promote_history();
+            choices.partial_template_hint.set(false);
+            let before = self.capture_permission_switch(draft, recovery);
+            let outcome = draft.choose_catalog_model(
+                id,
+                harness,
+                catalog,
+                remembered_wrapper(&preferences.0.peek(), Some(harness)),
+                ChoiceOrigin::Control,
+            );
+            recovery.composer_reset_reason.set(outcome.reset_reason);
+            (
+                before,
+                EditFacts {
+                    publish: true,
+                    changed: outcome.selection_changed,
+                },
+            )
+        })
+    }
+
+    /// Default/custom equality still completes the current picker interaction.
+    pub(super) fn choose_default_model(
+        self,
+        mut choices: ChoiceTargets,
+        mut ui: ModelTargets,
+    ) -> bool {
+        self.apply_ordinary(|draft| {
+            choices.promote_history();
+            choices.partial_template_hint.set(false);
+            let changed = draft.choose_default_model();
+            ui.reset_reason.set(None);
+            ui.complete();
+            changed
+        })
+    }
+
+    /// Custom acceptance does not gain hint clearing or permission observation.
+    pub(super) fn choose_custom_model(
+        self,
+        id: String,
+        harness: LaunchHarness,
+        catalog: Option<&[api::LaunchCatalogModel]>,
+        choices: ChoiceTargets,
+        mut ui: ModelTargets,
+    ) -> bool {
+        self.apply_ordinary(|draft| {
+            choices.promote_history();
+            let outcome = draft.choose_custom_model(id, harness, catalog);
+            ui.reset_reason.set(outcome.reset_reason);
+            ui.complete();
+            outcome.selection_changed
+        })
+    }
+
+    /// An admitted missing-harness error explicitly ends ordinary authority.
+    /// No unchanged-valid request is asserted and no semantic field is published.
+    pub(super) fn report_model_harness_required(self, mut error: Signal<Option<String>>) -> bool {
+        self.apply_edit(EditRule::Ordinary, |_| {
+            error.set(Some("choose a harness before a custom model id".into()));
+            (
+                (),
+                EditFacts {
+                    publish: false,
+                    changed: true,
+                },
+            )
+        })
+        .is_some()
+    }
+
+    /// Reset uses current preference memory and clears only the agent group.
+    /// Its explicit retirement is independent of equality; command and one-time
+    /// inputs, host, placement and naming survive.
+    pub(super) fn reset_choices(
+        self,
+        preferences: SharedPreferences,
+        mut choices: ChoiceTargets,
+        mut reset: Signal<Option<String>>,
+        mut search: Signal<String>,
+        mut search_open: Signal<bool>,
+    ) -> bool {
+        self.apply_edit(EditRule::Ordinary, |draft| {
+            choices.partial_template_hint.set(false);
+            draft.reset_choices(initial_structured_permissions(&preferences.0.peek()));
+            reset.set(None);
+            choices.promote_history();
+            search.set(String::new());
+            search_open.set(false);
+            (
+                (),
+                EditFacts {
+                    publish: true,
+                    changed: true,
+                },
+            )
+        })
+        .is_some()
+    }
+
+    /// Undo obtains its payload only from the current fenced notice. Expired or
+    /// superseded openings refuse before busy; restored semantics never restore
+    /// preview/browse evidence or synchronously rewind live_destination.
+    pub(super) fn undo_permission_switch(
+        mut self,
+        generation: u64,
+        mut recovery: RecoveryTargets,
+        mut notice: Signal<Option<PermissionEscalation>>,
+        opening: Signal<u64>,
+        mut placement: PlacementTargets,
+    ) -> bool {
+        let current = notice.peek().clone();
+        let Some(current) = current.filter(|current| {
+            current.generation == generation && current.opening_generation == *opening.peek()
+        }) else {
+            return false;
+        };
+        let accepted = self
+            .apply_edit(EditRule::Ordinary, |draft| {
+                let before = &current.undo;
+                draft.restore(before.draft.clone());
+                recovery
+                    .composer_reset_reason
+                    .set(before.composer_reset_reason.clone());
+                self.chosen_host.set(before.chosen_host);
+                recovery.clone_host_state.set(before.clone_host_state);
+                recovery
+                    .remembered_destination
+                    .set(before.remembered_destination.clone());
+                recovery.model_draft.set(before.model_draft.clone());
+                recovery
+                    .model_draft_error
+                    .set(before.model_draft_error.clone());
+                (
+                    (),
+                    EditFacts {
+                        publish: true,
+                        changed: true,
+                    },
+                )
+            })
+            .is_some();
+        if accepted {
+            placement.invalidate_browse();
+            placement.preview_revision += 1;
+            notice.set(None);
+        }
+        accepted
+    }
+
+    /// One admitted acceptance owns validation/replay and its fixed pair policy.
+    /// Template refusals still earn outer completion; successful templates never
+    /// clear/recreate even a mismatched complete pair. Busy earns no preamble.
+    pub(super) fn accept_search_result(
+        self,
+        result: crate::launch_composer::ComposerSearchResult,
+        captured: Option<&farhelm_proto::launcher::LaunchTemplate>,
+        from_shortcut: bool,
+        inputs: SearchInputs<'_>,
+        mut targets: SearchTargets,
+    ) -> Option<SearchAcceptance> {
+        use crate::launch_composer::ComposerSearchResult;
+        let is_template = matches!(&result, ComposerSearchResult::Template(_));
+        self.apply_edit(
+            if is_template {
+                EditRule::Template
+            } else {
+                EditRule::Ordinary
+            },
+            |draft| {
+                let before = self.capture_permission_switch(draft, targets.recovery);
+                let templates = captured
+                    .map(std::slice::from_ref)
+                    .unwrap_or(inputs.templates);
+                if captured.is_none() || from_shortcut {
+                    targets.placement.choices.partial_template_hint.set(false);
+                }
+                let automatic_permission = match &result {
+                    ComposerSearchResult::Template(name) => templates
+                        .iter()
+                        .find(|t| &t.name == name)
+                        .is_some_and(|t| t.fields.permissions.is_none()),
+                    ComposerSearchResult::Recent(_) | ComposerSearchResult::Permissions(_) => false,
+                    _ => true,
+                };
+                targets.placement.invalidate_browse();
+                targets.placement.choices.promote_history();
+                let (browse_path, publish, changed) = if let ComposerSearchResult::Template(name) =
+                    result
+                {
+                    let applied = match templates.iter().find(|t| t.name == name) {
+                        Some(template) => self.apply_template(draft, template, &inputs, targets),
+                        None => Err(format!(
+                            "no template is named {name:?}; it may have been deleted"
+                        )),
+                    };
+                    match applied {
+                        Ok(()) => (None, true, false),
+                        Err(message) => {
+                            targets.template_error.set(Some(message));
+                            (None, false, false)
+                        }
+                    }
+                } else {
+                    targets.template_error.set(None);
+                    let (path, changed, publish) =
+                        self.apply_search_result(draft, result, &inputs, targets);
+                    (path, publish, changed)
+                };
+                (
+                    SearchAcceptance {
+                        before,
+                        automatic_permission,
+                        browse_path,
+                        is_template,
+                    },
+                    EditFacts { publish, changed },
+                )
+            },
+        )
+    }
+
+    /// Whole validation precedes every semantic write. Private search branches
+    /// retain their conditional observations but never recursively gate/publish.
+    fn apply_template(
+        self,
+        draft: &mut LaunchDraft,
+        template: &farhelm_proto::launcher::LaunchTemplate,
+        inputs: &SearchInputs<'_>,
+        mut targets: SearchTargets,
+    ) -> Result<(), String> {
+        use crate::launch_composer::{ComposerPermission, ComposerSearchResult};
+        use farhelm_proto::launcher::{LauncherKind, TemplateDestination};
+        let (applied, repositories) = super::validated_template_batch(
+            std::slice::from_ref(template),
+            inputs.hosts,
+            inputs.catalog.unwrap_or_default(),
+            inputs.host_fixed,
+            draft,
+            *self.chosen_host.peek(),
+        )?;
+        let repository = repositories.into_iter().next().flatten();
+        targets.template_error.set(None);
+        let fields = template.fields.clone();
+        let kind = applied.kind.unwrap_or(LauncherKind::Agent);
+        // Kind precedes agent interpretation: the same agent field means
+        // a structured choice or a command declaration depending on this step.
+        if let Some(kind) = fields.kind {
+            draft.choose_tab(match kind {
+                LauncherKind::Agent => LaunchTab::Agent,
+                LauncherKind::Command => LaunchTab::Command,
+            });
+        }
+        if let Some(agent) = fields.agent {
+            match kind {
+                LauncherKind::Agent => {
+                    self.apply_search_result(
+                        draft,
+                        ComposerSearchResult::Harness(agent),
+                        inputs,
+                        targets,
+                    );
+                }
+                LauncherKind::Command => {
+                    draft.choose_command_agent(Some(agent));
+                }
+            }
+        }
+        // Resets retain their direct-field semantics; actual picks keep the
+        // private search branch's reconciliation and conditional subscriptions.
+        match fields.model {
+            Some(Some(id)) => {
+                self.apply_search_result(
+                    draft,
+                    ComposerSearchResult::Model {
+                        id,
+                        harness: applied
+                            .harness
+                            .expect("a model applies only with an agent type"),
+                    },
+                    inputs,
+                    targets,
+                );
+            }
+            Some(None) => {
+                draft.choose_default_model();
+                targets.recovery.composer_reset_reason.set(None);
+            }
+            None => {}
+        }
+        match fields.effort {
+            Some(Some(effort)) => {
+                self.apply_search_result(
+                    draft,
+                    ComposerSearchResult::Effort(Some(effort)),
+                    inputs,
+                    targets,
+                );
+            }
+            Some(None) => {
+                draft.choose_effort(None);
+            }
+            None => {}
+        }
+        let flags = fields
+            .permission_flags
+            .as_ref()
+            .map(shell_words::join)
+            .unwrap_or_default();
+        match fields.permissions {
+            Some(Some(LaunchPermission::Yolo)) => {
+                self.apply_search_result(
+                    draft,
+                    ComposerSearchResult::Permissions(ComposerPermission::Yolo),
+                    inputs,
+                    targets,
+                );
+            }
+            Some(None) => draft.apply_template_permissions(None, String::new()),
+            Some(Some(permission)) => draft.apply_template_permissions(Some(permission), flags),
+            None => {}
+        }
+        if let Some(prefix) = fields.wrapper_prefix {
+            draft.edit_wrapper(prefix.as_ref().map(shell_words::join).unwrap_or_default());
+        }
+        // Template-owned command text deliberately discards peer raw seeds.
+        if let Some(command) = fields.command {
+            draft.apply_template_invocation(command);
+        }
+        if let Some(yolo) = fields.yolo {
+            draft.choose_command_yolo(yolo);
+        }
+        if let Some(resume) = fields.resume_command {
+            draft.apply_template_resume(resume);
+        }
+        // Host/destination use existing private actions. Names additionally
+        // retain Base/Fixed policy and invalidate even on a kind-only change.
+        if let Some(identity) = &fields.host
+            && let Some(host) = super::template_host(inputs.hosts, identity)
+        {
+            self.apply_search_result(
+                draft,
+                ComposerSearchResult::Host(crate::launch_composer::ComposerHost {
+                    id: host.id,
+                    name: host.name.clone(),
+                    label: host.label(),
+                    local: host.local,
+                }),
+                inputs,
+                targets,
+            );
+        }
+        match (fields.destination, repository) {
+            (Some(TemplateDestination::Folder(folder)), _) => {
+                self.apply_search_result(
+                    draft,
+                    ComposerSearchResult::UsePath(folder),
+                    inputs,
+                    targets,
+                );
+            }
+            (Some(TemplateDestination::Github(_)), Some(repo)) => {
+                self.apply_search_result(
+                    draft,
+                    ComposerSearchResult::Github(repo),
+                    inputs,
+                    targets,
+                );
+            }
+            _ => {}
+        }
+        if let Some(name) = fields.name {
+            draft.apply_template_name(
+                name,
+                applied
+                    .name_kind
+                    .expect("an applied name carries its template policy"),
+            );
+            targets.placement.preview_revision.with_mut(|revision| {
+                *revision = revision.checked_add(1).expect("preview revision exhausted")
+            });
+        }
+        // Shared application can clear an incompatible dormant message. Its
+        // final presence, including Some(empty), is part of completed replay.
+        draft.apply_template_prompt(applied.prompt);
+        Ok(())
+    }
+
+    /// Search and template replay share this finite plain application. Inner
+    /// actions never publish or settle the pair; the outer owner rule does that.
+    /// Return path, retirement fact and publication separately: stale history
+    /// refuses publication, equal effort still assigns, and Host is external.
+    fn apply_search_result(
+        self,
+        draft: &mut LaunchDraft,
+        result: crate::launch_composer::ComposerSearchResult,
+        inputs: &SearchInputs<'_>,
+        targets: SearchTargets,
+    ) -> (Option<String>, bool, bool) {
+        let catalog_answer = inputs.catalog;
+        let catalog = catalog_answer.unwrap_or_default();
+        let hosts = inputs.hosts;
+        let preferences = inputs.preferences;
+        let history_target = inputs.history_target.clone();
+        let mut chosen_host = self.chosen_host;
+        let mut clone_host_state = targets.placement.clone_host_state;
+        let mut live_destination = targets.placement.live_destination;
+        let mut remembered_destination = targets.placement.remembered_destination;
+        let history_activation_attempts = targets.placement.history_activation_attempts;
+        let mut preview_revision = targets.placement.preview_revision;
+        let mut composer_reset_reason = targets.recovery.composer_reset_reason;
+        let mut action_error = targets.template_error;
+        use crate::launch_composer::ComposerSearchResult;
+        // Capture before history adoption or path override can clear the old claim.
+        let correcting_invalid = !remembered_destination_matches(
+            remembered_destination.peek().as_ref(),
+            live_destination.peek().as_ref(),
+        );
+        let changed;
+        if matches!(
+            &result,
+            ComposerSearchResult::Folder(_) | ComposerSearchResult::Recent(_)
+        ) && !admit_history_destination(
+            history_target,
+            live_destination,
+            remembered_destination,
+            history_activation_attempts,
+        ) {
+            // A retained result can outlive its installation. Keep the existing
+            // admission fence, but explain the rejected activation where other
+            // search/template failures already appear.
+            action_error.set(Some(
+                "that result belongs to an earlier host; choose a current result".into(),
+            ));
+            return (None, false, false);
+        }
+        if matches!(
+            &result,
+            ComposerSearchResult::UsePath(_) | ComposerSearchResult::BrowsePath(_)
+        ) {
+            // An explicit path action replaces the remembered destination, even
+            // when the person deliberately chooses the same spelling again.
+            remembered_destination.set(None);
+        }
+        match result {
+            // A template is expanded into the edits it contains before it gets
+            // here (apply_template), and none of those edits is a template.
+            ComposerSearchResult::Template(_) => {
+                unreachable!("apply_template expands every template result")
+            }
+            ComposerSearchResult::Name(name) => {
+                // A cloned title may have an escaped display seed. This action
+                // is the user's new text, so submit and checkout preview must
+                // read it rather than replay the clone's raw title.
+                changed = draft.edit_title(name);
+            }
+            ComposerSearchResult::Host(host) => {
+                // A host action has the same authority effects as the selector:
+                // it takes over clone defaults and retires the old destination
+                // before a queued history callback or submit can observe it.
+                if hosts.iter().any(|offered| offered.id == host.id) {
+                    chosen_host.set(Some(host.id));
+                    live_destination.set(self::history_target(hosts, Some(host.id)));
+                    remembered_destination.set(None);
+                    clone_host_state.set(CloneHostState::UserTookOver);
+                }
+                return (None, true, false);
+            }
+            ComposerSearchResult::Github(repo) => {
+                changed = true;
+                remembered_destination.set(None);
+                draft.select_repository(repo);
+                preview_revision.with_mut(|value| {
+                    *value = value.checked_add(1).expect("preview revision exhausted")
+                });
+            }
+            crate::launch_composer::ComposerSearchResult::UsePath(folder)
+            | crate::launch_composer::ComposerSearchResult::Folder(folder) => {
+                changed = draft.choose_existing_folder(&folder) || correcting_invalid;
+            }
+            crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => {
+                // Query-path actions are treated like other relayed path choices:
+                // the escaped field remains reviewable, while the browse request
+                // and an untouched later create retain the exact requested bytes.
+                let changed = draft.choose_existing_folder(&folder) || correcting_invalid;
+                return (Some(folder), changed, true);
+            }
+            crate::launch_composer::ComposerSearchResult::Harness(harness) => {
+                let tab_changed = draft.tab() != LaunchTab::Agent;
+                draft.choose_tab(LaunchTab::Agent);
+                observe_search_agent_fields(self.fields());
+                let outcome = draft.choose_harness(
+                    harness,
+                    catalog_answer,
+                    remembered_wrapper(&preferences.0.peek(), Some(harness)),
+                    ChoiceOrigin::Search,
+                );
+                changed = outcome.selection_changed || tab_changed;
+                composer_reset_reason.set(outcome.reset_reason);
+            }
+            crate::launch_composer::ComposerSearchResult::Model { id, harness } => {
+                let tab_changed = draft.tab() != LaunchTab::Agent;
+                // A model carries its harness ownership, so selecting it is also
+                // an explicit return to structured mode rather than leaving a
+                // structured draft hidden behind command controls.
+                draft.choose_tab(LaunchTab::Agent);
+                observe_search_agent_fields(self.fields());
+                let outcome = draft.choose_catalog_model(
+                    id,
+                    harness,
+                    catalog_answer,
+                    remembered_wrapper(&preferences.0.peek(), Some(harness)),
+                    ChoiceOrigin::Search,
+                );
+                changed = outcome.selection_changed || tab_changed;
+                composer_reset_reason.set(outcome.reset_reason);
+            }
+            crate::launch_composer::ComposerSearchResult::Effort(effort) => {
+                // An unchanged choice is a retry gesture, just like pressing its
+                // button again. Preserve the key after an ambiguous reply so that
+                // accepting effort:default cannot create a second session. A real
+                // edit reaches the shared key reset below; harness and model stay
+                // put, so no reconciliation runs.
+                if !draft.choose_effort(effort) {
+                    return (None, false, true);
+                }
+                changed = true;
+            }
+            crate::launch_composer::ComposerSearchResult::Permissions(permission) => {
+                let focus_custom = permission == crate::launch_composer::ComposerPermission::Custom;
+                let permission = match permission {
+                    crate::launch_composer::ComposerPermission::Custom => {
+                        Some(LaunchPermission::Custom)
+                    }
+                    crate::launch_composer::ComposerPermission::Guarded => {
+                        Some(LaunchPermission::Guarded)
+                    }
+                    crate::launch_composer::ComposerPermission::OwnSetting => None,
+                    crate::launch_composer::ComposerPermission::Yolo => {
+                        Some(LaunchPermission::Yolo)
+                    }
+                    crate::launch_composer::ComposerPermission::Approve => {
+                        Some(LaunchPermission::Approve)
+                    }
+                    crate::launch_composer::ComposerPermission::SmartApprove => {
+                        Some(LaunchPermission::SmartApprove)
+                    }
+                    crate::launch_composer::ComposerPermission::Chat => {
+                        Some(LaunchPermission::Chat)
+                    }
+                };
+                changed = draft.choose_permissions(permission);
+                if focus_custom {
+                    document::eval(
+                        "requestAnimationFrame(() => document.querySelector('.custom-permission-flags')?.focus())",
+                    );
+                }
+            }
+            crate::launch_composer::ComposerSearchResult::Recent(entry) => {
+                let tab_changed = draft.tab() != LaunchTab::Agent;
+                draft.choose_tab(LaunchTab::Agent);
+                composer_reset_reason.set(None);
+                let mut selection = crate::launch_composer::select_recent(&entry);
+                selection.permissions = crate::launch_composer::normalized_permissions(
+                    selection.harness,
+                    selection.permissions,
+                );
+                let owner = crate::launch_composer::custom_model_owner(&selection, catalog);
+                let selection_changed = draft.restore_launch(&selection, owner);
+                if let Some(repo) = entry.github_repo {
+                    changed = true;
+                    remembered_destination.set(None);
+                    draft.select_repository(repo);
+                    preview_revision.with_mut(|value| {
+                        *value = value.checked_add(1).expect("preview revision exhausted")
+                    });
+                } else {
+                    changed = draft.choose_existing_folder(entry.cwd.raw())
+                        || selection_changed
+                        || tab_changed
+                        || correcting_invalid;
+                }
+            }
+        }
+        (None, changed, true)
+    }
+
     /// Seed launch fields once per source generation, but resolve its host every pass.
     /// Keep the entry target observation separate from a host chosen later in this
     /// invocation: target retirement catches up on the next pass as before. Both
@@ -1978,6 +2706,22 @@ pub(super) fn use_launch_draft(
     }
 }
 
+/// Search replay can run synchronously inside the initial-template effect.
+/// Keep precisely its former structured subscriptions even though mutation
+/// now reads the live plain draft. Subscribing to the aggregate here would
+/// make unrelated ownership/editor changes replay pending opening work.
+fn observe_search_agent_fields(fields: DraftFields) {
+    let _ = (
+        (fields.structured_permissions)(),
+        (fields.structured_permission_flags)(),
+        (fields.structured_wrapper)(),
+        (fields.structured_harness)(),
+        (fields.structured_model)(),
+        (fields.structured_effort)(),
+        (fields.structured_permissions_is_explicit)(),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2038,6 +2782,11 @@ mod tests {
         let chosen_host = use_signal(|| None);
         let owner = use_launch_draft(None, None, ops, key, chosen_host);
         let choices = use_choice_targets();
+        let source = use_source_targets(choices);
+        use_placement_handles(SystemFixture {
+            ordinary: OrdinaryFixture { owner, choices },
+            source,
+        });
         ORDINARY_FIXTURE.with(|slot| slot.set(Some(OrdinaryFixture { owner, choices })));
         rsx! {}
     }
@@ -2101,6 +2850,10 @@ mod tests {
         let owner = use_launch_draft(None, None, ops, key, chosen_host);
         let choices = use_choice_targets();
         let source = use_source_targets(choices);
+        use_placement_handles(SystemFixture {
+            ordinary: OrdinaryFixture { owner, choices },
+            source,
+        });
         use_effect(move || {
             let _ = owner.value.read();
             PUBLICATIONS.with(|count| count.set(count.get() + 1));
@@ -2138,8 +2891,10 @@ mod tests {
 
     /// Mount only production handles; measured transitions call the owner.
     fn use_placement_fixture() -> PlacementFixture {
-        let system = use_system_fixture();
-        use_placement_handles(system)
+        use_system_fixture();
+        PLACEMENT_FIXTURE
+            .with(std::cell::Cell::get)
+            .expect("the system hook mounted the shared placement handles")
     }
 
     /// Existing Memo probes can share these real aliases around their own
@@ -2174,8 +2929,901 @@ mod tests {
             connection: use_signal(|| Some(4)),
             attempts: use_signal(|| 0),
         };
+        use_final_context(targets, source);
         PLACEMENT_FIXTURE.with(|slot| slot.set(Some(fixture)));
         fixture
+    }
+
+    /// All final-family fixtures share actual alias handles and preference data.
+    /// No helper can publish a supplied draft; it must call a concrete operation.
+    #[derive(Clone, Copy)]
+    struct FinalContext {
+        search: SearchTargets,
+        model: ModelTargets,
+        source: SourceTargets,
+        preferences: SharedPreferences,
+        opening: Signal<u64>,
+        notice_generation: Signal<u64>,
+        retained: Signal<Option<(IntentBinding, crate::github_checkout::GithubAttempt)>>,
+    }
+    std::thread_local! {
+        static FINAL_CONTEXT: std::cell::Cell<Option<FinalContext>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// Mount independent picker candidates around the same production owner.
+    fn use_final_context(placement: PlacementTargets, source: SourceTargets) {
+        let draft = use_signal(String::new);
+        let error = use_signal(|| None);
+        let recovery = RecoveryTargets {
+            composer_reset_reason: source.composer_reset_reason,
+            clone_host_state: source.clone_host_state,
+            remembered_destination: source.remembered_destination,
+            model_draft: draft,
+            model_draft_error: error,
+        };
+        let model = ModelTargets {
+            reset_reason: source.composer_reset_reason,
+            draft,
+            error,
+            open: use_signal(|| false),
+            active: use_signal(|| None),
+        };
+        let context = FinalContext {
+            search: SearchTargets {
+                placement,
+                recovery,
+                template_error: use_signal(|| None),
+            },
+            model,
+            source,
+            preferences: SharedPreferences(use_signal(api::Preferences::default)),
+            opening: use_signal(|| 1),
+            notice_generation: use_signal(|| 0),
+            retained: use_signal(|| None),
+        };
+        FINAL_CONTEXT.with(|slot| slot.set(Some(context)));
+    }
+
+    /// Use production replay, including validation and the full-pair policy.
+    fn apply_fields(owner: LaunchDraftState, fields: farhelm_proto::launcher::TemplateFields) {
+        let context = FINAL_CONTEXT.with(std::cell::Cell::get).unwrap();
+        let template = farhelm_proto::launcher::LaunchTemplate {
+            name: "fixture".into(),
+            fields,
+        };
+        let accepted = owner.accept_search_result(
+            crate::launch_composer::ComposerSearchResult::Template("fixture".into()),
+            Some(&template),
+            false,
+            SearchInputs {
+                templates: &[],
+                hosts: &[],
+                catalog: Some(&[]),
+                host_fixed: false,
+                history_target: None,
+                preferences: context.preferences,
+            },
+            context.search,
+        );
+        assert!(accepted.is_some(), "fixture replay must be admitted");
+        assert!(
+            context.search.template_error.peek().is_none(),
+            "fixture template must apply: {:?}",
+            context.search.template_error.peek()
+        );
+    }
+
+    /// Fixture agent selection earns the real Control-origin admission/capture.
+    fn choose_fixture_harness(owner: LaunchDraftState, harness: LaunchHarness) {
+        let context = FINAL_CONTEXT.with(std::cell::Cell::get).unwrap();
+        assert!(
+            owner
+                .choose_harness(
+                    harness,
+                    None,
+                    context.preferences,
+                    context.search.placement.choices,
+                    context.search.recovery
+                )
+                .is_some()
+        );
+    }
+
+    /// Occupied setup exercises the same finite authority/default gate as replies.
+    fn advance_fixture_name(owner: LaunchDraftState) -> bool {
+        let authority = naming_authority(&owner.snapshot());
+        owner.advance_checkout_name_for_occupied_reply(
+            &authority,
+            &authority,
+            &api::GithubPreviewFailure {
+                message: "occupied".into(),
+                occupied: true,
+            },
+            false,
+        )
+    }
+
+    /// Seed unsafe bytes through the real source operation. Both retained launch
+    /// groups supply the fixture's source facts; ordinary tab/prompt/resume edits
+    /// then preserve the observer's values. Other raw ownership may be reseeded,
+    /// which must not create an aggregate preview subscription either.
+    fn seed_invocation_from_source(owner: LaunchDraftState, raw: &str) {
+        let context = FINAL_CONTEXT.with(std::cell::Cell::get).unwrap();
+        let before = owner.snapshot();
+        let mut source = source_prefill();
+        source.generation = context.source.prefill_applied.peek().unwrap_or(0) + 1;
+        source.cwd = before.submitted_cwd();
+        source.title = before.effective_title();
+        source.repo = None;
+        source.invocation = raw.into();
+        source.launch = before.structured_selection();
+        source.command = before.command_yolo().map(|yolo| CommandLaunch {
+            command: raw.into(),
+            yolo,
+            agent: before.command_agent(),
+            resume: before.command_resume_on().then(|| {
+                submitted_field(
+                    &before.command_resume(),
+                    before.command_resume_edited(),
+                    before.command_resume_raw_seed().as_deref(),
+                )
+            }),
+        });
+        owner.reconcile_source(Some(&source), false, &[], context.source);
+        // An empty peer title displays as "(empty)". Keep this invocation-only
+        // fixture's original blank editor through a real title edit, rather
+        // than introducing a name before the later same-turn placement probe.
+        if before.title().is_empty() {
+            owner.edit_title(String::new());
+        }
+        owner.choose_launch_tab(before.tab(), context.search.placement.choices);
+        if let Some(prompt) = before.prompt() {
+            owner.edit_prompt(prompt);
+        }
+        if before.command_resume_edited() {
+            owner.edit_command_resume(before.command_resume());
+        }
+    }
+
+    /// Recovery must come from the actual completed switch notice, retaining raw
+    /// and dormant values while excluding retry/preview authority. Every final
+    /// editing entry also rejects under the real same-turn operation claim.
+    #[farhelm_testtrace::test]
+    fn final_owner_gates_composites_and_restores_current_immutable_undo() {
+        let mut dom = VirtualDom::new(placement_fixture);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let f = PLACEMENT_FIXTURE.with(std::cell::Cell::get).unwrap();
+        let owner = f.system.ordinary.owner;
+        let mut c = FINAL_CONTEXT.with(std::cell::Cell::get).unwrap();
+        let mut key = owner.intent_key;
+        dom.in_runtime(|| {
+            let mut source = source_prefill();
+            source.repo = None;
+            source.title = "peer-name\u{202e}".into();
+            owner.reconcile_source(Some(&source), false, &[], c.source);
+            choose_fixture_harness(owner, LaunchHarness::Codex);
+            owner.choose_permissions(Some(LaunchPermission::Guarded), f.targets.choices);
+            owner.choose_command_agent(Some(LaunchHarness::Claude));
+            owner.choose_command_resume(true);
+            let mut recent = placement_recent(&source.cwd);
+            recent.selection.model = Some("private-model\u{202e}".into());
+            recent.selection.permissions = Some(LaunchPermission::Guarded);
+            assert!(owner.accept_recent(
+                recent,
+                &[],
+                Some(CreateTarget::new(1, "install-a".into())),
+                None,
+                f.targets,
+                c.source.permission_escalation,
+                c.source.composer_reset_reason
+            ));
+            owner.edit_permission_flags("'unfinished dormant flags".into());
+            owner.edit_wrapper("nice 'two words'".into());
+            owner.edit_prompt("raw prompt\nsecond".into());
+            owner.edit_conversation("conversation".into());
+            c.search
+                .recovery
+                .model_draft
+                .set("candidate before capture".into());
+            c.search
+                .recovery
+                .model_draft_error
+                .set(Some("candidate error".into()));
+            c.search
+                .recovery
+                .composer_reset_reason
+                .set(Some("old reset".into()));
+            c.search
+                .recovery
+                .remembered_destination
+                .set(Some(CreateTarget::new(1, "install-a".into())));
+            let mut host = owner.chosen_host;
+            host.set(Some(1));
+            c.search
+                .recovery
+                .clone_host_state
+                .set(CloneHostState::Bound);
+            let before = owner.snapshot();
+            assert_ne!(before.cwd(), before.submitted_cwd());
+            assert!(!before.command_resume_edited());
+            assert!(!before.model_edited());
+            assert_eq!(
+                before.model_raw_seed(),
+                Some("private-model\u{202e}".into())
+            );
+            let pair = Some(("before-switch".into(), request(&before)));
+            key.set(pair.clone());
+            c.retained.set(Some((
+                pair.as_ref().unwrap().1.clone(),
+                crate::github_checkout::GithubAttempt::new(
+                    "retained".into(),
+                    serde_json::json!({"frozen": "body"}),
+                    "install-a".into(),
+                ),
+            )));
+            let retained = c.retained.peek().clone();
+            let mut ops = owner.ops;
+            let guard = ops.claim_guard().unwrap();
+            assert!(
+                owner
+                    .choose_harness(
+                        LaunchHarness::Pi,
+                        None,
+                        c.preferences,
+                        f.targets.choices,
+                        c.search.recovery
+                    )
+                    .is_none()
+            );
+            assert!(
+                owner
+                    .choose_catalog_model(
+                        "other".into(),
+                        LaunchHarness::Pi,
+                        None,
+                        c.preferences,
+                        f.targets.choices,
+                        c.search.recovery
+                    )
+                    .is_none()
+            );
+            assert!(!owner.choose_default_model(f.targets.choices, c.model));
+            assert!(!owner.choose_custom_model(
+                "custom".into(),
+                LaunchHarness::Codex,
+                None,
+                f.targets.choices,
+                c.model
+            ));
+            assert!(!owner.report_model_harness_required(c.model.error));
+            assert!(!owner.reset_choices(
+                c.preferences,
+                f.targets.choices,
+                c.model.reset_reason,
+                f.repository.search,
+                f.repository.search_open
+            ));
+            assert!(
+                owner
+                    .accept_search_result(
+                        crate::launch_composer::ComposerSearchResult::Name("blocked".into()),
+                        None,
+                        false,
+                        SearchInputs {
+                            templates: &[],
+                            hosts: &[],
+                            catalog: None,
+                            host_fixed: false,
+                            history_target: None,
+                            preferences: c.preferences
+                        },
+                        c.search
+                    )
+                    .is_none()
+            );
+            let blocked = farhelm_proto::launcher::LaunchTemplate {
+                name: "blocked".into(),
+                fields: farhelm_proto::launcher::TemplateFields {
+                    name: Some("blocked".into()),
+                    ..Default::default()
+                },
+            };
+            assert!(
+                owner
+                    .accept_search_result(
+                        crate::launch_composer::ComposerSearchResult::Template("blocked".into()),
+                        Some(&blocked),
+                        false,
+                        SearchInputs {
+                            templates: &[],
+                            hosts: &[],
+                            catalog: None,
+                            host_fixed: false,
+                            history_target: None,
+                            preferences: c.preferences
+                        },
+                        c.search
+                    )
+                    .is_none()
+            );
+            assert_eq!(owner.snapshot(), before);
+            assert_eq!(*key.peek(), pair);
+            assert_eq!(
+                c.search.recovery.model_draft.peek().as_str(),
+                "candidate before capture"
+            );
+            drop(guard);
+            let captured = owner
+                .choose_harness(
+                    LaunchHarness::Pi,
+                    None,
+                    c.preferences,
+                    f.targets.choices,
+                    c.search.recovery,
+                )
+                .unwrap();
+            assert_eq!(captured.undo.draft, before);
+            assert_eq!(captured.undo.model_draft, "candidate before capture");
+            assert_eq!(
+                captured.undo.model_draft_error.as_deref(),
+                Some("candidate error")
+            );
+            assert!(
+                key.peek().is_none(),
+                "settled before the completed observer"
+            );
+            super::super::note_completed_permission_switch(
+                owner,
+                captured,
+                true,
+                c.source.permission_escalation,
+                c.notice_generation,
+                c.opening,
+            );
+            let notice = c
+                .source
+                .permission_escalation
+                .peek()
+                .clone()
+                .expect("real automatic Guarded to Pi increase creates recovery");
+            assert_eq!(notice.undo.draft, before);
+            assert_eq!(notice.undo.chosen_host, Some(1));
+            assert_eq!(notice.undo.clone_host_state, CloneHostState::Bound);
+            let after = owner.snapshot();
+            key.set(Some(("after-switch".into(), request(&after))));
+            let after_pair = key.peek().clone();
+            c.opening.set(2);
+            assert!(!owner.undo_permission_switch(
+                notice.generation,
+                c.search.recovery,
+                c.source.permission_escalation,
+                c.opening,
+                f.targets
+            ));
+            c.opening.set(1);
+            assert!(!owner.undo_permission_switch(
+                notice.generation + 1,
+                c.search.recovery,
+                c.source.permission_escalation,
+                c.opening,
+                f.targets
+            ));
+            let guard = ops.claim_guard().unwrap();
+            assert!(!owner.undo_permission_switch(
+                notice.generation,
+                c.search.recovery,
+                c.source.permission_escalation,
+                c.opening,
+                f.targets
+            ));
+            assert_eq!(owner.snapshot(), after);
+            assert_eq!(*key.peek(), after_pair);
+            drop(guard);
+            c.search.recovery.model_draft.set("later candidate".into());
+            let mut host = owner.chosen_host;
+            host.set(Some(9));
+            c.search
+                .recovery
+                .clone_host_state
+                .set(CloneHostState::UserTookOver);
+            c.search.recovery.remembered_destination.set(None);
+            let live = f.targets.live_destination.peek().clone();
+            let browse_generation = *f.targets.browse_generation.peek();
+            let revision = *f.targets.preview_revision.peek();
+            assert!(owner.undo_permission_switch(
+                notice.generation,
+                c.search.recovery,
+                c.source.permission_escalation,
+                c.opening,
+                f.targets
+            ));
+            assert_eq!(
+                owner.snapshot(),
+                before,
+                "Undo restores all raw/dormant fields as one value"
+            );
+            assert_eq!(*owner.chosen_host.peek(), Some(1));
+            assert_eq!(
+                *c.search.recovery.clone_host_state.peek(),
+                CloneHostState::Bound
+            );
+            assert_eq!(
+                *c.search.recovery.remembered_destination.peek(),
+                notice.undo.remembered_destination
+            );
+            assert_eq!(
+                c.search.recovery.model_draft.peek().as_str(),
+                "candidate before capture"
+            );
+            assert_eq!(
+                c.search.recovery.model_draft_error.peek().as_deref(),
+                Some("candidate error")
+            );
+            assert_eq!(
+                *f.targets.live_destination.peek(),
+                live,
+                "Undo does not synchronously restore this fence"
+            );
+            assert_eq!(*f.targets.browse_generation.peek(), browse_generation + 1);
+            assert_eq!(*f.targets.preview_revision.peek(), revision + 1);
+            assert!(key.peek().is_none());
+            assert!(c.source.permission_escalation.peek().is_none());
+            assert_eq!(*c.retained.peek(), retained);
+            assert!(!owner.undo_permission_switch(
+                notice.generation,
+                c.search.recovery,
+                c.source.permission_escalation,
+                c.opening,
+                f.targets
+            ));
+            let captured = owner
+                .choose_catalog_model(
+                    "pi-model".into(),
+                    LaunchHarness::Pi,
+                    None,
+                    c.preferences,
+                    f.targets.choices,
+                    c.search.recovery,
+                )
+                .unwrap();
+            assert_eq!(captured.undo.model_draft, "candidate before capture");
+            super::super::note_completed_permission_switch(
+                owner,
+                captured,
+                true,
+                c.source.permission_escalation,
+                c.notice_generation,
+                c.opening,
+            );
+            c.model.complete();
+            let catalog_notice = c
+                .source
+                .permission_escalation
+                .peek()
+                .clone()
+                .expect("cross-agent catalog pick observes completed increase");
+            assert_eq!(
+                catalog_notice.undo.model_draft_error.as_deref(),
+                Some("candidate error")
+            );
+            assert!(owner.undo_permission_switch(
+                catalog_notice.generation,
+                c.search.recovery,
+                c.source.permission_escalation,
+                c.opening,
+                f.targets
+            ));
+            // Equal model/default cleanup and NeedsHarness are different fixed
+            // operations: only the latter eagerly ends an unchanged pair.
+            owner.choose_default_model(f.targets.choices, c.model);
+            let pair = Some(("default".into(), request(&owner.snapshot())));
+            key.set(pair.clone());
+            c.model.draft.set("discard".into());
+            c.model.error.set(Some("discard".into()));
+            c.model.open.set(true);
+            assert!(owner.choose_default_model(f.targets.choices, c.model));
+            assert_eq!(*key.peek(), pair);
+            assert_eq!(c.model.draft.peek().as_str(), "");
+            assert!(c.model.error.peek().is_none() && !*c.model.open.peek());
+            assert!(owner.choose_custom_model(
+                "same-custom".into(),
+                LaunchHarness::Codex,
+                None,
+                f.targets.choices,
+                c.model
+            ));
+            let custom_pair = Some(("custom".into(), request(&owner.snapshot())));
+            key.set(custom_pair.clone());
+            c.model.draft.set("discard equal custom".into());
+            assert!(owner.choose_custom_model(
+                "same-custom".into(),
+                LaunchHarness::Codex,
+                None,
+                f.targets.choices,
+                c.model
+            ));
+            assert_eq!(*key.peek(), custom_pair);
+            assert_eq!(c.model.draft.peek().as_str(), "");
+            assert!(owner.report_model_harness_required(c.model.error));
+            assert!(key.peek().is_none());
+            c.preferences
+                .0
+                .with_mut(|p| p.remembered_permissions = Some("chat".into()));
+            let command = owner.snapshot().invocation();
+            let prompt = owner.snapshot().prompt();
+            assert!(owner.reset_choices(
+                c.preferences,
+                f.targets.choices,
+                c.model.reset_reason,
+                f.repository.search,
+                f.repository.search_open
+            ));
+            assert_eq!(owner.snapshot().permissions(), Some(LaunchPermission::Chat));
+            assert_eq!(owner.snapshot().permission_flags(), "");
+            assert_eq!(owner.snapshot().invocation(), command);
+            assert_eq!(owner.snapshot().prompt(), prompt);
+            assert_eq!(owner.snapshot().conversation(), "conversation");
+        });
+    }
+
+    /// Whole templates preserve even mismatched pairs; validation refuses before
+    /// semantic publication while retaining its admitted browse/history preamble.
+    /// Search BrowsePath equality must still request the raw directory afterward.
+    #[farhelm_testtrace::test]
+    fn final_owner_replays_templates_with_fixed_pair_and_partial_prompt_contracts() {
+        let mut dom = VirtualDom::new(placement_fixture);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let f = PLACEMENT_FIXTURE.with(std::cell::Cell::get).unwrap();
+        let owner = f.system.ordinary.owner;
+        let c = FINAL_CONTEXT.with(std::cell::Cell::get).unwrap();
+        let mut key = owner.intent_key;
+        dom.in_runtime(|| {
+            apply_fields(
+                owner,
+                farhelm_proto::launcher::TemplateFields {
+                    prompt: Some(String::new()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(owner.snapshot().harness(), None);
+            assert_eq!(owner.snapshot().prompt(), Some(String::new()));
+            apply_fields(
+                owner,
+                farhelm_proto::launcher::TemplateFields {
+                    agent: Some(LaunchHarness::Codex),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                request(&owner.snapshot()).prompt,
+                Some(String::new()),
+                "a later template supplies the agent without losing empty presence"
+            );
+            let pair = Some(("deliberately-old".into(), request(&owner.snapshot())));
+            key.set(pair.clone());
+            apply_fields(
+                owner,
+                farhelm_proto::launcher::TemplateFields {
+                    name: Some("changed".into()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                *key.peek(),
+                pair,
+                "changed completed template keeps mismatched old binding"
+            );
+            apply_fields(
+                owner,
+                farhelm_proto::launcher::TemplateFields {
+                    name: Some("".into()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(*key.peek(), pair);
+            apply_fields(
+                owner,
+                farhelm_proto::launcher::TemplateFields {
+                    prompt: Some(String::new()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(owner.snapshot().prompt(), Some(String::new()));
+            assert_eq!(request(&owner.snapshot()).prompt, Some(String::new()));
+            let before = owner.snapshot();
+            let generation = *f.targets.browse_generation.peek();
+            let template = farhelm_proto::launcher::LaunchTemplate {
+                name: "invalid".into(),
+                fields: farhelm_proto::launcher::TemplateFields {
+                    kind: Some(farhelm_proto::launcher::LauncherKind::Command),
+                    model: Some(Some("inapplicable".into())),
+                    ..Default::default()
+                },
+            };
+            let accepted = owner
+                .accept_search_result(
+                    crate::launch_composer::ComposerSearchResult::Template("invalid".into()),
+                    Some(&template),
+                    false,
+                    SearchInputs {
+                        templates: &[],
+                        hosts: &[],
+                        catalog: Some(&[]),
+                        host_fixed: false,
+                        history_target: None,
+                        preferences: c.preferences,
+                    },
+                    c.search,
+                )
+                .unwrap();
+            assert!(accepted.is_template);
+            assert!(c.search.template_error.peek().is_some());
+            assert_eq!(owner.snapshot(), before);
+            assert_eq!(*key.peek(), pair);
+            assert_eq!(*f.targets.browse_generation.peek(), generation + 1);
+            let path = owner.snapshot().submitted_cwd();
+            let accepted = owner
+                .accept_search_result(
+                    crate::launch_composer::ComposerSearchResult::BrowsePath(path.clone()),
+                    None,
+                    false,
+                    SearchInputs {
+                        templates: &[],
+                        hosts: &[],
+                        catalog: None,
+                        host_fixed: false,
+                        history_target: None,
+                        preferences: c.preferences,
+                    },
+                    c.search,
+                )
+                .unwrap();
+            assert_eq!(accepted.browse_path, Some(path));
+            assert_eq!(*key.peek(), pair);
+            let before = owner.snapshot();
+            let revision = *f.targets.preview_revision.peek();
+            apply_fields(
+                owner,
+                farhelm_proto::launcher::TemplateFields {
+                    name: Some("base".into()),
+                    name_kind: Some(farhelm_proto::launcher::TemplateNameKind::Fixed),
+                    ..Default::default()
+                },
+            );
+            apply_fields(
+                owner,
+                farhelm_proto::launcher::TemplateFields {
+                    name: Some("base".into()),
+                    name_kind: Some(farhelm_proto::launcher::TemplateNameKind::Base),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(*f.targets.preview_revision.peek(), revision + 2);
+            assert_eq!(*key.peek(), pair);
+            assert_eq!(owner.snapshot().prompt(), before.prompt());
+            let explicit = farhelm_proto::launcher::LaunchTemplate {
+                name: "explicit".into(),
+                fields: farhelm_proto::launcher::TemplateFields {
+                    agent: Some(LaunchHarness::Pi),
+                    permissions: Some(None),
+                    ..Default::default()
+                },
+            };
+            let accepted = owner
+                .accept_search_result(
+                    crate::launch_composer::ComposerSearchResult::Template("explicit".into()),
+                    Some(&explicit),
+                    false,
+                    SearchInputs {
+                        templates: &[],
+                        hosts: &[],
+                        catalog: Some(&[]),
+                        host_fixed: false,
+                        history_target: None,
+                        preferences: c.preferences,
+                    },
+                    c.search,
+                )
+                .unwrap();
+            assert!(c.search.template_error.peek().is_none());
+            assert!(!accepted.automatic_permission);
+            super::super::note_completed_permission_switch(
+                owner,
+                accepted.before,
+                accepted.automatic_permission,
+                c.source.permission_escalation,
+                c.notice_generation,
+                c.opening,
+            );
+            assert!(
+                c.source.permission_escalation.peek().is_none(),
+                "explicit final permission suppresses the intermediate automatic increase"
+            );
+            choose_fixture_harness(owner, LaunchHarness::Codex);
+            owner.edit_prompt("restore prompt".into());
+            let automatic = farhelm_proto::launcher::LaunchTemplate {
+                name: "automatic".into(),
+                fields: farhelm_proto::launcher::TemplateFields {
+                    agent: Some(LaunchHarness::Pi),
+                    ..Default::default()
+                },
+            };
+            key.set(pair.clone());
+            let accepted = owner
+                .accept_search_result(
+                    crate::launch_composer::ComposerSearchResult::Template("automatic".into()),
+                    Some(&automatic),
+                    false,
+                    SearchInputs {
+                        templates: &[],
+                        hosts: &[],
+                        catalog: Some(&[]),
+                        host_fixed: false,
+                        history_target: None,
+                        preferences: c.preferences,
+                    },
+                    c.search,
+                )
+                .unwrap();
+            assert!(accepted.automatic_permission);
+            assert_eq!(*key.peek(), pair);
+            super::super::note_completed_permission_switch(
+                owner,
+                accepted.before,
+                accepted.automatic_permission,
+                c.source.permission_escalation,
+                c.notice_generation,
+                c.opening,
+            );
+            assert!(
+                c.source.permission_escalation.peek().is_some(),
+                "automatic final increase has the real positive notice control"
+            );
+        });
+    }
+
+    /// Initial replay earns the original seven conditional field dependencies.
+    /// A real Harness acceptance establishes them; each named edit is a positive
+    /// control, while prompt/name edits prove no aggregate subscription leaked.
+    #[farhelm_testtrace::test]
+    fn final_owner_search_keeps_conditional_agent_subscriptions() {
+        std::thread_local! { static RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+        /// Constant captured input isolates dependencies earned by actual replay.
+        fn probe() -> Element {
+            let f = use_placement_fixture();
+            let c = FINAL_CONTEXT.with(std::cell::Cell::get).unwrap();
+            use_effect(move || {
+                RUNS.with(|count| count.set(count.get() + 1));
+                f.system
+                    .ordinary
+                    .owner
+                    .accept_search_result(
+                        crate::launch_composer::ComposerSearchResult::Harness(LaunchHarness::Codex),
+                        None,
+                        false,
+                        SearchInputs {
+                            templates: &[],
+                            hosts: &[],
+                            catalog: None,
+                            host_fixed: false,
+                            history_target: None,
+                            preferences: c.preferences,
+                        },
+                        c.search,
+                    )
+                    .unwrap();
+                f.system
+                    .ordinary
+                    .owner
+                    .accept_search_result(
+                        crate::launch_composer::ComposerSearchResult::Model {
+                            id: "fixture-model".into(),
+                            harness: LaunchHarness::Codex,
+                        },
+                        None,
+                        false,
+                        SearchInputs {
+                            templates: &[],
+                            hosts: &[],
+                            catalog: None,
+                            host_fixed: false,
+                            history_target: None,
+                            preferences: c.preferences,
+                        },
+                        c.search,
+                    )
+                    .unwrap();
+            });
+            rsx! {}
+        }
+        RUNS.with(|count| count.set(0));
+        let mut dom = VirtualDom::new(probe);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let f = PLACEMENT_FIXTURE.with(std::cell::Cell::get).unwrap();
+        let owner = f.system.ordinary.owner;
+        let c = FINAL_CONTEXT.with(std::cell::Cell::get).unwrap();
+        let initial = RUNS.with(std::cell::Cell::get);
+        assert!(initial >= 1);
+        assert_eq!(
+            dom.in_runtime(|| owner.snapshot().harness()),
+            Some(LaunchHarness::Codex)
+        );
+        dom.in_runtime(|| {
+            owner.edit_prompt("unrelated".into());
+            owner.edit_title("unrelated".into());
+        });
+        dom.process_events();
+        assert_eq!(RUNS.with(std::cell::Cell::get), initial);
+        let edits: [fn(LaunchDraftState, FinalContext); 7] = [
+            |o, c| {
+                o.choose_permissions(Some(LaunchPermission::Custom), c.search.placement.choices);
+            },
+            |o, _| {
+                o.edit_permission_flags("--other".into());
+            },
+            |o, _| {
+                o.edit_wrapper("wrapper".into());
+            },
+            |o, c| {
+                o.choose_harness(
+                    LaunchHarness::Claude,
+                    None,
+                    c.preferences,
+                    c.search.placement.choices,
+                    c.search.recovery,
+                );
+            },
+            |o, c| {
+                o.choose_custom_model(
+                    "private".into(),
+                    LaunchHarness::Codex,
+                    None,
+                    c.search.placement.choices,
+                    c.model,
+                );
+            },
+            |o, c| {
+                o.choose_effort(Some(LaunchEffort::High), c.search.placement.choices);
+            },
+            |o, c| {
+                o.reset_choices(
+                    c.preferences,
+                    c.search.placement.choices,
+                    c.model.reset_reason,
+                    Signal::new(String::new()),
+                    Signal::new(false),
+                );
+            },
+        ];
+        for edit in edits {
+            let before = RUNS.with(std::cell::Cell::get);
+            dom.in_scope(ScopeId::ROOT, || edit(owner, c));
+            dom.process_events();
+            assert!(
+                RUNS.with(std::cell::Cell::get) > before,
+                "named field remains a replay dependency"
+            );
+        }
+        dom.in_runtime(|| {
+            let before = owner.snapshot();
+            assert!(!before.permissions_explicit());
+            assert_eq!(before.permissions(), Some(LaunchPermission::Guarded));
+            // Search has already reconciled Codex's passive Guarded default.
+            // Reaccept that exact value so only explicitness can wake replay.
+            owner.choose_permissions(before.permissions(), c.search.placement.choices);
+            let mut expected = before;
+            expected.permissions_explicit = true;
+            assert_eq!(owner.snapshot(), expected, "only explicitness changed");
+        });
+        let before = RUNS.with(std::cell::Cell::get);
+        dom.process_events();
+        assert!(
+            RUNS.with(std::cell::Cell::get) > before,
+            "explicitness alone stays subscribed"
+        );
     }
 
     /// No render subscription can substitute for the operation's live gate.
@@ -2869,7 +4517,16 @@ mod tests {
                 generation: 1,
                 opening_generation: 1,
                 message: "old notice".into(),
-                restore: std::rc::Rc::new(|| {}),
+                undo: owner
+                    .capture_permission_switch(
+                        &owner.snapshot(),
+                        FINAL_CONTEXT
+                            .with(std::cell::Cell::get)
+                            .unwrap()
+                            .search
+                            .recovery,
+                    )
+                    .undo,
             }));
             key.set(Some(("before-source".into(), request(&owner.snapshot()))));
             assert_eq!(owner.snapshot().prompt().as_deref(), Some("old prompt"));
@@ -3233,12 +4890,14 @@ mod tests {
         );
         dom.in_runtime(|| drop(guard));
         dom.in_runtime(|| {
-            owner.edit(|draft| {
-                draft.apply_template_name(
-                    "fixed".into(),
-                    farhelm_proto::launcher::TemplateNameKind::Fixed,
-                )
-            })
+            apply_fields(
+                owner,
+                farhelm_proto::launcher::TemplateFields {
+                    name: Some("fixed".into()),
+                    name_kind: Some(farhelm_proto::launcher::TemplateNameKind::Fixed),
+                    ..Default::default()
+                },
+            )
         });
         dom.process_events();
         let fixed_baseline = PUBLICATIONS.with(std::cell::Cell::get);
@@ -3275,19 +4934,21 @@ mod tests {
         dom.in_runtime(|| {
             // Reach the cap through the existing pure engine, not a fixture
             // copy of its index/math. Detailed series expectations live below.
-            owner.edit(|draft| {
-                draft.apply_template_name(
-                    "base".into(),
-                    farhelm_proto::launcher::TemplateNameKind::Base,
-                );
-                for _ in 0..49 {
-                    assert!(draft.advance_naming(false));
-                }
-                assert!(
-                    !draft.advance_naming(false),
-                    "premise: real sequence is capped"
-                );
-            });
+            apply_fields(
+                owner,
+                farhelm_proto::launcher::TemplateFields {
+                    name: Some("base".into()),
+                    name_kind: Some(farhelm_proto::launcher::TemplateNameKind::Base),
+                    ..Default::default()
+                },
+            );
+            for _ in 0..49 {
+                assert!(advance_fixture_name(owner));
+            }
+            assert!(
+                !advance_fixture_name(owner),
+                "premise: real sequence is capped"
+            );
             key.set(Some(("capped".into(), request(&owner.snapshot()))));
         });
         dom.process_events();
@@ -3407,22 +5068,26 @@ mod tests {
         let OrdinaryFixture { owner, mut choices } =
             ORDINARY_FIXTURE.with(std::cell::Cell::get).unwrap();
         dom.in_runtime(|| {
-            // Harness/template/source setup remains unconverted. All
-            // measured ordinary actions below use concrete owner operations.
-            owner.edit(|draft| {
-                draft.choose_harness(
-                    LaunchHarness::Codex,
-                    None,
-                    String::new(),
-                    ChoiceOrigin::Control,
-                );
-                draft.apply_template_permissions(
-                    Some(LaunchPermission::Custom),
-                    "--mode 'ask me'".into(),
-                );
-                draft.edit_wrapper("nice 'two words'".into());
-                draft.seed_invocation("source\u{1b}");
-            });
+            seed_invocation_from_source(owner, "source\u{1b}");
+            apply_fields(
+                owner,
+                farhelm_proto::launcher::TemplateFields {
+                    kind: Some(farhelm_proto::launcher::LauncherKind::Agent),
+                    agent: Some(LaunchHarness::Codex),
+                    permissions: Some(Some(LaunchPermission::Custom)),
+                    permission_flags: Some(vec!["--mode".into(), "ask me".into()]),
+                    wrapper_prefix: Some(Some(vec!["nice".into(), "two words".into()])),
+                    ..Default::default()
+                },
+            );
+            choices.partial_template_hint.set(true);
+            choices.offered_history.set(Some((
+                CreateTarget::new(1, "install-a".into()),
+                api::LaunchHistory {
+                    checkout_config_revision: 1,
+                    ..Default::default()
+                },
+            )));
             let mut key = owner.intent_key;
             let pair = Some(("unresolved".into(), request(&owner.snapshot())));
             key.set(pair.clone());
@@ -3514,7 +5179,7 @@ mod tests {
         let OrdinaryFixture { owner, choices } =
             ORDINARY_FIXTURE.with(std::cell::Cell::get).unwrap();
         dom.in_runtime(|| {
-            owner.edit(|draft| draft.seed_invocation("c\u{1b}"));
+            seed_invocation_from_source(owner, "c\u{1b}");
             assert!(owner.choose_launch_tab(LaunchTab::Command, choices));
             assert!(owner.choose_command_yolo(true));
             let mut key = owner.intent_key;
@@ -3583,6 +5248,11 @@ mod tests {
             let chosen_host = use_signal(|| None);
             let owner = use_launch_draft(None, None, ops, key, chosen_host);
             let choices = use_choice_targets();
+            let source = use_source_targets(choices);
+            use_placement_handles(SystemFixture {
+                ordinary: OrdinaryFixture { owner, choices },
+                source,
+            });
             let mut claim = use_signal(|| None);
             let kick = use_signal(|| 0_u64);
             use_hook(move || {
@@ -4533,23 +6203,6 @@ mod tests {
         }
     }
 
-    /// Supply external authority/UI handles to the real template adapter.
-    /// The owner under test still supplies every moved field; reconstructing
-    /// those fields here would hide a stale-memo or hidden-resume regression.
-    /// Reuse its retry slot too, so ordinary edits and template restoration
-    /// cannot silently exercise unrelated fixture identities.
-    /// Call inside the DOM's root scope so it owns these temporary handles.
-    fn template_targets(draft: LaunchDraftState) -> super::super::TemplateTargets {
-        super::super::TemplateTargets {
-            draft,
-            composer_reset_reason: Signal::new(None),
-            chosen_host: draft.chosen_host,
-            preview_revision: Signal::new(0),
-            template_error: Signal::new(None),
-            intent_key: draft.intent_key,
-        }
-    }
-
     /// Preview completion is external observation. It must wake status readers
     /// without rewriting repository intent or subscribing unrelated agent fields
     /// to placement. Live snapshots must also beat memo scheduling within a turn.
@@ -4643,12 +6296,14 @@ mod tests {
                 placement.folder
             ));
             assert!(owner.select_repository(repo.clone(), placement.targets, placement.repository));
-            owner.edit(|draft| {
-                draft.apply_template_name(
-                    "review".into(),
-                    farhelm_proto::launcher::TemplateNameKind::Base,
-                );
-            });
+            apply_fields(
+                owner,
+                farhelm_proto::launcher::TemplateFields {
+                    name: Some("review".into()),
+                    name_kind: Some(farhelm_proto::launcher::TemplateNameKind::Base),
+                    ..Default::default()
+                },
+            );
             assert!(
                 !fields.destination_draft.peek().is_managed(),
                 "premise: destination memo has not settled"
@@ -4717,7 +6372,7 @@ mod tests {
                 );
             });
             let saved = dom.in_scope(ScopeId::ROOT, || {
-                super::super::launcher_snapshot(template_targets(owner), &[], None)
+                super::super::launcher_snapshot(&owner.snapshot(), &[], None)
             });
             assert_eq!(
                 saved.destination,
@@ -4779,12 +6434,14 @@ mod tests {
             "every preview state remains observable"
         );
         dom.in_runtime(|| {
-            owner.edit(|draft| {
-                draft.apply_template_name(
-                    "review".into(),
-                    farhelm_proto::launcher::TemplateNameKind::Fixed,
-                );
-            })
+            apply_fields(
+                owner,
+                farhelm_proto::launcher::TemplateFields {
+                    name: Some("review".into()),
+                    name_kind: Some(farhelm_proto::launcher::TemplateNameKind::Fixed),
+                    ..Default::default()
+                },
+            )
         });
         dom.process_events();
         assert_eq!(
@@ -4793,20 +6450,18 @@ mod tests {
             "same text with a changed naming policy stays observed"
         );
         dom.in_runtime(|| {
-            owner.edit(|draft| {
-                draft.apply_template_name(
-                    "review".into(),
-                    farhelm_proto::launcher::TemplateNameKind::Base,
-                );
-            })
+            apply_fields(
+                owner,
+                farhelm_proto::launcher::TemplateFields {
+                    name: Some("review".into()),
+                    name_kind: Some(farhelm_proto::launcher::TemplateNameKind::Base),
+                    ..Default::default()
+                },
+            )
         });
         dom.process_events();
         assert_eq!(NAME_RUNS.with(Cell::get), 4);
-        dom.in_runtime(|| {
-            owner.edit(|draft| {
-                assert!(draft.advance_naming(false));
-            })
-        });
+        dom.in_runtime(|| assert!(advance_fixture_name(owner)));
         dom.process_events();
         assert_eq!(
             NAME_RUNS.with(Cell::get),
@@ -4855,6 +6510,11 @@ mod tests {
             let chosen_host = use_signal(|| None);
             let owner = use_launch_draft(None, None, ops, key, chosen_host);
             let choices = use_choice_targets();
+            let source = use_source_targets(choices);
+            use_placement_handles(SystemFixture {
+                ordinary: OrdinaryFixture { owner, choices },
+                source,
+            });
             let fields = owner.fields();
             use_effect(move || {
                 let _ = (
@@ -4900,14 +6560,7 @@ mod tests {
         assert_eq!(RENDERS.with(Cell::get), 1);
 
         dom.in_runtime(|| {
-            owner.edit(|draft| {
-                draft.choose_harness(
-                    LaunchHarness::Codex,
-                    None,
-                    String::new(),
-                    ChoiceOrigin::Control,
-                );
-            });
+            choose_fixture_harness(owner, LaunchHarness::Codex);
             assert_eq!(
                 *fields.structured_harness.peek(),
                 None,
@@ -4945,9 +6598,14 @@ mod tests {
         );
 
         dom.in_runtime(|| {
-            owner.edit(|draft| {
-                draft.choose_custom_model("private-model".into(), LaunchHarness::Codex, None);
-            });
+            let context = FINAL_CONTEXT.with(std::cell::Cell::get).unwrap();
+            owner.choose_custom_model(
+                "private-model".into(),
+                LaunchHarness::Codex,
+                None,
+                choices,
+                context.model,
+            );
         });
         dom.process_events();
         assert_eq!(EFFECT_RUNS.with(Cell::get), 4, "model remains observed");
@@ -4996,7 +6654,7 @@ mod tests {
             owner.choose_command_agent(None);
             assert_eq!(command(&owner.snapshot()).resume, None);
             let saved = dom.in_scope(ScopeId::ROOT, || {
-                super::super::launcher_snapshot(template_targets(owner), &[], None)
+                super::super::launcher_snapshot(&owner.snapshot(), &[], None)
             });
             assert_eq!(saved.command_agent, None);
             assert_eq!(
@@ -5007,7 +6665,7 @@ mod tests {
                 }),
                 "templates retain opted-in Resume even when its declaration is hidden"
             );
-            owner.edit(|draft| draft.restore(before));
+            owner.choose_command_agent(before.command_agent());
         });
         dom.process_events();
         assert_eq!(EFFECT_RUNS.with(Cell::get), 8);
@@ -5075,10 +6733,8 @@ mod tests {
         }
 
         dom.in_runtime(|| {
-            owner.edit(|draft| {
-                draft.choose_tab(LaunchTab::Command);
-                draft.seed_invocation("c\u{1b}");
-            });
+            owner.choose_launch_tab(LaunchTab::Command, choices);
+            seed_invocation_from_source(owner, "c\u{1b}");
         });
         dom.process_events();
         let runs_before_raw_reseed = EFFECT_RUNS.with(Cell::get);
@@ -5090,7 +6746,7 @@ mod tests {
                 display,
                 "premise: the first seed needs escaping"
             );
-            owner.edit(|draft| draft.seed_invocation(&display));
+            seed_invocation_from_source(owner, &display);
             assert_eq!(fields.invocation.peek().as_str(), display);
             assert!(!*fields.invocation_edited.peek());
             assert_eq!(
@@ -5099,7 +6755,7 @@ mod tests {
                 "a raw-only reseed is visible without waiting for a changed display memo"
             );
             let saved = dom.in_scope(ScopeId::ROOT, || {
-                super::super::launcher_snapshot(template_targets(owner), &[], None)
+                super::super::launcher_snapshot(&owner.snapshot(), &[], None)
             });
             assert_eq!(
                 saved.command, display,
@@ -5120,17 +6776,22 @@ mod tests {
                 "premise: placement memos still hold the initial folder"
             );
             assert_eq!(fields.title.peek().as_str(), "");
-            owner.edit(|draft| {
-                draft.choose_harness(
-                    LaunchHarness::Claude,
-                    None,
-                    String::new(),
-                    ChoiceOrigin::Control,
-                );
-                draft.choose_tab(LaunchTab::Agent);
-                draft.seed_folder("/work/current\u{202e}");
-                draft.seed_title("current-name\u{202e}", None);
-            });
+            let context = FINAL_CONTEXT.with(std::cell::Cell::get).unwrap();
+            let mut source = source_prefill();
+            source.generation = context.source.prefill_applied.peek().unwrap_or(0) + 1;
+            let mut selection = LaunchDraft::new(None);
+            selection.choose_harness(
+                LaunchHarness::Claude,
+                None,
+                String::new(),
+                ChoiceOrigin::Control,
+            );
+            source.launch = selection.structured_selection();
+            source.command = None;
+            source.repo = None;
+            source.cwd = "/work/current\u{202e}".into();
+            source.title = "current-name\u{202e}".into();
+            owner.reconcile_source(Some(&source), false, &[], context.source);
             owner.edit_prompt("same-turn prompt".into());
             owner.edit_conversation("same-turn-conversation".into());
             assert_eq!(fields.cwd.peek().as_str(), "~");

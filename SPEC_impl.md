@@ -5236,11 +5236,11 @@ kind counts: Agent needs an agent, Command a nonblank command, and omitted kind 
 The same dispatch serializes fresh reads when shortcuts arrive in a visible New, Clone or Replace with launcher. Each
 press or completed sequence becomes its own captured batch in a form-owned FIFO, fenced by the opening generation and
 the shared modal context and epoch. The form validates the whole batch against one draft snapshot, then replays its
-templates synchronously through the same search acceptance and `template_edits` path. A refusal drops only that batch
-before it changes the draft, leaving later presses queued. Shortcut batches do not enter the opening replay's loading or
-auto-submit predicates, and their acceptance keeps the query and focus in place. If a template unmounts the focused
-control, a deferred check restores the launcher's normal search target only while that same launcher is still the sole
-visible modal. Busy launch and template-save states consume and drop a press.
+templates synchronously through the draft owner's search acceptance operation and private template replay. A refusal
+drops only that batch before it changes the draft, leaving later presses queued. Shortcut batches do not enter the
+opening replay's loading or auto-submit predicates, and their acceptance keeps the query and focus in place. If a
+template unmounts the focused control, a deferred check restores the launcher's normal search target only while that
+same launcher is still the sole visible modal. Busy launch and template-save states consume and drop a press.
 
 The shared template-shortcut asset owns the synchronous armed flag, a pure key classifier and the context rule. Rust
 holds the ordered references in app-owned transient context; the sidebar's hidden relays mutate that signal
