@@ -51,6 +51,32 @@ impl DialogHandle {
         document::eval(&crate::modal_isolation::release_js(self.selector));
     }
 
+    /// Release isolation and wait for this captured root to leave the document.
+    ///
+    /// A terminal's focus veto also checks modal DOM, so releasing inert alone
+    /// cannot complete a navigation handoff. The surviving owner must await
+    /// this operation from its own task after requesting the closing render;
+    /// a dialog-owned task would be cancelled by the removal it waits for.
+    /// Release and node capture share one eval, and removal is observed on
+    /// that exact node rather than inferred from a frame or a later selector.
+    /// As with the existing handoff, an eval failure does not block the owner.
+    pub(crate) async fn close_and_wait(self) {
+        let selector = serde_json::to_string(self.selector).expect("a string always serializes");
+        let js = format!(
+            r#"{}
+        const dialog = document.querySelector({selector});
+        if (dialog) await new Promise(resolve => {{
+            const observer = new MutationObserver(() => {{
+                if (!dialog.isConnected) {{ observer.disconnect(); resolve(); }}
+            }});
+            observer.observe(document.body, {{ childList: true, subtree: true }});
+        }});
+        return true;"#,
+            crate::modal_isolation::release_js(self.selector)
+        );
+        let _ = document::eval(&js).join::<bool>().await;
+    }
+
     /// Resume a mounted parent's isolation without repeating its initial focus.
     ///
     /// Nested help and consent return to parents whose gap handlers and focus
@@ -64,6 +90,39 @@ impl DialogHandle {
     /// Install the opening's focus policy without repeating it on rerenders.
     fn install(self, focus: &DialogFocus) {
         install_focus(self.selector, focus);
+    }
+}
+
+/// An opener captured before a modal takes focus, consumed after admission.
+///
+/// The caller owns capture and the decision whether this close owes a return.
+/// A successful navigation can give focus to a new terminal or another modal;
+/// spending the old capture still matters when no restoration is owed.
+#[derive(Clone, Copy)]
+pub(crate) struct SavedFocus {
+    window_key: &'static str,
+}
+
+impl SavedFocus {
+    /// Address the existing window slot without capturing or moving focus.
+    pub(crate) const fn new(window_key: &'static str) -> Self {
+        Self { window_key }
+    }
+
+    /// Consume the opener now and focus it only when this close owes a return.
+    ///
+    /// Call after isolation release and the caller's navigation decision.
+    /// Consumption is unconditional, including a detached or unused opener;
+    /// missing destinations have no fallback and no delayed return is queued.
+    pub(crate) fn restore(self, restore: bool) {
+        let key = serde_json::to_string(self.window_key).expect("a string always serializes");
+        document::eval(&format!(
+            r#"
+        const previous = window[{key}];
+        delete window[{key}];
+        if ({restore} && previous?.isConnected) previous.focus({{ preventScroll: true }});
+    "#
+        ));
     }
 }
 
@@ -167,14 +226,14 @@ fn trap_js(dialog: &str, trap: TabTrap, initial_focus: &str) -> String {
     )
 }
 
-/// Install the shared boundary from a shell or an as-yet-unconverted host root.
+/// Install the shell's opening policy in its existing eval order.
 ///
 /// Initial focus precedes isolation, which otherwise blurs an inerted opener.
 /// Remembered dialogs keep their existing two eval submissions: focus and
 /// isolation first, gap/Enter second. Direct trapped dialogs keep gap/Enter
 /// before isolation in one eval. These are mount contracts, not effects that
 /// should run again whenever a dialog's state changes.
-pub(crate) fn install_focus(dialog_selector: &str, focus: &DialogFocus) {
+fn install_focus(dialog_selector: &str, focus: &DialogFocus) {
     let dialog = serde_json::to_string(dialog_selector).expect("a string always serializes");
     let setup = match &focus.initial_focus {
         InitialFocus::Target(selector) => {
@@ -321,6 +380,8 @@ pub(crate) enum DialogRoot {
 /// work such as Settings' delayed trust-section scroll, not a second installer.
 /// Movement callbacks attach to this same root only when supplied, so dialogs
 /// without resize behavior do not acquire an otherwise unused resize observer.
+/// Click handling likewise stays on the root when a caller separates its
+/// controls from a dismissible backdrop; absent handlers remain absent.
 /// An optional second focus target preserves setup's existing root-first
 /// isolation, then quiet confirmation handoff, before domain mounted work.
 /// A nested consent may first release its still-mounted parent; this remains
@@ -338,6 +399,7 @@ pub(crate) fn ModalDialog(
     #[props(default)] onscroll: Option<EventHandler<ScrollEvent>>,
     #[props(default)] onresize: Option<EventHandler<ResizeEvent>>,
     #[props(default)] onsubmit: Option<EventHandler<FormEvent>>,
+    #[props(default)] onclick: Option<EventHandler<MouseEvent>>,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
@@ -365,8 +427,8 @@ pub(crate) fn ModalDialog(
         }),
     ];
     root_attributes.extend(attributes);
-    // GlobalAttributes forwards presentation attributes, but native movement
-    // and submit events need explicit props. Absent listeners remain absent.
+    // GlobalAttributes forwards presentation attributes, but native events
+    // need explicit props. Absent listeners remain absent.
     if let Some(onscroll) = onscroll {
         root_attributes.push(dioxus::html::onscroll(move |event: ScrollEvent| {
             onscroll.call(event);
@@ -380,6 +442,11 @@ pub(crate) fn ModalDialog(
     if let Some(onsubmit) = onsubmit {
         root_attributes.push(dioxus::html::onsubmit(move |event: FormEvent| {
             onsubmit.call(event);
+        }));
+    }
+    if let Some(onclick) = onclick {
+        root_attributes.push(dioxus::html::onclick(move |event: MouseEvent| {
+            onclick.call(event);
         }));
     }
     match root {

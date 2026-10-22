@@ -3475,7 +3475,7 @@ pub(crate) fn ListView(
         // Spawn in this parent's scope: a task owned by the closing dialog
         // would be cancelled by the very unmount it must wait for.
         spawn(async move {
-            super::quick_switcher::finish_close().await;
+            super::quick_switcher::DIALOG.close_and_wait().await;
             let mut restore = true;
             match pick {
                 Some(super::quick_switcher::SwitcherPick::Session(session)) => {
@@ -3511,7 +3511,10 @@ pub(crate) fn ListView(
                 }
                 None => {}
             }
-            super::quick_switcher::restore_focus(restore);
+            // Cancellation, refusal and the current session owe the opener
+            // focus. An accepted handoff owns its next focus instead, but
+            // still consumes the capture before either trigger can reopen.
+            super::quick_switcher::OPENER.restore(restore);
             quick_switcher_closing.set(false);
         });
     });

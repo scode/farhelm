@@ -143,53 +143,6 @@ pub(crate) fn focus_remove_refusal() {
     );
 }
 
-/// Install focus isolation and container keyboard behavior for a dialog.
-///
-/// QuickSwitcher still mounts through this bridge while its root awaits
-/// conversion. Keeping its cancel selector explicit prevents the document-level
-/// Escape fallback from silently swallowing Escape when focus has escaped.
-/// A main action is separate from initial focus: destructive dialogs can open
-/// on Cancel yet still let container Enter press their visible confirmation.
-pub(crate) fn install_dialog_with_selector(
-    dialog_selector: &str,
-    initial_focus: &str,
-    escape_selector: Option<&str>,
-    main_action_selector: Option<&str>,
-) {
-    install_dialog_with_focus(
-        dialog_selector,
-        initial_focus,
-        escape_selector,
-        false,
-        main_action_selector,
-    );
-}
-
-/// Set initial focus and the optional main action without coupling them.
-///
-/// QuickSwitcher still using this bridge shares the shell's remembered focus
-/// policy, including its independent search and Escape targets.
-/// If the container gets focus later, Enter clicks the caller's main button;
-/// a disabled button retains its native refusal.
-pub(crate) fn install_dialog_with_focus(
-    dialog_selector: &str,
-    initial_focus: &str,
-    escape_selector: Option<&str>,
-    quiet_initial_focus: bool,
-    main_action_selector: Option<&str>,
-) {
-    // The remaining QuickSwitcher root uses the same installation as the shell,
-    // including focus memory and its two-eval order. Its later conversion can
-    // change the root owner without leaving another copy of the focus rules.
-    let focus = crate::modal_dialog::DialogFocus::remembered(
-        initial_focus,
-        escape_selector,
-        quiet_initial_focus,
-        main_action_selector,
-    );
-    crate::modal_dialog::install_focus(dialog_selector, &focus);
-}
-
 /// Put focus back inside the dialog after a write ends, if the write lost it.
 ///
 /// A control that is disabled while a write runs drops focus to `body` (see
