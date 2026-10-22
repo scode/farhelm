@@ -6,6 +6,110 @@ This is the exclusive starting point for the next trailing code review of `main`
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
 
+## Incomplete review toward 2ea2826c
+
+Pinned range: `5c6e49937b1e779be2a5445059637aadf3757356..2ea2826caa0eec867c4e2bddc01badbac7bbe6c7`, 258 commits. The
+review is **incomplete**. `Last reviewed commit` remains unchanged; neither this result nor merging it advances the
+checkpoint.
+
+The first 216 commits reuse run `a7b93df6-ca17-4bff-8608-f443575ae5e6`'s immutable patch inventory and completed
+synthesis/discovery evidence. Every one of its 983 patch parts was compared with the pinned Git history, and all 162
+mandatory delivery audits were rerun successfully. This is explicit evidence reuse, not a claim that 154 completed
+reviewers performed new searches. Eight incomplete reviewers continued on their original identities in the new run.
+
+The additional 42 commits have 238 patch parts assigned to 34 new bounded functional groups. Across both inventories,
+all 1,221 individual commit/file patch parts are assigned exactly once, including deleted and intermediate changes.
+Mandatory manifests remain within 2,000 lines and 64 KiB per group; the regex continuation's combined original/runtime
+inventory is 921 lines and 42,479 bytes. Surrounding source and coverage sections were read selectively, not
+exhaustively across the repository.
+
+Two old investigations now complete. The numeric-token reviewer received isolated measurements from Chromium 156 and
+WebKit 27.2, establishing a bounded synthetic slowdown rather than an unverified engine premise. The start-command
+reviewer established a concrete wrong-directory migration chain: another inactive schema-30 installation can be migrated
+to 31 and then refused by its original program. The second installation and path pairing are conditional deployment
+inputs, not missing source behavior. Both original records are extended, and both original reviewer identities completed
+later synthesis and a separate empty discovery pass. Neither extension establishes a reproduced security exploit or
+physical session-data loss.
+
+Six old reviewer identities still stop on four unresolved concerns:
+
+- `g044` and `g125`: no complete shipped route establishes or excludes delivery of an older trusted header answer across
+  cancellation and reopening. Matching framework source and lifecycle checks refute narrower routes but do not settle
+  the whole input sequence.
+- `g046` and `g151`: a mounted launcher's captured replacement source is established, but ordinary input superseding
+  that source before an old answer arrives remains unestablished. Modal and shortcut checks obstruct the naive route.
+- `g138`: ambiguous repository labels are established; harmful human selection despite separate operation identity
+  remains a missing causal premise.
+- `g139`: the changed-host warning loses distinguishing information; consequential reliance on that warning remains a
+  missing causal premise.
+
+These groups have complete mandatory delivery. Their gap is substantive source or causal evidence, not skipped patches
+or merely unmeasured frequency. Repeating nominal empty passes would not resolve it, so they stop under the persistent
+review's stuck-investigation rule. Their existing queue records remain open. No unresolved concern is silently declared
+fixed, accepted or harmless.
+
+The result retains eleven new items: four provisionally highest, two conditional high and five other. These are triage
+records, not eleven reproduced bugs. Three highest records concern ordinary ready-folder replacement gaining claim
+cleanup authority, cleanup deleting an already detected building-folder replacement, and a home-alias uninstall plan
+losing retained-state containment. The first has a source-established ordinary replacement sequence; the second
+preserves an unestablished ordinary-use actor and a namespace-authority contract ambiguity; the third is a conditional
+counterexample to a plan, not a claim about its later implementation PR. The fourth is an adjacent pre-existing race in
+which a stale create retry's refusal can delete a concurrently restarted session. It was already present at the
+exclusive base; the later launch-file cleanup patch is not claimed to introduce or worsen it. It remains recorded rather
+than dropped on a unilateral attribution judgment.
+
+One high record concerns deliberately forged pane facts hiding an active preparation from startup cleanup. Direct
+private-tmux interference is explicitly unsupported; an independent auditor could not reconcile that acceptance with the
+separate uncertain-claim protection. No accidental producer, security consequence or existing-user-work loss was
+established. The other high record concerns a cancelled blocking startup sweep outliving state-directory ownership, then
+using an old claim sample against a successor's new preparation. A second source-only example extends the same
+ownership-lifetime record: a delayed failed-create unlink can remove a successor retry's new launch input after normal
+runtime shutdown. Neither example needs a filesystem error. The record preserves their normal-stop overlap schedules and
+does not assert existing-user-work loss. The five other records concern an unbounded test FIFO release, late
+fixture-process cleanup registration, a final settings-test save overtaking restoration, caller cleanup skipping the new
+switch restoration, and tunnel consent competing with Restart with isolation. Native manifestation of the last remains
+untested; both test-setting records preserve their failure schedules and historical-coverage caveats.
+
+The additional landing-report extension records a second test's recurring baseline-failure omission across two reports.
+It relies on committed observations; the reports' private runs and diagnoses were not independently authenticated. No
+FLAKES, TODO, known-flakes, triage or product changes are made by this review.
+
+Independent exclusions preserve their exact scope. They cover source refutations for plan ownership fences, preparation
+fallback, runtime claim retention, traversal extraction, modal extraction, serialized Rename data, Stop task ownership
+and launch-file generation/settlement gates. Explicit acceptance covers bounded default-on background Git hooks, the
+specific check/move interference windows, same-run tooling PID reuse, host-local unlink failures and the previously
+recorded coincident-fault rollback. None establishes general cleanup, replacement, credential or modal safety.
+
+Reviewers used Codex `gpt-6.1-sol` with high reasoning and at most 19 concurrent children. Across both runs there are
+213 distinct reviewer identities: 139 primary groups and 74 auditors. The continuation adds 34 primary groups and 17
+fresh auditors, and resumes eight old identities; 207 identities complete the protocol and six remain incomplete. All
+new groups have parent-inspected initial review, later synthesis, audited delivery and credible final empty discovery on
+their original identities. Verified new discoveries received another search; duplicate or refuted hypotheses did not
+count as productive discoveries. Fresh auditors checked possibly-highest exclusions, including withdrawals and
+candidates mentioned only in prose. No backend-failed turn occurred in this continuation; historical failed attempts
+remain in the reused evidence.
+
+Evidence remains private under run `30f46c42-a021-475f-96a8-eac06930471b`: `completion.md` is the compact record;
+`completion.json` contains stable assignments, manifest versions, identities, actual turns, synthesis/discovery passes,
+audit references and stop reasons. `dispositions.json` preserves every latest finding identity and its revision or
+withdrawal history, with references to reused dispositions. Every group retains its own progress, append-only findings,
+replies and audits. The regex runtime manifest has a separate delivery audit. Delivery proves neither attention nor
+understanding, correctness or exhaustiveness.
+
+Recording-time main is `73f2bb9007c2c6b9fa9eee7f67f1f79a881abaff`. The parent checked its checkpoint, queue and coverage
+changes against the pinned tip before recording. Commits after the pinned tip are outside this review and are not
+claimed reviewed.
+
+Two recorder-wrapped isolated browser-engine experiments ran successfully, one engine at a time. At the maximum input
+length, guard calls measured about 53–79 ms and full recognition about 85–125 ms; the older matcher contributes separate
+cost. The experiments used the exact reviewed asset, no Farhelm server and no network. They do not establish ordinary
+output frequency, a practical denial of service or production Mac timings. They preceded the user's explicit source-only
+instruction; all remaining reviewer prompts prohibit reproductions, tests, browser launches, experiments and
+live-instance interaction. No further reproduction is performed. No product suite, desktop integration, vendor-agent or
+filesystem-fault test ran, and no historical runtime result was reused as a current pass. This documentation-only result
+is checked for Markdown formatting, whitespace, queue/index consistency, required fields, assignments and instruction
+pointers. Its PR stays a draft for separate manual review and merging.
+
 ## Incomplete review toward e7d3bb10
 
 Pinned range: `5c6e49937b1e779be2a5445059637aadf3757356..e7d3bb107618dccd17b6a06ee807a72cb3f87ef0`, 216 commits. The tip

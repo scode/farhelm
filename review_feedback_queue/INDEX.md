@@ -44,7 +44,7 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   superseded launcher could retain an earlier replacement source; normal event reachability remains unresolved.
 
 - [`numeric-token-regex-performance-remains-unresolved.md`](numeric-token-regex-performance-remains-unresolved.md) — A
-  bounded numeric-token regex slowdown remains conditional on unverified browser-engine behavior and impact.
+  synthetic numeric-token slowdown is measured; ordinary occurrence and security impact remain unestablished.
 
 - [`repository-label-ambiguity-has-unresolved-selection-risk.md`](repository-label-ambiguity-has-unresolved-selection-risk.md)
   — Ambiguous repository labels have an unresolved harmful-selection interpretation; launch bypasses were refuted.
@@ -53,10 +53,25 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   changed-host warning loses distinct identities and isolation; consequential reliance remains unestablished.
 
 - [`escaped-start-remedy-changes-program-and-state-path.md`](escaped-start-remedy-changes-program-and-state-path.md) —
-  The suggested start command changes path bytes; collateral inactive-installation harm remains conditional.
+  The suggested start command changes path bytes and can migrate another inactive installation under a conditional path
+  pairing.
 
 - [`respawn-reflow-crosses-launch-excerpt-boundary.md`](respawn-reflow-crosses-launch-excerpt-boundary.md) — Restart can
   retain preceding-run terminal text as a startup error; consequential confidentiality exposure remains unverified.
+
+- [`uninstall-plan-normalizes-containing-paths-independently.md`](uninstall-plan-normalizes-containing-paths-independently.md)
+  — A home-alias uninstall plan can miss retained data inside its removal target; a conditional design counterexample,
+  not a reviewed implementation.
+
+- [`spare-take-adopts-replaced-ready-folder.md`](spare-take-adopts-replaced-ready-folder.md) — A replaced ready-checkout
+  folder can become a cleanup-owned claim and later be deleted.
+
+- [`spare-builder-cleans-detected-replacement.md`](spare-builder-cleans-detected-replacement.md) — Spare cleanup deletes
+  an already detected building replacement; ordinary-use trigger and namespace authority remain ambiguous.
+
+- [`refused-create-retry-can-delete-restarted-session.md`](refused-create-retry-can-delete-restarted-session.md) — A
+  refused stale create retry can delete a concurrently restarted session; this conditional mechanism predates the review
+  range.
 
 ## High priority: material UX degradation
 
@@ -74,6 +89,14 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`spare-checkout-rewind-keeps-removed-history.md`](spare-checkout-rewind-keeps-removed-history.md) — After an upstream
   rewind, a prepared checkout can successfully retain removed commits instead of the current upstream worktree.
+
+- [`duplicate-pane-facts-can-unprotect-spare-claim.md`](duplicate-pane-facts-can-unprotect-spare-claim.md) —
+  Deliberately forged private-tmux facts can expose an active preparation to cleanup; explicit unsupported-use coverage
+  remains ambiguous.
+
+- [`cancelled-startup-sweep-outlives-directory-ownership.md`](cancelled-startup-sweep-outlives-directory-ownership.md) —
+  Blocking cleanup can outlive supervisor ownership and delete a successor's claimed checkout or retry input; resulting
+  failures are unmeasured.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -176,8 +199,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`removed-deflake-items-leave-exclusions.md`](removed-deflake-items-leave-exclusions.md) — Removing two tracked flake
   items leaves their machine-readable sweep exclusions orphaned.
 
-- [`landing-leaves-baseline-flake-unrecorded.md`](landing-leaves-baseline-flake-unrecorded.md) — A landing report defers
-  recording a reproduced baseline flake; its private runtime evidence was not authenticated here.
+- [`landing-leaves-baseline-flake-unrecorded.md`](landing-leaves-baseline-flake-unrecorded.md) — Landing reports defer
+  recording recurring baseline flakes; their private runtime evidence was not authenticated here.
 
 - [`launcher-report-confuses-apply-with-launch.md`](launcher-report-confuses-apply-with-launch.md) — The landing report
   says Enter launches where the launcher actually applies queued templates to the draft.
@@ -224,3 +247,20 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`plan-pruning-can-interrupt-shared-cargo-build.md`](plan-pruning-can-interrupt-shared-cargo-build.md) — Plan cleanup
   may interrupt another workspace's build using its target directory; the concurrent failure schedule is unverified.
+
+- [`spare-test-fifo-write-can-outlive-reader.md`](spare-test-fifo-write-can-outlive-reader.md) — A completion test's
+  FIFO release can block after its reader exits; the standard runner supplies only an outer timeout.
+
+- [`spare-owner-tests-register-child-cleanup-after-readiness.md`](spare-owner-tests-register-child-cleanup-after-readiness.md)
+  — Owner-death tests can leave a disposable child outside cleanup after readiness failure.
+
+- [`settings-test-restores-before-final-spare-save.md`](settings-test-restores-before-final-spare-save.md) — A final
+  test save can overtake restoration of an initially disabled switch; the established starting state requires earlier
+  cleanup failure.
+
+- [`checkout-test-skips-new-spare-setting-restoration.md`](checkout-test-skips-new-spare-setting-restoration.md) — An
+  earlier caller-cleanup failure can skip restoring the new prepared-checkout switch; historical coverage remains
+  ambiguous.
+
+- [`tunnel-consent-conflicts-with-restart-dialog.md`](tunnel-consent-conflicts-with-restart-dialog.md) — Tunnel consent
+  and Restart with can become mutually inert; native behavior and Escape recovery remain untested.
