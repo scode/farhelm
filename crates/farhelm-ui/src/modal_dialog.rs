@@ -157,6 +157,30 @@ impl DialogHandle {
         ))
     }
 
+    /// Focus a revealed modal's surface at an explicit interaction boundary.
+    ///
+    /// Ordinary interactions resolve the root immediately. A reveal can precede
+    /// its DOM update, so its caller requests one frame before lookup instead.
+    /// Neither path reinstalls focus behavior or runs on ordinary rerenders.
+    pub(crate) fn focus_surface(self, target: &FocusTarget, defer_for_reveal: bool) {
+        let focus = self.surface_script(target);
+        document::eval(&if defer_for_reveal {
+            format!("requestAnimationFrame(() => {{ {focus} }})")
+        } else {
+            focus
+        });
+    }
+
+    /// Resolve this root when the action runs, keeping reveal lookup deferred.
+    fn surface_script(self, target: &FocusTarget) -> String {
+        let selector = serde_json::to_string(self.selector).expect("a string always serializes");
+        let generation_guard = self.generation_guard();
+        let focus = target.surface_script();
+        format!(
+            "(() => {{ const dialog = document.querySelector({selector}); if (!dialog{generation_guard} || !dialog.getClientRects().length) return; {focus} }})();"
+        )
+    }
+
     /// Install the opening's focus policy without repeating it on rerenders.
     fn install(self, focus: &DialogFocus) {
         install_focus(self, focus);
@@ -228,6 +252,17 @@ impl FocusTarget {
     /// Perform a caller-owned handoff now, without reinstalling modal behavior.
     pub(crate) fn focus(&self) {
         document::eval(&self.script());
+    }
+
+    /// Focus descendants of an already captured, visible `dialog` root.
+    ///
+    /// The enclosing script supplies that exact node and checks its visibility.
+    /// This lets a deferred repair keep its old-root connection and focus-
+    /// ownership checks without resolving a later opening through the selector.
+    /// A surface with neither descendant falls back to its root, including
+    /// loading-only renders.
+    pub(crate) fn surface_script(&self) -> String {
+        target_js("dialog", self, true)
     }
 }
 
@@ -350,7 +385,9 @@ fn handoff_js(
 /// Remembered dialogs keep their existing two eval submissions: focus and
 /// isolation first, gap/Enter second. Direct trapped dialogs keep gap/Enter
 /// before isolation in one eval. These are mount contracts, not effects that
-/// should run again whenever a dialog's state changes.
+/// should run again whenever a dialog's state changes. A preparable surface
+/// submits gap/Enter and trap first, then samples its live hidden state: hidden
+/// preparation isolates without focus, while reveal owns a later handoff.
 fn install_focus(handle: DialogHandle, focus: &DialogFocus) {
     let dialog_selector = handle.selector;
     let dialog = serde_json::to_string(dialog_selector).expect("a string always serializes");
@@ -404,6 +441,7 @@ fn install_focus(handle: DialogHandle, focus: &DialogFocus) {
             focus.trap,
             &handoff_js(selector, *select_all, *captured_opener, admission),
         ),
+        InitialFocus::Surface { .. } => trap_js(handle, focus.trap, ""),
     };
     let action = focus.main_action.as_deref().map_or(
         crate::dialog_focus::ContainerEnter::None,
@@ -426,6 +464,16 @@ fn install_focus(handle: DialogHandle, focus: &DialogFocus) {
         InitialFocus::Remembered { .. } => {
             document::eval(&format!("{setup} {isolate}"));
             document::eval(&gap);
+        }
+        InitialFocus::Surface { target, hidden_now } => {
+            document::eval(&format!("{gap}\n{setup}"));
+            // Preserve the live read after the first eval submission. Moving
+            // it into render or page JS changes which opening state it sees.
+            if hidden_now.call(()) {
+                document::eval(&handle.isolation_script(focus.escape_target.as_deref()));
+            } else {
+                document::eval(&format!("{} {isolate}", handle.surface_script(target)));
+            }
         }
     };
 }
@@ -467,6 +515,16 @@ pub(crate) enum InitialFocus {
         captured_opener: Option<&'static str>,
         admission: FocusAdmission,
     },
+    /// Prepare without focusing hidden controls; reveal is a separate action.
+    ///
+    /// The installer calls `hidden_now` once after submitting gap/Enter and
+    /// trap setup. Hidden preparation always isolates; a visible opening uses
+    /// the ordinary isolation flag after its preferred/fallback/root handoff.
+    /// The callback reads live caller state without making installation reactive.
+    Surface {
+        target: FocusTarget,
+        hidden_now: Callback<(), bool>,
+    },
 }
 
 /// Which current focus sources an opening is allowed to replace.
@@ -493,7 +551,8 @@ pub(crate) struct DialogFocus {
     pub(crate) trap: Option<TabTrap>,
     pub(crate) escape_target: Option<String>,
     pub(crate) main_action: Option<String>,
-    /// Preserve existing page isolation independently of Tab trapping.
+    /// Preserve visible page isolation independently of Tab trapping.
+    /// Hidden Surface preparation always isolates, without taking focus.
     pub(crate) isolation: bool,
     /// Preserve gap-click retention independently of a container Enter action.
     pub(crate) gap: bool,
@@ -556,12 +615,15 @@ pub(crate) enum DialogRoot {
 /// a separate eval before initial focus, rather than another mount callback.
 /// Focus ownership listeners also attach to the actual root: a wrapper would
 /// change the boundary that records whether an async close still owns focus.
+/// Form-only validity suppression remains explicit rather than acquiring
+/// browser validation when its root moves behind this component boundary.
 #[component]
 pub(crate) fn ModalDialog(
     handle: DialogHandle,
     focus: DialogFocus,
     on_escape: EventHandler<KeyboardEvent>,
     #[props(default)] root: DialogRoot,
+    #[props(default)] novalidate: Option<bool>,
     #[props(default)] before_install_release: Option<DialogHandle>,
     #[props(default)] after_install_focus: Option<FocusTarget>,
     #[props(default)] onkeydown: Option<EventHandler<KeyboardEvent>>,
@@ -570,6 +632,8 @@ pub(crate) fn ModalDialog(
     #[props(default)] onresize: Option<EventHandler<ResizeEvent>>,
     #[props(default)] onsubmit: Option<EventHandler<FormEvent>>,
     #[props(default)] onclick: Option<EventHandler<MouseEvent>>,
+    #[props(default)] oninput: Option<EventHandler<FormEvent>>,
+    #[props(default)] onchange: Option<EventHandler<FormEvent>>,
     #[props(default)] onfocusin: Option<EventHandler<FocusEvent>>,
     #[props(default)] onfocusout: Option<EventHandler<FocusEvent>>,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
@@ -621,6 +685,16 @@ pub(crate) fn ModalDialog(
             onclick.call(event);
         }));
     }
+    if let Some(oninput) = oninput {
+        root_attributes.push(dioxus::html::oninput(move |event: FormEvent| {
+            oninput.call(event);
+        }));
+    }
+    if let Some(onchange) = onchange {
+        root_attributes.push(dioxus::html::onchange(move |event: FormEvent| {
+            onchange.call(event);
+        }));
+    }
     if let Some(onfocusin) = onfocusin {
         root_attributes.push(dioxus::html::onfocusin(move |event: FocusEvent| {
             onfocusin.call(event);
@@ -633,6 +707,6 @@ pub(crate) fn ModalDialog(
     }
     match root {
         DialogRoot::Div => rsx! { div { ..root_attributes, {children} } },
-        DialogRoot::Form => rsx! { form { ..root_attributes, {children} } },
+        DialogRoot::Form => rsx! { form { novalidate, ..root_attributes, {children} } },
     }
 }
