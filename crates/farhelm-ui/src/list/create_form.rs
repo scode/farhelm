@@ -3,6 +3,10 @@
 //! Intent binding and host reconciliation live beside the form because they
 //! define when an idempotency key still describes the submitted create.
 
+mod draft;
+
+use draft::{ChoiceOrigin, DraftFields, LaunchDraft, LaunchDraftState, use_launch_draft};
+
 use dioxus::prelude::*;
 use farhelm_proto::github_checkout::CheckoutNameSequence;
 
@@ -20,8 +24,8 @@ use crate::ops::{ConfirmSlot, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, PeerText, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{
-    ApiBase, CommandLaunch, HostId, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
-    Session, SessionStatus,
+    ApiBase, CommandLaunch, HostId, LaunchHarness, LaunchPermission, LaunchSelection, Session,
+    SessionStatus,
 };
 
 use super::SharedPreferences;
@@ -53,29 +57,6 @@ const MINT_ATTEMPTS: usize = 3;
 /// Shared by visible invalidation and both submission checks so an explicit
 /// destination correction can retire only this refusal, not an unrelated error.
 const REMEMBERED_DESTINATION_CHANGED: &str = "the remembered folder belongs to a different installation; choose the host or folder again before launching";
-
-/// Snapshot a structured request identically before and after key minting.
-/// A template can reset permission to `None`; both reads must resolve that
-/// default alike or an unchanged retry acquires a new key and loses consent.
-/// Trust stays absent: the helm resolves Settings against the destination.
-fn submitted_structured_selection(
-    harness: LaunchHarness,
-    model: Option<String>,
-    effort: Option<LaunchEffort>,
-    permissions: Option<LaunchPermission>,
-    permission_flags: &str,
-    wrapper_prefix: Option<Vec<String>>,
-) -> LaunchSelection {
-    LaunchSelection {
-        harness,
-        model,
-        effort,
-        permissions: crate::launch_composer::normalized_permissions(harness, permissions),
-        permission_flags: crate::launch_composer::permission_words(permissions, permission_flags),
-        wrapper_prefix,
-        workspace_trust: None,
-    }
-}
 
 /// An empty field means no prefix; every nonempty draft must parse before a
 /// launch or template save so an unfinished quote cannot silently disappear.
@@ -325,7 +306,7 @@ fn command_intent(
 /// kinds are shown as two tabs, agent and command, each showing only its own
 /// fields; switching tabs keeps each tab's draft").
 ///
-/// Each tab owns its own signals, so switching never copies a value from one
+/// Each tab retains its own draft, so switching never copies a value from one
 /// draft into the other: a value from one kind cannot safely become a hidden
 /// input to the other's launch or idempotency key, and coming back finds the
 /// draft as it was left.
@@ -407,24 +388,15 @@ enum TemplateEdit {
     Set(Box<dyn FnOnce()>),
 }
 
-/// The launcher signals a template edits directly. All `Copy` handles,
-/// bundled only so [`template_edits`] has one argument for them.
+/// The launcher's ownership handles for template replay. Accepted agent choices
+/// use the draft owner; the remaining field groups retain their own signals.
+/// All handles are Copy so deferred edits keep one owner rather than mirrors.
 #[derive(Clone, Copy)]
 struct TemplateTargets {
     prompt: Signal<Option<String>>,
     launch_tab: Signal<LaunchTab>,
-    structured_harness: Signal<Option<LaunchHarness>>,
-    structured_model: Signal<Option<String>>,
-    structured_model_raw_seed: Signal<Option<String>>,
-    structured_model_edited: Signal<bool>,
-    custom_model_harness: Signal<Option<LaunchHarness>>,
+    draft: LaunchDraftState,
     composer_reset_reason: Signal<Option<String>>,
-    structured_effort: Signal<Option<LaunchEffort>>,
-    structured_permissions: Signal<Option<LaunchPermission>>,
-    structured_permission_flags: Signal<String>,
-    structured_wrapper: Signal<String>,
-    wrapper_is_explicit: Signal<bool>,
-    structured_permissions_is_explicit: Signal<bool>,
     invocation: Signal<String>,
     invocation_raw_seed: Signal<Option<String>>,
     invocation_edited: Signal<bool>,
@@ -484,16 +456,17 @@ struct PermissionEscalation {
 }
 
 /// Capture user-editable values, never an old retry key or authority cache.
-/// The bounded restoration closure avoids a second independently maintained
-/// form model, while keeping the pre-switch values immutable during the notice.
+/// Accepted agent choices are one plain snapshot; the remaining field groups
+/// retain their existing immutable restoration values during the notice.
 #[allow(
     clippy::clone_on_copy,
     reason = "the snapshot macro handles Copy and Clone signal values together"
 )]
 fn capture_permission_switch(targets: PermissionUndoTargets) -> PermissionSwitchBefore {
     let t = targets.fields;
-    let harness = *t.structured_harness.peek();
-    let permission = harness.and_then(|h| h.request_permission(*t.structured_permissions.peek()));
+    let draft_before = t.draft.snapshot();
+    let harness = draft_before.harness();
+    let permission = harness.and_then(|h| h.request_permission(draft_before.permissions()));
     let tab = *t.launch_tab.peek();
     macro_rules! capture {
         (($($field:ident),*); ($($extra:ident),*)) => {{
@@ -502,6 +475,7 @@ fn capture_permission_switch(targets: PermissionUndoTargets) -> PermissionSwitch
             std::rc::Rc::new(move || {
                 let mut t = t;
                 let mut targets = targets;
+                t.draft.edit(|draft| draft.restore(draft_before.clone()));
                 $(t.$field.set($field.clone());)*
                 $(targets.$extra.set($extra.clone());)*
                 // Ordinary create/replace must reacquire submission authority.
@@ -512,11 +486,7 @@ fn capture_permission_switch(targets: PermissionUndoTargets) -> PermissionSwitch
         }};
     }
     let restore = capture!((
-        prompt, launch_tab, structured_harness, structured_model, structured_model_raw_seed,
-        structured_model_edited, custom_model_harness, composer_reset_reason,
-        structured_effort, structured_permissions, structured_permission_flags,
-        structured_wrapper, wrapper_is_explicit,
-        structured_permissions_is_explicit, invocation, invocation_raw_seed,
+        prompt, launch_tab, composer_reset_reason, invocation, invocation_raw_seed,
         invocation_edited, command_yolo, command_agent, command_resume_on,
         command_resume, command_resume_raw_seed, command_resume_edited, chosen_host,
         destination, cwd, cwd_raw_seed, cwd_edited, title, title_raw_seed, title_edited,
@@ -585,29 +555,30 @@ fn launcher_snapshot(
     selected: Option<HostId>,
 ) -> farhelm_proto::launcher::LauncherState {
     use farhelm_proto::launcher::{LauncherKind, LauncherState, TemplateDestination};
+    let draft = t.draft.snapshot();
     let kind_now = match *t.launch_tab.peek() {
         LaunchTab::Agent => LauncherKind::Agent,
         LaunchTab::Command => LauncherKind::Command,
     };
     LauncherState {
-        prompt: active_prompt(kind_now, *t.structured_harness.peek(), &t.prompt.peek()),
+        prompt: active_prompt(kind_now, draft.harness(), &t.prompt.peek()),
         kind: Some(kind_now),
-        harness: *t.structured_harness.peek(),
-        model: t.structured_model.peek().as_ref().map(|model| {
+        harness: draft.harness(),
+        model: draft.model().as_ref().map(|model| {
             submitted_field(
                 model,
-                *t.structured_model_edited.peek(),
-                t.structured_model_raw_seed.peek().as_deref(),
+                draft.model_edited(),
+                draft.model_raw_seed().as_deref(),
             )
         }),
-        model_owner: *t.custom_model_harness.peek(),
-        effort: *t.structured_effort.peek(),
-        permissions: *t.structured_permissions.peek(),
+        model_owner: draft.model_owner(),
+        effort: draft.effort(),
+        permissions: draft.permissions(),
         permission_flags: crate::launch_composer::permission_words(
-            *t.structured_permissions.peek(),
-            &t.structured_permission_flags.peek(),
+            draft.permissions(),
+            &draft.permission_flags(),
         ),
-        wrapper_prefix: wrapper_words(&t.structured_wrapper.peek()).ok().flatten(),
+        wrapper_prefix: wrapper_words(&draft.wrapper()).ok().flatten(),
         workspace_trust: None,
         command: submitted_field(
             &t.invocation.peek(),
@@ -825,10 +796,7 @@ fn template_edits(
         // As choosing "harness default" by hand: no model, no owner for one,
         // and no notice about a choice that was cleared.
         Some(None) => edits.push(TemplateEdit::Set(Box::new(move || {
-            t.structured_model.set(None);
-            t.structured_model_raw_seed.set(None);
-            t.structured_model_edited.set(false);
-            t.custom_model_harness.set(None);
+            t.draft.edit(LaunchDraft::choose_default_model);
             t.composer_reset_reason.set(None);
         }))),
         None => {}
@@ -838,7 +806,9 @@ fn template_edits(
             effort,
         )))),
         Some(None) => edits.push(TemplateEdit::Set(Box::new(move || {
-            t.structured_effort.set(None)
+            t.draft.edit(|draft| {
+                draft.choose_effort(None);
+            });
         }))),
         None => {}
     }
@@ -852,22 +822,21 @@ fn template_edits(
             ComposerSearchResult::Permissions(ComposerPermission::Yolo),
         )),
         Some(None) => edits.push(TemplateEdit::Set(Box::new(move || {
-            t.structured_permissions.set(None);
-            t.structured_permission_flags.set(String::new());
-            t.structured_permissions_is_explicit.set(true);
+            t.draft
+                .edit(|draft| draft.apply_template_permissions(None, String::new()));
         }))),
         Some(Some(permission)) => edits.push(TemplateEdit::Set(Box::new(move || {
-            t.structured_permissions.set(Some(permission));
-            t.structured_permission_flags.set(template_flags.clone());
-            t.structured_permissions_is_explicit.set(true);
+            t.draft.edit(|draft| {
+                draft.apply_template_permissions(Some(permission), template_flags.clone())
+            });
         }))),
         None => {}
     }
     if let Some(prefix) = fields.wrapper_prefix {
         edits.push(TemplateEdit::Set(Box::new(move || {
-            t.structured_wrapper
-                .set(prefix.as_ref().map(shell_words::join).unwrap_or_default());
-            t.wrapper_is_explicit.set(true);
+            t.draft.edit(|draft| {
+                draft.edit_wrapper(prefix.as_ref().map(shell_words::join).unwrap_or_default())
+            });
         })));
     }
     // 4. The command launch's fields, typed text the user owns from here.
@@ -957,7 +926,7 @@ fn template_edits(
 /// closing the search surface.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the signals are independent reactive ownership handles; bundling them would obscure which draft fields a search action may replace"
+    reason = "destination authority and the remaining field groups retain independent ownership during the draft migration"
 )]
 fn apply_composer_search_result(
     result: crate::launch_composer::ComposerSearchResult,
@@ -978,18 +947,8 @@ fn apply_composer_search_result(
     mut cwd_edited: Signal<bool>,
     mut folder_is_explicit: Signal<bool>,
     mut launch_tab: Signal<LaunchTab>,
-    mut structured_harness: Signal<Option<LaunchHarness>>,
-    mut structured_model: Signal<Option<String>>,
-    mut structured_model_raw_seed: Signal<Option<String>>,
-    mut structured_model_edited: Signal<bool>,
-    mut custom_model_harness: Signal<Option<LaunchHarness>>,
-    mut structured_effort: Signal<Option<LaunchEffort>>,
-    mut structured_permissions: Signal<Option<LaunchPermission>>,
-    mut structured_permission_flags: Signal<String>,
-    mut structured_wrapper: Signal<String>,
-    mut wrapper_is_explicit: Signal<bool>,
+    draft: LaunchDraftState,
     preferences: SharedPreferences,
-    mut structured_permissions_is_explicit: Signal<bool>,
     mut composer_reset_reason: Signal<Option<String>>,
     mut action_error: Signal<Option<String>>,
     // `None` while the catalog read is pending or failed; see
@@ -1084,117 +1043,33 @@ fn apply_composer_search_result(
         }
         crate::launch_composer::ComposerSearchResult::Harness(harness) => {
             launch_tab.set(LaunchTab::Agent);
-            let old_harness = *structured_harness.peek();
-            let before = LaunchSelection {
-                permission_flags: crate::launch_composer::permission_words(
-                    structured_permissions(),
-                    &structured_permission_flags(),
-                ),
-                wrapper_prefix: wrapper_words(&structured_wrapper()).ok().flatten(),
-                harness: structured_harness().unwrap_or(harness),
-                model: structured_model(),
-                effort: structured_effort(),
-                permissions: structured_permissions(),
-                workspace_trust: None,
-            };
-            let (selection, owner) = crate::launch_composer::reconcile_harness_for_catalog_read(
-                before.clone(),
-                *custom_model_harness.peek(),
-                harness,
-                catalog_answer,
-            );
-            composer_reset_reason.set(draft_reconciliation_reason(
-                &before,
-                &selection,
-                structured_permissions_is_explicit(),
-            ));
-            structured_harness.set(Some(selection.harness));
-            structured_model_raw_seed.set(selection.model.clone());
-            structured_model_edited.set(false);
-            structured_model.set(selection.model);
-            structured_effort.set(selection.effort);
-            structured_permissions.set(selection.permissions);
-            if old_harness != Some(selection.harness) {
-                structured_wrapper.set(remembered_wrapper(
-                    &preferences.0.peek(),
-                    Some(selection.harness),
-                ));
-                wrapper_is_explicit.set(false);
-            }
-            // Parsed words cannot preserve an unfinished quote or the user's
-            // spacing. Only replacing their owner or permission choice may
-            // reseed this editable text; reselecting the owner must keep it.
-            if selection.harness != before.harness || selection.permissions != before.permissions {
-                structured_permission_flags.set(
-                    selection
-                        .permission_flags
-                        .as_ref()
-                        .map(shell_words::join)
-                        .unwrap_or_default(),
-                );
-            }
-            custom_model_harness.set(owner);
+            observe_search_agent_fields(draft.fields());
+            let outcome = draft.edit(|draft| {
+                draft.choose_harness(
+                    harness,
+                    catalog_answer,
+                    remembered_wrapper(&preferences.0.peek(), Some(harness)),
+                    ChoiceOrigin::Search,
+                )
+            });
+            composer_reset_reason.set(outcome.reset_reason);
         }
         crate::launch_composer::ComposerSearchResult::Model { id, harness } => {
             // A model carries its harness ownership, so selecting it is also
             // an explicit return to structured mode rather than leaving a
             // structured draft hidden behind command controls.
             launch_tab.set(LaunchTab::Agent);
-            let old_harness = *structured_harness.peek();
-            let before = LaunchSelection {
-                permission_flags: crate::launch_composer::permission_words(
-                    structured_permissions(),
-                    &structured_permission_flags(),
-                ),
-                wrapper_prefix: wrapper_words(&structured_wrapper()).ok().flatten(),
-                harness: structured_harness().unwrap_or(harness),
-                model: structured_model(),
-                effort: structured_effort(),
-                permissions: structured_permissions(),
-                workspace_trust: None,
-            };
-            // Retain the source harness until reconciliation has removed its
-            // default permission; the selected model belongs to the target.
-            let selection = LaunchSelection {
-                model: Some(id),
-                ..before.clone()
-            };
-            let (selection, owner) = crate::launch_composer::reconcile_harness_for_catalog_read(
-                selection,
-                Some(harness),
-                harness,
-                catalog_answer,
-            );
-            composer_reset_reason.set(draft_reconciliation_reason(
-                &before,
-                &selection,
-                structured_permissions_is_explicit(),
-            ));
-            structured_harness.set(Some(selection.harness));
-            structured_model_raw_seed.set(selection.model.clone());
-            structured_model_edited.set(false);
-            structured_model.set(selection.model);
-            structured_effort.set(selection.effort);
-            structured_permissions.set(selection.permissions);
-            if old_harness != Some(selection.harness) {
-                structured_wrapper.set(remembered_wrapper(
-                    &preferences.0.peek(),
-                    Some(selection.harness),
-                ));
-                wrapper_is_explicit.set(false);
-            }
-            // A same-agent model choice leaves the custom editor's raw draft
-            // intact, including malformed quotes that the person can repair.
-            if selection.harness != before.harness || selection.permissions != before.permissions {
-                structured_permission_flags.set(
-                    selection
-                        .permission_flags
-                        .as_ref()
-                        .map(shell_words::join)
-                        .unwrap_or_default(),
-                );
-            }
-            custom_model_harness.set(owner);
+            observe_search_agent_fields(draft.fields());
+            let outcome = draft.edit(|draft| {
+                draft.choose_catalog_model(
+                    id,
+                    harness,
+                    catalog_answer,
+                    remembered_wrapper(&preferences.0.peek(), Some(harness)),
+                    ChoiceOrigin::Search,
+                )
+            });
+            composer_reset_reason.set(outcome.reset_reason);
         }
         crate::launch_composer::ComposerSearchResult::Effort(effort) => {
             // An unchanged choice is a retry gesture, just like pressing its
@@ -1202,43 +1077,37 @@ fn apply_composer_search_result(
             // accepting effort:default cannot create a second session. A real
             // edit reaches the shared key reset below; harness and model stay
             // put, so no reconciliation runs.
-            if *structured_effort.peek() == effort {
+            if !draft.edit(|draft| draft.choose_effort(effort)) {
                 return None;
             }
-            structured_effort.set(effort);
         }
         crate::launch_composer::ComposerSearchResult::Permissions(permission) => {
-            if permission != crate::launch_composer::ComposerPermission::Custom {
-                structured_permission_flags.set(String::new());
-            }
-            match permission {
+            let focus_custom = permission == crate::launch_composer::ComposerPermission::Custom;
+            let permission = match permission {
                 crate::launch_composer::ComposerPermission::Custom => {
-                    structured_permissions.set(Some(LaunchPermission::Custom));
-                    document::eval(
-                        "requestAnimationFrame(() => document.querySelector('.custom-permission-flags')?.focus())",
-                    );
+                    Some(LaunchPermission::Custom)
                 }
                 crate::launch_composer::ComposerPermission::Guarded => {
-                    structured_permissions.set(Some(LaunchPermission::Guarded));
+                    Some(LaunchPermission::Guarded)
                 }
-                crate::launch_composer::ComposerPermission::OwnSetting => {
-                    structured_permissions.set(None);
-                    structured_permission_flags.set(String::new());
-                }
-                crate::launch_composer::ComposerPermission::Yolo => {
-                    structured_permissions.set(Some(LaunchPermission::Yolo));
-                }
+                crate::launch_composer::ComposerPermission::OwnSetting => None,
+                crate::launch_composer::ComposerPermission::Yolo => Some(LaunchPermission::Yolo),
                 crate::launch_composer::ComposerPermission::Approve => {
-                    structured_permissions.set(Some(LaunchPermission::Approve));
+                    Some(LaunchPermission::Approve)
                 }
                 crate::launch_composer::ComposerPermission::SmartApprove => {
-                    structured_permissions.set(Some(LaunchPermission::SmartApprove));
+                    Some(LaunchPermission::SmartApprove)
                 }
-                crate::launch_composer::ComposerPermission::Chat => {
-                    structured_permissions.set(Some(LaunchPermission::Chat));
-                }
+                crate::launch_composer::ComposerPermission::Chat => Some(LaunchPermission::Chat),
+            };
+            draft.edit(|draft| {
+                draft.choose_permissions(permission);
+            });
+            if focus_custom {
+                document::eval(
+                    "requestAnimationFrame(() => document.querySelector('.custom-permission-flags')?.focus())",
+                );
             }
-            structured_permissions_is_explicit.set(true);
         }
         crate::launch_composer::ComposerSearchResult::Recent(entry) => {
             launch_tab.set(LaunchTab::Agent);
@@ -1249,32 +1118,7 @@ fn apply_composer_search_result(
                 selection.permissions,
             );
             let owner = crate::launch_composer::custom_model_owner(&selection, catalog);
-            structured_harness.set(Some(selection.harness));
-            structured_model_raw_seed.set(selection.model.clone());
-            structured_model_edited.set(false);
-            structured_model.set(selection.model);
-            structured_effort.set(selection.effort);
-            structured_permissions.set(selection.permissions);
-            structured_permission_flags.set(
-                selection
-                    .permission_flags
-                    .as_ref()
-                    .map(shell_words::join)
-                    .unwrap_or_default(),
-            );
-            structured_wrapper.set(
-                selection
-                    .wrapper_prefix
-                    .as_ref()
-                    .map(shell_words::join)
-                    .unwrap_or_default(),
-            );
-            wrapper_is_explicit.set(true);
-            // A search-applied recent replaces the whole draft with a real
-            // choice, not a passive default — see
-            // `structured_permissions_is_explicit`'s own doc.
-            structured_permissions_is_explicit.set(true);
-            custom_model_harness.set(owner);
+            draft.edit(|draft| draft.restore_launch(&selection, owner));
             if let Some(repo) = entry.github_repo {
                 remembered_destination.set(None);
                 destination_draft.set(DestinationDraft::github(repo));
@@ -1295,6 +1139,22 @@ fn apply_composer_search_result(
     }
     intent_key.set(None);
     None
+}
+
+/// Search replay can run synchronously inside the initial-template effect.
+/// Keep precisely its former structured subscriptions even though mutation
+/// now reads the live plain draft. Subscribing to the aggregate here would
+/// make unrelated ownership/editor changes replay pending opening work.
+fn observe_search_agent_fields(fields: DraftFields) {
+    let _ = (
+        (fields.structured_permissions)(),
+        (fields.structured_permission_flags)(),
+        (fields.structured_wrapper)(),
+        (fields.structured_harness)(),
+        (fields.structured_model)(),
+        (fields.structured_effort)(),
+        (fields.structured_permissions_is_explicit)(),
+    );
 }
 
 /// Every explicit path choice leaves fresh-checkout mode. Keep the raw path
@@ -2519,8 +2379,8 @@ fn effective_title(
 /// mounts immediately (SPEC.md: "creation launches the agent; you type
 /// your first prompt into its terminal") — the sidebar itself stays
 /// mounted throughout. On failure the form stays mounted with its values
-/// untouched and the refusal rendered beside Launch — the fields are
-/// plain `use_signal<String>`s rather than being reset or lifted into
+/// untouched and the refusal rendered beside Launch — the draft remains local
+/// to this component rather than being reset or lifted into
 /// `ListView`, so "form contents preserved" falls out of simply not
 /// clearing them rather than needing a restore step. On success the
 /// fields are left as-is too: `on_created` closes this form (unmounting
@@ -2823,15 +2683,6 @@ pub(super) fn CreateSessionForm(
     let mut command_resume_edited = use_signal(|| false);
     let mut title = use_signal(String::new);
     let mut launch_tab = use_signal(|| LaunchTab::Agent);
-    let mut structured_harness = use_signal(|| None::<LaunchHarness>);
-    let mut structured_model = use_signal(|| None::<String>);
-    // A restored custom id is peer text even though it is stored in a launch
-    // selection. Keep its raw bytes for submission while showing an escaped
-    // spelling until the person deliberately edits the field.
-    let mut structured_model_raw_seed = use_signal(|| None::<String>);
-    let mut structured_model_edited = use_signal(|| false);
-    let mut custom_model_harness = use_signal(|| None::<LaunchHarness>);
-    let mut structured_effort = use_signal(|| None::<LaunchEffort>);
     // Seeded from the helm's remembered permissions mode ONLY when this
     // mount has no prefill at all (SPEC.md's launch-composer carve-out): a
     // clone/replace prefill's own reseed effect below (`prefill.launch`)
@@ -2839,12 +2690,10 @@ pub(super) fn CreateSessionForm(
     // prefilled mount briefly starting at `None` here is never visible —
     // see `initial_structured_permissions`'s own doc for why the precedence
     // is a call-site guard rather than logic inside that function.
-    let mut structured_permissions = use_signal(|| {
-        if prefill.is_none() {
-            initial_structured_permissions(&preferences.0.peek())
-        } else {
-            None
-        }
+    let draft = use_launch_draft(if prefill.is_none() {
+        initial_structured_permissions(&preferences.0.peek())
+    } else {
+        None
     });
     // Whether `structured_permissions`'s current value is a real choice
     // (an explicit click, a restored prefill, or an applied recent/search
@@ -2861,17 +2710,22 @@ pub(super) fn CreateSessionForm(
     // browser session had remembered `"yolo"`). Every other seeded field
     // (harness/model/effort) has no passive-seed case to distinguish from
     // — SPEC.md keeps them unpreselected on a fresh open — so only
-    // permissions needs this second signal.
-    let mut structured_permissions_is_explicit = use_signal(|| false);
-    // Raw text remains editable through quote errors; only split words reach a launch.
-    let mut structured_permission_flags = use_signal(String::new);
-    // New starts without an agent type. Selecting one loads only that type's
-    // remembered prefix; Clone and Replace with use their source instead.
-    let mut structured_wrapper = use_signal(String::new);
-    // A remembered prefix is visible but is not a template edit by itself.
-    // Source launches, recents, templates and direct edits set this bit so
-    // Save as template can offer only a choice the user actually made here.
-    let mut wrapper_is_explicit = use_signal(|| false);
+    // permissions needs a separate explicitness bit in the draft.
+    // These are read-only subscriptions, never independently mutable fields.
+    // Handler-time authority reads the live owner rather than memo.peek(),
+    // whose cached value can lag an earlier edit in the same event turn.
+    let DraftFields {
+        structured_harness,
+        structured_model,
+        structured_model_raw_seed,
+        structured_model_edited,
+        structured_effort,
+        structured_permissions,
+        structured_permissions_is_explicit,
+        structured_permission_flags,
+        structured_wrapper,
+        wrapper_is_explicit,
+    } = draft.fields();
     // Never seed from a source, history or template: every dialog starts fresh.
     let mut conversation = use_signal(String::new);
     // A message belongs to this opening, not its reusable launch. Keep the
@@ -3350,52 +3204,19 @@ pub(super) fn CreateSessionForm(
                     // permission is Pi's mandatory YOLO mode. Trust is no longer
                     // editable and is composed by the helm for the destination.
                     launch_tab.set(LaunchTab::Agent);
-                    structured_harness.set(Some(launch.harness));
-                    structured_model_raw_seed.set(launch.model.clone());
-                    structured_model_edited.set(false);
-                    structured_model.set(launch.model.clone());
                     // A restored model must establish ownership just like a
                     // freshly typed one. Known catalog ids override this
                     // fallback during harness reconciliation; an unknown id
                     // needs the source harness so it cannot leak across one.
-                    custom_model_harness.set(launch.model.as_ref().map(|_| launch.harness));
-                    structured_effort.set(launch.effort);
-                    structured_permission_flags.set(
-                        launch
-                            .permission_flags
-                            .as_ref()
-                            .map(shell_words::join)
-                            .unwrap_or_default(),
-                    );
-                    structured_wrapper.set(
-                        launch
-                            .wrapper_prefix
-                            .as_ref()
-                            .map(shell_words::join)
-                            .unwrap_or_default(),
-                    );
-                    wrapper_is_explicit.set(true);
-                    structured_permissions.set(crate::launch_composer::normalized_permissions(
-                        launch.harness,
-                        launch.permissions,
-                    ));
+                    draft.edit(|draft| {
+                        draft.restore_launch(launch, launch.model.as_ref().map(|_| launch.harness))
+                    });
                     // A restored structured snapshot is a real choice the
                     // source session made, not a passive default — it must
                     // filter recents exactly as it always has.
-                    structured_permissions_is_explicit.set(true);
                 } else {
                     launch_tab.set(LaunchTab::Command);
-                    structured_harness.set(None);
-                    structured_model_raw_seed.set(None);
-                    structured_model_edited.set(false);
-                    structured_model.set(None);
-                    custom_model_harness.set(None);
-                    structured_effort.set(None);
-                    structured_permissions.set(None);
-                    structured_permission_flags.set(String::new());
-                    structured_wrapper.set(String::new());
-                    wrapper_is_explicit.set(false);
-                    structured_permissions_is_explicit.set(true);
+                    draft.edit(LaunchDraft::clear_for_command_seed);
                 }
                 // A prefill is as fresh an intent as any manual edit —
                 // see the field `oninput` handlers below for both edges
@@ -3684,15 +3505,7 @@ pub(super) fn CreateSessionForm(
         if invalid_permission_flags {
             return Some(CUSTOM_PERMISSION_FLAGS_REFUSAL);
         }
-        let selection = LaunchSelection {
-            permission_flags: crate::launch_composer::permission_words(structured_permissions(), &structured_permission_flags()),
-            wrapper_prefix: wrapper_words(&structured_wrapper()).ok().flatten(),
-            harness,
-            model: structured_model(),
-            effort: structured_effort(),
-            permissions: structured_permissions(),
-            workspace_trust: None,
-        };
+        let selection = draft.snapshot().editing_selection(harness);
         (!crate::launch_composer::selection_fits_catalog(&selection, catalog_answer.as_deref())).then_some(
             "this saved choice is no longer supported by the current catalog; choose a compatible model or effort",
         )
@@ -3728,23 +3541,7 @@ pub(super) fn CreateSessionForm(
         (None, crate::DeleteGuard::NothingAlive)
     };
     let current_launch = if launch_tab() == LaunchTab::Agent {
-        structured_harness().map(|harness| {
-            LaunchIntent::Structured(LaunchSelection {
-                permission_flags: crate::launch_composer::permission_words(
-                    structured_permissions(),
-                    &structured_permission_flags(),
-                ),
-                wrapper_prefix: wrapper_words(&structured_wrapper()).ok().flatten(),
-                harness,
-                model: structured_model(),
-                effort: structured_effort(),
-                permissions: crate::launch_composer::normalized_permissions(
-                    harness,
-                    structured_permissions(),
-                ),
-                workspace_trust: None,
-            })
-        })
+        draft.snapshot().request().map(LaunchIntent::Structured)
     } else {
         command_intent(
             submitted_field(
@@ -4007,35 +3804,11 @@ pub(super) fn CreateSessionForm(
             // escalation notice no longer describes it, and its Undo would
             // throw the recent away.
             permission_escalation.set(None);
-            structured_harness.set(Some(selection.harness));
-            structured_model_raw_seed.set(selection.model.clone());
-            structured_model_edited.set(false);
-            structured_model.set(selection.model);
-            custom_model_harness.set(crate::launch_composer::custom_model_owner(
-                &entry.selection,
-                &catalog,
-            ));
-            structured_effort.set(selection.effort);
-            structured_permissions.set(selection.permissions);
-            structured_permission_flags.set(
-                selection
-                    .permission_flags
-                    .as_ref()
-                    .map(shell_words::join)
-                    .unwrap_or_default(),
-            );
-            structured_wrapper.set(
-                selection
-                    .wrapper_prefix
-                    .as_ref()
-                    .map(shell_words::join)
-                    .unwrap_or_default(),
-            );
-            wrapper_is_explicit.set(true);
+            let owner = crate::launch_composer::custom_model_owner(&entry.selection, &catalog);
+            draft.edit(|draft| draft.restore_launch(&selection, owner));
             // Applying a recent is a deliberate whole-draft replacement, not
             // a passive default — its permissions choice must filter
             // further recents exactly as it always has.
-            structured_permissions_is_explicit.set(true);
             invalidate_directory_browse(
                 browse_generation,
                 browse_request,
@@ -4072,18 +3845,8 @@ pub(super) fn CreateSessionForm(
     let template_targets = TemplateTargets {
         prompt,
         launch_tab,
-        structured_harness,
-        structured_model,
-        structured_model_raw_seed,
-        structured_model_edited,
-        custom_model_harness,
+        draft,
         composer_reset_reason,
-        structured_effort,
-        structured_permissions,
-        structured_permissions_is_explicit,
-        structured_permission_flags,
-        structured_wrapper,
-        wrapper_is_explicit,
         invocation,
         invocation_raw_seed,
         invocation_edited,
@@ -4119,7 +3882,8 @@ pub(super) fn CreateSessionForm(
     // explicit template permission can replace an intermediate fallback.
     let note_permission_switch =
         use_callback(move |(before, automatic): (PermissionSwitchBefore, bool)| {
-            let after = *structured_harness.peek();
+            let current = draft.snapshot();
+            let after = current.harness();
             if before.harness == after {
                 return;
             }
@@ -4133,7 +3897,7 @@ pub(super) fn CreateSessionForm(
             let (Some(_), Some(harness)) = (before.harness, after) else {
                 return;
             };
-            let permission = harness.request_permission(*structured_permissions.peek());
+            let permission = harness.request_permission(current.permissions());
             if permission_danger(permission) <= permission_danger(before.permission) {
                 return;
             }
@@ -4159,7 +3923,6 @@ pub(super) fn CreateSessionForm(
     // would make the next Enter (the keystroke a person reaches for to
     // submit) apply the filter text as a custom id over the model just chosen.
     let apply_model_option = Callback::<crate::launch_composer::ModelOption>::new({
-        let catalog = catalog_models.clone();
         let catalog_answer = catalog_answer.clone();
         move |option| {
             // Showing or hiding other harnesses' rows is a view toggle, not a
@@ -4176,10 +3939,7 @@ pub(super) fn CreateSessionForm(
             match option {
                 crate::launch_composer::ModelOption::HarnessDefault => {
                     partial_template_hint.set(false);
-                    structured_model.set(None);
-                    structured_model_raw_seed.set(None);
-                    structured_model_edited.set(false);
-                    custom_model_harness.set(None);
+                    draft.edit(LaunchDraft::choose_default_model);
                     composer_reset_reason.set(None);
                     model_draft_error.set(None);
                     model_draft.set(String::new());
@@ -4188,79 +3948,16 @@ pub(super) fn CreateSessionForm(
                 crate::launch_composer::ModelOption::Model { id, harness } => {
                     partial_template_hint.set(false);
                     let switch_before = capture_permission_switch(undo_targets);
-                    // A pick within the chosen harness is what the old model
-                    // chip did: keep the harness, and clear an effort the
-                    // picked model does not offer, saying so in terms of the
-                    // MODEL. A pick that switches harness is the harness
-                    // chip's reconciliation instead, whose message names the
-                    // harness as well. The two messages differ on purpose:
-                    // each tells the person which choice made the effort go.
-                    if structured_harness() == Some(harness) {
-                        let offered = catalog
-                            .iter()
-                            .find(|model| model.id == id && model.harness == harness)
-                            .map(|model| model.efforts.clone())
-                            .unwrap_or_default();
-                        let chosen_effort = *structured_effort.peek();
-                        match chosen_effort {
-                            Some(effort) if !offered.contains(&effort) => {
-                                structured_effort.set(None);
-                                composer_reset_reason.set(Some(
-                                    "the selected effort is not in Farhelm's offering for that model, so it was cleared".to_string(),
-                                ));
-                            }
-                            _ => composer_reset_reason.set(None),
-                        }
-                        structured_model_raw_seed.set(None);
-                        structured_model_edited.set(true);
-                        structured_model.set(Some(id));
-                        custom_model_harness.set(None);
-                    } else {
-                        let before = LaunchSelection {
-                            permission_flags: crate::launch_composer::permission_words(
-                                structured_permissions(),
-                                &structured_permission_flags(),
-                            ),
-                            harness: structured_harness().unwrap_or(harness),
-                            model: structured_model(),
-                            effort: structured_effort(),
-                            permissions: structured_permissions(),
-                            wrapper_prefix: None,
-                            workspace_trust: None,
-                        };
-                        let (selection, owner) =
-                            crate::launch_composer::reconcile_harness_for_catalog_read(
-                                LaunchSelection {
-                                    model: Some(id),
-                                    ..before.clone()
-                                },
-                                None,
-                                harness,
-                                catalog_answer.as_deref(),
-                            );
-                        composer_reset_reason.set(draft_reconciliation_reason(
-                            &before,
-                            &selection,
-                            structured_permissions_is_explicit(),
-                        ));
-                        structured_harness.set(Some(selection.harness));
-                        structured_model_raw_seed.set(None);
-                        structured_model_edited.set(true);
-                        structured_model.set(selection.model);
-                        structured_effort.set(selection.effort);
-                        structured_permissions.set(selection.permissions);
-                        structured_permission_flags.set(
-                            selection
-                                .permission_flags
-                                .as_ref()
-                                .map(shell_words::join)
-                                .unwrap_or_default(),
-                        );
-                        structured_wrapper
-                            .set(remembered_wrapper(&preferences.0.peek(), Some(harness)));
-                        wrapper_is_explicit.set(false);
-                        custom_model_harness.set(owner);
-                    }
+                    let outcome = draft.edit(|draft| {
+                        draft.choose_catalog_model(
+                            id,
+                            harness,
+                            catalog_answer.as_deref(),
+                            remembered_wrapper(&preferences.0.peek(), Some(harness)),
+                            ChoiceOrigin::Control,
+                        )
+                    });
+                    composer_reset_reason.set(outcome.reset_reason);
                     note_permission_switch.call((switch_before, true));
                     model_draft_error.set(None);
                     model_draft.set(String::new());
@@ -4623,18 +4320,8 @@ pub(super) fn CreateSessionForm(
                             cwd_edited,
                             folder_is_explicit,
                             launch_tab,
-                            structured_harness,
-                            structured_model,
-                            structured_model_raw_seed,
-                            structured_model_edited,
-                            custom_model_harness,
-                            structured_effort,
-                            structured_permissions,
-                            structured_permission_flags,
-                            structured_wrapper,
-                            wrapper_is_explicit,
+                            draft,
                             preferences,
-                            structured_permissions_is_explicit,
                             composer_reset_reason,
                             template_error,
                             action_catalog.as_deref(),
@@ -4847,71 +4534,21 @@ pub(super) fn CreateSessionForm(
                 return;
             }
             partial_template_hint.set(false);
-            let old_harness = *structured_harness.peek();
             let switch_before = capture_permission_switch(undo_targets);
             promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
-            let selection = LaunchSelection {
-                permission_flags: crate::launch_composer::permission_words(
-                    structured_permissions(),
-                    &structured_permission_flags(),
-                ),
-                harness: structured_harness().unwrap_or(harness),
-                model: structured_model(),
-                effort: structured_effort(),
-                permissions: structured_permissions(),
-                wrapper_prefix: None,
-                workspace_trust: None,
-            };
-            let previous_selection = selection.clone();
-            let (selection, owner) = crate::launch_composer::reconcile_harness_for_catalog_read(
-                selection,
-                *custom_model_harness.peek(),
-                harness,
-                catalog.as_deref(),
-            );
             // Enter also applies the already-selected harness. Keep an
             // ambiguous launch's retry key unless reconciliation changes
             // the effective request; real edits still retire its YOLO question.
-            let changed = *structured_harness.peek() != Some(selection.harness)
-                || *launch_tab.peek() != LaunchTab::Agent
-                || selection != previous_selection;
-            composer_reset_reason.set(draft_reconciliation_reason(
-                &LaunchSelection {
-                    permission_flags: crate::launch_composer::permission_words(
-                        structured_permissions(),
-                        &structured_permission_flags(),
-                    ),
-                    harness: structured_harness().unwrap_or(harness),
-                    model: structured_model(),
-                    effort: structured_effort(),
-                    permissions: structured_permissions(),
-                    wrapper_prefix: None,
-                    workspace_trust: None,
-                },
-                &selection,
-                structured_permissions_is_explicit(),
-            ));
-            structured_harness.set(Some(selection.harness));
-            structured_model_raw_seed.set(selection.model.clone());
-            structured_model_edited.set(false);
-            structured_model.set(selection.model);
-            structured_effort.set(selection.effort);
-            structured_permissions.set(selection.permissions);
-            // Re-selecting the current agent is not an edit to its flags.
-            // Parsing loses unfinished quotes and normalizes intentional
-            // spacing, so only a real agent switch may reconstruct the text.
-            if old_harness != Some(harness) {
-                structured_permission_flags.set(
-                    selection
-                        .permission_flags
-                        .as_ref()
-                        .map(shell_words::join)
-                        .unwrap_or_default(),
-                );
-                structured_wrapper.set(remembered_wrapper(&preferences.0.peek(), Some(harness)));
-                wrapper_is_explicit.set(false);
-            }
-            custom_model_harness.set(owner);
+            let outcome = draft.edit(|draft| {
+                draft.choose_harness(
+                    harness,
+                    catalog.as_deref(),
+                    remembered_wrapper(&preferences.0.peek(), Some(harness)),
+                    ChoiceOrigin::Control,
+                )
+            });
+            let changed = outcome.selection_changed || *launch_tab.peek() != LaunchTab::Agent;
+            composer_reset_reason.set(outcome.reset_reason);
             launch_tab.set(LaunchTab::Agent);
             note_permission_switch.call((switch_before, true));
             if changed {
@@ -5167,14 +4804,12 @@ pub(super) fn CreateSessionForm(
         }
         partial_template_hint.set(false);
         promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
-        if *structured_permissions.peek() != permission {
+        if draft.snapshot().permissions() != permission {
             intent_key.set(None);
         }
-        structured_permissions.set(permission);
-        if permission != Some(LaunchPermission::Custom) {
-            structured_permission_flags.set(String::new());
-        }
-        structured_permissions_is_explicit.set(true);
+        draft.edit(|draft| {
+            draft.choose_permissions(permission);
+        });
     });
     // A guarded answer may arrive after another control's event but before
     // that control's render. Reconstruct the executable draft from live
@@ -5187,15 +4822,10 @@ pub(super) fn CreateSessionForm(
             if *launch_tab.peek() != LaunchTab::Agent {
                 return None;
             }
-            let harness = (*structured_harness.peek())?;
-            let selection = submitted_structured_selection(
-                harness,
-                structured_model.peek().clone(),
-                *structured_effort.peek(),
-                *structured_permissions.peek(),
-                &structured_permission_flags.peek(),
-                wrapper_words(&structured_wrapper.peek()).ok()?,
-            );
+            let current = draft.snapshot();
+            let harness = current.harness()?;
+            wrapper_words(&current.wrapper()).ok()?;
+            let selection = current.request()?;
             let selected = effective_create_host(&hosts, *chosen_host.peek(), open_host.as_ref());
             if !target_matches_selection(selected, &hosts, create_target.peek().as_ref()) {
                 return None;
@@ -5314,33 +4944,32 @@ pub(super) fn CreateSessionForm(
             // re-reading across it would let the request's MODE differ
             // from the one the button was pressed on.
             let launch = if *launch_tab.peek() == LaunchTab::Agent {
-                let Some(harness) = *structured_harness.peek() else {
+                if draft.snapshot().harness().is_none() {
                     drop(op_guard);
                     return;
-                };
-                if *structured_permissions.peek() == Some(LaunchPermission::Custom)
+                }
+                if draft.snapshot().permissions() == Some(LaunchPermission::Custom)
                     && farhelm_proto::split_permission_flags(&structured_permission_flags())
                         .is_err()
                 {
                     error.set(Some(CUSTOM_PERMISSION_FLAGS_REFUSAL.into()));
                     return;
                 }
-                let wrapper_prefix = match wrapper_words(&structured_wrapper()) {
-                    Ok(prefix) => prefix,
+                match wrapper_words(&structured_wrapper()) {
+                    Ok(_) => {}
                     Err(reason) => {
                         error.set(Some(reason));
                         drop(op_guard);
                         return;
                     }
-                };
-                let selection = submitted_structured_selection(
-                    harness,
-                    structured_model.peek().clone(),
-                    *structured_effort.peek(),
-                    *structured_permissions.peek(),
-                    &structured_permission_flags(),
-                    wrapper_prefix,
-                );
+                }
+                // The flags read was unconditional in the old snapshot
+                // builder, including synchronous guarded-preview submission.
+                let _ = structured_permission_flags();
+                let selection = draft
+                    .snapshot()
+                    .request()
+                    .expect("the live harness was checked above");
                 LaunchIntent::Structured(selection)
             } else {
                 // The RAW bytes while untouched, not the escaped display
@@ -5516,10 +5145,10 @@ pub(super) fn CreateSessionForm(
                 (
                     destination_draft.peek().repo().cloned(),
                     *launch_tab.peek(),
-                    *structured_harness.peek(),
-                    structured_model.peek().clone(),
-                    *structured_effort.peek(),
-                    *structured_permissions.peek(),
+                    draft.snapshot().harness(),
+                    draft.snapshot().model(),
+                    draft.snapshot().effort(),
+                    draft.snapshot().permissions(),
                     submitted_field(
                         &invocation.peek(),
                         *invocation_edited.peek(),
@@ -5715,29 +5344,26 @@ pub(super) fn CreateSessionForm(
                     // complete declarative intent so the next key binds
                     // exactly what the person now sees.
                     if matches!(binding.agent, LaunchIntent::Structured(_)) {
-                        let Some(harness) = *structured_harness.peek() else {
+                        if draft.snapshot().harness().is_none() {
                             error.set(Some(
                                 "the structured launch choice changed while its idempotency key was being generated; choose a harness and press launch again".to_string(),
                             ));
                             drop(op_guard);
                             return;
-                        };
-                        let wrapper_prefix = match wrapper_words(&structured_wrapper()) {
-                            Ok(prefix) => prefix,
+                        }
+                        match wrapper_words(&structured_wrapper()) {
+                            Ok(_) => {}
                             Err(reason) => {
                                 error.set(Some(reason));
                                 drop(op_guard);
                                 return;
                             }
-                        };
-                        let selection = submitted_structured_selection(
-                            harness,
-                            structured_model.peek().clone(),
-                            *structured_effort.peek(),
-                            *structured_permissions.peek(),
-                            &structured_permission_flags(),
-                            wrapper_prefix,
-                        );
+                        }
+                        let _ = structured_permission_flags();
+                        let selection = draft
+                            .snapshot()
+                            .request()
+                            .expect("the live harness was checked above");
                         if *launch_tab.peek() != LaunchTab::Agent
                             || !crate::launch_composer::selection_fits_catalog(
                                 &selection,
@@ -6314,28 +5940,18 @@ pub(super) fn CreateSessionForm(
                             // them would turn a quick correction into a new
                             // destination decision.
                             partial_template_hint.set(false);
-                            structured_harness.set(None);
-                            structured_model_raw_seed.set(None);
-                            structured_model_edited.set(false);
-                            structured_model.set(None);
-                            custom_model_harness.set(None);
-                            structured_effort.set(None);
                             // Reset returns the segment to the REMEMBERED
                             // value, not to "default" — it does not clear
                             // the memory itself, only re-applies it (SPEC.md's
                             // launch-composer carve-out). A fresh `peek` here
                             // rather than the value this dialog seeded from,
                             // since "reset" means "as if freshly opened now".
-                            structured_permissions
-                                .set(initial_structured_permissions(&preferences.0.peek()));
+                            draft.edit(|draft| draft.reset_choices(initial_structured_permissions(&preferences.0.peek())));
                             // Back to a passive seed, exactly like a fresh
                             // open: reset does not turn the remembered value
                             // into a deliberate choice, so it must not start
                             // filtering recents either (see
                             // `structured_permissions_is_explicit`).
-                            structured_permissions_is_explicit.set(false);
-                            structured_wrapper.set(String::new());
-                            wrapper_is_explicit.set(false);
                             composer_reset_reason.set(None);
                             promote_fetched_history_snapshot(
                                 offered_history, create_target, fetched_history,
@@ -7515,8 +7131,7 @@ pub(super) fn CreateSessionForm(
                                 wrapper_prefix: structured_wrapper(),
                                 on_wrapper_prefix: move |text| {
                                     if !draft_transition_allowed(ops) { return; }
-                                    structured_wrapper.set(text);
-                                    wrapper_is_explicit.set(true);
+                                    draft.edit(|draft| draft.edit_wrapper(text));
                                     intent_key.set(None);
                                 },
                                 on_permission_flags: move |text| {
@@ -7524,9 +7139,8 @@ pub(super) fn CreateSessionForm(
                                     // enabled this editor. Keep the admitted
                                     // launch and its retry key unchanged.
                                     if !draft_transition_allowed(ops) { return; }
-                                    structured_permission_flags.set(text);
+                                    draft.edit(|draft| draft.edit_permission_flags(text));
                                     intent_key.set(None);
-                                    structured_permissions_is_explicit.set(true);
                                 },
                                 catalog: catalog_models.clone(),
                                 busy,
@@ -7585,50 +7199,11 @@ pub(super) fn CreateSessionForm(
                                                 promote_fetched_history_snapshot(
                                                     offered_history, create_target, fetched_history,
                                                 );
-                                                let before = LaunchSelection {
-                                                    permission_flags: crate::launch_composer::permission_words(structured_permissions(), &structured_permission_flags()),
-                                                    harness,
-                                                    model: structured_model(),
-                                                    effort: structured_effort(),
-                                                    permissions: structured_permissions(),
-                                                    wrapper_prefix: None,
-                                                    workspace_trust: None,
-                                                };
-                                                let selection = LaunchSelection {
-                                                    permission_flags: crate::launch_composer::permission_words(structured_permissions(), &structured_permission_flags()),
-                                                    harness,
-                                                    model: Some(model),
-                                                    effort: structured_effort(),
-                                                    permissions: structured_permissions(),
-                                                    wrapper_prefix: None,
-                                                    workspace_trust: None,
-                                                };
                                                 // Permission text can still be an unfinished draft.
                                                 // Only model/effort compatibility may clear effort;
                                                 // an unavailable catalog cannot establish a conflict.
-                                                if let Some(effort) = selection.effort
-                                                    && let Some(catalog) = catalog_answer.as_deref()
-                                                    && !crate::launch_composer::compatible_efforts(
-                                                        selection.harness, selection.model.as_deref(), catalog,
-                                                    ).contains(&effort)
-                                                {
-                                                    structured_effort.set(None);
-                                                    composer_reset_reason.set(
-                                                        crate::launch_composer::reconciliation_reset_reason(
-                                                            &before,
-                                                            &LaunchSelection {
-                                                                effort: None,
-                                                                ..selection.clone()
-                                                            },
-                                                        ),
-                                                    );
-                                                } else {
-                                                    composer_reset_reason.set(None);
-                                                }
-                                                structured_model_raw_seed.set(None);
-                                                structured_model_edited.set(true);
-                                                structured_model.set(selection.model);
-                                                custom_model_harness.set(Some(harness));
+                                                let reason = draft.edit(|draft| draft.choose_custom_model(model, harness, catalog_answer.as_deref()));
+                                                composer_reset_reason.set(reason);
                                                 model_draft_error.set(None);
                                                 model_draft.set(String::new());
                                                 model_open.set(false);
@@ -7661,10 +7236,10 @@ pub(super) fn CreateSessionForm(
                                     );
                                     // Reapplying a choice with Enter is also a
                                     // retry gesture. Only a real edit retires it.
-                                    if *structured_effort.peek() != effort {
+                                    if draft.snapshot().effort() != effort {
                                         intent_key.set(None);
                                     }
-                                    structured_effort.set(effort);
+                                    draft.edit(|draft| { draft.choose_effort(effort); });
                                 },
                                 on_permissions: move |permission| choose_permissions.call(permission),
                             }
@@ -9583,14 +9158,16 @@ mod tests {
             incarnation: "original-installation".into(),
             cwd: "/workspace".into(),
             github_checkout: None,
-            agent: LaunchIntent::Structured(submitted_structured_selection(
-                LaunchHarness::Codex,
-                None,
-                None,
-                Some(LaunchPermission::Yolo),
-                "",
-                None,
-            )),
+            agent: LaunchIntent::Structured({
+                let mut draft = LaunchDraft::new(Some(LaunchPermission::Yolo));
+                draft.choose_harness(
+                    LaunchHarness::Codex,
+                    None,
+                    String::new(),
+                    ChoiceOrigin::Control,
+                );
+                draft.request().expect("the refused request has an agent")
+            }),
             title: "original title".into(),
             replace_source: None,
         };
