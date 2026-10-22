@@ -21,9 +21,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`refused-sequence-displaces-later-binding-snapshots.md`](refused-sequence-displaces-later-binding-snapshots.md) — A
   refused sequence may displace later Enter bindings; native event reachability remains unresolved.
 
-- [`reset-search-agent-restores-other-custom-flags.md`](reset-search-agent-restores-other-custom-flags.md) — Reset and
-  agent search can restore another agent's custom permission flags; harmful interpretation is unverified.
-
 - [`restored-link-press-misses-intervening-drag.md`](restored-link-press-misses-intervening-drag.md) — A held press may
   activate a link after recovery misses dragging; native delivery and security impact are unverified.
 
