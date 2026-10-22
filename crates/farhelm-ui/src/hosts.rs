@@ -4451,8 +4451,9 @@ enum AddConfirm<G> {
 /// its refusal (a retry after a refusal answers the same opening again);
 /// the request's success clears it. The skip-confirmation path has no
 /// dialog, so its answer consumes the opening it just made. This makes host
-/// Remove one of the two prompts `ConfirmSlot`'s docs sanction to answer
-/// without `take` (the tunnel security warning is the other).
+/// Remove one of the prompts `ConfirmSlot`'s docs sanction to answer
+/// without `take` (the tunnel security warning and the templates editor's
+/// save-before-leaving prompt are the others).
 ///
 /// Because a dialog answer does not consume the opening, a "remove" and a
 /// "remove, don't ask again" queued in one burst both pass here; the

@@ -20,6 +20,7 @@ use crate::menu_panel::{
     remember_menu_item, session_menu_placement_style, use_menu_instance,
 };
 use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus};
+use crate::ops::{ConfirmSlot, ConfirmToken, use_confirm_slot};
 use crate::peer::{PeerText, display_peer};
 use dioxus::prelude::*;
 pub(super) use farhelm_proto::launcher::quick_launch_eligible;
@@ -1312,12 +1313,15 @@ fn FieldEditor(
 }
 
 /// All editor departure paths share the same guard, including mobile Back and
-/// Escape. A pending action carries its destination rather than losing it when
-/// the user saves from the inline prompt.
-#[derive(Clone, PartialEq)]
+/// Escape. A departure held by the "Save these changes before leaving?"
+/// prompt is that prompt's [`ConfirmSlot`] key: it carries its destination,
+/// so saving from the prompt still goes where the user was heading, and each
+/// answer carries the departure its own render drew.
+#[derive(Clone, PartialEq, Debug)]
 enum Departure {
-    // Only Open carries a stored template. Keep the pending navigation value
-    // small as template fields grow; the other departures carry no payload.
+    // Only Open carries a stored template. Keep the prompt key (cloned into
+    // every token and answer) small as template fields grow; the other
+    // departures carry no payload.
     Open(Box<LaunchTemplate>),
     New,
     Duplicate,
@@ -1356,7 +1360,7 @@ fn leave_editor(
     mut baseline: Signal<Draft>,
     mut previous: Signal<Option<String>>,
     mut opened: Signal<bool>,
-    mut pending: Signal<Option<Departure>>,
+    mut leave_prompt: ConfirmSlot<Departure>,
     mut error: Signal<Option<String>>,
     names: Vec<String>,
     on_close: EventHandler<()>,
@@ -1366,7 +1370,10 @@ fn leave_editor(
         Departure::Close => None,
         _ => Some(".templates-name"),
     };
-    pending.set(None);
+    // Reconciliation, not an answer: whichever path got here (an answer that
+    // already took or accepted the prompt's opening, a clean draft that never
+    // asked, a delete), the editor is moving on and no prompt describes it.
+    leave_prompt.clear();
     error.set(None);
     match action {
         Departure::Open(template) => {
@@ -1410,6 +1417,83 @@ fn leave_editor(
     if let Some(selector) = focus {
         focus_template_control(selector);
     }
+}
+
+// The "Save these changes before leaving?" prompt's answers.
+//
+// The prompt is a `ConfirmSlot<Departure>`: every departure from a dirty
+// draft opens a new opening keyed by where the user was heading, and the
+// render that draws the prompt moves that opening's token into its three
+// buttons. Each answer below acts only for the token it was drawn with and
+// only on the departure that token names, never on the slot as it is when
+// the click runs. A click drawn for an earlier showing (one the user since
+// answered with "keep editing", or one another departure replaced while the
+// prompt was up) does nothing and leaves the prompt now on screen alone.
+//
+// Save is the one answer that does not consume its opening: the prompt stays
+// up, buttons disabled, while the save runs, and stays up after a failed save
+// (the error shows in the dialog's status line, not in the prompt) so the
+// user can answer the same question again; a successful save retires it when
+// `leave_editor` moves on. That is the stay-up-through-the-request exception
+// `ConfirmSlot`'s docs describe, and the dialog's `busy` flag is what refuses
+// every other answer meanwhile. Save itself refuses on `busy`, and Discard
+// and "keep editing" take `busy` too: they are refused while the dialog is
+// busy with a write (a save from this prompt included, but also, for
+// example, a binding edit or an Undo started elsewhere in the dialog), which
+// is also when all three buttons are drawn disabled. Without that refusal, a
+// Discard queued behind the prompt's "save" in one burst would run its
+// departure at once and the save's success would run the same departure a
+// second time, and a "keep editing" queued the same way would close the
+// prompt only for the save's success to leave the editor anyway, silently
+// overriding the user's answer.
+
+/// The departure a "save" click drawn for `shown` saves and then performs,
+/// or `None` when `shown` is no longer the open showing.
+///
+/// Leaves the opening open (see the section comment above for why). The
+/// caller must already have refused the click while the dialog is busy with
+/// a write.
+fn answer_save_and_leave(
+    slot: &ConfirmSlot<Departure>,
+    shown: &ConfirmToken<Departure>,
+) -> Option<Departure> {
+    slot.is_current(shown).then(|| shown.key().clone())
+}
+
+/// The departure a "discard" click drawn for `shown` performs, consuming the
+/// opening, or `None` (and the prompt unchanged) when `shown` is no longer
+/// the open showing or the dialog is busy with a write (`busy`; a save from
+/// this prompt included).
+///
+/// A stale Discard is the case that matters: one handled after "keep
+/// editing" closed the prompt would throw away the draft the user had just
+/// chosen to keep. The `busy` refusal keeps a Discard queued behind the
+/// prompt's "save" from leaving now and again when that save succeeds.
+fn answer_discard(
+    slot: &mut ConfirmSlot<Departure>,
+    shown: &ConfirmToken<Departure>,
+    busy: bool,
+) -> Option<Departure> {
+    if busy {
+        return None;
+    }
+    slot.take(shown).map(|()| shown.key().clone())
+}
+
+/// Whether a "keep editing" click drawn for `shown` closes the prompt (and
+/// the caller moves focus to the name field): only when `shown` is the open
+/// showing and the dialog is not busy with a write (`busy`; a save from this
+/// prompt included). A refused click changes nothing, focus included.
+///
+/// The `busy` refusal matters because accepting "keep editing" behind a
+/// running save from the prompt would close the prompt, and the save's
+/// success would then leave the editor regardless.
+fn answer_keep_editing(
+    slot: &mut ConfirmSlot<Departure>,
+    shown: &ConfirmToken<Departure>,
+    busy: bool,
+) -> bool {
+    !busy && slot.take(shown).is_some()
 }
 
 /// A deleted template lives only in this mounted dialog. The generation keeps
@@ -1535,7 +1619,7 @@ pub(super) fn TemplatesDialog(
     let mut baseline = use_signal(move || initial_baseline);
     let mut previous = use_signal(|| initial_template.as_ref().map(|t| t.name.clone()));
     let opened = use_signal(|| initial_template.is_some());
-    let mut pending = use_signal(|| None::<Departure>);
+    let mut leave_prompt = use_confirm_slot::<Departure, ()>();
     let mut error = use_signal(|| None::<String>);
     let mut busy = use_signal(|| false);
     let mut add_open = use_signal(|| false);
@@ -1655,7 +1739,11 @@ pub(super) fn TemplatesDialog(
         }
         add_open.set(false);
         if opened() && draft() != baseline() {
-            pending.set(Some(action));
+            // A new opening even when the prompt is already up (Escape or a
+            // row click while it shows): answers drawn for the earlier
+            // showing stop matching, so none of them can act on a departure
+            // the prompt has since swapped out.
+            leave_prompt.open(action, ());
         } else {
             leave_editor(
                 action,
@@ -1663,7 +1751,7 @@ pub(super) fn TemplatesDialog(
                 baseline,
                 previous,
                 opened,
-                pending,
+                leave_prompt,
                 error,
                 departure_names.clone(),
                 on_close,
@@ -1672,10 +1760,21 @@ pub(super) fn TemplatesDialog(
     });
 
     let save_base = base.clone();
-    let save: EventHandler<Option<Departure>> = EventHandler::new(move |after| {
+    // `after` is the leave prompt's token when the click is that prompt's
+    // "save", and `None` for the editor's own save button.
+    let save: EventHandler<Option<ConfirmToken<Departure>>> = EventHandler::new(move |after| {
         if busy() {
             return;
         }
+        // A stale prompt answer refuses before validation, so it neither
+        // saves nor puts an error on the prompt now on screen.
+        let after = match after {
+            None => None,
+            Some(shown) => match answer_save_and_leave(&leave_prompt, &shown) {
+                Some(action) => Some(action),
+                None => return,
+            },
+        };
         let value = draft();
         let catalog_value = catalog.peek();
         let catalog_rows = catalog_value
@@ -1794,11 +1893,18 @@ pub(super) fn TemplatesDialog(
                     templates.restart();
                     if let Some(action) = after {
                         leave_editor(
-                            action, draft, baseline, previous, opened, pending, error, names,
+                            action,
+                            draft,
+                            baseline,
+                            previous,
+                            opened,
+                            leave_prompt,
+                            error,
+                            names,
                             on_close,
                         );
                     } else {
-                        pending.set(None);
+                        leave_prompt.clear();
                     }
                 }
                 Err(message) => error.set(Some(message)),
@@ -1872,7 +1978,7 @@ pub(super) fn TemplatesDialog(
                         baseline,
                         previous,
                         opened,
-                        pending,
+                        leave_prompt,
                         error,
                         Vec::new(),
                         on_close,
@@ -1941,7 +2047,9 @@ pub(super) fn TemplatesDialog(
     };
 
     let disabled = busy();
-    let prompt = pending();
+    // The leave prompt's opening, read once here and moved into each of its
+    // buttons below, so every answer names the showing it was drawn for.
+    let prompt = leave_prompt.current();
     let inferred =
         previous().is_some() && baseline().fields.kind.is_none() && current.fields.kind.is_some();
     // The same resolved mark and number label drive both visible controls and
@@ -2096,14 +2204,14 @@ pub(super) fn TemplatesDialog(
                             }
                             p { class: "templates-hint", "Fields not shown are left as is. Another template can supply choices this one leaves out." }
                             footer { class: "templates-editor-footer",
-                                if let Some(action)=prompt.clone() {
+                                if let Some(shown)=prompt.clone() {
                                     div { class: "templates-departure", role: "status",
                                         onmounted: move |_| { document::eval("requestAnimationFrame(() => { const prompt = document.querySelector('.templates-departure'); prompt?.scrollIntoView({block: 'nearest'}); prompt?.querySelector('.templates-save-leave')?.focus({preventScroll: true}); })"); },
                                         p { "Save these changes before leaving?" }
                                         div { class: "templates-actions",
-                                            button { r#type: "button", class: "btn btn-primary templates-save-leave", disabled, "data-tooltip": "save these changes, then continue", onclick: { let action=action.clone(); move |_| save.call(Some(action.clone())) }, "save" }
-                                            button { r#type: "button", class: "btn btn-neutral templates-discard", disabled, "data-tooltip": "discard these changes, then continue", onclick: { let names=names.clone(); move |_| leave_editor(action.clone(),draft,baseline,previous,opened,pending,error,names.clone(),on_close) }, "discard" }
-                                            button { r#type: "button", class: "btn btn-neutral templates-keep-editing", disabled, "data-tooltip": "stay here with the unsaved draft", onclick: move |_| { pending.set(None); focus_template_control(".templates-name"); }, "keep editing" }
+                                            button { r#type: "button", class: "btn btn-primary templates-save-leave", disabled, "data-tooltip": "save these changes, then continue", onclick: { let shown=shown.clone(); move |_| save.call(Some(shown.clone())) }, "save" }
+                                            button { r#type: "button", class: "btn btn-neutral templates-discard", disabled, "data-tooltip": "discard these changes, then continue", onclick: { let names=names.clone(); let shown=shown.clone(); move |_| { if let Some(action)=answer_discard(&mut leave_prompt,&shown,busy()) { leave_editor(action,draft,baseline,previous,opened,leave_prompt,error,names.clone(),on_close) } } }, "discard" }
+                                            button { r#type: "button", class: "btn btn-neutral templates-keep-editing", disabled, "data-tooltip": "stay here with the unsaved draft", onclick: move |_| { if answer_keep_editing(&mut leave_prompt,&shown,busy()) { focus_template_control(".templates-name"); } }, "keep editing" }
                                         }
                                     }
                                 } else {
@@ -3094,6 +3202,120 @@ mod tests {
             DeleteKind::of(Some(std::slice::from_ref(&unsaveable)), Some("other")),
             DeleteKind::Restorable
         );
+    }
+
+    /// Mount a leave-prompt slot the way `TemplatesDialog` does and run `body`
+    /// against it inside the runtime, so the answer tests below exercise the
+    /// real signal-backed slot. The dialog itself is not mounted: its
+    /// handlers only route the clicks to the `answer_*` helpers tested here.
+    fn with_leave_prompt(body: impl FnOnce(ConfirmSlot<Departure>)) {
+        std::thread_local! {
+            static SLOT: Cell<Option<ConfirmSlot<Departure>>> = const { Cell::new(None) };
+        }
+
+        fn app() -> Element {
+            let slot = use_confirm_slot::<Departure, ()>();
+            SLOT.with(|cell| cell.set(Some(slot)));
+            rsx! {}
+        }
+
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let slot = SLOT.with(Cell::get).expect("the slot mounted");
+        dom.in_runtime(|| body(slot));
+    }
+
+    /// A stored template to head to, distinct per `name`.
+    fn open_departure(name: &str) -> Departure {
+        Departure::Open(Box::new(LaunchTemplate {
+            name: name.into(),
+            fields: TemplateFields::default(),
+        }))
+    }
+
+    /// Spec (`answer_save_and_leave`, `answer_discard`,
+    /// `answer_keep_editing`): an answer to "Save these changes before
+    /// leaving?" drawn for a showing that is no longer open does nothing:
+    /// "save" saves nothing and leaves nowhere, "discard" discards nothing,
+    /// "keep editing" closes nothing, and the prompt now on screen (if any)
+    /// stays open. A showing stops being open once answered, once another
+    /// departure replaces it while it is up, and once it is reopened, even
+    /// for the same departure.
+    ///
+    /// Why: these clicks can be handled after the click or key that changed
+    /// the prompt but before the render that redraws it. A Discard handled
+    /// after "keep editing" used to throw away the draft the user had just
+    /// chosen to keep, and one handled after Escape replaced the prompt
+    /// would leave for the earlier destination instead of the one the user
+    /// last chose (Escape's Close).
+    #[farhelm_testtrace::test]
+    fn a_stale_leave_prompt_answer_does_nothing() {
+        with_leave_prompt(|mut slot| {
+            // "keep editing" first; a Discard or save from the same showing
+            // queued behind it must not act.
+            let first = slot.open(open_departure("build"), ());
+            assert!(answer_keep_editing(&mut slot, &first, false));
+            assert_eq!(answer_discard(&mut slot, &first, false), None);
+            assert_eq!(answer_save_and_leave(&slot, &first), None);
+            assert!(!answer_keep_editing(&mut slot, &first, false));
+            assert!(!slot.is_open(), "no prompt is open after keep editing");
+
+            // Escape replaces Back's prompt with Close's while it is up.
+            let back = slot.open(Departure::Back, ());
+            let close = slot.open(Departure::Close, ());
+            assert_eq!(answer_discard(&mut slot, &back, false), None);
+            assert_eq!(answer_save_and_leave(&slot, &back), None);
+            assert!(!answer_keep_editing(&mut slot, &back, false));
+            assert!(slot.is_current(&close), "the replacing prompt stays up");
+
+            // Reopened for an equal departure: still a different showing.
+            let reopened = slot.open(Departure::Close, ());
+            assert_eq!(answer_discard(&mut slot, &close, false), None);
+            assert_eq!(answer_save_and_leave(&slot, &close), None);
+            assert!(!answer_keep_editing(&mut slot, &close, false));
+            assert!(slot.is_current(&reopened), "the reopened prompt stays up");
+        });
+    }
+
+    /// Spec: a current answer acts on the departure its showing was opened
+    /// with, which is what the prompt's render drew. "save" leaves the prompt
+    /// open (it stays up through the save, and after a failed save the user
+    /// answers the same showing again); while the dialog is busy with a
+    /// write (that save included), "discard" and "keep editing" are refused
+    /// and the prompt stays; otherwise "discard"
+    /// yields the departure and "keep editing" closes the prompt, both
+    /// consuming the showing.
+    ///
+    /// Why: the save path owns the prompt until its outcome is known, so a
+    /// Discard or "keep editing" queued behind "save" in one burst must not
+    /// leave or close underneath it (the buttons are already drawn disabled
+    /// by then). And each answer must go where the prompt it was drawn for
+    /// said, not wherever a later departure points.
+    #[farhelm_testtrace::test]
+    fn leave_prompt_answers_act_on_the_departure_drawn() {
+        with_leave_prompt(|mut slot| {
+            let heading = open_departure("review");
+            let shown = slot.open(heading.clone(), ());
+            assert_eq!(answer_save_and_leave(&slot, &shown), Some(heading.clone()));
+            assert!(
+                slot.is_current(&shown),
+                "the prompt stays up through the save"
+            );
+
+            // While that save runs.
+            assert_eq!(answer_discard(&mut slot, &shown, true), None);
+            assert!(!answer_keep_editing(&mut slot, &shown, true));
+            assert!(slot.is_current(&shown), "the save still owns the prompt");
+
+            // After a failed save: retry, then discard instead.
+            assert_eq!(answer_save_and_leave(&slot, &shown), Some(heading.clone()));
+            assert_eq!(answer_discard(&mut slot, &shown, false), Some(heading));
+            assert!(!slot.is_open(), "discard consumed the showing");
+
+            let staying = slot.open(Departure::New, ());
+            assert!(answer_keep_editing(&mut slot, &staying, false));
+            assert!(!slot.is_open(), "keep editing closed the prompt");
+        });
     }
 
     /// Spec: a new template, or a rename, is saved only once the template
