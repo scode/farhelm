@@ -260,3 +260,115 @@ entry, returning refused Feedback to Message, and recovering SSH help after a re
 escape scenario was rejected because the actual dialog's footer remains after the radio group; it was not claimed as a
 separate observed defect. Commit and PR wording passed fresh-context cold reads. The rebase preserves the reviewed
 product diffs, so it reuses those gates.
+
+### Landing
+
+Landed as #2519, #2524, #2525, #2527, #2529, #2531, #2533, #2534, #2535 and #2537, merged bottom-up, with the content
+the report describes plus three browser-test updates described below. It was the only plan in this landing round.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing but queue bookkeeping landed after the stack's base, so the stack needed no rebase changes. It was written right
+after several UI plans landed, though, and its own browser runs were selections, so a fresh-context reviewer and I
+checked that the converted dialogs keep what those plans added:
+
+- The YOLO question in the session launcher and in Restart with, including the "start guarded session instead" answer
+  (yolo-confirm-launch-guarded), renders inside its dialog, so the dialog's Tab trap includes its buttons and the
+  question's Cancel still gets first focus. When that answer waits for a fresh checkout preview before launching,
+  nothing in the new dialog boundary releases or holds the launcher in between.
+- The Replace questions that ui-session-actions shared between the sidebar, session header and interrupted-session card
+  stay inline rather than becoming modal dialogs. One that appears behind an open launcher or Rename is now part of the
+  inactive page instead of pulling focus out of the dialog.
+- The "keep a checkout ready" switch that spare-launch-checkout added to Settings stays in Settings' Tab order.
+- The connection-stage text and host update warnings from connection-stall-phase and host-changed-update-warning are
+  shown in host rows and session cards, not inside a dialog, and no dialog content was dropped.
+- Agent approval cards stay usable over every dialog, including the launcher and Rename, which isolate the page for the
+  first time.
+
+#### Fixes made during the landing
+
+The full browser suite found three existing tests, outside the plan's own selections, that the plan's intended changes
+broke on both engines. They had passed in the previous full run (`3157847c-bee9-4df2-b327-1137c87e135f`, on 2026-10-21),
+and their spec files had not changed on main since. Each was a test assumption the plan made out of date, not a product
+fault, so the landing updated the tests:
+
+- "opening the create-session form closes an open row menu" (sidebar) also walked Tab from the New button, through
+  Templates, into the open launcher. The launcher now makes the rest of the page inactive and keeps Tab inside itself,
+  so that route no longer exists; the landing removed that walk and kept the row-menu check. The walk existed so a
+  keyboard user could always reach the new form; the plan's own dialog test now checks that opening New moves focus into
+  the launcher's search field and that Tab stays inside the launcher. This update is in #2534, the PR that made the
+  launcher isolate the page.
+- "Replace with refuses a whole sequence and yields to another modal" (template shortcuts) adds a stand-in dialog above
+  the launcher and checks that the launcher's template shortcut leaves keys pressed there alone. The launcher's new
+  isolation made that stand-in inactive. A real dialog opened over the launcher takes the isolation over from it, which
+  the plan's own nested-dialog tests check, but the stand-in is plain markup and cannot do that. The landing gave it the
+  exemption agent approval cards carry, so it stays active, and added a check that it did. The shortcut still decides to
+  yield because the stand-in is a second visible dialog, not because of the exemption, so the test proves the same
+  thing. Also in #2534.
+- "sent-feedback scrollports have keyboard entry points" (dialog layout) pauses the page clock, which also holds the
+  animation frame in which the sent message's body gains its new keyboard stop. Once a message is sent, its text fields
+  are replaced by plain text, and the body gets that stop in the next frame; in a running browser that is immediate, and
+  only the test's frozen clock held it. The landing lets the clock run 50 milliseconds first, as the plan's own
+  scrolling tests already do, while Feedback's close timer stays held. This update is in #2537, the PR that added those
+  keyboard stops.
+
+The three tests then passed three times each on both engines.
+
+#### Possible follow-ups
+
+- Found at landing, low severity; neither the report nor the executor's reviews mention it: with the launcher's "save as
+  template" panel open, Escape can now close the whole launcher and discard its draft instead of closing only the panel.
+  This needs keyboard focus to have left the launcher first; one way is a refused save (a taken name, say) in a browser
+  that drops focus from the panel's controls while they are disabled during the save. Before this plan, Escape did
+  nothing in that state; with focus inside the panel it still closes only the panel. The page-isolation handler presses
+  the launcher's own Cancel in that case. Possible follow-up: make that handler close the panel first when it is open.
+- Found at landing, not caused by this plan: Settings' "keep a checkout ready" switch is disabled outright while its
+  change saves, unlike Settings' other controls, so keyboard focus can drop out of it during the save; the next Tab
+  starts again at the dialog's first control. Possible follow-up: keep it focusable while saving, as the other controls
+  are.
+- SPEC_impl.md's paragraph that begins "The dialog owns keyboard focus structurally" is about Restart with, but now
+  follows the two new paragraphs about all dialogs, so "the dialog" reads as the shared boundary. Possible follow-up:
+  name Restart with in that paragraph.
+- Not caused by this plan: with keyboard focus on an agent approval card's button while the launcher is open, a template
+  shortcut still applies to the launcher's draft, because the shortcut does not treat the card as a dialog to yield to.
+  Possible follow-up, if that is not intended: have the shortcut yield to approval cards too.
+
+#### Checks
+
+The plan adds about 2,800 lines and removes about 1,200, all in the UI and its browser tests, and changes every modal
+dialog, while its own browser runs were per-PR selections; that is why this round ran the full browser suite. No helm,
+supervisor or asset JavaScript changed, so the rest of the Rust workspace and the JavaScript harness did not run. All of
+the following ran on the stack before the landing's three test updates, except where noted:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, `dprint check` on
+  every changed Markdown, JSON and TOML file, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py`, the workspace debug build, the UI's release web build and
+  `scripts/check-desktop-assets.sh` (which also builds the desktop app) passed on the stack before the test updates,
+  which change no product code. The isolated test-sleep check passed on the stack as it landed.
+- `cargo nextest run -p farhelm-ui` through the test recorder with pinned nextest and tmux, four slots, no retries, run
+  `4fbf6c23-6496-4587-92a5-4de9e01e3087`: 612 passed. `cargo nextest run -p farhelm-ui --features desktop`, run
+  `6c5b4e49-92e7-4dfe-8b37-b4ff7783c1ea`: 773 passed. Both ran before the test updates, which change only browser tests.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, on the stack before the test updates, run `c2a8412b-3534-414f-bd04-a77888f9cb27` (kept):
+  2300 passed, 14 skipped by design (WebKit clipboard cases and tests that need a real signed-in agent or run on one
+  engine only), 8 failed:
+  - the three tests above, on both engines. The tests that the recent UI plans added for the dialogs this plan converted
+    (the YOLO question with its guarded answer, the guarded answer waiting for a checkout preview, guarded restarts and
+    the prepared-checkout setting), which the plan's own selections had not run, all passed; after the updates, run
+    `9efef768-79db-4da0-b76f-83044890fa8a` passed each three times on both engines (18 of 18); the updates were later
+    changed only in their comments;
+  - on Chromium, "a-tab-opened-unaware-of-a-takeover-does-not-take-the-session-back", the open flake FLAKES.md recorded
+    on 2026-10-20, failing the same way (the new tab's banner stayed empty);
+  - on WebKit, "post-clone commands with carriage returns refuse edits but can be cleared", which finished its steps and
+    then hung in its cleanup waiting for the browser to report a save as finished, exactly as it did once two landing
+    rounds earlier on unrelated code. This plan does not change that test or the post-clone command save. I am recording
+    it as an open flake in FLAKES.md, with a Deflake entry in TODO.md, in a separate draft PR.
+- Skipped: the rest of the Rust workspace and the JavaScript harness (no helm, supervisor or asset JavaScript changed),
+  the website build (no docs page changed), the doctests (no documentation example changed), the desktop smoke test, the
+  native Mac app (not runnable here) and the installer (unchanged).
+
+The report's checks were focused browser selections per PR and the UI unit tests; it skipped the full browser suite,
+which ran this round, above, and found the three tests the landing updated. Its note that browser tests cannot prove the
+desktop app's tunnel-consent dialog timing still holds. Nothing in the executor's report became untrue at landing.
