@@ -21,7 +21,7 @@ use crate::menu_panel::{
     cancel_menu_focus, closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus,
     handle_menu_key, install_row_menu_outside_dismiss, measurement_outcome, record_menu_item_focus,
     remember_menu_item, row_menu_relay_key, session_menu_placement_style,
-    session_menu_pointer_style, should_measure_on_mount,
+    session_menu_pointer_style, should_measure_on_mount, use_menu_instance,
 };
 use crate::peer::display_peer;
 use crate::reader::sleep_ms;
@@ -260,6 +260,7 @@ struct BarMenuState {
     focus_queue: MenuFocusQueue,
     open_generation: Signal<u64>,
     close_menu: Callback<()>,
+    instance: u64,
 }
 
 impl PartialEq for BarMenuState {
@@ -281,6 +282,7 @@ impl BarMenuState {
             requested: self.menu_requested,
             open_intent: self.open_intent,
             close_menu: self.close_menu,
+            instance: self.instance,
         }
     }
 
@@ -361,6 +363,7 @@ fn use_bar_menu(layout_epoch: ReadSignal<u64>, name: &'static str) -> (BarMenuSt
         focus_queue,
         open_generation: use_signal(|| 0_u64),
         close_menu: use_callback(move |()| open.set(false)),
+        instance: use_menu_instance(),
     };
     let registration = use_registration(
         use_context::<MovementOwner>(),
