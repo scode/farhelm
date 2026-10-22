@@ -4,8 +4,9 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
-import { type Page } from "@playwright/test";
+import { type Page, type Route } from "@playwright/test";
 import { agentLaunchRow, listHosts, localHostId, openRowMenu, SESSION_LISTING, setLocalYoloWithoutAsking } from "./helpers/fleet";
+import { routeGate } from "./helpers/route-gate";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 
 installTerminalSuiteHooks();
@@ -46,6 +47,95 @@ test("custom permission search focuses literal words and switching agents clears
   await expect(flags).toHaveValue("");
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Goose", exact: true }).click();
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true })).toHaveCount(0);
+});
+
+/** An input queued behind Launch cannot replace its permission words or retire
+ * its retry key. Dispatch past the cosmetic disabled state to exercise the
+ * actual callback's live operation check, then prove ordinary edits still work.
+ */
+test("queued custom permission edits cannot change an in-flight launch", async ({ page }) => {
+  const held = routeGate();
+  const bodies: any[] = [];
+  const completions: Promise<void>[] = [];
+  const endpoint = "**/api/sessions";
+  const refuseCreate = async (route: Route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const attempt = bodies.push(route.request().postDataJSON());
+    const completion = (async () => {
+      if (attempt === 1) await held.wait();
+      // No definitely-unaccepted marker: an ambiguous refusal must keep the
+      // original request's key available for an unchanged explicit retry.
+      await fulfillAsHelm(route, {
+        status: 503,
+        contentType: "text/plain",
+        body: `held custom refusal ${attempt}`,
+      });
+    })();
+    completions.push(completion);
+    await completion;
+  };
+  await page.route(endpoint, refuseCreate);
+  try {
+    const form = await openNew(page);
+    await form.getByLabel("folder", { exact: true }).fill("/tmp");
+    const custom = form.locator(".launch-composer-permissions-choice")
+      .getByRole("button", { name: "custom", exact: true });
+    await custom.click();
+    const flags = form.locator(".custom-permission-flags");
+    const words = form.locator(".custom-permission-words code");
+    const launch = form.locator(".create-session-submit");
+    const originalWords = ["--mode", "ask me", "$HOME"];
+    await flags.fill("--mode 'ask me' '$HOME'");
+    await expect(words).toHaveText(originalWords);
+    await expect(custom).toHaveAttribute("aria-pressed", "true");
+    await expect(launch).toBeEnabled();
+    await launch.click();
+    await expect.poll(() => bodies.length, { message: "the first create reached its held route" }).toBe(1);
+    expect(bodies[0].intent_key).toEqual(expect.any(String));
+    expect(bodies[0].intent_key).not.toBe("");
+    expect(bodies[0].launch).toMatchObject({ permissions: "custom", permission_flags: originalWords });
+    await expect(flags).toBeDisabled();
+    await expect(launch).toBeDisabled();
+
+    // A normal fill would stop at disabled rather than challenge the Rust
+    // callback. Parsed words and the next request observe the draft; the DOM
+    // value set here is deliberately not an oracle for reactive state.
+    await flags.evaluate((element: HTMLInputElement) => {
+      element.value = "--mode changed";
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    held.release();
+    await expect(form.locator(".create-session-error")).toContainText("held custom refusal 1");
+    await expect(launch).toBeEnabled();
+    await expect(words).toHaveText(originalWords);
+    await expect(custom).toHaveAttribute("aria-pressed", "true");
+
+    await launch.click();
+    await expect(form.locator(".create-session-error")).toContainText("held custom refusal 2");
+    await expect(launch).toBeEnabled();
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1].intent_key).toBe(bodies[0].intent_key);
+    expect(bodies[1]).toEqual(bodies[0]);
+
+    // An enabled edit must still reach the same callback and create a new
+    // intent; an inert editor would otherwise satisfy the refusal assertions.
+    await flags.fill("--mode edited");
+    await expect(words).toHaveText(["--mode", "edited"]);
+    await launch.click();
+    await expect(form.locator(".create-session-error")).toContainText("held custom refusal 3");
+    await expect(launch).toBeEnabled();
+    expect(bodies).toHaveLength(3);
+    expect(bodies[2].launch).toMatchObject({ permissions: "custom", permission_flags: ["--mode", "edited"] });
+    expect(bodies[2].intent_key).toEqual(expect.any(String));
+    expect(bodies[2].intent_key).not.toBe("");
+    expect(bodies[2].intent_key).not.toBe(bodies[0].intent_key);
+  } finally {
+    held.release();
+    await page.unroute(endpoint, refuseCreate);
+    // Drain only routes that actually entered; setup failures before Launch
+    // have no pending route to wait for and create no session to remove.
+    await Promise.all(completions);
+  }
 });
 
 /** Model search and same-agent choices must not reconstruct the editor from
