@@ -17518,7 +17518,11 @@
   (`display_identity`) before it goes into the warning; a test that two identities differing only in a bidi control and
   its literal spelling render differently. The structural change to per-value parts is out of scope. Size gate: about
   100 lines; over it, discard instead. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/cheap-ui-hardening-oct21.md`.
+- Execution: complete in jj change `stsomyskrnurpwrqxuqnqnnvulsplkwu`, bookmark
+  `plan/cheap-ui-hardening-oct21/02-changed-host-identities`. Each identity in the warning is spelled with
+  `display_identity` before it joins the sentence; destinations are unchanged, as the outcome scoped. The code, test and
+  documentation total 53 added/deleted lines, below the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2571/changes.
 
 ## same-destination-recovery-loses-trash-location.md
 

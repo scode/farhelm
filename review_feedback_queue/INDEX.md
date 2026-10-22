@@ -18,9 +18,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`numeric-token-regex-performance-remains-unresolved.md`](numeric-token-regex-performance-remains-unresolved.md) — A
   synthetic numeric-token slowdown is measured; ordinary occurrence and security impact remain unestablished.
 
-- [`changed-host-warning-flattens-compared-identities.md`](changed-host-warning-flattens-compared-identities.md) — A
-  changed-host warning loses distinct identities and isolation; consequential reliance remains unestablished.
-
 - [`escaped-start-remedy-changes-program-and-state-path.md`](escaped-start-remedy-changes-program-and-state-path.md) —
   The suggested start command changes path bytes and can migrate another inactive installation under a conditional path
   pairing.
