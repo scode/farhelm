@@ -548,3 +548,95 @@ test("with no CSPRNG, a create still carries a key while the session view refuse
     await cleanUpSessionsTitled(request, title);
   }
 });
+
+/** Reopen without editing the path: refocusing an already focused field
+ * need not fire onfocus, and typing would independently retire the key.
+ */
+async function placementFolderOptions(form: Locator) {
+  const anchor = form.locator(".create-session-submit");
+  await anchor.focus();
+  await expect(anchor).toBeFocused();
+  const folder = form.getByRole("combobox", { name: "folder", exact: true });
+  await folder.focus();
+  await expect(folder).toBeFocused();
+  const list = form.getByRole("listbox", { name: "folders", exact: true });
+  await expect(list).toBeVisible();
+  return list;
+}
+
+/** The server has already created the command session before its browser
+ * response disappears. Reapplying Home must reconcile that exact session,
+ * making duplicate creation observable rather than merely comparing keys.
+ */
+test("reapplying Home after a lost command-create reply reconciles one session", async ({ page, request }) => {
+  const title = `intent-home-retry-${Date.now()}`;
+  const bodies: Record<string, unknown>[] = [];
+  let firstStatus = 0;
+  let bodyFailed = false;
+  await page.route("**/api/sessions", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    bodies.push(route.request().postDataJSON());
+    if (bodies.length === 1) {
+      const response = await route.fetch();
+      firstStatus = response.status();
+      await route.abort();
+    } else await route.continue();
+  });
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, { cwd: "~", invocation: FAKE_AGENT_INVOCATION, title });
+    let list = await placementFolderOptions(form);
+    await list.getByRole("option", { name: "reset folder to home", exact: true }).click();
+    await expect(list).toHaveCount(0);
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("~");
+    expect(bodies).toEqual([]);
+    await form.locator(".create-session-submit").click();
+    await expect(form.locator(".create-session-error")).toBeVisible();
+    expect(firstStatus, "the lost response must follow an actual admitted create").toBe(200);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].intent_key).toEqual(expect.any(String));
+    expect(bodies[0].intent_key).not.toBe("");
+    expect(bodies[0]).toMatchObject({ cwd: "~", command: { yolo: false } });
+    const firstListing = await request.get("/api/sessions");
+    expect(firstListing.ok()).toBe(true);
+    const accepted = (await firstListing.json()).sessions.filter((session: { title: string }) => session.title === title);
+    expect(accepted, "the first accepted command must already exist before reapplying Home").toHaveLength(1);
+    const firstId = accepted[0].id;
+
+    await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "false");
+    list = await placementFolderOptions(form);
+    await list.getByRole("option", { name: "reset folder to home", exact: true }).click();
+    await expect(list).toHaveCount(0);
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("~");
+    expect(bodies, "Home itself does not send a create").toHaveLength(1);
+    // The first accepted session may already be visible in the sidebar.
+    // Wait for the retry's own reply before using that row as its result.
+    const retryResponse = page.waitForResponse(response =>
+      response.request().method() === "POST" && new URL(response.url()).pathname === "/api/sessions");
+    await form.locator(".create-session-submit").click();
+    expect((await retryResponse).status()).toBe(200);
+    // Check allocation before locating a sidebar row: duplicates can make
+    // that locator ambiguous or leave it pointing at the first session.
+    const finalListing = await request.get("/api/sessions");
+    expect(finalListing.ok()).toBe(true);
+    const survivors = (await finalListing.json()).sessions.filter((session: { title: string }) => session.title === title);
+    expect(survivors).toHaveLength(1);
+    expect(survivors[0].id).toBe(firstId);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toEqual(bodies[0]);
+    const id = await sessionIdFor(rowByTitle(page, title));
+    expect(id).toBe(firstId);
+    await waitForSessionRevealed(page, id);
+    await expect(page.locator(".session-details .title")).toHaveText(title);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      // Complete an admitted route.fetch before session lookup, so a late
+      // success cannot escape cleanup after an earlier assertion failed.
+      ["pending creates", () => page.unrouteAll({ behavior: "wait" })],
+      ["sessions", () => cleanUpSessionsTitled(request, title)],
+    ]);
+  }
+});
