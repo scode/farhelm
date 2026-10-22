@@ -6,6 +6,7 @@ import {
   cleanupSession,
   createSession,
   listHosts,
+  listSessions,
   openRowMenu,
   patchPreferences,
   readPreferences,
@@ -13,6 +14,7 @@ import {
 } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 import { requireHelmBuild } from "./helpers/helm-build";
+import { stackScratchDir } from "./helpers/scratch";
 
 /** Keep the real template store as the fixture so shortcut dispatch must resolve fresh references. */
 async function template(request: APIRequestContext, name: string, fields: Record<string, unknown>) {
@@ -320,6 +322,140 @@ test("Replace with refuses a whole sequence and yields to another modal", async 
       [name, () => removeTemplate(request, name)],
       [first, () => removeTemplate(request, first)],
       ["source session", () => cleanupSession(request, source.id)],
+    ]);
+  }
+});
+
+/** Clearing a quick-launch question must preserve the editor that owns a
+ * template chord. Explicit Cancel still hands focus back to the composer;
+ * that handoff must not also run over an unrelated live name selection.
+ */
+test("a template shortcut preserves editor focus when clearing a quick-launch YOLO question", async ({ page, request }) => {
+  const stem = `quick-question-focus-${Date.now()}`;
+  const yolo = `${stem}-yolo`;
+  const guarded = `${stem}-guarded`;
+  const initialName = "keep this draft name";
+  const query = "keep this search query";
+  const cwd = stackScratchDir("quick-question-focus-");
+  const local = (await listHosts(request)).find((host) => host.kind === "local");
+  expect(local?.identity, "the quick template needs the owned local installation").toBeTruthy();
+  expect(local?.yolo_without_asking, "fixture premise: the real local guard asks before YOLO launches").toBe(false);
+  if (!local?.identity) throw new Error("the local host has no installation identity");
+  const build = requireHelmBuild(await request.get("/api/sessions"), "quick question focus fixture");
+  const bodies: any[] = [];
+  let bodyFailed = false;
+  try {
+    await template(request, yolo, {
+      kind: "agent", agent: "codex", permissions: "yolo", host: local.identity,
+      destination: { folder: cwd }, name: initialName, name_kind: "fixed",
+    });
+    await template(request, guarded, { kind: "agent", permissions: "guarded" });
+    await patchPreferences(request, { quick_launch_template: yolo, template_shortcuts: { "1": guarded } });
+    const preferences = await readPreferences(request);
+    expect(preferences.quick_launch_template).toBe(yolo);
+    expect(preferences.template_shortcuts).toEqual({ "1": guarded });
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      const body = route.request().postDataJSON();
+      bodies.push(body);
+      if (body.host === local.id && body.launch?.harness === "codex" && body.launch.permissions === "yolo" && body.confirm_yolo !== true) {
+        // Only the real guard creates the question. An unexpected submit or
+        // retained override must fail the test without executing an agent.
+        await route.continue();
+      } else {
+        await route.fulfill({
+          status: 503,
+          headers: { "x-farhelm-build": build, "content-type": "text/plain" },
+          body: "unexpected create in quick question focus fixture",
+        });
+      }
+    });
+    await page.goto("/");
+    const form = page.locator('.create-session-form[role="dialog"]');
+    await expect(form).toHaveCount(0);
+    await expect(page.locator(".quick-launch-trigger")).toHaveCount(1);
+    const isCreate = (candidate: { request(): { method(): string }; url(): string }) =>
+      candidate.request().method() === "POST" && new URL(candidate.url()).pathname === "/api/sessions";
+
+    // Do not use openNew: the hidden quick preparation and its real refusal
+    // establish the quick-origin reveal effect that a manual New cannot reach.
+    const [first] = await Promise.all([
+      page.waitForResponse(isCreate),
+      page.keyboard.press("Control+Shift+p"),
+    ]);
+    expect(first.status()).toBe(409);
+    expect(first.headers()["x-farhelm-yolo-confirmation"]).toBe("confirmation-required");
+    await expect(form).toBeVisible();
+    const question = form.locator(".yolo-confirmation");
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    const name = form.getByLabel("name (optional)", { exact: true });
+    await expect(question).toBeVisible();
+    await expect(question.locator(".yolo-cancel")).toBeFocused();
+    await expect(name).toHaveValue(initialName);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ host: local.id, cwd, title: initialName, launch: { harness: "codex", permissions: "yolo" } });
+
+    /** Observe after the accepted DOM state and its deferred focus work.
+     * The second frame measures the outcome of a focus callback queued for
+     * the first frame; an immediate assertion could miss that later theft.
+     */
+    const afterFocusFrames = () => page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
+
+    // A blanket removal of reveal focus would hide the regression while
+    // breaking the real Cancel handoff. Keep that control in this same case.
+    await question.locator(".yolo-cancel").click();
+    await expect(question).toHaveCount(0);
+    await afterFocusFrames();
+    await expect(search).toBeFocused();
+    const [again] = await Promise.all([page.waitForResponse(isCreate), form.locator(".create-session-submit").click()]);
+    expect(again.status()).toBe(409);
+    expect(again.headers()["x-farhelm-yolo-confirmation"]).toBe("confirmation-required");
+    await expect(question).toBeVisible();
+    expect(bodies).toHaveLength(2);
+
+    await search.focus();
+    await expect(search).toBeFocused();
+    await search.fill(query);
+    await expect(search).toHaveValue(query);
+    await expect(question).toBeVisible();
+    // The name is already template-owned. Focus and native select-all must
+    // not edit it or retire the question before the numbered shortcut does.
+    await name.focus();
+    await expect(name).toBeFocused();
+    await page.keyboard.press("ControlOrMeta+A");
+    const before = await name.evaluate((element) => {
+      const input = element as HTMLInputElement;
+      return { focused: document.activeElement === input, value: input.value, start: input.selectionStart, end: input.selectionEnd };
+    });
+    expect(before).toEqual({ focused: true, value: initialName, start: 0, end: initialName.length });
+    await expect(question).toBeVisible();
+    expect(bodies).toHaveLength(2);
+
+    await number(page, "1");
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect(question).toHaveCount(0);
+    await afterFocusFrames();
+    const after = await name.evaluate((element) => {
+      const input = element as HTMLInputElement;
+      return { focused: document.activeElement === input, value: input.value, start: input.selectionStart, end: input.selectionEnd };
+    });
+    expect(after, "question retirement must preserve the shortcut owner's focus and selection after deferred focus work").toEqual(before);
+    await expect(search).toHaveValue(query);
+    expect(bodies, "the bound template only edits the revealed draft").toHaveLength(2);
+    for (const body of bodies) expect(body).not.toHaveProperty("confirm_yolo");
+    expect((await listHosts(request)).find((host) => host.id === local.id)?.yolo_without_asking).toBe(false);
+    expect((await listSessions(request)).sessions.filter((session) => session.cwd === cwd)).toHaveLength(0);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["entered routes", () => page.unrouteAll({ behavior: "wait" })],
+      [yolo, () => removeTemplate(request, yolo)],
+      [guarded, () => removeTemplate(request, guarded)],
     ]);
   }
 });
