@@ -4637,24 +4637,31 @@ round trip, never the cache) with no session that has not ended and none with a 
 truncate, its supervisor unit running (a connected supervisor whose unit is not running was started some other way, and
 removing its lib directory would leave it running from deleted files), and the fresh probe reporting exactly the
 recorded identity, a missing one included, since the probe dials the destination again and uninstall must not act on a
-machine it has not verified. The unit systemd loaded (`FragmentPath`) must be the planned unit file, so neither "no unit
-file left" nor the removal can miss a unit loaded from elsewhere. A host that is not connected is refused when a
-supervisor answers there but cannot be used (version skew, an identity problem), and otherwise needs the probe's
-positive evidence that no supervisor answers and its unit file already gone; when its lib directory is gone too, the
-registered binary is no longer checked, since there is nothing left to protect and the check would strand the retry. The
-binary the probe dialed must lie inside the lib directory and the host's state directory must not, compared as canonical
-paths the host resolves (`readlink -f`), since the lib directory is removed with `rm -rf` and a state directory
-symlinked into it would otherwise go with it; a path the host cannot resolve refuses. Those comparisons cannot see a lib
-directory that is itself a symlink, since the binary resolves inside the link's target, while `rm -rf` of the link
-removes only the link; so the inspection also reports, per path, whether the path itself is a symlink (`[ -L ]`, which
-sees a dangling link too), and planning refuses a symlinked lib directory before any other check of the inspection, the
-resolution check included, so that a dangling link gets the refusal that points to Remove rather than "cannot tell where
-it leads". The removal command repeats the `-L` test in the same shell as the `rm`, as the unit removal does for setup's
-marker, and refuses a lib directory that became a link after confirmation as a failed step. A row with no recorded state
-directory uses the supervisor's default as the host's own environment resolves it, `XDG_STATE_HOME` included. A session
-started between the confirmation check and the stop is not locked out and may be ended with the unit. The
-confirmation-time check is sufficient; nothing requires another check during the removal. Local `farhelm uninstall`
-keeps its separate scope and behavior.
+machine it has not verified. The unit systemd loaded (`FragmentPath`) must be the planned unit file after the home-only
+normalization below, including its full-path same-file guard, so neither "no unit file left" nor the removal can miss a
+unit loaded from elsewhere. A host that is not connected is refused when a supervisor answers there but cannot be used
+(version skew, an identity problem), and otherwise needs the probe's positive evidence that no supervisor answers and
+its unit file already gone; when its lib directory is gone too, the registered binary is no longer checked, since there
+is nothing left to protect and the check would strand the retry. The binary the probe dialed must lie inside the lib
+directory and the host's state directory must not, compared as canonical paths the host resolves (`readlink -f`), since
+the lib directory is removed with `rm -rf` and a state directory symlinked into it would otherwise go with it; a path
+the host cannot resolve refuses. For every inspected path, including the unit fragment, the inspection walks from that
+resolved path toward the root to find an ancestor that is the same folder (`-ef`) as the SSH login's resolved home. It
+replaces only that prefix with the login home's spelling, and keeps the replacement only when both full paths name the
+same file (`-ef`). That final guard matters for a non-recursive home bind with different nested mounts. An absent,
+empty, unresolvable or root home leaves the resolved spelling unchanged; so does an unavailable identity comparison or a
+failed same-file guard. No other folder aliases are normalized. The three guards still compare the resulting paths as
+text, preserving refusals for shared unit folders, shared installs and hard-linked unit copies at a different path.
+Those comparisons cannot see a lib directory that is itself a symlink, since the binary resolves inside the link's
+target, while `rm -rf` of the link removes only the link; so the inspection also reports, per path, whether the path
+itself is a symlink (`[ -L ]`, which sees a dangling link too), and planning refuses a symlinked lib directory before
+any other check of the inspection, the resolution check included, so that a dangling link gets the refusal that points
+to Remove rather than "cannot tell where it leads". The removal command repeats the `-L` test in the same shell as the
+`rm`, as the unit removal does for setup's marker, and refuses a lib directory that became a link after confirmation as
+a failed step. A row with no recorded state directory uses the supervisor's default as the host's own environment
+resolves it, `XDG_STATE_HOME` included. A session started between the confirmation check and the stop is not locked out
+and may be ended with the unit. The confirmation-time check is sufficient; nothing requires another check during the
+removal. Local `farhelm uninstall` keeps its separate scope and behavior.
 
 The last action deletes the row from inside the run, which already holds the host's provisioning lock and is the host's
 own run task, so it cannot go through Remove's entry point, which takes that lock and aborts the host's task. Both share

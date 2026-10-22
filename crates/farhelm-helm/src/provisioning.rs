@@ -269,8 +269,8 @@ mod tests {
     }
 
     /// Execute each remote shell command locally under a fixture HOME and a
-    /// PATH that starts with a fixture `bin` directory, so a real reach-check
-    /// script runs against a scratch user-unit directory and a fake
+    /// PATH that starts with a fixture `bin` directory, so real reach-check
+    /// and uninstall scripts run against a scratch user-unit directory and a fake
     /// `systemctl` instead of this machine's own user manager and units.
     /// XDG overrides are removed from the child so config and state both
     /// belong to that HOME. The test process's environment is untouched.
@@ -427,6 +427,11 @@ mod tests {
         /// Where an inspection says systemd loaded the unit from, when not
         /// from the planned unit path (the first path asked about).
         unit_fragment: Mutex<Option<PathBuf>>,
+        /// Run the production inspection script for filesystem fixtures while
+        /// keeping connection discovery and mutators scripted. This carries
+        /// the script's output into the real planning checks without building
+        /// an already-normalized inspection in the test.
+        uninstall_script: Mutex<Option<Arc<SystemBackend>>>,
     }
 
     /// The supervisor `FakeBackend::repeat_probe` reports on every probe.
@@ -473,6 +478,7 @@ mod tests {
                 default_state_dir: Mutex::new(PathBuf::from("/home/test/.local/state/farhelm")),
                 unit_state: Mutex::new("active".to_string()),
                 unit_fragment: Mutex::new(None),
+                uninstall_script: Mutex::new(None),
             })
         }
 
@@ -706,14 +712,18 @@ mod tests {
 
         async fn inspect_uninstall(
             &self,
-            _target: &ProvisioningTarget,
-            _unit: &str,
+            target: &ProvisioningTarget,
+            unit: &str,
             paths: &[&Path],
         ) -> Result<UninstallInspection, BackendFailure> {
             self.operations
                 .lock()
                 .unwrap()
                 .push("inspect-uninstall".to_string());
+            let script = self.uninstall_script.lock().unwrap().clone();
+            if let Some(script) = script {
+                return script.inspect_uninstall(target, unit, paths).await;
+            }
             let present = self.present.lock().unwrap().clone();
             let symlinks = self.symlinks.lock().unwrap().clone();
             let host_path = |path: &Path| {
@@ -6229,6 +6239,486 @@ mod tests {
         }
     }
 
+    /// A second spelling of a fixture home that `readlink -f` deliberately
+    /// leaves intact, while the shell's `-ef` still observes real identity.
+    ///
+    /// The layout follows the fictional `/home/alex` and `/srv/accounts/a1`
+    /// example under a private root. A symlink plus the fake readlink models
+    /// the two spellings of a bind mount without requiring mount privileges.
+    /// It does not model divergent child mounts under a non-recursive bind.
+    #[cfg(target_os = "linux")]
+    struct UninstallAliasFixture {
+        root: tempfile::TempDir,
+        home: PathBuf,
+        alias: PathBuf,
+        bin: PathBuf,
+        unit: PathBuf,
+        lib: PathBuf,
+        state: PathBuf,
+        fragment: PathBuf,
+        system: Arc<SystemBackend>,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl UninstallAliasFixture {
+        /// Keep every real shell command inside this fixture: systemctl is
+        /// strict about inspection requests, and all paths live under root.
+        async fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            let home = root.path().join("home/alex");
+            let alias = root.path().join("srv/accounts/a1");
+            let bin = root.path().join("bin");
+            let unit = home.join(".config/systemd/user/farhelm-supervisor.service");
+            let lib = home.join(".local/lib/farhelm");
+            let state = home.join(".local/state/farhelm");
+            for directory in [
+                unit.parent().unwrap(),
+                &lib,
+                &state,
+                &bin,
+                alias.parent().unwrap(),
+            ] {
+                tokio::fs::create_dir_all(directory).await.unwrap();
+            }
+            tokio::fs::write(&unit, "[Unit]\n# fixture installation\n")
+                .await
+                .unwrap();
+            tokio::fs::write(lib.join("farhelm"), b"fixture binary")
+                .await
+                .unwrap();
+            tokio::fs::write(state.join("kept"), b"fixture data")
+                .await
+                .unwrap();
+            tokio::fs::symlink(&home, &alias).await.unwrap();
+            assert_same_fixture_file(&home, &alias);
+            assert_ne!(home, alias);
+            write_fake_tool(&bin, "readlink", "[ \"$#\" = 3 ] && [ \"$1\" = -f ] && [ \"$2\" = -- ] || exit 91\nprintf '%s\\n' \"$3\"").await;
+            let fragment = root.path().join("fragment");
+            tokio::fs::write(
+                &fragment,
+                alias
+                    .join(unit.strip_prefix(&home).unwrap())
+                    .as_os_str()
+                    .as_encoded_bytes(),
+            )
+            .await
+            .unwrap();
+            write_fake_tool(&bin, "systemctl", &format!(
+                "case \"$*\" in\n'--user show -p ActiveState --value -- farhelm-supervisor.service') printf 'active\\n' ;;\n'--user show -p FragmentPath --value -- farhelm-supervisor.service') cat {} ;;\n*) exit 92 ;;\nesac",
+                shell_path(&fragment).unwrap(),
+            )).await;
+            let system = Arc::new(SystemBackend {
+                control_dir: root.path().to_path_buf(),
+                linger: LingerBehavior::Simulated(Ok(())),
+                launcher: Arc::new(FixtureHomeLauncher {
+                    home: home.clone(),
+                    bin: bin.clone(),
+                }),
+                runtime_units: false,
+                fail_before_rename: false,
+            });
+            Self {
+                root,
+                home,
+                alias,
+                bin,
+                unit,
+                lib,
+                state,
+                fragment,
+                system,
+            }
+        }
+
+        /// Use the production script's answer for every planning inspection.
+        /// Only the peer connection and its discovery answer are simulated;
+        /// they name this fixture's binary and state, never the local install.
+        async fn planning_service(
+            &self,
+            binary: PathBuf,
+            state: Option<PathBuf>,
+        ) -> (Harness, HostId, Arc<FakeBackend>, Arc<ProvisioningService>) {
+            let (builder, host) = FleetBuilder::new()
+                .await
+                .ssh(
+                    "uninstall.example",
+                    HostScript {
+                        identity: Some(UNINSTALL_IDENTITY.to_string()),
+                        ..HostScript::default()
+                    },
+                )
+                .await;
+            let harness = builder.start().await;
+            harness
+                .await_refreshed_as(host, UNINSTALL_IDENTITY, 0)
+                .await;
+            let backend = FakeBackend::absent(self.home.clone());
+            *backend.probe.lock().unwrap() = None;
+            *backend.repeat_probe.lock().unwrap() = Some(RepeatProbe {
+                identity: Some(UNINSTALL_IDENTITY.to_string()),
+                dial_farhelm: binary,
+                dial_state_dir: state,
+            });
+            *backend.uninstall_script.lock().unwrap() = Some(Arc::clone(&self.system));
+            let service = ProvisioningService::injected(
+                harness.store.clone(),
+                Arc::clone(&harness.manager),
+                backend.clone(),
+                Arc::new(FixedPayloads(self.lib.join("farhelm"))),
+                PlanLayout::production(self.root.path().join("unused-local-state")),
+                PathBuf::from("/test/farhelm"),
+            );
+            (harness, host, backend, service)
+        }
+
+        /// Query the actual inspection script under the fixture login, with
+        /// no real SSH connection or user manager involved.
+        async fn inspect(&self, paths: &[&Path]) -> UninstallInspection {
+            self.system
+                .inspect_uninstall(
+                    &ProvisioningTarget::Ssh {
+                        destination: "scripted.example".to_string(),
+                    },
+                    "farhelm-supervisor.service",
+                    paths,
+                )
+                .await
+                .unwrap()
+        }
+
+        /// Change only systemd's reported spelling, preserving the unit itself.
+        async fn report_fragment(&self, path: &Path) {
+            tokio::fs::write(&self.fragment, path.as_os_str().as_encoded_bytes())
+                .await
+                .unwrap();
+        }
+    }
+
+    /// Assert the identity premise that text equality cannot establish.
+    /// Canonicalizing alone would conceal precisely the second spelling the
+    /// fake readlink leaves visible to the production script.
+    #[cfg(target_os = "linux")]
+    fn assert_same_fixture_file(left: &Path, right: &Path) {
+        use std::os::unix::fs::MetadataExt;
+        let left_metadata = std::fs::metadata(left).unwrap();
+        let right_metadata = std::fs::metadata(right).unwrap();
+        assert_eq!(
+            (left_metadata.dev(), left_metadata.ino()),
+            (right_metadata.dev(), right_metadata.ino()),
+            "{} and {} must name the same fixture object",
+            left.display(),
+            right.display()
+        );
+    }
+
+    /// A manager using the other home spelling must not strand an otherwise
+    /// owned install. The real inspection normalizes the fragment, binary,
+    /// explicit state, and default state; ordinary planning then accepts both
+    /// unit spellings, and real removal scripts leave the data intact.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn uninstall_inspection_accepts_home_alias_for_unit_binary_and_state() {
+        let fixture = UninstallAliasFixture::new().await;
+        let binary = fixture.alias.join(".local/lib/farhelm/farhelm");
+        let state = fixture.alias.join(".local/state/farhelm");
+        let aliased_lib = fixture.alias.join(".local/lib/farhelm");
+        assert_same_fixture_file(&binary, &fixture.lib.join("farhelm"));
+        assert_same_fixture_file(&state, &fixture.state);
+        for fragment in [
+            &fixture.unit,
+            &fixture
+                .alias
+                .join(".config/systemd/user/farhelm-supervisor.service"),
+        ] {
+            assert_same_fixture_file(fragment, &fixture.unit);
+            fixture.report_fragment(fragment).await;
+            let inspection = fixture
+                .inspect(&[&fixture.unit, &fixture.lib, &state, &binary, &aliased_lib])
+                .await;
+            assert_eq!(
+                inspection
+                    .unit_fragment
+                    .as_ref()
+                    .unwrap()
+                    .canonical
+                    .as_ref(),
+                Some(&fixture.unit)
+            );
+            assert_eq!(inspection.paths[2].canonical.as_ref(), Some(&fixture.state));
+            assert_eq!(
+                inspection.paths[3].canonical,
+                Some(fixture.lib.join("farhelm"))
+            );
+            assert_eq!(inspection.paths[4].canonical.as_ref(), Some(&fixture.lib));
+            assert_eq!(
+                inspection.default_state_dir.canonical.as_ref(),
+                Some(&fixture.state)
+            );
+            let (_harness, host, backend, service) = fixture
+                .planning_service(binary.clone(), Some(state.clone()))
+                .await;
+            let preview = service.plan_uninstall(host).await.unwrap();
+            assert_eq!(
+                step_labels(&preview.plan),
+                [
+                    "disable-supervisor",
+                    "remove-unit",
+                    "daemon-reload",
+                    "stop-supervisor",
+                    "remove-directory",
+                    "forget-host"
+                ]
+            );
+            assert_eq!(preview.plan.state_dir, state);
+            assert_eq!(*backend.operations.lock().unwrap(), ["inspect-uninstall"]);
+        }
+        let (_harness, host, _backend, service) = fixture.planning_service(binary, None).await;
+        assert_eq!(
+            service.plan_uninstall(host).await.unwrap().plan.state_dir,
+            fixture.state
+        );
+        let target = ProvisioningTarget::Ssh {
+            destination: "scripted.example".to_string(),
+        };
+        fixture
+            .system
+            .remove_unit(&target, &fixture.unit)
+            .await
+            .unwrap();
+        fixture
+            .system
+            .remove_directory(&target, &fixture.lib)
+            .await
+            .unwrap();
+        assert!(!fixture.unit.exists() && !fixture.lib.exists());
+        assert_eq!(
+            tokio::fs::read(fixture.state.join("kept")).await.unwrap(),
+            b"fixture data"
+        );
+    }
+
+    /// Matching a shared unit folder by identity would authorize deleting a
+    /// unit other accounts use. Only a home alias may be respelled: even when
+    /// both fragments are the same file, the external fragment stays external
+    /// and planning retains its unit-origin refusal.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn uninstall_inspection_refuses_shared_unit_directory_alias() {
+        let fixture = UninstallAliasFixture::new().await;
+        let shared = fixture.root.path().join("srv/shared-units");
+        tokio::fs::rename(fixture.unit.parent().unwrap(), &shared)
+            .await
+            .unwrap();
+        tokio::fs::symlink(&shared, fixture.unit.parent().unwrap())
+            .await
+            .unwrap();
+        let fragment = shared.join("farhelm-supervisor.service");
+        assert_same_fixture_file(&fragment, &fixture.unit);
+        assert_same_fixture_file(&shared, fixture.unit.parent().unwrap());
+        assert!(
+            !std::fs::symlink_metadata(&fixture.unit)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        fixture.report_fragment(&fragment).await;
+        let inspection = fixture.inspect(&[&fixture.unit]).await;
+        assert_eq!(
+            inspection.unit_fragment.unwrap().canonical,
+            Some(fragment.clone())
+        );
+        let (_harness, host, backend, service) = fixture
+            .planning_service(fixture.lib.join("farhelm"), None)
+            .await;
+        let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(
+            refusal.contains(&format!(
+                "is loaded from {}, not from {}",
+                fragment.display(),
+                fixture.unit.display()
+            )),
+            "{refusal}"
+        );
+        assert_eq!(*backend.operations.lock().unwrap(), ["inspect-uninstall"]);
+        assert!(fragment.exists() && fixture.lib.exists());
+    }
+
+    /// A shared install reached through a parent link is not the lib-directory
+    /// symlink case. The binary really is the planned binary by identity, but
+    /// its external spelling must keep failing the binary-inside-lib check.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn uninstall_inspection_refuses_shared_install_alias() {
+        let fixture = UninstallAliasFixture::new().await;
+        let shared = fixture.root.path().join("opt");
+        tokio::fs::rename(fixture.lib.parent().unwrap(), &shared)
+            .await
+            .unwrap();
+        tokio::fs::symlink(&shared, fixture.lib.parent().unwrap())
+            .await
+            .unwrap();
+        let binary = shared.join("farhelm/farhelm");
+        assert_same_fixture_file(&binary, &fixture.lib.join("farhelm"));
+        assert!(
+            !std::fs::symlink_metadata(&fixture.lib)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        fixture.report_fragment(&fixture.unit).await;
+        let inspection = fixture.inspect(&[&fixture.lib, &binary]).await;
+        assert!(!inspection.paths[0].symlink);
+        assert_eq!(inspection.paths[1].canonical.as_ref(), Some(&binary));
+        let (_harness, host, backend, service) =
+            fixture.planning_service(binary.clone(), None).await;
+        let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(
+            refusal.contains(&format!(
+                "runs {}, outside Farhelm's own directory {}",
+                binary.display(),
+                fixture.lib.display()
+            )),
+            "{refusal}"
+        );
+        assert_eq!(*backend.operations.lock().unwrap(), ["inspect-uninstall"]);
+        assert!(binary.exists() && fixture.state.join("kept").exists());
+    }
+
+    /// Removing the planned unit leaves a hard link elsewhere loadable.
+    /// Home respelling must preserve the rest of the path, so equal file
+    /// identity does not turn that other unit location into an owned origin.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn uninstall_inspection_refuses_hard_linked_unit_elsewhere_in_home() {
+        let fixture = UninstallAliasFixture::new().await;
+        let other = fixture
+            .home
+            .join(".local/share/systemd/user/farhelm-supervisor.service");
+        tokio::fs::create_dir_all(other.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::hard_link(&fixture.unit, &other).await.unwrap();
+        let fragment = fixture
+            .alias
+            .join(other.strip_prefix(&fixture.home).unwrap());
+        assert_same_fixture_file(&fragment, &fixture.unit);
+        assert_ne!(other, fixture.unit);
+        fixture.report_fragment(&fragment).await;
+        let inspection = fixture.inspect(&[&fixture.unit]).await;
+        assert_eq!(
+            inspection.unit_fragment.unwrap().canonical,
+            Some(other.clone())
+        );
+        let (_harness, host, backend, service) = fixture
+            .planning_service(fixture.lib.join("farhelm"), None)
+            .await;
+        let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(
+            refusal.contains(&format!(
+                "is loaded from {}, not from {}",
+                fragment.display(),
+                fixture.unit.display()
+            )),
+            "{refusal}"
+        );
+        assert_eq!(*backend.operations.lock().unwrap(), ["inspect-uninstall"]);
+        assert!(other.exists() && fixture.unit.exists());
+    }
+
+    /// A second spelling used to hide state inside the removable lib tree.
+    /// The real script must expose that containment before planning can
+    /// authorize any removal, with the ordinary data-preservation refusal.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn uninstall_inspection_refuses_home_aliased_state_inside_lib() {
+        let fixture = UninstallAliasFixture::new().await;
+        let data = fixture.lib.join("data");
+        tokio::fs::create_dir(&data).await.unwrap();
+        tokio::fs::write(data.join("kept"), b"nested data")
+            .await
+            .unwrap();
+        let state = fixture.alias.join(".local/lib/farhelm/data");
+        assert_same_fixture_file(&state, &data);
+        assert!(!state.starts_with(&fixture.lib));
+        fixture.report_fragment(&fixture.unit).await;
+        let inspection = fixture.inspect(&[&fixture.lib, &state]).await;
+        assert_eq!(inspection.paths[1].canonical, Some(data.clone()));
+        let (_harness, host, backend, service) = fixture
+            .planning_service(fixture.lib.join("farhelm"), Some(state.clone()))
+            .await;
+        let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(
+            refusal.contains(&format!(
+                "data directory {} is inside {}",
+                state.display(),
+                fixture.lib.display()
+            )),
+            "{refusal}"
+        );
+        assert!(refusal.contains("uninstall keeps the data"), "{refusal}");
+        assert_eq!(*backend.operations.lock().unwrap(), ["inspect-uninstall"]);
+        assert_eq!(
+            tokio::fs::read(data.join("kept")).await.unwrap(),
+            b"nested data"
+        );
+    }
+
+    /// Failing to resolve HOME must disable only respelling, not inspection.
+    /// Both a failing readlink and an empty answer keep the old canonical
+    /// spellings and unit-origin refusal; a normal home-spelled unit still
+    /// plans through the same fallback.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn uninstall_inspection_keeps_old_behavior_when_home_is_unresolvable() {
+        let fixture = UninstallAliasFixture::new().await;
+        let fragment = fixture
+            .alias
+            .join(".config/systemd/user/farhelm-supervisor.service");
+        assert_same_fixture_file(&fragment, &fixture.unit);
+        for failure in ["exit 1", "exit 0"] {
+            write_fake_tool(
+                &fixture.bin,
+                "readlink",
+                &format!("if [ \"$3\" = \"$HOME\" ]; then {failure}; fi\nprintf '%s\\n' \"$3\""),
+            )
+            .await;
+            fixture.report_fragment(&fragment).await;
+            let inspection = fixture.inspect(&[&fixture.unit]).await;
+            assert_eq!(inspection.paths[0].canonical.as_ref(), Some(&fixture.unit));
+            assert_eq!(
+                inspection.unit_fragment.unwrap().canonical.as_ref(),
+                Some(&fragment)
+            );
+            let (_harness, host, backend, service) = fixture
+                .planning_service(fixture.lib.join("farhelm"), None)
+                .await;
+            let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+            assert!(refusal.contains("is loaded from"), "{failure}: {refusal}");
+            fixture.report_fragment(&fixture.unit).await;
+            service.plan_uninstall(host).await.unwrap();
+            assert_eq!(
+                *backend.operations.lock().unwrap(),
+                ["inspect-uninstall", "inspect-uninstall"]
+            );
+        }
+    }
+
+    /// An identical ancestor is insufficient when the full rewritten path
+    /// cannot be proved identical. A missing leaf directly exercises the
+    /// full-path guard's rejection branch, though it cannot simulate the
+    /// divergent mounted children of a real non-recursive bind.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn uninstall_inspection_does_not_respell_an_unverifiable_leaf() {
+        let fixture = UninstallAliasFixture::new().await;
+        let missing = fixture.alias.join("missing");
+        assert_same_fixture_file(&fixture.alias, &fixture.home);
+        assert!(!missing.exists() && !fixture.home.join("missing").exists());
+        let inspection = fixture.inspect(&[&missing]).await;
+        assert!(!inspection.paths[0].exists);
+        assert_eq!(inspection.paths[0].canonical.as_ref(), Some(&missing));
+    }
+
     /// Why this matters: UNINSTALL's host commands delete files and stop a
     /// service on someone's machine, and a retry reruns them over whatever
     /// an earlier run left. They must refuse setup's unit at the moment of
@@ -6239,9 +6729,10 @@ mod tests {
     /// fake `systemctl`: `inspect_uninstall` reports each path's existence,
     /// whether the path itself is a symlink (dangling included; a path under
     /// a symlinked parent is not), and its canonical location in order (a
-    /// symlink resolved to its target, none for one the host cannot
-    /// resolve), the default state directory under the host's HOME, and the
-    /// unit's run state; `remove_unit` refuses a unit whose
+    /// symlink resolved to its target, with a second home spelling normalized
+    /// only when the complete paths are the same file, none for one the host
+    /// cannot resolve), the default state directory under the host's HOME,
+    /// and the unit's run state; `remove_unit` refuses a unit whose
     /// first line is setup's marker (with or without a trailing newline) and
     /// keeps it, removes an unmarked one, and skips an absent one; `stop`
     /// stops a running unit before private socket cleanup, and still cleans

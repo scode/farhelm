@@ -1400,6 +1400,9 @@ impl ProvisioningService {
         // The session and identity checks above run before the inspection
         // exists, so such a user may first be asked to stop sessions before
         // hearing that uninstall cannot run on this layout at all.
+        // Home normalization in inspect_uninstall can respell the printed
+        // target relative to the login home (unlike ls -l's link text).
+        // The asked path's -L flag still makes this the first refusal.
         if lib_dir.symlink {
             let link_target = lib_dir.canonical.as_ref().map_or_else(
                 || "a target the host cannot resolve".to_string(),
@@ -1428,6 +1431,9 @@ impl ProvisioningService {
         // The "no unit file left" rule and the removal both look at the
         // planned unit path; a unit systemd loads from anywhere else is not
         // provisioning's and could start the supervisor again.
+        // inspect_uninstall's home-only normalization accepts the alternate
+        // home name, but leaves shared unit folders and hard-linked copies
+        // elsewhere distinct. See its full aliasing rationale in backend.rs.
         if let Some(fragment) = &inspection.unit_fragment
             && fragment.canonical.is_some()
             && fragment.canonical != unit_file.canonical

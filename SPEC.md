@@ -3484,12 +3484,13 @@ the escaping rule in [Local authority and trust between hosts](#local-authority-
 
 Confirmed 2026-10-10: a configuration Farhelm does not support is refused with a clear message rather than left to
 undefined behavior, except where this section says otherwise (other login shells, unsupported tmux programs, filesystem
-aliasing, out-of-band manipulation of managed checkouts and the trash, including uncommon filesystems under them, the
-proxy case below, and hand-edited Farhelm service units under [Supported host setup](#supported-host-setup)). An install
-whose `farhelm` program path contains `$` is unsupported and refused, because systemd does not decode `$$` in a
-service's program position, so a service written for that path could not start. The supervisor also refuses startup when
-the Farhelm program folder put on session `PATH` contains `:`, naming the folder; the desktop app shows the same refusal
-before starting its supervisor, because a colon would split that folder into unintended command-search directories.
+aliasing outside the home-folder exception below, out-of-band manipulation of managed checkouts and the trash, including
+uncommon filesystems under them, the proxy case below, and hand-edited Farhelm service units under
+[Supported host setup](#supported-host-setup)). An install whose `farhelm` program path contains `$` is unsupported and
+refused, because systemd does not decode `$$` in a service's program position, so a service written for that path could
+not start. The supervisor also refuses startup when the Farhelm program folder put on session `PATH` contains `:`,
+naming the folder; the desktop app shows the same refusal before starting its supervisor, because a colon would split
+that folder into unintended command-search directories.
 
 Two host aliases that reach the same host, user and port through different `ProxyCommand` routes are unsupported. The
 helm shares SSH connections by OpenSSH's connection hash, which does not include the proxy command, so such aliases may
@@ -3500,7 +3501,10 @@ folders appear at more than one path even after symlinks are resolved, including
 paths (symlinks resolved, as the checkout rules above require) and treats each canonical path as the location it names.
 A session that reaches a managed checkout, a working directory, or any other folder Farhelm tracks through such an alias
 is not recognized as being there, and a file hard-linked between checkouts is not treated as shared. Farhelm need not
-detect aliasing or add complexity to cope with it.
+detect aliasing or add complexity to cope with it, with one narrow exception: uninstall from the hosts panel recognizes
+the host account's home folder reached through a second path, such as a bind mount. It still refuses layouts it cannot
+tell apart safely. Other aliases, including shared unit or installation folders, remain unsupported; sessions, working
+directories and managed checkouts do not gain this exception.
 
 Confirmed 2026-10-11: Farhelm has dedicated ownership of the managed checkouts it creates, their checkout roots and the
 trash (`farhelm-archived-working-copies`) and reserved spare container (`.farhelm-spares`). Out-of-band manipulation of

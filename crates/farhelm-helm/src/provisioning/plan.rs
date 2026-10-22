@@ -767,7 +767,8 @@ impl PlanLayout {
     /// can leave tmux behind even after systemd has forgotten the unit.
     ///
     /// Two refusals guard the `rm -rf` of the lib directory, both on the
-    /// host's canonical paths rather than their spelling. The binary the
+    /// host's symlink-resolved paths with verified alternate home prefixes
+    /// normalized by the inspection. The binary the
     /// host runs, when known, must be inside it, so the plan removes the
     /// installation actually in use (SPEC.md "Supported host setup": other
     /// setups get a clear refusal). And the host's state directory must not
@@ -788,6 +789,10 @@ impl PlanLayout {
             )));
         }
         if let Some(binary) = &facts.farhelm {
+            // The inspection normalizes only aliases of the home: a
+            // binary reached through that alias is inside the same lib,
+            // while a shared /opt install stays outside and refused. See
+            // inspect_uninstall in backend.rs for the full aliasing policy.
             let inside = facts
                 .lib_dir
                 .as_ref()
@@ -801,6 +806,10 @@ impl PlanLayout {
                 )));
             }
         }
+        // The same home normalization makes an aliased state path inside
+        // the lib visible here, so removing the lib cannot remove that
+        // data. General folder identity would also accept shared installs;
+        // inspect_uninstall in backend.rs explains why that is forbidden.
         if let Some(lib) = &facts.lib_dir
             && facts.state_dir.canonical.starts_with(lib)
         {

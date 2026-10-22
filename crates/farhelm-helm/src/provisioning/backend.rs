@@ -154,11 +154,12 @@ pub(super) enum ReachOutcome {
 
 /// What [`ProvisioningBackend::inspect_uninstall`] found on the host.
 ///
-/// Canonical paths are the host's own `readlink -f` answers, because the
-/// guards that keep uninstall's `rm -rf` away from the user's data compare
-/// real locations, not spellings: SPEC.md treats each canonical path as the
-/// location it names, and a state directory symlinked into the lib
-/// directory must be recognized as inside it.
+/// Canonical paths resolve symlinks on the host, then normalize a second
+/// name for the login's home only when both full paths name the same file.
+/// Every uninstall guard consumes that one spelling: the unit must be the
+/// file removed, the running binary must be inside the removed lib folder,
+/// and the state directory must stay outside it. Aliases of other folders
+/// remain distinct, per SPEC.md's narrow uninstall exception.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UninstallInspection {
     /// One entry per asked path, in the order asked.
@@ -191,8 +192,10 @@ pub(super) struct HostPath {
     /// refuses a lib directory that is one, since `rm -rf` of the link
     /// would remove only the link and leave the installation behind.
     pub(super) symlink: bool,
-    /// Where the path really leads, or `None` when the host could not
-    /// resolve it (a missing parent, a symlink loop).
+    /// The host's `readlink -f` answer, with a verified alternate home
+    /// prefix rewritten to the login home's canonical spelling. No other
+    /// folder aliases are folded. `None` means the host could not resolve
+    /// the path (a missing parent, a symlink loop).
     pub(super) canonical: Option<PathBuf>,
 }
 
@@ -2420,7 +2423,8 @@ impl ProvisioningBackend for SystemBackend {
     /// planning asks and that refuses the local row before it gets here.
     ///
     /// The output is NUL-separated: an existence flag, a symlink flag and a
-    /// canonical path (empty when unresolvable) per asked path, then the
+    /// canonical path (empty when unresolvable), with a verified alternate
+    /// home prefix normalized, per asked path, then the
     /// default state directory and its three fields, then the unit's
     /// `ActiveState` and `FragmentPath`, and the fragment's
     /// three fields (no fragment prints two `0` flags and an empty path,
@@ -2434,10 +2438,71 @@ impl ProvisioningBackend for SystemBackend {
         unit: &str,
         paths: &[&Path],
     ) -> Result<UninstallInspection, BackendFailure> {
+        // Only the home may have two names. For example, alex logs in with
+        // /home/alex while systemd still loads its unit through
+        // /srv/accounts/a1, a bind mount of that same home. readlink -f
+        // leaves both names intact. The reach probe derives planned paths
+        // from this same SSH login's HOME (or the manager's XDG_CONFIG_HOME),
+        // so normalize every resolved path against that login home once.
+        // This also catches a registered state directory spelled
+        // /srv/accounts/a1/.local/lib/farhelm/data: without normalization,
+        // the text containment check misses data inside the removed lib.
+        //
+        // Walk from the resolved path toward the root; the nearest home
+        // identity wins if a home is itself mounted inside that home. Keep
+        // the rewrite only if the TWO FULL PATHS are -ef. A non-recursive
+        // home bind can expose different files below a nested mount: home
+        // identity alone would then approve a unit uninstall won't remove.
+        // Missing files and unsupported -ef tests retain today's spelling.
+        // An absent/unresolvable home, or / as home, disables rewriting.
+        //
+        // Do not replace this with identity comparisons of arbitrary
+        // folders or files. /srv/shared-units mounted at each account's
+        // .config/systemd/user, or /opt/farhelm mounted at each account's
+        // .local/lib/farhelm, must stay refused: removing them affects
+        // everyone. Neither has a home ancestor to rewrite. A hard-linked
+        // unit under .local/share/systemd/user remains a DIFFERENT path
+        // after home normalization too; removing the planned unit would
+        // leave that copy for systemd to start again. The comparisons in
+        // service.rs and PlanLayout::plan_uninstall deliberately stay text
+        // comparisons over these normalized values, not general identities.
         let mut script = String::from(
-            "resolve() { if [ -e \"$1\" ] || [ -L \"$1\" ]; then printf 1; else printf 0; fi; \
-             printf '\\0'; if [ -L \"$1\" ]; then printf 1; else printf 0; fi; printf '\\0'; \
-             readlink -f -- \"$1\" 2>/dev/null | tr -d '\\n'; printf '\\0'; }; ",
+            r#"home=''
+if [ -n "${HOME-}" ]; then
+    home=$(readlink -f -- "$HOME" 2>/dev/null) || home=''
+fi
+resolve() {
+    if [ -e "$1" ] || [ -L "$1" ]; then printf 1; else printf 0; fi
+    printf '\0'
+    if [ -L "$1" ]; then printf 1; else printf 0; fi
+    printf '\0'
+    resolved=$(readlink -f -- "$1" 2>/dev/null | tr -d '\n')
+    case "$home" in
+        ''|/) ;;
+        *)
+            parent=$resolved
+            suffix=''
+            while [ -n "$parent" ]; do
+                if [ "$parent" -ef "$home" ] 2>/dev/null; then
+                    rewritten=$home$suffix
+                    if [ "$rewritten" -ef "$resolved" ] 2>/dev/null; then
+                        resolved=$rewritten
+                    fi
+                    break
+                fi
+                case "$parent" in /) break ;; esac
+                suffix=/${parent##*/}$suffix
+                case "$parent" in
+                    */*) parent=${parent%/*} ;;
+                    *) break ;;
+                esac
+                if [ -z "$parent" ]; then parent=/; fi
+            done
+            ;;
+    esac
+    printf '%s\0' "$resolved"
+}
+"#,
         );
         for path in paths {
             script.push_str(&format!("resolve {}; ", shell_path(path)?));
