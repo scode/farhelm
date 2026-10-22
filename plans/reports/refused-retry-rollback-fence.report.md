@@ -80,3 +80,71 @@ test-authoring checklist) found nothing blocking and judged the idempotency-key 
 applied its wording findings: the reply no longer claims the session was restarted when it may have been deleted, a
 comment no longer promises more than the code does, and a doc comment now describes the return value accurately. Its two
 follow-ups are listed above. It also suggested two optional style tweaks, which I left as they are.
+
+### Landing
+
+Landed as #2570, with the same content the report describes. It was the last of five plans in this landing round, after
+triage-specs-oct21, cheap-ui-hardening-oct21, start-remedy-quoting and uninstall-mixed-spelling.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained popover-anchor-close and documentation commits, neither touching the supervisor. A
+fresh-context reviewer and I read this plan against the supervisor work landed in recent rounds:
+
+- create-reservation-retention (a create's retry key freed when its session is deleted): after a Delete, the new "not
+  recorded" reply leaves the key unspent, which matches the rule that a retry after a Delete starts a fresh session.
+  After a Restart, the refused retry changes nothing, and a later retry with the same key returns the restarted session.
+- launch-attempt-owner (one owner for a failed launch's leftover files) and spare-launch-checkout (prepared checkouts):
+  the new check runs before their cleanup and before the prepared-checkout guard, and changes neither.
+- The other plans in the round do not touch the supervisor's create path.
+
+#### Fixes made during the landing
+
+None to the plan's code. The review-queue index conflicted with entries main had changed; the landing rebuilt it.
+
+#### Possible follow-ups
+
+- Found at landing, not confirmed, and older than this plan; nothing in the review queue or TODO.md tracks it: a stale
+  retry can also be refused in a way that keeps its session listed as failed rather than removing it, for example when
+  the folder for the fresh checkout it was creating is already taken, or when its launch failed before any agent
+  started. That path has no check of its own for a Restart made in between, so a session the user just restarted could
+  show as failed. It only runs once the session's other lifecycle operations have finished, so it matters only if a
+  Restart can finish while its new agent is still starting, which nobody has shown. Possible follow-up: give that path
+  the same check of the session's launch count, together with the takeover gap the report already raises.
+
+#### Checks
+
+Together the five plans change about 650 lines of code, tests and specification text (more with review-queue
+bookkeeping) across the helm's connection errors and uninstall, the supervisor's create path and store, and the UI,
+including how every menu remembers its focused item and the terminal's file-link script; that reach is why this round
+ran the whole Rust workspace and the full browser suite. All of the following ran on the five plans stacked together on
+this round's main, including the landing's conflict resolutions. After the run, the landing moved changelog text between
+fragment files in cheap-ui-hardening-oct21's last PR (see its notes); that changed only changelog files:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on the changed Markdown files, `python3 scripts/check-agents-md.py` (one warning,
+  about a citation main already had), the workspace debug build, the UI's release web build and
+  `scripts/check-desktop-assets.sh` (which also builds the desktop app): all passed.
+  `python3 releasing/check-changelog.py format` passed again after every changelog change.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  slots, no retries, run `461bfc4c-651d-4a70-8498-7a9b5ae524cf`: 4291 passed, none failed; 40 tests marked as ignored
+  did not run.
+- `cargo nextest run -p farhelm-ui --features desktop`, run `4073dcb5-a14f-42e5-bddd-8b007925da68`: 900 passed.
+  `node --test` in `crates/farhelm-ui/js-tests`, run `4086a6d6-96a5-4691-b05e-e50169546906`: 329 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `b5e88d8c-8a25-4e9b-be8f-ada4f9d48bc3`: 2475 passed, 14 skipped by design (WebKit
+  clipboard cases and tests that need a real signed-in agent or run on one engine only), 1 failed: on WebKit, "don't ask
+  again on a refused YOLO replace marks the host, then replaces with the override", the open flake FLAKES.md recorded on
+  2026-10-20, which the deflake sweep already excludes. It exercises a host's YOLO question during Replace, which none
+  of the five plans touches; refused-retry-rollback-fence changes only the supervisor's handling of a stale create
+  retry.
+- An earlier start of these checks was stopped at its build step and discarded, because the landing changed the stack
+  while it ran; nothing from it is counted.
+- Reused: none. Skipped: the website build (no docs page changed), the doctests (no documentation example changed), the
+  desktop smoke test (the desktop app crate is unchanged, and the menu marker fix is covered by the desktop-feature unit
+  tests above, which mount real menus), the native Mac app (not runnable here) and the installer (unchanged).
+
+The report's checks were the supervisor's store tests; the round ran the whole Rust workspace and the browser suite
+above. Nothing in the executor's report became untrue at landing.
