@@ -147,6 +147,16 @@
    * to the press. Document capture observes the whole gesture before xterm
    * activates a link, including releases outside the terminal. The exact
    * release event is the admission token, never a sticky permission.
+   *
+   * The drag check is only as good as the observer's coverage: a press is
+   * judged by the movement this object saw, so a press must not outlive the
+   * listeners that feed it. Whoever removes those listeners calls `reset()`.
+   * Reconnect is the case that needs it: a recovery that ends by restoring
+   * the old screen hands this same object to new listeners, and a press
+   * kept across the gap would let a drag away and back during the gap
+   * release as a click. `reset()` clears state in place rather than handing
+   * out a new object, because the terminal's link providers captured this
+   * one at mount and keep asking it `isClick`.
    */
   function createLinkGesture() {
     let press = null;
@@ -167,6 +177,12 @@
         }
       },
       isClick(event) { return event === click; },
+      /** Forget any held press and any admitted release; the next click
+       * has to start with a press observed from here on. */
+      reset() {
+        press = null;
+        click = null;
+      },
     };
   }
 

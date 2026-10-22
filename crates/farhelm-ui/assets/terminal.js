@@ -1281,6 +1281,8 @@
    * and OSC 52 grace: there is no attached program to answer the gesture.
    * Link providers belong to the retained terminal and need their original
    * gesture observer back. Input and transport listeners remain detached.
+   * The gesture arrives clean: the live island's teardown reset it, so a
+   * press held when the socket died cannot complete as a click here.
    */
   function installSnapshotCopyOnSelect(el, term, linkGesture) {
     let pressed = null;
@@ -1316,6 +1318,9 @@
     return () => {
       pressed = null;
       for (const type of ['mousedown', 'mousemove', 'mouseup']) document.removeEventListener(type, observeLink, true);
+      // Same rule as the live island's teardown: no held press outlives
+      // its observer (`createLinkGesture`).
+      linkGesture.reset();
       term.element.removeEventListener("mousedown", mouseDown);
       document.removeEventListener("mouseup", mouseUp);
     };
@@ -5628,6 +5633,10 @@
           for (const type of ['mousedown', 'mousemove', 'mouseup']) {
             document.removeEventListener(type, captureLinkMouseEvent, true);
           }
+          // A reconnect keeps this gesture for the screen it may restore
+          // (`runReconnect`), so a press held now must not survive the
+          // stretch where nothing observes it (`createLinkGesture`).
+          linkGesture.reset();
           linkMouseDispatch = null;
           withheldPrimary = false;
           document.removeEventListener("mouseup", handleCopyOnSelectMouseUp);
