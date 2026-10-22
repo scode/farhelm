@@ -1043,19 +1043,12 @@ pub(crate) fn ListView(
     // Registration and open-state reads are untracked, so opening alone
     // cannot rerun this effect or receive a past layout invalidation.
     //
-    // NOT exhaustive. A session row above the open one changing height in
-    // place is mostly caught elsewhere: its detail line (ended, stale) comes
-    // from the listing, so `commit_listing`'s reflow check
-    // (`rows::menu_row_reordered`) sees it appear or go, and its refusal
-    // line comes from `errors`, which the effect beside `order_hold`
-    // watches. What still moves an open menu unnoticed, accepted because
-    // closing on these would mean measuring the toggle's position on every
-    // change rather than reasoning about what changed:
-    //
-    // - a detail line that is already shown wrapping onto more or fewer
-    //   lines because its text changed (a new exit annotation, say);
-    // - a listing that carries a row with a refusal line across the open
-    //   row, in either direction, while the open row keeps its index.
+    // Other session-row causes report at their own publication boundary:
+    // listing commit compares displayed detail/refusal prefixes, including
+    // rewrapping text and unchanged refusals crossing an anchor; accepted
+    // host reads compare changed stale wording before publishing it. Error
+    // map edits retain the effect beside `order_hold`. These are causal
+    // reports, not measurements, and this broad effect is not exhaustive.
     //
     // `commit_listing`'s reconciliation is SESSION-only. The hosts list has
     // no reorder guard, on the judgment that a small, largely id-ordered
@@ -1373,11 +1366,32 @@ pub(crate) fn ListView(
                 // closure was built, and a toggle in between decides
                 // whether detail lines are on screen now.
                 let detail_lines_shown = !compact_choice(preferences.0.peek().compact);
-                rows::menu_rows_reordered(
+                let incoming_shown = rows::held_display_order(&incoming_held, &listing.sessions);
+                let mut moved = rows::menu_rows_reordered(
                     previous_shown.as_deref(),
-                    &rows::held_display_order(&incoming_held, &listing.sessions),
+                    &incoming_shown,
                     detail_lines_shown,
-                )
+                );
+                // Use the same live host/error inputs on both sides: this
+                // commit changes listing contents/order, while the existing
+                // errors effect still owns error-map edits and their timing.
+                let current_hosts = hosts.peek();
+                let current_errors = errors.peek();
+                moved.extend(rows::session_content_rows_moved(
+                    previous_shown.as_deref().map(|shown| rows::SessionFlow {
+                        shown,
+                        hosts: &current_hosts,
+                        errors: &current_errors,
+                        compact: !detail_lines_shown,
+                    }),
+                    rows::SessionFlow {
+                        shown: &incoming_shown,
+                        hosts: &current_hosts,
+                        errors: &current_errors,
+                        compact: !detail_lines_shown,
+                    },
+                ));
+                moved
             };
             listing_popovers.close_affected(&MovedRows::new(AnchorRegion::Sessions, moved));
             // Still open: this listing's entries are what the list shows next.
@@ -1578,8 +1592,10 @@ pub(crate) fn ListView(
     // happens to be scheduled. The `bool` it reports means what the listing
     // read's does: the helm answered, whatever the gate then did with it.
     let read_hosts_base = base.clone();
+    let host_content_popovers = popovers.clone();
     let hosts_read = move || {
         let base = read_hosts_base.clone();
+        let popovers = host_content_popovers.clone();
         let generation = hosts_reads.write().start();
         async move {
             let outcome = fetch_hosts(&base).await;
@@ -1597,6 +1613,43 @@ pub(crate) fn ListView(
                 Err(_) => hosts_reads.peek().accept_failure(generation),
             };
             if accepted {
+                // Preview the same pure fold before publication. A pending
+                // host read already supplies visible "checking host" wording
+                // when stale session rows exist; a failed session listing has
+                // no row baseline and instead heals by remounting on recovery.
+                let moved = {
+                    let current_listing = listing.peek();
+                    let compact = compact_choice(preferences.0.peek().compact);
+                    if let Some(Ok(current)) = current_listing.as_ref()
+                        && !compact
+                    {
+                        let before = hosts.peek();
+                        let mut after = before.clone();
+                        after.record(outcome.clone());
+                        let held = order_hold.peek().clone().unwrap_or_default();
+                        let shown = rows::held_display_order(&held, &current.sessions);
+                        let current_errors = errors.peek();
+                        rows::session_content_rows_moved(
+                            Some(rows::SessionFlow {
+                                shown: &shown,
+                                hosts: &before,
+                                errors: &current_errors,
+                                compact,
+                            }),
+                            rows::SessionFlow {
+                                shown: &shown,
+                                hosts: &after,
+                                errors: &current_errors,
+                                compact,
+                            },
+                        )
+                    } else {
+                        Vec::new()
+                    }
+                };
+                // No read guards survive dispatch, and there is no await or
+                // late effect that can replay this change at a fresh opening.
+                popovers.close_affected(&MovedRows::new(AnchorRegion::Sessions, moved));
                 hosts.write().record(outcome);
             }
             answered
