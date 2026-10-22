@@ -4,4 +4,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [complete] `launcher-draft-model.md` — Hold the session launcher's draft in one value whose only mutator applies the reset, in-flight and retry-key rules, fixing the handlers that drifted from them (structural refactor; aligned fixes in their own PRs).
 - [in-flight 1852fd] `popover-anchor-close.md` — Route closing anchored popovers on row movement through one owner, and close the three movements left uncovered on purpose (structural refactor; aligned fixes in their own PRs).
-- [complete] `uninstall-aliased-home.md` — Let host uninstall recognize the home folder reached through a second path (a bind-mounted home), so its unit-origin, binary and data checks compare like spellings without accepting other shared folders.
+- [landing d944e0] `uninstall-aliased-home.md` — Let host uninstall recognize the home folder reached through a second path (a bind-mounted home), so its unit-origin, binary and data checks compare like spellings without accepting other shared folders.
