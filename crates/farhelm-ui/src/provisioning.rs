@@ -76,7 +76,7 @@ use crate::list::SharedPreferences;
 use crate::modal_dialog::{
     DialogFocus, DialogHandle, FocusTarget, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
 };
-use crate::ops::{OpGuard, OpLock, ReadGate};
+use crate::ops::{ConfirmSlot, ConfirmToken, OpGuard, OpLock, ReadGate, use_confirm_slot};
 use crate::peer::{
     DetailPart, PeerBlock, PeerBlockBody, PeerLine, PeerText, display_identity, display_peer,
 };
@@ -959,6 +959,11 @@ fn update_owned(intent: Option<&UpdateIntent>, tracked: Option<&TrackedRun>) -> 
 ///
 /// Local confirmation and notice state retain raw strings: the plan renderer
 /// escapes the confirmation and Copy plan needs its exact original bytes.
+///
+/// A displayed plan is the key of the row's confirmation [`ConfirmSlot`], so
+/// the token an answer carries names the whole plan its render drew: the
+/// `probe_id` the POST spends, the text and steps the user read, and the
+/// binding the plan was made for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingPlan {
     operation: ProvisioningOperation,
@@ -980,6 +985,77 @@ struct PendingPlan {
 fn release_plan_modal(host_id: HostId) {
     DialogHandle::new(r#".host-add-dialog[role="dialog"], .host-uninstall-dialog[role="dialog"]"#)
         .release_within(&format!(r#"[data-provisioning-host="{host_id}"]"#));
+}
+
+/// What answering a row's Setup, Uninstall or Update confirmation may do;
+/// see [`take_plan_offer`].
+#[derive(Debug, PartialEq)]
+enum PlanConfirm<G> {
+    /// The showing this answer was drawn for is no longer open (cancelled,
+    /// already confirmed, retired by reconciliation, or replaced by another
+    /// plan): nothing may happen, the "don't ask in the future" preference
+    /// included, and whatever plan is open now stays up.
+    Stale,
+    /// The row's registry facts changed since the plan was made: the plan is
+    /// withdrawn unsent, and the caller releases its modal.
+    BindingChanged,
+    /// Another operation holds the page: nothing happens, and the question
+    /// stays up to be answered again.
+    Refused,
+    /// The showing is taken and the page lock claimed: the caller submits the
+    /// plan its own token names (`shown.key()`), which is the one the
+    /// answer's render drew.
+    Accepted(G),
+}
+
+/// Confirm `shown`, the opening of the plan the answer was drawn for, against
+/// the row's binding as it is now (`current`).
+///
+/// The answer acts on the plan `shown` names, never on whatever the row holds
+/// at click time: an answer for a plan since replaced would otherwise spend a
+/// `probe_id`, and carry out steps, the user never saw. So the plan travels
+/// in the token, and the slot is only asked whether that showing is still
+/// the open one.
+///
+/// Staleness is decided before `claim` runs, so an answer that can no longer
+/// land never takes (and drops) the page lock, whose write would wake every
+/// reader of the lock for nothing. A busy page refuses and leaves the
+/// question up; the plan is taken only once the claim is held, so the claim
+/// and the one-use plan move into the submission together.
+///
+/// The binding comparison is the row's long-standing check that a plan still
+/// matches the host details it was made for ([`HostBinding`]: the entry and
+/// its kind, its identity, its destination, its remote farhelm path, its
+/// remote state directory and its connection incarnation). That comparison is
+/// unchanged by moving these answers onto the showing; only its left-hand
+/// side is now the rendered plan's binding instead of the live plan's, which
+/// is the same plan once `is_current` has passed. No installation-identity
+/// check was added: per SPEC.md ("Confirmed 2026-10-10") a confirmed host
+/// operation follows the host entry, so nothing beyond that existing
+/// comparison may be added here.
+fn take_plan_offer<G>(
+    slot: &mut ConfirmSlot<PendingPlan>,
+    shown: &ConfirmToken<PendingPlan>,
+    current: &HostBinding,
+    claim: impl FnOnce() -> Option<G>,
+) -> PlanConfirm<G> {
+    if !slot.is_current(shown) {
+        return PlanConfirm::Stale;
+    }
+    if shown.key().binding != *current {
+        slot.cancel_for(shown);
+        return PlanConfirm::BindingChanged;
+    }
+    let Some(claim) = claim() else {
+        return PlanConfirm::Refused;
+    };
+    // Nothing between the check above and here can close the slot (this all
+    // runs in one synchronous handler), but a miss still drops the claim
+    // rather than submitting a plan nobody confirmed.
+    if slot.take(shown).is_none() {
+        return PlanConfirm::Stale;
+    }
+    PlanConfirm::Accepted(claim)
 }
 
 /// What preparing a run established without yet mutating the target.
@@ -2026,7 +2102,9 @@ struct ProgressCommit<'a> {
     intent: &'a mut Signal<Option<UpdateIntent>>,
     epoch: &'a mut Signal<u64>,
     tracked: &'a mut Signal<Option<TrackedRun>>,
-    pending: &'a mut Signal<Option<PendingPlan>>,
+    /// The row's plan confirmation, retired (never answered) when a run is
+    /// observed.
+    offer: &'a mut ConfirmSlot<PendingPlan>,
     accepted_run_waiting: &'a mut Signal<bool>,
     update_error: &'a mut Signal<Option<UpdateDiagnostic>>,
     update_warning: &'a mut Signal<Option<UpdateDiagnostic>>,
@@ -2170,7 +2248,7 @@ fn reconcile_progress(view: ProvisioningView, commit: ProgressCommit<'_>) {
         intent,
         epoch,
         tracked,
-        pending,
+        offer,
         accepted_run_waiting,
         update_error,
         update_warning,
@@ -2216,7 +2294,7 @@ fn reconcile_progress(view: ProvisioningView, commit: ProgressCommit<'_>) {
         // component was still displaying. (An unsubmitted UPDATE plan died
         // with its intent above.)
         release_plan_modal(host_id);
-        pending.set(None);
+        offer.clear();
     }
     // ADD acceptance is authoritative only until the first applicable GET;
     // updates carry the same gap in their tracked run instead.
@@ -2739,8 +2817,21 @@ pub(crate) fn ProvisioningPanel(
     let progress_error = use_signal(|| None::<String>);
     let progress_surface = use_signal(SurfaceReader::default);
     let mut read_gate = use_signal(ReadGate::default);
-    let mut pending = use_signal(|| None::<PendingPlan>);
-    let mut auto_submit_add = use_signal(|| false);
+    // The plan this row is asking the user to confirm (Setup, Uninstall, or
+    // the defensive inline Update), keyed by the plan itself. Its answers
+    // carry the token of the showing their render drew, so they act on that
+    // plan and its `probe_id` only, and only while that showing is still
+    // open. Opening a new plan, the binding and run reconciliation below,
+    // and a new menu request retire it with `clear`, never by answering it.
+    let mut offer = use_confirm_slot::<PendingPlan, ()>();
+    // The showing a remembered "don't ask in the future" answer is for: the
+    // token `offer.open` returned when planning opened a remote ADD plan
+    // with that preference set. Holding the token, not a bare flag, is what
+    // keeps the remembered answer bound to that one plan. If reconciliation
+    // clears the plan before the auto-submit effect runs, the token goes
+    // stale and answers nothing, so no later plan (one the user was never
+    // meant to skip) can be confirmed by it.
+    let mut auto_submit_add = use_signal(|| None::<ConfirmToken<PendingPlan>>);
     // A confirmed action owns this slot from click through its plan reply,
     // letting the folded row name the pending operation.
     let mut planning = use_signal(|| None::<ProvisioningOperation>);
@@ -2814,7 +2905,7 @@ pub(crate) fn ProvisioningPanel(
         let mut view_progress = progress;
         let mut view_error = progress_error;
         let view_running = on_running;
-        let mut view_pending = pending;
+        let mut view_offer = offer;
         let mut view_waiting = accepted_run_waiting;
         let mut view_intent = intent;
         let view_outstanding = outstanding_submission;
@@ -2857,7 +2948,7 @@ pub(crate) fn ProvisioningPanel(
                             intent: &mut view_intent,
                             epoch: &mut view_epoch,
                             tracked: &mut view_tracked,
-                            pending: &mut view_pending,
+                            offer: &mut view_offer,
                             accepted_run_waiting: &mut view_waiting,
                             update_error: &mut view_update_error,
                             update_warning: &mut view_update_warning,
@@ -2914,7 +3005,7 @@ pub(crate) fn ProvisioningPanel(
         }
         planning.set(Some(operation));
         release_plan_modal(host_id);
-        pending.set(None);
+        offer.clear();
         action_error.set(None);
         action_warning.set(None);
         let base = plan_base.clone();
@@ -2935,8 +3026,8 @@ pub(crate) fn ProvisioningPanel(
                     if is_local_add {
                         local_auto_retry.set(true);
                     }
-                    auto_submit_add.set(!is_local_add && remembered_answer);
-                    pending.set(Some(*plan));
+                    let opened = offer.open(*plan, ());
+                    auto_submit_add.set((!is_local_add && remembered_answer).then_some(opened));
                 }
                 Ok(Preparation::Discovered) => {
                     // Discovery can register a host and can resolve a
@@ -3015,7 +3106,7 @@ pub(crate) fn ProvisioningPanel(
         // uncertainty survives: only this attempt's correlated success
         // supersedes that.
         release_plan_modal(host_id);
-        pending.set(None);
+        offer.clear();
         // Setup/uninstall row diagnostics can still occupy the Update display
         // slots. A new Update must not hide its own result behind one.
         action_error.set(None);
@@ -3075,7 +3166,7 @@ pub(crate) fn ProvisioningPanel(
                         // it ever does, the plan confirms explicitly
                         // rather than submitting itself.
                         intent.set(None);
-                        pending.set(Some(*plan));
+                        offer.open(*plan, ());
                         on_reveal_details.call(());
                     }
                 }
@@ -3462,20 +3553,16 @@ pub(crate) fn ProvisioningPanel(
         move |(local_setup, binding)| {
             let authoritative = progress.read().clone();
             let page_busy = ops.busy();
-            if pending
-                .peek()
-                .as_ref()
-                .is_some_and(|plan| plan.binding != binding)
-            {
+            if offer.peek_key().is_some_and(|plan| plan.binding != binding) {
                 release_plan_modal(host_id);
-                pending.set(None);
+                offer.clear();
             }
             let running = authoritative.as_ref().is_some_and(|view| {
                 view.run_id.is_some() && view.status == ProvisioningStatus::Running
             });
             if running {
                 release_plan_modal(host_id);
-                pending.set(None);
+                offer.clear();
             }
             if local_setup
                 && !page_busy
@@ -3491,7 +3578,7 @@ pub(crate) fn ProvisioningPanel(
                 local_probe_started.set(false);
                 local_auto_retry.set(false);
                 release_plan_modal(host_id);
-                pending.set(None);
+                offer.clear();
                 action_error.set(None);
             }
             if *was_local_setup.peek() != local_setup {
@@ -3513,7 +3600,7 @@ pub(crate) fn ProvisioningPanel(
         move |(local_setup, menu_host_kind, menu_too_new)| {
             let snapshot = progress();
             let is_planning = planning().is_some();
-            let has_pending_plan = pending().is_some();
+            let has_pending_plan = offer.is_open();
             let owned = update_owned(intent().as_ref(), tracked().as_ref());
             let can_retry_local_setup = local_auto_retry();
             let run_active = snapshot.as_ref().is_some_and(|view| {
@@ -3584,23 +3671,27 @@ pub(crate) fn ProvisioningPanel(
     // Both explicit cancellations return to this row; confirmation and
     // lifecycle retirement intentionally leave focus to the next surface.
     let row_focus = move || settings_dialog::row_focus(host_id).script();
-    // `skip_future` is setup's permanent answer ("don't ask in the
-    // future"), remembered only once this confirmation has consumed the plan
-    // below: an answer queued behind Cancel finds no plan and must change no
-    // preference either. Every other confirmation passes `false`.
-    let confirm = use_callback(move |skip_future: bool| {
-        let Some(plan) = pending.peek().clone() else {
-            return;
-        };
-        if plan.binding != *current_binding.peek() {
-            release_plan_modal(host_id);
-            pending.set(None);
-            return;
-        }
+    // Confirm `shown`, the showing the answer's render drew; the plan it
+    // submits is the one that token names (see `take_plan_offer`).
+    // `skip_future` is setup's permanent answer ("don't ask in the future"),
+    // remembered only once this confirmation has taken its showing: an
+    // answer queued behind Cancel, or drawn for a plan since replaced, finds
+    // its showing gone and must change no preference either. Every other
+    // confirmation passes `false`.
+    let confirm = use_callback(move |answer: (ConfirmToken<PendingPlan>, bool)| {
+        let (shown, skip_future) = answer;
+        let current = current_binding.peek().clone();
         let mut confirm_ops = ops;
-        let Some(claim) = confirm_ops.claim_guard() else {
-            return;
-        };
+        let claim =
+            match take_plan_offer(&mut offer, &shown, &current, || confirm_ops.claim_guard()) {
+                PlanConfirm::Accepted(claim) => claim,
+                PlanConfirm::BindingChanged => {
+                    release_plan_modal(host_id);
+                    return;
+                }
+                PlanConfirm::Refused | PlanConfirm::Stale => return,
+            };
+        let plan = shown.key().clone();
         // The notice an uninstall owes, built now from the plan the user
         // confirmed and registered with the parent BEFORE the POST. Once the
         // host is forgotten nothing else can say where its data stayed, and
@@ -3623,10 +3714,10 @@ pub(crate) fn ProvisioningPanel(
             );
         }
         // Every attempt consumes what was displayed from the client's point
-        // of view too. A refusal or transport ambiguity cannot prove the
-        // helm left this one-use id unconsumed.
+        // of view too (`take_plan_offer` already took the showing). A
+        // refusal or transport ambiguity cannot prove the helm left this
+        // one-use id unconsumed.
         release_plan_modal(host_id);
-        pending.set(None);
         if skip_future {
             preferences.0.write().skip_host_setup_confirmation = Some(true);
             store_preference(
@@ -3671,15 +3762,24 @@ pub(crate) fn ProvisioningPanel(
     // A remembered setup answer applies to failed remote ADD reruns as well
     // as a fresh add. Keep the one-use plan and binding checks in the same
     // submission path; this effect only removes the question from the UI.
+    // There is no click to bind here, so the remembered answer carries the
+    // token planning got back from `offer.open` and answers exactly that
+    // showing. The effect deliberately never reads the slot: reading the
+    // open plan here would answer whatever is open when the effect runs, and
+    // would subscribe the effect to later openings. A token whose showing
+    // reconciliation has since cleared is refused as stale by
+    // `take_plan_offer` and confirms nothing.
     use_effect(move || {
-        if auto_submit_add() && pending.peek().is_some() {
-            auto_submit_add.set(false);
-            confirm.call(false);
+        if let Some(shown) = auto_submit_add() {
+            auto_submit_add.set(None);
+            confirm.call((shown, false));
         }
     });
 
     let snapshot = progress.read().clone();
-    let offer = pending.read().clone();
+    // The showing this render draws. Every answer and dismissal below moves
+    // a clone of this token into its handler, so it acts only on this plan.
+    let shown = offer.current();
     // ADD and update diagnostics share their render slots: the two
     // lifecycles never run together, so at most one side has news.
     let current_error = action_error
@@ -3746,7 +3846,7 @@ pub(crate) fn ProvisioningPanel(
         .map(|run| run.run_id);
     let flow = ProvisioningFlow::resolve(ProvisioningFlowInput {
         snapshot: snapshot.as_ref(),
-        offer: offer.as_ref(),
+        offer: shown.as_ref().map(ConfirmToken::key),
         details_open,
         local_setup,
         manual_remedy: manual_remedy.as_deref(),
@@ -3762,6 +3862,33 @@ pub(crate) fn ProvisioningPanel(
         visible_trace,
     });
     use_provisioning_flow_movement(&flow, host_id, capture_lower_hosts);
+
+    // Every dismissal the confirmations below draw: Cancel, the modal
+    // header's dismiss, and Escape. It acts only for `shown`, the showing it
+    // was drawn for: the `take` closes the question only if that showing is
+    // still open, and the rest of the dismissal runs only then. A dismissal
+    // drawn for an earlier showing, or queued behind a confirmation in the
+    // same event burst, must not close, pull focus out of, or wipe the
+    // diagnostics of the question now on screen (or of the run a
+    // confirmation just submitted), nor re-arm the local setup retry.
+    // `close_dialog` is whether the question is a modal whose isolation to
+    // release, with focus back on this row; `retry_local_setup` re-arms a
+    // local row's automatic setup retry, as Setup's and the inline Update's
+    // dismissals always have.
+    let mut dismiss =
+        move |shown: &ConfirmToken<PendingPlan>, close_dialog: bool, retry_local_setup: bool| {
+            if offer.take(shown).is_none() {
+                return;
+            }
+            if close_dialog {
+                host_dialog.close(&row_focus());
+            }
+            action_error.set(None);
+            action_warning.set(None);
+            if retry_local_setup && local_setup {
+                local_auto_retry.set(true);
+            }
+        };
 
     rsx! {
         div {
@@ -3830,9 +3957,9 @@ pub(crate) fn ProvisioningPanel(
                 }
             }
 
-            if let Some(plan) = offer {
-                if plan.operation == ProvisioningOperation::Add {
-                    crate::modal_isolation::HostModal { key: "{plan.probe_id}",
+            if let Some(shown) = shown {
+                if shown.key().operation == ProvisioningOperation::Add {
+                    crate::modal_isolation::HostModal { key: "{shown.key().probe_id}",
                     div { class: "host-settings-backdrop", role: "presentation",
                         ModalDialog {
                             handle: DialogHandle::new(settings_dialog::ADD_DIALOG_SELECTOR),
@@ -3855,44 +3982,39 @@ pub(crate) fn ProvisioningPanel(
                             // Cancel and Escape stay live while another
                             // operation holds the page token: dismissing the
                             // question starts nothing, and the confirm path
-                            // takes `pending` before it submits, so there is
-                            // no request of this row's to strand.
-                            on_escape: move |evt: KeyboardEvent| {
-                                if !evt.is_composing() {
-                                    host_dialog.close(&row_focus());
-                                    pending.set(None);
-                                    action_error.set(None);
-                                    action_warning.set(None);
-                                    if local_setup {
-                                        local_auto_retry.set(true);
+                            // takes its showing before it submits, so there
+                            // is no request of this row's to strand.
+                            on_escape: {
+                                let shown = shown.clone();
+                                move |evt: KeyboardEvent| {
+                                    if !evt.is_composing() {
+                                        dismiss(&shown, true, true);
                                     }
                                 }
                             },
                             SetupPlanConfirmation {
-                                confirmation: plan.confirmation,
-                                steps: plan.steps,
+                                confirmation: shown.key().confirmation.clone(),
+                                steps: shown.key().steps.clone(),
                                 name: crate::hosts::gui_host_name(host.name.raw(), host.kind == HostKind::Local),
                                 host: Some(host.clone()),
                                 local: host.kind == HostKind::Local,
                                 busy: page_busy,
                                 // The permanent answer is remembered inside
-                                // `confirm`, once it has consumed the plan.
-                                on_confirm: move |skip_future| confirm.call(skip_future),
-                                on_cancel: move |_| {
-                                    host_dialog.close(&row_focus());
-                                    pending.set(None);
-                                    action_error.set(None);
-                                    action_warning.set(None);
-                                    if local_setup {
-                                        local_auto_retry.set(true);
-                                    }
+                                // `confirm`, once it has taken this showing.
+                                on_confirm: {
+                                    let shown = shown.clone();
+                                    move |skip_future| confirm.call((shown.clone(), skip_future))
+                                },
+                                on_cancel: {
+                                    let shown = shown.clone();
+                                    move |_| dismiss(&shown, true, true)
                                 },
                             }
                         }
                     }
                     }
-                } else if plan.operation == ProvisioningOperation::Uninstall {
-                    crate::modal_isolation::HostModal { key: "{plan.probe_id}",
+                } else if shown.key().operation == ProvisioningOperation::Uninstall {
+                    crate::modal_isolation::HostModal { key: "{shown.key().probe_id}",
                     // A removal the user has to read before agreeing to,
                     // so it gets the same modal treatment as setup, with
                     // the destructive confirm in the danger tier. Cancel
@@ -3910,25 +4032,26 @@ pub(crate) fn ProvisioningPanel(
                             aria_modal: "true",
                             aria_label: "uninstall Farhelm from this host",
                             tabindex: "-1",
-                            on_escape: move |evt: KeyboardEvent| {
-                                if !evt.is_composing() {
-                                    host_dialog.close(&row_focus());
-                                    pending.set(None);
-                                    action_error.set(None);
-                                    action_warning.set(None);
+                            on_escape: {
+                                let shown = shown.clone();
+                                move |evt: KeyboardEvent| {
+                                    if !evt.is_composing() {
+                                        dismiss(&shown, true, false);
+                                    }
                                 }
                             },
                             UninstallConfirmation {
-                                confirmation: plan.confirmation,
-                                steps: plan.steps,
+                                confirmation: shown.key().confirmation.clone(),
+                                steps: shown.key().steps.clone(),
                                 host: host.clone(),
                                 busy: page_busy,
-                                on_confirm: move |_| confirm.call(false),
-                                on_cancel: move |_| {
-                                    host_dialog.close(&row_focus());
-                                    pending.set(None);
-                                    action_error.set(None);
-                                    action_warning.set(None);
+                                on_confirm: {
+                                    let shown = shown.clone();
+                                    move |_| confirm.call((shown.clone(), false))
+                                },
+                                on_cancel: {
+                                    let shown = shown.clone();
+                                    move |_| dismiss(&shown, true, false)
                                 },
                             }
                         }
@@ -3936,20 +4059,19 @@ pub(crate) fn ProvisioningPanel(
                     }
                 } else if let Some(inline_plan) = body.inline_plan {
                     PlanConfirmation {
-                        confirmation: plan.confirmation,
+                        confirmation: shown.key().confirmation.clone(),
                         body: inline_plan,
                         busy: page_busy,
                         confirm_label: "confirm update",
-                        on_confirm: move |_| confirm.call(false),
-                        on_cancel: move |_| {
-                            // The offer owns no submitted request or page token;
-                            // cancellation must stay available while a peer is busy.
-                            pending.set(None);
-                            action_error.set(None);
-                            action_warning.set(None);
-                            if local_setup {
-                                local_auto_retry.set(true);
-                            }
+                        on_confirm: {
+                            let shown = shown.clone();
+                            move |_| confirm.call((shown.clone(), false))
+                        },
+                        // The offer owns no submitted request or page token;
+                        // cancellation must stay available while a peer is busy.
+                        on_cancel: {
+                            let shown = shown.clone();
+                            move |_| dismiss(&shown, false, true)
                         },
                     }
                 }
@@ -4725,6 +4847,241 @@ mod tests {
         };
         let refusal = planning_refusal(ProvisioningOperation::Uninstall, typed.into());
         assert!(refusal.remove_instead);
+    }
+
+    /// Mount a plan-confirmation slot the way `ProvisioningPanel` does and
+    /// run `body` against it inside the runtime, so the tests below exercise
+    /// the real signal-backed slot rather than a stand-in.
+    fn with_plan_slot(body: impl FnOnce(ConfirmSlot<PendingPlan>)) {
+        std::thread_local! {
+            static SLOT: Cell<Option<ConfirmSlot<PendingPlan>>> = const { Cell::new(None) };
+        }
+
+        fn app() -> Element {
+            let slot = use_confirm_slot::<PendingPlan, ()>();
+            SLOT.with(|cell| cell.set(Some(slot)));
+            rsx! {}
+        }
+
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let slot = SLOT.with(Cell::get).expect("the slot mounted");
+        dom.in_runtime(|| body(slot));
+    }
+
+    /// What a test's page-lock stand-in has seen: how many claims were ever
+    /// made, and how many are still held.
+    ///
+    /// Both counts are needed. `made` is what tells an answer that never
+    /// touched the lock from one that claimed it and dropped the claim again:
+    /// both leave `held` at zero, but only the second wrote the lock (waking
+    /// its readers) for an answer that could not land. `held` shows the
+    /// accepted answer's claim is the one that survives into the submission.
+    #[derive(Debug, Default, PartialEq)]
+    struct ClaimLedger {
+        made: Cell<u32>,
+        held: Cell<i32>,
+    }
+
+    /// A page-lock stand-in for [`take_plan_offer`]: one held claim in its
+    /// [`ClaimLedger`] until dropped.
+    #[derive(Debug, PartialEq)]
+    struct CountedClaim(Rc<ClaimLedger>);
+
+    impl Drop for CountedClaim {
+        fn drop(&mut self) {
+            self.0.held.set(self.0.held.get() - 1);
+        }
+    }
+
+    /// A claim source over `ledger` for [`take_plan_offer`]: every call
+    /// succeeds, and is recorded as one more claim made and held.
+    fn counted_claim(ledger: &Rc<ClaimLedger>) -> impl FnOnce() -> Option<CountedClaim> + '_ {
+        move || {
+            ledger.made.set(ledger.made.get() + 1);
+            ledger.held.set(ledger.held.get() + 1);
+            Some(CountedClaim(ledger.clone()))
+        }
+    }
+
+    /// Spec (`take_plan_offer`): a Setup, Uninstall or Update answer submits
+    /// the plan its render drew, and only while that showing is still open.
+    /// An answer drawn for a plan since replaced, or for a showing since
+    /// cancelled and reopened with the same plan, is stale: it submits
+    /// nothing, never takes the page lock, and leaves the question now on
+    /// screen up. A busy page refuses and keeps the question; a changed
+    /// binding withdraws it without taking the lock; a genuine answer takes
+    /// the showing and is accepted with its claim.
+    ///
+    /// Why: the answer spends the plan's one-use `probe_id` and carries out
+    /// its steps on the host. Before these answers carried the showing they
+    /// were drawn for, the confirm read whichever plan the row held at click
+    /// time, so an answer for one plan could submit a later plan the user had
+    /// not read. The claim counts pin `take_plan_offer`'s ordering: staleness
+    /// and the binding are decided before `claim` runs, so a regression that
+    /// claimed first and dropped the claim on a miss would fail here even
+    /// though it leaves no claim held.
+    #[farhelm_testtrace::test]
+    fn a_plan_answer_submits_only_the_showing_it_was_drawn_for() {
+        with_plan_slot(|mut slot| {
+            let ledger = Rc::new(ClaimLedger::default());
+            let mut first = flow_plan(ProvisioningOperation::Uninstall);
+            first.probe_id = "plan-first".into();
+            let mut second = first.clone();
+            second.probe_id = "plan-second".into();
+            second.confirmation = "a different plan".into();
+            let binding = first.binding.clone();
+
+            // A newer plan replaced the one the answer was drawn for.
+            let drawn = slot.open(first.clone(), ());
+            let replacing = slot.open(second.clone(), ());
+            assert_eq!(
+                take_plan_offer(&mut slot, &drawn, &binding, counted_claim(&ledger)),
+                PlanConfirm::Stale
+            );
+            assert_eq!(ledger.made.get(), 0, "a stale answer never claims");
+            assert!(slot.is_current(&replacing), "the newer plan stays up");
+
+            // Cancelled, then the same plan shown again: the earlier
+            // showing's answer still lands nowhere.
+            assert!(slot.take(&replacing).is_some());
+            let reopened = slot.open(second.clone(), ());
+            assert_eq!(
+                take_plan_offer(&mut slot, &replacing, &binding, counted_claim(&ledger)),
+                PlanConfirm::Stale
+            );
+            assert_eq!(ledger.made.get(), 0, "a stale answer never claims");
+            assert!(slot.is_current(&reopened), "the reopened plan stays up");
+
+            // A busy page refuses and keeps the question.
+            assert_eq!(
+                take_plan_offer(&mut slot, &reopened, &binding, || None::<CountedClaim>),
+                PlanConfirm::Refused
+            );
+            assert!(slot.is_current(&reopened));
+
+            // A retargeted row withdraws the plan unsent.
+            let mut retargeted = binding.clone();
+            retargeted.destination = Some("elsewhere".into());
+            assert_eq!(
+                take_plan_offer(&mut slot, &reopened, &retargeted, counted_claim(&ledger)),
+                PlanConfirm::BindingChanged
+            );
+            assert!(!slot.is_open());
+            assert_eq!(ledger.made.get(), 0, "a withdrawn plan never claims");
+
+            // A genuine answer takes its showing and holds the one claim.
+            // The panel then submits `genuine.key()`, the plan that showing
+            // drew.
+            let genuine = slot.open(first.clone(), ());
+            let PlanConfirm::Accepted(claim) =
+                take_plan_offer(&mut slot, &genuine, &binding, counted_claim(&ledger))
+            else {
+                panic!("a current answer on an idle page is accepted");
+            };
+            assert_eq!(ledger.made.get(), 1, "the accepted answer claimed once");
+            assert_eq!(ledger.held.get(), 1, "the accepted answer holds its claim");
+            assert!(!slot.is_open(), "the showing is spent");
+            drop(claim);
+
+            // A second answer queued behind the accepted one finds nothing.
+            assert_eq!(
+                take_plan_offer(&mut slot, &genuine, &binding, counted_claim(&ledger)),
+                PlanConfirm::Stale
+            );
+            assert_eq!(ledger.made.get(), 1, "the queued answer never claims");
+            assert_eq!(ledger.held.get(), 0);
+        });
+    }
+
+    /// Spec (the panel's remembered "don't ask in the future" setup answer):
+    /// the remembered answer is bound to the token of the showing planning
+    /// opened. If reconciliation clears that showing before the answer is
+    /// applied (a run observed, a binding change, the row leaving local
+    /// setup), the remembered answer is stale: it confirms neither that plan
+    /// nor any plan opened after it, takes no page lock, and leaves the later
+    /// plan up as an ordinary question.
+    ///
+    /// Why: the remembered answer used to be a bare flag that answered
+    /// whatever plan was open when the auto-submit effect ran. A flag left
+    /// set after reconciliation cleared its plan could then confirm a later
+    /// plan (the defensive inline Update, say) that the remembered answer was
+    /// never meant for, spending its `probe_id` without the user reading it.
+    #[farhelm_testtrace::test]
+    fn a_stale_remembered_answer_does_not_confirm_a_later_plan() {
+        with_plan_slot(|mut slot| {
+            let ledger = Rc::new(ClaimLedger::default());
+            let mut setup = flow_plan(ProvisioningOperation::Add);
+            setup.probe_id = "remembered-setup".into();
+            let mut later = flow_plan(ProvisioningOperation::Update);
+            later.probe_id = "later-update".into();
+            let binding = setup.binding.clone();
+
+            // Planning opens the setup plan and remembers its token; then
+            // reconciliation retires it before the auto-submit runs, and a
+            // later plan opens.
+            let remembered = slot.open(setup, ());
+            slot.clear();
+            let later_showing = slot.open(later, ());
+
+            assert_eq!(
+                take_plan_offer(&mut slot, &remembered, &binding, counted_claim(&ledger)),
+                PlanConfirm::Stale
+            );
+            assert_eq!(
+                ledger.made.get(),
+                0,
+                "a stale remembered answer never claims"
+            );
+            assert!(
+                slot.is_current(&later_showing),
+                "the later plan stays up for the user to answer"
+            );
+        });
+    }
+
+    /// Spec (the panel's dismissal closure): the gate a Cancel, header
+    /// dismiss or Escape consults, a `take` of the showing it was drawn for,
+    /// refuses a showing since replaced and one a confirmation queued ahead
+    /// of it already took, and closes nothing in either case. The panel's
+    /// `dismiss` closure runs the rest of a dismissal (releasing the modal,
+    /// moving focus to the row, clearing diagnostics, re-arming the local
+    /// setup retry) only when this gate succeeds; those panel effects are not
+    /// exercised here.
+    ///
+    /// Why: these dismissals used to close whatever plan was open, so one
+    /// drawn for an earlier showing could take down the plan the user now
+    /// sees, and one queued behind a confirmation could act after that
+    /// confirmation had already taken the showing in `take_plan_offer`.
+    #[farhelm_testtrace::test]
+    fn a_plan_dismissal_acts_only_for_the_open_showing() {
+        with_plan_slot(|mut slot| {
+            let plan = flow_plan(ProvisioningOperation::Add);
+            let earlier = slot.open(plan.clone(), ());
+            let current = slot.open(plan.clone(), ());
+            assert!(slot.take(&earlier).is_none());
+            assert!(
+                slot.is_current(&current),
+                "a stale dismissal closes nothing"
+            );
+
+            assert!(slot.take(&current).is_some());
+            assert!(!slot.is_open());
+
+            // Queued behind a confirmation that already took the showing.
+            let confirmed = slot.open(plan, ());
+            let ledger = Rc::new(ClaimLedger::default());
+            assert!(matches!(
+                take_plan_offer(
+                    &mut slot,
+                    &confirmed,
+                    &confirmed.key().binding,
+                    counted_claim(&ledger)
+                ),
+                PlanConfirm::Accepted(..)
+            ));
+            assert!(slot.take(&confirmed).is_none());
+        });
     }
 
     /// A confirmed plan closes before its POST. Only a definite remote
