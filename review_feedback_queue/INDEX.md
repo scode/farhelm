@@ -8,10 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`shortcut-save-overwrites-intervening-agent-binding.md`](shortcut-save-overwrites-intervening-agent-binding.md) — A
-  shortcut save can restore an older target, including a pre-read agent edit after save failure; harmful launch is
-  unverified.
-
 - [`tunnel-can-take-standalone-helm-port.md`](tunnel-can-take-standalone-helm-port.md) — A localhost tunnel can serve a
   remote page at the standalone helm's address and read the browser's helm credential; how often one is stored is
   unverified.

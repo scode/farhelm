@@ -236,6 +236,7 @@ stalled preference endpoint cannot blank the page for the funnel's full sixty se
 choice the list makes one more GET under that same short deadline. Only selection/history inputs refresh; unrelated
 settings retain their reload contract. A failed GET uses the current optimistic preference mirror. Selection writes
 update both values in that mirror before queueing their existing single-field PUT, including recovery overlays.
+Number-key bindings are not replayed: a failed or cancelled bindings write is discarded.
 
 The GUI's HTTP funnel orders reads and actions after this client's earlier configuration saves: quick-launch and
 number-key bindings, template save/delete, checkout folder, post-clone command, and ntfy settings. A save registers
@@ -1120,13 +1121,13 @@ edits. Clone/Replace revokes any pending choice, and closing clears the parent o
 search-accept callback as Enter and a clicked search result. Completed read failures follow that callback's ordinary
 refusal behavior; resource refreshes do not reapply the initial choice. Name and template picks do not submit the form.
 The templates-only mode passes its plain query through that same template matcher and refreshes shortcut labels when
-opened. Its separate preference read overlays unconfirmed local bindings and updates only the binding fields; a failed
-read leaves cached labels intact and does not hide templates. Later binding moves need not refresh an already-open list.
-An exact case-sensitive name is selected over other substring matches unless the user arrows away; the same rule applies
-if the template snapshot arrives after typing. A row pick carries only its name across the modal removal handoff. The
-shared shortcut worker reads preferences and templates afresh and resolves that name before using the existing
-quick-launch admission, fallback and naming behavior. A name missing from the fresh catalog opens New with a preparation
-error rather than launching a stale captured definition.
+opened. Its separate preference read overlays local bindings whose save is still pending and updates only the binding
+fields; a failed read leaves cached labels intact and does not hide templates. Later binding moves need not refresh an
+already-open list. An exact case-sensitive name is selected over other substring matches unless the user arrows away;
+the same rule applies if the template snapshot arrives after typing. A row pick carries only its name across the modal
+removal handoff. The shared shortcut worker reads preferences and templates afresh and resolves that name before using
+the existing quick-launch admission, fallback and naming behavior. A name missing from the fresh catalog opens New with
+a preparation error rather than launching a stale captured definition.
 
 Session-action shortcuts use an idempotent capture listener and a pure key matcher from `session-action-shortcuts.js`.
 The build's Mac-desktop condition selects Cmd+W for Delete; browsers use Ctrl+Shift+Backspace. A visible modal yields,
@@ -1160,9 +1161,10 @@ without closing Templates. The open toggle owns pointerdown until click. Dialog 
 app's layout epoch dismiss the popup when its fixed coordinates become stale; the popup's own scrolling does not dismiss
 it. Focus returns only while still owned by a closing menu, with `preventScroll`, so a delayed dismissal cannot steal
 another popup's focus or undo the dialog's scroll. Re-delivery to an already closed popup does nothing. The two shortcut
-preference fields share acknowledgment, deletion retirement and fresh-read overlay helpers. A rename repoints both
-before deleting the old name, and removes a stale new-name key when retaining the old name's key would otherwise violate
-one-key-per-template. Failed repoints keep both names and dirty intent for recovery.
+preference fields share acknowledgment and fresh-read overlay helpers. A rename repoints both before deleting the old
+name, and removes a stale new-name key when retaining the old name's key would otherwise violate one-key-per-template.
+Failed repoints keep both names. A failed number-key save, from a key edit or a repoint, is reported and its map
+discarded, so no later read or sign-in replay brings it back; the ⚡ mark still keeps dirty intent for recovery.
 
 Quick launch uses that shared capture listener and the same list-owned New-open callback, followed by the ordinary
 template search action and form requestSubmit. The mark is one nullable shared preference rather than template data, so

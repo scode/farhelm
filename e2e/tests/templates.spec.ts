@@ -333,6 +333,48 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
   }
 });
 
+/** A failed number-key save is reported and then discarded (SPEC.md, "One GUI
+ * at a time"). The dialog goes back to the helm's keys, and the next save starts
+ * from a fresh read instead of writing the failed choice back over a key an
+ * agent set in the meantime.
+ */
+test("a failed number-key save is reported and never saved later", async ({ page, request }) => {
+  const prefix = `number-failed-${Date.now()}`;
+  const [a, b] = ["a", "b"].map(s => `${prefix}-${s}`);
+  try {
+    await patchPreferences(request, { template_shortcuts: null, quick_launch_template: null });
+    await putTemplate(request, a, { kind: "agent", agent: "claude" });
+    await putTemplate(request, b, { kind: "agent", agent: "codex" });
+    let refused = 0;
+    await page.route("**/api/preferences", async route => {
+      const put = route.request();
+      if (put.method() !== "PUT" || !put.postData()?.includes("template_shortcuts")) return route.fallback();
+      refused += 1;
+      await route.fulfill({ status: 503, body: "refused by the test" });
+    });
+    await page.goto("/");
+    await page.locator(".templates-button").click();
+    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+    await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    const keyButton = dialog.getByRole("button", { name: `number shortcut ${a}`, exact: true });
+    const menu = dialog.getByRole("menu", { name: `number key for ${a}`, exact: true });
+    await expect(keyButton).toHaveText("Ctrl+Shift+ –");
+    await keyButton.click();
+    await menu.getByRole("menuitem", { name: "Ctrl+Shift+1", exact: true }).click();
+    await expect(dialog.locator(".templates-error")).toHaveText("the number key could not be saved");
+    expect(refused).toBe(1);
+    await expect(keyButton).toHaveText("Ctrl+Shift+ –");
+    await page.unroute("**/api/preferences");
+    await patchPreferences(request, { template_shortcuts: { "1": b } });
+    await keyButton.click();
+    await menu.getByRole("menuitem", { name: "Ctrl+Shift+2", exact: true }).click();
+    await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "1": b, "2": a });
+  } finally {
+    await patchPreferences(request, { template_shortcuts: null, quick_launch_template: null });
+    for (const name of [a, b]) await deleteTemplate(request, name);
+  }
+});
+
 /** A model-only key is useful for composition even though it cannot launch
  * alone. Hold catalog loading past the notice lifetime to prove that loading
  * cannot consume the explanation; editing and elapsed visible time must both

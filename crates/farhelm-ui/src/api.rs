@@ -826,6 +826,15 @@ impl PreferenceField {
         matches!(self, Self::QuickLaunchTemplate | Self::TemplateShortcuts)
     }
 
+    /// Whether a write that fails or is cancelled drops its value instead of
+    /// keeping it dirty for a later read overlay and sign-in replay. Only
+    /// number-key bindings do so far (SPEC.md, "One GUI at a time"): replaying
+    /// a whole stale map undoes agent changes made since. The other fields
+    /// still keep a failed value until the TODO sweep removes that.
+    fn discards_failed_writes(self) -> bool {
+        matches!(self, Self::TemplateShortcuts)
+    }
+
     /// The field's wire key in a `PUT /api/preferences` patch.
     fn key(self) -> &'static str {
         match self {
@@ -883,18 +892,6 @@ pub(crate) enum PreferenceValue {
 }
 
 impl PreferenceValue {
-    /// Remove only a deleted template from this client's queued shortcut intent.
-    /// Retiring it before DELETE prevents credential replay from restoring a key
-    /// the helm just freed, while unrelated number bindings remain intact.
-    fn retire_template(&mut self, name: &str) {
-        match self {
-            Self::QuickLaunchTemplate(value) if value.as_ref().map(PeerText::raw) == Some(name) => {
-                *value = None
-            }
-            Self::TemplateShortcuts(value) => value.retain(|_, template| template.raw() != name),
-            _ => {}
-        }
-    }
     /// Select the independent queue slot that serializes writes for this value.
     fn field(&self) -> PreferenceField {
         match self {
@@ -992,14 +989,14 @@ struct FieldWrite {
     sending_saves: Vec<save_order::Ticket>,
 }
 
-/// Retire the matching mark entirely, or just the deleted name from a map.
-/// A failed map write may also contain unrelated choices that still need replay.
+/// Retire a dirty ⚡ mark that names the deleted template. Retiring it before
+/// DELETE prevents credential replay from restoring a mark the helm just
+/// cleared. Number-key maps need nothing here: one that fails or is cancelled
+/// is discarded outright.
 fn retire_template_choice(slot: &mut FieldWrite, name: &str) {
     if matches!(&slot.latest, Some(PreferenceValue::QuickLaunchTemplate(Some(value))) if value.raw() == name)
     {
         slot.latest = None;
-    } else if let Some(value) = &mut slot.latest {
-        value.retire_template(name);
     }
 }
 
@@ -1128,7 +1125,11 @@ impl PreferenceWrites {
     /// A FAILED write is not retried on its own: the value stays dirty for
     /// the next reauthentication replay or the next user change, per the
     /// fire-and-forget policy — persistence failures cost the next launch,
-    /// never a retry loop against a helm that is refusing.
+    /// never a retry loop against a helm that is refusing. Number-key
+    /// bindings are the exception: their caller reports the failure, and the
+    /// attempted map is discarded (SPEC.md, "One GUI at a time"). Kept, the
+    /// whole map would overlay every later read and replay after sign-in,
+    /// writing itself back over agent changes made since.
     fn finished(&mut self, field: PreferenceField, sent: &PreferenceValue, success: bool) -> bool {
         let slot = self.field(field);
         slot.sending_saves.clear();
@@ -1137,6 +1138,9 @@ impl PreferenceWrites {
         }
         slot.acked = success;
         slot.in_flight = false;
+        if !success && field.discards_failed_writes() {
+            slot.latest = None;
+        }
         if let Some(completion) = slot.completion.take() {
             let deleting = completion.retire_template.is_some();
             if let Some(name) = completion.retire_template {
@@ -1149,12 +1153,16 @@ impl PreferenceWrites {
 
     /// The writer was cancelled mid-request (its task dropped): release the
     /// field so a later write can start a replacement, keeping the value
-    /// dirty so nothing pretends it was persisted.
+    /// dirty so nothing pretends it was persisted, except for a field that
+    /// [`PreferenceField::discards_failed_writes`].
     fn writer_lost(&mut self, field: PreferenceField) {
         let slot = self.field(field);
         slot.sending_saves.clear();
         slot.queued_saves.clear();
         slot.in_flight = false;
+        if field.discards_failed_writes() {
+            slot.latest = None;
+        }
         if let Some(completion) = slot.completion.take() {
             let _ = completion.sender.send(false);
         }
@@ -1410,10 +1418,14 @@ async fn send_preference_patch(base: &str, value: &PreferenceValue) -> bool {
     false
 }
 
-/// Acknowledge a shortcut-field repoint before rename deletes the old name.
+/// Write a shortcut field and report whether the helm acknowledged it: the
+/// Templates dialog's number-key edits, and rename's repoints before it
+/// deletes the old name.
 ///
-/// The optional acknowledgment belongs to the existing latest-wins queue;
-/// failures and writer loss leave the choice dirty for credential recovery.
+/// The optional acknowledgment belongs to the existing latest-wins queue.
+/// A failed or cancelled ⚡ mark stays dirty for credential recovery, while a
+/// failed or cancelled number-key map is discarded (see
+/// [`PreferenceField::discards_failed_writes`]).
 /// Receiver cancellation never cancels that process-wide writer. A rename
 /// retains both names if its particular choice is not acknowledged.
 pub(crate) fn write_template_binding(
@@ -5178,13 +5190,16 @@ mod tests {
 
     /// Dirty does not mean active: a refused or cancelled shortcut save must
     /// free the reauthentication seed that will eventually restart its writer.
+    /// It uses the ⚡ mark, which keeps a failed value for that replay; a failed
+    /// number-key map is discarded instead (see
+    /// `failed_number_key_save_is_discarded_not_replayed`).
     #[farhelm_testtrace::test]
     fn failed_and_cancelled_shortcut_writes_release_reads() {
         use std::task::{Context, Waker};
         for cancelled in [false, true] {
             let mut queue = super::PreferenceWrites::default();
-            let field = super::PreferenceField::TemplateShortcuts;
-            let value = super::PreferenceValue::TemplateShortcuts(Default::default());
+            let field = super::PreferenceField::QuickLaunchTemplate;
+            let value = super::PreferenceValue::QuickLaunchTemplate(None);
             assert!(queue.record(value.clone()));
             queue.next_to_send(field).unwrap();
             let mut read = std::pin::pin!(queue.saves.preceding());
@@ -6491,11 +6506,15 @@ mod preference_write_tests {
         assert_eq!(queue.dirty(field), None);
     }
 
-    /// A failed in-flight map is drained before deletion and its matching name
-    /// retired before credential replay. Other keys stay dirty: clearing them
-    /// as collateral would lose a separate local choice the helm never saved.
+    /// A failed number-key save is discarded rather than kept for replay
+    /// (SPEC.md, "One GUI at a time"): neither the next fresh read nor the
+    /// sign-in replay may bring back the map it tried to save, or it would
+    /// undo an agent's later binding. Deleting a template still waits for the
+    /// owned PUT. A cancelled writer, whose outcome is unknown, discards its map
+    /// too and still refuses deletion. A failure only discards the map it sent:
+    /// a newer choice recorded meanwhile still goes out.
     #[farhelm_testtrace::test]
-    fn number_binding_delete_retires_only_the_deleted_name() {
+    fn failed_number_key_save_is_discarded_not_replayed() {
         use std::collections::BTreeMap;
         let mut queue = PreferenceWrites::default();
         let field = PreferenceField::TemplateShortcuts;
@@ -6505,18 +6524,45 @@ mod preference_write_tests {
         ]));
         assert!(queue.record(value.clone()));
         assert_eq!(queue.next_to_send(field), Some(value.clone()));
+        let mut read = std::pin::pin!(queue.saves.preceding());
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(
+            read.as_mut().poll(&mut cx).is_pending(),
+            "premise: reads wait for the save"
+        );
         let mut deleting = queue.before_template_delete(field, "deleted").unwrap();
         assert_eq!(
             deleting.try_recv(),
             Ok(None),
             "premise: deletion waits for the owned PUT"
         );
+        assert_eq!(
+            queue.dirty(field),
+            Some(value.clone()),
+            "premise: a pending save still overlays reads"
+        );
         assert!(!queue.finished(field, &value, false));
         assert_eq!(deleting.try_recv(), Ok(Some(true)));
-        let kept =
+        assert!(
+            read.as_mut().poll(&mut cx).is_ready(),
+            "the failure releases reads"
+        );
+        assert_eq!(queue.dirty(field), None, "the failed map is discarded");
+        assert_eq!(queue.begin_replay(field), None, "sign-in replays nothing");
+        let helm = Preferences {
+            template_shortcuts: BTreeMap::from([("1".into(), "agent".into())]),
+            ..Default::default()
+        };
+        assert_eq!(
+            queue.template_bindings_after_read(helm.clone()),
+            helm,
+            "the next read shows the helm's keys"
+        );
+
+        let pending =
             PreferenceValue::TemplateShortcuts(BTreeMap::from([("0".into(), "kept".into())]));
-        assert_eq!(queue.dirty(field), Some(kept.clone()));
-        assert_eq!(queue.begin_replay(field), Some(kept));
+        assert!(queue.record(pending.clone()));
+        assert_eq!(queue.next_to_send(field), Some(pending));
         let mut deleting = queue.before_template_delete(field, "kept").unwrap();
         queue.writer_lost(field);
         assert_eq!(
@@ -6524,6 +6570,18 @@ mod preference_write_tests {
             Ok(Some(false)),
             "lost ownership refuses deletion"
         );
+        assert_eq!(queue.dirty(field), None, "a cancelled map is discarded too");
+
+        let newer =
+            PreferenceValue::TemplateShortcuts(BTreeMap::from([("2".into(), "newer".into())]));
+        assert!(queue.record(value.clone()));
+        assert_eq!(queue.next_to_send(field), Some(value.clone()));
+        assert!(!queue.record(newer.clone()));
+        assert!(
+            queue.finished(field, &value, false),
+            "the newer choice goes out next"
+        );
+        assert_eq!(queue.next_to_send(field), Some(newer));
     }
 
     /// A bindings refresh honors both unconfirmed local shortcut fields, then
