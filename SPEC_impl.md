@@ -1620,12 +1620,16 @@ detail, with `|` between lines so the existing peer-text escaping in the badge a
 newlines into visible control-character escapes. The separators count toward the byte bound. It is not a replay snapshot
 or a conversation history store. A fresh pane starts its process-local fence at history position zero. Pane reuse
 samples the old history size, stamps a random launch token and a separate validity token, then respawns in one
-synchronous tmux command group. Respawn clears the old visible grid and preserves history. Every resize empties the
-validity token immediately before resizing in the same group, so even a queued resize from an old attachment invalidates
-a reused fence when it actually executes. A resize executed after pane death also clears generation eligibility: the
-death banner can move away from the final row when the dead grid grows. Fresh resizes while the process is alive keep
-generation eligibility because their later death draws the banner at the new bottom row. Reload and ambiguous launches
-have no fence and omit the optional quote.
+synchronous tmux command group. Respawn clears the old visible grid and preserves history. The respawn itself can still
+add old rows to history after the sample. When the old run left a full-screen program's alternate screen showing and the
+pane was narrowed while it showed, tmux restores the saved primary screen and reflows the pane's contents, history
+included, to the current width; every row the split adds raises the history count, so that many old rows fall after the
+sample (read from tmux 3.7c's source, not reproduced). The fence does not catch this, so the quote can include them;
+SPEC.md accepts that. Every resize empties the validity token immediately before resizing in the same group, so even a
+queued resize from an old attachment invalidates a reused fence when it actually executes. A resize executed after pane
+death also clears generation eligibility: the death banner can move away from the final row when the dead grid grows.
+Fresh resizes while the process is alive keep generation eligibility because their later death draws the banner at the
+new bottom row. Reload and ambiguous launches have no fence and omit the optional quote.
 
 Capture uses `if-shell -F` to check exact session and pane identity, deadness, launch token and, for reuse, validity,
 then captures in that same non-waiting command group. Its start is the recorded history position minus current

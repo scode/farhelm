@@ -35,9 +35,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   The suggested start command changes path bytes and can migrate another inactive installation under a conditional path
   pairing.
 
-- [`respawn-reflow-crosses-launch-excerpt-boundary.md`](respawn-reflow-crosses-launch-excerpt-boundary.md) — Restart can
-  retain preceding-run terminal text as a startup error; consequential confidentiality exposure remains unverified.
-
 - [`uninstall-plan-normalizes-containing-paths-independently.md`](uninstall-plan-normalizes-containing-paths-independently.md)
   — A home-alias uninstall plan can miss retained data inside its removal target; a conditional design counterexample,
   not a reviewed implementation.

@@ -17446,7 +17446,11 @@
 - Completion criteria: SPEC.md's failed-launch excerpt rule says the excerpt can include text from the preceding run in
   rare cases (such as a terminal resized while a full-screen program ran), and that this is accepted. No code change.
   Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-specs-oct21.md`.
+- Execution: `complete`; SPEC.md's failed-launch excerpt rule now says that in rare cases, such as a terminal narrowed
+  while a full-screen program from the preceding run was showing, the excerpt can include that run's text, and that this
+  is accepted. SPEC_impl.md says where the history fence misses it. No code change. jj change
+  `wpkltslrmwqloztlorxrzvsvruknlokn`, bookmark `plan/triage-specs-oct21/02-excerpt-preceding-run`;
+  [draft PR #2565](https://github.com/scode/farhelm/pull/2565/changes).
 
 ## menu-focus-marker-exposes-native-address.md
 
