@@ -109,3 +109,75 @@ applied. For #2575 it confirmed the patterns accept the same strings and that no
 caught a changelog claim that overstated the speedup and a test that might not have failed against the old pattern on a
 fast machine; both were fixed (the test now makes 500 checks inside its five-second limit). Fresh cold readers checked
 each commit message; the #2575 message was rewritten to stop crediting the whole line's cost to the version check.
+
+### Landing
+
+Landed as #2569, #2571 and #2575, merged bottom-up, with the content the report describes, rebased onto this round's
+main with one code conflict resolution and three changelog changes described below. It was the second of five plans in
+this landing round, after triage-specs-oct21; start-remedy-quoting, uninstall-mixed-spelling and
+refused-retry-rollback-fence followed it.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained popover-anchor-close, which closes menus when the row they are attached to moves and
+changed the same UI files, plus documentation commits. A fresh-context reviewer and I read this plan against it:
+
+- The menu focus markers this plan renumbers are not used by popover-anchor-close: it closes menus through each menu's
+  existing close action, and returning focus after a close does not read the markers.
+- The changed-host warning's new identity spelling is deterministic, so it does not make popover-anchor-close's
+  row-movement detection close menus any more often than before.
+- The other four plans in the round do not touch menus, the changed-host warning or the terminal's version-number check.
+
+#### Fixes made during the landing
+
+- The changed-host warning PR's import of the identity formatter conflicted with popover-anchor-close's additions to the
+  same import line; the landing kept both.
+- All three of the plan's changelog fragments described fixes to work that landed after the last release and has not
+  shipped: the menu focus markers came from a menu focus fix (#2438), the changed-host warning that names both
+  identities came from host-changed-update-warning (#2504), and the version-number check's slowdown came from a change
+  that let the dotted parts of version numbers contain letters and hyphens, as part of recognizing file names such as
+  `backup.7z` (#2396); the released version-number check had no such slowdown. All three landed on 2026-10-20 or later,
+  after v0.30.0 (2026-10-18). The repository's rule is that a fix to unreleased work edits that work's fragment rather
+  than adding a second entry, so the landing deleted the three new fragments and added their content as context
+  paragraphs to the original fragments, in the same PRs. The report's "about half as long" changelog wording therefore
+  no longer appears; the context paragraph instead says the file-name check's remaining cost on such lines was left
+  alone, and that whether it also exists in the released version was not established.
+- The review-queue index conflicted with entries main had changed; the landing rebuilt it the same way for each PR.
+
+#### Checks
+
+Together the five plans change about 650 lines of code, tests and specification text (more with review-queue
+bookkeeping) across the helm's connection errors and uninstall, the supervisor's create path and store, and the UI,
+including how every menu remembers its focused item and the terminal's file-link script; that reach is why this round
+ran the whole Rust workspace and the full browser suite. All of the following ran on the five plans stacked together on
+this round's main, including the landing's conflict resolutions. After the run, the landing moved changelog text between
+fragment files in cheap-ui-hardening-oct21's last PR (see its notes); that changed only changelog files:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on the changed Markdown files, `python3 scripts/check-agents-md.py` (one warning,
+  about a citation main already had), the workspace debug build, the UI's release web build and
+  `scripts/check-desktop-assets.sh` (which also builds the desktop app): all passed.
+  `python3 releasing/check-changelog.py format` passed again after every changelog change.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  slots, no retries, run `461bfc4c-651d-4a70-8498-7a9b5ae524cf`: 4291 passed, none failed; 40 tests marked as ignored
+  did not run.
+- `cargo nextest run -p farhelm-ui --features desktop`, run `4073dcb5-a14f-42e5-bddd-8b007925da68`: 900 passed.
+  `node --test` in `crates/farhelm-ui/js-tests`, run `4086a6d6-96a5-4691-b05e-e50169546906`: 329 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `b5e88d8c-8a25-4e9b-be8f-ada4f9d48bc3`: 2475 passed, 14 skipped by design (WebKit
+  clipboard cases and tests that need a real signed-in agent or run on one engine only), 1 failed: on WebKit, "don't ask
+  again on a refused YOLO replace marks the host, then replaces with the override", the open flake FLAKES.md recorded on
+  2026-10-20, which the deflake sweep already excludes. It exercises a host's YOLO question during Replace, which none
+  of the five plans touches; refused-retry-rollback-fence changes only the supervisor's handling of a stale create
+  retry.
+- An earlier start of these checks was stopped at its build step and discarded, because the landing changed the stack
+  while it ran; nothing from it is counted.
+- Reused: none. Skipped: the website build (no docs page changed), the doctests (no documentation example changed), the
+  desktop smoke test (the desktop app crate is unchanged, and the menu marker fix is covered by the desktop-feature unit
+  tests above, which mount real menus), the native Mac app (not runnable here) and the installer (unchanged).
+
+The report's checks were the UI unit tests and selected browser specs on its base; the round ran the full suites above.
+The report's note that the menu fix came out at about 120 changed lines, over the nominal 100, still holds. Nothing in
+the executor's report became untrue at landing, apart from the three changelog fragments moved as described above.
