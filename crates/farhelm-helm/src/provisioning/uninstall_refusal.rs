@@ -85,10 +85,20 @@ pub(super) fn unusable_host(state: &HostState, twin: Option<(&str, HostKind)>) -
                 Some((_, HostKind::Local)) => "To remove Farhelm from the helm's own machine, \
                     run farhelm uninstall there"
                     .to_string(),
-                Some((_, HostKind::Ssh)) | None => format!(
+                Some((_, HostKind::Ssh)) => format!(
                     "To remove Farhelm from that machine, choose uninstall on {other}, \
                      then remove this entry"
                 ),
+                // No twin means the registry no longer holds the entry that owned
+                // the machine: it was removed, and this entry stays a duplicate
+                // until Retry lets it connect (SPEC.md's duplicate remedy). Pointing
+                // the user at the removed entry would be advice they cannot follow.
+                // Uninstall's ordinary checks still apply after the retry, so this
+                // promises only that uninstall can be chosen again, not that it
+                // will succeed.
+                None => "That entry has since been removed: press retry so this entry \
+                    can connect to the machine, then choose uninstall on this entry"
+                    .to_string(),
             };
             format!(
                 "Farhelm can't uninstall through this entry: it reaches the same machine as \
@@ -194,26 +204,41 @@ mod tests {
         assert_plain_remove_refusal(&unverified);
     }
 
-    /// The entry to uninstall through is named as in the host list, even if
-    /// it disappeared between the connection snapshot and the registry read.
+    /// The entry to uninstall through is named as in the host list. Once that
+    /// entry is gone, the refusal still names it by a fallback, but must not
+    /// send the user to it: the remedy that works is Retry on this entry,
+    /// then uninstall here.
     #[farhelm_testtrace::test]
     fn twin_refusals_name_the_other_entry_or_its_missing_entry_fallback() {
         let state = HostState::Duplicate {
             twin: 42,
             identity: "shared".into(),
         };
-        for (name, expected) in [
-            (Some("build\nbox"), r#""build\nbox""#),
-            (None, "another entry (host 42)"),
-        ] {
-            let text = unusable_host(&state, name.map(|name| (name, HostKind::Ssh))).unwrap();
-            assert!(
-                text.contains(&format!("choose uninstall on {expected}")),
-                "{text}"
-            );
-            assert!(text.contains("press retry"));
-            assert_plain_remove_refusal(&text);
-        }
+        let text = unusable_host(&state, Some(("build\nbox", HostKind::Ssh))).unwrap();
+        assert!(
+            text.contains(r#"choose uninstall on "build\nbox""#),
+            "{text}"
+        );
+        assert!(text.contains("press retry"));
+        // The shared closing sentence also says "press retry", so pin the
+        // removed-entry advice's absence directly.
+        assert!(!text.contains("has since been removed"), "{text}");
+        assert_plain_remove_refusal(&text);
+
+        let removed = unusable_host(&state, None).unwrap();
+        assert!(
+            removed.contains("same machine as another entry (host 42)"),
+            "{removed}"
+        );
+        assert!(
+            removed.contains("press retry so this entry can connect to the machine, then choose uninstall on this entry"),
+            "{removed}"
+        );
+        assert!(
+            !removed.contains("choose uninstall on another"),
+            "{removed}"
+        );
+        assert_plain_remove_refusal(&removed);
         for (name, shown) in [("desk", "desk"), ("this machine", "local (this machine)")] {
             let local = unusable_host(&state, Some((name, HostKind::Local))).unwrap();
             assert!(
