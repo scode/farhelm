@@ -298,3 +298,69 @@ above, each PR passed its review gate, and each outcome's `TRIAGE_OUTCOMES.md` E
 bookmark and PR. Open, not merged. If a `## Decisions` section exists, its latest entry must also be satisfied. Then
 close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the
 queue script, write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-10-22 (claim eac6f2).
+
+### The failed-save fix for number-key shortcuts is over its size gate: land it or discard it?
+
+#### What this is about
+
+Number keys launch templates. In the Templates dialog each template can be given one of the keys 1–9 or 0, and an agent
+(or the `farhelm` command line) can assign or move those keys too. When you change a key in the Templates dialog, the
+app re-reads the current keys, applies your change, and saves the whole set back.
+
+The 2026-10-21 triage found what happens when that save fails, most likely because your sign-in expired. The app keeps
+the whole set it tried to save and treats it as the truth from then on. Your next key change, renaming a template that
+has a key, or simply signing back in, then writes that old set back, undoing any key an agent moved or assigned in the
+meantime. A later key press can then launch a template the agent had deliberately moved off that key.
+
+You decided "Spec, plus fix the failed-save case": the spec should accept that GUI saves otherwise overwrite agent
+edits, and the failed-save case should be fixed. The fix had a size gate of about 100 changed lines (code, tests and
+docs), and "over it, block and bring it back". The triage estimated 60–120 lines and called it borderline.
+
+#### What the plan did
+
+The spec change is done and is draft PR #2562. SPEC.md now accepts that GUI saves of templates and number keys can
+overwrite an agent's or the command line's edit, except after a failed number-key save.
+
+The fix is built, tested and reviewed, and is held as draft PR #2573 on top of #2562. After a failed save, the app now
+remembers only which key you chose for each template you changed, not the whole set. It applies just those choices to
+every fresh read: when you next change a key, when you rename a template, when a number key launches, and in the
+automatic retry after signing back in. Choices from several failed saves add up until one save goes through. Where your
+change and an agent's touch the same key or template, yours wins, as it would have if the save had worked. Keys an agent
+set that you did not touch survive.
+
+Three things came up that the triage did not anticipate, all fixed in #2573:
+
+- If the app cannot read the keys when you sign back in, the retry now waits for a real read. Before this, it would have
+  saved your changes over an empty set, erasing every other key.
+- A key you vacated by moving a template away is not cleared when an agent has since put another template on it.
+- If a save fails, an agent then rebinds that key, and you change the key again, your second change is kept, not lost.
+
+The first version tracked changes per key and needed two review rounds of fixes. A scope review then found a simpler
+shape (tracking per template), which is what #2573 now contains. That review also checked for a smaller design that
+still meets the spec and your wording, and found none under about 135 lines.
+
+The fix measures 194 changed lines: about 90 of code, 35 of comments and implementation-spec text, and 65 of tests. The
+tests cover the next key change, the sign-in retry, a failed sign-in read, an agent reusing a key you vacated, and
+deleting a template. Most of the size over the estimate comes from the sign-in retry, which the estimate did not
+include.
+
+#### The question
+
+Should #2573 land as built, or should this outcome be discarded?
+
+- **Land it (recommended).** #2573 lands as is, after #2562. The failed-save case is then closed everywhere the old set
+  could be written back. Cost: 194 lines in the code that saves the app's shared preferences, although the change only
+  affects number keys. Recommended because every fix that keeps your criterion is over the gate anyway (none under about
+  135 lines), and this one is already built and reviewed.
+- **Discard it.** #2573 is dropped and the outcome is recorded as discarded over its gate. #2562 still lands, but its
+  sentence excluding the failed-save case would have to be withdrawn, which makes the failed-save overwrite accepted
+  like the rest.
+- **A smaller fix that changes your criterion.** The app could simply forget a failed number-key save, so it never
+  writes an old set back: about 30–40 lines. A change you made that failed to save would then be silently lost, which
+  goes against your wording ("reapplies only the key change the user made") and #2562's spec text. A middle option (no
+  retry of number keys after signing back in, about 110–125 lines, so still over the gate) leaves your change visible in
+  this window only, while the helm, agents and other windows keep the old key.
