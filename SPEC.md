@@ -60,8 +60,9 @@ absolutely catastrophically major mistake with huge user impact."
   further before launching, and several templates can be applied one after another. A session records the launch that
   resulted, never which templates produced it, so editing or deleting a template cannot affect any session. Template
   edits are last-write-wins: two clients editing the same template at once is not a case Farhelm guards, because it is
-  one user's rare action, and no optimistic-concurrency check on template writes is wanted. An agent's template write is
-  the one exception (Agent-spawned sessions).
+  one user's rare action, and no optimistic-concurrency check on template writes is wanted. The same holds when a GUI
+  save lands after an agent's or the command line's edit (One GUI at a time). An agent's own template write is the one
+  exception: it is refused if the template changed while its card waited (Agent-spawned sessions).
 
 ## Topology
 
@@ -793,7 +794,8 @@ agent choice is independent of that destination:
   how to combine it with the sequence prefix. The banner expires about six seconds after application finishes, or when
   the user starts editing. Both key and bolt hover explain launching, their uniqueness and the current choice;
   partial-template key hover explains composition. The bolt retains its existing eligibility rule. Bindings are a
-  whole-map shared preference, replaced on write; concurrent windows may lose one map edit. Names must be syntactically
+  whole-map shared preference, replaced on write; concurrent windows may lose one map edit, and a GUI save can undo an
+  agent's binding change that lands between its re-read and its write (One GUI at a time). Names must be syntactically
   valid but need not exist at write time. Rename keeps a key, delete frees it through both delete paths, and Undo never
   restores it. A browser that reserves a chord keeps its behavior. An agent may assign or clear a number key through the
   same template verbs and approval card. Assigning an occupied key moves it from its previous template, as the Templates
@@ -3319,6 +3321,15 @@ GUI must behave correctly, and the best-effort qualifier above applies only to s
 
 A GUI write must not undo a change an agent or the command line made while that view was open; the view's display may
 lag until the next interaction.
+
+Confirmed 2026-10-21, one exception: GUI saves of launch templates and of number-key bindings are last-write-wins
+against agent and command-line edits too. The Templates editor saves its whole draft of a template, so saving any field
+can put back a template field an agent changed while that editor was open (Concepts). A number-key change re-reads the
+bindings before it saves and then writes the whole map, so an agent's or the command line's binding change that lands
+between that read and the write can be undone (Creation). That overwriting is accepted. A failed number-key save is
+outside the exception: until a bindings write succeeds, every later one, the retry after signing back in included,
+writes the bindings it re-read with only the user's own unsaved key changes applied, so a binding an agent or the
+command line changed before that read survives unless the user's change moved the same key or template.
 
 Confirmed 2026-10-10: an action a user takes inside a sub-second window before the screen updates, or in a dialog hidden
 behind another, may be carried out as delivered. A Cancel and a submit of the same dialog that arrive together before a

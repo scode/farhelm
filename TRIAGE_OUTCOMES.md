@@ -17565,7 +17565,10 @@
   it saves; that overwriting is accepted. The failed-save case is excluded from the acceptance (fixed under
   `shortcut-save-overwrites-intervening-agent-binding.md`). SPEC_impl.md agrees. No code change. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/gui-saves-last-write-wins.md`.
+- Execution: complete in change `qurksszsntvrmumxzzxxzouxruprwpvq`, bookmark
+  `plan/gui-saves-last-write-wins/01-spec-last-write-wins`. SPEC.md's "One GUI at a time" states the exception, with
+  Concepts, the number-key bindings and SPEC_impl.md agreeing; the failed-save case is excluded there and fixed under
+  `shortcut-save-overwrites-intervening-agent-binding.md`. PR: https://github.com/scode/farhelm/pull/2562/changes.
 
 ## refused-create-retry-can-delete-restarted-session.md
 

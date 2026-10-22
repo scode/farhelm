@@ -19,9 +19,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   shortcut save can restore an older target, including a pre-read agent edit after save failure; harmful launch is
   unverified.
 
-- [`template-preservation-promise-omits-last-write-wins.md`](template-preservation-promise-omits-last-write-wins.md) —
-  The agent-edit preservation promise omits accepted template overwrites; loss from reliance is conditional.
-
 - [`numeric-token-regex-performance-remains-unresolved.md`](numeric-token-regex-performance-remains-unresolved.md) — A
   synthetic numeric-token slowdown is measured; ordinary occurrence and security impact remain unestablished.
 

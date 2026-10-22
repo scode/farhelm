@@ -5302,7 +5302,8 @@ while such a card waits and keeps showing its last successfully decoded list; th
 consistent with SPEC.md's "Upgrade compatibility and client scale" update rule rather than a supported downgrade path.
 At approval, the store compares the named template and the entire ⚡/number-key snapshot from the card under one
 immediate transaction, then writes the template and both binding columns together. The GUI's template and preference
-writes keep their existing last-write-wins behavior.
+writes keep their existing last-write-wins behavior, which SPEC.md's "One GUI at a time" accepts for templates and
+number-key bindings apart from a failed number-key save.
 
 Application is one pure function, `farhelm_proto::launcher::apply_template`, compiled into both the UI and the helm: a
 launcher state plus a template gives a new launcher state or a refusal naming the field, in SPEC.md's order (launch
