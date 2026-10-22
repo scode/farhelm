@@ -35,6 +35,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - Allow aliasing hosts in add host flow
 
+- If not already fixed, make the launcher tell the user when they try to create a session whose directory does not
+  exist.
+
+- Remember the launcher's most recently selected folder separately for each host; for a new host, initially default to
+  that host's home directory.
+
 - Initial version of agent2agent comms.
 
 - **Sweep out browser sign-in and failed-save preservation.** Decided 2026-10-22 (SPEC.md, "Signing in again" and the
