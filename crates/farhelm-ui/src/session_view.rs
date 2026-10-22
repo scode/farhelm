@@ -25,7 +25,7 @@ use crate::hosts::{
     HostLookup, HostsRead, SessionUnavailableNotice, is_connected, stale_session_notice,
 };
 use crate::modal_dialog::DialogHandle;
-use crate::ops::{ConfirmSlot, OpGuard, ReadGate, use_confirm_slot};
+use crate::ops::{ConfirmSlot, ConfirmToken, OpGuard, ReadGate, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
 use crate::reconnect::reconnect_policy;
@@ -470,17 +470,17 @@ fn followed_title(selected: Option<&Session>, shown: &Session) -> Option<crate::
         .then(|| selected.title.clone())
 }
 
-/// One opening of the YOLO question inside Restart with: the key its
-/// [`ConfirmSlot`] is open for.
+/// The YOLO question inside Restart with: the key its [`ConfirmSlot`] is
+/// open for.
 ///
 /// The question is about the settings the helm refused (`edit`), and its
-/// answers are approval for exactly those. `opening` counts openings, so an
-/// answer drawn for an earlier question cannot take a later one, and a
-/// closed dialog clears whatever question it held. `ask` is what the
-/// question shows; the slot holds nothing else.
+/// answers are approval for exactly those. Which asking of it an answer was
+/// drawn for is the slot's [`ConfirmToken`], so an answer drawn for an
+/// earlier opening cannot take a later one even when both ask about the
+/// same settings, and a closed dialog clears whatever question it held.
+/// `ask` is what the question shows; the slot holds nothing else.
 #[derive(Clone, PartialEq)]
 struct RestartYoloQuestion {
-    opening: u64,
     edit: crate::restart_with::RestartEdit,
     ask: crate::yolo_confirm::YoloAsk,
 }
@@ -509,8 +509,8 @@ enum RestartYoloAnswer {
 /// Accept an approval-bearing Restart with submission only by taking the
 /// live question it answers.
 ///
-/// `question` is the question as the session view rendered it, which is
-/// the one the dialog's answer was drawn with; `edit` the settings the
+/// `question` is the opening the session view rendered, which is the one
+/// the dialog's answer was drawn with; `edit` the settings the
 /// answer submits. Cancel followed by either answer in one event burst finds
 /// the question taken and gets [`RestartYoloAnswer::Stale`], so no restart
 /// and no host setting change follow. Only the settings the question was
@@ -519,25 +519,26 @@ enum RestartYoloAnswer {
 /// one-off approval.
 fn take_restart_yolo(
     slot: &mut ConfirmSlot<RestartYoloQuestion>,
-    question: Option<&RestartYoloQuestion>,
+    question: Option<&ConfirmToken<RestartYoloQuestion>>,
     edit: &crate::restart_with::RestartEdit,
     stop_asking: bool,
 ) -> RestartYoloAnswer {
     let Some(question) = question else {
         return RestartYoloAnswer::Stale;
     };
+    let shown = question.key();
     let stop_asking = if stop_asking {
-        let Some(host) = question.ask.host else {
+        let Some(host) = shown.ask.host else {
             return RestartYoloAnswer::Stale;
         };
-        Some((host, question.ask.host_name.clone(), question.ask.clone()))
+        Some((host, shown.ask.host_name.clone(), shown.ask.clone()))
     } else {
         None
     };
     if slot.take(question).is_none() {
         return RestartYoloAnswer::Stale;
     }
-    if question.edit != *edit {
+    if shown.edit != *edit {
         return RestartYoloAnswer::SettingsChanged;
     }
     RestartYoloAnswer::Accepted { stop_asking }
@@ -551,10 +552,10 @@ fn take_restart_yolo(
 /// Taking the question grants no YOLO consent and supplies no host to mark.
 fn take_restart_guarded(
     slot: &mut ConfirmSlot<RestartYoloQuestion>,
-    question: Option<&RestartYoloQuestion>,
+    question: Option<&ConfirmToken<RestartYoloQuestion>>,
     edit: &crate::restart_with::RestartEdit,
 ) -> bool {
-    question.is_some_and(|question| question.edit == *edit && slot.take(question).is_some())
+    question.is_some_and(|question| question.key().edit == *edit && slot.take(question).is_some())
 }
 
 #[component]
@@ -651,19 +652,17 @@ pub(crate) fn SessionView(
     // (`take_restart_yolo`). `restart_yolo_error` is why a "don't ask again"
     // failed at its first step; the question comes back up with it.
     let mut restart_yolo = use_confirm_slot::<RestartYoloQuestion, ()>();
-    let mut restart_yolo_openings = use_signal(|| 0u64);
     let mut restart_yolo_error = use_signal(|| None::<String>);
-    // Open the question about `edit` as a new opening.
+    // Open the question about `edit`; the slot makes it a new opening, so an
+    // answer drawn for an earlier asking of the same settings cannot take it.
     let mut open_restart_yolo =
         move |edit: crate::restart_with::RestartEdit, ask: crate::yolo_confirm::YoloAsk| {
-            let opening = *restart_yolo_openings.peek() + 1;
-            restart_yolo_openings.set(opening);
-            restart_yolo.open(RestartYoloQuestion { opening, edit, ask }, ());
+            restart_yolo.open(RestartYoloQuestion { edit, ask }, ());
         };
-    // The question as this render draws it: the one every handler the dialog
-    // gets from this render answers, so a handler queued behind a Cancel
-    // still names the question the Cancel took.
-    let restart_question = restart_yolo.current_key();
+    // The opening this render draws: the one every handler the dialog gets
+    // from this render answers, so a handler queued behind a Cancel still
+    // names the opening the Cancel took.
+    let restart_question = restart_yolo.current();
     // Replace has its own prompt and error because it creates a new session
     // before deleting this one; sharing restart state would lose the
     // endpoint's partial-failure wording or make the two operations race.
@@ -1721,15 +1720,16 @@ pub(crate) fn SessionView(
         }
     };
 
-    // The confirm button. Proceeds ONLY when this tab is still the one
-    // being confirmed — `Some(id)` matching — which is what stops a
-    // confirm click queued behind a cancel (both fired in the same burst)
-    // from closing a tab the user just told the UI to leave alone.
-    let mut confirm_close_tab = move |tab_id: String| {
-        if confirming_close.take(&tab_id).is_none() {
+    // The confirm button. Proceeds ONLY when the prompt it was drawn with
+    // is still the open one (the same opening, for the same tab), which is
+    // what stops a confirm click queued behind a cancel (both fired in the
+    // same burst) from closing a tab the user just told the UI to leave
+    // alone, or from answering a prompt reopened since.
+    let mut confirm_close_tab = move |shown: ConfirmToken<String>| {
+        if confirming_close.take(&shown).is_none() {
             return;
         }
-        do_close_tab(tab_id);
+        do_close_tab(shown.key().clone());
     };
 
     // What this view currently wants mounted, as the JSON array
@@ -1959,16 +1959,24 @@ pub(crate) fn SessionView(
     // makes that a re-render loop rather than a fix.
     let active_tab = selected.read().clone().filter(|id| tabs.contains(id));
     let confirming_tab = confirming_close
-        .current_key()
-        .filter(|id| tabs.contains(id));
+        .current()
+        .filter(|shown| tabs.contains(shown.key()));
     // The prompt names the tab by the SAME positional label the strip
     // shows, recomputed from the list as it is right now — so a tab that
     // shifts position under an open prompt (a lower-numbered sibling
     // closed from another client) is still identified correctly.
     let confirming_label = confirming_tab
         .as_ref()
-        .and_then(|id| tabs.iter().position(|candidate| candidate == id))
+        .and_then(|shown| tabs.iter().position(|candidate| candidate == shown.key()))
         .map(tab_label);
+    // The openings this render draws for the header's Replace and Delete
+    // questions and the interrupted card's Replace question. Their buttons
+    // (and the header's Escape) answer only these, so a click drawn before
+    // a cancel and reopen in the same burst cannot answer the reopened
+    // question, nor spend the claim it holds.
+    let header_replace_shown = confirming_header_replace.current();
+    let header_delete_shown = confirming_header_delete.current();
+    let card_replace_shown = confirming_replace.current();
     let shown_title = shown.title.clone();
     // Built from the row's own `host_name` rather than from the host record,
     // so the notice can name the host even before the hosts read lands —
@@ -2131,28 +2139,40 @@ pub(crate) fn SessionView(
                 // Header questions share Escape cancellation, including their
                 // lifecycle admission. Once an answer has taken a claim, a
                 // queued Escape must leave the running operation alone.
-                onkeydown: move |event: KeyboardEvent| {
-                    if event.key() != Key::Escape || event.is_composing() {
-                        return;
-                    }
-                    let mut cancelled = false;
-                    if *confirming.peek() {
-                        confirming.set(false);
-                        view_claim.set(None);
-                        cancelled = true;
-                    }
-                    if confirming_header_replace.take(&()).is_some() {
-                        cancel_replace_intent();
-                        cancelled = true;
-                    }
-                    if confirming_header_delete.take(&()).is_some() {
-                        cancelled = true;
-                    }
-                    if cancelled {
-                        event.prevent_default();
-                        event.stop_propagation();
-                        // Focus after the cancelled question has unmounted.
-                        document::eval("requestAnimationFrame(() => window.farhelmTerm?.focusSelected());");
+                //
+                // Escape answers the Replace and Delete questions as this
+                // render drew them, like their Cancel buttons: a question
+                // reopened since then is not the one the user dismissed.
+                onkeydown: {
+                    let header_replace_shown = header_replace_shown.clone();
+                    let header_delete_shown = header_delete_shown.clone();
+                    move |event: KeyboardEvent| {
+                        if event.key() != Key::Escape || event.is_composing() {
+                            return;
+                        }
+                        let mut cancelled = false;
+                        if *confirming.peek() {
+                            confirming.set(false);
+                            view_claim.set(None);
+                            cancelled = true;
+                        }
+                        if let Some(shown) = &header_replace_shown
+                            && confirming_header_replace.take(shown).is_some()
+                        {
+                            cancel_replace_intent();
+                            cancelled = true;
+                        }
+                        if let Some(shown) = &header_delete_shown
+                            && confirming_header_delete.take(shown).is_some()
+                        {
+                            cancelled = true;
+                        }
+                        if cancelled {
+                            event.prevent_default();
+                            event.stop_propagation();
+                            // Focus after the cancelled question has unmounted.
+                            document::eval("requestAnimationFrame(() => window.farhelmTerm?.focusSelected());");
+                        }
                     }
                 },
                 if keep_terminal_surface(&shown, relaunched(), had_terminal()) {
@@ -2395,7 +2415,7 @@ pub(crate) fn SessionView(
                             },
                             "replace"
                         }
-                        if confirming_header_replace.is_open() {
+                        if let Some(shown_replace) = header_replace_shown.clone() {
                             div { class: "header-confirm header-replace-confirm",
                                 "data-terminal-keyboard-owner": "true",
                                 onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".header-replace-confirm", crate::dialog_focus::ContainerEnter::None)); },
@@ -2415,14 +2435,17 @@ pub(crate) fn SessionView(
                                     autofocus: !replacing(),
                                     onkeydown: crate::guard_confirmation_enter,
                                     onmounted: move |_| crate::focus_confirmation(".header-replace-confirm .btn-danger", ".header-replace-confirm .btn-neutral"),
-                                    onclick: move |_| {
-                                        if let Some(claim) = confirming_header_replace.take(&()) {
-                                            header_confirm_replace(
-                                                claim,
-                                                header_replace_source.clone(),
-                                                replace_prompt_guard,
-                                                None,
-                                            );
+                                    onclick: {
+                                        let shown_replace = shown_replace.clone();
+                                        move |_| {
+                                            if let Some(claim) = confirming_header_replace.take(&shown_replace) {
+                                                header_confirm_replace(
+                                                    claim,
+                                                    header_replace_source.clone(),
+                                                    replace_prompt_guard,
+                                                    None,
+                                                );
+                                            }
                                         }
                                     },
                                     "replace"
@@ -2433,7 +2456,7 @@ pub(crate) fn SessionView(
                                     autofocus: replacing(),
                                     "data-tooltip": "cancel: keep this session as it is",
                                     onclick: move |_| {
-                                        if confirming_header_replace.take(&()).is_some() {
+                                        if confirming_header_replace.take(&shown_replace).is_some() {
                                             cancel_replace_intent();
                                         }
                                     },
@@ -2500,7 +2523,7 @@ pub(crate) fn SessionView(
                             },
                             "delete"
                         }
-                        if confirming_header_delete.is_open() {
+                        if let Some(shown_delete) = header_delete_shown.clone() {
                             div { class: "header-confirm header-delete-confirm",
                                 "data-terminal-keyboard-owner": "true",
                                 onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".header-delete-confirm", crate::dialog_focus::ContainerEnter::None)); },
@@ -2525,8 +2548,9 @@ pub(crate) fn SessionView(
                                     onmounted: move |_| crate::focus_confirmation(".header-delete-confirm-submit", ".header-delete-confirm .btn-neutral"),
                                     onclick: {
                                         let id = shown.id.raw().to_owned();
+                                        let shown_delete = shown_delete.clone();
                                         move |_| {
-                                            let Some(claim) = confirming_header_delete.take(&()) else {
+                                            let Some(claim) = confirming_header_delete.take(&shown_delete) else {
                                                 return;
                                             };
                                             drop(claim);
@@ -2543,7 +2567,7 @@ pub(crate) fn SessionView(
                                     class: "btn btn-neutral",
                                     autofocus: header_deleting,
                                     "data-tooltip": "cancel: keep this session",
-                                    onclick: move |_| confirming_header_delete.cancel_for(&()),
+                                    onclick: move |_| confirming_header_delete.cancel_for(&shown_delete),
                                     "cancel"
                                 }
                             }
@@ -2556,7 +2580,7 @@ pub(crate) fn SessionView(
                     session: opening.clone(),
                     busy: restarting(),
                     error: restart_with_error(),
-                    yolo_confirmation: restart_question.as_ref().map(|question| question.ask.clone()),
+                    yolo_confirmation: restart_question.as_ref().map(|question| question.key().ask.clone()),
                     yolo_error: restart_yolo_error(),
                     stop_first: restart_with_stops_first,
                     offer_label: restart_button_label(shown.restart_offer).to_string(),
@@ -2831,7 +2855,7 @@ pub(crate) fn SessionView(
                             "replace"
                         }
                     }
-                    if confirming_replace.is_open() {
+                    if let Some(shown_card_replace) = card_replace_shown.clone() {
                         div { class: "replace-confirm",
                             "data-terminal-keyboard-owner": "true",
                             span { class: "confirm-consequence", "{crate::status::replace_consequence(&shown.status, shown.tabs.len())}" }
@@ -2843,14 +2867,17 @@ pub(crate) fn SessionView(
                                 autofocus: !replacing(),
                                 onkeydown: crate::guard_confirmation_enter,
                                 onmounted: move |_| crate::focus_confirmation(".replace-confirm-submit", ".replace-confirm .replace-cancel"),
-                                onclick: move |_| {
-                                    if let Some(claim) = confirming_replace.take(&()) {
-                                        confirm_replace(
-                                            claim,
-                                            card_replace_source.clone(),
-                                            replace_prompt_guard,
-                                            None,
-                                        );
+                                onclick: {
+                                    let shown_card_replace = shown_card_replace.clone();
+                                    move |_| {
+                                        if let Some(claim) = confirming_replace.take(&shown_card_replace) {
+                                            confirm_replace(
+                                                claim,
+                                                card_replace_source.clone(),
+                                                replace_prompt_guard,
+                                                None,
+                                            );
+                                        }
                                     }
                                 },
                                 "confirm replace"
@@ -2861,7 +2888,7 @@ pub(crate) fn SessionView(
                                 "data-tooltip": "cancel: keep this session as it is",
                                 autofocus: replacing(),
                                 onclick: move |_| {
-                                    if confirming_replace.take(&()).is_some() {
+                                    if confirming_replace.take(&shown_card_replace).is_some() {
                                         cancel_replace_intent();
                                     }
                                 },
@@ -2883,11 +2910,11 @@ pub(crate) fn SessionView(
                 // consequence / truncatable name split) the delete prompt uses;
                 // see `status::confirm_consequence`'s docs for why that order is
                 // the safety-critical part.
-                if let Some(tab_id) = confirming_tab {
+                if let Some(shown_close) = confirming_tab {
                     // Changing the target is a fresh question, even while the
                     // previous one is open. Keying by tab remounts its focus
                     // handoff instead of leaving Enter on the second close control.
-                    div { key: "{tab_id}", class: "tab-confirm",
+                    div { key: "{shown_close.key()}", class: "tab-confirm",
                         "data-terminal-keyboard-owner": "true",
                         span { class: "confirm-consequence", "{CLOSE_TAB_CONSEQUENCE}" }
                         span { class: "confirm-title",
@@ -2897,13 +2924,13 @@ pub(crate) fn SessionView(
                             r#type: "button",
                             class: "btn btn-danger confirm-delete confirm-close-tab",
                             "data-tooltip": "close this tab, ending its shell and everything it started",
-                            disabled: closing_tabs.read().contains(&tab_id),
-                            autofocus: !closing_tabs.read().contains(&tab_id),
+                            disabled: closing_tabs.read().contains(shown_close.key()),
+                            autofocus: !closing_tabs.read().contains(shown_close.key()),
                             onkeydown: crate::guard_confirmation_enter,
                             onmounted: move |_| crate::focus_confirmation(".confirm-close-tab", ".tab-confirm .confirm-cancel"),
                             onclick: {
-                                let tab_id = tab_id.clone();
-                                move |_| confirm_close_tab(tab_id.clone())
+                                let shown_close = shown_close.clone();
+                                move |_| confirm_close_tab(shown_close.clone())
                             },
                             "confirm close"
                         }
@@ -2913,10 +2940,10 @@ pub(crate) fn SessionView(
                             "data-tooltip": "cancel: keep the tab open",
                             // Confirm owns initial focus unless its request is
                             // already running; Cancel remains a usable fallback.
-                            autofocus: closing_tabs.read().contains(&tab_id),
+                            autofocus: closing_tabs.read().contains(shown_close.key()),
                             onclick: {
-                                let tab_id = tab_id.clone();
-                                move |_| confirming_close.cancel_for(&tab_id)
+                                let shown_close = shown_close.clone();
+                                move |_| confirming_close.cancel_for(&shown_close)
                             },
                             "cancel"
                         }
@@ -4899,8 +4926,7 @@ mod tests {
             host_name: "build box".to_string(),
             reason: crate::yolo_confirm::YoloReason::Asserted,
         };
-        let question = |opening: u64| RestartYoloQuestion {
-            opening,
+        let question = || RestartYoloQuestion {
             edit: edit("codex --yolo"),
             ask: ask(Some(7)),
         };
@@ -4912,8 +4938,7 @@ mod tests {
 
         dom.in_runtime(|| {
             for stop_asking in [false, true] {
-                let open = question(1);
-                slot.open(open.clone(), ());
+                let open = slot.open(question(), ());
                 assert!(slot.take(&open).is_some(), "premise: Cancel closes it");
                 assert_eq!(
                     take_restart_yolo(&mut slot, Some(&open), &submitted, stop_asking),
@@ -4927,22 +4952,25 @@ mod tests {
                 );
             }
 
-            // An answer drawn for an earlier opening.
-            slot.open(question(2), ());
+            // An answer drawn for an earlier opening of the same question,
+            // replaced since: equal settings and host, a different opening.
+            let earlier = slot.open(question(), ());
+            slot.open(question(), ());
             assert_eq!(
-                take_restart_yolo(&mut slot, Some(&question(1)), &submitted, false),
+                take_restart_yolo(&mut slot, Some(&earlier), &submitted, false),
                 RestartYoloAnswer::Stale,
                 "an answer for an earlier opening approves nothing"
             );
             assert!(slot.is_open(), "the later question is left alone");
 
             // "Don't ask again" needs the question's host.
-            let hostless = RestartYoloQuestion {
-                opening: 3,
-                edit: edit("codex --yolo"),
-                ask: ask(None),
-            };
-            slot.open(hostless.clone(), ());
+            let hostless = slot.open(
+                RestartYoloQuestion {
+                    edit: edit("codex --yolo"),
+                    ask: ask(None),
+                },
+                (),
+            );
             assert_eq!(
                 take_restart_yolo(&mut slot, Some(&hostless), &submitted, true),
                 RestartYoloAnswer::Stale,
@@ -4951,9 +4979,9 @@ mod tests {
             assert!(slot.is_open(), "and leaves the question up");
 
             // Settings edited since the question.
-            slot.open(question(4), ());
+            let edited = slot.open(question(), ());
             assert_eq!(
-                take_restart_yolo(&mut slot, Some(&question(4)), &edit("codex --other"), false),
+                take_restart_yolo(&mut slot, Some(&edited), &edit("codex --other"), false),
                 RestartYoloAnswer::SettingsChanged
             );
             assert!(
@@ -4962,15 +4990,15 @@ mod tests {
             );
 
             // Positive controls.
-            slot.open(question(5), ());
+            let one_off = slot.open(question(), ());
             assert_eq!(
-                take_restart_yolo(&mut slot, Some(&question(5)), &submitted, false),
+                take_restart_yolo(&mut slot, Some(&one_off), &submitted, false),
                 RestartYoloAnswer::Accepted { stop_asking: None }
             );
             assert!(!slot.is_open());
-            slot.open(question(6), ());
+            let permanent = slot.open(question(), ());
             assert_eq!(
-                take_restart_yolo(&mut slot, Some(&question(6)), &submitted, true),
+                take_restart_yolo(&mut slot, Some(&permanent), &submitted, true),
                 RestartYoloAnswer::Accepted {
                     stop_asking: Some((7, "build box".to_string(), ask(Some(7))))
                 }
@@ -4982,8 +5010,7 @@ mod tests {
 
             // Guarded admission happens before any permission mutation, so
             // rejected admission must preserve both draft and live question.
-            let guarded_question = question(7);
-            slot.open(guarded_question.clone(), ());
+            let guarded_question = slot.open(question(), ());
             assert!(!take_restart_guarded(&mut slot, None, &submitted));
             assert!(!take_restart_guarded(
                 &mut slot,
@@ -5000,15 +5027,14 @@ mod tests {
                 Some(&guarded_question),
                 &submitted,
             ));
-            let later = question(8);
-            slot.open(later.clone(), ());
+            let later = slot.open(question(), ());
             assert!(!take_restart_guarded(
                 &mut slot,
                 Some(&guarded_question),
                 &submitted,
             ));
             assert!(
-                slot.current_key() == Some(later.clone()),
+                slot.peek_token() == Some(later.clone()),
                 "a newer opening survives"
             );
             assert!(take_restart_guarded(&mut slot, Some(&later), &submitted));

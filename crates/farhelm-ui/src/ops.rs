@@ -271,7 +271,38 @@ impl ReadGate {
     }
 }
 
-/// One inline "confirm / cancel" prompt: which target it is open for, and
+/// One opening of one prompt: the identity an answer must present to act.
+///
+/// Minted only by [`ConfirmSlot::open`], which numbers every opening from
+/// one process-wide counter and never reuses a number, so two openings of the
+/// same prompt (the same `key`, asked again after a cancel, say) still get
+/// different tokens, and neither do two slots with the same key type.
+/// `key` is what the opening was for (a tab id, a refused request, or `()`
+/// when the slot holds a single prompt); the opening number is what tells
+/// this asking of it apart from every other one.
+///
+/// Callers cannot construct or alter one: the fields are private to this
+/// module, so the only tokens outside it come from [`ConfirmSlot::open`] or
+/// a render's [`ConfirmSlot::current`]; nothing in the app hands out the
+/// token of whatever is open at click time. A token is good for exactly the opening it names. Once that
+/// opening is answered, cancelled, cleared or replaced, the token matches
+/// nothing ever again, including a later opening with an equal key.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(crate) struct ConfirmToken<K> {
+    opening: u64,
+    key: K,
+}
+
+impl<K> ConfirmToken<K> {
+    /// What this opening was for, as the code that opened it named it. For
+    /// display and for the caller's own checks; the slot compares the whole
+    /// token, never the key alone.
+    pub(crate) fn key(&self) -> &K {
+        &self.key
+    }
+}
+
+/// One inline "confirm / cancel" prompt: which opening is on screen, and
 /// whatever the confirmation will own when it proceeds.
 ///
 /// Every confirmation in this UI is two buttons whose clicks can arrive in
@@ -282,15 +313,22 @@ impl ReadGate {
 /// Replace shipped without it (cancel, then a queued confirm, still replaced
 /// the session) and how the lifecycle prompts' cancel handlers kept
 /// releasing the page's operation lock after a confirm had already handed
-/// it to a running task. This type makes the check the only way in, the way
-/// [`OpLock`] did for operation exclusion:
+/// it to a running task. The same burst can also hold a cancel and a
+/// reopen ahead of a click drawn for the first opening; a check by key alone
+/// would let that click answer the second asking, which the user has not
+/// seen yet. This type makes the check the only way in, the way [`OpLock`]
+/// did for operation exclusion:
 ///
+/// - [`Self::open`] mints a [`ConfirmToken`] for the new opening. The render
+///   that draws the prompt reads that token with [`Self::current`] and moves
+///   it into each of the prompt's handlers.
 /// - [`Self::take`] is the one way a confirm handler learns the user
-///   confirmed THIS prompt. It is a synchronous test-and-clear: it yields
-///   the payload only if the prompt is still open for `key`, and leaves any
-///   other prompt untouched.
-/// - [`Self::cancel_for`] closes the prompt only if it is still open for
-///   `key`; after a `take` it does nothing.
+///   confirmed THIS opening. It is a synchronous test-and-clear: it yields
+///   the payload only if the open prompt's token equals the one the handler
+///   carries (same opening AND same key), and otherwise changes nothing.
+/// - [`Self::cancel_for`] closes the prompt only under the same condition;
+///   after a `take`, or once another opening has replaced it, it does
+///   nothing.
 /// - The payload is what the confirmation owns. For the lifecycle prompts it
 ///   is the [`OpGuard`] claimed when the prompt opened: it lives in the slot
 ///   while the prompt is open, moves into the confirmed task on `take`, and
@@ -298,13 +336,46 @@ impl ReadGate {
 ///   replacement, or by the slot itself going away with its component. No
 ///   handler releases the lock by hand, so none can release someone else's.
 ///
+/// What a caller must not do, because each one reopens the race this type
+/// closes:
+///
+/// - Decide what to answer by reading the live slot in a handler
+///   ([`Self::current`] followed by `take`). That answers whatever is open
+///   when the click runs, not what the user saw. [`Self::peek_key`] exists
+///   for imperative reconciliation (a completion callback retiring a
+///   question that no longer describes its draft) and returns no token, so
+///   it cannot be turned into an answer.
+/// - Keep a token past the render that drew it and answer with it later
+///   expecting it to reach a reopened prompt. It will not; that is the point.
+/// - Mint or forge a token. Outside this module the fields are private;
+///   inside it, only a test builds one by hand, to isolate the key check.
+///
 /// `Copy` because it is a handle to a signal, like [`OpLock`]. Render code
-/// uses the tracked readers ([`Self::is_open`], [`Self::current_key`]);
-/// handlers use [`Self::peek_key`], [`Self::take`] and [`Self::cancel_for`],
-/// which inspect the live slot without subscribing their caller.
+/// uses the tracked readers ([`Self::is_open`], [`Self::current`]);
+/// [`Self::peek_key`], [`Self::take`] and [`Self::cancel_for`] inspect the
+/// live slot without subscribing their caller.
 pub(crate) struct ConfirmSlot<K: 'static, P: 'static = ()> {
-    open: Signal<Option<(K, P)>>,
+    state: Signal<SlotState<K, P>>,
 }
+
+/// What a [`ConfirmSlot`]'s signal holds: the open prompt, if any.
+struct SlotState<K, P> {
+    open: Option<(ConfirmToken<K>, P)>,
+}
+
+impl<K, P> SlotState<K, P> {
+    /// A slot that has never been opened.
+    fn closed() -> Self {
+        Self { open: None }
+    }
+}
+
+/// The last opening number handed out, shared by every slot in the process.
+/// One counter rather than one per slot, so tokens from two slots with the
+/// same key type (the session view keeps two `ConfirmSlot<(), OpGuard>`
+/// apart on purpose) can never be equal, and a token passed to the wrong
+/// slot matches nothing.
+static LAST_OPENING: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl<K: 'static, P: 'static> Clone for ConfirmSlot<K, P> {
     fn clone(&self) -> Self {
@@ -316,7 +387,7 @@ impl<K: 'static, P: 'static> Copy for ConfirmSlot<K, P> {}
 
 impl<K: 'static, P: 'static> PartialEq for ConfirmSlot<K, P> {
     fn eq(&self, other: &Self) -> bool {
-        self.open == other.open
+        self.state == other.state
     }
 }
 
@@ -346,79 +417,126 @@ pub(crate) fn use_clear_when_hidden<K: PartialEq + Clone + 'static, P: 'static>(
 /// [`OpGuard`], say) are dropped when that component unmounts.
 pub(crate) fn use_confirm_slot<K: 'static, P: 'static>() -> ConfirmSlot<K, P> {
     ConfirmSlot {
-        open: use_signal(|| None),
+        state: use_signal(SlotState::closed),
     }
 }
 
 impl<K: PartialEq + Clone + 'static, P: 'static> ConfirmSlot<K, P> {
-    /// Open the prompt for `key`, holding `payload` until it is confirmed or
-    /// dismissed. An already open prompt is REPLACED (the tab strip moves
-    /// its close prompt to the tab clicked last) and its payload dropped.
-    /// For a slot whose payload is an operation claim that drop cannot
-    /// release anyone else's claim: a second prompt could only have claimed
-    /// after the first one's claim was gone.
-    pub(crate) fn open(&mut self, key: K, payload: P) {
-        open_in(&mut self.open.write(), key, payload);
+    /// Open the prompt for `key` as a new opening, holding `payload` until it
+    /// is confirmed or dismissed, and return that opening's token.
+    ///
+    /// An already open prompt is REPLACED (the tab strip moves its close
+    /// prompt to the tab clicked last) and its payload dropped; its token,
+    /// and any handler still carrying it, stops matching even when `key` is
+    /// equal. For a slot whose payload is an operation claim that drop
+    /// cannot release anyone else's claim: a second prompt could only have
+    /// claimed after the first one's claim was gone.
+    ///
+    /// Most openers drop the returned token. The answers are drawn by the
+    /// next render, which reads the token back through [`Self::current`];
+    /// the return value is for code that has no render in between, such as
+    /// tests.
+    pub(crate) fn open(&mut self, key: K, payload: P) -> ConfirmToken<K> {
+        open_in(&mut self.state.write(), key, payload)
     }
 
-    /// Consume the confirmation for `key`: the payload if the prompt is
-    /// still open for exactly that key, `None` (and nothing changed)
+    /// Consume the confirmation drawn for `token`: the payload if the open
+    /// prompt is exactly that opening, `None` (and nothing changed)
     /// otherwise.
-    pub(crate) fn take(&mut self, key: &K) -> Option<P> {
+    pub(crate) fn take(&mut self, token: &ConfirmToken<K>) -> Option<P> {
+        // Checked through `peek` first so a refused answer does not write
+        // the signal: a write would rerender every reader of the slot for
+        // a click that changed nothing.
         if !self
-            .open
+            .state
             .peek()
+            .open
             .as_ref()
-            .is_some_and(|(open, _)| open == key)
+            .is_some_and(|(open, _)| open == token)
         {
             return None;
         }
-        take_in(&mut self.open.write(), key)
+        take_in(&mut self.state.write(), token)
     }
 
-    /// Dismiss the prompt if it is still open for `key`, dropping its
-    /// payload. Does nothing once a confirmation has taken it.
-    pub(crate) fn cancel_for(&mut self, key: &K) {
-        drop(self.take(key));
+    /// Dismiss the prompt if it is still the opening `token` names, dropping
+    /// its payload. Does nothing once a confirmation has taken it or another
+    /// opening has replaced it.
+    pub(crate) fn cancel_for(&mut self, token: &ConfirmToken<K>) {
+        drop(self.take(token));
     }
 
     /// Close whatever is open, unconditionally. For reconciliation (the
-    /// target disappeared), never for an event handler: a handler must name
-    /// the prompt it was rendered for, which is what `cancel_for` does.
+    /// target disappeared, the dialog holding the prompt closed), never for
+    /// an answer: an answer must name the opening it was rendered for, which
+    /// is what `take` and `cancel_for` require.
     pub(crate) fn clear(&mut self) {
-        if self.open.peek().is_some() {
-            self.open.set(None);
+        if self.state.peek().open.is_some() {
+            self.state.write().open = None;
         }
     }
 
     /// Whether any prompt is open, for a RENDER (tracked read).
     pub(crate) fn is_open(&self) -> bool {
-        self.open.read().is_some()
+        self.state.read().open.is_some()
     }
 
-    /// Which key the prompt is open for, for a RENDER (tracked read).
-    pub(crate) fn current_key(&self) -> Option<K> {
-        self.open.read().as_ref().map(|(key, _)| key.clone())
+    /// The open prompt's token, for the RENDER that draws it (tracked read).
+    /// Capture it once per render and move it into every handler that render
+    /// draws for the prompt; reading it again inside a handler would answer
+    /// whatever is open at click time instead.
+    pub(crate) fn current(&self) -> Option<ConfirmToken<K>> {
+        self.state
+            .read()
+            .open
+            .as_ref()
+            .map(|(token, _)| token.clone())
     }
 
-    /// Inspect an opening for imperative reconciliation without subscribing.
-    /// A completion callback can run inside another effect; a tracked read
-    /// there would make the caller observe this slot's unrelated later changes.
+    /// What the open prompt is for, for imperative reconciliation, without
+    /// subscribing. A completion callback can run inside another effect; a
+    /// tracked read there would make the caller observe this slot's
+    /// unrelated later changes. Deliberately the key only, never a token: a
+    /// handler that could fetch the live token could answer whatever is open
+    /// at click time. Reconciliation that decides the prompt no longer fits
+    /// closes it with [`Self::clear`].
     pub(crate) fn peek_key(&self) -> Option<K> {
-        self.open.peek().as_ref().map(|(key, _)| key.clone())
+        self.state
+            .peek()
+            .open
+            .as_ref()
+            .map(|(token, _)| token.key.clone())
+    }
+
+    /// The open prompt's token without subscribing, for tests that need to
+    /// name an opening no render drew. Not compiled into the app.
+    #[cfg(test)]
+    pub(crate) fn peek_token(&self) -> Option<ConfirmToken<K>> {
+        self.state
+            .peek()
+            .open
+            .as_ref()
+            .map(|(token, _)| token.clone())
     }
 }
 
-/// [`ConfirmSlot::open`]'s state change over a plain `Option`, split out
-/// (like [`claim_in`]) so the rules are testable without a Dioxus runtime.
-fn open_in<K, P>(slot: &mut Option<(K, P)>, key: K, payload: P) {
-    *slot = Some((key, payload));
+/// [`ConfirmSlot::open`]'s state change over a plain value, split out (like
+/// [`claim_in`]) so the rules are testable without a Dioxus runtime. Mints
+/// the next opening number from [`LAST_OPENING`]; the counter only ever
+/// increases, so no later opening, in this slot or any other, can share a
+/// token with an earlier one.
+fn open_in<K: Clone, P>(state: &mut SlotState<K, P>, key: K, payload: P) -> ConfirmToken<K> {
+    let opening = LAST_OPENING.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let token = ConfirmToken { opening, key };
+    state.open = Some((token.clone(), payload));
+    token
 }
 
-/// [`ConfirmSlot::take`]'s test-and-clear over a plain `Option`.
-fn take_in<K: PartialEq, P>(slot: &mut Option<(K, P)>, key: &K) -> Option<P> {
-    if slot.as_ref().is_some_and(|(open, _)| open == key) {
-        slot.take().map(|(_, payload)| payload)
+/// [`ConfirmSlot::take`]'s test-and-clear over a plain value. Taking closes
+/// the prompt; it never rewinds the opening numbering.
+fn take_in<K: PartialEq, P>(state: &mut SlotState<K, P>, token: &ConfirmToken<K>) -> Option<P> {
+    if state.open.as_ref().is_some_and(|(open, _)| open == token) {
+        state.open.take().map(|(_, payload)| payload)
     } else {
         None
     }
@@ -532,20 +650,20 @@ mod tests {
     fn the_first_of_a_confirm_and_a_cancel_decides() {
         // cancel, then confirm
         let (payload, dropped) = owned();
-        let mut slot = None;
-        open_in(&mut slot, "prompt", payload);
-        drop(take_in(&mut slot, &"prompt")); // cancel_for
+        let mut slot = SlotState::closed();
+        let shown = open_in(&mut slot, "prompt", payload);
+        drop(take_in(&mut slot, &shown)); // cancel_for
         assert!(dropped.get(), "cancel releases what the prompt held");
         assert!(
-            take_in(&mut slot, &"prompt").is_none(),
+            take_in(&mut slot, &shown).is_none(),
             "a queued confirm finds nothing"
         );
 
         // confirm, then cancel
         let (payload, dropped) = owned();
-        open_in(&mut slot, "prompt", payload);
-        let confirmed = take_in(&mut slot, &"prompt").expect("the confirm takes the payload");
-        drop(take_in(&mut slot, &"prompt")); // the queued cancel
+        let shown = open_in(&mut slot, "prompt", payload);
+        let confirmed = take_in(&mut slot, &shown).expect("the confirm takes the payload");
+        drop(take_in(&mut slot, &shown)); // the queued cancel
         assert!(
             !dropped.get(),
             "a queued cancel must not release the confirmed task's claim"
@@ -556,29 +674,128 @@ mod tests {
 
     /// Why this matters: the second click of a double-click, or a stale
     /// handler rendered for another target, must not act on the prompt that
-    /// is open now. Spec: a duplicate confirm gets nothing; a confirm or
-    /// cancel naming a different key leaves the open prompt and its payload
-    /// untouched.
+    /// is open now. Spec: `take` is test-and-clear, so a duplicate confirm
+    /// gets nothing; a confirm or cancel whose token names a different key
+    /// leaves the open prompt and its payload untouched, even when its
+    /// opening number is the open one's (the key is part of the identity,
+    /// not decoration).
     #[farhelm_testtrace::test]
     fn duplicate_and_wrong_key_clicks_change_nothing() {
         let (payload, dropped) = owned();
-        let mut slot = None;
-        open_in(&mut slot, "tab-a", payload);
+        let mut slot = SlotState::closed();
+        let tab_a = open_in(&mut slot, "tab-a", payload);
+        // Forged here, where the fields are visible, to isolate the key: the
+        // same opening number as the open prompt, for another tab.
+        let tab_b = ConfirmToken {
+            opening: tab_a.opening,
+            key: "tab-b",
+        };
         assert!(
-            take_in(&mut slot, &"tab-b").is_none(),
+            take_in(&mut slot, &tab_b).is_none(),
             "a wrong key takes nothing"
         );
-        drop(take_in(&mut slot, &"tab-b")); // a cancel rendered for tab-b
+        drop(take_in(&mut slot, &tab_b)); // a cancel rendered for tab-b
         assert!(
-            !dropped.get() && slot.is_some(),
+            !dropped.get() && slot.open.is_some(),
             "the open prompt survives other keys"
         );
-        let first = take_in(&mut slot, &"tab-a");
+        let first = take_in(&mut slot, &tab_a);
         assert!(first.is_some());
         assert!(
-            take_in(&mut slot, &"tab-a").is_none(),
+            take_in(&mut slot, &tab_a).is_none(),
             "a duplicate confirm gets nothing"
         );
+    }
+
+    /// Why this matters: one burst can hold a Cancel, a click that reopens
+    /// the same prompt, and a confirm drawn for the FIRST opening. Keyed by
+    /// target alone, that confirm would answer a question the user has not
+    /// seen yet (and, for a lifecycle prompt, run the operation with the
+    /// claim the new opening took). Spec: a token for an earlier opening of
+    /// the same key neither takes nor cancels a reopened prompt, and the
+    /// reopened prompt's payload stays held; the reopened prompt's own token
+    /// still takes it.
+    #[farhelm_testtrace::test]
+    fn a_stale_opening_cannot_answer_a_reopened_prompt() {
+        let mut slot = SlotState::closed();
+        let (payload, _) = owned();
+        let first = open_in(&mut slot, (), payload);
+        drop(take_in(&mut slot, &first)); // the Cancel
+        let (payload, dropped) = owned();
+        let reopened = open_in(&mut slot, (), payload);
+        assert_eq!(first.key(), reopened.key(), "premise: the same prompt");
+
+        assert!(
+            take_in(&mut slot, &first).is_none(),
+            "a confirm drawn for the first opening takes nothing"
+        );
+        drop(take_in(&mut slot, &first)); // a cancel drawn for it
+        assert!(
+            !dropped.get() && slot.open.is_some(),
+            "the reopened prompt and its payload survive the stale answers"
+        );
+        assert!(
+            take_in(&mut slot, &reopened).is_some(),
+            "the reopened prompt's own answer still works"
+        );
+
+        // Replacement without a close in between is the same case: the tab
+        // strip moves its prompt, and the old opening's token goes stale.
+        let (payload, _) = owned();
+        let replaced = open_in(&mut slot, (), payload);
+        let (payload, dropped) = owned();
+        let replacing = open_in(&mut slot, (), payload);
+        assert!(take_in(&mut slot, &replaced).is_none());
+        assert!(!dropped.get(), "the replacing prompt keeps its payload");
+        assert!(take_in(&mut slot, &replacing).is_some());
+    }
+
+    /// Why this matters: a stale token is refused only because its opening
+    /// number is never handed out again. A counter that restarted when the
+    /// slot emptied, or that `clear` rewound, would mint the old token anew
+    /// and let a click drawn for a long-gone prompt answer the next one.
+    /// Spec: every `open` on a slot returns a token with a strictly larger
+    /// opening than any before it, across take, `clear` and replacement.
+    #[farhelm_testtrace::test]
+    fn openings_are_never_reused() {
+        use std::cell::Cell;
+        std::thread_local! {
+            static SLOT: Cell<Option<ConfirmSlot<&'static str>>> = const { Cell::new(None) };
+        }
+        /// Mount a real slot, so `clear` is the method the UI calls rather
+        /// than a stand-in over the plain state.
+        fn app() -> Element {
+            let slot = use_confirm_slot::<&'static str, ()>();
+            SLOT.with(|cell| cell.set(Some(slot)));
+            rsx! {}
+        }
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let mut slot = SLOT.with(Cell::get).expect("the slot mounted");
+        dom.in_runtime(|| {
+            let taken = slot.open("prompt", ());
+            assert!(slot.take(&taken).is_some());
+            let cleared = slot.open("prompt", ());
+            slot.clear();
+            assert!(slot.peek_key().is_none(), "premise: clear closed it");
+            let replaced = slot.open("prompt", ());
+            let current = slot.open("prompt", ());
+            let openings = [&taken, &cleared, &replaced, &current].map(|token| token.opening);
+            assert!(
+                openings.windows(2).all(|pair| pair[0] < pair[1]),
+                "openings only increase: {openings:?}"
+            );
+            for stale in [&taken, &cleared, &replaced] {
+                slot.cancel_for(stale);
+                assert_eq!(
+                    slot.peek_token().as_ref(),
+                    Some(&current),
+                    "a token from an earlier opening cannot close the current one"
+                );
+            }
+            assert_eq!(slot.take(&current), Some(()));
+            assert_eq!(slot.take(&current), None, "take is test-and-clear");
+        });
     }
 
     /// Why this matters: a lifecycle prompt holds the page's operation claim
@@ -683,16 +900,16 @@ mod tests {
             use_hook(move || {
                 let mut lock = lock;
                 if let Some(claim) = lock.claim_guard() {
-                    slot.open((), claim);
-                }
-                // The confirm click: the claim moves into a task that stays
-                // pending, like a Replace request still in flight.
-                if let Some(claim) = slot.take(&()) {
-                    spawn(async move {
-                        let _claim = claim;
-                        reached.set(true);
-                        std::future::pending::<()>().await;
-                    });
+                    let shown = slot.open((), claim);
+                    // The confirm click: the claim moves into a task that
+                    // stays pending, like a Replace request still in flight.
+                    if let Some(claim) = slot.take(&shown) {
+                        spawn(async move {
+                            let _claim = claim;
+                            reached.set(true);
+                            std::future::pending::<()>().await;
+                        });
+                    }
                 }
             });
             SLOT_OPEN.with(|open| open.set(Some(slot.is_open())));
@@ -755,8 +972,8 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_refused_claim_opens_nothing_and_a_later_owner_is_protected() {
         let lock = std::rc::Rc::new(std::cell::Cell::new(false));
-        let mut slot = None;
-        open_in(
+        let mut slot = SlotState::closed();
+        let shown = open_in(
             &mut slot,
             (),
             claim(&lock).expect("the first prompt claims"),
@@ -766,12 +983,12 @@ mod tests {
             "a refused claim yields nothing to open a prompt with"
         );
 
-        let task = take_in(&mut slot, &()).expect("confirmed");
+        let task = take_in(&mut slot, &shown).expect("confirmed");
         drop(task); // the confirmed task finishes and releases
         assert!(!lock.get());
 
         let later_owner = claim(&lock).expect("a later operation claims the lock");
-        drop(take_in(&mut slot, &())); // a stale cancel for the old prompt
+        drop(take_in(&mut slot, &shown)); // a stale cancel for the old prompt
         assert!(
             lock.get(),
             "the stale cancel must not release the later owner's claim"
