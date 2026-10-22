@@ -51,6 +51,19 @@
     return '\uf15b';
   }
 
+  /** Version-like tokens (1.2.3, v1.5x, 1.2.3-rc.1+build.5) that link recognition skips.
+   * Each dotted component starts with a required digit, so components cannot
+   * repartition each other's digits. Hyphens belong only to the suffix: when
+   * components could hold them too, `1.1` followed by thousands of hyphens and
+   * a stray character backtracked quadratically, 50 to 80 ms for one
+   * 8,192-character line in a browser. The suffix is `+build`, `-pre`, or
+   * `-pre+build`. In that last form a dot before the `+` must be followed by a
+   * digit, because the hyphenated text there stands for what the old pattern
+   * matched as further dotted components; with that rule the three forms accept
+   * exactly the tokens the overlapping pattern accepted.
+   */
+  const NUMERIC_VERSION = /^[+-]?v?\d+(?:\.\d[a-z0-9_]*)+(?:\+[\w.-]+|-[\w.-]*|-(?:[\w-]|\.\d)*\+[\w.-]+)?$/iu;
+
   /** Recognize conservative prose tokens without turning URL text into paths.
    * Quotes/brackets delimit tokens; spaces inside filenames need OSC 8. Source
    * diagnostic suffixes and sentence punctuation are outside the link range.
@@ -69,9 +82,7 @@
         if (path.startsWith('//') || /^[a-z][a-z0-9+.-]*:/iu.test(path) || path.includes('://')) continue;
         // Numeric version-like tokens, including units such as 1.5x, are
         // not file evidence. A directory prefix still makes them paths.
-        // One required digit per dotted component avoids overlapping digit
-        // quantifiers that can backtrack exponentially on a near-match.
-        if (/^[+-]?v?\d+(?:\.\d[a-z0-9_-]*)+(?:[-+][\w.-]+)?$/iu.test(path)) continue;
+        if (NUMERIC_VERSION.test(path)) continue;
         if (!(path.startsWith('/') || path.startsWith('~/') || path.includes('/') || /[^/.]+\.[a-z0-9][a-z0-9_-]*$/iu.test(path))) continue;
         const start = chunk.index + match.index;
         found.push({ path, start, end: start + path.length });
@@ -523,7 +534,7 @@
     }
   }
 
-  const api = { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, FileLinksAddon, MAX_BYTES };
+  const api = { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, FileLinksAddon, MAX_BYTES, NUMERIC_VERSION };
   if (typeof window !== 'undefined') window.farhelmTerminalFiles = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

@@ -15,9 +15,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`template-preservation-promise-omits-last-write-wins.md`](template-preservation-promise-omits-last-write-wins.md) —
   The agent-edit preservation promise omits accepted template overwrites; loss from reliance is conditional.
 
-- [`numeric-token-regex-performance-remains-unresolved.md`](numeric-token-regex-performance-remains-unresolved.md) — A
-  synthetic numeric-token slowdown is measured; ordinary occurrence and security impact remain unestablished.
-
 - [`escaped-start-remedy-changes-program-and-state-path.md`](escaped-start-remedy-changes-program-and-state-path.md) —
   The suggested start command changes path bytes and can migrate another inactive installation under a conditional path
   pairing.

@@ -203,6 +203,25 @@ test('a long numeric-looking filename completes recognition', () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
+/** Ordinary release-version spellings stay out of file links, and the guard
+ * that keeps them out answers a long near-match in linear time: `1.1`,
+ * thousands of hyphens and a stray `@` once cost 50 ms or more per call. Five
+ * hundred calls fit the subprocess timeout only when each takes under 10 ms.
+ */
+test('the numeric-version guard keeps version spellings out and answers near-matches fast', () => {
+  for (const input of ['1.2-rc.3', 'v1.5x', '2.0.1+build.5', '1.2.3-beta-2', '1.2.3-rc.1+build.5', '1.0.0-beta+exp.sha.5114f85', '1.2-']) {
+    assert.deepEqual(pathTokens(input), [], input);
+  }
+  const result = spawnSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const { NUMERIC_VERSION } = require(process.argv[1]);
+    const near = '1.1' + '-'.repeat(8188) + '@';
+    for (let i = 0; i < 500; i++) assert.equal(NUMERIC_VERSION.test(near), false);
+  `, require.resolve('../assets/terminal-files.js')], { timeout: 5000, encoding: 'utf8' });
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, result.stderr);
+});
+
 /** Enabling xterm all-scheme delivery must never send executable targets to an opener. */
 test('OSC allows web unchanged and decoded file paths only', () => {
   assert.deepEqual(oscTarget('https://example.test/x'), { kind: 'web', uri: 'https://example.test/x' });
