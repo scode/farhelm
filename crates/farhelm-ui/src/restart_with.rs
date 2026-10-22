@@ -483,6 +483,8 @@ pub(crate) fn RestartWithDialog(
                     }),
                     escape_target: Some(".restart-with-cancel".into()),
                     main_action: Some(".restart-with-submit".into()),
+                    isolation: true,
+                    gap: true,
                 },
                 class: "restart-with-dialog",
                 role: "dialog",

@@ -11,60 +11,19 @@
 //! in the supervisor (see `api::rename_session`).
 
 use crate::list::PeerTitle;
+use crate::modal_dialog::{
+    DialogFocus, DialogHandle, FocusAdmission, InitialFocus, ModalDialog, TabTrap,
+};
 use crate::peer::{DetailPart, PeerLine};
 use dioxus::prelude::*;
 
-/// Hand focus to Rename once and keep Tab inside its mounted dialog.
+/// Address only this opening, including deferred mount work and focus return.
 ///
-/// The sidebar stays live behind the modal. Native modal attributes describe
-/// that relationship to assistive technology but do not constrain browser
-/// focus in every renderer, so the listener belongs to this exact dialog
-/// node and vanishes with it. Naming after quick launch explicitly focuses
-/// and selects the title once; ordinary Rename preserves a later outside
-/// focus choice if the desktop bridge delivers mount work late.
-fn install_rename_focus_trap(generation: u64, shortcut: bool, naming: bool) {
-    document::eval(
-        &r#"(() => {
-            const dialog = document.querySelector('.rename-dialog[role="dialog"]');
-            if (!dialog || dialog.dataset.renameGeneration !== '__GENERATION__' || dialog.__farhelmRenameFocusTrap) return;
-            dialog.__farhelmRenameFocusTrap = true;
-            // Autofocus may already have been consumed by an earlier editor
-            // in this document. Ordinary Rename's delayed bridge callback
-            // must yield to an outside control chosen since its opening.
-            const active = document.activeElement;
-            // A hidden shortcut click leaves focus on its original control.
-            // Identity, rather than a broad selector, prevents delayed mount
-            // work from taking focus back from a newly chosen outside control.
-            const shortcutOpener = __SHORTCUT__ && active === window.__farhelmSessionRenameOpener;
-            if (__SHORTCUT__) window.__farhelmSessionRenameOpener = null;
-            if (__NAMING__) {
-                // A hidden launch may leave any opener focused. Naming owns
-                // this new dialog's one handoff, including later launches in
-                // the same document after native autofocus was consumed.
-                const input = dialog.querySelector('.rename-input');
-                input?.focus({ preventScroll: true });
-                input?.select();
-            } else if (!active || active === document.body || active.matches('.session-row-rename') || shortcutOpener) {
-                dialog.querySelector('.rename-input')?.focus({ preventScroll: true });
-            }
-            const focusable = () => [...dialog.querySelectorAll(
-                'button:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-            )].filter((node) => !node.hidden && node.getClientRects().length);
-            dialog.addEventListener('keydown', (event) => {
-                if (event.key !== 'Tab') return;
-                const nodes = focusable();
-                if (!nodes.length) return;
-                const first = nodes[0];
-                const last = nodes[nodes.length - 1];
-                if (event.shiftKey ? document.activeElement === first : document.activeElement === last) {
-                    event.preventDefault();
-                    (event.shiftKey ? last : first).focus();
-                }
-            });
-        })();"#.replace("__GENERATION__", &generation.to_string())
-            .replace("__SHORTCUT__", if shortcut { "true" } else { "false" })
-            .replace("__NAMING__", if naming { "true" } else { "false" }),
-    );
+/// A session id can reopen in a later generation. The static selector must be
+/// resolved first, then checked, so late work cannot act on its replacement.
+pub(crate) const fn dialog_handle(generation: u64) -> DialogHandle {
+    DialogHandle::new(r#".rename-dialog[role="dialog"]"#)
+        .for_generation("data-rename-generation", generation)
 }
 
 /// Show hidden characters in the seed without rewriting an untouched title.
@@ -267,27 +226,50 @@ pub(crate) fn RenameDialog(
         div {
             class: "rename-dialog-backdrop",
             role: "presentation",
-        div {
+        ModalDialog {
+            handle: dialog_handle(generation),
+            focus: DialogFocus {
+                initial_focus: InitialFocus::Handoff {
+                    selector: ".rename-input".into(),
+                    select_all: naming,
+                    captured_opener: shortcut.then_some("__farhelmSessionRenameOpener"),
+                    // Native autofocus may be spent after an earlier editor.
+                    // Naming still owns a handoff; ordinary Rename yields to
+                    // an outside control chosen before delayed mount work.
+                    admission: if naming {
+                        FocusAdmission::Always
+                    } else {
+                        FocusAdmission::DocumentOrOpener { selector: ".session-row-rename".into() }
+                    },
+                },
+                trap: Some(TabTrap {
+                    selector: "button:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])",
+                    empty_to_root: false,
+                    reverse_from_root: false,
+                }),
+                escape_target: None,
+                main_action: None,
+                // Preserve the current live sidebar and native gap clicks.
+                // Page isolation is added separately from this conversion.
+                isolation: false,
+                gap: false,
+            },
             class: "rename-dialog",
             "data-rename-generation": "{generation}",
             role: "dialog",
             aria_modal: "true",
             aria_label: "rename session",
-            onmounted: move |_| install_rename_focus_trap(generation, shortcut, naming),
             // Focusout followed by focusin is an internal transition and
             // ends owned. A move outside has no matching focusin and ends
             // unowned. Busy controls stay focusable, so the render itself
             // cannot manufacture the external case.
             onfocusin: move |_| focus_owned.set(true),
             onfocusout: move |_| focus_owned.set(false),
-            onkeydown: move |evt| {
+            on_escape: move |evt: KeyboardEvent| {
                 // Escape accepts or dismisses candidates while an IME is
                 // composing. Treating that key as dialog cancellation would
                 // abandon the draft on an ordinary composition keystroke.
-                if evt.key() == Key::Escape
-                    && !evt.is_composing()
-                    && !busy_now.call(())
-                {
+                if !evt.is_composing() && !busy_now.call(()) {
                     on_cancel.call(generation);
                 }
             },
