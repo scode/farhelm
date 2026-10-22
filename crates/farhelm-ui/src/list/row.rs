@@ -21,7 +21,9 @@ use crate::status::{StatusBadgeView, confirm_consequence, replace_consequence, s
 use crate::{LaunchHarness, Session, SessionStatus};
 
 use super::bell::{BellSlot, NotificationBell};
-use super::shared::{DeleteTarget, HostLocality, RowState, SessionHostIcon, SessionHostName};
+use super::shared::{
+    DeleteTarget, HostLocality, RowQuestion, RowState, SessionHostIcon, SessionHostName,
+};
 use super::summary_card::SessionSummarySource;
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
@@ -29,6 +31,7 @@ use crate::menu_panel::{
     measurement_outcome, record_menu_item_focus, remember_menu_item, session_menu_placement_style,
     session_menu_pointer_style, should_measure_on_mount,
 };
+use crate::ops::ConfirmToken;
 
 // ===== Identity copy shared by rendering and movement comparison =====
 
@@ -865,7 +868,8 @@ std::thread_local! {
 ///
 /// ## Inline delete confirmation
 ///
-/// `confirming` (also `ListView`'s per-session state, same discipline as
+/// `RowState::question` (the opening of this row's question that `ListView`
+/// holds in its per-row question slots, narrowed to this row like
 /// `error`/`busy`) swaps the stop/delete pair out for a prompt plus
 /// **confirm delete**/**cancel** in place — there used to be a
 /// `window.confirm()` call here instead; wry ships no native JS dialogs on
@@ -876,6 +880,12 @@ std::thread_local! {
 /// order walks confirm delete → cancel; initial FOCUS lands directly on
 /// cancel regardless of tab order (see below).
 ///
+/// Both answers (button click, or the Enter or Space that activates the
+/// focused button) hand that render's token back up with the row's id, and
+/// `ListView` acts only if it still names the open opening. A click queued
+/// for an earlier showing of this row's question, which a cancel and a
+/// reopen in the same burst could leave behind, answers nothing.
+///
 /// The `.session-row-open` button (title/cwd/invocation/badge) stays
 /// VISIBLE while a prompt is pending, merely `disabled`: the prompt lives
 /// in the floating actions panel now, which overlays the rows below
@@ -883,7 +893,7 @@ std::thread_local! {
 /// MT-8 overflow that once forced the button out of layout entirely
 /// (`display: none` behind a `prompting` class) cannot recur by
 /// construction. Disabling it is still required — cancel must be the only
-/// way back to normal, never an implicit click on open (see `confirming`
+/// way back to normal, never an implicit click on open (see `row_questions`
 /// in `ListView`).
 ///
 /// The session identity prompt uses two separate elements, not one combined sentence:
@@ -961,8 +971,8 @@ std::thread_local! {
 /// contents are not menu items — a two-button prompt — and arrow keys do
 /// not describe commands while it is visible. Escape is left unbound there
 /// too, and that one is a decision
-/// rather than an omission: closing the panel does not clear
-/// `ListView`'s confirming flag (see `menu_panel_placement_style` for why
+/// rather than an omission: closing the panel does not close
+/// `ListView`'s open row question (see `menu_panel_placement_style` for why
 /// that state outlives the panel), so an Escape that dismissed
 /// the prompt without answering it would leave the row primed to reopen
 /// straight back into the same prompt.
@@ -1005,7 +1015,7 @@ pub(super) fn SessionRow(
     /// row mid-decision is exactly as unstable a replace-with source as it
     /// is a clone or replace one.
     on_replace_with: EventHandler<Session>,
-    /// The "replace" menu item's click: opens `confirming_replace`, hands
+    /// The "replace" menu item's click: opens the row's Replace question, hands
     /// the row's own `Session` up. Unlike `on_clone` this DOES eventually
     /// mutate the fleet — `ListView`'s handler calls `api::replace_session`
     /// — but not from this click alone; see `on_confirm_replace` for the
@@ -1013,13 +1023,18 @@ pub(super) fn SessionRow(
     on_replace: EventHandler<Session>,
     /// The replace prompt's confirm: hands up the `Session` this render drew
     /// the prompt's consequence text from, so the replace acts on what the
-    /// user read (see `ListView`'s `confirm_replace`).
-    on_confirm_replace: EventHandler<Session>,
-    on_cancel_replace: EventHandler<String>,
+    /// user read (see `ListView`'s `confirm_replace`), with the opening of
+    /// the question that render drew (`RowState::question`).
+    on_confirm_replace: EventHandler<(Session, ConfirmToken<RowQuestion>)>,
+    /// The replace prompt's cancel: this row's id and the drawn opening.
+    on_cancel_replace: EventHandler<(String, ConfirmToken<RowQuestion>)>,
     on_stop: EventHandler<String>,
     on_delete: EventHandler<DeleteTarget>,
-    on_confirm_delete: EventHandler<(String, crate::DeleteGuard)>,
-    on_cancel_delete: EventHandler<String>,
+    /// The delete prompt's confirm: this row's id, the drawn opening, and
+    /// the guard derived from the same render as the consequence text.
+    on_confirm_delete: EventHandler<(String, ConfirmToken<RowQuestion>, crate::DeleteGuard)>,
+    /// The delete prompt's cancel: this row's id and the drawn opening.
+    on_cancel_delete: EventHandler<(String, ConfirmToken<RowQuestion>)>,
     /// The read/unread toggle's click, from either the menu item or the
     /// row's own dot (SPEC.md, Status): the session id and
     /// the target `seen_activity_at` to PUT — `Some(effective_activity)` to
@@ -1050,8 +1065,7 @@ pub(super) fn SessionRow(
     let RowState {
         error,
         busy,
-        confirming,
-        confirming_replace,
+        question,
         renaming,
         nav_disabled,
         menu_open,
@@ -1065,6 +1079,14 @@ pub(super) fn SessionRow(
         deleting,
         bell_open,
     } = state;
+    // Which prompt the panel shows follows the drawn opening's key; the
+    // token itself travels into that prompt's answers below.
+    let confirming = question
+        .as_ref()
+        .is_some_and(|token| *token.key() == RowQuestion::Delete);
+    let confirming_replace = question
+        .as_ref()
+        .is_some_and(|token| *token.key() == RowQuestion::Replace);
     let identity = session_identity_copy(&session, deleting);
     let stale_tooltip = format!("{unavailable_cause}: this is the session's last-known state");
     #[cfg(test)]
@@ -1166,10 +1188,16 @@ pub(super) fn SessionRow(
     let clone_target = session.clone();
     let replace_with_target = session.clone();
     let replace_target = session.clone();
+    // Each prompt answer owns the id and the opening this render drew, so a
+    // click answers exactly the showing it was drawn for (`RowState::question`).
     let confirm_id = session.id.raw().to_owned();
     let cancel_id = session.id.raw().to_owned();
     let confirm_replace_source = session.clone();
     let cancel_replace_id = session.id.raw().to_owned();
+    let confirm_delete_question = question.clone();
+    let cancel_delete_question = question.clone();
+    let confirm_replace_question = question.clone();
+    let cancel_replace_question = question;
     // The editor owns a local String seed so unchanged submission can preserve
     // the title even when its editable spelling contains visible escape markers.
     let rename_start = (session.id.raw().to_owned(), session.title.raw().to_owned());
@@ -2157,10 +2185,15 @@ pub(super) fn SessionRow(
                                 // snapshot, the one the consequence text
                                 // above was drawn from, so a prompt that
                                 // drifted is answered for what it said.
-                                onclick: move |_| on_confirm_delete.call((
-                                    confirm_id.clone(),
-                                    crate::status::delete_guard(&session.status, session.tabs.len()),
-                                )),
+                                onclick: move |_| {
+                                    if let Some(token) = confirm_delete_question.clone() {
+                                        on_confirm_delete.call((
+                                            confirm_id.clone(),
+                                            token,
+                                            crate::status::delete_guard(&session.status, session.tabs.len()),
+                                        ));
+                                    }
+                                },
                                 "confirm delete"
                             }
                             button {
@@ -2170,7 +2203,11 @@ pub(super) fn SessionRow(
                                 // A disabled confirming answer cannot receive
                                 // focus; keep a usable escape hatch instead.
                                 autofocus: busy,
-                                onclick: move |_| on_cancel_delete.call(cancel_id.clone()),
+                                onclick: move |_| {
+                                    if let Some(token) = cancel_delete_question.clone() {
+                                        on_cancel_delete.call((cancel_id.clone(), token));
+                                    }
+                                },
                                 "cancel"
                             }
                         } else if confirming_replace {
@@ -2209,7 +2246,11 @@ pub(super) fn SessionRow(
                                 autofocus: !busy,
                                 onkeydown: crate::guard_confirmation_enter,
                                 onmounted: move |_| crate::focus_confirmation(".session-row-menu-panel .confirm-replace", ".session-row-menu-panel .replace-cancel"),
-                                onclick: move |_| on_confirm_replace.call(confirm_replace_source.clone()),
+                                onclick: move |_| {
+                                    if let Some(token) = confirm_replace_question.clone() {
+                                        on_confirm_replace.call((confirm_replace_source.clone(), token));
+                                    }
+                                },
                                 "confirm replace"
                             }
                             button {
@@ -2217,7 +2258,11 @@ pub(super) fn SessionRow(
                                 class: "btn btn-neutral replace-cancel",
                                 "data-tooltip": "cancel: keep this session as it is",
                                 autofocus: busy,
-                                onclick: move |_| on_cancel_replace.call(cancel_replace_id.clone()),
+                                onclick: move |_| {
+                                    if let Some(token) = cancel_replace_question.clone() {
+                                        on_cancel_replace.call((cancel_replace_id.clone(), token));
+                                    }
+                                },
                                 "cancel"
                             }
                         } else {
@@ -2511,7 +2556,7 @@ pub(super) fn SessionRow(
                                 // opens an editable form first, replace acts
                                 // at once, deletes this row's own session,
                                 // and puts an unedited copy in its place.
-                                // The click only opens `confirming_replace`;
+                                // The click only opens the Replace question;
                                 // `on_confirm_replace` is what actually
                                 // calls the API.
                                 button {
@@ -2913,6 +2958,20 @@ mod tests {
         (menu, bell, use_callback(|()| true))
     }
 
+    /// The token a row render draws for `kind`'s question, minted the only
+    /// way the app can mint one: by opening a lane of the same slot type
+    /// `ListView` keeps its row questions in. A hook; the opening happens
+    /// once, on the first render, as `ListView`'s opener would.
+    fn use_test_question(kind: Option<RowQuestion>) -> Option<ConfirmToken<RowQuestion>> {
+        let mut questions = crate::ops::use_confirm_slots::<String, RowQuestion, ()>();
+        use_hook(move || {
+            if let Some(kind) = kind {
+                questions.open("row".to_string(), kind, ());
+            }
+        });
+        questions.current("row")
+    }
+
     /// The label describes the next action, and pins remain available when
     /// read/unread is absent (ended sessions and older peers).
     #[farhelm_testtrace::test]
@@ -3024,18 +3083,26 @@ mod tests {
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
             let on_pin = use_callback(|_: (String, bool)| {});
             let on_replace = use_callback(|_: Session| {});
-            let on_confirm_replace = use_callback(|_: Session| {});
-            let on_cancel_replace = use_callback(|_: String| {});
+            let on_confirm_replace = use_callback(|_: (Session, ConfirmToken<RowQuestion>)| {});
+            let on_cancel_replace = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
             let on_stop = use_callback(|_: String| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
-            let on_confirm_delete = use_callback(|_: (String, crate::DeleteGuard)| {});
-            let on_cancel_delete = use_callback(|_: String| {});
+            let on_confirm_delete =
+                use_callback(|_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {});
+            let on_cancel_delete = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});
             let on_bell_toggle = use_callback(|_: (String, u64, u64)| {});
             let on_bell_close = use_callback(|_: String| {});
             let on_bell_clear = use_callback(|_: (String, u64)| {});
             let (confirming, confirming_replace) = PROMPT.with(std::cell::Cell::get);
+            let question = use_test_question(if confirming {
+                Some(RowQuestion::Delete)
+            } else if confirming_replace {
+                Some(RowQuestion::Replace)
+            } else {
+                None
+            });
             let session = Session {
                 title: TITLE.with(std::cell::Cell::get).into(),
                 cwd: CWD.with(std::cell::Cell::get).into(),
@@ -3051,8 +3118,7 @@ mod tests {
                     state: RowState {
                         error: None,
                         busy: false,
-                        confirming,
-                        confirming_replace,
+                        question,
                         renaming: false,
                         nav_disabled: false,
                         // The ordinary menu and its confirmations expose
@@ -3255,6 +3321,255 @@ mod tests {
         }
     }
 
+    /// Why this matters: a row's Delete or Replace question refuses a stale
+    /// answer only because each of its buttons hands `ListView` the token of
+    /// the showing that button was drawn for. `ListView`'s handlers act on
+    /// that token and never look the question up again, so a row button that
+    /// handed up anything else (a token read again at click time, say) would
+    /// let a click queued behind a cancel and a reopen answer a showing the
+    /// user has not seen. The slot tests in `ops` cover the comparison; this
+    /// pins the row's half of the wiring.
+    ///
+    /// Spec (`SessionRow`): each inline prompt button (Delete's confirm and
+    /// cancel, Replace's confirm and cancel) calls its own callback exactly
+    /// once, with this row's id (or `Session`) and exactly the token its
+    /// render drew in `RowState::question`. Reopening the row's question
+    /// after that render and before the click does not change what the
+    /// click hands up.
+    ///
+    /// Desktop-only like the other headless click tests (`app_updater`,
+    /// `approvals`): dispatching a click needs Dioxus's serialized event
+    /// converter, which only the desktop feature enables.
+    #[cfg(native_desktop)]
+    #[farhelm_testtrace::test]
+    fn each_prompt_button_hands_up_the_token_its_render_drew() {
+        use dioxus::core::{
+            DynamicNode, ElementId, ScopeId, Template, TemplateAttribute, TemplateNode, VNode,
+        };
+        use std::cell::{Cell, RefCell};
+
+        /// Which callback ran, with the row it named and the token it carried.
+        type Call = (&'static str, String, ConfirmToken<RowQuestion>);
+        std::thread_local! {
+            static KIND: Cell<RowQuestion> = const { Cell::new(RowQuestion::Delete) };
+            static QUESTIONS: Cell<Option<crate::ops::ConfirmSlots<String, RowQuestion>>> =
+                const { Cell::new(None) };
+            static DRAWN: RefCell<Option<ConfirmToken<RowQuestion>>> = const { RefCell::new(None) };
+            static CALLS: RefCell<Vec<Call>> = const { RefCell::new(Vec::new()) };
+        }
+        fn record(callback: &'static str, row: String, token: ConfirmToken<RowQuestion>) {
+            CALLS.with(|calls| calls.borrow_mut().push((callback, row, token)));
+        }
+
+        /// One row with `KIND`'s question open, recording what each prompt
+        /// callback receives. The question is opened the way
+        /// `use_test_question` opens it, but the lanes are kept so the test
+        /// can reopen the question behind the render's back.
+        fn app() -> Element {
+            let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
+            let on_open = use_callback(|_: Session| {});
+            let on_clone = use_callback(|_: Session| {});
+            let on_replace_with = use_callback(|_: Session| {});
+            let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
+            let on_pin = use_callback(|_: (String, bool)| {});
+            let on_replace = use_callback(|_: Session| {});
+            let on_confirm_replace =
+                use_callback(|(session, token): (Session, ConfirmToken<RowQuestion>)| {
+                    record("confirm replace", session.id.raw().to_string(), token);
+                });
+            let on_cancel_replace =
+                use_callback(|(row, token): (String, ConfirmToken<RowQuestion>)| {
+                    record("cancel replace", row, token);
+                });
+            let on_stop = use_callback(|_: String| {});
+            let on_delete = use_callback(|_: DeleteTarget| {});
+            let on_confirm_delete = use_callback(
+                |(row, token, _): (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {
+                    record("confirm delete", row, token);
+                },
+            );
+            let on_cancel_delete =
+                use_callback(|(row, token): (String, ConfirmToken<RowQuestion>)| {
+                    record("cancel delete", row, token);
+                });
+            let on_rename_start = use_callback(|_: (String, String)| {});
+            let on_menu_toggle = use_callback(|_: String| {});
+            let on_bell_toggle = use_callback(|_: (String, u64, u64)| {});
+            let on_bell_close = use_callback(|_: String| {});
+            let on_bell_clear = use_callback(|_: (String, u64)| {});
+            let mut questions = crate::ops::use_confirm_slots::<String, RowQuestion, ()>();
+            let kind = KIND.with(Cell::get);
+            use_hook(move || {
+                questions.open("row".to_string(), kind, ());
+            });
+            QUESTIONS.with(|cell| cell.set(Some(questions)));
+            let question = questions.current("row");
+            DRAWN.with(|cell| *cell.borrow_mut() = question.clone());
+            rsx! {
+                SessionRow {
+                    menu_registration: menu_registration.clone(),
+                    bell_registration: bell_registration.clone(),
+                    listing_ready,
+                    session: row_specimen("row"),
+                    compact: false,
+                    state: RowState {
+                        error: None,
+                        busy: false,
+                        question,
+                        renaming: false,
+                        nav_disabled: false,
+                        // The prompts are drawn inside the open menu panel.
+                        menu_open: true,
+                        composer_transfer_open: false,
+                        selected: false,
+                        locality: HostLocality::Unknown,
+                        host_icon: Default::default(),
+                        host_color: Default::default(),
+                        unavailable_cause: "waiting for supervisor",
+                        activity: None,
+                        deleting: false,
+                        bell_open: None,
+                    },
+                    on_open,
+                    on_clone,
+                    on_replace_with,
+                    on_mark_seen,
+                    on_pin,
+                    on_replace,
+                    on_confirm_replace,
+                    on_cancel_replace,
+                    on_stop,
+                    on_delete,
+                    on_confirm_delete,
+                    on_cancel_delete,
+                    on_rename_start,
+                    on_menu_toggle,
+                    on_bell_toggle,
+                    on_bell_close,
+                    on_bell_clear,
+                }
+            }
+        }
+
+        /// Every mounted element under `vnode` that listens for clicks, with
+        /// its static class, descending into fragments and child components.
+        /// The prompt buttons' classes are static template attributes, which
+        /// never appear in the mutation stream, so the template is the only
+        /// place to tell the four buttons apart.
+        fn click_targets(dom: &VirtualDom, vnode: &VNode, found: &mut Vec<(String, ElementId)>) {
+            for (index, attrs) in vnode.dynamic_attrs.iter().enumerate() {
+                if !attrs.iter().any(|attr| attr.name == "onclick") {
+                    continue;
+                }
+                let class = static_class(&vnode.template, vnode.template.attr_paths[index]);
+                if let (Some(class), Some(id)) =
+                    (class, vnode.mounted_dynamic_attribute(index, dom))
+                {
+                    found.push((class.to_string(), id));
+                }
+            }
+            for (index, node) in vnode.dynamic_nodes.iter().enumerate() {
+                match node {
+                    DynamicNode::Fragment(children) => {
+                        for child in children {
+                            click_targets(dom, child, found);
+                        }
+                    }
+                    DynamicNode::Component(component) => {
+                        if let Some(scope) = component.mounted_scope(index, vnode, dom) {
+                            click_targets(dom, scope.root_node(), found);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        /// The static `class` of the template element at `path`, if any.
+        fn static_class(template: &Template, path: &[u8]) -> Option<&'static str> {
+            let mut node = &template.roots[usize::from(path[0])];
+            for &step in &path[1..] {
+                let TemplateNode::Element { children, .. } = node else {
+                    return None;
+                };
+                node = &children[usize::from(step)];
+            }
+            let TemplateNode::Element { attrs, .. } = node else {
+                return None;
+            };
+            attrs.iter().find_map(|attr| match attr {
+                TemplateAttribute::Static {
+                    name: "class",
+                    value,
+                    ..
+                } => Some(*value),
+                _ => None,
+            })
+        }
+
+        dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
+        for (kind, buttons) in [
+            (
+                RowQuestion::Delete,
+                [
+                    ("confirm-delete", "confirm delete"),
+                    ("confirm-cancel", "cancel delete"),
+                ],
+            ),
+            (
+                RowQuestion::Replace,
+                [
+                    ("confirm-replace", "confirm replace"),
+                    ("replace-cancel", "cancel replace"),
+                ],
+            ),
+        ] {
+            KIND.with(|cell| cell.set(kind));
+            let mut dom = VirtualDom::new(app);
+            dom.rebuild_in_place();
+            let drawn = DRAWN
+                .with(|cell| cell.borrow().clone())
+                .expect("premise: the render drew a question");
+            assert_eq!(*drawn.key(), kind, "premise: the render drew {kind:?}");
+            let mut targets = Vec::new();
+            let root = dom.get_scope(ScopeId::APP).expect("the app scope rendered");
+            click_targets(&dom, root.root_node(), &mut targets);
+
+            // Cancel and reopen the row's question with no render in
+            // between, so the live question is a later opening than the one
+            // the buttons were drawn for.
+            let mut questions = QUESTIONS.with(Cell::get).expect("the lanes mounted");
+            let live = dom.in_runtime(|| {
+                questions.cancel_for("row", &drawn);
+                questions.open("row".to_string(), kind, ())
+            });
+            assert_ne!(live, drawn, "premise: the live question is a later opening");
+
+            for (class, callback) in buttons {
+                let matching: Vec<ElementId> = targets
+                    .iter()
+                    .filter(|(classes, _)| classes.split_whitespace().any(|name| name == class))
+                    .map(|(_, id)| *id)
+                    .collect();
+                assert_eq!(matching.len(), 1, "{class}: exactly one mounted button");
+                CALLS.with(|calls| calls.borrow_mut().clear());
+                let data: Rc<dyn std::any::Any> = Rc::new(dioxus::html::PlatformEventData::new(
+                    Box::new(dioxus::html::SerializedMouseData::default()),
+                ));
+                dom.runtime().handle_event(
+                    "click",
+                    dioxus::core::Event::new(data, true),
+                    matching[0],
+                );
+                assert_eq!(
+                    CALLS.with(|calls| calls.borrow().clone()),
+                    vec![(callback, "row".to_string(), drawn.clone())],
+                    "{class}: hands up the drawn opening, not the live one"
+                );
+            }
+        }
+    }
+
     /// Repeated parent refreshes must update direct callback props in place
     /// without rerendering an otherwise unchanged session row.
     ///
@@ -3273,12 +3588,13 @@ mod tests {
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
             let on_pin = use_callback(|_: (String, bool)| {});
             let on_replace = use_callback(|_: Session| {});
-            let on_confirm_replace = use_callback(|_: Session| {});
-            let on_cancel_replace = use_callback(|_: String| {});
+            let on_confirm_replace = use_callback(|_: (Session, ConfirmToken<RowQuestion>)| {});
+            let on_cancel_replace = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
             let on_stop = use_callback(|_: String| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
-            let on_confirm_delete = use_callback(|_: (String, crate::DeleteGuard)| {});
-            let on_cancel_delete = use_callback(|_: String| {});
+            let on_confirm_delete =
+                use_callback(|_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {});
+            let on_cancel_delete = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});
             let on_bell_toggle = use_callback(|_: (String, u64, u64)| {});
@@ -3295,8 +3611,7 @@ mod tests {
                     state: RowState {
                         error: None,
                         busy: false,
-                        confirming: false,
-                        confirming_replace: false,
+                        question: None,
                         renaming: false,
                         nav_disabled: false,
                         menu_open: false,
@@ -3374,12 +3689,13 @@ mod tests {
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
             let on_pin = use_callback(|_: (String, bool)| {});
             let on_replace = use_callback(|_: Session| {});
-            let on_confirm_replace = use_callback(|_: Session| {});
-            let on_cancel_replace = use_callback(|_: String| {});
+            let on_confirm_replace = use_callback(|_: (Session, ConfirmToken<RowQuestion>)| {});
+            let on_cancel_replace = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
             let on_stop = use_callback(|_: String| {});
             let on_delete = use_callback(|_: DeleteTarget| {});
-            let on_confirm_delete = use_callback(|_: (String, crate::DeleteGuard)| {});
-            let on_cancel_delete = use_callback(|_: String| {});
+            let on_confirm_delete =
+                use_callback(|_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {});
+            let on_cancel_delete = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});
             let on_bell_toggle = use_callback(|_: (String, u64, u64)| {});
@@ -3399,8 +3715,7 @@ mod tests {
                         state: RowState {
                             error: None,
                             busy: false,
-                            confirming: false,
-                            confirming_replace: false,
+                            question: None,
                             renaming: false,
                             nav_disabled: false,
                             menu_open: false,
@@ -3506,8 +3821,7 @@ mod tests {
                     state: RowState {
                         error: None,
                         busy: false,
-                        confirming: false,
-                        confirming_replace: false,
+                        question: None,
                         renaming: false,
                         nav_disabled: false,
                         menu_open: false,
@@ -3527,12 +3841,12 @@ mod tests {
                     on_mark_seen: |_: (String, Option<i64>)| {},
                     on_pin: |_: (String, bool)| {},
                     on_replace: |_: Session| {},
-                    on_confirm_replace: |_: Session| {},
-                    on_cancel_replace: |_: String| {},
+                    on_confirm_replace: |_: (Session, ConfirmToken<RowQuestion>)| {},
+                    on_cancel_replace: |_: (String, ConfirmToken<RowQuestion>)| {},
                     on_stop: |_: String| {},
                     on_delete: |_: DeleteTarget| {},
-                    on_confirm_delete: |_: (String, crate::DeleteGuard)| {},
-                    on_cancel_delete: |_: String| {},
+                    on_confirm_delete: |_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {},
+                    on_cancel_delete: |_: (String, ConfirmToken<RowQuestion>)| {},
                     on_rename_start: |_: (String, String)| {},
                     on_menu_toggle: |_: String| {},
                     on_bell_toggle: |_: (String, u64, u64)| {},

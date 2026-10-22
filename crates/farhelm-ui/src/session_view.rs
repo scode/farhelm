@@ -1646,7 +1646,7 @@ pub(crate) fn SessionView(
     let close_session_id = session.id.raw().to_owned();
     let mut do_close_tab = move |tab_id: String| {
         // Re-entry guard on the per-tab in-flight set, mirroring
-        // `ListView`'s `RowPhase::Pending`: `insert` returning `false` means a close
+        // `ListView`'s `row_pending`: `insert` returning `false` means a close
         // for this tab is already running.
         if !closing_tabs.write().insert(tab_id.clone()) {
             return;
