@@ -15,6 +15,7 @@ use crate::list::SharedPreferences;
 use crate::modal_dialog::{
     DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
 };
+use crate::ops::{ConfirmSlot, ConfirmToken, use_confirm_slot};
 use crate::peer::display_peer;
 use crate::reader::{SurfaceReader, Trigger, request_read};
 
@@ -25,24 +26,44 @@ const SETTINGS: &str = ".app-settings-dialog[role=\"dialog\"]";
 const SETTINGS_DIALOG: DialogHandle = DialogHandle::new(SETTINGS);
 
 /// The action's lifetime follows its source, rather than the selected pane alone.
-#[derive(Clone)]
+///
+/// Also the key of the security warning's [`ConfirmSlot`], where it records
+/// which source's action an opening's Allow completes. It does not decide
+/// which showing an answer reaches: the slot's token check compares whole
+/// tokens, and the opening number alone already tells showings apart.
+/// `PartialEq` is there because that check compares the key too.
+///
+/// NOTE: The derived equality compares every field, so for a card it
+/// includes the expiry, host name and session details. It is not the
+/// liveness check: [`TunnelController::current`] and
+/// [`TunnelController::observe_cards`] match a card by request id, host,
+/// session id and action only.
+#[derive(Clone, PartialEq, Debug)]
 enum Source {
     Terminal { session: String, generation: u64 },
     Card(Box<PendingApproval>),
     Settings,
 }
 
-/// A warning owns only its result; the caller retains the intent until acceptance.
-struct Warning {
-    source: Source,
-    result: oneshot::Sender<Result<bool, String>>,
-}
+/// The shared security warning: at most one opening, keyed by the [`Source`]
+/// whose action waits on it, holding the sender that tells that action's
+/// preparation whether the user allowed tunnels.
+///
+/// A warning owns only its result; the caller retains the intent until
+/// acceptance. Dropping the sender (a reconciliation `clear`, or the slot
+/// going away) reads as "not allowed" to the waiting preparation, exactly
+/// like sending `Ok(false)`, because it awaits with `unwrap_or(Ok(false))`.
+type WarningSlot = ConfirmSlot<Source, oneshot::Sender<Result<bool, String>>>;
+
+/// One showing of the security warning, as the render that drew its Allow,
+/// Cancel and Escape captured it.
+type WarningToken = ConfirmToken<Source>;
 
 /// Page-owned controller, provided above both cards and keyed session views.
 #[derive(Clone, Copy)]
 pub(crate) struct TunnelController {
     busy: Signal<bool>,
-    warning: Signal<Option<Warning>>,
+    warning: WarningSlot,
     saving: Signal<bool>,
     view: Signal<Option<(String, u64)>>,
     next_view: Signal<u64>,
@@ -54,33 +75,39 @@ pub(crate) struct TunnelController {
 /// Install context in the preferences gate so it survives selection changes.
 pub(crate) fn use_controller() {
     let preferences = use_context::<SharedPreferences>();
-    use_context_provider(|| TunnelController {
-        busy: Signal::new(false),
-        warning: Signal::new(None),
-        saving: Signal::new(false),
-        view: Signal::new(None),
-        next_view: Signal::new(0),
-        revision: Signal::new(0),
-        notice: Signal::new(None),
-        preferences,
-    });
+    let warning = use_confirm_slot();
+    use_context_provider(|| TunnelController::new(warning, preferences));
 }
 
 impl TunnelController {
+    /// A controller with no action, warning or save in flight. Creates its
+    /// signals in the calling scope, so call it once per owner: from
+    /// [`use_controller`]'s provider, or from a test's hook.
+    fn new(warning: WarningSlot, preferences: SharedPreferences) -> Self {
+        Self {
+            busy: Signal::new(false),
+            warning,
+            saving: Signal::new(false),
+            view: Signal::new(None),
+            next_view: Signal::new(0),
+            revision: Signal::new(0),
+            notice: Signal::new(None),
+            preferences,
+        }
+    }
+
     /// A newly selected view supersedes earlier terminal intents immediately.
     /// Clear the old view before cancelling its modal, so focus cannot return to it.
     fn enter_view(mut self, session: &str) -> u64 {
         self.view.set(None);
         let terminal_warning = self
             .warning
-            .peek()
-            .as_ref()
-            .is_some_and(|warning| matches!(warning.source, Source::Terminal { .. }));
-        // Once Allow starts saving, keep this claim until that save completes.
-        // Retiring its source still suppresses the eventual open, but releasing
-        // the claim here would let its completion consume a newer warning.
-        if terminal_warning && !*self.saving.peek() {
-            self.finish_warning(Ok(false));
+            .peek_key()
+            .is_some_and(|source| matches!(source, Source::Terminal { .. }));
+        // An accepted warning whose save is still running survives this;
+        // `retire_warning` explains why that still suppresses the open.
+        if terminal_warning {
+            self.retire_warning();
         }
         let generation = self.next_view.peek().wrapping_add(1);
         self.next_view.set(generation);
@@ -97,10 +124,10 @@ impl TunnelController {
             .is_some_and(|(_, current)| *current == generation)
         {
             self.view.set(None);
-            if !*self.saving.peek() && self.warning.peek().as_ref().is_some_and(|warning|
-                matches!(warning.source, Source::Terminal { generation: own, .. } if own == generation))
+            if self.warning.peek_key().is_some_and(|source|
+                matches!(source, Source::Terminal { generation: own, .. } if own == generation))
             {
-                self.finish_warning(Ok(false));
+                self.retire_warning();
             }
         }
     }
@@ -165,10 +192,9 @@ impl TunnelController {
         }
         if !consent {
             let (tx, rx) = oneshot::channel();
-            self.warning.set(Some(Warning {
-                source: source.clone(),
-                result: tx,
-            }));
+            // The returned token is dropped: the dialog's render reads the
+            // opening back with `current` and hands it to its answers.
+            self.warning.open(source.clone(), tx);
             if !rx.await.unwrap_or(Ok(false))? {
                 return Ok(false);
             }
@@ -188,8 +214,8 @@ impl TunnelController {
     /// The existing card reader supplies both feed and fallback expiry observations.
     /// Do not add a second fleet-wide polling surface for an open warning.
     pub(crate) fn observe_cards(self, cards: &[PendingApproval]) {
-        let vanished = self.warning.peek().as_ref().is_some_and(|warning| {
-            if let Source::Card(card) = &warning.source {
+        let vanished = self.warning.peek_key().is_some_and(|source| {
+            if let Source::Card(card) = &source {
                 !cards.iter().any(|live| {
                     live.id == card.id
                         && live.host_id == card.host_id
@@ -200,8 +226,8 @@ impl TunnelController {
                 false
             }
         });
-        if vanished && !*self.saving.peek() {
-            self.finish_warning(Ok(false));
+        if vanished {
+            self.retire_warning();
         }
     }
 
@@ -246,33 +272,96 @@ impl TunnelController {
         self.revision.set(revision);
     }
 
-    /// The accepted warning retains busy ownership through its save, even if
-    /// its source disappears. Preparation rechecks that source before opening.
-    fn finish_save(mut self, result: Result<bool, String>) {
-        self.saving.set(false);
-        self.finish_warning(result);
+    /// Accept an Allow drawn for `shown`, returning the source whose action
+    /// the save completes: the one that showing was opened for, never
+    /// whichever warning is open when the click runs.
+    ///
+    /// Refused (`None`, nothing changed) while an accepted save is running,
+    /// so a second Allow from the same burst starts no second save, and when
+    /// `shown` is no longer the open showing (cancelled, retired or replaced
+    /// since its render), so a stale Allow neither saves consent nor lets
+    /// another source's action proceed, and leaves the warning now on screen
+    /// as it is.
+    ///
+    /// Accepting does not consume the opening. The dialog stays up, its
+    /// buttons disabled, through the consent write, and [`Self::finish_save`]
+    /// retires the opening with that write's outcome. This is the
+    /// stay-up-through-the-request exception `ConfirmSlot`'s docs describe;
+    /// `saving` is what keeps a second answer from starting a second save,
+    /// and what makes Cancel, Escape and reconciliation leave the accepted
+    /// opening alone meanwhile.
+    fn accept_warning(mut self, shown: &WarningToken) -> Option<Source> {
+        if *self.saving.peek() || !self.warning.is_current(shown) {
+            return None;
+        }
+        self.saving.set(true);
+        Some(shown.key().clone())
     }
 
-    /// Release the owned warning before retiring its result and returning focus.
+    /// The accepted warning retains busy ownership through its save, even if
+    /// its source disappears. Preparation rechecks that source before opening.
+    /// `shown` is the token [`Self::accept_warning`] accepted; the outcome goes
+    /// to that opening's preparation.
+    fn finish_save(mut self, shown: &WarningToken, result: Result<bool, String>) {
+        self.saving.set(false);
+        self.finish_warning(shown, result);
+    }
+
+    /// Answer the showing `shown` names with `result`, then close the dialog:
+    /// Cancel and Escape (`Ok(false)`) and a finished save. Does nothing when
+    /// `shown` is no longer the open showing, so a dismissal drawn for an
+    /// earlier showing cannot close, or move focus out of, the warning now on
+    /// screen.
     ///
+    /// Release the owned warning before retiring its result and returning focus.
     /// Preparation retains ownership of the original action, so result delivery
-    /// still precedes the framed return. Settings restoration and source focus
-    /// remain framed so the closing render can remove the child first.
-    fn finish_warning(mut self, result: Result<bool, String>) {
+    /// still precedes the framed return.
+    fn finish_warning(mut self, shown: &WarningToken, result: Result<bool, String>) {
         // A queued Cancel can arrive after Allow starts saving but before DOM
         // disabling renders. Only finish_save may retire that accepted warning.
-        if *self.saving.peek() {
-            return;
-        }
-        if self.warning.peek().is_none() {
+        if *self.saving.peek() || !self.warning.is_current(shown) {
             return;
         }
         DIALOG.release();
-        let Some(warning) = self.warning.write().take() else {
+        let Some(reply) = self.warning.take(shown) else {
             return;
         };
-        let source = warning.source;
-        let _ = warning.result.send(result);
+        let _ = reply.send(result);
+        self.close_dialog(shown.key());
+    }
+
+    /// Reconciliation: close whatever warning is open because its source went
+    /// away (its terminal view left or was superseded, its card expired).
+    /// Callers decide from [`ConfirmSlot::peek_key`] that the open warning is
+    /// the one to retire; this is never an answer, which is why it takes no
+    /// token.
+    ///
+    /// Leaves an accepted warning alone while its save runs, so callers need
+    /// not check `saving` themselves. Once Allow starts saving, the warning
+    /// stays up until that save completes, so its outcome (a failed write
+    /// included, which the preparation reports) reaches the opening that was
+    /// answered. Skipping retirement does not let a gone source's action run:
+    /// preparation rechecks the source after the warning.
+    ///
+    /// The preparation waiting on the warning sees "not allowed": the slot's
+    /// `clear` drops its result sender (see [`WarningSlot`]).
+    fn retire_warning(mut self) {
+        if *self.saving.peek() {
+            return;
+        }
+        let Some(source) = self.warning.peek_key() else {
+            return;
+        };
+        DIALOG.release();
+        self.warning.clear();
+        self.close_dialog(&source);
+    }
+
+    /// Return focus after the warning for `source` closed.
+    ///
+    /// Settings restoration and source focus remain framed so the closing
+    /// render can remove the child first.
+    fn close_dialog(self, source: &Source) {
         // Settings resumes isolation before taking focus. Terminal and card
         // returns below remain separate frame submissions, in their original
         // order, because their source lifetime chooses a different destination.
@@ -282,7 +371,7 @@ impl TunnelController {
         ",
             settings = serde_json::to_string(SETTINGS).unwrap(),
             install = SETTINGS_DIALOG.isolation_script(Some(".app-settings-close"))));
-        if matches!(&source, Source::Terminal { session, generation }
+        if matches!(source, Source::Terminal { session, generation }
             if self.view.peek().as_ref().is_some_and(|(active, epoch)| active == session && epoch == generation))
         {
             document::eval(
@@ -352,7 +441,11 @@ pub(crate) fn TunnelControls() -> Element {
     use_drop(move || {
         document::eval("delete window.farhelmTunnelOpen;");
     });
-    let pending = controller.warning.read().is_some();
+    // The dialog draws the opening this render read and moves that token into
+    // Escape, Cancel and Allow, so each answer names the showing it was drawn
+    // for. The text is the same for every source; the token's source decides
+    // which action an Allow lets proceed.
+    let shown = controller.warning.current();
     rsx! {
         if let Some(error) = controller.notice.read().as_ref() {
             div { class: "tunnel-error-notice", role: "alert",
@@ -360,7 +453,7 @@ pub(crate) fn TunnelControls() -> Element {
                 button { r#type: "button", class: "btn btn-neutral", onclick: move |_| controller.notice.set(None), "dismiss" }
             }
         }
-        if pending {
+        if let Some(shown) = shown {
             div { class: "host-settings-backdrop tunnel-consent-backdrop", role: "presentation",
                 ModalDialog {
                     handle: DIALOG,
@@ -368,9 +461,12 @@ pub(crate) fn TunnelControls() -> Element {
                     focus: DialogFocus::remembered(".tunnel-cancel", Some(".tunnel-cancel"), false, Some(".tunnel-allow")),
                     class: "tunnel-consent-dialog host-dialog-framed", role: "dialog", aria_modal: "true",
                     aria_labelledby: "tunnel-consent-heading", tabindex: "-1",
-                    on_escape: move |event: KeyboardEvent| {
-                        if !event.is_composing() && !*controller.saving.peek() {
-                            event.stop_propagation(); controller.finish_warning(Ok(false));
+                    on_escape: {
+                        let shown = shown.clone();
+                        move |event: KeyboardEvent| {
+                            if !event.is_composing() && !*controller.saving.peek() {
+                                event.stop_propagation(); controller.finish_warning(&shown, Ok(false));
+                            }
                         }
                     },
                     ScrollRegion { class: "host-settings-body",
@@ -386,26 +482,28 @@ pub(crate) fn TunnelControls() -> Element {
                         p { "Allow this only for remote pages you trust. You can turn tunnels off in Settings, which closes every open tunnel." }
                         div { class: "approval-card-actions",
                             button { r#type: "button", class: "btn btn-neutral tunnel-cancel", disabled: (controller.saving)(),
-                                onclick: move |_| controller.finish_warning(Ok(false)), "Cancel" }
+                                onclick: {
+                                    let shown = shown.clone();
+                                    move |_| controller.finish_warning(&shown, Ok(false))
+                                }, "Cancel" }
                             button { r#type: "button", class: "btn btn-primary tunnel-allow", disabled: (controller.saving)(),
-                                onclick: move |_| {
-                                    if *controller.saving.peek() { return; }
-                                    controller.saving.set(true);
-                                    let source = controller.warning.peek().as_ref().map(|warning| warning.source.clone());
-                                    let base = base.clone();
-                                    spawn(async move {
-                                        let result = match source {
-                                            Some(source) => match controller.current(&base, &source).await {
+                                onclick: {
+                                    let shown = shown.clone();
+                                    move |_| {
+                                        let Some(source) = controller.accept_warning(&shown) else { return; };
+                                        let base = base.clone();
+                                        let shown = shown.clone();
+                                        spawn(async move {
+                                            let result = match controller.current(&base, &source).await {
                                                 Ok(true) => api::write_tunnel_consent(&base, true).await.map(|()| {
                                                     controller.preferences.0.write().tunnel_consent = Some(true); true
                                                 }),
                                                 Ok(false) => Ok(false),
                                                 Err(error) => Err(error),
-                                            },
-                                            None => Ok(false),
-                                        };
-                                        controller.finish_save(result);
-                                    });
+                                            };
+                                            controller.finish_save(&shown, result);
+                                        });
+                                    }
                                 }, "Allow tunnels" }
                         }
                     }
@@ -587,80 +685,257 @@ mod tests {
     use std::future::Future;
     use std::task::{Context, Poll, Waker};
 
+    /// Run `body` against a fresh controller mounted in a probe component.
+    ///
+    /// The warning slot has to come from a hook, so a probe builds the
+    /// controller on its first render and hands it out through a
+    /// thread-local. `body` then runs after the render, inside the probe's
+    /// scope, because the dialog helpers the controller calls on close
+    /// (`DIALOG.release`, `document::eval`) need a current scope.
+    ///
+    /// NOTE: `body` must not run inside the render itself. Dioxus catches a
+    /// panic in a component's render and turns it into an error for the
+    /// nearest boundary, so a failed assertion there prints its message and
+    /// the test still passes. An earlier version of this helper did exactly
+    /// that, which a deliberately broken preparation showed.
+    fn with_controller(body: fn(TunnelController)) {
+        std::thread_local! {
+            static CONTROLLER: std::cell::Cell<Option<TunnelController>> =
+                const { std::cell::Cell::new(None) };
+        }
+
+        fn probe() -> Element {
+            let warning = use_confirm_slot();
+            use_hook(|| {
+                let controller = TunnelController::new(
+                    warning,
+                    SharedPreferences(Signal::new(api::Preferences::default())),
+                );
+                CONTROLLER.with(|cell| cell.set(Some(controller)));
+            });
+            rsx! {}
+        }
+
+        let mut dom = VirtualDom::new(probe);
+        dom.rebuild_in_place();
+        let controller = CONTROLLER
+            .with(std::cell::Cell::take)
+            .expect("the probe mounted its controller");
+        dom.in_scope(dioxus::core::ScopeId::APP, || body(controller));
+    }
+
     /// Host/view retirement during an accepted save must keep the original
     /// warning's action claim. A second intent cannot replace that warning,
     /// and the original intent must be stale when the save finally settles.
     #[test]
     fn source_retirement_cannot_replace_a_warning_with_an_unfinished_save() {
-        fn probe() -> Element {
-            use_hook(|| {
-                for leave in [true, false] {
-                    let mut controller = TunnelController {
-                        busy: Signal::new(false),
-                        warning: Signal::new(None),
-                        saving: Signal::new(false),
-                        view: Signal::new(None),
-                        next_view: Signal::new(0),
-                        revision: Signal::new(0),
-                        notice: Signal::new(None),
-                        preferences: SharedPreferences(Signal::new(api::Preferences::default())),
-                    };
-                    let generation = controller.enter_view("old-session");
-                    let source = Source::Terminal {
-                        session: "old-session".into(),
-                        generation,
-                    };
-                    let (result, mut pending) = oneshot::channel();
-                    controller.warning.set(Some(Warning {
-                        source: source.clone(),
-                        result,
-                    }));
-                    controller.busy.set(true);
-                    controller.saving.set(true);
-                    // Model a Cancel already queued when Allow disabled the
-                    // controls; the live claim must win over stale DOM state.
-                    controller.finish_warning(Ok(false));
-                    if leave {
-                        controller.leave_view(generation);
-                    } else {
-                        controller.enter_view("new-session");
-                    }
-                    assert_eq!(
-                        pending.try_recv().unwrap(),
-                        None,
-                        "retirement must not release the accepted warning"
-                    );
-                    assert!(*controller.busy.peek());
-                    let mut competing = Box::pin(controller.prepare("unused", Source::Settings));
-                    let mut context = Context::from_waker(Waker::noop());
-                    assert!(
-                        matches!(competing.as_mut().poll(&mut context), Poll::Ready(Err(_))),
-                        "an unfinished save must exclude a second intent"
-                    );
-                    drop(competing);
-                    assert!(controller.warning.peek().is_some());
+        with_controller(|controller| retire_during_save(controller, true));
+        with_controller(|controller| retire_during_save(controller, false));
+    }
 
-                    // This is the actual callback's completion path. The HTTP
-                    // result is controlled here at its unresolved-save boundary.
-                    controller.finish_save(Ok(true));
-                    assert_eq!(pending.try_recv().unwrap(), Some(Ok(true)));
-                    assert!(controller.warning.peek().is_none());
-                    assert!(!*controller.saving.peek());
-                    let mut current = Box::pin(controller.current("unused", &source));
-                    assert!(
-                        matches!(current.as_mut().poll(&mut context), Poll::Ready(Ok(false))),
-                        "the retired terminal must not continue after a successful save"
-                    );
-                    drop(current);
-                    controller.complete();
-                    assert!(
-                        !*controller.busy.peek(),
-                        "completion must leave later intents usable"
-                    );
-                }
-            });
-            rsx! {}
+    /// One case of the test above: the terminal view leaves (`leave`) or is
+    /// superseded by another session's view while the accepted save runs.
+    fn retire_during_save(mut controller: TunnelController, leave: bool) {
+        let generation = controller.enter_view("old-session");
+        let source = Source::Terminal {
+            session: "old-session".into(),
+            generation,
+        };
+        let (result, mut pending) = oneshot::channel();
+        let shown = controller.warning.open(source.clone(), result);
+        controller.busy.set(true);
+        assert_eq!(controller.accept_warning(&shown), Some(source.clone()));
+        // Model a Cancel already queued when Allow disabled the
+        // controls; the live claim must win over stale DOM state.
+        controller.finish_warning(&shown, Ok(false));
+        if leave {
+            controller.leave_view(generation);
+        } else {
+            controller.enter_view("new-session");
         }
-        VirtualDom::new(probe).rebuild_in_place();
+        assert_eq!(
+            pending.try_recv().unwrap(),
+            None,
+            "retirement must not release the accepted warning"
+        );
+        assert!(*controller.busy.peek());
+        let mut competing = Box::pin(controller.prepare("unused", Source::Settings));
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(
+            matches!(competing.as_mut().poll(&mut context), Poll::Ready(Err(_))),
+            "an unfinished save must exclude a second intent"
+        );
+        drop(competing);
+        assert!(controller.warning.is_current(&shown));
+
+        // This is the actual callback's completion path. The HTTP
+        // result is controlled here at its unresolved-save boundary.
+        controller.finish_save(&shown, Ok(true));
+        assert_eq!(pending.try_recv().unwrap(), Some(Ok(true)));
+        assert!(controller.warning.peek_key().is_none());
+        assert!(!*controller.saving.peek());
+        let mut current = Box::pin(controller.current("unused", &source));
+        assert!(
+            matches!(current.as_mut().poll(&mut context), Poll::Ready(Ok(false))),
+            "the retired terminal must not continue after a successful save"
+        );
+        drop(current);
+        controller.complete();
+        assert!(
+            !*controller.busy.peek(),
+            "completion must leave later intents usable"
+        );
+    }
+
+    /// Spec (`accept_warning`, `finish_save`): an Allow acts only for the
+    /// showing its render drew. Drawn for a warning since dismissed, it
+    /// starts no save, does not mark the dialog saving, and leaves the
+    /// warning now open (another source's) as it is. The current showing's
+    /// Allow completes the source that showing was opened for, a second
+    /// Allow from the same burst is refused while the save runs, and the
+    /// save's outcome goes to that opening's own preparation.
+    ///
+    /// Why: the warning text is the same for every source, so a click drawn
+    /// for one terminal link's warning that read the open warning at click
+    /// time, as this handler once did, would write consent and let a
+    /// different link, card or Settings action proceed that the user never
+    /// answered.
+    #[farhelm_testtrace::test]
+    fn a_stale_allow_lets_no_other_source_proceed() {
+        with_controller(|mut controller| {
+            let generation = controller.enter_view("first-session");
+            let first_source = Source::Terminal {
+                session: "first-session".into(),
+                generation,
+            };
+            let (first_result, mut first) = oneshot::channel();
+            let drawn = controller.warning.open(first_source, first_result);
+            controller.finish_warning(&drawn, Ok(false));
+            assert_eq!(first.try_recv().unwrap(), Some(Ok(false)));
+
+            let (second_result, mut second) = oneshot::channel();
+            let open = controller.warning.open(Source::Settings, second_result);
+            assert_eq!(controller.accept_warning(&drawn), None);
+            // Checked right after the refusal: the old handler marked the
+            // dialog saving before it looked at the warning and cleared the
+            // mark only when its spawned task finished, so "never claimed"
+            // shows here as `false`, where "claimed and later released" would
+            // still read `true`.
+            assert!(!*controller.saving.peek(), "a stale Allow claims no save");
+            assert!(
+                controller.warning.is_current(&open),
+                "the open warning stays"
+            );
+            assert_eq!(second.try_recv().unwrap(), None);
+
+            assert_eq!(controller.accept_warning(&open), Some(Source::Settings));
+            assert_eq!(
+                controller.accept_warning(&open),
+                None,
+                "a second Allow starts no second save"
+            );
+            assert!(
+                controller.warning.is_current(&open),
+                "the dialog stays up through the save"
+            );
+            controller.finish_save(&open, Ok(true));
+            assert_eq!(second.try_recv().unwrap(), Some(Ok(true)));
+            assert!(controller.warning.peek_key().is_none());
+            assert!(!*controller.saving.peek());
+        });
+    }
+
+    /// Spec (`finish_warning`, `retire_warning`): Cancel and Escape close the
+    /// warning only for the showing they were drawn for; one drawn for a
+    /// showing that reconciliation already retired leaves the next warning
+    /// open with its preparation still waiting. Retirement drops the retired
+    /// opening's result sender; how a real preparation reads that drop is
+    /// `a_retired_warning_answers_its_action_not_allowed`'s job.
+    ///
+    /// Why: a dismissal that read the open warning at click time would
+    /// cancel, and pull focus out of, a warning for another action the user
+    /// has not seen yet.
+    #[farhelm_testtrace::test]
+    fn a_stale_dismissal_leaves_the_open_warning() {
+        with_controller(|mut controller| {
+            let generation = controller.enter_view("left-session");
+            let (first_result, mut first) = oneshot::channel();
+            let drawn = controller.warning.open(
+                Source::Terminal {
+                    session: "left-session".into(),
+                    generation,
+                },
+                first_result,
+            );
+            controller.leave_view(generation);
+            assert!(
+                first.try_recv().is_err(),
+                "retirement drops the retired opening's sender"
+            );
+
+            let (second_result, mut second) = oneshot::channel();
+            let open = controller.warning.open(Source::Settings, second_result);
+            controller.finish_warning(&drawn, Ok(false));
+            assert!(
+                controller.warning.is_current(&open),
+                "the open warning stays"
+            );
+            assert_eq!(second.try_recv().unwrap(), None);
+
+            controller.finish_warning(&open, Ok(false));
+            assert_eq!(second.try_recv().unwrap(), Some(Ok(false)));
+            assert!(controller.warning.peek_key().is_none());
+        });
+    }
+
+    /// Spec (`retire_warning`, `prepare`): retiring the open warning ends the
+    /// action waiting on it with `Ok(false)`, "not allowed" and no error, and
+    /// releases the controller so the next tunnel action is admitted.
+    ///
+    /// Why: retirement has no token to answer with, so it does not send a
+    /// result; it drops the opening's sender, and only the preparation's
+    /// `unwrap_or(Ok(false))` turns that into "not allowed". If a cancelled
+    /// channel ever mapped to an error instead, every retired warning would
+    /// raise an error notice, and if it never resolved, the controller would
+    /// stay claimed and refuse every later tunnel action.
+    #[farhelm_testtrace::test]
+    fn a_retired_warning_answers_its_action_not_allowed() {
+        with_controller(|controller| {
+            // The Settings source is used because its preparation makes no
+            // request and reaches the warning on the first poll; the test
+            // runs no helm. Real callers never retire a Settings warning, so
+            // this exercises the waiter's reading of a dropped sender, not
+            // which sources reconciliation retires.
+            let mut context = Context::from_waker(Waker::noop());
+            let mut waiting = Box::pin(controller.prepare("unused", Source::Settings));
+            assert!(
+                waiting.as_mut().poll(&mut context).is_pending(),
+                "the action waits on the warning"
+            );
+            assert_eq!(controller.warning.peek_key(), Some(Source::Settings));
+            assert!(*controller.busy.peek());
+
+            controller.retire_warning();
+            assert!(controller.warning.peek_key().is_none());
+            assert!(
+                matches!(waiting.as_mut().poll(&mut context), Poll::Ready(Ok(false))),
+                "the waiting action reads retirement as not allowed"
+            );
+            drop(waiting);
+            assert!(
+                !*controller.busy.peek(),
+                "the retired action releases its claim"
+            );
+
+            // A still-claimed controller answers this with
+            // `Poll::Ready(Err(_))` ("another tunnel action is still
+            // waiting"); an admitted action reaches its own warning instead.
+            let mut next = Box::pin(controller.prepare("unused", Source::Settings));
+            assert!(
+                next.as_mut().poll(&mut context).is_pending(),
+                "the next action is admitted"
+            );
+            assert_eq!(controller.warning.peek_key(), Some(Source::Settings));
+        });
     }
 }
