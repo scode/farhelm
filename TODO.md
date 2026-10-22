@@ -33,6 +33,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- Allow aliasing hosts in add host flow
+
 - Initial version of agent2agent comms.
 
 - **Sweep out browser sign-in and failed-save preservation.** Decided 2026-10-22 (SPEC.md, "Signing in again" and the
