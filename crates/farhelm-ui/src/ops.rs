@@ -168,7 +168,8 @@ impl PaneGate {
     ///
     /// The only way the session view claims the token: the guard is held by
     /// a [`ConfirmSlot`] while a prompt is open, by the view's own claim slot
-    /// while a Restart is pending, or by the task a confirmation starts. Each
+    /// while a Restart is pending (a confirmed Restart prompt hands its claim
+    /// there), or by the task a confirmation starts. Each
     /// of those is dropped with the view, so no claim can outlive it. There
     /// is deliberately no bare `claim`/`release` pair here: a hand-released
     /// claim is exactly what used to strand the token when the view unmounted
@@ -339,7 +340,8 @@ impl<K> ConfirmToken<K> {
 ///   nothing.
 /// - The payload is what the confirmation owns. For the lifecycle prompts it
 ///   is the [`OpGuard`] claimed when the prompt opened: it lives in the slot
-///   while the prompt is open, moves into the confirmed task on `take`, and
+///   while the prompt is open, moves on `take` into whatever the confirmation
+///   runs (the confirmed task, or the session view's shared Restart claim), and
 ///   is dropped (releasing the lock) by cancel, by [`Self::clear`], by
 ///   replacement, or by the slot itself going away with its component. No
 ///   handler releases the lock by hand, so none can release someone else's.
@@ -382,7 +384,7 @@ impl<K, P> SlotState<K, P> {
 /// The last opening number handed out, shared by every slot and every lane
 /// in the process: [`ConfirmSlot::open`] and [`ConfirmSlots::open`] both
 /// mint through [`open_in`]. One counter rather than one per slot, so tokens
-/// from two slots with the same key type (the session view keeps two
+/// from two slots with the same key type (the session view keeps several
 /// `ConfirmSlot<(), OpGuard>` apart on purpose), or from two lanes of one
 /// [`ConfirmSlots`], can never be equal, and a token passed to the wrong
 /// slot or lane matches nothing.
