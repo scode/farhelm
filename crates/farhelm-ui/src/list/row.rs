@@ -8,6 +8,8 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
+use crate::anchored_popovers::{Registration, use_anchor_binding};
+
 use crate::icons::{
     EndedGlyph, EndedStatusIcon, HarnessGlyph, HarnessIcon, ManagedCheckoutMark, PermissionGlyph,
     PermissionIcon, QualifierGlyph, QualifierIcon,
@@ -895,6 +897,13 @@ pub(super) fn SessionRow(
     /// The identity row never changes, so compactness cannot hide status,
     /// locality, or the menu target a keyboard user needs to reach.
     compact: bool,
+    /// Stable root registrations supply existing closers; the row contributes
+    /// only its scoped measurement lifetime for new content-movement reports.
+    menu_registration: Registration,
+    bell_registration: Registration,
+    /// Untracked live listing success excludes retained root slots while row
+    /// DOM is absent, including before teardown and before recovery mount.
+    listing_ready: Callback<(), bool>,
     on_open: EventHandler<Session>,
     /// The "clone" menu item's click: hands the row's own `Session` up so
     /// `ListView` can seed a fresh create form from it
@@ -1256,6 +1265,13 @@ pub(super) fn SessionRow(
     // without this counter the OLDER one finishing LAST would silently
     // overwrite the newer, correct measurement with a stale one.
     let open_generation = use_signal(|| 0_u64);
+    // This lease follows the same measurement starts, including recovery;
+    // it neither owns placement nor changes the existing generation timing.
+    let bind_anchor = use_anchor_binding(
+        menu_registration,
+        session.id.raw().to_owned(),
+        listing_ready,
+    );
     // Shared by the toggle's `onclick` (every fresh open) and its
     // `onmounted` (healing a remount that lands with the menu ALREADY
     // open — see that handler's own doc for why that happens and why
@@ -1265,6 +1281,7 @@ pub(super) fn SessionRow(
     // capture-generation → query → classify-if-still-current sequence, so
     // this is the one place that sequence is written.
     let spawn_measurement = move || {
+        bind_anchor.call(());
         let handle = toggle_handle;
         let mut placement = placement;
         // Captured SYNCHRONOUSLY, before the `await` below yields — a
@@ -1806,6 +1823,8 @@ pub(super) fn SessionRow(
                 // doc. Only on rows whose session has notifications left.
                 if has_bell {
                     NotificationBell {
+                        registration: bell_registration,
+                        listing_ready,
                         session_id: session.id.raw().to_owned(),
                         title: session.title.clone(),
                         notifications: session.notifications.clone(),
@@ -2687,6 +2706,22 @@ mod tests {
 
     use super::*;
 
+    /// Supply stable real registration props for render/memoization fixtures.
+    /// Their root slots stay closed: these fixtures inspect markup without a
+    /// renderer measurement, while owner tests exercise admitted openings.
+    fn use_test_anchors() -> (Registration, Registration, Callback<(), bool>) {
+        use crate::anchored_popovers::{AnchorRegion, Interest, MovementOwner, use_registration};
+        let owner = use_hook(MovementOwner::default);
+        let menu = use_registration(
+            owner.clone(),
+            Interest::new(AnchorRegion::Sessions),
+            || None,
+            || {},
+        );
+        let bell = use_registration(owner, Interest::new(AnchorRegion::Sessions), || None, || {});
+        (menu, bell, use_callback(|()| true))
+    }
+
     /// The label describes the next action, and pins remain available when
     /// read/unread is absent (ended sessions and older peers).
     #[farhelm_testtrace::test]
@@ -2792,6 +2827,7 @@ mod tests {
         /// Inspecting mutation payloads keeps Rust debug escaping out of the proof.
         fn app() -> Element {
             let on_open = use_callback(|_: Session| {});
+            let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
             let on_clone = use_callback(|_: Session| {});
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
@@ -2816,6 +2852,9 @@ mod tests {
             };
             rsx! {
                 SessionRow {
+                    menu_registration: menu_registration.clone(),
+                    bell_registration: bell_registration.clone(),
+                    listing_ready,
                     session,
                     compact: false,
                     state: RowState {
@@ -3036,6 +3075,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn repeated_parent_refreshes_do_not_rerender_an_unchanged_row() {
         fn app() -> Element {
+            let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
             let on_open = use_callback(|_: Session| {});
             let on_clone = use_callback(|_: Session| {});
             let on_replace_with = use_callback(|_: Session| {});
@@ -3056,6 +3096,9 @@ mod tests {
             let session = row_specimen("session-1");
             rsx! {
                 SessionRow {
+                    menu_registration: menu_registration.clone(),
+                    bell_registration: bell_registration.clone(),
+                    listing_ready,
                     session,
                     compact: false,
                     state: RowState {
@@ -3152,10 +3195,14 @@ mod tests {
             let on_bell_close = use_callback(|_: String| {});
             let on_bell_clear = use_callback(|_: (String, u64)| {});
             let selected = SELECTED.with(|selected| selected.get());
+            let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
             rsx! {
                 for id in ["session-1", "session-2", "session-3"] {
                     SessionRow {
                         key: "{id}",
+                        menu_registration: menu_registration.clone(),
+                        bell_registration: bell_registration.clone(),
+                        listing_ready,
                         session: row_specimen(id),
                         compact: false,
                         state: RowState {
@@ -3235,6 +3282,7 @@ mod tests {
         fn app() -> Element {
             let (notifications, read_through, open) =
                 CASE.with(|case| case.borrow().clone()).expect("case set");
+            let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
             let session = Session {
                 notifications,
                 notifications_read_through: read_through,
@@ -3242,6 +3290,9 @@ mod tests {
             };
             rsx! {
                 SessionRow {
+                    menu_registration: menu_registration.clone(),
+                    bell_registration: bell_registration.clone(),
+                    listing_ready,
                     session,
                     compact: false,
                     state: RowState {

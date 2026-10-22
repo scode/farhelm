@@ -210,9 +210,10 @@ pub(crate) struct SharedPreferences(pub(crate) Signal<Preferences>);
 /// Shared app-wide, not local to the list, because a Replace deletes its
 /// source too, and a Replace can start from the session view or the create
 /// form as well as from the list; each sets this, and the list is where it
-/// is shown.
+/// is shown. Its shared setter reports changes to the in-flow band before
+/// publication, without clearing retained slots whose row DOM is absent.
 #[derive(Clone, Copy)]
-pub(crate) struct DeleteNotice(pub(crate) Signal<Option<String>>);
+pub(crate) struct DeleteNotice(pub(crate) Signal<Option<String>>, Callback<Option<String>>);
 
 /// One unresolved plain Replace, shared by every control on this page.
 /// The source is reserved before key minting so a late reply from an older
@@ -228,11 +229,39 @@ pub(crate) struct ReplaceIntent(pub(crate) Signal<Option<(String, Option<String>
 pub(crate) struct ReplaceYoloQuestions(pub(crate) Signal<HashSet<String>>);
 
 impl DeleteNotice {
+    /// Keep every Delete/Replace surface on the same synchronous publication
+    /// boundary. Initial retained state is a mount baseline, not an event.
+    pub(crate) fn new(mut value: Signal<Option<String>>, popovers: MovementOwner) -> Self {
+        let replace = Callback::new(move |next: Option<String>| {
+            let changed = {
+                let previous = value.peek();
+                previous.as_deref().map(crate::peer::display_peer)
+                    != next.as_deref().map(crate::peer::display_peer)
+            };
+            if changed {
+                popovers
+                    .capture_region(AnchorRegion::Sessions)
+                    .close_if_current();
+            }
+            // Same-value publications retain the original signal write, but
+            // introduce no new movement report. None still differs from Some
+            // empty text: the latter renders the band's dismiss control.
+            value.set(next);
+        });
+        Self(value, replace)
+    }
+
     /// Show `notice` when there is one; `None` leaves any earlier notice.
-    pub(crate) fn publish(mut self, notice: Option<String>) {
+    pub(crate) fn publish(self, notice: Option<String>) {
         if let Some(notice) = notice {
-            self.0.set(Some(notice));
+            self.1.call(Some(notice));
         }
+    }
+
+    /// Remove this in-flow band before its old coordinates can survive in a
+    /// session popover; host rows above the band are outside this report.
+    pub(crate) fn dismiss(self) {
+        self.1.call(None);
     }
 }
 
@@ -807,7 +836,7 @@ pub(crate) fn ListView(
     // peek readers preserve effect dependencies; no second open-state model
     // can lag a toggle or replay an earlier movement against a new opening.
     let popovers = use_context::<MovementOwner>();
-    use_registration(
+    let menu_registration = use_registration(
         popovers.clone(),
         Interest {
             direct_host_disclosure: true,
@@ -831,7 +860,7 @@ pub(crate) fn ListView(
             slot.set(None);
         },
     );
-    use_registration(
+    let bell_registration = use_registration(
         popovers.clone(),
         Interest::new(AnchorRegion::Sessions),
         move || bell_open.peek().as_ref().map(|open| open.id.clone()),
@@ -840,6 +869,9 @@ pub(crate) fn ListView(
             slot.set(None);
         },
     );
+    // Root open slots survive failed listings. New content reports also need
+    // the live success check and the row's scoped measurement binding.
+    let listing_ready = use_callback(move |()| matches!(listing.peek().as_ref(), Some(Ok(_))));
     // The read mark each list this page closed sent, by session id, so a
     // list reopened before the next listing arrives does not show the same
     // entries as new again. Failed writes release only their own current mark,
@@ -1347,8 +1379,12 @@ pub(crate) fn ListView(
             // Report displayed rows once, independently of popup kinds. The
             // outgoing listing borrow must end before closers or the final
             // listing write can run, preserving the old commit boundary.
-            let moved = {
+            let (moved, banner_changed) = {
                 let previous = listing_signal.peek();
+                let banner_changed = match previous.as_ref() {
+                    Some(Ok(previous)) => count_banner(previous) != count_banner(listing),
+                    _ => false,
+                };
                 let previous_sessions = match previous.as_ref() {
                     Some(Ok(prev)) => Some(prev.sessions.as_slice()),
                     _ => None,
@@ -1396,9 +1432,23 @@ pub(crate) fn ListView(
                         compact: !detail_lines_shown,
                     },
                 ));
-                moved
+                (moved, banner_changed)
             };
             listing_popovers.close_affected(&MovedRows::new(AnchorRegion::Sessions, moved));
+            // The count sentence and header actions can rewrap above every
+            // session anchor. Admission excludes retained Err/remount slots;
+            // this report stays synchronous before the original publication.
+            if banner_changed {
+                listing_popovers
+                    .capture_affected(&MovedRows::new(
+                        AnchorRegion::Sessions,
+                        listing
+                            .sessions
+                            .iter()
+                            .map(|session| session.id.raw().to_owned()),
+                    ))
+                    .close_if_current();
+            }
             // Still open: this listing's entries are what the list shows next.
             let still_shown = bell_open.peek().as_ref().and_then(|open| {
                 let newest = listing
@@ -2973,8 +3023,12 @@ pub(crate) fn ListView(
             try_release_order_hold();
         }
     };
+    let menu_opening_registration = menu_registration.clone();
     let toggle_menu = use_callback(move |id: String| {
         let currently = menu_open.peek().as_deref() == Some(id.as_str());
+        if !currently {
+            menu_opening_registration.forget_anchor();
+        }
         menu_open.set(if currently { None } else { Some(id) });
         // Opening a session row's menu must close whichever host row's menu
         // is open — see `HostsPanel`'s own "one row menu open, across BOTH
@@ -2988,6 +3042,7 @@ pub(crate) fn ListView(
     // other floating surface in the sidebar, or closes it when it is already
     // the open one (SPEC.md, Status).
     let toggle_read_sent = bell_read_sent.clone();
+    let bell_opening_registration = bell_registration.clone();
     let toggle_bell = use_callback(move |(id, read_through, newest): (String, u64, u64)| {
         let currently = bell_open.peek().as_ref().is_some_and(|open| open.id == id);
         if currently {
@@ -2997,6 +3052,7 @@ pub(crate) fn ListView(
         menu_open.set(None);
         host_menu_open.set(None);
         let sent = toggle_read_sent.borrow().get(&id).copied().unwrap_or(0);
+        bell_opening_registration.forget_anchor();
         bell_open.set(Some(OpenBell {
             id,
             read_through: read_through.max(sent),
@@ -4158,8 +4214,7 @@ pub(crate) fn ListView(
                     r#type: "button",
                     "data-tooltip": "dismiss: hide this notice",
                     onclick: move |_| {
-                        let mut slot = delete_notice.0;
-                        slot.set(None);
+                        delete_notice.dismiss();
                     },
                     "dismiss"
                 }
@@ -4307,6 +4362,9 @@ pub(crate) fn ListView(
                         ) {
                             SessionRow {
                                 key: "{session.id.raw()}",
+                                menu_registration: menu_registration.clone(),
+                                bell_registration: bell_registration.clone(),
+                                listing_ready,
                                 compact,
                                 pin_separator: pin_separator.as_deref() == Some(session.id.raw()),
                                 state: RowState {
@@ -4516,6 +4574,108 @@ fn listed_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every Delete/Replace publisher uses this real context setter. It must
+    /// report before replacing visible text, preserve None/same-display writes,
+    /// and treat construction with a retained notice as a mount baseline.
+    #[farhelm_testtrace::test]
+    fn delete_notice_reports_actual_display_changes_before_publication() {
+        use crate::anchored_popovers::Registration;
+        thread_local! {
+            static OWNER: RefCell<Option<MovementOwner>> = const { RefCell::new(None) };
+            static NOTICE: Cell<Option<DeleteNotice>> = const { Cell::new(None) };
+        }
+        fn app() -> Element {
+            let owner = OWNER.with(|owner| owner.borrow().clone().unwrap());
+            let value = use_signal(|| Some("retained".to_string()));
+            let notice = use_hook(move || DeleteNotice::new(value, owner));
+            NOTICE.with(|slot| slot.set(Some(notice)));
+            rsx! {}
+        }
+        /// Model a fresh root opening, followed by its existing measurement.
+        fn open(
+            registration: &Registration,
+            row: &RefCell<Option<String>>,
+            ready: Rc<Cell<bool>>,
+        ) -> crate::anchored_popovers::AnchorLease {
+            registration.forget_anchor();
+            *row.borrow_mut() = Some("target".into());
+            registration
+                .bind_anchor("target".into(), move || ready.get())
+                .unwrap()
+        }
+        let owner = MovementOwner::default();
+        let row = Rc::new(RefCell::new(None::<String>));
+        let observed = Rc::new(RefCell::new(Vec::<Option<String>>::new()));
+        let read_row = row.clone();
+        let close_row = row.clone();
+        let closed = observed.clone();
+        let registration = owner.register(
+            Interest::new(AnchorRegion::Sessions),
+            move || read_row.borrow().clone(),
+            move || {
+                let notice = NOTICE.with(|slot| slot.get().unwrap());
+                closed.borrow_mut().push(notice.0.peek().clone());
+                *close_row.borrow_mut() = None;
+            },
+        );
+        let ready = Rc::new(Cell::new(true));
+        let first = open(&registration, &row, ready.clone());
+        OWNER.with(|slot| *slot.borrow_mut() = Some(owner));
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        assert!(
+            observed.borrow().is_empty(),
+            "retained initial text is no event"
+        );
+        dom.in_runtime(|| {
+            let notice = NOTICE.with(|slot| slot.get().unwrap());
+            notice.publish(None);
+            notice.publish(Some("retained".into()));
+            assert!(observed.borrow().is_empty());
+            assert_eq!(notice.0.peek().as_deref(), Some("retained"));
+            notice.publish(Some("notice\u{202e}".into()));
+            assert_eq!(*observed.borrow(), [Some("retained".into())]);
+            assert_eq!(notice.0.peek().as_deref(), Some("notice\u{202e}"));
+            let second = open(&registration, &row, ready.clone());
+            drop(first);
+            notice.publish(Some("notice<U+202E>".into()));
+            assert_eq!(
+                observed.borrow().len(),
+                1,
+                "equal escaped display produces no report"
+            );
+            assert_eq!(
+                notice.0.peek().as_deref(),
+                Some("notice<U+202E>"),
+                "the original same-display write is retained"
+            );
+            notice.dismiss();
+            assert_eq!(
+                observed.borrow().last(),
+                Some(&Some("notice<U+202E>".into()))
+            );
+            assert!(notice.0.peek().is_none());
+            notice.dismiss();
+            assert_eq!(
+                observed.borrow().len(),
+                2,
+                "stale repeated dismiss is no movement"
+            );
+            let _third = open(&registration, &row, ready.clone());
+            drop(second);
+            ready.set(false);
+            notice.publish(Some("changed while listing failed".into()));
+            assert_eq!(
+                observed.borrow().len(),
+                2,
+                "Err root slot has no admitted DOM"
+            );
+        });
+        drop(dom);
+        NOTICE.with(|slot| slot.set(None));
+        OWNER.with(|slot| slot.borrow_mut().take());
+    }
 
     /// Upgraded helms must enable naming without a stored preference, while
     /// revealed New and an explicit opt-out each independently prevent it.

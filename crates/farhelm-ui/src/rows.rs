@@ -674,6 +674,9 @@ pub(crate) fn no_match_line(listing: &SessionListing) -> Option<&'static str> {
 /// carried the paged design's "the list changed while it was being read"
 /// note as its own text run; a whole-list reply cannot contradict itself,
 /// so there is nothing left for it to say.)
+/// Equality is the actual header contribution, including sentence/heading
+/// shape, so accepted listing commits can report possible header rewrapping.
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct CountBanner {
     /// The banner element's full class attribute — the variant is part of
     /// it (`truncation-banner` vs. `session-count`), and the stylesheet and
@@ -1665,6 +1668,32 @@ mod tests {
             omits_fleet_members: false,
             truncated,
         }
+    }
+
+    /// Header movement follows the banner the renderer consumes, rather than
+    /// arbitrary row changes or total alone. A new trailing row can change
+    /// that banner without changing an earlier anchor's row index.
+    #[farhelm_testtrace::test]
+    fn count_banner_equality_tracks_actual_header_contents() {
+        let nine = listing(9, 9, false);
+        let mut refreshed = listing(9, 9, false);
+        refreshed.sessions[0].title = "renamed without changing the count".into();
+        assert_eq!(count_banner(&nine), count_banner(&refreshed));
+        let ten = listing(10, 10, false);
+        assert_eq!(nine.sessions[0].id, ten.sessions[0].id);
+        assert_ne!(count_banner(&nine), count_banner(&ten));
+        assert_eq!(
+            count_banner(&nine).heading_parts(),
+            Some(("9", " sessions"))
+        );
+        assert_eq!(
+            count_banner(&ten).heading_parts(),
+            Some(("10", " sessions"))
+        );
+        let filtered = filtered_listing(9, 9, 10, false);
+        assert_ne!(count_banner(&ten), count_banner(&filtered));
+        assert!(count_banner(&filtered).heading_parts().is_none());
+        assert_ne!(count_banner(&ten), count_banner(&listing(10, 10, true)));
     }
 
     /// The same, for a request that carried a filter a PERSON applied:

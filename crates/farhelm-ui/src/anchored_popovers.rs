@@ -5,6 +5,10 @@
 //! invokes their idempotent closers at the reporting caller's own boundary.
 //! It keeps no movement history: an opening after a report measures the new
 //! layout and must never receive a replay of that earlier invalidation.
+//!
+//! New content reports additionally capture a weak row-local opening
+//! binding. That admission distinguishes retained root slots from mounted
+//! measurement lifetimes; it does not narrow any existing legacy dispatch.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -86,7 +90,46 @@ struct Entry {
     direct_host_disclosure: bool,
     current_row: Box<dyn Fn() -> Option<String>>,
     close: Box<dyn Fn()>,
+    // Enrolled openings bind here. Legacy dispatch deliberately ignores
+    // admission: its historical closed-slot and recovery policies still apply.
+    anchor: RefCell<Weak<Anchor>>,
 }
+
+impl Entry {
+    /// End the binding borrow before any user-supplied live reader runs.
+    fn has_anchor(&self, anchor: &Weak<Anchor>) -> bool {
+        Weak::ptr_eq(&self.anchor.borrow(), anchor)
+    }
+}
+
+/// A row's current measurement lifetime, without handles or geometry.
+/// The row owns the strong lease; registry bindings and captured tickets are
+/// weak so a retained root open slot cannot keep an unmounted row alive.
+struct Anchor {
+    row: String,
+    ready: Box<dyn Fn() -> bool>,
+}
+
+/// Retire just this row's binding when its measurement scope disappears.
+/// Replacing a binding or opening revocation also invalidates existing tickets.
+pub(crate) struct AnchorLease {
+    registration: Registration,
+    anchor: Rc<Anchor>,
+}
+
+/// A captured opening, never an instruction to find a later open slot.
+/// Identity, weak lifetime and live row/listing checks all must still agree at
+/// delivery. Pending and fallback measurements belong to the same opening.
+pub(crate) struct OpeningTicket {
+    owner: Weak<RefCell<Registry>>,
+    registration: u64,
+    anchor: Weak<Anchor>,
+}
+
+/// A bounded regional snapshot of the openings admitted at a cause boundary.
+/// Producers may deliver immediately or later; a fresh opening receives no
+/// replay, even when it uses the same row as a captured opening.
+pub(crate) struct MovementTicket(Vec<OpeningTicket>);
 
 /// A mount's registration; clones share one lease and unregister together.
 ///
@@ -95,6 +138,13 @@ struct Entry {
 /// dropping the last lease also removes plain, non-component registrations.
 #[derive(Clone)]
 pub(crate) struct Registration(Rc<Lease>);
+
+impl PartialEq for Registration {
+    /// Component props compare a stable mount capability, not mutable state.
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
 
 /// Shared cleanup identity for render-local clones of a mount's token.
 struct Lease {
@@ -124,6 +174,7 @@ impl MovementOwner {
                 direct_host_disclosure: interest.direct_host_disclosure,
                 current_row: Box::new(current_row),
                 close: Box::new(close),
+                anchor: RefCell::new(Weak::new()),
             }),
         ));
         Registration(Rc::new(Lease {
@@ -138,6 +189,63 @@ impl MovementOwner {
             entry.region == moved.region
                 && (entry.current_row)().is_some_and(|row| moved.rows.contains(&row))
         });
+    }
+
+    /// Capture current openings in a region with an actual row-local lease.
+    /// Legacy reports remain independent of this optional admission. Caller
+    /// readiness excludes Err before teardown; the scoped lease excludes Ok
+    /// before a recovery mount starts its measurement.
+    pub(crate) fn capture_region(&self, region: AnchorRegion) -> MovementTicket {
+        self.capture_selected(|entry, _| entry.region == region)
+    }
+
+    /// Capture only affected current rows through the same scoped admission
+    /// as regional reports. The caller owns displayed-order selection.
+    pub(crate) fn capture_affected(&self, moved: &MovedRows) -> MovementTicket {
+        self.capture_selected(|entry, row| entry.region == moved.region && moved.rows.contains(row))
+    }
+
+    /// Snapshot weak opening identities without admitting unrelated regions.
+    fn capture_selected(&self, selected: impl Fn(&Entry, &str) -> bool) -> MovementTicket {
+        MovementTicket(
+            self.snapshot()
+                .into_iter()
+                .filter_map(|(id, entry)| {
+                    let anchor = entry.anchor.borrow().upgrade()?;
+                    if selected(&entry, &anchor.row) {
+                        self.capture_entry(id, &entry, &anchor.row)
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    /// Validate readers outside registry borrows, then retain weak identities.
+    /// A row-filtered capture prevents one bell's future width producer from
+    /// capturing another row that shares its parent registration.
+    fn capture_entry(&self, id: u64, entry: &Entry, row: &str) -> Option<OpeningTicket> {
+        if !self.contains(id) {
+            return None;
+        }
+        let anchor = entry.anchor.borrow().upgrade()?;
+        if row != anchor.row.as_str()
+            || (entry.current_row)().as_deref() != Some(anchor.row.as_str())
+            || !entry.has_anchor(&Rc::downgrade(&anchor))
+            || !(anchor.ready)()
+            || !self.contains(id)
+            || !entry.has_anchor(&Rc::downgrade(&anchor))
+            || (entry.current_row)().as_deref() != Some(anchor.row.as_str())
+            || !entry.has_anchor(&Rc::downgrade(&anchor))
+        {
+            return None;
+        }
+        Some(OpeningTicket {
+            owner: Rc::downgrade(&self.0),
+            registration: id,
+            anchor: Rc::downgrade(&anchor),
+        })
     }
 
     /// Invalidate whole row regions without writing already-closed slots.
@@ -214,6 +322,50 @@ impl MovementOwner {
 }
 
 impl Registration {
+    /// Revoke old admission synchronously before publishing a fresh root open.
+    /// Bell measurement still begins in its existing effect; this metadata
+    /// boundary prevents a deferred old ticket from reaching that new open.
+    pub(crate) fn forget_anchor(&self) {
+        if let Some(entry) = self.entry() {
+            *entry.anchor.borrow_mut() = Weak::new();
+        }
+    }
+
+    /// Bind at an existing measurement start, only for the live row.
+    /// A late callback for A must not replace B's newer binding. `ready` is an
+    /// untracked successful-listing check; scope and opening identity come from
+    /// this lease, without a second handle, placement or generation policy.
+    pub(crate) fn bind_anchor(
+        &self,
+        row: String,
+        ready: impl Fn() -> bool + 'static,
+    ) -> Option<AnchorLease> {
+        let entry = self.entry()?;
+        if (entry.current_row)().as_deref() != Some(row.as_str()) || self.entry().is_none() {
+            return None;
+        }
+        let anchor = Rc::new(Anchor {
+            row,
+            ready: Box::new(ready),
+        });
+        *entry.anchor.borrow_mut() = Rc::downgrade(&anchor);
+        Some(AnchorLease {
+            registration: self.clone(),
+            anchor,
+        })
+    }
+
+    /// Clone the callback record without holding its registry borrow.
+    fn entry(&self) -> Option<Rc<Entry>> {
+        let owner = self.0.owner.upgrade()?;
+        owner
+            .borrow()
+            .entries
+            .iter()
+            .find(|(id, _)| *id == self.0.id)
+            .map(|(_, entry)| entry.clone())
+    }
+
     /// Continue this registration's existing epoch effect through the owner.
     ///
     /// The caller keeps its own dependencies, initial execution and admission
@@ -230,6 +382,68 @@ impl Registration {
     fn unregister(&self) {
         self.0.unregister();
     }
+}
+
+impl OpeningTicket {
+    /// Invoke the original closer only while this exact opening remains live.
+    /// Recheck after the admission callback because it can retire a component;
+    /// no closer is called while registry or binding storage is borrowed.
+    pub(crate) fn close_if_current(self) {
+        let Some(owner) = self.owner.upgrade().map(MovementOwner) else {
+            return;
+        };
+        let Some(anchor) = self.anchor.upgrade() else {
+            return;
+        };
+        owner.dispatch(|id, entry| {
+            id == self.registration
+                && entry.has_anchor(&self.anchor)
+                && (entry.current_row)().as_deref() == Some(anchor.row.as_str())
+                && entry.has_anchor(&self.anchor)
+                && (anchor.ready)()
+                && entry.has_anchor(&self.anchor)
+                && (entry.current_row)().as_deref() == Some(anchor.row.as_str())
+                && entry.has_anchor(&self.anchor)
+        });
+    }
+}
+
+impl MovementTicket {
+    /// Preserve regional registration order while dropping superseded openings.
+    pub(crate) fn close_if_current(self) {
+        for ticket in self.0 {
+            ticket.close_if_current();
+        }
+    }
+}
+
+impl Drop for AnchorLease {
+    fn drop(&mut self) {
+        if let Some(entry) = self.registration.entry() {
+            let current = Weak::ptr_eq(&entry.anchor.borrow(), &Rc::downgrade(&self.anchor));
+            if current {
+                *entry.anchor.borrow_mut() = Weak::new();
+            }
+        }
+    }
+}
+
+/// Keep one row-local lease across renders, retiring it before row signals.
+/// The Copy callback preserves the existing synchronous menu open handlers and
+/// delayed bell measurement effect without adding a reactive dependency.
+pub(crate) fn use_anchor_binding(
+    registration: Registration,
+    row: String,
+    ready: Callback<(), bool>,
+) -> Callback<()> {
+    let lease = use_hook(|| Rc::new(RefCell::new(None::<AnchorLease>)));
+    let on_drop = lease.clone();
+    use_drop(move || {
+        on_drop.borrow_mut().take();
+    });
+    use_callback(move |()| {
+        *lease.borrow_mut() = registration.bind_anchor(row.clone(), move || ready.call(()));
+    })
 }
 
 impl Lease {
@@ -295,6 +509,315 @@ mod tests {
                 },
             )
         }
+    }
+
+    /// Exercise exact producer-row selection through the real traversal.
+    /// Returning None makes a missing fixture opening fail before delivery.
+    fn capture_row(owner: &MovementOwner, row: &str) -> Option<MovementTicket> {
+        let ticket =
+            owner.capture_affected(&MovedRows::new(AnchorRegion::Sessions, [row.to_owned()]));
+        (!ticket.0.is_empty()).then_some(ticket)
+    }
+
+    /// Optional scoped admission must not narrow any existing close policy,
+    /// including closed-slot writes and a retained open slot without row DOM.
+    #[farhelm_testtrace::test]
+    fn legacy_dispatch_ignores_absent_or_ineligible_anchor_bindings() {
+        let owner = MovementOwner::default();
+        let slot = Slot::default();
+        let registration = slot.register(&owner, AnchorRegion::Sessions);
+        slot.open("a");
+        owner
+            .capture_region(AnchorRegion::Sessions)
+            .close_if_current();
+        assert_eq!(slot.deliveries.get(), 0);
+        registration.close_if_open();
+        assert_eq!(slot.deliveries.get(), 1);
+        slot.open("a");
+        let _anchor = registration.bind_anchor("a".into(), || false).unwrap();
+        owner
+            .capture_region(AnchorRegion::Sessions)
+            .close_if_current();
+        assert_eq!(slot.deliveries.get(), 1);
+        owner.close_affected(&MovedRows::new(AnchorRegion::Sessions, ["a".into()]));
+        assert_eq!(slot.deliveries.get(), 2);
+        owner.close_registered(AnchorRegion::Sessions);
+        assert_eq!(
+            slot.deliveries.get(),
+            3,
+            "legacy unconditional writes remain unconditional"
+        );
+    }
+
+    /// A new report addresses the captured opening, not the latest same-row
+    /// slot. Pending and fallback are included: binding takes no placement
+    /// policy, and neither outcome replaces the measurement-start lease.
+    #[farhelm_testtrace::test]
+    fn reopening_revokes_old_tickets_before_the_next_measurement() {
+        let owner = MovementOwner::default();
+        let slot = Slot::default();
+        let registration = slot.register(&owner, AnchorRegion::Sessions);
+        slot.open("a");
+        let old = registration.bind_anchor("a".into(), || true).unwrap();
+        let pending_ticket = capture_row(&owner, "a").unwrap();
+        let fallback_ticket = capture_row(&owner, "a").unwrap();
+        registration.forget_anchor();
+        slot.open("a");
+        assert!(capture_row(&owner, "a").is_none());
+        pending_ticket.close_if_current();
+        fallback_ticket.close_if_current();
+        assert_eq!(slot.deliveries.get(), 0);
+        let _fresh = registration.bind_anchor("a".into(), || true).unwrap();
+        drop(old);
+        capture_row(&owner, "a").unwrap().close_if_current();
+        assert_eq!(
+            slot.deliveries.get(),
+            1,
+            "old cleanup cannot clear the fresh same-row lease"
+        );
+    }
+
+    /// Every bell shares its parent's registration. A's delayed callback or
+    /// width producer must neither replace nor capture the current bell B.
+    #[farhelm_testtrace::test]
+    fn late_bind_and_capture_are_constrained_to_the_actual_current_row() {
+        let owner = MovementOwner::default();
+        let slot = Slot::default();
+        let registration = slot.register(&owner, AnchorRegion::Sessions);
+        slot.open("a");
+        let a = registration.bind_anchor("a".into(), || true).unwrap();
+        let a_ticket = capture_row(&owner, "a").unwrap();
+        registration.forget_anchor();
+        slot.open("b");
+        let _b = registration.bind_anchor("b".into(), || true).unwrap();
+        assert!(registration.bind_anchor("a".into(), || true).is_none());
+        assert!(capture_row(&owner, "a").is_none());
+        a_ticket.close_if_current();
+        drop(a);
+        assert_eq!(slot.deliveries.get(), 0);
+        capture_row(&owner, "b").unwrap().close_if_current();
+        assert_eq!(slot.deliveries.get(), 1);
+    }
+
+    /// Regional and selected reports share the same opaque row traversal.
+    /// A matching id in another region and a later replacement are excluded;
+    /// future host enrollment therefore needs no session-specific owner rule.
+    #[farhelm_testtrace::test]
+    fn affected_capture_keeps_region_membership_and_delivery_row_identity() {
+        let owner = MovementOwner::default();
+        let first = Slot::default();
+        let lower = Slot::default();
+        let replaced = Slot::default();
+        let session = Slot::default();
+        first.open("a");
+        lower.open("b");
+        replaced.open("c");
+        session.open("b");
+        let a = first.register(&owner, AnchorRegion::Hosts);
+        let b = lower.register(&owner, AnchorRegion::Hosts);
+        let c = replaced.register(&owner, AnchorRegion::Hosts);
+        let s = session.register(&owner, AnchorRegion::Sessions);
+        let _a = a.bind_anchor("a".into(), || true).unwrap();
+        let _b = b.bind_anchor("b".into(), || true).unwrap();
+        let _c = c.bind_anchor("c".into(), || true).unwrap();
+        let _s = s.bind_anchor("b".into(), || true).unwrap();
+        let selected = owner.capture_affected(&MovedRows::new(
+            AnchorRegion::Hosts,
+            ["b".into(), "c".into()],
+        ));
+        assert_eq!(
+            selected.0.len(),
+            2,
+            "exactly the affected host openings were captured"
+        );
+        c.forget_anchor();
+        replaced.open("d");
+        let _d = c.bind_anchor("d".into(), || true).unwrap();
+        selected.close_if_current();
+        assert_eq!(
+            (
+                first.deliveries.get(),
+                lower.deliveries.get(),
+                replaced.deliveries.get(),
+                session.deliveries.get()
+            ),
+            (0, 1, 0, 0)
+        );
+        owner.capture_region(AnchorRegion::Hosts).close_if_current();
+        assert_eq!(
+            (
+                first.deliveries.get(),
+                replaced.deliveries.get(),
+                session.deliveries.get()
+            ),
+            (1, 1, 0)
+        );
+    }
+
+    /// Regional content reports select admitted Sessions only. Weak tickets
+    /// cannot retain row-local readers after teardown, even with open ids left.
+    #[farhelm_testtrace::test]
+    fn scope_drop_releases_reader_and_regional_capture_excludes_other_regions() {
+        let owner = MovementOwner::default();
+        let slot = Slot::default();
+        let registration = slot.register(&owner, AnchorRegion::Sessions);
+        slot.open("a");
+        let witness = Rc::new(());
+        let weak = Rc::downgrade(&witness);
+        let row = registration
+            .bind_anchor("a".into(), move || {
+                let _ = &witness;
+                true
+            })
+            .unwrap();
+        assert!(
+            weak.upgrade().is_some(),
+            "the live row owns the reader witness"
+        );
+        let ticket = owner.capture_region(AnchorRegion::Sessions);
+        drop(row);
+        assert!(
+            weak.upgrade().is_none(),
+            "tickets and entries keep only weak row bindings"
+        );
+        ticket.close_if_current();
+        assert_eq!(slot.deliveries.get(), 0);
+        let host = Slot::default();
+        host.open("host");
+        let host_registration = host.register(&owner, AnchorRegion::Hosts);
+        let _host_anchor = host_registration
+            .bind_anchor("host".into(), || true)
+            .unwrap();
+        let _row = registration.bind_anchor("a".into(), || true).unwrap();
+        owner
+            .capture_region(AnchorRegion::Sessions)
+            .close_if_current();
+        assert_eq!(slot.deliveries.get(), 1);
+        assert_eq!(host.deliveries.get(), 0);
+    }
+
+    /// Reader/closer callbacks can revoke or unregister bindings. No RefCell
+    /// borrow may cross those callbacks, and a captured retired entry is inert.
+    #[farhelm_testtrace::test]
+    fn admitted_dispatch_releases_borrows_and_rechecks_unregistration() {
+        let owner = MovementOwner::default();
+        let first = Slot::default();
+        first.open("a");
+        let retiring = Rc::new(RefCell::new(None::<Registration>));
+        let retire = retiring.clone();
+        let read_first = first.clone();
+        let close_first = first.clone();
+        let callback_owner = Rc::downgrade(&owner.0);
+        let registration = owner.register(
+            Interest::new(AnchorRegion::Sessions),
+            move || read_first.row.borrow().clone(),
+            move || {
+                assert!(callback_owner.upgrade().unwrap().try_borrow_mut().is_ok());
+                if let Some(registration) = retire.borrow_mut().take() {
+                    registration.unregister();
+                }
+                close_first.deliveries.set(close_first.deliveries.get() + 1);
+                *close_first.row.borrow_mut() = None;
+            },
+        );
+        let callback_registration = registration.clone();
+        let _first_anchor = registration
+            .bind_anchor("a".into(), move || {
+                let entry = callback_registration.entry().unwrap();
+                assert!(entry.anchor.try_borrow_mut().is_ok());
+                true
+            })
+            .unwrap();
+        let second = Slot::default();
+        second.open("b");
+        let second_registration = second.register(&owner, AnchorRegion::Sessions);
+        let _second_anchor = second_registration
+            .bind_anchor("b".into(), || true)
+            .unwrap();
+        *retiring.borrow_mut() = Some(second_registration);
+        let ticket = owner.capture_region(AnchorRegion::Sessions);
+        ticket.close_if_current();
+        assert_eq!(first.deliveries.get(), 1);
+        assert_eq!(second.deliveries.get(), 0);
+    }
+
+    /// A real Dioxus row scope owns the production binding hook. Err disables
+    /// admission before physical teardown; Ok alone cannot revive a dropped
+    /// row, and a recovery measurement creates a distinct opening identity.
+    #[farhelm_testtrace::test]
+    fn component_binding_tracks_err_teardown_and_recovery_mount() {
+        /// Control logical readiness separately from physical row presence.
+        type BindingFixture = (Registration, Rc<Cell<bool>>, Rc<Cell<bool>>);
+        thread_local! {
+            static FIXTURE: RefCell<Option<BindingFixture>> = const { RefCell::new(None) };
+        }
+        #[component]
+        fn BoundRow() -> Element {
+            let (registration, ready, _) =
+                FIXTURE.with(|fixture| fixture.borrow().clone().unwrap());
+            let ready = use_callback(move |()| ready.get());
+            let bind = use_anchor_binding(registration, "a".into(), ready);
+            // This named boundary stands in for starting the existing renderer
+            // measurement; the headless renderer supplies no MountedData rect.
+            use_hook(move || bind.call(()));
+            rsx! {}
+        }
+        fn app() -> Element {
+            let shown = FIXTURE.with(|fixture| fixture.borrow().as_ref().unwrap().2.get());
+            if shown {
+                rsx! { BoundRow {} }
+            } else {
+                rsx! {}
+            }
+        }
+        let owner = MovementOwner::default();
+        let slot = Slot::default();
+        slot.open("a");
+        let registration = slot.register(&owner, AnchorRegion::Sessions);
+        let ready = Rc::new(Cell::new(true));
+        let shown = Rc::new(Cell::new(true));
+        FIXTURE.with(|fixture| {
+            *fixture.borrow_mut() = Some((registration.clone(), ready.clone(), shown.clone()))
+        });
+        let mut dom = VirtualDom::new(app);
+        assert!(
+            capture_row(&owner, "a").is_none(),
+            "Ok before first mount is no anchor"
+        );
+        dom.rebuild_in_place();
+        let old = capture_row(&owner, "a").unwrap();
+        let before_err = capture_row(&owner, "a").unwrap();
+        ready.set(false);
+        before_err.close_if_current();
+        owner
+            .capture_region(AnchorRegion::Sessions)
+            .close_if_current();
+        assert_eq!(
+            slot.deliveries.get(),
+            0,
+            "Err is excluded before the row drops"
+        );
+        shown.set(false);
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        ready.set(true);
+        assert!(
+            capture_row(&owner, "a").is_none(),
+            "Ok before recovery mount is no anchor"
+        );
+        shown.set(true);
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        old.close_if_current();
+        assert_eq!(
+            slot.deliveries.get(),
+            0,
+            "a remount cannot reuse an old identity"
+        );
+        capture_row(&owner, "a").unwrap().close_if_current();
+        assert_eq!(slot.deliveries.get(), 1);
+        drop(dom);
+        FIXTURE.with(|fixture| fixture.borrow_mut().take());
     }
 
     /// A movement selects rows and regions, not popup kinds; unrelated open
