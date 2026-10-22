@@ -728,7 +728,7 @@ mod tests {
             let symlinks = self.symlinks.lock().unwrap().clone();
             let host_path = |path: &Path| {
                 let link = symlinks.get(path);
-                HostPath {
+                let mut host = HostPath {
                     path: path.to_path_buf(),
                     exists: present
                         .as_ref()
@@ -745,7 +745,11 @@ mod tests {
                                 .unwrap_or_else(|| path.to_path_buf()),
                         ),
                     },
-                }
+                    raw: None,
+                };
+                // The fake models no home alias, so nothing is respelled.
+                host.raw = host.canonical.clone();
+                host
             };
             let unit_active_state = self.unit_state.lock().unwrap().clone();
             let fragment = self.unit_fragment.lock().unwrap().clone();
@@ -6061,9 +6065,10 @@ mod tests {
     ///
     /// Spec: per asked path, then for the default state directory and the
     /// unit's fragment, the output carries an existence flag, a symlink
-    /// flag and a canonical path (empty when the host could not resolve
-    /// it), NUL-terminated. A dangling link parses as existing, a symlink,
-    /// and unresolved; an empty fragment parses as no fragment. A flag
+    /// flag, a canonical path (empty when the host could not resolve it)
+    /// and that path before home normalization, NUL-terminated. A dangling
+    /// link parses as existing, a symlink, and unresolved; an empty fragment
+    /// parses as no fragment. A flag
     /// other than `0` or `1`, a missing field, or a field left over is
     /// malformed, which is how output in the older two-field shape is
     /// rejected rather than misread.
@@ -6078,18 +6083,22 @@ mod tests {
                 .collect::<String>()
         };
         let mut fields = vec![
-            // The unit file: present, not a link, resolved to itself.
+            // The unit file: present, not a link, resolved to itself
+            // after its alias spelling was respelled to the home.
             "1",
             "0",
             "/h/.config/systemd/user/farhelm-supervisor.service",
+            "/a/.config/systemd/user/farhelm-supervisor.service",
             // The lib directory: a dangling link the host cannot resolve.
             "1",
             "1",
             "",
-            // The default state directory's name, then its three fields.
+            "",
+            // The default state directory's name, then its four fields.
             "/h/.local/state/farhelm",
             "1",
             "0",
+            "/h/.local/state/farhelm",
             "/h/.local/state/farhelm",
             // The unit's state and (empty) fragment path, then
             // the placeholder fields for no fragment.
@@ -6097,6 +6106,7 @@ mod tests {
             "",
             "0",
             "0",
+            "",
             "",
         ];
         let output = encode(&fields);
@@ -6110,6 +6120,9 @@ mod tests {
                 exists: true,
                 symlink: false,
                 canonical: Some(unit.to_path_buf()),
+                raw: Some(PathBuf::from(
+                    "/a/.config/systemd/user/farhelm-supervisor.service"
+                )),
             }
         );
         assert_eq!(
@@ -6119,13 +6132,14 @@ mod tests {
                 exists: true,
                 symlink: true,
                 canonical: None,
+                raw: None,
             }
         );
         assert!(!inspection.default_state_dir.symlink);
         assert_eq!(inspection.unit_fragment, None);
 
         // The lib directory's symlink flag.
-        fields[4] = "2";
+        fields[5] = "2";
         assert_eq!(
             parse_uninstall_inspection(encode(&fields).as_bytes(), &[unit, lib]),
             None
@@ -6661,6 +6675,56 @@ mod tests {
             tokio::fs::read(data.join("kept")).await.unwrap(),
             b"nested data"
         );
+    }
+
+    /// Respelling one path at a time must not hide state inside the lib.
+    /// Here `~/.local/lib` resolves into the alias, as a symlink into a
+    /// non-recursive home bind does, so the lib is respelled to the home
+    /// while a state path `-ef` cannot confirm keeps the alias spelling. A
+    /// missing state stands in for the real trigger, a nested mount the bind
+    /// lacks, which this fixture cannot build. The normalized spellings miss
+    /// the containment; the unnormalized ones the script also reports must
+    /// still make planning refuse before anything is removed.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn uninstall_inspection_refuses_state_inside_lib_in_mixed_spellings() {
+        let fixture = UninstallAliasFixture::new().await;
+        let aliased_lib = fixture
+            .alias
+            .join(fixture.lib.strip_prefix(&fixture.home).unwrap());
+        let lib = shell_path(&fixture.lib).unwrap();
+        write_fake_tool(&fixture.bin, "readlink", &format!(
+            "[ \"$#\" = 3 ] && [ \"$1\" = -f ] && [ \"$2\" = -- ] || exit 91\ncase \"$3\" in\n{lib}|{lib}/*) printf '%s\\n' {alias}\"${{3#{lib}}}\" ;;\n*) printf '%s\\n' \"$3\" ;;\nesac",
+            alias = shell_path(&aliased_lib).unwrap(),
+        )).await;
+        let state = fixture.lib.join("data");
+        let aliased_state = aliased_lib.join("data");
+        assert_same_fixture_file(&aliased_lib, &fixture.lib);
+        assert!(!state.exists());
+        fixture.report_fragment(&fixture.unit).await;
+        let inspection = fixture.inspect(&[&fixture.lib, &state]).await;
+        let [lib_path, state_path] = inspection.paths.as_slice() else {
+            panic!("two paths asked: {inspection:?}");
+        };
+        assert_eq!(lib_path.canonical.as_ref(), Some(&fixture.lib));
+        assert_eq!(lib_path.raw.as_ref(), Some(&aliased_lib));
+        assert_eq!(state_path.canonical.as_ref(), Some(&aliased_state));
+        assert_eq!(state_path.raw.as_ref(), Some(&aliased_state));
+        assert!(!aliased_state.starts_with(&fixture.lib));
+        let (_harness, host, backend, service) = fixture
+            .planning_service(fixture.lib.join("farhelm"), Some(state.clone()))
+            .await;
+        let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(
+            refusal.contains(&format!(
+                "data directory {} is inside {}",
+                state.display(),
+                fixture.lib.display()
+            )),
+            "{refusal}"
+        );
+        assert_eq!(*backend.operations.lock().unwrap(), ["inspect-uninstall"]);
+        assert!(fixture.lib.join("farhelm").exists());
     }
 
     /// Failing to resolve HOME must disable only respelling, not inspection.

@@ -370,6 +370,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         let behavior = self.behavior(target).await?;
         let present = |path: PathBuf| HostPath {
             canonical: Some(path.clone()),
+            raw: Some(path.clone()),
             path,
             exists: true,
             symlink: false,

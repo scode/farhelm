@@ -4670,7 +4670,12 @@ to Remove rather than "cannot tell where it leads". The removal command repeats 
 a failed step. A row with no recorded state directory uses the supervisor's default as the host's own environment
 resolves it, `XDG_STATE_HOME` included. A session started between the confirmation check and the stop is not locked out
 and may be ended with the unit. The confirmation-time check is sufficient; nothing requires another check during the
-removal. Local `farhelm uninstall` keeps its separate scope and behavior.
+removal. Local `farhelm uninstall` keeps its separate scope and behavior. The state check also compares the spellings
+from before home normalization. Each path is respelled on its own, so the lib directory can come back in the home's
+spelling while the state directory inside it keeps the alias spelling, because its same-file guard failed (below a
+nested mount the bind lacks, or for a state directory that does not exist). The inspection therefore also reports each
+resolved path before normalization, and the state check refuses when the state directory is inside the lib directory in
+either spelling.
 
 The last action deletes the row from inside the run, which already holds the host's provisioning lock and is the host's
 own run task, so it cannot go through Remove's entry point, which takes that lock and aborts the host's task. Both share

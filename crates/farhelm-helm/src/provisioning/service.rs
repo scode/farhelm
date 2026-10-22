@@ -1456,9 +1456,11 @@ impl ProvisioningService {
             host_path
                 .canonical
                 .clone()
-                .map(|canonical| ResolvedPath {
+                .zip(host_path.raw.clone())
+                .map(|(canonical, raw)| ResolvedPath {
                     named: host_path.path.clone(),
                     canonical,
+                    raw,
                 })
                 .ok_or_else(|| unresolved(&host_path.path))
         };
@@ -1481,10 +1483,7 @@ impl ProvisioningService {
         } else {
             farhelm.map(resolved).transpose()?
         };
-        let lib_dir = lib_dir
-            .exists
-            .then(|| resolved(lib_dir).map(|lib| lib.canonical))
-            .transpose()?;
+        let lib_dir = lib_dir.exists.then(|| resolved(lib_dir)).transpose()?;
         self.layout.plan_uninstall(
             target.transport,
             &reach,

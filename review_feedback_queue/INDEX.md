@@ -15,10 +15,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`template-preservation-promise-omits-last-write-wins.md`](template-preservation-promise-omits-last-write-wins.md) —
   The agent-edit preservation promise omits accepted template overwrites; loss from reliance is conditional.
 
-- [`uninstall-plan-normalizes-containing-paths-independently.md`](uninstall-plan-normalizes-containing-paths-independently.md)
-  — A home-alias uninstall plan can miss retained data inside its removal target; a conditional design counterexample,
-  not a reviewed implementation.
-
 - [`refused-create-retry-can-delete-restarted-session.md`](refused-create-retry-can-delete-restarted-session.md) — A
   refused stale create retry can delete a concurrently restarted session; this conditional mechanism predates the review
   range.

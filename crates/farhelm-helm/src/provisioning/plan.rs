@@ -498,9 +498,9 @@ pub(super) struct UninstallPaths {
 pub(super) struct UninstallFacts {
     /// Whether the supervisor's unit file is still there.
     pub(super) unit_file: bool,
-    /// The lib directory's canonical path when it still exists; `None`
-    /// when it is already gone.
-    pub(super) lib_dir: Option<PathBuf>,
+    /// Where the lib directory leads when it still exists; `None` when it
+    /// is already gone.
+    pub(super) lib_dir: Option<ResolvedPath>,
     /// The binary the supervisor was dialed through, when one answered.
     pub(super) farhelm: Option<ResolvedPath>,
     /// The state directory the host uses, which uninstall keeps.
@@ -511,7 +511,10 @@ pub(super) struct UninstallFacts {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ResolvedPath {
     pub(super) named: PathBuf,
+    /// The host's resolution with a verified home alias normalized.
     pub(super) canonical: PathBuf,
+    /// The same resolution before that normalization (`HostPath::raw`).
+    pub(super) raw: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -772,7 +775,8 @@ impl PlanLayout {
     /// host runs, when known, must be inside it, so the plan removes the
     /// installation actually in use (SPEC.md "Supported host setup": other
     /// setups get a clear refusal). And the host's state directory must not
-    /// be inside it, so data is never removed with it.
+    /// be inside it in either the normalized or the unnormalized spelling,
+    /// so data is never removed with it.
     pub(super) fn plan_uninstall(
         &self,
         target: ProvisioningTarget,
@@ -796,7 +800,7 @@ impl PlanLayout {
             let inside = facts
                 .lib_dir
                 .as_ref()
-                .is_some_and(|lib| binary.canonical.starts_with(lib));
+                .is_some_and(|lib| binary.canonical.starts_with(&lib.canonical));
             if !inside {
                 return Err(refused(format!(
                     "the supervisor on this host runs {}, outside Farhelm's own directory {}; \
@@ -810,8 +814,12 @@ impl PlanLayout {
         // the lib visible here, so removing the lib cannot remove that
         // data. General folder identity would also accept shared installs;
         // inspect_uninstall in backend.rs explains why that is forbidden.
+        // That normalization is per path, so containment in either spelling
+        // refuses: a layout they disagree on is one uninstall cannot tell
+        // apart safely (SPEC.md, the home-alias exception).
         if let Some(lib) = &facts.lib_dir
-            && facts.state_dir.canonical.starts_with(lib)
+            && (facts.state_dir.canonical.starts_with(&lib.canonical)
+                || facts.state_dir.raw.starts_with(&lib.raw))
         {
             return Err(refused(format!(
                 "the host's Farhelm data directory {} is inside {}, which uninstall would remove; \
