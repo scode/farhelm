@@ -8,6 +8,7 @@
 //! so keyboard users can still scroll retained host information in WebKit
 //! while a read or deletion is pending.
 
+use crate::anchored_popovers::{AnchorRegion, MovementOwner, use_rendered_movement};
 use crate::hosts::HostsRead;
 use crate::icons::{BranchIcon, TrashIcon};
 use crate::modal_dialog::{
@@ -31,6 +32,13 @@ const MAX_SELECTION: usize = 10_000;
 /// Count wording stays grammatical at the destructive confirmation boundary.
 fn checkouts(count: usize) -> &'static str {
     if count == 1 { "checkout" } else { "checkouts" }
+}
+
+/// Use the same optional decimal text for the header span and its width key.
+/// Zero has no span or gap; 1→2 keeps its monospace width, while 0→1 and 9→10
+/// can wrap the heading and move every session anchor below it.
+fn sidebar_count_text(count: usize) -> Option<String> {
+    (count > 0).then(|| count.to_string())
 }
 
 /// Keep the can and its descriptions honest about archives not yet inspected.
@@ -340,6 +348,7 @@ pub(super) fn TrashControl(
     gate: PaneGate,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let popovers = use_context::<MovementOwner>();
     let mut open = use_signal(|| false);
     let mut state = use_signal(HashMap::<HostId, HostTrash>::new);
     let mut generation = use_signal(|| 0_u64);
@@ -427,6 +436,13 @@ pub(super) fn TrashControl(
         .fold((0, false), |(count, unchecked), (known, issues)| {
             (count + known, unchecked || issues)
         });
+    // Use the final displayed span after all accepted host/count gates. Its
+    // width can wrap the heading above the session list, independent of totals.
+    let count_text = sidebar_count_text(count);
+    let count_columns = count_text.as_ref().map_or(0, String::len);
+    use_rendered_movement(&count_columns, || {
+        popovers.capture_region(AnchorRegion::Sessions)
+    });
     let targets: Vec<_> = current_hosts
         .iter()
         .filter(|_| hosts_known)
@@ -617,7 +633,7 @@ pub(super) fn TrashControl(
             "data-tooltip": tooltip, disabled: gate.busy(),
             onclick: move |_| { if !gate.busy_now() { notices.write().clear(); confirmation.set(None); open.set(true); } },
             TrashIcon { full }
-            if count > 0 { span { class: "checkout-trash-count", "{count}" } }
+            if let Some(text) = count_text { span { class: "checkout-trash-count", "{text}" } }
         }
         if open() {
             div { class: "host-settings-backdrop", role: "presentation",
@@ -794,6 +810,26 @@ pub(super) fn finish_row_cue(id: &str, archived: bool) {
 mod tests {
     use super::*;
     use farhelm_proto::ArchivedCheckout;
+
+    /// The optional text is also the rendered span, including its absence at
+    /// zero. Only a changed decimal column count can add header width; counts
+    /// with the same number of digits must not acquire a movement policy.
+    #[farhelm_testtrace::test]
+    fn sidebar_count_span_preserves_text_and_only_changes_width_at_digit_boundaries() {
+        let cases = [
+            (0, None, 0),
+            (1, Some("1"), 1),
+            (2, Some("2"), 1),
+            (9, Some("9"), 1),
+            (10, Some("10"), 2),
+            (11, Some("11"), 2),
+        ];
+        for (count, text, columns) in cases {
+            let shown = sidebar_count_text(count);
+            assert_eq!(shown.as_deref(), text);
+            assert_eq!(shown.as_ref().map_or(0, String::len), columns);
+        }
+    }
 
     /// Build a connected host snapshot with a nonzero incarnation, so the
     /// selection proof exercises authority rather than an offline refusal.
