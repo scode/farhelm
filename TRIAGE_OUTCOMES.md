@@ -17741,7 +17741,7 @@
   test that holds a response open is not required. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
 
 ## changed-template-test-allows-missing-retry-key.md
 
@@ -17758,7 +17758,7 @@
 - Completion criteria: the test also asserts that the changed launch carries a non-empty retry key, copying the
   sibling's assertion. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
 
 ## held-reveal-fixture-pins-before-cleanup.md
 
@@ -17774,26 +17774,26 @@
 - Completion criteria: the session is owned by cleanup as soon as it exists (the `try` starts right after creation).
   Test-only, confined to this test. Size gate: about 100 lines as above; over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
 
 ## model-effort-test-never-proves-model-accepted.md
 
 - Outcome: `fix code`.
 - Assessment: confirmed by code reading on main 287bd81c (not run). The model-effort browser test, now in
   `e2e/tests/custom-permissions.spec.ts` (around 306–328; the finding's line numbers are stale), checks the model field
-  while it is still open, where it shows the typed draft (`crates/farhelm-ui/src/create/launch_controls.rs` around
-  169–171). Some Enter outcomes leave the draft in place without accepting it (`create_form.rs` around 6202–6213), and
-  both rounds reuse one model name, so the test passes even if Enter never accepts the custom model, which its title
-  claims to cover. Blur discards an unaccepted draft (`create_form.rs` around 6171–6178), so closing the field and then
-  checking the value tells the two apart. The review did not confirm that a successful Enter closes the field; blur
-  closes it either way.
+  while it is still open, where it shows the typed draft (`crates/farhelm-ui/src/launch_controls.rs` around 169–171).
+  Some Enter outcomes leave the draft in place without accepting it (`create_form.rs` around 6202–6213), and both rounds
+  reuse one model name, so the test passes even if Enter never accepts the custom model, which its title claims to
+  cover. Blur discards an unaccepted draft (`create_form.rs` around 6171–6178), so closing the field and then checking
+  the value tells the two apart. The review did not confirm that a successful Enter closes the field; blur closes it
+  either way.
 - Decision: on 2026-10-21 the user asked that queue items be triaged without asking when they clearly fit (quoted under
   `approval-poll-http-await-exceeds-deadline.md`). Read-only verification and a fresh-context adversarial review classed
   this finding that way, following the 2026-10-15 delegation of tests that pass without proving their operation.
 - Completion criteria: each round uses a distinct model name and proves the model was accepted (field closed, accepted
   value shown) before the effort checks. Test-only, confined to this test. Size gate: about 100 lines as above; over it,
   block and bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
 
 ## notification-fixtures-register-ownership-too-late.md
 
@@ -17810,7 +17810,7 @@
 - Completion criteria: in both tests each session is registered for cleanup right after its own create. Test-only,
   confined to these two sites. Size gate: about 100 lines as above; over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
 
 ## replacement-cleanup-test-never-proves-child-lived.md
 
@@ -17826,7 +17826,7 @@
 - Completion criteria: before signalling, the test waits (bounded) until the stand-in is running with the command line
   `start-stack.sh` matches, and fails if it never is. Confined to this test script. Size gate: about 100 lines as above;
   over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
 
 ## settings-test-restores-before-final-spare-save.md
 
@@ -17842,7 +17842,7 @@
 - Completion criteria: cleanup records and awaits every save the page sends in this test before restoring, as the
   checkout-folder tests in the same file do. Test-only, confined to this test. Size gate: about 100 lines as above; over
   it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
 
 ## spare-owner-tests-register-child-cleanup-after-readiness.md
 
@@ -17859,7 +17859,7 @@
 - Completion criteria: each test waits for the child's own pid file, takes cleanup ownership of the child, and only then
   waits for the remaining readiness files. Test-only, confined to these two tests. Size gate: about 100 lines as above;
   over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
 
 ## duplicate-uninstall-advice-points-to-removed-owner.md
 
@@ -17882,4 +17882,4 @@
   uninstall through this entry, without promising that uninstall will then succeed (its ordinary checks still apply);
   the tests that pin the old wording are updated. The name fallback and the GUI host-details text stay as they are. Size
   gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/duplicate-uninstall-retry-advice.md`.
