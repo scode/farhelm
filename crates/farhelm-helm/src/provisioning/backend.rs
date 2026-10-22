@@ -156,9 +156,10 @@ pub(super) enum ReachOutcome {
 ///
 /// Canonical paths resolve symlinks on the host, then normalize a second
 /// name for the login's home only when both full paths name the same file.
-/// Every uninstall guard consumes that one spelling: the unit must be the
-/// file removed, the running binary must be inside the removed lib folder,
-/// and the state directory must stay outside it. Aliases of other folders
+/// Every uninstall guard consumes that spelling: the unit must be the file
+/// removed, the running binary must be inside the removed lib folder, and
+/// the state directory must stay outside it, which is also checked in the
+/// spelling from before normalization. Aliases of other folders
 /// remain distinct, per SPEC.md's narrow uninstall exception.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UninstallInspection {
@@ -197,6 +198,10 @@ pub(super) struct HostPath {
     /// folder aliases are folded. `None` means the host could not resolve
     /// the path (a missing parent, a symlink loop).
     pub(super) canonical: Option<PathBuf>,
+    /// The host's `readlink -f` answer before home normalization, `None`
+    /// exactly when `canonical` is; `inspect_uninstall` says why
+    /// containment checks need it.
+    pub(super) raw: Option<PathBuf>,
 }
 
 impl UninstallInspection {
@@ -2422,12 +2427,12 @@ impl ProvisioningBackend for SystemBackend {
     /// Read-only, so it runs on either transport, though only UNINSTALL
     /// planning asks and that refuses the local row before it gets here.
     ///
-    /// The output is NUL-separated: an existence flag, a symlink flag and a
-    /// canonical path (empty when unresolvable), with a verified alternate
-    /// home prefix normalized, per asked path, then the
-    /// default state directory and its three fields, then the unit's
-    /// `ActiveState` and `FragmentPath`, and the fragment's
-    /// three fields (no fragment prints two `0` flags and an empty path,
+    /// The output is NUL-separated: an existence flag, a symlink flag, a
+    /// canonical path (empty when unresolvable) with a verified alternate
+    /// home prefix normalized, and that path before normalization, per asked
+    /// path, then the default state directory and its four fields, then the
+    /// unit's `ActiveState` and `FragmentPath`, and the fragment's four
+    /// fields (no fragment prints two `0` flags and two empty paths,
     /// through `%s` because a literal `\00` would read the second flag's
     /// digit as part of an octal escape). A failing `systemctl show` fails
     /// the whole command rather than reading as empty values. `readlink -f`
@@ -2466,6 +2471,10 @@ impl ProvisioningBackend for SystemBackend {
         // leave that copy for systemd to start again. The comparisons in
         // service.rs and PlanLayout::plan_uninstall deliberately stay text
         // comparisons over these normalized values, not general identities.
+        // The rewrite is per path, so a lib rewritten to the login home can
+        // hold state left in the alias spelling (a nested mount the bind
+        // lacks fails that state's -ef); the unnormalized spelling printed
+        // beside each path lets planning still see that containment.
         let mut script = String::from(
             r#"home=''
 if [ -n "${HOME-}" ]; then
@@ -2477,6 +2486,7 @@ resolve() {
     if [ -L "$1" ]; then printf 1; else printf 0; fi
     printf '\0'
     resolved=$(readlink -f -- "$1" 2>/dev/null | tr -d '\n')
+    raw=$resolved
     case "$home" in
         ''|/) ;;
         *)
@@ -2500,7 +2510,7 @@ resolve() {
             done
             ;;
     esac
-    printf '%s\0' "$resolved"
+    printf '%s\0%s\0' "$resolved" "$raw"
 }
 "#,
         );
@@ -2514,7 +2524,7 @@ resolve() {
              active=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
              fragment=$(systemctl --user show -p FragmentPath --value -- {unit}) || exit 1; \
              printf '%s\\0%s\\0' \"$active\" \"$fragment\"; \
-             if [ -n \"$fragment\" ]; then resolve \"$fragment\"; else printf '%s\\0%s\\0\\0' 0 0; fi",
+             if [ -n \"$fragment\" ]; then resolve \"$fragment\"; else printf '%s\\0%s\\0\\0\\0' 0 0; fi",
             unit = crate::ssh::shell_quote(unit),
         ));
         let output = self
@@ -2746,13 +2756,18 @@ pub(super) fn parse_uninstall_inspection(
         let exists = flag(fields)?;
         let symlink = flag(fields)?;
         let canonical = fields.next()?;
+        let raw = fields.next()?;
+        let resolved = |field: &[u8]| {
+            (!field.is_empty())
+                .then(|| bytes_path(field).ok())
+                .flatten()
+        };
         Some(HostPath {
             path,
             exists,
             symlink,
-            canonical: (!canonical.is_empty())
-                .then(|| bytes_path(canonical).ok())
-                .flatten(),
+            canonical: resolved(canonical),
+            raw: resolved(raw),
         })
     }
     let mut fields = output.split(|byte| *byte == 0);

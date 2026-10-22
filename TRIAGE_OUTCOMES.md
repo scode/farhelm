@@ -17582,7 +17582,14 @@
   resolved spelling or the alias-rewritten one, so a layout it cannot tell apart is refused; a test for the mixed
   spelling. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/uninstall-mixed-spelling.md`.
+- Execution: `complete`; the uninstall inspection now also reports each path before home normalization, and planning
+  refuses when the state directory is inside the lib directory in either spelling. A regression drives the real
+  inspection script into the mixed spelling and fails without the fix; recorded runs `22096300` (expected failure
+  without the fix) and `8672f4d3` (30 uninstall tests passed). Size: 126 inserted and 34 deleted code, test and
+  implementation-spec lines, over the gate on a strict count; delivered rather than blocked because the fix itself is
+  about 25 lines and the excess is the regression test and documentation (the plan report says so). jj change
+  `popuuxwtxnlulwznytkxuylpnyltxrrm`, bookmark `plan/uninstall-mixed-spelling/01-refuse-mixed-spelling`;
+  [draft PR #2574](https://github.com/scode/farhelm/pull/2574/changes).
 
 ## template-preservation-promise-omits-last-write-wins.md
 
