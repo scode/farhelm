@@ -237,3 +237,75 @@ Both original reviewers for the confirmation fix and the final ownership convers
 follow-up. No finding from these required per-PR reviews remains open; the separate queued follow-ups above remain.
 Commit and PR wording received separate blind cold reads; those are wording checks, not additional code reviewers.
 Runtime results above are the executor's evidence, not tests claimed by the source reviewers.
+
+### Landing
+
+Landed as #2515, #2521, #2523, #2526, #2530, #2532, #2536, #2538, #2539, #2543, #2546 and #2553, merged bottom-up, with
+the same content the report describes. It was the only plan in this landing round.
+
+#### What landed since the stack was based, and whether it interacted
+
+The executor had already rebased the stack over modal-dialog-shell, as its report says. After that base, main gained
+only queue bookkeeping, uninstall-aliased-home (a helm change to how host uninstall inspects a remote home folder, which
+the launcher does not use), and #2513, which records review findings and changes no code. During this round main also
+gained #2554 (a new TODO.md entry) and #2557 (more review-queue records), neither touching code; the stack rebased over
+them without conflicts and landed otherwise unchanged. The executor's browser runs covered chosen tests rather than
+whole spec files, so a fresh-context reviewer and I checked that the launcher keeps what the recent UI plans added:
+
+- The launcher still makes the rest of the page inactive while open (modal-dialog-shell). This plan adds no new way to
+  close or hand off the launcher; the one close the launcher handles itself, a successful launch, still makes the page
+  usable again before handing off, and the other closes are in code this plan does not touch.
+- The "start guarded session instead" answer (yolo-confirm-launch-guarded) still edits the draft and submits in one step
+  through the shared submit entry point, which takes the launcher's pending-request lock; the wait for a fresh
+  managed-checkout preview still ends in that same submit.
+- The pending-request lock is still released automatically when the request's handling ends, with no manual release a
+  later change could forget (ui-session-actions), and launch refusals keep the same three outcomes: a YOLO question
+  keeps the attempt's retry key, a settled refusal drops it, an unclear outcome keeps it.
+- The launcher's retry key still covers every field the launcher sends, so keeping a key through unchanged edits (one of
+  this plan's fixes) can never send a different request under an old key, which is what the helm's create retry rules
+  rely on.
+
+#### Fixes made during the landing
+
+None.
+
+#### Possible follow-ups
+
+- Found at landing, low severity: a comment in the Restart with code still names a launcher helper this plan removed
+  when explaining how cloned fields are seeded. Possible follow-up: point it at the draft's seeding instead.
+
+#### Checks
+
+The plan adds about 10,500 lines and removes about 2,500, all in the UI and its browser tests and mostly in the
+launcher, which every New, Clone and Replace with goes through, while its own browser runs were selections; that is why
+this round ran the full browser suite. No helm, supervisor or asset JavaScript changed, so the rest of the Rust
+workspace and the JavaScript harness did not run. All of the following ran on the stack as it landed:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on the changed Markdown files, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py`, the workspace debug build, the UI's release web build and
+  `scripts/check-desktop-assets.sh` (which also builds the desktop app): all passed.
+- `cargo nextest run -p farhelm-ui` through the test recorder with pinned nextest and tmux, four slots, no retries, run
+  `80f75e72-4060-4db5-b62b-b998ed616968`: 658 passed. `cargo nextest run -p farhelm-ui --features desktop`, run
+  `1fe8d13a-4b32-4d16-8e40-a946bb78480b`: 819 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `c731cfe8-d581-46ff-ae8d-58b90ca2346e`, retained: 2349 passed, 14 skipped by design
+  (WebKit clipboard cases and tests that need a real signed-in agent or run on one engine only), 1 failed. That includes
+  every spec the plan changed and its new test of reapplying Home after a lost create reply. The failure, on Chromium,
+  was "Update planning keeps only its own Settings unavailable", a host update test that does not use the launcher; it
+  timed out waiting for the host actions menu to finish positioning itself. Ten repeats on Chromium (run
+  `1aa9d0f5-c8e1-4363-86d4-641fe5ec7ec7`) and five on WebKit (run `4a101321-6f32-44a8-ae27-11ab6aee6661`) all passed.
+  Its spec file and the host dialogs were changed recently by modal-dialog-shell, not by this plan. I am fairly
+  confident it is unrelated to this plan, which does not touch host menus, and did not add it to FLAKES.md on one
+  observation.
+- Reused: none. Skipped: the rest of the Rust workspace and the JavaScript harness (no helm, supervisor or asset
+  JavaScript changed), the website build (no docs page changed), the doctests (no documentation example changed), the
+  desktop smoke test (the desktop app crate is unchanged), the native Mac app (not runnable here) and the installer
+  (unchanged).
+
+The report's checks were selected browser specs and the UI unit tests; two of the spec files the plan changed had last
+run before the rebase over modal-dialog-shell, and one new test (reapplying Home after a lost create reply) had never
+run. The full browser suite ran this round, above, on the code as it landed. Nothing in the executor's report became
+untrue at landing.
