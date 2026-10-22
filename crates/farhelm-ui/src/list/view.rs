@@ -11,7 +11,8 @@ use dioxus::prelude::*;
 
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::anchored_popovers::{
-    AnchorRegion, Interest, MovedRows, MovementOwner, use_registration,
+    AnchorRegion, Interest, MovedRows, MovementCapture, MovementOwner, use_registration,
+    use_rendered_movement_between,
 };
 use crate::api::{
     self, ListSort, Preferences, SessionFilter, SessionListing, delete_session, fetch_hosts,
@@ -35,7 +36,7 @@ use super::create_form::{
     COMPOSER_DIALOG, CreatePrefill, CreateSessionForm, CreateTarget, CreatedSession,
     mark_replace_with, prefill_from,
 };
-use super::row::SessionRow;
+use super::row::{IdentityFlow, SessionRow, session_identity_flow};
 use super::shared::{
     DeleteClick, DeleteTarget, HostOption, OpenDestination, RowState, effective_create_host,
     host_options, matching_host_option, session_locality,
@@ -49,6 +50,84 @@ const NEW_SESSION_TOOLTIP: &str = if crate::HAS_NEW_SESSION_SHORTCUT {
 } else {
     "new session: start an agent or a command on any host"
 };
+
+/// A successful render's held-order identities and their actual copy flow.
+///
+/// None is an absent/failed listing, not a successful empty list. The rendered
+/// movement hook owns the only previous snapshot; this value has no independent
+/// cache, clock subscription or publication lifecycle.
+type IdentitySnapshot = Option<Vec<(String, Option<IdentityFlow>)>>;
+
+/// The row's accepted session plus its already-derived local rendering values.
+type RenderedSession = (Session, bool, Option<ActivityStamp>);
+
+/// Use the same held/renamed session and local values passed into SessionRow.
+fn identity_snapshot(rows: Option<&[RenderedSession]>, compact: bool) -> IdentitySnapshot {
+    rows.map(|rows| {
+        rows.iter()
+            .map(|(session, deleting, activity)| {
+                (
+                    session.id.raw().to_string(),
+                    session_identity_flow(session, *deleting, compact, activity.as_ref()),
+                )
+            })
+            .collect()
+    })
+}
+
+/// Preserve complete identity contributions and duplicates within one prefix.
+fn identity_prefix(rows: &[(String, Option<IdentityFlow>)], end: usize) -> Vec<&IdentityFlow> {
+    let mut values: Vec<_> = rows[..end]
+        .iter()
+        .filter_map(|(_, value)| value.as_ref())
+        .collect();
+    values.sort_unstable();
+    values
+}
+
+/// Select surviving anchors whose strictly earlier identity contents changed.
+///
+/// Compare whole contributions as multisets: one accepted listing can exchange
+/// two complete copy values wholly above an anchor without moving its prefix.
+/// Multiplicity and text/activity pairing still matter. Routing identities are
+/// deliberately excluded from contribution equality. Index/separator/detail and
+/// refusal movement keep their existing publication rules.
+fn identity_rows_moved(before: &IdentitySnapshot, after: &IdentitySnapshot) -> Vec<String> {
+    let (Some(before), Some(after)) = (before, after) else {
+        return Vec::new();
+    };
+    after
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (id, _))| {
+            let previous_index = before.iter().position(|(previous, _)| previous == id)?;
+            (identity_prefix(before, previous_index) != identity_prefix(after, index))
+                .then(|| id.clone())
+        })
+        .collect()
+}
+
+/// Retain admitted causes across successful renders with different audiences.
+///
+/// A below-anchor change can select nobody while an earlier committed change
+/// still requires closing that same opening. Only loss/recovery of a comparable
+/// listing baseline resets pending; an unaffected successful capture does not.
+/// The hook and owner retain the existing deferred exact-opening admission.
+fn capture_identity_movement(
+    owner: &MovementOwner,
+    before: &IdentitySnapshot,
+    after: &IdentitySnapshot,
+) -> MovementCapture {
+    let ticket = owner.capture_affected(&MovedRows::new(
+        AnchorRegion::Sessions,
+        identity_rows_moved(before, after),
+    ));
+    if before.is_some() && after.is_some() {
+        MovementCapture::Merge(ticket)
+    } else {
+        MovementCapture::Replace(ticket)
+    }
+}
 
 /// One-shot request sent by a session header to the list's existing composer.
 /// AppBody owns the signal so the request survives the keyed session view and
@@ -1084,7 +1163,9 @@ pub(crate) fn ListView(
     // listing commit compares displayed detail/refusal prefixes, including
     // rewrapping text and unchanged refusals crossing an anchor; accepted
     // host reads compare changed stale wording before publishing it. Error
-    // map edits retain the effect beside `order_hold`. These are causal
+    // map edits retain the effect beside `order_hold`. The actual rendered
+    // identity snapshot also covers pin/copy changes within held positions.
+    // These are causal
     // reports, not measurements, and this broad effect is not exhaustive.
     //
     // Accepted host reads also compare displayed host prefix membership and
@@ -3319,9 +3400,38 @@ pub(crate) fn ListView(
         .read()
         .as_ref()
         .and_then(|result| result.as_ref().ok())
-        .map(|listing| rows::held_display_order(&held_order, &listing.sessions))
-        .unwrap_or_default();
-    let pin_separator = rows::pin_separator_after(&displayed).map(str::to_string);
+        .map(|listing| {
+            apply_optimistic_renames(
+                &rows::held_display_order(&held_order, &listing.sessions),
+                &renamed.read(),
+            )
+        });
+    let pin_separator = displayed
+        .as_deref()
+        .and_then(rows::pin_separator_after)
+        .map(str::to_string);
+    // Prepare the exact local delete/activity values once for both the copy
+    // comparison and the row props. The existing clock read above remains the
+    // sole time source, and held rows retain their current accepted fields.
+    let displayed_rows = displayed.map(|sessions| {
+        let deleting = deleting.read();
+        sessions
+            .into_iter()
+            .map(|session| {
+                let is_deleting = deleting.contains(session.id.raw());
+                let activity = ActivityStamp::new(now_secs, session.effective_activity());
+                (session, is_deleting, activity)
+            })
+            .collect::<Vec<_>>()
+    });
+    let identity_snapshot = identity_snapshot(displayed_rows.as_deref(), compact);
+    // Capture admitted openings before changed DOM is published. The common
+    // hook merges successful transitions until delivery, so a later unrelated
+    // change cannot erase an earlier cause. Unavailable/recovery baselines
+    // replace pending work with an empty capture rather than replaying it.
+    use_rendered_movement_between(&identity_snapshot, |before, after| {
+        capture_identity_movement(&popovers, before, after)
+    });
     // Every session whose menu an outside click may have to dismiss: the one
     // whose menu is open, plus any row still holding a delete or replace
     // confirmation. Sorted so the relays render in a stable order.
@@ -4357,10 +4467,7 @@ pub(crate) fn ListView(
                         // While the pointer holds the order, rows keep the
                         // positions they had when it arrived (see
                         // `rows::held_display_order` for new and removed rows).
-                        for session in apply_optimistic_renames(
-                            &rows::held_display_order(&held_order, &listing.sessions),
-                            &renamed.read(),
-                        ) {
+                        for (session, row_deleting, row_activity) in displayed_rows.clone().unwrap_or_default() {
                             SessionRow {
                                 key: "{session.id.raw()}",
                                 menu_registration: menu_registration.clone(),
@@ -4379,7 +4486,7 @@ pub(crate) fn ListView(
                                     // that refusal made visible.
                                     busy: busy || row_is(&row_phases.read(), session.id.raw(), RowPhase::Pending),
                                     confirming: row_is(&row_phases.read(), session.id.raw(), RowPhase::ConfirmingDelete),
-                                    deleting: deleting.read().contains(session.id.raw()),
+                                    deleting: row_deleting,
                                     confirming_replace: row_is(&row_phases.read(), session.id.raw(), RowPhase::ConfirmingReplace),
                                     renaming: rename_editor
                                         .read()
@@ -4408,10 +4515,7 @@ pub(crate) fn ListView(
                                     // `RowState::activity` for why the
                                     // clock's tick must not reach a row
                                     // whose displayed age has not moved.
-                                    activity: ActivityStamp::new(
-                                        now_secs,
-                                        session.effective_activity(),
-                                    ),
+                                    activity: row_activity,
                                     bell_open: bell_open
                                         .read()
                                         .as_ref()
@@ -4575,6 +4679,394 @@ fn listed_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Keep a real admitted B opening while independently publishing held row
+    /// snapshots. Cells deliberately leave effect polling under test control;
+    /// no geometry or replacement owner policy is fabricated by this fixture.
+    struct IdentityRenderFixture {
+        owner: MovementOwner,
+        registration: crate::anchored_popovers::Registration,
+        lease: RefCell<Option<crate::anchored_popovers::AnchorLease>>,
+        open: Rc<RefCell<Option<String>>>,
+        deliveries: Rc<Cell<usize>>,
+        ready: Rc<Cell<bool>>,
+        bindings: Cell<usize>,
+        rows: RefCell<Option<Vec<RenderedSession>>>,
+        scope: Cell<Option<dioxus::core::ScopeId>>,
+    }
+
+    impl PartialEq for IdentityRenderFixture {
+        /// Mutable render inputs do not change the fixture's prop identity.
+        fn eq(&self, other: &Self) -> bool {
+            std::ptr::eq(self, other)
+        }
+    }
+
+    impl IdentityRenderFixture {
+        /// Establish held A/B/C despite reverse served order, then bind the
+        /// existing root B slot before mount so an accidental initial close is
+        /// observable. A and C can change copy flow without changing position.
+        fn new() -> Rc<Self> {
+            let owner = MovementOwner::default();
+            let open = Rc::new(RefCell::new(Some("B".to_string())));
+            let deliveries = Rc::new(Cell::new(0));
+            let current = open.clone();
+            let closing = open.clone();
+            let delivered = deliveries.clone();
+            let registration = owner.register(
+                Interest::new(AnchorRegion::Sessions),
+                move || current.borrow().clone(),
+                move || {
+                    delivered.set(delivered.get() + 1);
+                    *closing.borrow_mut() = None;
+                },
+            );
+            let ready = Rc::new(Cell::new(true));
+            let admitted = ready.clone();
+            let lease = registration
+                .bind_anchor("B".to_string(), move || admitted.get())
+                .expect("open B must admit its measurement lease");
+            let served: Vec<_> = ["C", "B", "A"]
+                .into_iter()
+                .map(|id| {
+                    let mut session = super::super::row::row_specimen(id);
+                    session.pinned = id != "B";
+                    session.title = format!("initial {id}").into();
+                    session
+                })
+                .collect();
+            let held = ["A".to_string(), "B".to_string(), "C".to_string()];
+            let shown = rows::held_display_order(&held, &served);
+            assert_eq!(
+                shown.iter().map(|row| row.id.raw()).collect::<Vec<_>>(),
+                ["A", "B", "C"]
+            );
+            Rc::new(Self {
+                owner,
+                registration,
+                lease: RefCell::new(Some(lease)),
+                open,
+                deliveries,
+                ready,
+                bindings: Cell::new(1),
+                rows: RefCell::new(Some(
+                    shown.into_iter().map(|row| (row, false, None)).collect(),
+                )),
+                scope: Cell::new(None),
+            })
+        }
+
+        /// Drain mount only; subsequent renders intentionally leave delivery
+        /// unsettled until the test has published the competing transition.
+        fn mount(self: &Rc<Self>) -> VirtualDom {
+            let mut dom = VirtualDom::new_with_props(identity_render_probe, self.clone());
+            dom.rebuild_to_vec();
+            dom.process_events();
+            assert_eq!(self.deliveries.get(), 0, "mount is a baseline");
+            assert!(self.ready.get() && self.lease.borrow().is_some());
+            dom
+        }
+
+        /// Read current inputs through the production snapshot resolver.
+        fn snapshot(&self) -> IdentitySnapshot {
+            identity_snapshot(self.rows.borrow().as_deref(), false)
+        }
+
+        /// Change an actual row input, rather than manufacturing a selected
+        /// audience or returning a prebuilt ticket from the test component.
+        fn title(&self, id: &str, title: &str) {
+            let mut rows = self.rows.borrow_mut();
+            let row = rows
+                .as_mut()
+                .expect("successful fixture listing")
+                .iter_mut()
+                .find(|row| row.0.id.raw() == id)
+                .expect("held row exists");
+            row.0.title = title.into();
+        }
+
+        /// Return committed witness edits without polling the queued effect.
+        fn render(&self, dom: &mut VirtualDom) -> Vec<dioxus::core::Mutation> {
+            dom.mark_dirty(self.scope.get().expect("probe mounted"));
+            dom.render_immediate_to_vec().edits
+        }
+
+        /// Revoke the old opening before restoring Some(B), then bind the new
+        /// measurement lifetime through the same production registration API.
+        fn reopen(&self) {
+            *self.open.borrow_mut() = None;
+            self.registration.forget_anchor();
+            *self.open.borrow_mut() = Some("B".to_string());
+            let ready = self.ready.clone();
+            *self.lease.borrow_mut() = Some(
+                self.registration
+                    .bind_anchor("B".to_string(), move || ready.get())
+                    .expect("fresh B opening admits a distinct lease"),
+            );
+            self.bindings.set(self.bindings.get() + 1);
+        }
+    }
+
+    /// Render a minimal witness of the exact production snapshot, while using
+    /// the production capture helper and common deferred hook unchanged. The
+    /// real SessionRow markup is covered separately; this test owns timing.
+    fn identity_render_probe(fixture: Rc<IdentityRenderFixture>) -> Element {
+        fixture.scope.set(Some(dioxus::core::current_scope_id()));
+        let snapshot = fixture.snapshot();
+        use_rendered_movement_between(&snapshot, |before, after| {
+            capture_identity_movement(&fixture.owner, before, after)
+        });
+        let witness = format!("{snapshot:?}");
+        rsx! { span { "{witness}" } }
+    }
+
+    /// A committed above-B cause must survive a below-B-only render before
+    /// effects run. The second transition has a genuinely empty selected set,
+    /// while B's readiness and exact lease remain unchanged throughout.
+    #[farhelm_testtrace::test]
+    fn identity_pending_close_survives_an_unrelated_successful_render() {
+        let fixture = IdentityRenderFixture::new();
+        let mut dom = fixture.mount();
+        let before = fixture.snapshot();
+        fixture.title("A", "A expanded title");
+        let first = fixture.snapshot();
+        assert_eq!(identity_rows_moved(&before, &first), ["B", "C"]);
+        let edits = fixture.render(&mut dom);
+        assert!(edits.iter().any(|edit| matches!(edit,
+            dioxus::core::Mutation::SetText { value, .. } if value.contains("A expanded title"))));
+        assert_eq!(fixture.deliveries.get(), 0);
+        fixture.title("C", "C independently expanded");
+        assert!(identity_rows_moved(&first, &fixture.snapshot()).is_empty());
+        let edits = fixture.render(&mut dom);
+        assert!(edits.iter().any(|edit| matches!(edit,
+            dioxus::core::Mutation::SetText { value, .. } if value.contains("C independently expanded"))));
+        assert_eq!(fixture.open.borrow().as_deref(), Some("B"));
+        assert!(fixture.ready.get() && fixture.lease.borrow().is_some());
+        assert_eq!(fixture.bindings.get(), 1, "both changes use the same lease");
+        assert_eq!(
+            fixture.deliveries.get(),
+            0,
+            "no delivery before effect polling"
+        );
+        dom.process_events();
+        assert_eq!(fixture.deliveries.get(), 1);
+        assert!(fixture.open.borrow().is_none());
+        dom.process_events();
+        assert_eq!(fixture.deliveries.get(), 1, "pending drains once");
+    }
+
+    /// None is an explicit comparable-baseline reset, even if logical
+    /// readiness recovers before delivery and the old fixture lease survives.
+    /// This isolates reset from teardown's independent weak-ticket rejection.
+    #[farhelm_testtrace::test]
+    fn identity_pending_close_resets_across_unavailable_and_recovery_renders() {
+        let fixture = IdentityRenderFixture::new();
+        let mut dom = fixture.mount();
+        fixture.title("A", "A changed before Err");
+        fixture.render(&mut dom);
+        let recovery = fixture.rows.borrow().clone();
+        fixture.ready.set(false);
+        *fixture.rows.borrow_mut() = None;
+        fixture.render(&mut dom);
+        fixture.ready.set(true);
+        *fixture.rows.borrow_mut() = recovery;
+        fixture.render(&mut dom);
+        assert_eq!(fixture.deliveries.get(), 0);
+        assert_eq!(fixture.bindings.get(), 1);
+        dom.process_events();
+        assert_eq!(
+            fixture.deliveries.get(),
+            0,
+            "recovery must not replay the old cause"
+        );
+        assert_eq!(fixture.open.borrow().as_deref(), Some("B"));
+        fixture.title("A", "A genuinely changes after recovery");
+        fixture.render(&mut dom);
+        dom.process_events();
+        assert_eq!(fixture.deliveries.get(), 1);
+    }
+
+    /// Retaining an earlier ticket must not reinterpret it as a fresh opening.
+    /// A later genuine above-B cause, rather than a below-B render, is required
+    /// to close the newly measured opening.
+    #[farhelm_testtrace::test]
+    fn identity_pending_close_rejects_reopening_until_a_new_cause() {
+        let fixture = IdentityRenderFixture::new();
+        let mut dom = fixture.mount();
+        fixture.title("A", "A changed for the old opening");
+        fixture.render(&mut dom);
+        fixture.reopen();
+        let before = fixture.snapshot();
+        fixture.title("C", "C below the fresh opening");
+        assert!(identity_rows_moved(&before, &fixture.snapshot()).is_empty());
+        fixture.render(&mut dom);
+        assert_eq!(fixture.deliveries.get(), 0);
+        assert_eq!(fixture.bindings.get(), 2);
+        dom.process_events();
+        assert_eq!(fixture.deliveries.get(), 0);
+        assert_eq!(fixture.open.borrow().as_deref(), Some("B"));
+        fixture.title("A", "A genuinely changes for the fresh opening");
+        fixture.render(&mut dom);
+        dom.process_events();
+        assert_eq!(fixture.deliveries.get(), 1);
+    }
+
+    /// A held source can change pin flow without changing index/separator.
+    /// Select by the actual held vector, never numeric identity or served sort;
+    /// own-row and below-row contributions cannot move an earlier top anchor.
+    #[farhelm_testtrace::test]
+    fn identity_selection_uses_current_held_rows_and_strict_prefixes() {
+        let c = super::super::row::row_specimen("9303");
+        let mut a = super::super::row::row_specimen("9302");
+        let b = super::super::row::row_specimen("9301");
+        let held = vec!["9303".to_string(), "9302".to_string(), "9301".to_string()];
+        let renamed = HashMap::from([(
+            "9302".to_string(),
+            ("actual optimistic title".to_string(), 1),
+        )]);
+        let prepare = |served: &[Session]| {
+            apply_optimistic_renames(&rows::held_display_order(&held, served), &renamed)
+                .into_iter()
+                .map(|session| (session, false, None))
+                .collect::<Vec<RenderedSession>>()
+        };
+        let before_rows = prepare(&[b.clone(), a.clone(), c.clone()]);
+        assert_eq!(
+            before_rows
+                .iter()
+                .map(|row| row.0.id.raw())
+                .collect::<Vec<_>>(),
+            ["9303", "9302", "9301"]
+        );
+        assert_eq!(before_rows[1].0.title.raw(), "actual optimistic title");
+        let before = identity_snapshot(Some(&before_rows), false);
+        a.pinned = true;
+        let after_rows = prepare(&[a.clone(), c.clone(), b.clone()]);
+        let after = identity_snapshot(Some(&after_rows), false);
+        assert_eq!(identity_rows_moved(&before, &after), ["9301"]);
+        assert_eq!(
+            rows::pin_separator_after(
+                &before_rows
+                    .iter()
+                    .map(|row| row.0.clone())
+                    .collect::<Vec<_>>()
+            ),
+            None
+        );
+        assert_eq!(
+            rows::pin_separator_after(
+                &after_rows
+                    .iter()
+                    .map(|row| row.0.clone())
+                    .collect::<Vec<_>>()
+            ),
+            None
+        );
+        let mut below_rows = after_rows.clone();
+        below_rows[2].0.pinned = true;
+        assert!(
+            identity_rows_moved(&after, &identity_snapshot(Some(&below_rows), false)).is_empty()
+        );
+        assert!(
+            identity_rows_moved(
+                &identity_snapshot(Some(&before_rows), true),
+                &identity_snapshot(Some(&after_rows), true),
+            )
+            .is_empty()
+        );
+    }
+
+    /// One accepted listing may exchange complete identities wholly above a
+    /// target. Atomic cancellation must survive, while duplicate counts and
+    /// text/activity pairing must not be flattened into independent bags.
+    #[farhelm_testtrace::test]
+    fn identity_prefix_preserves_atomic_exchanges_multiplicity_and_pairing() {
+        let row = |id: &str, title: &str, age: &str| {
+            let mut session = super::super::row::row_specimen(id);
+            session.pinned = true;
+            session.title = title.into();
+            (
+                session,
+                false,
+                Some(ActivityStamp {
+                    age: age.to_string(),
+                    absolute: "tooltip".to_string(),
+                }),
+            )
+        };
+        let before_rows = vec![
+            row("a", "short", "1m"),
+            row("b", "long title", "10m"),
+            row("target", "target", "1m"),
+        ];
+        let exchanged = vec![
+            row("a", "long title", "10m"),
+            row("b", "short", "1m"),
+            row("target", "target", "1m"),
+        ];
+        let before = identity_snapshot(Some(&before_rows), false);
+        let exchanged = identity_snapshot(Some(&exchanged), false);
+        assert_eq!(identity_rows_moved(&before, &exchanged), ["b"]);
+        let re_paired = vec![
+            row("a", "short", "10m"),
+            row("b", "long title", "1m"),
+            row("target", "target", "1m"),
+        ];
+        assert!(
+            identity_rows_moved(&before, &identity_snapshot(Some(&re_paired), false))
+                .contains(&"target".to_string())
+        );
+        let duplicates = vec![
+            row("a", "same", "1m"),
+            row("b", "same", "1m"),
+            row("c", "other", "1m"),
+            row("target", "target", "1m"),
+        ];
+        let changed_count = vec![
+            row("a", "same", "1m"),
+            row("b", "other", "1m"),
+            row("c", "other", "1m"),
+            row("target", "target", "1m"),
+        ];
+        assert!(
+            identity_rows_moved(
+                &identity_snapshot(Some(&duplicates), false),
+                &identity_snapshot(Some(&changed_count), false),
+            )
+            .contains(&"target".to_string())
+        );
+    }
+
+    /// Err/loading means no measured row baseline. Recovery and fresh rows get
+    /// fresh measurements; local deleting state still compares in a surviving
+    /// successful render, including compact rows whose copy cannot wrap.
+    #[farhelm_testtrace::test]
+    fn identity_selection_preserves_unavailable_baselines_and_local_delete_values() {
+        let rows = vec![
+            (super::super::row::row_specimen("a"), false, None),
+            (super::super::row::row_specimen("target"), false, None),
+        ];
+        for compact in [false, true] {
+            let before = identity_snapshot(Some(&rows), compact);
+            assert!(identity_rows_moved(&None, &before).is_empty());
+            assert!(identity_rows_moved(&before, &None).is_empty());
+            assert!(identity_rows_moved(&Some(Vec::new()), &before).is_empty());
+            let mut deleting = rows.clone();
+            deleting[0].1 = true;
+            let after = identity_snapshot(Some(&deleting), compact);
+            assert_eq!(identity_rows_moved(&before, &after), ["target"]);
+            let mut fresh = deleting.clone();
+            fresh.push((super::super::row::row_specimen("fresh"), false, None));
+            assert_eq!(
+                identity_rows_moved(&before, &identity_snapshot(Some(&fresh), compact)),
+                ["target"]
+            );
+            let mut same_label = deleting;
+            same_label[0].0.title = "hidden title".into();
+            same_label[0].0.status = SessionStatus::Exited { exit_code: Some(5) };
+            assert_eq!(after, identity_snapshot(Some(&same_label), compact));
+        }
+    }
 
     /// Every Delete/Replace publisher uses this real context setter. It must
     /// report before replacing visible text, preserve None/same-display writes,
