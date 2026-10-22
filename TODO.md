@@ -262,6 +262,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Post-clone settings test hangs waiting for a finished save.** The WebKit test
+  `post-clone commands with carriage returns refuse edits but can be cleared` in `e2e/tests/settings.spec.ts` finished
+  its steps in about 12 to 14 seconds, then hung in its cleanup until the 60-second test timeout, waiting for Playwright
+  to report one of its post-clone command saves as finished. It did so in browser runs
+  `dd883f13-632e-4743-b2f1-83f3d27dd15f` and `c2a8412b-3534-414f-bd04-a77888f9cb27` on two different landing stacks that
+  do not touch the test or the save; 10 WebKit and 5 Chromium repetitions all passed
+  (`bb964d0b-b35e-43e3-a2e9-e2c08cb09e0a`, `16b8d112-1859-457a-be9c-258475b98947`). Hypothesis: the cleanup's unbounded
+  wait for each routed save's `finished()` sometimes never resolves in WebKit, although the page had already shown every
+  save's result (FLAKES.md, 2026-10-22).
+
 - **Hung-save waiter times out just before its deadline.** The unit test
   `api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline` in `crates/farhelm-ui/src/api/save_order.rs`
   failed its assertion that at least 30 ms had passed, fast and through the timeout path, in full `farhelm-ui` library
