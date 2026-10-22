@@ -876,6 +876,8 @@ pub(crate) enum PreferenceValue {
     /// Transparent peer-text serialization retains the name's exact wire spelling.
     QuickLaunchTemplate(Option<PeerText>),
     /// Empty clears every key; each write replaces the entire shared map.
+    /// Record one only after `note_template_shortcut_edit`, or a failed write
+    /// loses the edit on the next read.
     TemplateShortcuts(std::collections::BTreeMap<String, PeerText>),
     /// None is an explicit clear, not an omitted patch field.
     FeedbackContact(Option<String>),
@@ -990,11 +992,17 @@ struct FieldWrite {
     /// tickets separate lets an earlier reader resume despite a stream of edits.
     queued_saves: Vec<save_order::Ticket>,
     sending_saves: Vec<save_order::Ticket>,
+    /// Number keys only: each template whose key changed since the last
+    /// acknowledged map, and its key now (`None` freed it). A failed whole map
+    /// predates later reads and would undo an agent's binding, so these are
+    /// replayed onto each fresh read instead (SPEC.md, "One GUI at a time").
+    changes: std::collections::BTreeMap<PeerText, Option<String>>,
 }
 
 /// Retire the matching mark entirely, or just the deleted name from a map.
 /// A failed map write may also contain unrelated choices that still need replay.
 fn retire_template_choice(slot: &mut FieldWrite, name: &str) {
+    slot.changes.retain(|template, _| template.raw() != name);
     if matches!(&slot.latest, Some(PreferenceValue::QuickLaunchTemplate(Some(value))) if value.raw() == name)
     {
         slot.latest = None;
@@ -1133,10 +1141,19 @@ impl PreferenceWrites {
         let slot = self.field(field);
         slot.sending_saves.clear();
         if slot.recorded_since_send || slot.latest.as_ref() != Some(sent) {
+            // A superseded map that landed saved some key choices; forget those.
+            if let (true, PreferenceValue::TemplateShortcuts(sent)) = (success, sent) {
+                let saved = |t: &PeerText| sent.iter().find_map(|(k, o)| (o == t).then_some(k));
+                slot.changes
+                    .retain(|template, key| saved(template) != key.as_ref());
+            }
             return true;
         }
         slot.acked = success;
         slot.in_flight = false;
+        if success {
+            slot.changes.clear();
+        }
         if let Some(completion) = slot.completion.take() {
             let deleting = completion.retire_template.is_some();
             if let Some(name) = completion.retire_template {
@@ -1201,11 +1218,70 @@ impl PreferenceWrites {
             PreferenceField::QuickLaunchTemplate,
             PreferenceField::TemplateShortcuts,
         ] {
-            if let Some(value) = self.dirty(field) {
+            if let Some(value) = self.rebased(field, &fetched) {
                 value.overlay(&mut fetched);
             }
         }
         fetched
+    }
+
+    /// Remember which templates' keys an edit of `before` into `after` changed.
+    /// Callers pass the overlaid read they edited, so earlier failed changes
+    /// are already in `before` and accumulate rather than being forgotten.
+    fn note_shortcut_edit(
+        &mut self,
+        before: &std::collections::BTreeMap<String, PeerText>,
+        after: &std::collections::BTreeMap<String, PeerText>,
+    ) {
+        let key_of = |map: &std::collections::BTreeMap<String, PeerText>, name: &PeerText| {
+            map.iter()
+                .find_map(|(key, owner)| (owner == name).then(|| key.clone()))
+        };
+        for name in before.values().chain(after.values()) {
+            let key = key_of(after, name);
+            if key_of(before, name) != key {
+                self.template_shortcuts.changes.insert(name.clone(), key);
+            }
+        }
+    }
+
+    /// [`Self::dirty`] as of a fresh read: unconfirmed number keys are this
+    /// client's key changes applied to `fetched`, not its last whole map.
+    fn rebased(&self, field: PreferenceField, fetched: &Preferences) -> Option<PreferenceValue> {
+        let value = self.dirty(field)?;
+        if field != PreferenceField::TemplateShortcuts {
+            return Some(value);
+        }
+        let mut map = fetched.template_shortcuts.clone();
+        for (template, key) in &self.template_shortcuts.changes {
+            // As in the Templates editor: a template holds at most one key, and
+            // a template the user's choice displaced was recorded as freed.
+            map.retain(|_, owner| owner != template);
+            if let Some(key) = key {
+                map.insert(key.clone(), template.clone());
+            }
+        }
+        Some(PreferenceValue::TemplateShortcuts(map))
+    }
+
+    /// Overlay `field`'s unconfirmed choice on a reauthentication seed and
+    /// claim its replay. An idle replay sends the choice rebased on that seed;
+    /// a PUT already in flight keeps its map (the accepted read-to-write race).
+    /// Number keys need a seed that was really read: rebased onto the
+    /// defaults of a failed read, they would erase every other key.
+    fn replay_over(&mut self, field: PreferenceField, seed: &mut Preferences, read: bool) -> bool {
+        if !read && field == PreferenceField::TemplateShortcuts {
+            return false;
+        }
+        let Some(value) = self.rebased(field, seed) else {
+            return false;
+        };
+        value.overlay(seed);
+        let slot = self.field(field);
+        if !slot.in_flight {
+            slot.latest = Some(value);
+        }
+        self.begin_replay(field).is_some()
     }
 
     /// This session's newest choice for `field` when no PUT has confirmed
@@ -1322,8 +1398,14 @@ pub(crate) fn store_preference(base: &str, value: PreferenceValue) {
 /// after credential recovery, where the fetched row predates a choice
 /// whose PUT died with the old credential. Fields whose last write was
 /// acknowledged are NOT overlaid: the helm's answer is newer authority for
-/// those (another client may have written since this one did).
-pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Preferences {
+/// those (another client may have written since this one did). `read` says
+/// whether `seed` came from the helm; after a failed read, number keys are
+/// left out, since defaults are no base for rebasing them.
+pub(crate) fn seed_with_local_changes(
+    base: &str,
+    mut seed: Preferences,
+    read: bool,
+) -> Preferences {
     for field in [
         PreferenceField::WelcomeSeen,
         PreferenceField::ClaudeTrustHintDismissed,
@@ -1343,18 +1425,7 @@ pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Pref
         PreferenceField::FeedbackContact,
         PreferenceField::TerminalLinkClick,
     ] {
-        let claimed = {
-            let mut queue = preference_writes();
-            match queue.dirty(field) {
-                Some(value) => {
-                    let claimed = queue.begin_replay(field).is_some();
-                    value.overlay(&mut seed);
-                    claimed
-                }
-                None => false,
-            }
-        };
-        if claimed {
+        if preference_writes().replay_over(field, &mut seed, read) {
             spawn_preference_writer(base.to_string(), field);
         }
     }
@@ -1466,6 +1537,15 @@ fn preference_write_completion(
 /// honor this ownership; an acknowledged choice yields to the fresh shared read.
 pub(crate) fn template_bindings_after_read(fetched: Preferences) -> Preferences {
     preference_writes().template_bindings_after_read(fetched)
+}
+
+/// Record a number-key edit's changes before storing its whole map, so a
+/// failed write is later replayed as those changes rather than as that map.
+pub(crate) fn note_template_shortcut_edit(
+    before: &std::collections::BTreeMap<String, PeerText>,
+    after: &std::collections::BTreeMap<String, PeerText>,
+) {
+    preference_writes().note_shortcut_edit(before, after);
 }
 
 /// Order template deletion after shortcut writes and retire matching local intent.
@@ -6499,10 +6579,9 @@ mod preference_write_tests {
         use std::collections::BTreeMap;
         let mut queue = PreferenceWrites::default();
         let field = PreferenceField::TemplateShortcuts;
-        let value = PreferenceValue::TemplateShortcuts(BTreeMap::from([
-            ("1".into(), "deleted".into()),
-            ("0".into(), "kept".into()),
-        ]));
+        let map = BTreeMap::from([("1".into(), "deleted".into()), ("0".into(), "kept".into())]);
+        queue.note_shortcut_edit(&BTreeMap::new(), &map);
+        let value = PreferenceValue::TemplateShortcuts(map);
         assert!(queue.record(value.clone()));
         assert_eq!(queue.next_to_send(field), Some(value.clone()));
         let mut deleting = queue.before_template_delete(field, "deleted").unwrap();
@@ -6516,6 +6595,11 @@ mod preference_write_tests {
         let kept =
             PreferenceValue::TemplateShortcuts(BTreeMap::from([("0".into(), "kept".into())]));
         assert_eq!(queue.dirty(field), Some(kept.clone()));
+        let read = queue.template_bindings_after_read(Preferences::default());
+        assert_eq!(
+            read.template_shortcuts,
+            BTreeMap::from([("0".into(), "kept".into())])
+        );
         assert_eq!(queue.begin_replay(field), Some(kept));
         let mut deleting = queue.before_template_delete(field, "kept").unwrap();
         queue.writer_lost(field);
@@ -6541,6 +6625,10 @@ mod preference_write_tests {
             quick_launch_template: Some("bolt".into()),
             ..Default::default()
         };
+        queue.note_shortcut_edit(
+            &BTreeMap::new(),
+            &BTreeMap::from([("1".into(), "local".into())]),
+        );
         assert!(queue.record(value.clone()));
         assert_eq!(value.wire_value(), serde_json::json!({"1":"local"}));
         assert_eq!(value.field().key(), "template_shortcuts");
@@ -6556,6 +6644,7 @@ mod preference_write_tests {
         assert!(!queue.finished(field, &value, true));
         assert_eq!(queue.template_bindings_after_read(seed.clone()), seed);
         let clear = PreferenceValue::TemplateShortcuts(BTreeMap::new());
+        queue.note_shortcut_edit(&seed.template_shortcuts, &BTreeMap::new());
         assert!(queue.record(clear.clone()));
         assert_eq!(clear.wire_value(), serde_json::json!({}));
         assert!(
@@ -6563,6 +6652,56 @@ mod preference_write_tests {
                 .template_bindings_after_read(seed)
                 .template_shortcuts
                 .is_empty()
+        );
+    }
+
+    /// After a failed number-key save, neither the next edit's read nor the
+    /// sign-in replay may put the failed map back over an agent's newer binding
+    /// (SPEC.md, "One GUI at a time"). The user's own key changes are reapplied
+    /// and accumulate across failures until a write succeeds.
+    #[farhelm_testtrace::test]
+    fn failed_number_key_save_replays_only_the_users_changes() {
+        // "2mine" binds key 2 to the template "mine".
+        let map = |s: &str| -> std::collections::BTreeMap<String, PeerText> {
+            s.split(' ')
+                .map(|b| (b[..1].into(), b[1..].into()))
+                .collect()
+        };
+        let read = |s| Preferences {
+            template_shortcuts: map(s),
+            ..Default::default()
+        };
+        let mut queue = PreferenceWrites::default();
+        let field = PreferenceField::TemplateShortcuts;
+        let fail = |queue: &mut PreferenceWrites, before: &str, after: &str| {
+            queue.note_shortcut_edit(&map(before), &map(after));
+            let sent = PreferenceValue::TemplateShortcuts(map(after));
+            assert!(queue.record(sent.clone()));
+            queue.next_to_send(field).unwrap();
+            assert!(!queue.finished(field, &sent, false));
+        };
+        // The user moves "mine" from key 1 to 2. An agent then binds 1 and 3
+        // and adds 4; the next edit's read keeps all three and the user's move.
+        fail(&mut queue, "1mine 3old", "2mine 3old");
+        let fresh = queue.template_bindings_after_read(read("1other 3agent 4new"));
+        assert_eq!(fresh.template_shortcuts, map("1other 2mine 3agent 4new"));
+        // Freeing keys 1 (now the agent's) and 4 fails too. A failed sign-in
+        // read must not replay over defaults, which would erase every key.
+        fail(&mut queue, "1other 2mine 3agent 4new", "2mine 3agent");
+        let mut defaults = Preferences::default();
+        assert!(!queue.replay_over(field, &mut defaults, false));
+        assert_eq!(defaults, Preferences::default());
+        // A real read then shows 1 and 4 again, a new 5 and "mine" moved to 6:
+        // the replay keeps 5 and every change the user made.
+        let replayed = PreferenceValue::TemplateShortcuts(map("2mine 3agent 5later"));
+        let mut seed = read("1other 3agent 4new 5later 6mine");
+        assert!(queue.replay_over(field, &mut seed, true));
+        assert_eq!(seed, read("2mine 3agent 5later"));
+        assert_eq!(queue.next_to_send(field), Some(replayed.clone()));
+        assert!(!queue.finished(field, &replayed, true));
+        assert_eq!(
+            queue.template_bindings_after_read(read("3agent")),
+            read("3agent")
         );
     }
 

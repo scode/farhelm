@@ -1342,7 +1342,12 @@ pub(super) fn TemplatesDialog(
                             })
                         }
                         BindingEdit::Number(name, key) => {
+                            let before = current.template_shortcuts.clone();
                             bind_number(&mut current.template_shortcuts, &name, key.as_deref());
+                            crate::api::note_template_shortcut_edit(
+                                &before,
+                                &current.template_shortcuts,
+                            );
                             Some(PreferenceValue::TemplateShortcuts(
                                 current.template_shortcuts.clone(),
                             ))
@@ -1511,6 +1516,7 @@ pub(super) fn TemplatesDialog(
                     let before = bindings.clone();
                     rename_number_binding(&mut bindings, &old, &value.name);
                     if bindings != before {
+                        crate::api::note_template_shortcut_edit(&before, &bindings);
                         preferences.0.write().template_shortcuts = bindings.clone();
                         if !crate::api::write_template_binding(
                             &base,

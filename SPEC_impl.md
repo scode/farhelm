@@ -1160,9 +1160,12 @@ without closing Templates. The open toggle owns pointerdown until click. Dialog 
 app's layout epoch dismiss the popup when its fixed coordinates become stale; the popup's own scrolling does not dismiss
 it. Focus returns only while still owned by a closing menu, with `preventScroll`, so a delayed dismissal cannot steal
 another popup's focus or undo the dialog's scroll. Re-delivery to an already closed popup does nothing. The two shortcut
-preference fields share acknowledgment, deletion retirement and fresh-read overlay helpers. A rename repoints both
-before deleting the old name, and removes a stale new-name key when retaining the old name's key would otherwise violate
-one-key-per-template. Failed repoints keep both names and dirty intent for recovery.
+preference fields share acknowledgment, deletion retirement and fresh-read overlay helpers. After a failed save, number
+keys are rebased rather than overlaid: each template whose key this client changed since its last acknowledged write is
+moved to its chosen key (or unbound) on the fresh read, and the sign-in replay does the same only when its read
+succeeded. An agent's binding from that read survives unless the user changed the same key or template. A rename
+repoints both before deleting the old name, and removes a stale new-name key when retaining the old name's key would
+otherwise violate one-key-per-template. Failed repoints keep both names and dirty intent for recovery.
 
 Quick launch uses that shared capture listener and the same list-owned New-open callback, followed by the ordinary
 template search action and form requestSubmit. The mark is one nullable shared preference rather than template data, so

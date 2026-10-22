@@ -2066,7 +2066,7 @@ fn PreferencesGate(children: Element) -> Element {
                     (api::Preferences::default(), false)
                 }
             };
-            let seed = api::seed_with_local_changes(&base, seed);
+            let seed = api::seed_with_local_changes(&base, seed, read_succeeded);
             // A failed read also yields defaults, but those defaults are not
             // evidence that this helm's welcome has never been dismissed.
             if !*welcome_decided.0.peek() && !*auth::TOKEN_REQUIRED.peek() {

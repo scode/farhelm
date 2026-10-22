@@ -17626,7 +17626,12 @@
   equivalent that keeps agent changes made before the read); a unit test. Size gate: about 100 lines as above
   (verification estimated 60–120, borderline); over it, block and bring it back. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/gui-saves-last-write-wins.md`.
+- Execution: built, not complete: the fix exceeds the size gate and awaits the maintainer's decision (build it or
+  discard the outcome). Change `qxzmrlpookppmzlqmzxmxkpkypnxlqxv`, bookmark
+  `plan/gui-saves-last-write-wins/02-failed-key-save`. A failed number-key save is remembered as the keys the user
+  changed and reapplied to every fresh read and to the replay after signing back in, so agent changes from that read
+  survive. Size: 194 changed code/test/doc lines against the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2573/changes.
 
 ## guarded-preview-widens-source-deletion-consent.md
 
