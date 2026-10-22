@@ -17653,7 +17653,9 @@
   conflict. The assessment and completion criteria above stand as the case that plan must cover; the queue item is
   removed now.
 - Execution: complete for the queue removal (feedback file and index entry removed in the change that recorded this
-  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw".
+  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw". Fixed by jj change
+  `ustnksqtmomowxvvyvwlomqqptkstqtk`, bookmark `plan/bind-gui-answers/01-guarded-answer-binding`;
+  [draft PR #2576](https://github.com/scode/farhelm/pull/2576/changes).
 
 ## shortcut-save-overwrites-intervening-agent-binding.md
 
@@ -17705,7 +17707,9 @@
   conflict. The assessment and completion criteria above stand as the case that plan must cover; the queue item is
   removed now.
 - Execution: complete for the queue removal (feedback file and index entry removed in the change that recorded this
-  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw".
+  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw". Fixed by jj change
+  `ustnksqtmomowxvvyvwlomqqptkstqtk`, bookmark `plan/bind-gui-answers/01-guarded-answer-binding`;
+  [draft PR #2576](https://github.com/scode/farhelm/pull/2576/changes).
 
 ## selection-history-plan-forgets-upgrade-selection.md
 

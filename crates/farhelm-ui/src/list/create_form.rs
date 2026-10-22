@@ -721,12 +721,19 @@ fn answer_launcher_yolo(
 /// deliberately replaces the preview generation. Ignore only that generation;
 /// any other draft or opening change cancels the accepted automatic submit.
 /// Prompt and conversation are launch inputs outside preview authority.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// The opening and the Replace precondition are the ones the answered render
+/// drew, never the values current at the click or at send time: the submit
+/// that follows the preview sends `replace_guard` as captured, so a source
+/// that became alive while the preview loaded is kept, as SPEC.md's Replace
+/// with section requires.
+#[derive(Debug, Clone)]
 struct GuardedSubmitStamp {
     opening: u64,
     authority: PreviewAuthority,
     prompt: Option<String>,
     conversation: String,
+    replace_guard: crate::DeleteGuard,
 }
 
 impl GuardedSubmitStamp {
@@ -738,6 +745,7 @@ impl GuardedSubmitStamp {
         mut authority: PreviewAuthority,
         prompt: Option<String>,
         conversation: String,
+        replace_guard: crate::DeleteGuard,
     ) -> Self {
         authority.generation = 0;
         Self {
@@ -745,7 +753,28 @@ impl GuardedSubmitStamp {
             authority,
             prompt,
             conversation,
+            replace_guard,
         }
+    }
+
+    /// The precondition to send when the live launch is still the one this
+    /// answer accepted, or `None` when anything that identifies it changed.
+    /// The captured precondition is never compared: it is what the submit
+    /// sends, and the live one moving (a source restarted meanwhile) must not
+    /// turn the accepted launch into a different deletion.
+    fn guard_if_current(
+        &self,
+        opening: u64,
+        mut authority: PreviewAuthority,
+        prompt: &Option<String>,
+        conversation: &str,
+    ) -> Option<crate::DeleteGuard> {
+        authority.generation = 0;
+        (self.opening == opening
+            && self.authority == authority
+            && &self.prompt == prompt
+            && self.conversation == conversation)
+            .then_some(self.replace_guard)
     }
 }
 
@@ -753,15 +782,21 @@ impl GuardedSubmitStamp {
 ///
 /// Slot identity rejects Cancel and older openings. Binding equality rejects
 /// an edit that reached live signals before the render removed its old button.
-/// A busy operation leaves the question intact, including its error.
+/// The launcher opening the answer's render drew must still be the live one:
+/// opening another source swaps the launcher's prefill without unmounting it,
+/// and an answer delivered before the rerender would otherwise act on the
+/// earlier source. A busy operation leaves the question intact, including its
+/// error.
 fn take_launcher_guarded_answer(
     slot: &mut ConfirmSlot<LauncherYoloQuestion>,
     question: &LauncherYoloQuestion,
     busy: bool,
+    rendered_opening: u64,
+    live_opening: u64,
     refused: &IntentBinding,
     current: Option<&IntentBinding>,
 ) -> bool {
-    if busy || current != Some(refused) {
+    if busy || rendered_opening != live_opening || current != Some(refused) {
         return false;
     }
     let selection = match &refused.agent {
@@ -2893,9 +2928,9 @@ pub(super) fn CreateSessionForm(
     // earlier. `launch-composer-launch-context` beside it is unchanged
     // either way — the host/folder summary is equally true of both verbs.
     let submit_verb = if is_replace_with { "replace" } else { "launch" };
-    // What pressing "replace" stops, drawn from the same render the submit
-    // handler below is created in: the warning under the button, and the
-    // precondition that handler sends (see `replace_with_warning`).
+    // What pressing "replace" stops, drawn from one render: the warning under
+    // the button, and the precondition a press or answer drawn by this render
+    // passes to the submit (see `replace_with_warning`).
     let (replace_warning, replace_guard) = if is_replace_with {
         replace_with_warning(replace_source_state.as_ref())
     } else {
@@ -3988,13 +4023,15 @@ pub(super) fn CreateSessionForm(
     // Native submit and admitted guarded answers share this one Rust entry.
     // Keeping transition, admission and the synchronous operation claim in
     // one turn avoids desktop JavaScript evaluation dispatching a later draft.
-    let submit_composer = Callback::<()>::new({
+    // Every caller passes the Replace precondition the press it acts for saw:
+    // a native submit passes this render's, a guarded answer its own render's.
+    let submit_composer = Callback::<crate::DeleteGuard>::new({
         let hosts = hosts.clone();
         let open_host = open_host.clone();
         let prefill_for_submit = prefill_for_submit.clone();
         let base = base.clone();
         let catalog_for_submit = catalog_for_submit.clone();
-        move |_| {
+        move |replace_guard: crate::DeleteGuard| {
             // Any ordinary submit supersedes a guarded answer still waiting
             // for preview, including a submit refused before a request exists.
             guarded_submit_pending.set(None);
@@ -4590,8 +4627,9 @@ pub(super) fn CreateSessionForm(
                     // the exact payload available to the next explicit retry.
                     github_attempt.set(Some((bound.clone(), attempt.clone())));
                     // The body is the retained original; the source
-                    // delete's precondition is this press's, matching
-                    // the warning on screen now (see `submit_fresh_create`).
+                    // delete's precondition is the one this submit was
+                    // given: the warning the press or answer it acts for saw
+                    // (see `submit_fresh_create` and `GuardedSubmitStamp`).
                     match api::submit_fresh_create(
                         &base,
                         bound.replace_source.as_deref(),
@@ -4773,14 +4811,14 @@ pub(super) fn CreateSessionForm(
         let Some(pending) = guarded_submit_pending() else {
             return;
         };
-        let current = live_preview_authority().map(|mut authority| {
+        let answered_guard = live_preview_authority().and_then(|mut authority| {
             authority.agent = preview_agent_now();
-            GuardedSubmitStamp::new(opening_generation(), authority, prompt(), conversation())
+            pending.guard_if_current(opening_generation(), authority, &prompt(), &conversation())
         });
-        if current.as_ref() != Some(&pending) {
+        let Some(answered_guard) = answered_guard else {
             guarded_submit_pending.set(None);
             return;
-        }
+        };
         if ops.busy() || ops.busy_now() {
             return;
         }
@@ -4798,7 +4836,7 @@ pub(super) fn CreateSessionForm(
                     .is_some_and(|live| authority.accepts(live, &preview)) =>
             {
                 guarded_submit_pending.set(None);
-                submit_composer.call(());
+                submit_composer.call(answered_guard);
             }
             PreviewState::Failed { message, .. } => {
                 guarded_submit_pending.set(None);
@@ -4899,7 +4937,7 @@ pub(super) fn CreateSessionForm(
             },
             onsubmit: move |evt: FormEvent| {
                 evt.prevent_default();
-                submit_composer.call(());
+                submit_composer.call(replace_guard);
             },
             if partial_template_hint() && pending_initial_templates.read().is_empty() {
                 div { class: "partial-template-banner", role: "alert",
@@ -5120,6 +5158,10 @@ pub(super) fn CreateSessionForm(
                             LaunchIntent::Structured(selection) => Some(selection),
                             LaunchIntent::Command(_) => None,
                         };
+                        // What this render shows: the launcher opening the
+                        // question sits in, and the Replace warning above it.
+                        // The answer binds to both (`GuardedSubmitStamp`).
+                        let rendered_opening = *opening_generation.peek();
                         question.ask.reason.can_launch_guarded(selection).then(|| Callback::new(move |_| {
                             let held = intent_key.peek().clone();
                             let current = held.as_ref()
@@ -5127,6 +5169,7 @@ pub(super) fn CreateSessionForm(
                                 .and_then(|_| live_yolo_binding());
                             if !take_launcher_guarded_answer(
                                 &mut yolo_refusal, &question, ops.busy_now(),
+                                rendered_opening, *opening_generation.peek(),
                                 &refused_binding, current.as_ref(),
                             ) { return; }
                             yolo_error.set(None);
@@ -5142,12 +5185,13 @@ pub(super) fn CreateSessionForm(
                                 if let Some(mut authority) = live_preview_authority.peek().clone() {
                                     authority.agent = preview_agent_now();
                                     guarded_submit_pending.set(Some(GuardedSubmitStamp::new(
-                                        *opening_generation.peek(), authority,
+                                        rendered_opening, authority,
                                         draft.snapshot().prompt(), draft.snapshot().conversation(),
+                                        replace_guard,
                                     )));
                                 }
                             } else {
-                                submit_composer.call(());
+                                submit_composer.call(replace_guard);
                             }
                         }))
                     },
@@ -6732,6 +6776,8 @@ mod tests {
                     &mut fixture.slot,
                     &question,
                     false,
+                    1,
+                    1,
                     &refused,
                     Some(&refused)
                 ));
@@ -6753,6 +6799,8 @@ mod tests {
                     &mut fixture.slot,
                     &question,
                     false,
+                    1,
+                    1,
                     &refused,
                     Some(&refused)
                 ));
@@ -8475,9 +8523,64 @@ mod tests {
             assert!(stop_for.is_some_and(|answered| answered == question(3)));
         });
     }
+    /// Why: a Guarded answer in Replace with waits for a checkout preview
+    /// before submitting, and the source can start again meanwhile. SPEC.md
+    /// says the replace then carries the precondition the launcher showed at
+    /// the click, so a source with more alive by then is kept.
+    ///
+    /// Spec: while the opening, preview authority (ignoring its generation),
+    /// prompt and conversation are unchanged, the stamp yields the
+    /// precondition it was created with as the one the deferred submit sends;
+    /// any of those changing yields nothing to send.
+    #[test]
+    fn guarded_submit_stamp_sends_the_answered_precondition() {
+        use super::*;
+        let authority = |generation| PreviewAuthority {
+            generation,
+            config_revision: 1,
+            host: "7".into(),
+            incarnation: 2,
+            installation_identity: "installation-a".into(),
+            repo: GithubRepo::parse("acme/bar").unwrap(),
+            title: None,
+            agent: "codex".into(),
+        };
+        let prompt = Some("original prompt".to_string());
+        let stamp = GuardedSubmitStamp::new(
+            3,
+            authority(5),
+            prompt.clone(),
+            "conversation".into(),
+            crate::DeleteGuard::NothingAlive,
+        );
+        // The live source may now imply `Unconditional`; the stamp's answer
+        // to "what does the submit send" is still what the user saw.
+        assert_eq!(
+            stamp.guard_if_current(3, authority(6), &prompt, "conversation"),
+            Some(crate::DeleteGuard::NothingAlive)
+        );
+        for (opening, prompt, conversation) in [
+            (4, prompt.clone(), "conversation"),
+            (3, None, "conversation"),
+            (3, prompt.clone(), "another"),
+        ] {
+            assert_eq!(
+                stamp.guard_if_current(opening, authority(6), &prompt, conversation),
+                None
+            );
+        }
+        let mut moved = authority(6);
+        moved.incarnation = 3;
+        assert_eq!(
+            stamp.guard_if_current(3, moved, &prompt, "conversation"),
+            None
+        );
+    }
+
     /// A guarded answer has edit authority only for the opening and exact
-    /// draft the user saw. Cancel, a changed draft or a busy operation must
-    /// leave the question available and never initiate the transition.
+    /// draft the user saw. Cancel, a changed draft, a launcher opening
+    /// replaced since the render, or a busy operation must leave the question
+    /// available and never initiate the transition.
     #[farhelm_testtrace::test]
     fn guarded_launcher_answers_take_only_the_current_unchanged_draft() {
         use super::*;
@@ -8538,6 +8641,8 @@ mod tests {
                 &mut slot,
                 &open,
                 true,
+                1,
+                1,
                 &refused,
                 Some(&refused)
             ));
@@ -8567,6 +8672,8 @@ mod tests {
                     &mut slot,
                     &open,
                     false,
+                    1,
+                    1,
                     &refused,
                     Some(&changed)
                 ));
@@ -8576,7 +8683,7 @@ mod tests {
                 );
             }
             assert!(!take_launcher_guarded_answer(
-                &mut slot, &open, false, &refused, None
+                &mut slot, &open, false, 1, 1, &refused, None
             ));
             assert!(
                 slot.take(&open).is_some(),
@@ -8586,6 +8693,8 @@ mod tests {
                 &mut slot,
                 &open,
                 false,
+                1,
+                1,
                 &refused,
                 Some(&refused)
             ));
@@ -8595,6 +8704,8 @@ mod tests {
                 &mut slot,
                 &open,
                 false,
+                1,
+                1,
                 &refused,
                 Some(&refused)
             ));
@@ -8602,10 +8713,28 @@ mod tests {
                 slot.current_key() == Some(later.clone()),
                 "a stale answer cannot take a newer opening"
             );
+            // Another source opened in the same launcher before this
+            // answer's render was replaced: the answer belongs to the
+            // earlier source and must not take the question.
+            assert!(!take_launcher_guarded_answer(
+                &mut slot,
+                &later,
+                false,
+                1,
+                2,
+                &refused,
+                Some(&refused)
+            ));
+            assert!(
+                slot.current_key() == Some(later.clone()),
+                "a superseded launcher opening leaves the question intact"
+            );
             assert!(take_launcher_guarded_answer(
                 &mut slot,
                 &later,
                 false,
+                1,
+                1,
                 &refused,
                 Some(&refused)
             ));
@@ -8617,6 +8746,8 @@ mod tests {
                 &mut slot,
                 &later,
                 false,
+                1,
+                1,
                 &refused,
                 Some(&refused)
             ));
