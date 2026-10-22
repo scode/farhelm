@@ -6,14 +6,14 @@
 //! module keeps preview observations, reactive subscriptions and the ordered
 //! host/submission guards. The draft assembles every complete request from the
 //! caller's accepted facts, including the variant and checkout frozen at a press.
-//! Ordinary leaf/scalar edits also own their live lock and retry retirement in
-//! draft; composite and system routes still retain their caller policies here.
+//! Ordinary leaf/scalar edits and finite source/naming reconciliation own their
+//! publication/key rules in draft; remaining composites retain caller policies.
 
 mod draft;
 
 use draft::{
     CheckoutInput, ChoiceOrigin, ChoiceTargets, DraftFields, LaunchDraft, LaunchDraftState,
-    RequestContext, use_launch_draft,
+    RequestContext, SourceTargets, use_launch_draft,
 };
 
 use dioxus::prelude::*;
@@ -2687,6 +2687,7 @@ pub(super) fn CreateSessionForm(
         initial_cwd.clone(),
         ops,
         intent_key,
+        chosen_host,
     );
     // Whether `structured_permissions`'s current value is a real choice
     // (an explicit click, a restored prefill, or an applied recent/search
@@ -3033,17 +3034,17 @@ pub(super) fn CreateSessionForm(
 
     // A host installation change rotates the idempotency key and any
     // host-specific refusal; the launch draft survives it.
-    let mut bound_target = use_signal(|| None::<CreateTarget>);
+    let bound_target = use_signal(|| None::<CreateTarget>);
     // Which prefill GENERATION (`CreatePrefill`) this form has already
     // applied. Compared by generation rather than by mere presence in the
     // effect below, because `prefill` stays populated at its latest
     // generation for as long as this form is open, so presence alone would
     // reseed on every unrelated rerun of that effect (a host reconnect, a
     // catalog refresh) for as long as a clone is on screen.
-    let mut prefill_applied = use_signal(|| None::<u64>);
+    let prefill_applied = use_signal(|| None::<u64>);
     // Initial search acceptance follows this effect, so mount-time host and
     // clone reconciliation cannot overwrite the action it applies.
-    let mut mount_seeded = use_signal(|| false);
+    let mount_seeded = use_signal(|| false);
     let mut pending_initial_action = use_signal(move || initial_action);
     let mut pending_initial_templates =
         use_signal(move || std::collections::VecDeque::from(initial_templates));
@@ -3067,173 +3068,41 @@ pub(super) fn CreateSessionForm(
     // the way the surrounding signals are), and the render body further
     // down needs its own, unmoved copy for the selector.
     let hosts_for_reseed = hosts.clone();
+    // Preserve the effect's generation trigger and the owner's one tracked
+    // target read. Construct aliases here; host resolution must not precompute
+    // or replace the entry target used by this invocation's final comparison.
+    let source_targets = SourceTargets {
+        create_target,
+        bound_target,
+        remembered_destination,
+        prefill_applied,
+        mount_seeded,
+        partial_template_hint,
+        auto_launch_pending,
+        quick_launch_hidden,
+        pending_initial_action,
+        pending_initial_templates,
+        clone_host_state,
+        preview_revision,
+        browse_generation,
+        browse_request,
+        browse_result,
+        browse_error,
+        error,
+        preparation_error,
+        composer_reset_reason,
+        permission_escalation,
+        template_panel,
+    };
     use_effect(use_reactive(
         (&prefill.as_ref().map(|prefill| prefill.generation),),
         move |_| {
-            // A new clone intent supersedes a still-waiting switcher pick.
-            // The form may stay mounted, so clearing the parent alone cannot
-            // revoke the child's mount-time copy.
-            if prefill.is_some() {
-                pending_initial_action.set(None);
-                pending_initial_templates.write().clear();
-                partial_template_hint.set(false);
-                auto_launch_pending.set(false);
-                quick_launch_hidden.set(false);
-            }
-            let hosts = &hosts_for_reseed;
-            let target = create_target();
-            let previous = bound_target.peek().clone();
-
-            // Applied BEFORE the host resolution below, and in the
-            // SAME effect invocation rather than a separate one: a clone
-            // aimed at a different host is itself what moves
-            // `chosen_host`, and these fields must seed exactly once
-            // whether or not the host also moves as a result.
-            if let Some(prefill) = prefill
-                .as_ref()
-                .filter(|prefill| Some(prefill.generation) != *prefill_applied.peek())
-            {
-                prefill_applied.set(Some(prefill.generation));
-                // A mounted Clone/Replace prefill supersedes the old opening's
-                // first message even when the selected agent stays the same.
-                draft.edit(LaunchDraft::clear_prompt_for_prefill);
-                permission_escalation.set(None);
-                // A clone generation replaces the destination as a unit.
-                // Invalidate before reseeding so an A→B→A clone sequence
-                // cannot make an old A listing current again by restoring
-                // matching host and folder text later in this effect.
-                invalidate_directory_browse(
-                    browse_generation,
-                    browse_request,
-                    browse_result,
-                    browse_error,
-                );
-                draft.edit(|draft| draft.seed_folder(&prefill.cwd));
-                template_panel.set(None);
-                let source_repo = prefill
-                    .repo
-                    .clone()
-                    .filter(|_| prefill.replace_source.is_none());
-                draft.edit(|draft| draft.seed_title(&prefill.title, source_repo.clone()));
-                if let Some(repo) = source_repo {
-                    // A second Clone of the same row still needs a new offer:
-                    // equal repository/name inputs must not reuse its old preview.
-                    draft.edit(|draft| draft.select_repository(repo));
-                    preview_revision.with_mut(|revision| {
-                        *revision = revision.checked_add(1).expect("preview revision exhausted")
-                    });
-                }
-                // Clone owns a separate installation-reconciliation contract;
-                // a new clone generation replaces any earlier history choice.
-                remembered_destination.set(None);
-                // Every clone generation establishes the WHOLE form state,
-                // the dormant command field included, so switching a
-                // structured clone to the command path starts from the
-                // source's own command.
-                draft.edit(|draft| draft.seed_invocation(&prefill.invocation));
-                // A command launch's clone carries its assertion, agent
-                // type and resume command (SPEC.md, Clone). Anything else —
-                // an agent launch, or a legacy session whose command is all
-                // the launcher gets — leaves them for the user, the YOLO
-                // assertion unanswered.
-                draft.edit(|draft| draft.seed_command_fields(prefill.command.as_ref()));
-                if let Some(launch) = &prefill.launch {
-                    // A structured snapshot is the source's explicit
-                    // request, whereas its invocation is only the compiler's
-                    // result. Preserve its editable fields for clone except for Pi's
-                    // compatibility normalization: an older omitted
-                    // permission is Pi's mandatory YOLO mode. Trust is no longer
-                    // editable and is composed by the helm for the destination.
-                    draft.edit(|draft| {
-                        draft.choose_tab(LaunchTab::Agent);
-                    });
-                    // A restored model must establish ownership just like a
-                    // freshly typed one. Known catalog ids override this
-                    // fallback during harness reconciliation; an unknown id
-                    // needs the source harness so it cannot leak across one.
-                    draft.edit(|draft| {
-                        draft.restore_launch(launch, launch.model.as_ref().map(|_| launch.harness))
-                    });
-                    // A restored structured snapshot is a real choice the
-                    // source session made, not a passive default — it must
-                    // filter recents exactly as it always has.
-                } else {
-                    draft.edit(|draft| {
-                        draft.choose_tab(LaunchTab::Command);
-                    });
-                    draft.edit(LaunchDraft::clear_for_command_seed);
-                }
-                // A prefill is as fresh an intent as any manual edit —
-                // see the field `oninput` handlers below for both edges
-                // of the "the key describes what was submitted" rule
-                // this keeps.
-                intent_key.set(None);
-                // A refusal from before this clone described whatever
-                // the form held then, which this prefill has just
-                // replaced wholesale.
-                error.set(None);
-                preparation_error.set(None);
-                // Compatibility prose belongs to the previous whole draft
-                // too. A mounted second clone must not inherit a warning
-                // about values this generation has already replaced.
-                composer_reset_reason.set(None);
-
-                // item2-review2.md F2: every new generation starts its OWN
-                // host decision from a clean slate, cleared BEFORE any
-                // attempt to resolve it — otherwise a clone whose own host
-                // cannot be confirmed (rejected below, or hostless) could
-                // silently inherit whatever a PREVIOUS generation (or an
-                // earlier manual pick) had left in these two signals.
-                chosen_host.set(None);
-                clone_host_state.set(match prefill.host {
-                    None => CloneHostState::Unconfirmable, // F4: nothing to resolve safely
-                    Some(_) => CloneHostState::Waiting,
-                });
-            }
-
-            // Resolve (or re-resolve) THIS generation's own host binding.
-            // Deliberately NOT gated on the generation transition
-            // above — it runs on every pass this effect fires, reading
-            // whatever `clone_host_state` currently holds, which is what
-            // makes both F1's retry (once the registry answers a clone that
-            // opened before it did) and F3's withdrawal (the instant a
-            // `Bound` installation stops matching) possible: `prefill_applied`
-            // above is a one-shot latch and will never route this
-            // generation through the reseed branch a second time, so the
-            // binding needs a path that keeps trying independently of it.
-            if let Some(prefill) = prefill.as_ref() {
-                let (next_state, action) = resolve_clone_host(
-                    *clone_host_state.peek(),
-                    prefill.host,
-                    &prefill.host_identity,
-                    hosts_loaded,
-                    hosts,
-                    prefill.host.is_some() && chosen_host.peek().as_ref() == prefill.host.as_ref(),
-                );
-                clone_host_state.set(next_state);
-                match action {
-                    CloneHostAction::Hold => {}
-                    CloneHostAction::Bind(target) => {
-                        chosen_host.set(Some(target.host));
-                    }
-                    CloneHostAction::Withdraw => {
-                        chosen_host.set(None);
-                    }
-                }
-            }
-            // An unconfirmable clone host leaves the selector at its ordinary
-            // default. The launch seeded above is deliberately unaffected.
-
-            mount_seeded.set(true);
-            if previous != target {
-                bound_target.set(target.clone());
-                // Equality already compares the row and installation
-                // fingerprint, so every target change here is a new intent.
-                intent_key.set(None);
-                // A refusal belongs to the host it came from. Left standing,
-                // host A's refusal could be shown for host B.
-                error.set(None);
-            }
+            draft.reconcile_source(
+                prefill.as_ref(),
+                hosts_loaded,
+                &hosts_for_reseed,
+                source_targets,
+            );
         },
     ));
 
@@ -3284,15 +3153,7 @@ pub(super) fn CreateSessionForm(
     // synchronous destination claim: create_target is reconciled by an effect
     // and can still describe the prior host during this render.
     let _ = destination_draft();
-    let current = draft.snapshot();
-    let mut naming = current.checkout_naming();
-    naming.retarget(
-        destination_now.clone(),
-        current.destination().repo().cloned(),
-    );
-    if naming != current.checkout_naming() {
-        draft.edit(|draft| draft.retarget_naming(destination_now.clone()));
-    }
+    draft.retarget_checkout_name(destination_now.clone());
     // Display, preview authority, retry binding, submit, draft snapshot and
     // request-key re-read must share this policy. A stray raw-title read
     // would make the create disagree with its preview and be refused as stale.
@@ -3553,14 +3414,11 @@ pub(super) fn CreateSessionForm(
             Ok(preview) if authority.accepts(&live, &preview) => PreviewState::Ready { authority: authority.clone(), preview },
             Ok(_) => PreviewState::Failed { authority: authority.clone(), message: "the preview is stale or belongs to a different host installation; select the repository again".into() },
             Err(failure) => {
-                let current = draft.snapshot();
-                let mut naming = current.checkout_naming();
-                let default = naming.default_title(current.title_edited(), current.title_raw_seed().as_deref(), current.destination().repo());
                 // This is the existing system edit: authoritative occupancy may
                 // advance a default while busy, but never retire a retry key.
-                if failure.occupied && default.as_ref() == authority.title.as_ref()
-                    && default.is_some() && naming.advance(retry_binding.is_some()) {
-                    draft.edit(|draft| draft.advance_naming(retry_binding.is_some()));
+                if draft.advance_checkout_name_for_occupied_reply(
+                    &authority, &live, &failure, retry_binding.is_some(),
+                ) {
                     return;
                 }
                 PreviewState::Failed { authority: authority.clone(), message: failure.message }
@@ -7426,10 +7284,11 @@ mod tests {
         use super::*;
         let ops = crate::ops::use_op_lock();
         let intent_key = use_signal(|| None);
+        let chosen_host = use_signal(|| Some(1));
         let targets = TemplateTargets {
-            draft: use_launch_draft(None, None, ops, intent_key),
+            draft: use_launch_draft(None, None, ops, intent_key, chosen_host),
             composer_reset_reason: use_signal(|| None),
-            chosen_host: use_signal(|| Some(1)),
+            chosen_host,
             preview_revision: use_signal(|| 0),
             template_error: use_signal(|| None),
             intent_key,

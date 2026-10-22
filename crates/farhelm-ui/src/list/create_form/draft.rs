@@ -2,9 +2,10 @@
 //!
 //! Raw editor text and ownership belong together: parsing a draft and writing
 //! it back would lose unfinished quotes and change untouched peer values.
-//! Host authority, preview observations, confirmation and picker state stay
-//! with the form. `LaunchDraftState` shares the form's existing operation lock
-//! and retry slot for ordinary edits; submission still owns mint/reply lifetime.
+//! Preview observations, confirmation and picker state stay with the form.
+//! `LaunchDraftState` shares the form's existing host, operation lock and retry
+//! handles for ordinary edits and finite source/naming reconciliation;
+//! submission still owns mint/reply lifetime.
 //! Field memos are subscriptions, never live callback authority.
 //!
 //! Ordinary edit facts describe submitted changes, not admission or assignment:
@@ -14,14 +15,16 @@
 
 use dioxus::prelude::*;
 
-use crate::github_checkout::GithubPreview;
+use crate::github_checkout::{GithubPreview, PreviewAuthority};
 use crate::ops::OpLock;
 use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, api};
 
 use super::{
-    CheckoutNameSource, CheckoutNaming, CommandLaunch, CreateTarget, DestinationDraft,
-    GithubCheckoutRequest, GithubRepo, HostId, IntentBinding, LaunchIntent, LaunchTab,
-    active_prompt, command_intent, display_peer, effective_title, submitted_field,
+    BrowseAuthority, CheckoutNameSource, CheckoutNaming, CloneHostAction, CloneHostState,
+    CommandLaunch, CreatePrefill, CreateTarget, DestinationDraft, GithubCheckoutRequest,
+    GithubRepo, HostId, HostOption, IntentBinding, LaunchIntent, LaunchTab, PermissionEscalation,
+    active_prompt, command_intent, display_peer, effective_title, invalidate_directory_browse,
+    resolve_clone_host, submitted_field,
 };
 
 /// External or deliberately frozen facts for one envelope projection.
@@ -395,13 +398,14 @@ impl LaunchDraft {
             ..Default::default()
         };
     }
-    /// Render reconciliation resets only occupancy search, even while busy.
-    /// The caller keeps this system edit outside user admission/key policy.
+    /// Retarget only occupancy search, preserving the naming source and title.
+    /// The renderer owner supplies the finite system publication/key policy.
     pub(super) fn retarget_naming(&mut self, host: Option<CreateTarget>) {
         self.checkout_naming
             .retarget(host, self.destination.repo().cloned());
     }
-    /// Only the form may decide that an authoritative occupied reply may advance.
+    /// Advance the plain series after the owner admits an occupied default reply.
+    /// Retained-attempt freeze remains an explicit observation of that admission.
     pub(super) fn advance_naming(&mut self, reconciling: bool) -> bool {
         self.checkout_naming.advance(reconciling)
     }
@@ -1064,9 +1068,56 @@ impl ChoiceTargets {
     }
 }
 
-/// Live publication and ordinary edit admission share the form's original handles.
-/// Concrete leaf/scalar operations own their lock and key rule. The raw edit
-/// entry remains temporarily for unconverted composite and system operations;
+/// Existing source-opening handles retain their separate lifetimes and reads.
+/// A source generation replaces launch fields once; host binding keeps resolving
+/// later without reseeding. Nothing in this bundle caches a draft or host target.
+#[derive(Clone, Copy)]
+pub(super) struct SourceTargets {
+    pub(super) create_target: Signal<Option<CreateTarget>>,
+    pub(super) bound_target: Signal<Option<CreateTarget>>,
+    pub(super) remembered_destination: Signal<Option<CreateTarget>>,
+    pub(super) prefill_applied: Signal<Option<u64>>,
+    pub(super) mount_seeded: Signal<bool>,
+    pub(super) partial_template_hint: Signal<bool>,
+    pub(super) auto_launch_pending: Signal<bool>,
+    pub(super) quick_launch_hidden: Signal<bool>,
+    pub(super) pending_initial_action: Signal<Option<crate::launch_composer::ComposerSearchResult>>,
+    pub(super) pending_initial_templates:
+        Signal<std::collections::VecDeque<farhelm_proto::launcher::LaunchTemplate>>,
+    pub(super) clone_host_state: Signal<CloneHostState>,
+    pub(super) preview_revision: Signal<u64>,
+    pub(super) browse_generation: Signal<u64>,
+    pub(super) browse_request: Signal<Option<BrowseAuthority>>,
+    pub(super) browse_result: Signal<Option<(BrowseAuthority, api::DirectoryBrowse)>>,
+    pub(super) browse_error: Signal<Option<String>>,
+    pub(super) error: Signal<Option<String>>,
+    pub(super) preparation_error: Signal<Option<String>>,
+    pub(super) composer_reset_reason: Signal<Option<String>>,
+    pub(super) permission_escalation: Signal<Option<PermissionEscalation>>,
+    pub(super) template_panel: Signal<Option<(super::super::save_template::Candidate, String)>>,
+}
+
+/// Only concrete owner operations choose a rule; callers cannot bypass the gate.
+/// Source reconciliation and checkout naming are observations, allowed while a
+/// submit is busy, with different publication and ordinary-key consequences.
+#[derive(Clone, Copy)]
+enum EditRule {
+    Ordinary,
+    SourceReconciliation,
+    CheckoutNaming,
+}
+
+/// Publication is independent of key retirement for system observations.
+/// Target-only reconciliation retires without rewriting the draft; naming
+/// publishes only an actual sequence change and never retires ordinary authority.
+struct EditFacts {
+    publish: bool,
+    changed: bool,
+}
+
+/// Live publication and edit admission share the form's original handles.
+/// Concrete leaf/scalar and finite source/naming operations own their rules.
+/// The raw edit entry remains temporarily for unconverted composite operations;
 /// their callers still own those policies until the next migration.
 #[derive(Clone, Copy)]
 pub(super) struct LaunchDraftState {
@@ -1074,6 +1125,7 @@ pub(super) struct LaunchDraftState {
     fields: DraftFields,
     ops: OpLock,
     intent_key: Signal<Option<(String, IntentBinding)>>,
+    chosen_host: Signal<Option<HostId>>,
 }
 
 impl LaunchDraftState {
@@ -1085,88 +1137,109 @@ impl LaunchDraftState {
     pub(super) fn fields(self) -> DraftFields {
         self.fields
     }
-    /// Unconverted composite/system routes retain their existing caller policy.
+    /// Unconverted composite routes retain their existing caller policy.
     /// New ordinary handlers must use a concrete operation, never this closure.
     pub(super) fn edit<R>(mut self, edit: impl FnOnce(&mut LaunchDraft) -> R) -> R {
         edit(&mut self.value.write())
     }
 
-    /// Reject queued edits before any preamble or live draft read can run.
-    /// The local plain copy allows internal observations without a live write
-    /// borrow. Even unchanged operations publish ownership/buffer assignments;
-    /// only their submitted-change fact retires the ordinary pair. The return
-    /// means admitted, so equal choices still receive their usual UI completion.
-    fn apply_edit(mut self, apply: impl FnOnce(&mut LaunchDraft) -> bool) -> bool {
-        if self.ops.busy_now() {
-            return false;
+    /// Keep all converted publication and edit-induced retirement in one place.
+    /// Ordinary admission precedes every read/preamble; the two finite system
+    /// rules remain available while busy. A local copy avoids borrowing the live
+    /// signal during internal observations. Equal system work publishes nothing.
+    fn apply_edit<R>(
+        mut self,
+        rule: EditRule,
+        apply: impl FnOnce(&mut LaunchDraft) -> (R, EditFacts),
+    ) -> Option<R> {
+        if matches!(rule, EditRule::Ordinary) && self.ops.busy_now() {
+            return None;
         }
         let mut current = self.snapshot();
-        let changed = apply(&mut current);
-        self.value.set(current);
-        if changed {
+        let (result, facts) = apply(&mut current);
+        if facts.publish {
+            self.value.set(current);
+        }
+        if facts.changed && !matches!(rule, EditRule::CheckoutNaming) {
             self.intent_key.set(None);
         }
-        true
+        Some(result)
+    }
+
+    /// Ordinary equality still publishes raw ownership and accepted buffers.
+    /// Return admission, so unchanged choices retain their UI completion contract.
+    fn apply_ordinary(self, apply: impl FnOnce(&mut LaunchDraft) -> bool) -> bool {
+        self.apply_edit(EditRule::Ordinary, |draft| {
+            let changed = apply(draft);
+            (
+                (),
+                EditFacts {
+                    publish: true,
+                    changed,
+                },
+            )
+        })
+        .is_some()
     }
 
     /// Ordinary name ownership follows the existing folder/checkout name policy.
     /// Admission is returned independently of the plain transition's key fact.
     pub(super) fn edit_title(self, text: String) -> bool {
-        self.apply_edit(|draft| draft.edit_title(text))
+        self.apply_ordinary(|draft| draft.edit_title(text))
     }
 
     /// Literal command edits retire authority only when submitted bytes change.
     /// Equality still claims editor ownership; a busy edit claims no text at all.
     pub(super) fn edit_invocation(self, text: String) -> bool {
-        self.apply_edit(|draft| draft.edit_invocation(text))
+        self.apply_ordinary(|draft| draft.edit_invocation(text))
     }
 
     /// An explicit assertion remains distinct from the unanswered command state.
     /// Reapplying its current answer is still an admitted interaction.
     pub(super) fn choose_command_yolo(self, yolo: bool) -> bool {
-        self.apply_edit(|draft| draft.choose_command_yolo(yolo))
+        self.apply_ordinary(|draft| draft.choose_command_yolo(yolo))
     }
 
     /// Declaration edits preserve dormant Resume text and its opt-in choice.
     /// Only the existing submitted metadata fact decides ordinary retirement.
     pub(super) fn choose_command_agent(self, agent: Option<LaunchHarness>) -> bool {
-        self.apply_edit(|draft| draft.choose_command_agent(agent))
+        self.apply_ordinary(|draft| draft.choose_command_agent(agent))
     }
 
     /// Resume visibility may change without changing the effective command.
     /// Apply that retained state even when the plain request fact is unchanged.
     pub(super) fn choose_command_resume(self, enabled: bool) -> bool {
-        self.apply_edit(|draft| draft.choose_command_resume(enabled))
+        self.apply_ordinary(|draft| draft.choose_command_resume(enabled))
     }
 
     /// Literal Resume ownership and hidden retention use the same live gate.
     /// The plain transition keeps effective Resume separate from display text.
     pub(super) fn edit_command_resume(self, text: String) -> bool {
-        self.apply_edit(|draft| draft.edit_command_resume(text))
+        self.apply_ordinary(|draft| draft.edit_command_resume(text))
     }
 
     /// UI empty prompt means absence; template empty prompts have a separate path.
     /// Dormant prompt assignments still occur when their request fact is equal.
     pub(super) fn edit_prompt(self, text: String) -> bool {
-        self.apply_edit(|draft| draft.edit_prompt(text))
+        self.apply_ordinary(|draft| draft.edit_prompt(text))
     }
 
     /// Conversation edits retain exact selector bytes and current refusal rules.
     /// This ordinary edit does not acquire submission or confirmation authority.
     pub(super) fn edit_conversation(self, text: String) -> bool {
-        self.apply_edit(|draft| draft.edit_conversation(text))
+        self.apply_ordinary(|draft| draft.edit_conversation(text))
     }
 
     /// Keep unfinished wrapper text editable and compare only proven word equality.
     /// Admission preserves raw explicitness even when quoting changes no words.
     pub(super) fn edit_wrapper(self, text: String) -> bool {
-        self.apply_edit(|draft| draft.edit_wrapper(text))
+        self.apply_ordinary(|draft| draft.edit_wrapper(text))
     }
 
     /// Custom flags share every ordinary editor's live queued-event protection.
     /// The existing parser fact remains conservative for malformed drafts.
     pub(super) fn edit_permission_flags(self, text: String) -> bool {
-        self.apply_edit(|draft| draft.edit_permission_flags(text))
+        self.apply_ordinary(|draft| draft.edit_permission_flags(text))
     }
 
     /// Effort choice promotes history only after live admission, even on equality.
@@ -1176,7 +1249,7 @@ impl LaunchDraftState {
         effort: Option<LaunchEffort>,
         mut targets: ChoiceTargets,
     ) -> bool {
-        self.apply_edit(|draft| {
+        self.apply_ordinary(|draft| {
             targets.partial_template_hint.set(false);
             targets.promote_history();
             draft.choose_effort(effort)
@@ -1190,7 +1263,7 @@ impl LaunchDraftState {
         permission: Option<LaunchPermission>,
         mut targets: ChoiceTargets,
     ) -> bool {
-        self.apply_edit(|draft| {
+        self.apply_ordinary(|draft| {
             targets.partial_template_hint.set(false);
             targets.promote_history();
             draft.choose_permissions(permission)
@@ -1200,7 +1273,7 @@ impl LaunchDraftState {
     /// Click/Enter tab choices dismiss the hint before promoting history.
     /// The admitted return lets the renderer retain its search-focus completion.
     pub(super) fn choose_launch_tab(self, tab: LaunchTab, mut targets: ChoiceTargets) -> bool {
-        self.apply_edit(|draft| {
+        self.apply_ordinary(|draft| {
             targets.partial_template_hint.set(false);
             targets.promote_history();
             draft.choose_tab(tab)
@@ -1210,12 +1283,187 @@ impl LaunchDraftState {
     /// Arrow/Home/End navigation retains its distinct hint order and tab focus.
     /// It shares the plain tab transition and ordinary key rule with click/Enter.
     pub(super) fn navigate_launch_tab(self, tab: LaunchTab, mut targets: ChoiceTargets) -> bool {
-        self.apply_edit(|draft| {
+        self.apply_ordinary(|draft| {
             targets.promote_history();
             let changed = draft.choose_tab(tab);
             targets.partial_template_hint.set(false);
             changed
         })
+    }
+
+    /// Seed launch fields once per source generation, but resolve its host every pass.
+    /// Keep the entry target observation separate from a host chosen later in this
+    /// invocation: target retirement catches up on the next pass as before. Both
+    /// source retirement phases remain available under a live operation claim.
+    pub(super) fn reconcile_source(
+        mut self,
+        prefill: Option<&CreatePrefill>,
+        hosts_loaded: bool,
+        hosts: &[HostOption],
+        mut targets: SourceTargets,
+    ) {
+        // Even an already-seeded source supersedes waiting opening work. Read
+        // the tracked target only after this every-pass preamble, never while
+        // constructing targets or after clone host resolution has changed it.
+        if prefill.is_some() {
+            targets.pending_initial_action.set(None);
+            targets.pending_initial_templates.write().clear();
+            targets.partial_template_hint.set(false);
+            targets.auto_launch_pending.set(false);
+            targets.quick_launch_hidden.set(false);
+        }
+        let target = (targets.create_target)();
+        let previous = targets.bound_target.peek().clone();
+        if let Some(prefill) =
+            prefill.filter(|prefill| Some(prefill.generation) != *targets.prefill_applied.peek())
+        {
+            targets.prefill_applied.set(Some(prefill.generation));
+            let _ = self.apply_edit(EditRule::SourceReconciliation, |draft| {
+                draft.clear_prompt_for_prefill();
+                targets.permission_escalation.set(None);
+                // Invalidate before seeding: A→B→A source changes must never
+                // revive an old directory listing whose raw path matches again.
+                invalidate_directory_browse(
+                    targets.browse_generation,
+                    targets.browse_request,
+                    targets.browse_result,
+                    targets.browse_error,
+                );
+                draft.seed_folder(&prefill.cwd);
+                targets.template_panel.set(None);
+                let source_repo = prefill
+                    .repo
+                    .clone()
+                    .filter(|_| prefill.replace_source.is_none());
+                draft.seed_title(&prefill.title, source_repo.clone());
+                if let Some(repo) = source_repo {
+                    draft.select_repository(repo);
+                    targets.preview_revision.with_mut(|revision| {
+                        *revision = revision.checked_add(1).expect("preview revision exhausted")
+                    });
+                }
+                targets.remembered_destination.set(None);
+                // Invocation and declared command metadata have distinct source
+                // ownership. A structured source also seeds its dormant command.
+                draft.seed_invocation(&prefill.invocation);
+                draft.seed_command_fields(prefill.command.as_ref());
+                if let Some(launch) = &prefill.launch {
+                    draft.choose_tab(LaunchTab::Agent);
+                    draft.restore_launch(launch, launch.model.as_ref().map(|_| launch.harness));
+                } else {
+                    draft.choose_tab(LaunchTab::Command);
+                    draft.clear_for_command_seed();
+                }
+                (
+                    (),
+                    EditFacts {
+                        publish: true,
+                        changed: true,
+                    },
+                )
+            });
+            // The seed is published and its key retired before old refusal
+            // cleanup and host resolution, independently of target retirement.
+            targets.error.set(None);
+            targets.preparation_error.set(None);
+            targets.composer_reset_reason.set(None);
+            self.chosen_host.set(None);
+            targets.clone_host_state.set(match prefill.host {
+                None => CloneHostState::Unconfirmable,
+                Some(_) => CloneHostState::Waiting,
+            });
+        }
+        // Delayed host reads and withdrawal cannot pass through the generation
+        // latch again: doing so would overwrite a literal edit made meanwhile.
+        if let Some(prefill) = prefill {
+            let (next_state, action) = resolve_clone_host(
+                *targets.clone_host_state.peek(),
+                prefill.host,
+                &prefill.host_identity,
+                hosts_loaded,
+                hosts,
+                prefill.host.is_some() && self.chosen_host.peek().as_ref() == prefill.host.as_ref(),
+            );
+            targets.clone_host_state.set(next_state);
+            match action {
+                CloneHostAction::Hold => {}
+                CloneHostAction::Bind(target) => self.chosen_host.set(Some(target.host)),
+                CloneHostAction::Withdraw => self.chosen_host.set(None),
+            }
+        }
+        targets.mount_seeded.set(true);
+        if previous != target {
+            targets.bound_target.set(target);
+            let _ = self.apply_edit(EditRule::SourceReconciliation, |_| {
+                (
+                    (),
+                    EditFacts {
+                        publish: false,
+                        changed: true,
+                    },
+                )
+            });
+            targets.error.set(None);
+        }
+    }
+
+    /// Resolve naming against the synchronous destination before preview construction.
+    /// Compare only the existing naming value; equal renders publish nothing and
+    /// a real reset never retires an ordinary pair or a retained checkout attempt.
+    pub(super) fn retarget_checkout_name(self, destination_now: Option<CreateTarget>) {
+        let _ = self.apply_edit(EditRule::CheckoutNaming, |draft| {
+            let before = draft.checkout_naming();
+            draft.retarget_naming(destination_now);
+            let publish = before != draft.checkout_naming();
+            (
+                (),
+                EditFacts {
+                    publish,
+                    changed: false,
+                },
+            )
+        });
+    }
+
+    /// Only an occupied reply for the current default may advance its sequence.
+    /// The caller supplies its already-captured authority pair and retained-match
+    /// observation. Stale replies, fixed/manual names, caps and retained attempts
+    /// publish nothing; the returned advance preserves the effect's early return.
+    pub(super) fn advance_checkout_name_for_occupied_reply(
+        self,
+        authority: &PreviewAuthority,
+        live: &PreviewAuthority,
+        failure: &api::GithubPreviewFailure,
+        reconciling: bool,
+    ) -> bool {
+        self.apply_edit(EditRule::CheckoutNaming, |draft| {
+            if authority != live {
+                return (
+                    false,
+                    EditFacts {
+                        publish: false,
+                        changed: false,
+                    },
+                );
+            }
+            let default = draft.checkout_naming().default_title(
+                draft.title_edited(),
+                draft.title_raw_seed().as_deref(),
+                draft.destination().repo(),
+            );
+            let advanced = failure.occupied
+                && default.as_ref() == authority.title.as_ref()
+                && default.is_some()
+                && draft.advance_naming(reconciling);
+            (
+                advanced,
+                EditFacts {
+                    publish: advanced,
+                    changed: false,
+                },
+            )
+        })
+        .unwrap_or(false)
     }
 }
 
@@ -1223,13 +1471,14 @@ impl LaunchDraftState {
 /// Only these memos subscribe to the aggregate; effects subscribe to the
 /// individual values they already observed, not every unrelated edit. Initial
 /// cwd is a mount-only raw seed; later source changes use explicit transitions.
-/// The operation and retry handles come from this opening's existing owner;
-/// neither is recreated or mirrored by this hook.
+/// Operation/retry and parent host-selection handles retain their existing
+/// identities; this hook recreates or mirrors none of those live authorities.
 pub(super) fn use_launch_draft(
     permission: Option<LaunchPermission>,
     initial_cwd: Option<String>,
     ops: OpLock,
     intent_key: Signal<Option<(String, IntentBinding)>>,
+    chosen_host: Signal<Option<HostId>>,
 ) -> LaunchDraftState {
     let value = use_signal(|| {
         let mut draft = LaunchDraft::new(permission);
@@ -1272,6 +1521,7 @@ pub(super) fn use_launch_draft(
         fields,
         ops,
         intent_key,
+        chosen_host,
     }
 }
 
@@ -1332,10 +1582,679 @@ mod tests {
     fn ordinary_fixture() -> Element {
         let ops = crate::ops::use_op_lock();
         let key = use_signal(|| None);
-        let owner = use_launch_draft(None, None, ops, key);
+        let chosen_host = use_signal(|| None);
+        let owner = use_launch_draft(None, None, ops, key, chosen_host);
         let choices = use_choice_targets();
         ORDINARY_FIXTURE.with(|slot| slot.set(Some(OrdinaryFixture { owner, choices })));
         rsx! {}
+    }
+
+    /// Mount the existing ancillary source handles, with no fixture-side source
+    /// model. Choice/history and source code see the same target and hint aliases.
+    fn use_source_targets(choices: ChoiceTargets) -> SourceTargets {
+        SourceTargets {
+            create_target: choices.create_target,
+            bound_target: use_signal(|| None),
+            remembered_destination: use_signal(|| None),
+            prefill_applied: use_signal(|| None),
+            mount_seeded: use_signal(|| false),
+            partial_template_hint: choices.partial_template_hint,
+            auto_launch_pending: use_signal(|| true),
+            quick_launch_hidden: use_signal(|| true),
+            pending_initial_action: use_signal(|| {
+                Some(crate::launch_composer::ComposerSearchResult::Name(
+                    "pending".into(),
+                ))
+            }),
+            pending_initial_templates: use_signal(|| {
+                std::collections::VecDeque::from([farhelm_proto::launcher::LaunchTemplate {
+                    name: "pending".into(),
+                    fields: Default::default(),
+                }])
+            }),
+            clone_host_state: use_signal(|| CloneHostState::Unconfirmable),
+            preview_revision: use_signal(|| 0),
+            browse_generation: use_signal(|| 4),
+            browse_request: use_signal(|| None),
+            browse_result: use_signal(|| None),
+            browse_error: use_signal(|| Some("old browse failure".into())),
+            error: use_signal(|| Some("old refusal".into())),
+            preparation_error: use_signal(|| Some("old preparation".into())),
+            composer_reset_reason: use_signal(|| Some("old reset".into())),
+            permission_escalation: use_signal(|| None),
+            template_panel: use_signal(|| None),
+        }
+    }
+
+    /// Observe the actual private aggregate only in tests. A field Memo could
+    /// conceal an erroneous equal publication; this effect distinguishes it.
+    #[derive(Clone, Copy)]
+    struct SystemFixture {
+        ordinary: OrdinaryFixture,
+        source: SourceTargets,
+    }
+
+    std::thread_local! {
+        static SYSTEM_FIXTURE: std::cell::Cell<Option<SystemFixture>> = const { std::cell::Cell::new(None) };
+        static PUBLICATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// Keep observation and mutation on the same real Signal and OpLock. The
+    /// counter measures publication, not derived naming/request equality.
+    fn use_system_fixture() -> SystemFixture {
+        let ops = crate::ops::use_op_lock();
+        let key = use_signal(|| None);
+        let chosen_host = use_signal(|| None);
+        let owner = use_launch_draft(None, None, ops, key, chosen_host);
+        let choices = use_choice_targets();
+        let source = use_source_targets(choices);
+        use_effect(move || {
+            let _ = owner.value.read();
+            PUBLICATIONS.with(|count| count.set(count.get() + 1));
+        });
+        let fixture = SystemFixture {
+            ordinary: OrdinaryFixture { owner, choices },
+            source,
+        };
+        SYSTEM_FIXTURE.with(|slot| slot.set(Some(fixture)));
+        fixture
+    }
+
+    /// Render no draft fields; process_events can settle only the named effects.
+    fn system_fixture() -> Element {
+        use_system_fixture();
+        rsx! {}
+    }
+
+    /// Relayed invocation deliberately differs from stored command metadata.
+    /// Seeding must use prefill.invocation, while raw command/resume ownership
+    /// and Clone repository membership retain their separate source contracts.
+    fn source_prefill() -> CreatePrefill {
+        let mut source =
+            super::super::prefill_from(&super::super::super::row::row_specimen("source"), 1);
+        source.host = Some(1);
+        source.host_identity = Some(Some("install-1".into()));
+        source.cwd = "/source/dir\u{1b}".into();
+        source.title = "work".into();
+        source.repo = Some(GithubRepo::parse("acme/repo").unwrap());
+        source.invocation = "source-command\u{1b}".into();
+        source.launch = None;
+        source.command = Some(CommandLaunch {
+            command: "metadata-command".into(),
+            yolo: true,
+            agent: Some(LaunchHarness::Claude),
+            resume: Some("source-resume\u{1b}".into()),
+        });
+        source.replace_source = None;
+        source.replace_source_opened = None;
+        source
+    }
+
+    /// Source generation is an explicit boundary even under the real page claim.
+    /// Later host binding/withdrawal must preserve literal edits and the original
+    /// entry target; target-only retirement never publishes a detached snapshot.
+    #[farhelm_testtrace::test]
+    fn source_owner_separates_generation_host_and_target_lifetimes() {
+        SYSTEM_FIXTURE.with(|slot| slot.set(None));
+        PUBLICATIONS.with(|count| count.set(0));
+        let mut dom = VirtualDom::new(system_fixture);
+        dom.rebuild_in_place();
+        dom.process_events();
+        assert_eq!(
+            PUBLICATIONS.with(std::cell::Cell::get),
+            1,
+            "aggregate oracle subscribed"
+        );
+        let SystemFixture {
+            ordinary: OrdinaryFixture { owner, choices },
+            mut source,
+        } = SYSTEM_FIXTURE.with(std::cell::Cell::get).unwrap();
+        let mut prefill = source_prefill();
+        let mut ops = owner.ops;
+        let mut key = owner.intent_key;
+        dom.in_runtime(|| {
+            owner.choose_launch_tab(LaunchTab::Command, choices);
+            owner.edit_invocation("old-command".into());
+            owner.choose_command_yolo(true);
+            owner.edit_prompt("old prompt".into());
+            owner.edit_conversation("keep-conversation".into());
+            source
+                .create_target
+                .set(Some(CreateTarget::new(9, "entry-target".into())));
+            source.browse_request.set(Some(BrowseAuthority {
+                target: CreateTarget::new(9, "entry-target".into()),
+                connection: Some(3),
+                cwd: prefill.cwd.clone(),
+                generation: 4,
+            }));
+            source.permission_escalation.set(Some(PermissionEscalation {
+                generation: 1,
+                opening_generation: 1,
+                message: "old notice".into(),
+                restore: std::rc::Rc::new(|| {}),
+            }));
+            key.set(Some(("before-source".into(), request(&owner.snapshot()))));
+            assert_eq!(owner.snapshot().prompt().as_deref(), Some("old prompt"));
+            assert_eq!(owner.snapshot().conversation(), "keep-conversation");
+            assert!(source.browse_request.peek().is_some());
+            assert!(source.error.peek().is_some());
+            assert!(source.permission_escalation.peek().is_some());
+            assert_eq!(*source.prefill_applied.peek(), None);
+            assert!(key.peek().is_some());
+        });
+        dom.process_events();
+        let before_seed = PUBLICATIONS.with(std::cell::Cell::get);
+        let guard = dom.in_runtime(|| ops.claim_guard().expect("premise: claim the real token"));
+        dom.in_runtime(|| {
+            owner.reconcile_source(Some(&prefill), false, &[], source);
+            assert!(ops.busy_now());
+            assert!(key.peek().is_none());
+            assert_eq!(owner.snapshot().prompt(), None);
+            assert_eq!(owner.snapshot().conversation(), "keep-conversation");
+            assert_eq!(owner.snapshot().submitted_cwd(), prefill.cwd);
+            assert!(!owner.snapshot().cwd_edited());
+            assert_ne!(owner.snapshot().cwd(), prefill.cwd);
+            assert_eq!(command(&owner.snapshot()).command, prefill.invocation);
+            assert_eq!(
+                command(&owner.snapshot()).resume.as_deref(),
+                Some("source-resume\u{1b}")
+            );
+            assert!(!owner.snapshot().invocation_edited());
+            assert_eq!(owner.snapshot().destination().repo(), prefill.repo.as_ref());
+            assert_eq!(*source.prefill_applied.peek(), Some(1));
+            assert_eq!(*source.browse_generation.peek(), 5);
+            assert!(source.browse_request.peek().is_none());
+            assert!(source.browse_error.peek().is_none());
+            assert!(source.error.peek().is_none() && source.preparation_error.peek().is_none());
+            assert!(
+                source.composer_reset_reason.peek().is_none()
+                    && source.permission_escalation.peek().is_none()
+            );
+            assert_eq!(*source.preview_revision.peek(), 1);
+            assert_eq!(*source.clone_host_state.peek(), CloneHostState::Waiting);
+            assert_eq!(*owner.chosen_host.peek(), None);
+            assert_eq!(
+                *source.bound_target.peek(),
+                Some(CreateTarget::new(9, "entry-target".into()))
+            );
+            assert!(*source.mount_seeded.peek());
+        });
+        dom.process_events();
+        assert_eq!(PUBLICATIONS.with(std::cell::Cell::get), before_seed + 1);
+        prefill.generation = 2;
+        dom.in_runtime(|| {
+            key.set(Some(("equal-source".into(), request(&owner.snapshot()))));
+            owner.reconcile_source(Some(&prefill), false, &[], source);
+            assert!(
+                key.peek().is_none(),
+                "equal bytes still belong to a new source generation"
+            );
+            assert_eq!(*source.preview_revision.peek(), 2);
+        });
+        dom.process_events();
+        assert_eq!(PUBLICATIONS.with(std::cell::Cell::get), before_seed + 2);
+        dom.in_runtime(|| drop(guard));
+        dom.in_runtime(|| {
+            owner.edit_invocation(owner.snapshot().invocation());
+            assert!(owner.snapshot().invocation_edited());
+            source.pending_initial_action.set(Some(
+                crate::launch_composer::ComposerSearchResult::Name("new pending".into()),
+            ));
+            source.pending_initial_templates.write().push_back(
+                farhelm_proto::launcher::LaunchTemplate {
+                    name: "new pending".into(),
+                    fields: Default::default(),
+                },
+            );
+            source.partial_template_hint.set(true);
+            source.auto_launch_pending.set(true);
+            source.quick_launch_hidden.set(true);
+        });
+        dom.process_events();
+        let before_host = PUBLICATIONS.with(std::cell::Cell::get);
+        let host = super::super::super::shared::tests::option(1, "source host", false);
+        let guard = dom.in_runtime(|| ops.claim_guard().unwrap());
+        dom.in_runtime(|| {
+            let literal = owner.snapshot();
+            let pair = Some(("literal-edit".into(), request(&literal)));
+            key.set(pair.clone());
+            owner.reconcile_source(Some(&prefill), true, std::slice::from_ref(&host), source);
+            assert_eq!(
+                owner.snapshot(),
+                literal,
+                "late bind cannot reseed editor ownership"
+            );
+            assert_eq!(*owner.chosen_host.peek(), Some(1));
+            assert_eq!(*source.clone_host_state.peek(), CloneHostState::Bound);
+            assert_eq!(
+                *source.bound_target.peek(),
+                Some(CreateTarget::new(9, "entry-target".into()))
+            );
+            assert_eq!(
+                *key.peek(),
+                pair,
+                "binding uses the already observed equal target"
+            );
+            assert!(source.pending_initial_action.peek().is_none());
+            assert!(source.pending_initial_templates.peek().is_empty());
+            assert!(
+                !*source.partial_template_hint.peek()
+                    && !*source.auto_launch_pending.peek()
+                    && !*source.quick_launch_hidden.peek()
+            );
+            source
+                .create_target
+                .set(Some(CreateTarget::new(1, host.incarnation.clone())));
+            source.error.set(Some("prior target refusal".into()));
+            owner.reconcile_source(Some(&prefill), true, std::slice::from_ref(&host), source);
+            assert_eq!(*source.bound_target.peek(), *source.create_target.peek());
+            assert!(key.peek().is_none() && source.error.peek().is_none());
+            assert_eq!(owner.snapshot(), literal);
+            key.set(pair.clone());
+            let mut moved = host.clone();
+            moved.identity = Some("another-install".into());
+            owner.reconcile_source(Some(&prefill), true, &[moved], source);
+            assert_eq!(*owner.chosen_host.peek(), None);
+            assert_eq!(
+                *source.clone_host_state.peek(),
+                CloneHostState::Unconfirmable
+            );
+            assert_eq!(owner.snapshot(), literal);
+            assert_eq!(*key.peek(), pair);
+            owner.reconcile_source(None, true, &[], source);
+            assert_eq!(owner.snapshot(), literal);
+            assert_eq!(
+                *key.peek(),
+                pair,
+                "no-prefill equal target does no retirement"
+            );
+            source
+                .create_target
+                .set(Some(CreateTarget::new(2, "empty-source-target".into())));
+            source.error.set(Some("old target refusal".into()));
+            owner.reconcile_source(None, true, &[], source);
+            assert_eq!(*source.bound_target.peek(), *source.create_target.peek());
+            assert!(key.peek().is_none() && source.error.peek().is_none());
+            assert_eq!(
+                owner.snapshot(),
+                literal,
+                "empty source target change cannot reinstall fields"
+            );
+        });
+        dom.process_events();
+        assert_eq!(
+            PUBLICATIONS.with(std::cell::Cell::get),
+            before_host,
+            "host/target-only work never publishes"
+        );
+        dom.in_runtime(|| {
+            let mut agent = LaunchDraft::new(None);
+            agent.choose_harness(
+                LaunchHarness::Codex,
+                None,
+                String::new(),
+                ChoiceOrigin::Control,
+            );
+            prefill.generation = 3;
+            prefill.launch = agent.structured_selection();
+            prefill.command = None;
+            prefill.replace_source = Some("source".into());
+            key.set(Some((
+                "before-agent-source".into(),
+                request(&owner.snapshot()),
+            )));
+            owner.reconcile_source(Some(&prefill), false, &[], source);
+            assert_eq!(structured(&owner.snapshot()).harness, LaunchHarness::Codex);
+            assert!(
+                !owner.snapshot().destination().is_managed(),
+                "Replace with ignores source repository membership"
+            );
+            assert_eq!(owner.snapshot().submitted_cwd(), prefill.cwd);
+            assert_eq!(owner.snapshot().title_raw_seed().as_deref(), Some("work"));
+            assert_eq!(
+                owner.snapshot().invocation_raw_seed().as_deref(),
+                Some(prefill.invocation.as_str())
+            );
+            assert_eq!(owner.snapshot().command_yolo(), None);
+            assert_eq!(owner.snapshot().command_agent(), None);
+            assert_eq!(owner.snapshot().prompt(), None);
+            assert_eq!(owner.snapshot().conversation(), "keep-conversation");
+            assert!(key.peek().is_none());
+        });
+        dom.process_events();
+        assert_eq!(PUBLICATIONS.with(std::cell::Cell::get), before_host + 1);
+        dom.in_runtime(|| drop(guard));
+        SYSTEM_FIXTURE.with(|slot| slot.set(None));
+    }
+
+    /// Offer the live resolved title without reproducing its naming algorithm.
+    /// Other authority fields are fixed external facts, as in the response effect.
+    fn naming_authority(draft: &LaunchDraft) -> PreviewAuthority {
+        PreviewAuthority {
+            generation: 2,
+            config_revision: 7,
+            host: "1".into(),
+            incarnation: 4,
+            installation_identity: "install-a".into(),
+            repo: draft.destination().repo().unwrap().clone(),
+            title: Some(draft.effective_title()),
+            agent: "fixture-agent".into(),
+        }
+    }
+
+    /// System naming must preserve authority while busy and publish only change.
+    /// The private Signal oracle distinguishes a refused/equal reconciliation
+    /// from accidentally publishing an equal value behind a filtered field Memo.
+    #[farhelm_testtrace::test]
+    fn naming_owner_freezes_retained_attempts_and_skips_refused_publications() {
+        SYSTEM_FIXTURE.with(|slot| slot.set(None));
+        PUBLICATIONS.with(|count| count.set(0));
+        let mut dom = VirtualDom::new(system_fixture);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let SystemFixture {
+            ordinary: OrdinaryFixture { owner, .. },
+            source,
+        } = SYSTEM_FIXTURE.with(std::cell::Cell::get).unwrap();
+        let prefill = source_prefill();
+        let target = Some(CreateTarget::new(1, "install-a".into()));
+        dom.in_runtime(|| {
+            owner.reconcile_source(Some(&prefill), false, &[], source);
+            owner.retarget_checkout_name(target.clone());
+        });
+        dom.process_events();
+        let baseline = PUBLICATIONS.with(std::cell::Cell::get);
+        let authority = dom.in_runtime(|| naming_authority(&owner.snapshot()));
+        let occupied = api::GithubPreviewFailure {
+            message: "occupied".into(),
+            occupied: true,
+        };
+        let mut ops = owner.ops;
+        let guard = dom.in_runtime(|| {
+            ops.claim_guard()
+                .expect("premise: naming runs under the real claim")
+        });
+        let mut key = owner.intent_key;
+        dom.in_runtime(|| {
+            assert_eq!(
+                owner.snapshot().checkout_naming().default_title(
+                    owner.snapshot().title_edited(),
+                    owner.snapshot().title_raw_seed().as_deref(),
+                    owner.snapshot().destination().repo(),
+                ),
+                authority.title,
+                "premise: the offer names the current default"
+            );
+            let preview = accepted_preview();
+            let checkout = GithubCheckoutRequest {
+                repo: authority.repo.identifier(),
+                title: authority.title.clone(),
+                preview: preview.clone(),
+            };
+            let current = owner.snapshot();
+            let retained = current
+                .request(RequestContext {
+                    host: Some((1, "fixture-incarnation")),
+                    launch: current.launch_intent().unwrap(),
+                    replace_source: None,
+                    checkout: Some(CheckoutInput::Accepted {
+                        cwd: preview.cwd.raw(),
+                        request: &checkout,
+                    }),
+                })
+                .unwrap();
+            let reconciling = super::super::same_fresh_intent(
+                &retained,
+                &request(&current),
+                &authority.repo,
+                "install-a",
+            );
+            assert!(
+                reconciling,
+                "premise: production comparison matches the retained accepted checkout"
+            );
+            let pair = Some(("retained-checkout".into(), retained));
+            key.set(pair.clone());
+            assert!(!owner.advance_checkout_name_for_occupied_reply(
+                &authority,
+                &authority,
+                &occupied,
+                reconciling
+            ));
+            let mut stale = authority.clone();
+            stale.generation += 1;
+            assert!(
+                !owner
+                    .advance_checkout_name_for_occupied_reply(&stale, &authority, &occupied, false)
+            );
+            let mut wrong_title = authority.clone();
+            wrong_title.title = Some("another title".into());
+            assert!(!owner.advance_checkout_name_for_occupied_reply(
+                &wrong_title,
+                &wrong_title,
+                &occupied,
+                false
+            ));
+            let not_occupied = api::GithubPreviewFailure {
+                message: "transport failure".into(),
+                occupied: false,
+            };
+            assert!(!owner.advance_checkout_name_for_occupied_reply(
+                &authority,
+                &authority,
+                &not_occupied,
+                false
+            ));
+            assert_eq!(*key.peek(), pair);
+            assert!(ops.busy_now());
+        });
+        dom.process_events();
+        assert_eq!(PUBLICATIONS.with(std::cell::Cell::get), baseline);
+        dom.in_runtime(|| {
+            // A fresh offer has no retained attempt to freeze. Its ordinary
+            // slot still survives name resolution until submit compares it.
+            let pair = Some(("fresh-offer".into(), request(&owner.snapshot())));
+            key.set(pair.clone());
+            assert!(owner.advance_checkout_name_for_occupied_reply(
+                &authority, &authority, &occupied, false
+            ));
+            assert_ne!(
+                owner.snapshot().effective_title(),
+                authority.title.clone().unwrap()
+            );
+            assert_eq!(
+                request(&owner.snapshot()).title,
+                owner.snapshot().effective_title()
+            );
+            assert_eq!(*key.peek(), pair);
+        });
+        dom.process_events();
+        assert_eq!(
+            PUBLICATIONS.with(std::cell::Cell::get),
+            baseline + 1,
+            "real advance publishes"
+        );
+        dom.in_runtime(|| owner.retarget_checkout_name(target));
+        dom.process_events();
+        assert_eq!(
+            PUBLICATIONS.with(std::cell::Cell::get),
+            baseline + 1,
+            "equal retarget publishes nothing"
+        );
+        dom.in_runtime(|| {
+            let pair = key.peek().clone();
+            owner.retarget_checkout_name(Some(CreateTarget::new(1, "install-b".into())));
+            assert_eq!(Some(owner.snapshot().effective_title()), authority.title);
+            assert_eq!(*key.peek(), pair);
+        });
+        dom.process_events();
+        assert_eq!(
+            PUBLICATIONS.with(std::cell::Cell::get),
+            baseline + 2,
+            "changed target really publishes its reset"
+        );
+        dom.in_runtime(|| drop(guard));
+        dom.in_runtime(|| {
+            owner.edit(|draft| {
+                draft.apply_template_name(
+                    "fixed".into(),
+                    farhelm_proto::launcher::TemplateNameKind::Fixed,
+                )
+            })
+        });
+        dom.process_events();
+        let fixed_baseline = PUBLICATIONS.with(std::cell::Cell::get);
+        let guard = dom.in_runtime(|| ops.claim_guard().unwrap());
+        dom.in_runtime(|| {
+            let fixed = naming_authority(&owner.snapshot());
+            let pair = key.peek().clone();
+            assert!(
+                !owner.advance_checkout_name_for_occupied_reply(&fixed, &fixed, &occupied, false)
+            );
+            assert_eq!(*key.peek(), pair);
+        });
+        dom.process_events();
+        assert_eq!(PUBLICATIONS.with(std::cell::Cell::get), fixed_baseline);
+        dom.in_runtime(|| drop(guard));
+        dom.in_runtime(|| {
+            assert!(owner.edit_title("manual".into()));
+            key.set(Some(("manual".into(), request(&owner.snapshot()))));
+        });
+        dom.process_events();
+        let manual_baseline = PUBLICATIONS.with(std::cell::Cell::get);
+        let guard = dom.in_runtime(|| ops.claim_guard().unwrap());
+        dom.in_runtime(|| {
+            let manual = naming_authority(&owner.snapshot());
+            let pair = key.peek().clone();
+            assert!(
+                !owner.advance_checkout_name_for_occupied_reply(&manual, &manual, &occupied, false)
+            );
+            assert_eq!(*key.peek(), pair);
+        });
+        dom.process_events();
+        assert_eq!(PUBLICATIONS.with(std::cell::Cell::get), manual_baseline);
+        dom.in_runtime(|| drop(guard));
+        dom.in_runtime(|| {
+            // Reach the cap through the existing pure engine, not a fixture
+            // copy of its index/math. Detailed series expectations live below.
+            owner.edit(|draft| {
+                draft.apply_template_name(
+                    "base".into(),
+                    farhelm_proto::launcher::TemplateNameKind::Base,
+                );
+                for _ in 0..49 {
+                    assert!(draft.advance_naming(false));
+                }
+                assert!(
+                    !draft.advance_naming(false),
+                    "premise: real sequence is capped"
+                );
+            });
+            key.set(Some(("capped".into(), request(&owner.snapshot()))));
+        });
+        dom.process_events();
+        let cap_baseline = PUBLICATIONS.with(std::cell::Cell::get);
+        let guard = dom.in_runtime(|| ops.claim_guard().unwrap());
+        dom.in_runtime(|| {
+            let capped = naming_authority(&owner.snapshot());
+            let pair = key.peek().clone();
+            assert!(
+                !owner.advance_checkout_name_for_occupied_reply(&capped, &capped, &occupied, false)
+            );
+            assert_eq!(*key.peek(), pair);
+        });
+        dom.process_events();
+        assert_eq!(PUBLICATIONS.with(std::cell::Cell::get), cap_baseline);
+        dom.in_runtime(|| drop(guard));
+        SYSTEM_FIXTURE.with(|slot| slot.set(None));
+    }
+
+    /// Source observes the target, never aggregate edits or its own host aliases.
+    /// Positive target reruns and seed publication establish that the absence of
+    /// draft/host reruns is an ownership contract rather than an inert fixture.
+    #[farhelm_testtrace::test]
+    fn source_owner_retains_target_subscription_without_draft_or_host_tracking() {
+        std::thread_local! {
+            static RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        }
+        /// Keep one immutable source generation, as the form's effect captures
+        /// its prop. Host/latch reads inside that source branch must remain peeks;
+        /// the target is the only reactive dependency earned by this body.
+        fn probe() -> Element {
+            let SystemFixture {
+                ordinary: OrdinaryFixture { owner, .. },
+                source,
+            } = use_system_fixture();
+            let prefill = use_hook(source_prefill);
+            use_effect(move || {
+                RUNS.with(|count| count.set(count.get() + 1));
+                owner.reconcile_source(Some(&prefill), false, &[], source);
+            });
+            rsx! {}
+        }
+        RUNS.with(|count| count.set(0));
+        PUBLICATIONS.with(|count| count.set(0));
+        SYSTEM_FIXTURE.with(|slot| slot.set(None));
+        let mut dom = VirtualDom::new(probe);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let SystemFixture {
+            ordinary: OrdinaryFixture { owner, .. },
+            mut source,
+        } = SYSTEM_FIXTURE.with(std::cell::Cell::get).unwrap();
+        assert_eq!(RUNS.with(std::cell::Cell::get), 1);
+        let initial_publications = PUBLICATIONS.with(std::cell::Cell::get);
+        assert!(
+            initial_publications > 0,
+            "aggregate oracle subscribed and settled with source seed"
+        );
+        dom.in_runtime(|| {
+            assert!(*source.mount_seeded.peek());
+            assert_eq!(*source.prefill_applied.peek(), Some(1));
+            assert_eq!(
+                owner.snapshot().invocation_raw_seed().as_deref(),
+                Some(source_prefill().invocation.as_str())
+            );
+            assert_eq!(*source.bound_target.peek(), *source.create_target.peek());
+            owner.edit_prompt("unrelated draft".into());
+            let mut chosen = owner.chosen_host;
+            chosen.set(Some(3));
+        });
+        dom.process_events();
+        assert_eq!(RUNS.with(std::cell::Cell::get), 1);
+        assert_eq!(
+            PUBLICATIONS.with(std::cell::Cell::get),
+            initial_publications + 1
+        );
+        dom.in_runtime(|| {
+            source
+                .create_target
+                .set(Some(CreateTarget::new(2, "install-b".into())))
+        });
+        dom.process_events();
+        assert_eq!(RUNS.with(std::cell::Cell::get), 2, "target remains tracked");
+        assert_eq!(
+            PUBLICATIONS.with(std::cell::Cell::get),
+            initial_publications + 1,
+            "target-only work does not publish"
+        );
+        dom.in_runtime(|| {
+            let mut next = source_prefill();
+            next.generation = 2;
+            owner.reconcile_source(Some(&next), false, &[], source);
+        });
+        dom.process_events();
+        assert_eq!(
+            PUBLICATIONS.with(std::cell::Cell::get),
+            initial_publications + 2,
+            "seed is a positive publication control"
+        );
+        assert_eq!(
+            RUNS.with(std::cell::Cell::get),
+            2,
+            "seed/host writes do not subscribe or retrigger source"
+        );
+        SYSTEM_FIXTURE.with(|slot| slot.set(None));
     }
 
     /// A queued callback must reject before it claims text or promotes history.
@@ -1523,7 +2442,8 @@ mod tests {
         fn probe() -> Element {
             let mut ops = crate::ops::use_op_lock();
             let key = use_signal(|| None);
-            let owner = use_launch_draft(None, None, ops, key);
+            let chosen_host = use_signal(|| None);
+            let owner = use_launch_draft(None, None, ops, key, chosen_host);
             let choices = use_choice_targets();
             let mut claim = use_signal(|| None);
             let kick = use_signal(|| 0_u64);
@@ -2485,7 +3405,7 @@ mod tests {
         super::super::TemplateTargets {
             draft,
             composer_reset_reason: Signal::new(None),
-            chosen_host: Signal::new(None),
+            chosen_host: draft.chosen_host,
             preview_revision: Signal::new(0),
             template_error: Signal::new(None),
             intent_key: draft.intent_key,
@@ -2512,7 +3432,14 @@ mod tests {
         fn probe() -> Element {
             let ops = crate::ops::use_op_lock();
             let key = use_signal(|| None);
-            let owner = use_launch_draft(None, Some("/work/peer\u{202e}".into()), ops, key);
+            let chosen_host = use_signal(|| None);
+            let owner = use_launch_draft(
+                None,
+                Some("/work/peer\u{202e}".into()),
+                ops,
+                key,
+                chosen_host,
+            );
             let fields = owner.fields();
             let preview = use_signal(|| PreviewState::Pending);
             use_effect(move || {
@@ -2739,7 +3666,8 @@ mod tests {
             RENDERS.with(|count| count.set(count.get() + 1));
             let ops = crate::ops::use_op_lock();
             let key = use_signal(|| None);
-            let owner = use_launch_draft(None, None, ops, key);
+            let chosen_host = use_signal(|| None);
+            let owner = use_launch_draft(None, None, ops, key, chosen_host);
             let choices = use_choice_targets();
             let fields = owner.fields();
             use_effect(move || {
