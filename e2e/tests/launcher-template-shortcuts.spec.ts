@@ -283,17 +283,25 @@ test("Replace with refuses a whole sequence and yields to another modal", async 
     await expect(nameField, "a later press still applies after the failed sequence")
       .toHaveValue("applied after refusal");
 
+    // The open launcher makes anything later added beside it inert and
+    // swallows keys whose focus is outside it. The one way an element stays
+    // live is `data-modal-exempt`, the marker agent approval cards carry, so
+    // the fixture uses it to model a second visible modal; the premise below
+    // checks it stayed live. The shortcut yields because of the fixture's
+    // `role="dialog"` and `aria-modal`, not because of the exemption.
     await page.evaluate(() => {
       const dialog = document.createElement("div");
       dialog.id = "launcher-shortcut-modal-fixture";
       dialog.setAttribute("role", "dialog");
       dialog.setAttribute("aria-modal", "true");
+      dialog.setAttribute("data-modal-exempt", "true");
       dialog.tabIndex = -1;
       dialog.textContent = "modal fixture";
       document.body.append(dialog);
       dialog.focus();
     });
     const overlay = page.locator("#launcher-shortcut-modal-fixture");
+    await expect(overlay, "premise: the exempt fixture is not made inert").not.toHaveAttribute("inert");
     await expect(overlay).toBeFocused();
     const yielded = await overlay.evaluate((node) => {
       const event = new KeyboardEvent("keydown", {

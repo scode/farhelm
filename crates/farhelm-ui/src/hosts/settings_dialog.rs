@@ -28,7 +28,7 @@
 //! and restart-with dialogs. On close, focus returns to the host row's "⋯"
 //! toggle the dialog was opened from.
 //!
-//! Two focus hazards are handled rather than designed away:
+//! Pending writes can temporarily remove the current focus target:
 //!
 //! - A write natively disables the control that started it (the field, its
 //!   save button, the YOLO checkbox) for as long as the request holds the
@@ -39,12 +39,10 @@
 //!   button when a field is open (natively disabled mid-save, so Escape then
 //!   does nothing, as the dialog's own handler would), and focus is put back
 //!   on the field or checkbox once the write ends (`refocus_after_write`).
-//! - There is no Tab trap, unlike restart-with's. The isolation makes
-//!   everything outside the dialog inert, so Tab past the last control goes
-//!   to the browser's own chrome rather than into the page; coming back
-//!   lands in the dialog, and any stray key is caught by the isolation's net.
-//!   That was judged enough for a dialog of a few controls; add a trap if
-//!   leaving to the browser chrome turns out to confuse people.
+//!
+//! The shared modal boundary wraps Tab among enabled, visible controls and
+//! keyboard scroll regions. If a write leaves no such descendant, focus stays
+//! on the dialog root until the write recovery can restore a usable control.
 
 use dioxus::prelude::*;
 

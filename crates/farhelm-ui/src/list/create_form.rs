@@ -14,7 +14,7 @@ use crate::github_checkout::{
 };
 use crate::launch_controls::{DestinationTypeControl, LaunchControls, enter_choice};
 use crate::modal_dialog::{
-    DialogFocus, DialogHandle, DialogRoot, FocusTarget, InitialFocus, ModalDialog, TabTrap,
+    DialogFocus, DialogHandle, DialogRoot, FocusTarget, InitialFocus, ModalDialog,
 };
 use crate::ops::{ConfirmSlot, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, PeerText, display_peer};
@@ -6115,20 +6115,10 @@ pub(super) fn CreateSessionForm(
                     // preparation isolates without taking a field's focus.
                     hidden_now: composer_hidden_now,
                 },
-                trap: Some(TabTrap {
-                    // Retain the existing broad branches, including controls
-                    // with tabindex=-1; narrowing them is a separate change.
-                    selector: "button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex=\"-1\"])",
-                    empty_to_root: false,
-                    reverse_from_root: false,
-                }),
                 escape_target: Some(".launch-composer-cancel, .launch-composer-loading-cancel".into()),
                 // Loading has no Launch button: the shared container Enter
                 // action must resolve the live control rather than submit early.
                 main_action: Some(".create-session-submit".into()),
-                // Ordinary visible New retains its trap without isolation.
-                // The Surface policy keeps hidden preparation isolated.
-                isolation: false,
                 gap: true,
             },
             class: "create-session-form",

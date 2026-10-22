@@ -54,7 +54,7 @@ use dioxus::prelude::*;
 use crate::api;
 use crate::launch_composer::{self, ModelEnterTarget, ModelOption};
 use crate::launch_controls::{LaunchControls, enter_choice};
-use crate::modal_dialog::{DialogFocus, DialogHandle, InitialFocus, ModalDialog, TabTrap};
+use crate::modal_dialog::{DialogFocus, DialogHandle, InitialFocus, ModalDialog};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::{ApiBase, CommandLaunch, LaunchEffort, LaunchPermission, LaunchSelection, Session};
 
@@ -474,16 +474,8 @@ pub(crate) fn RestartWithDialog(
                 handle: DialogHandle::new(RESTART_WITH_DIALOG_SELECTOR),
                 focus: DialogFocus {
                     initial_focus: InitialFocus::Target(".restart-with-cancel".into()),
-                    // Model option rows are arrow-owned tabindex=-1 buttons;
-                    // native Tab never visits them, so neither may this trap.
-                    trap: Some(TabTrap {
-                        selector: "button:not([disabled]):not([tabindex=\"-1\"]), input:not([disabled]):not([tabindex=\"-1\"])",
-                        empty_to_root: true,
-                        reverse_from_root: true,
-                    }),
                     escape_target: Some(".restart-with-cancel".into()),
                     main_action: Some(".restart-with-submit".into()),
-                    isolation: true,
                     gap: true,
                 },
                 class: "restart-with-dialog",

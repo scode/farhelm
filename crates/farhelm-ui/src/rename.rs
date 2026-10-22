@@ -11,9 +11,7 @@
 //! in the supervisor (see `api::rename_session`).
 
 use crate::list::PeerTitle;
-use crate::modal_dialog::{
-    DialogFocus, DialogHandle, FocusAdmission, InitialFocus, ModalDialog, TabTrap,
-};
+use crate::modal_dialog::{DialogFocus, DialogHandle, FocusAdmission, InitialFocus, ModalDialog};
 use crate::peer::{DetailPart, PeerLine};
 use dioxus::prelude::*;
 
@@ -242,16 +240,10 @@ pub(crate) fn RenameDialog(
                         FocusAdmission::DocumentOrOpener { selector: ".session-row-rename".into() }
                     },
                 },
-                trap: Some(TabTrap {
-                    selector: "button:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])",
-                    empty_to_root: false,
-                    reverse_from_root: false,
-                }),
-                escape_target: None,
+                escape_target: Some(".rename-cancel".into()),
                 main_action: None,
-                // Preserve the current live sidebar and native gap clicks.
-                // Page isolation is added separately from this conversion.
-                isolation: false,
+                // Rename retains native gap clicks and has no container action;
+                // trapping and page isolation do not imply either policy.
                 gap: false,
             },
             class: "rename-dialog",
@@ -259,6 +251,9 @@ pub(crate) fn RenameDialog(
             role: "dialog",
             aria_modal: "true",
             aria_label: "rename session",
+            // The shared boundary can park focus here after an empty-space
+            // click or lost control, without adding a sequential Tab stop.
+            tabindex: "-1",
             // Focusout followed by focusin is an internal transition and
             // ends owned. A move outside has no matching focusin and ends
             // unowned. Busy controls stay focusable, so the render itself

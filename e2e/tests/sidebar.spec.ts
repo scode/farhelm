@@ -5131,15 +5131,11 @@ test("opening the create-session form closes an open row menu", async ({ page, r
     await page.locator(".new-session-button").click();
     await expect(page.locator(".create-session-form")).toBeVisible();
 
-    // Moving the opener into the count heading must leave the draft after
-    // it in keyboard order. Otherwise forward Tab skips the newly opened
-    // form entirely, even though pointer creation still works: forward Tab
-    // from New visits the Templates button beside it, then enters the form.
-    await page.locator(".new-session-button").focus();
-    await page.keyboard.press("Tab");
-    await expect(page.locator(".templates-button")).toBeFocused();
-    await page.keyboard.press("Tab");
-    await expect(page.locator(".create-session-form :focus")).toHaveCount(1);
+    // This test used to also walk forward Tab from New, through Templates,
+    // into the open form, so the draft could not fall out of keyboard order.
+    // The open launcher now isolates the page (New and Templates are inert
+    // while it is open) and keeps Tab inside itself, which modal-trap.spec.ts
+    // covers, so that route no longer exists to check.
 
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(target.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
