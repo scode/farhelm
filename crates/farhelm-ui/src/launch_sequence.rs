@@ -274,6 +274,47 @@ impl QuickLaunchOrigin {
     }
 }
 
+/// What the shortcut worker owes one relay click: nothing, only the press's
+/// JS snapshot, or that snapshot plus a launch.
+///
+/// The page's listener saves one snapshot per keyboard relay it clicks (a
+/// direct shortcut, or a sequence's Enter), and the worker takes snapshots
+/// from that FIFO one per keyboard entry, in queue order. Nothing else ties a
+/// snapshot to its press, so every keyboard click must produce exactly one
+/// worker entry. An entry that cannot launch still has to take its snapshot,
+/// or each later batch would take the one before it and could launch with
+/// names an earlier press displayed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ShortcutAdmission {
+    /// A picker row refused at admission. It never had a snapshot.
+    Ignore,
+    /// Take and discard this press's snapshot without launching anything.
+    Drain,
+    /// Take this press's snapshot and resolve the batch.
+    Dispatch,
+}
+
+/// Decide what one relay click enqueues, given whether live state refuses
+/// new work right now.
+///
+/// An empty batch only comes from a sequence's Enter whose queue the app never
+/// filled: Begin was refused from live state while the page, rendered before
+/// that state, still armed and queued entries. The page captured a snapshot
+/// for that Enter all the same, so it drains like any refused keyboard press.
+pub(crate) fn shortcut_admission(
+    origin: QuickLaunchOrigin,
+    references: &[TemplateReference],
+    refused: bool,
+) -> ShortcutAdmission {
+    if !refused && !references.is_empty() {
+        ShortcutAdmission::Dispatch
+    } else if origin.keyboard() {
+        ShortcutAdmission::Drain
+    } else {
+        ShortcutAdmission::Ignore
+    }
+}
+
 /// An opening-owned hint, separate from launch refusal or remembered draft state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PartialTemplateBanner {
@@ -388,6 +429,17 @@ pub(crate) async fn take_shortcut_press_snapshot() -> Option<ShortcutContextSnap
         .join::<ShortcutContextSnapshot>()
         .await
         .ok()
+}
+
+/// Drop every press snapshot the page still holds for the shortcut worker.
+///
+/// The page's listener is installed once per window, but the worker that
+/// takes its snapshots, and the queue of entries that owe them, belong to the
+/// sidebar list and die when it unmounts (the token prompt). Call this from
+/// that unmount so both sides of the one-to-one pairing restart empty
+/// together. Fire and forget: nothing is left to receive a result.
+pub(crate) fn clear_shortcut_presses() {
+    document::eval("window.farhelmClearTemplateShortcutPresses?.()");
 }
 
 /// Ask the installed listener's one DOM rule before and after a fresh read.
@@ -606,6 +658,78 @@ mod tests {
             assert_eq!(
                 QuickLaunchOrigin::Sequence.incomplete_banner(&batch).text(),
                 "This sequence doesn't make a complete setup; complete it below."
+            );
+        }
+    }
+
+    /// The worker pairs JS snapshots with entries purely by order, so a refused
+    /// or empty sequence's Enter must still enqueue one entry that takes its
+    /// own snapshot. Before this held, the app dropped such an Enter and the
+    /// next batch launched with the names the refused sequence had shown.
+    ///
+    /// This pins only the admission decision: refused and empty keyboard
+    /// clicks come back as `Drain`, never `Ignore`. The loop below imitates
+    /// the worker's pairing to show what that decision implies; it does not run
+    /// the launch relay or the worker. Their part is the browser test "a
+    /// sequence refused at its prefix leaves later sequences their own
+    /// bindings" in `e2e/tests/quick-launch.spec.ts`.
+    #[test]
+    fn refused_sequence_drains_its_own_snapshot() {
+        let clicks = [
+            // Begin was refused from live state while the page showed "1",
+            // so the app's queue is empty at Enter.
+            ("refused", QuickLaunchOrigin::Sequence, vec![], false),
+            (
+                "launched",
+                QuickLaunchOrigin::Sequence,
+                vec![TemplateReference::Number("2".into())],
+                false,
+            ),
+            (
+                "busy",
+                QuickLaunchOrigin::Bolt,
+                vec![TemplateReference::Bolt],
+                true,
+            ),
+            (
+                "bolt",
+                QuickLaunchOrigin::Bolt,
+                vec![TemplateReference::Bolt],
+                false,
+            ),
+        ];
+        let mut snapshots: std::collections::VecDeque<_> =
+            clicks.iter().map(|(snapshot, ..)| *snapshot).collect();
+        let mut launched = Vec::new();
+        for (_, origin, references, refused) in &clicks {
+            let admission = shortcut_admission(*origin, references, *refused);
+            if admission == ShortcutAdmission::Ignore {
+                continue;
+            }
+            let snapshot = snapshots.pop_front();
+            if admission == ShortcutAdmission::Dispatch {
+                launched.push(snapshot);
+            }
+        }
+        assert_eq!(launched, [Some("launched"), Some("bolt")]);
+        assert!(snapshots.is_empty(), "every snapshot is consumed once");
+    }
+
+    /// Picker rows read their context afresh rather than from the press FIFO,
+    /// so a refused one must enqueue nothing that would take a snapshot.
+    #[test]
+    fn refused_picker_row_enqueues_nothing() {
+        for origin in [
+            QuickLaunchOrigin::TemplateList,
+            QuickLaunchOrigin::QuickSwitcher,
+        ] {
+            assert_eq!(
+                shortcut_admission(origin, &[TemplateReference::Bolt], true),
+                ShortcutAdmission::Ignore
+            );
+            assert_eq!(
+                shortcut_admission(origin, &[TemplateReference::Bolt], false),
+                ShortcutAdmission::Dispatch
             );
         }
     }

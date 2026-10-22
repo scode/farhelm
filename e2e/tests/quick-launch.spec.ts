@@ -563,6 +563,191 @@ for (const bolt of [false, true]) {
   });
 }
 
+/** The page copies the shown bindings at each sequence's Enter, and the app
+ * pairs those copies with its keyboard launches purely by order. When the app
+ * refuses a prefix that the page, rendered earlier, still showed as enabled,
+ * that sequence's Enter must still retire its own copy. Before it did, the
+ * copy stayed queued and the next sequence launched with it: here, the key-1
+ * binding from before the change.
+ *
+ * The refusal is real: a quick launch whose preference read is held keeps the
+ * app refusing new launches, and Begin's stale `disabled` is removed from the
+ * DOM to stand in for the render that has not caught up yet. The app does
+ * not patch the attribute back while its own value stays unchanged. Refused
+ * creates name the launched template without starting an agent.
+ *
+ * The second launch's title alone would also pass if the first sequence
+ * never left a copy behind (the page did not arm, or the app accepted Begin
+ * after all). So the test asserts both premises: the page starts each
+ * sequence with focus on the body, no sequence pill ever appears for the
+ * refused one, and a wrapper around the page's snapshot hand-off records
+ * every copy the app takes, in order: the bolt's (no bindings), the refused
+ * Enter's old binding, then the second Enter's fresh one.
+ */
+test("a sequence refused at its prefix leaves later sequences their own bindings", async ({ page, request }) => {
+  const prefix = `sequence-refused-${Date.now()}`;
+  const [bolt, old, fresh] = ["bolt", "old", "new"].map((suffix) => `${prefix}-${suffix}`);
+  const gate = routeGate();
+  let holdRead = false;
+  let held = 0;
+  const bodies: Record<string, any>[] = [];
+  let bodyFailed = false;
+  // Hold exactly one preference read: the first one after the bolt chord arms
+  // the hold, which is that press's own fresh read.
+  await page.route("**/api/preferences", async (route) => {
+    if (route.request().method() !== "GET" || !holdRead) return route.continue();
+    holdRead = false;
+    held++;
+    await gate.wait();
+    await route.fulfill({ response: await route.fetch() });
+  });
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    bodies.push(route.request().postDataJSON());
+    await fulfillQuickFixture(route, request, 409, "refused sequence fixture refusal");
+  });
+  await observeFeedReaders(page);
+  try {
+    for (const name of [bolt, old, fresh]) await commandTemplate(request, name);
+    await patchPreferences(request, { quick_launch_template: bolt, template_shortcuts: { "1": old } });
+    await page.goto("/");
+    const begin = page.locator('.launch-sequence-trigger[data-sequence-action="begin"]');
+    const trigger = page.locator(".quick-launch-trigger");
+    const indicator = page.locator(".launch-sequence-indicator");
+    const form = page.locator(".create-session-form");
+    await expect(begin).toBeEnabled();
+    // The first Enter copies these bindings; the old pairing replayed them.
+    await expect(page.locator(".launch-sequence-bindings")).toHaveAttribute("data-bindings", new RegExp(old));
+    // Record each snapshot the app takes from the page, in order, as the key-1
+    // binding it copied (null for a direct press, which copies none). The
+    // installer assigns the hand-off once and the app calls it by name each
+    // time, so wrapping it here sees every take.
+    await expect.poll(() =>
+      page.evaluate(() =>
+        typeof (window as unknown as { farhelmTakeTemplateShortcutPress?: unknown }).farhelmTakeTemplateShortcutPress
+      )
+    ).toBe("function");
+    await page.evaluate(() => {
+      const root = window as unknown as {
+        farhelmTakeTemplateShortcutPress: () => { sequence_bindings: string | null } | undefined;
+        takenBindings: (string | null)[];
+      };
+      const take = root.farhelmTakeTemplateShortcutPress;
+      root.takenBindings = [];
+      root.farhelmTakeTemplateShortcutPress = () => {
+        const snapshot = take();
+        root.takenBindings.push(
+          snapshot === undefined
+            ? "no snapshot"
+            : snapshot.sequence_bindings === null
+            ? null
+            : JSON.parse(snapshot.sequence_bindings).template_shortcuts?.["1"] ?? "unbound",
+        );
+        return snapshot;
+      };
+    });
+    const taken = () => page.evaluate(() => (window as unknown as { takenBindings: (string | null)[] }).takenBindings);
+    // Startup readers, automatic selection included, read preferences too.
+    // Only the bolt press's read may meet the hold.
+    await waitForFeedReadersSettled(page);
+    holdRead = true;
+    await chord(page);
+    await expect.poll(() => held, { message: "the bolt press's preference read is held" }).toBe(1);
+    const opening = await trigger.getAttribute("data-opening-generation");
+    expect(opening).toBeTruthy();
+    // Premises: the held read is the bolt's (its continuation has not run),
+    // and the app's render already refuses Begin.
+    expect(await trigger.getAttribute("data-read-completed-generation")).not.toBe(opening);
+    await expect(begin).toBeDisabled();
+    await begin.evaluate((node) => node.removeAttribute("disabled"));
+    await expect(begin).toBeEnabled();
+    // The prefix yields to a focused text field. If the page did not arm, it
+    // would copy nothing at Enter and leave nothing behind, and the test
+    // would pass without the refusal it exists for.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    // The app's refusal of Begin is otherwise only inferred from the held
+    // read. A sequence pill is its observable opposite: the app accepted the
+    // prefix. Watch for one until the refused Enter's copy is drained.
+    await expect(indicator).toHaveCount(0);
+    await page.evaluate(() => {
+      const root = window as unknown as { refusedPillShown: boolean; refusedPillObserver: MutationObserver };
+      root.refusedPillShown = false;
+      root.refusedPillObserver = new MutationObserver(() => {
+        if (document.querySelector(".launch-sequence-indicator")) root.refusedPillShown = true;
+      });
+      root.refusedPillObserver.observe(document.body, { childList: true, subtree: true });
+    });
+
+    await page.keyboard.press("Control+Shift+KeyX");
+    await page.keyboard.press("Digit1");
+    await page.keyboard.press("Enter");
+    // The bolt press cannot finish before the release below, so these keys'
+    // relay clicks, already dispatched, meet the app's refusal. A Begin the
+    // app accepted instead would launch the old binding and show up in
+    // `bodies` below.
+    expect(await trigger.getAttribute("data-read-completed-generation")).not.toBe(opening);
+    expect(
+      bodies,
+      "the bolt press's own read was held (a bolt POST here means another reader met the hold)",
+    ).toHaveLength(0);
+
+    gate.release();
+    await expect(form).toBeVisible();
+    await expect(form.locator(".create-session-error")).toContainText("refused sequence fixture refusal");
+    expect(bodies.map((body) => body.title), "only the bolt press launched").toEqual([`${bolt}-session`]);
+    // The worker reaches the refused Enter's entry only after the bolt's, so
+    // poll. Before the fix that entry never existed and the old copy stayed
+    // on the page, so this times out at [null].
+    await expect.poll(taken, { message: "the refused Enter's copy is taken and dropped" }).toEqual([null, old]);
+    expect(
+      await page.evaluate(() => {
+        const root = window as unknown as { refusedPillShown: boolean; refusedPillObserver: MutationObserver };
+        root.refusedPillObserver.disconnect();
+        return root.refusedPillShown;
+      }),
+      "the app refused Begin: no sequence pill appeared",
+    ).toBe(false);
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(form).toHaveCount(0);
+
+    await patchPreferences(request, { template_shortcuts: { "1": fresh } });
+    expect((await readPreferences(request)).template_shortcuts?.["1"]).toBe(fresh);
+    // Begin's attribute was edited by hand; the untouched bolt relay shares
+    // its admission rule and says when the app accepts a prefix again.
+    await expect(trigger).toBeEnabled();
+    // The prefix yields to a focused text field, and cancelling New may hand
+    // focus anywhere. Start this sequence from the page, as the first one did.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await page.keyboard.press("Control+Shift+KeyX");
+    await page.keyboard.press("Digit1");
+    await expect(indicator).toContainText(fresh);
+    await expect(indicator).not.toContainText(old);
+    await page.keyboard.press("Enter");
+    await expect.poll(() => bodies.length, { message: "the second sequence launches once" }).toBe(2);
+    expect(bodies[1].title, "the second sequence launches its own Enter's binding").toBe(`${fresh}-session`);
+    await expect(form.locator(".create-session-error")).toContainText("refused sequence fixture refusal");
+    expect(bodies).toHaveLength(2);
+    expect(await taken(), "every copy was taken once, in press order").toEqual([null, old, fresh]);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["preference gate", () => gate.release()],
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["pill observer", () => page.evaluate(() =>
+        (window as unknown as { refusedPillObserver?: MutationObserver }).refusedPillObserver?.disconnect()
+      )],
+      ...[bolt, old, fresh].map((name): [string, () => Promise<void>] => [name, async () => {
+        const removed = await request.delete(`/api/templates/${name}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }]),
+    ]);
+  }
+});
+
 /** One unbound number refuses the whole sequence, but its bound Bolt must
  * not be mistaken for an absent mark. The specific number hint establishes
  * settlement before asserting the misleading mark hint is absent. */

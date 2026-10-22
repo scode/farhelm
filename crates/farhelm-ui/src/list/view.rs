@@ -1057,6 +1057,20 @@ pub(crate) fn ListView(
         )>::new,
     );
     let mut shortcut_dispatch_running = use_signal(|| false);
+    // The page's press snapshots pair with this queue's keyboard entries
+    // purely by order, but the page's listener outlives this component. When
+    // the list unmounts (the token prompt), the queue and its worker task die
+    // with this scope while the page could still hold snapshots they owed;
+    // left there, each would be taken by the next mount's first keyboard
+    // press, shifting every later pair. Clearing the page here empties both
+    // sides at the same boundary: the remount starts a fresh queue, and no
+    // snapshot owed to the next mount can exist before this clear. The page
+    // captures only when it finds a relay, and on the web renderer this eval
+    // runs in the same browser task that then removes the relays, so no
+    // keydown falls between the two. (Only the web renderer raises the token
+    // prompt; the desktop keeps this list mounted.) Clearing on mount instead
+    // could run after the new relays reach the page and drop a valid press.
+    use_drop(crate::launch_sequence::clear_shortcut_presses);
     let mut shortcut_apply_requests =
         use_signal(std::collections::VecDeque::<super::create_form::ShortcutApplyRequest>::new);
     let mut launch_sequence = use_context::<crate::launch_sequence::LaunchSequence>().0;
@@ -3502,12 +3516,17 @@ pub(crate) fn ListView(
             Vec<crate::launch_sequence::TemplateReference>,
             crate::launch_sequence::QuickLaunchOrigin,
         )| {
-            let blocked = (*quick_launch_pending.peek() && !*show_create.peek())
+            let refused = (*quick_launch_pending.peek() && !*show_create.peek())
                 || *templates_open.peek()
                 || ops.busy_now();
-            if blocked && !origin.keyboard() {
-                return;
-            }
+            // Keyboard clicks always enqueue, even refused or empty ones, so
+            // the worker drains the JS snapshot each one owns in press order.
+            let blocked =
+                match crate::launch_sequence::shortcut_admission(origin, &references, refused) {
+                    crate::launch_sequence::ShortcutAdmission::Ignore => return,
+                    crate::launch_sequence::ShortcutAdmission::Drain => true,
+                    crate::launch_sequence::ShortcutAdmission::Dispatch => false,
+                };
             let opening = if blocked || *show_create.peek() {
                 *opening_generation.peek()
             } else {
@@ -3517,11 +3536,20 @@ pub(crate) fn ListView(
             shortcut_dispatch_queue
                 .write()
                 .push_back((opening, references, origin, blocked));
+            // Only an entry that can launch refuses the next press. A drained
+            // one launches nothing, so it must not disable Begin and the
+            // direct shortcuts while the worker takes its snapshot. Raise the
+            // flag even when joining a running worker: something may have
+            // cleared it since the worker started (its own open_new, or a
+            // drain started the worker), and this launch is still in flight.
+            // The worker's exit clears it.
+            if !blocked {
+                quick_launch_pending.set(true);
+            }
             if *shortcut_dispatch_running.peek() {
                 return;
             }
             shortcut_dispatch_running.set(true);
-            quick_launch_pending.set(true);
             let base = quick_base.clone();
             spawn(async move {
                 loop {
@@ -3542,9 +3570,10 @@ pub(crate) fn ListView(
                     let Some(entry) = entry else {
                         continue;
                     };
-                    // A relay can race a disabled render. Drain its JS
-                    // snapshot in order, but never apply a press refused at
-                    // admission after the operation becomes idle again.
+                    // A relay can race a disabled render, and a sequence's
+                    // Enter can arrive after the app refused its Begin. Drain
+                    // its JS snapshot in order, but never apply a press refused
+                    // at admission after the operation becomes idle again.
                     if blocked {
                         continue;
                     }
@@ -3831,13 +3860,15 @@ pub(crate) fn ListView(
             class: "launch-sequence-trigger", "data-sequence-action": "launch",
             r#type: "button", hidden: true, tabindex: "-1",
             onclick: move |_| {
+                // JS has already copied the indicator's published bindings at
+                // physical Enter, and clicks this relay only with that copy
+                // queued. The worker pairs them with this raw queue before its
+                // fresh reads can observe another binding. A queue the app
+                // refused at Begin still goes through, empty, so the worker
+                // discards this Enter's copy instead of handing it to the next
+                // press (`shortcut_admission`).
                 let queued = launch_sequence.write().take();
-                if let Some(queue) = queued.filter(|queue| !queue.is_empty()) {
-                    // JS has already copied the indicator's published bindings
-                    // at physical Enter. The worker pairs them with this raw
-                    // queue before its fresh reads can observe another binding.
-                    quick_launch.call((queue, crate::launch_sequence::QuickLaunchOrigin::Sequence));
-                }
+                quick_launch.call((queued.unwrap_or_default(), crate::launch_sequence::QuickLaunchOrigin::Sequence));
             },
         }
         button {

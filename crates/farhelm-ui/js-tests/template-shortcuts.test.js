@@ -486,8 +486,77 @@ test("installer is idempotent and empty Enter spends ownership synchronously", (
   assert.equal(p.document.listeners.get("visibilitychange").length, 1);
   p.prefix();
   p.press({ code: "Enter", key: "Enter" });
-  assert.deepEqual(p.clicks, ["begin", "launch"]);
+  // Nothing to launch: the cancel relay retires it, so no snapshot is owed.
+  assert.deepEqual(p.clicks, ["begin", "cancel"]);
   assert.equal(p.press({ code: "Enter", key: "Enter" }).defaultPrevented, false);
+  assert.equal(p.window.farhelmTakeTemplateShortcutPress(), undefined);
+});
+
+/** Rust's worker takes one snapshot per keyboard relay click, in order, and
+ * nothing else pairs them. So the page must queue a snapshot exactly when it
+ * clicks the launch or a direct relay: an Enter that clicks no launch relay
+ * (empty sequence, missing relay) must queue none, or every later batch takes
+ * the one before it and can launch with names an earlier Enter displayed.
+ * This pins only the page's half. The app's half, an Enter it refused still
+ * taking its own snapshot, is the browser test "a sequence refused at its
+ * prefix leaves later sequences their own bindings" in quick-launch.spec.ts.
+ */
+test("snapshots pair one to one with keyboard relay clicks", () => {
+  const p = page();
+  const shown = name => ({ quick_launch_template: null, template_shortcuts: { "1": name, "2": name } });
+  p.document.publishedBindings = shown("empty-enter");
+  p.prefix();
+  p.press({ code: "Enter", key: "Enter" });
+  p.document.publishedBindings = shown("missing-relay");
+  const launch = p.relays.get("launch");
+  p.relays.delete("launch");
+  p.prefix();
+  p.press({ code: "Digit1" });
+  p.press({ code: "Enter", key: "Enter" });
+  p.relays.set("launch", launch);
+  p.document.publishedBindings = shown("launched");
+  p.prefix();
+  p.press({ code: "Digit2" });
+  p.press({ code: "Enter", key: "Enter" });
+  p.press({ code: "KeyP", ctrlKey: true, shiftKey: true });
+
+  assert.deepEqual(p.clicks.filter(click => click === "launch" || click.startsWith("quick-")),
+    ["launch", "quick-bolt"]);
+  const taken = [];
+  for (let press; (press = p.window.farhelmTakeTemplateShortcutPress()) !== undefined;) {
+    taken.push(press.sequence_bindings === null ? null : JSON.parse(press.sequence_bindings));
+  }
+  assert.deepEqual(taken, [shown("launched"), null],
+    "the launched sequence takes the bindings its own Enter showed");
+});
+
+/** The listener outlives the sidebar list whose worker owes each snapshot, so
+ * the list clears the queue as it unmounts. Snapshots still queued then must
+ * not survive into the next mount, where the first sequence would take one
+ * and launch with names shown before the remount. Presses after the clear
+ * queue and pair as usual.
+ */
+test("clearing at unmount drops owed snapshots and later presses pair afresh", () => {
+  const p = page();
+  const shown = name => ({ quick_launch_template: null, template_shortcuts: { "1": name } });
+  p.document.publishedBindings = shown("before-unmount");
+  p.prefix();
+  p.press({ code: "Digit1" });
+  p.press({ code: "Enter", key: "Enter" });
+  p.press({ code: "KeyP", ctrlKey: true, shiftKey: true });
+  assert.deepEqual(p.clicks, ["begin", "digit1", "launch", "quick-bolt"],
+    "premise: both presses clicked a relay, so both snapshots are queued");
+
+  p.window.farhelmClearTemplateShortcutPresses();
+  assert.equal(p.window.farhelmTakeTemplateShortcutPress(), undefined);
+
+  p.document.publishedBindings = shown("after-remount");
+  p.prefix();
+  p.press({ code: "Digit1" });
+  p.press({ code: "Enter", key: "Enter" });
+  assert.deepEqual(JSON.parse(p.window.farhelmTakeTemplateShortcutPress().sequence_bindings),
+    shown("after-remount"));
+  assert.equal(p.window.farhelmTakeTemplateShortcutPress(), undefined);
 });
 
 /** Direct and sequence relays share one capture listener but have different

@@ -157,9 +157,19 @@
     let armed = false;
     let armedHasEntry = false;
     const presses = [];
-    // Rust drains one snapshot for each relay that dispatches a batch. Keep
-    // the physical press's modal epoch even while an earlier read is pending.
+    // One snapshot per keyboard relay click: a direct shortcut, or the launch
+    // relay at a sequence's Enter. Rust enqueues exactly one worker entry per
+    // such click, refused or empty ones included, and its worker takes these
+    // in order; that one-to-one pairing is the only thing tying a snapshot to
+    // its press. Keep the physical press's modal epoch even while an earlier
+    // read is pending.
     root.farhelmTakeTemplateShortcutPress = () => presses.shift();
+    // This listener outlives the sidebar list that owes these snapshots: the
+    // list, its worker queue and its relays unmount at the token prompt while
+    // this window keeps its listener. Rust calls this as the list unmounts, so
+    // a snapshot whose worker entry died with it cannot pair with a press made
+    // after the list mounts again.
+    root.farhelmClearTemplateShortcutPresses = () => { presses.length = 0; };
     const capturePress = (context, sequence = false) => presses.push({
       context, modal_opening: root.__farhelmModalOpening || 0,
       // This projection is published in the same render as the pill's names.
@@ -240,15 +250,25 @@
         }
       } else if (result.action === "cancel") {
         cancel();
+      } else if (result.action === "launch" && !armedHasEntry) {
+        // Nothing queued means nothing to launch: retire the sequence like
+        // Escape, so every launch relay click carries a snapshot.
+        cancel();
       } else {
-        if (result.action === "launch") {
+        const action = result.action;
+        if (action === "launch") {
           armed = false;
-          if (armedHasEntry) capturePress(context, true);
           armedHasEntry = false;
-        } else if (result.action === "digit" || result.action === "bolt") {
+        } else if (action === "digit" || action === "bolt") {
           armedHasEntry = true;
         }
-        sequenceRelay(result.action, result.digit)?.click();
+        const relay = sequenceRelay(action, result.digit);
+        // Capture only for a click that happens: a snapshot with no relay
+        // click would be taken by the next press's worker entry instead. A
+        // disabled button's .click() dispatches nothing, as on the direct path.
+        const launches = action === "launch" && relay && !relay.disabled;
+        if (launches) capturePress(context, true);
+        relay?.click();
       }
     }, true);
 
