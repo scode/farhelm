@@ -29,7 +29,7 @@ use crate::ops::{ConfirmSlot, ConfirmToken, OpGuard, ReadGate, use_confirm_slot}
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
 use crate::reconnect::reconnect_policy;
-use crate::replace::{ReplaceAnswer, ReplaceController, ReplaceResult, ReplaceYoloQuestion};
+use crate::replace::{PendingReplace, ReplaceAnswer, ReplaceController, ReplaceResult};
 use crate::restart_with::RestartWithDialog;
 use crate::status::{StatusBadge, StatusBadgeView, status_badge};
 use crate::tabs::{
@@ -669,15 +669,13 @@ pub(crate) fn SessionView(
     let mut replacing = use_signal(|| false);
     // Navigation retains the page's retry identity. Only the local question
     // belongs to this keyed view, including its permanent-answer mount timing.
-    let replace_yolo = use_signal(|| None::<ReplaceYoloQuestion>);
+    let replace_yolo = use_confirm_slot::<PendingReplace, ()>();
     let replace_yolo_error = use_signal(|| None::<String>);
-    let replace_yolo_openings = use_signal(|| 0u64);
     let replace_controller = ReplaceController::session(
         use_context::<crate::list::ReplaceIntent>().0,
         use_context::<crate::list::ReplaceYoloQuestions>().0,
         replace_yolo,
         replace_yolo_error,
-        replace_yolo_openings,
     );
     use_drop(move || replace_controller.release_question());
     let replace_source_id = use_signal(|| session.id.raw().to_owned());
@@ -2701,7 +2699,7 @@ pub(crate) fn SessionView(
             }
             if let Some(question) = replace_controller.question() {
                 crate::yolo_confirm::YoloConfirmation {
-                    ask: question.pending.ask.clone(),
+                    ask: question.key().ask.clone(),
                     busy: replacing(),
                     error: replace_controller.error(),
                     confirm_submits: false,
@@ -2740,7 +2738,7 @@ pub(crate) fn SessionView(
                             }
                         }
                     },
-                    on_cancel: move |_| replace_controller.cancel_stamped(&question),
+                    on_cancel: move |_| replace_controller.cancel_question(&question),
                 }
             }
             if let Some(err) = replace_error.read().clone() {
