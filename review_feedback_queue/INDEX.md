@@ -12,9 +12,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   shortcut save can restore an older target, including a pre-read agent edit after save failure; harmful launch is
   unverified.
 
-- [`template-preservation-promise-omits-last-write-wins.md`](template-preservation-promise-omits-last-write-wins.md) —
-  The agent-edit preservation promise omits accepted template overwrites; loss from reliance is conditional.
-
 - [`tunnel-can-take-standalone-helm-port.md`](tunnel-can-take-standalone-helm-port.md) — A localhost tunnel can serve a
   remote page at the standalone helm's address and read the browser's helm credential; how often one is stored is
   unverified.
