@@ -111,3 +111,96 @@ save too (done, which also removed now-dead cleanup code), stale comments (fixed
 second round found only a stale comment and dead code (both fixed). A resume check at the start of this round confirmed
 the earlier executor's work and state. Fresh cold readers checked both commit messages. Both PRs cleared the review
 gate.
+
+### Landing
+
+Landed as #2562 and #2583, merged bottom-up, with the same content the report describes; #2573 stays closed unmerged, as
+the answer asked. It was the only plan in this landing round.
+
+#### What landed since the stack was based, and whether it interacted
+
+The stack was based on current main, which already held #2580, the specification change behind the answer: an expired
+browser sign-in is treated as reloading from scratch, and a failed GUI save is reported and discarded. A fresh-context
+reviewer and I read the plan against it and against recent UI work:
+
+- #2562's text agrees with #2580: no failed-save exception is left, and the accepted overwrite is stated as an exception
+  to the rule that a GUI write must not undo an agent's change. The exception covers saves that succeed; the failed-save
+  rule covers saves that fail.
+- #2583 discards the attempted keys on every path the report names: the next key change, a rename's key move, the retry
+  after signing in again, and a save cut off without an answer. Other preferences that share the same saving code, such
+  as the ⚡ quick-launch mark, are unchanged, as the report says.
+- Restoring the helm's keys after a failed save cannot leave an open number-key menu pointing at the wrong row, because
+  every key menu is disabled while a save is in progress. That matters since the recent change that closes menus when
+  their rows move (popover-anchor-close). The launcher's template shortcuts, which the recent launcher rework
+  (launcher-draft-model) touched, only read the keys.
+
+#### Fixes made during the landing
+
+None.
+
+#### Things you should know
+
+- This plan landed although it makes an existing unit-test flake fail more often. The test,
+  `a_hung_save_releases_waiters_at_their_deadline` in the UI's save-ordering code, checks that a settings read stuck
+  behind a save that never finishes gives up when its 30 ms budget runs out. Run alone 50 times at a time, it failed
+  about 1 run in 15 on main (10 of 150) and about 1 in 4 with this plan (41 of 150); see Checks. The plan does not
+  change that code, though it changes another part of the same file's library. The open hypothesis, in the unmerged
+  draft PR #2528 that adds the test's FLAKES.md entry, is a deadline rounded down to whole milliseconds, so the read
+  gives up up to a millisecond early: harmless to users, but enough to fail the test's exact check. Why this plan makes
+  it more frequent was not tested. Until #2528 or a fix lands, desktop-feature UI test runs will fail on this test
+  often, with nothing on main explaining why.
+- This plan makes the Templates dialog stay locked, including Close and Escape, until a number-key save settles, which
+  can take up to the 60-second request timeout if the helm stalls; before, it was locked only while re-reading the keys.
+  That is why the report's sentence "changing two keys quickly still saves both" does not hold in the dialog: the second
+  change waits for the first. I recommend accepting the lock as the simple consequence of discarding failed saves,
+  unless a stalled helm is common enough to matter.
+
+#### Possible follow-ups
+
+- Merge the flake record (#2528), or fix the rounding behind it, so desktop-feature UI test runs stop failing on that
+  test without explanation.
+- Found at landing, low severity: a save whose outcome is unknown (its reply was lost or timed out after the helm may
+  have applied it) is reported as "the number key could not be saved", and the dialog shows the keys it last read. If
+  the helm did apply it, the number key launches by the new keys while the dialog showed the old ones until its next
+  read. SPEC.md asks the desktop app to say when an outcome is unknown. Possible follow-up: word that case as unknown.
+- Informational, older than this plan and covered by the near-term TODO entry "Sweep out browser sign-in and failed-save
+  preservation": if the app re-reads preferences after signing in again while a number-key save is still in progress,
+  and that save then fails, the reviewer believes the attempted keys can stay on screen until the next fresh read; they
+  did not confirm whether that re-read waits for the save. Launches always read fresh, so only the display would be
+  affected.
+
+#### Checks
+
+The plan changes about 200 lines; its code part is in the UI's shared preference-saving code, which every GUI preference
+save goes through, and in the Templates list. That is why this round ran the UI's unit tests and the browser specs for
+templates, number-key shortcuts, quick launch and Settings. All of the following ran on the stack as it landed:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on the changed Markdown files, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py` (one warning, about a citation main already had), the workspace debug build and
+  the UI's release web build: all passed.
+- `cargo nextest run -p farhelm-ui` through the test recorder with pinned nextest and tmux, four slots, no retries, run
+  `1de21559-6dcd-463a-a310-6c413ba38ccd`: 739 passed.
+- `cargo nextest run -p farhelm-ui --features desktop`, run `825930bd-9b5b-47a2-9d1d-a9b8e3163821`: 899 passed, 1
+  failed: `api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline`, the timing test that the unmerged
+  draft PR #2528 records in FLAKES.md, whose own code this plan does not change. Repeated alone with nextest's stress
+  mode, 50 iterations at a time, it failed 10 of 50 on the stack (run `25378352-1585-4c08-bd83-1164673b5089`), then,
+  alternating main and the stack back to back, 1, 4 and 5 of 50 on main (runs `50cdeddd-9320-48d7-9d33-b2efb94e1fbd`,
+  `51ac110a-7dc8-47d8-ba61-1e2643522786`, `474fd738-d650-4dc2-afc6-c98d710bbd8f`) against 12, 9 and 20 of 50 on the
+  stack (runs `47f8f8c9-fc3d-4935-bb2b-ed6de9ad850b`, `283d6cb7-5fd3-4c66-9f5a-cbcc9cca4958`,
+  `bacf1ea5-34e3-46ba-b1d8-0f47865d1101`). So the flake is real on main, fails alone and not only under load, and fails
+  about four times as often with this plan; see "Things you should know" for why the plan landed anyway.
+- `npx playwright test` in `e2e/` for `templates`, `launcher-template-shortcuts`, `template-list-shortcut`,
+  `quick-launch` and `settings` on Chromium and WebKit, three workers each with its own helm and supervisors, no
+  retries, run `533a5121-c41f-4b8d-bd55-f395a2a32291`: 242 passed, none failed, including the plan's new failed-save
+  test.
+- Reused: none. Skipped: the rest of the Rust workspace and the JavaScript harness (no helm, supervisor or asset
+  JavaScript changed), the rest of the browser suite (the preference-saving paths are covered by the specs above), the
+  website build (no docs page changed), the doctests (no documentation example changed), the desktop smoke test (the
+  desktop app crate is unchanged), the native Mac app (not runnable here) and the installer (unchanged).
+
+The report's checks were its own selections; this round ran the UI unit tests and the browser specs above on the plan as
+it landed. Apart from the report's sentence about saving two keys quickly, which does not hold in the dialog as
+described above, nothing in the executor's report became untrue at landing.
