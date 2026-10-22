@@ -71,7 +71,7 @@ use crate::menu_panel::{
     measurement_outcome, record_menu_item_focus, remember_menu_item, session_menu_placement_style,
     session_menu_pointer_style, should_measure_on_mount,
 };
-use crate::modal_dialog::{DialogFocus, DialogHandle, FocusTarget, ModalDialog};
+use crate::modal_dialog::{DialogFocus, DialogHandle, DialogRoot, FocusTarget, ModalDialog};
 use crate::ops::{ConfirmSlot, OpGuard, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_identity, display_peer};
 use crate::provisioning::{
@@ -1861,7 +1861,8 @@ pub(crate) fn HostsPanel(
             destination,
             claim,
         } = submission;
-        settings_dialog::return_focus_to_add_button();
+        settings_dialog::ADD_DIALOG
+            .close(&FocusTarget::new(".add-host-button", None, false).script());
         adding.set(false);
         add_reopen.set(None);
         add_error.set(None);
@@ -2009,12 +2010,12 @@ pub(crate) fn HostsPanel(
                     on_refresh: on_changed,
                     on_submit: on_add_submit,
                     on_cancel: move |_| {
-                        settings_dialog::return_focus_to_add_button();
+                        settings_dialog::ADD_DIALOG.close(&FocusTarget::new(".add-host-button", None, false).script());
                         adding.set(false);
                         add_reopen.set(None);
                     },
                     on_added: move |unvalidated: Option<String>| {
-                        settings_dialog::return_focus_to_add_button();
+                        settings_dialog::ADD_DIALOG.close(&FocusTarget::new(".add-host-button", None, false).script());
                         adding.set(false);
                         add_reopen.set(None);
                         // A committed-but-unreadable add has no row id to
@@ -4274,6 +4275,9 @@ fn destination_detail_parts(destination: impl Into<crate::peer::PeerText>) -> Ve
 /// The dialog card is the form, with header, scrolling body and pinned
 /// answers as direct children. Confirmation and dismiss buttons are explicit
 /// non-submit controls: only Enter in the destination starts discovery.
+/// The shared boundary keeps that native form root and releases isolation on
+/// the surviving owner's close path. SSH help temporarily hides this same
+/// form, then returns focus before restoring its isolation without remounting.
 ///
 /// The form asks only for the ssh destination. It used to offer a remote
 /// farhelm path and a remote state directory as optional fields, but nobody
@@ -4407,20 +4411,25 @@ fn AddHostForm(
 
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
-            form {
+            ModalDialog {
+                root: DialogRoot::Form,
+                handle: settings_dialog::ADD_DIALOG,
+                focus: DialogFocus::remembered(
+                    ".add-host-ssh", Some(".add-host-cancel"), false,
+                    Some(".provisioning-confirm, .add-host-submit"),
+                ),
                 class: "host-settings-dialog host-add-dialog host-dialog-framed add-host-form",
                 hidden: ssh_help_open(),
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: "add host",
                 tabindex: "-1",
-                onmounted: move |_| settings_dialog::install_add_dialog(),
-                onkeydown: move |evt: KeyboardEvent| {
-                    if evt.key() == Key::Escape && !evt.is_composing() {
+                on_escape: move |evt: KeyboardEvent| {
+                    if !evt.is_composing() {
                         close();
                     }
                 },
-            onsubmit: move |evt| {
+            onsubmit: move |evt: FormEvent| {
                 evt.prevent_default();
                 // Discovery can register an answering supervisor, but it
                 // still stays outside the page lock. This synchronous guard
@@ -4519,7 +4528,7 @@ fn AddHostForm(
                     button { r#type: "button", class: "add-host-ssh-help welcome-feedback",
                         "data-tooltip": "ssh needs 2FA?: see the commands for the destination you're adding",
                         onclick: move |_| {
-                            document::eval(&crate::modal_isolation::release_js(r#".host-add-dialog[role="dialog"]"#));
+                            settings_dialog::ADD_DIALOG.release();
                             ssh_help_open.set(true);
                         }, "Start its connections yourself first." }
                 }
@@ -4556,7 +4565,14 @@ fn AddHostForm(
             crate::ssh_help::SshHelpDialog {
                 destination: Some(ssh()),
                 on_close: move |_| {
-                    crate::ssh_help::return_focus(true);
+                    // The probe can replace this hidden form's Help opener
+                    // with a setup question. Resolve the original combined
+                    // selector, then restore isolation after focus has landed.
+                    crate::ssh_help::DIALOG.close(&format!(
+                        "{} {}",
+                        FocusTarget::new(".add-host-ssh-help, .host-add-dialog .add-host-cancel", None, false).script(),
+                        settings_dialog::ADD_DIALOG.isolation_script(Some(".add-host-cancel")),
+                    ));
                     ssh_help_open.set(false);
                 },
             }

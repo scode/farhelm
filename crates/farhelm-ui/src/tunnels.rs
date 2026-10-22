@@ -12,11 +12,15 @@ use crate::ApiBase;
 use crate::api::{self, SessionTunnels};
 use crate::feed::{fallback_polls_now, fallback_sleep};
 use crate::list::SharedPreferences;
+use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog};
 use crate::peer::display_peer;
 use crate::reader::{SurfaceReader, Trigger, request_read};
 
-const DIALOG: &str = ".tunnel-consent-dialog[role=\"dialog\"]";
+/// The controller survives the warning and releases it for each source's close.
+const DIALOG: DialogHandle = DialogHandle::new(".tunnel-consent-dialog[role=\"dialog\"]");
 const SETTINGS: &str = ".app-settings-dialog[role=\"dialog\"]";
+/// Settings stays mounted while consent temporarily owns the modal boundary.
+const SETTINGS_DIALOG: DialogHandle = DialogHandle::new(SETTINGS);
 
 /// The action's lifetime follows its source, rather than the selected pane alone.
 #[derive(Clone)]
@@ -247,7 +251,11 @@ impl TunnelController {
         self.finish_warning(result);
     }
 
-    /// Close the child modal, restore a still-mounted parent, then return the result.
+    /// Retire the result once, then release the warning for its source's return.
+    ///
+    /// The result is delivered before close submission, as preparation retains
+    /// ownership of the original action. Settings restoration and source focus
+    /// remain framed so the closing render can remove the child first.
     fn finish_warning(mut self, result: Result<bool, String>) {
         // A queued Cancel can arrive after Allow starts saving but before DOM
         // disabling renders. Only finish_save may retire that accepted warning.
@@ -259,12 +267,15 @@ impl TunnelController {
         };
         let source = warning.source;
         let _ = warning.result.send(result);
-        document::eval(&format!("{} requestAnimationFrame(() => {{
+        // Settings resumes isolation before taking focus. Terminal and card
+        // returns below remain separate frame submissions, in their original
+        // order, because their source lifetime chooses a different destination.
+        DIALOG.close(&format!("
             const settings = document.querySelector({settings});
             if (settings) {{ {install} settings.querySelector('.tunnel-settings-switch')?.focus({{preventScroll:true}}); }}
-        }});", crate::modal_isolation::release_js(DIALOG),
+        ",
             settings = serde_json::to_string(SETTINGS).unwrap(),
-            install = crate::modal_isolation::install_js(SETTINGS, Some(".app-settings-close"))));
+            install = SETTINGS_DIALOG.isolation_script(Some(".app-settings-close"))));
         if matches!(&source, Source::Terminal { session, generation }
             if self.view.peek().as_ref().is_some_and(|(active, epoch)| active == session && epoch == generation))
         {
@@ -345,14 +356,14 @@ pub(crate) fn TunnelControls() -> Element {
         }
         if pending {
             div { class: "host-settings-backdrop tunnel-consent-backdrop", role: "presentation",
-                div { class: "tunnel-consent-dialog host-dialog-framed", role: "dialog", aria_modal: "true",
+                ModalDialog {
+                    handle: DIALOG,
+                    before_install_release: SETTINGS_DIALOG,
+                    focus: DialogFocus::remembered(".tunnel-cancel", Some(".tunnel-cancel"), false, Some(".tunnel-allow")),
+                    class: "tunnel-consent-dialog host-dialog-framed", role: "dialog", aria_modal: "true",
                     aria_labelledby: "tunnel-consent-heading", tabindex: "-1",
-                    onmounted: move |_| {
-                        document::eval(&crate::modal_isolation::release_js(SETTINGS));
-                        crate::hosts::settings_dialog::install_dialog_with_selector(DIALOG, ".tunnel-cancel", Some(".tunnel-cancel"), Some(".tunnel-allow"));
-                    },
-                    onkeydown: move |event: KeyboardEvent| {
-                        if event.key() == Key::Escape && !event.is_composing() && !*controller.saving.peek() {
+                    on_escape: move |event: KeyboardEvent| {
+                        if !event.is_composing() && !*controller.saving.peek() {
                             event.stop_propagation(); controller.finish_warning(Ok(false));
                         }
                     },

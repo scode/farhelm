@@ -32,9 +32,10 @@ impl DialogHandle {
     /// Release isolation now and return focus after the closing render.
     ///
     /// The supplied body chooses the destination for this close reason. It
-    /// contains only that return action: release and frame scheduling live
-    /// here so no caller can focus its still-inert opener first. A missing
-    /// destination retains the caller's existing no-op behavior.
+    /// may also resume a still-mounted parent's isolation around that action.
+    /// Release and frame scheduling live here so no caller can focus its
+    /// still-inert opener first. A missing destination retains the caller's
+    /// existing no-op behavior.
     pub(crate) fn close(self, return_focus_body: &str) {
         document::eval(&format!(
             "{} requestAnimationFrame(() => {{ {return_focus_body} }});",
@@ -48,6 +49,16 @@ impl DialogHandle {
     /// still the fallback for success paths that do not explicitly close.
     pub(crate) fn release(self) {
         document::eval(&crate::modal_isolation::release_js(self.selector));
+    }
+
+    /// Resume a mounted parent's isolation without repeating its initial focus.
+    ///
+    /// Nested help and consent return to parents whose gap handlers and focus
+    /// memory remain installed. Their callers place this generated operation
+    /// before or after the destination action in the shared close frame,
+    /// preserving each handoff's existing order without submitting another eval.
+    pub(crate) fn isolation_script(self, escape_target: Option<&str>) -> String {
+        crate::modal_isolation::install_js(self.selector, escape_target)
     }
 
     /// Install the opening's focus policy without repeating it on rerenders.
@@ -286,6 +297,19 @@ impl DialogFocus {
     }
 }
 
+/// Keep a form dialog's native submit boundary on the modal root itself.
+///
+/// The shell adds no wrapper: controls and form submission retain the same
+/// ancestor and CSS relationships as the original div or form root.
+#[derive(Clone, Copy, Default, PartialEq)]
+pub(crate) enum DialogRoot {
+    /// Keep ordinary dialogs outside the browser's native submit behavior.
+    #[default]
+    Div,
+    /// Let destination-field Enter and explicit submit buttons submit this root.
+    Form,
+}
+
 /// Render one existing modal root and own its mount-time focus boundary.
 ///
 /// Attributes remain caller-supplied so markup, labels and root focusability
@@ -299,52 +323,67 @@ impl DialogFocus {
 /// without resize behavior do not acquire an otherwise unused resize observer.
 /// An optional second focus target preserves setup's existing root-first
 /// isolation, then quiet confirmation handoff, before domain mounted work.
+/// A nested consent may first release its still-mounted parent; this remains
+/// a separate eval before initial focus, rather than another mount callback.
 #[component]
 pub(crate) fn ModalDialog(
     handle: DialogHandle,
     focus: DialogFocus,
     on_escape: EventHandler<KeyboardEvent>,
+    #[props(default)] root: DialogRoot,
+    #[props(default)] before_install_release: Option<DialogHandle>,
     #[props(default)] after_install_focus: Option<FocusTarget>,
     #[props(default)] onkeydown: Option<EventHandler<KeyboardEvent>>,
     #[props(default)] onmounted: Option<EventHandler<MountedEvent>>,
     #[props(default)] onscroll: Option<EventHandler<ScrollEvent>>,
     #[props(default)] onresize: Option<EventHandler<ResizeEvent>>,
+    #[props(default)] onsubmit: Option<EventHandler<FormEvent>>,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
+    // Native roots share one lifecycle boundary. Keeping their handlers here
+    // avoids giving forms a second copy of focus installation or Escape rules.
+    let mut root_attributes = vec![
+        dioxus::html::onmounted(move |event: MountedEvent| {
+            if let Some(parent) = before_install_release {
+                parent.release();
+            }
+            handle.install(&focus);
+            if let Some(target) = &after_install_focus {
+                target.focus();
+            }
+            if let Some(onmounted) = onmounted {
+                onmounted.call(event);
+            }
+        }),
+        dioxus::html::onkeydown(move |event: KeyboardEvent| {
+            if event.key() == Key::Escape {
+                on_escape.call(event);
+            } else if let Some(onkeydown) = onkeydown {
+                onkeydown.call(event);
+            }
+        }),
+    ];
+    root_attributes.extend(attributes);
     // GlobalAttributes forwards presentation attributes, but native movement
-    // events need explicit props. Keep absent listeners absent on other roots.
-    let mut attributes = attributes;
+    // and submit events need explicit props. Absent listeners remain absent.
     if let Some(onscroll) = onscroll {
-        attributes.push(dioxus::html::onscroll(move |event: ScrollEvent| {
+        root_attributes.push(dioxus::html::onscroll(move |event: ScrollEvent| {
             onscroll.call(event);
         }));
     }
     if let Some(onresize) = onresize {
-        attributes.push(dioxus::html::onresize(move |event: ResizeEvent| {
+        root_attributes.push(dioxus::html::onresize(move |event: ResizeEvent| {
             onresize.call(event);
         }));
     }
-    rsx! {
-        div {
-            onmounted: move |event| {
-                handle.install(&focus);
-                if let Some(target) = &after_install_focus {
-                    target.focus();
-                }
-                if let Some(onmounted) = onmounted {
-                    onmounted.call(event);
-                }
-            },
-            onkeydown: move |event: KeyboardEvent| {
-                if event.key() == Key::Escape {
-                    on_escape.call(event);
-                } else if let Some(onkeydown) = onkeydown {
-                    onkeydown.call(event);
-                }
-            },
-            ..attributes,
-            {children}
-        }
+    if let Some(onsubmit) = onsubmit {
+        root_attributes.push(dioxus::html::onsubmit(move |event: FormEvent| {
+            onsubmit.call(event);
+        }));
+    }
+    match root {
+        DialogRoot::Div => rsx! { div { ..root_attributes, {children} } },
+        DialogRoot::Form => rsx! { form { ..root_attributes, {children} } },
     }
 }
