@@ -41,6 +41,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Remember the launcher's most recently selected folder separately for each host; for a new host, initially default to
   that host's home directory.
 
+- Allow agents to add a host for the user.
+
 - Initial version of agent2agent comms.
 
 - **Sweep out browser sign-in and failed-save preservation.** Decided 2026-10-22 (SPEC.md, "Signing in again" and the
