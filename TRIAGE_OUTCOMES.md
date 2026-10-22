@@ -17495,7 +17495,9 @@
 - Decision: on 2026-10-21 the user chose to fix what is super cheap with no real downside and discard the rest. Triage
   did not judge this one super cheap: changing how every repository label renders has a visible downside to weigh.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: planned in `plans/queue/triage-specs-oct21.md`.
+- Execution: `complete`; discarded as agreed, with no spec or code change. jj change `qwvpnwzpwqwwosnzslxyzqurmwsusqwq`,
+  bookmark `plan/triage-specs-oct21/03-close-discards`;
+  [draft PR #2566](https://github.com/scode/farhelm/pull/2566/changes).
 
 ## changed-host-warning-flattens-compared-identities.md
 
@@ -17523,7 +17525,9 @@
 - Decision: on 2026-10-21 the user chose to fix what is super cheap with no real downside and discard the rest; this one
   is neither cheap nor shown on a supported platform.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: planned in `plans/queue/triage-specs-oct21.md`.
+- Execution: `complete`; discarded as agreed, with no spec or code change. jj change `qwvpnwzpwqwwosnzslxyzqurmwsusqwq`,
+  bookmark `plan/triage-specs-oct21/03-close-discards`;
+  [draft PR #2566](https://github.com/scode/farhelm/pull/2566/changes).
 
 ## escaped-start-remedy-changes-program-and-state-path.md
 
