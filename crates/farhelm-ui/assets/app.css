@@ -664,7 +664,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 
 /* Center the transient queue where the next launch will appear, without
  * moving the terminal or taking the keyboard. The main area also provides
- * its stable home before any session exists. */
+ * its stable home before any session exists. Drawn above terminal link
+ * previews, so it is a link cover (see the z-index ladder at `.header-confirm`). */
 .launch-sequence-indicator {
   position: absolute;
   z-index: 50;
@@ -1380,9 +1381,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   /* Low on the z-index ladder (see `.header-confirm`): a status line inside
      the terminal must not cover header confirmations, menus, dialogs or the
      hover disclosure that names what a click would open or download. A refused
-     disclosure is the exception: neither its hover, an approval card nor a
-     tunnel-error notice may hide why the click was refused, including during
-     a terminal redraw. */
+     disclosure is the exception: neither its hover nor any link cover (an
+     approval card, a tunnel-error notice, the quick-launch pill, a tooltip)
+     may hide why the click was refused, including during a terminal redraw. */
   z-index: 12;
   padding: 4px 6px;
   background: var(--bg-2);
@@ -1397,10 +1398,12 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   transition: opacity 200ms;
 }
 .terminal-file-message.showing { opacity: 1; }
-.terminal-file-message[data-outcome="disclosure-refusal"] { z-index: 46; }
+/* One above the highest link cover (50). The trash flight (10000) is the one
+   cover exempt from this; see the ladder. */
+.terminal-file-message[data-outcome="disclosure-refusal"] { z-index: 51; }
 /* Modal isolation already marks background content inert. The refusal only
-   outranks hovers, approval cards and tunnel failures while its terminal is
-   active, never the dialog above it. */
+   outranks hovers and link covers while its terminal is active, never the
+   dialog above it. */
 [inert] .terminal-file-message[data-outcome="disclosure-refusal"],
 .terminal-file-message[data-outcome="disclosure-refusal"][inert] { z-index: 12; }
 @media (prefers-reduced-motion: reduce) {
@@ -1449,10 +1452,12 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    from reordering anything around it. It is never interactive: no pointer
    events, never focusable.
 
-   Above everything else on the z-index ladder (see `.header-confirm`),
+   Above every panel on the z-index ladder (see `.header-confirm`),
    including the modal backdrops at 40: dialogs are ordinary DOM rather
    than top-layer `<dialog>` elements, so their buttons' tooltips need this
-   to paint over the dialog they belong to. */
+   to paint over the dialog they belong to. That also puts it above terminal
+   link previews, which makes it a link cover (tooltip.js marks it); only a
+   raised link refusal (51) and the trash flight draw above it. */
 .farhelm-tooltip {
   position: fixed;
   z-index: 50;
@@ -1713,33 +1718,91 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    safety-critical consequence text with an unrelated context menu.
 
    THE Z-INDEX LADDER, documented here once rather than per rule — check
-   this list before adding a new value anywhere in the sheet:
+   this list before adding a new value anywhere in the sheet. It lists every
+   value in the sheet; values marked "local" only order siblings inside a
+   parent that makes its own stacking context (a dialog's backdrop, the
+   launcher's, a row menu flyout), so they never contest the page-level
+   layers:
+     0  `.session-row-menu-pointer`, `.host-row-menu-pointer` — local, the
+        flyout's pointer under its own panel
+     1  `.session-row-menu-flyout > .session-row-menu-panel`,
+        `.host-row-menu-flyout > .host-row-menu-panel` — local, see above
+     1  `.provisioning-plan-number` — a setup plan step's number, over the
+        line joining it to the next step
+     1  `.macos-window .main-empty-titlebar` — the empty main pane's Mac
+        title band
+     1  `.session-bell-overlay` — a sidebar row's bell, over its open button
      1  `.terminal-connecting` — a terminal pane's own attach/reconnect
-        placeholder, scoped to that pane and never contesting the two below
+        placeholder, scoped to that pane and never contesting the layers above
      2  `.attach-status` — the same pane's upload indicator, same scope
+     2  `.session-unavailable-overlay`, `.terminal-connecting.terminal-
+        reconnecting` — the same pane's outage card and scrim
+     2  `.launch-composer-folder-options`, `.launch-composer-listbox`,
+        `.launch-composer-search-results` — local, inside the launcher
+     3  `.launcher-host-options` — local, inside the launcher
+     3  `.sidebar-resize-handle` — the sidebar's resize strip, reaching into
+        the terminal's padding
+     3  `.terminal-delete-overlay` — a deletion in flight, over the panes
+     4  `.permission-escalation-banner` — local, sticky inside the launcher
+     5  `.app-bar` — the sticky app bar, which makes its own stacking context
+     6  `.outage-viewport .session-unavailable-overlay` and its reconnecting
+        twin — the outage card when it takes the viewport
      12 `.terminal-file-message` — a terminal's download status line, above
         xterm's own layers (its scrollbar is 11) and below everything else
-     20 `.session-row-menu-panel` — a sidebar row's action menu
+     15 `.host-update-popup` — below the menus at 20 (see its rule)
+     20 `.session-row-menu-panel`, `.host-row-menu-panel`, and the row menus'
+        flyouts — a sidebar row's action menu
      25 `.drag-copy-notice` — guidance at the drag-release pointer, allowed
         to overlap the sidebar and its row menus but below the warnings at 30
         (a copy warning and the header confirmation's consequence text must
         never be covered) and below modal dialogs
+     25 `.templates-number-flyout` — local, inside the templates dialog
      30 `.header-confirm` (this rule) — must outrank the row menu above
-     40 `.quick-switcher-backdrop` — the quick switcher, a modal dialog like
-        the others, so the approval cards and hover help stay above it
-     45 `.approval-cards` — an agent's request waiting for the user, above
-        every modal dialog's backdrop (40) because an agent that asked while a
-        dialog was open is waiting on this answer, not on the dialog
-     45 `.tunnel-error-notice` — a persistent tunnel failure, above link hovers
-        (40) but below their refusal explanation (46)
-     46 `.terminal-file-message[data-outcome="disclosure-refusal"]` — a clipped
-        or covered link hover's refusal, above that hover (40), cards and tunnel
-        failures (45); reverts to 12 when modal isolation makes its terminal
-        inert, and drops
-        to the ordinary failure layer once its file or web hover leaves, so it
-        never covers a later disclosure or the header confirmation
-     50 `.farhelm-tooltip` — hover help, above every panel and modal backdrop,
-        the approval cards included, so a card's buttons can show theirs
+     30 `.copy-warning` — a copy warning, never covered (see 25)
+     40 `.terminal-link-target` — a terminal link's destination preview, the
+        evidence a link click is admitted on. LINK COVER RULE: every surface
+        that draws at or above this layer and can overlap a preview carries
+        the `data-link-cover` attribute, and a file or web link click is
+        refused while any marked, rendered surface overlaps its preview
+        (`markedCoverRects` in terminal-files.js). Mark a new surface in its
+        own markup, never by adding a selector to the check: a hand-kept list
+        is how the quick-launch pill went uncounted. Surfaces below 40 cannot
+        hide the preview and are not covers. Two unmarked surfaces above 40
+        are deliberately not covers: the preview itself, and the raised
+        refusal (51), which exists only while its own link is hovered and
+        explains that link's refusal. Modal backdrops (40 and 50) are
+        not covers either: they cover the whole window and make every
+        terminal inert, so no link under one can be clicked.
+     40 `.quick-switcher-backdrop`, `.host-settings-backdrop`,
+        `.rename-dialog-backdrop`, `.restart-with-backdrop`,
+        `.launch-composer-backdrop` — modal dialogs, so the approval cards and
+        hover help stay above them
+     45 `.approval-cards` — link cover. An agent's request waiting for the
+        user, above every modal dialog's backdrop (40) because an agent that
+        asked while a dialog was open is waiting on this answer, not on the
+        dialog
+     45 `.tunnel-error-notice` — link cover. A persistent tunnel failure,
+        above link previews (40) but below their refusal explanation (51)
+     50 `.launch-sequence-indicator` — link cover. The quick-launch pill,
+        centered over the terminal and transparent to the pointer
+     50 `.farhelm-tooltip` — link cover. Hover help, above every panel and
+        modal backdrop, the approval cards included, so a card's buttons can
+        show theirs
+     50 `.tunnel-consent-backdrop` — the tunnel consent dialog's backdrop
+     51 `.terminal-file-message[data-outcome="disclosure-refusal"]` — a clipped
+        or covered link preview's refusal, above that preview (40) and every
+        link cover but the trash flight; reverts to 12 when modal isolation
+        makes its terminal inert, and drops to the ordinary failure layer once
+        its file or web hover leaves, so it never covers a later disclosure.
+        While raised it CAN overlap an open header confirmation's consequence
+        text: the confirmation (30) hangs over the terminal's top right, and
+        the refusal spans the terminal's top. That gap predates link covers
+        (the refusal was already 46) and is a known follow-up
+     10000 `.checkout-trash-flight` — link cover, and the one exempt from the
+        refusal outranking it: the short, unfilled outline of a session flying
+        to the sidebar's trash button, which a preview clamped against the
+        window's right edge can reach under (see `finish_row_cue` in
+        list/trash.rs)
    Right-aligned to the anchor, which is at the row's trailing edge, so the
    panel opens inward rather than off the window. */
 .header-confirm {

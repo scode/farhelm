@@ -904,6 +904,14 @@ pub(super) fn capture_row(id: &str) {
 
 /// Only this client's affirmative archive reply plays the cue. A bare Delete,
 /// a remote disappearance and reduced motion all skip flight and wiggle.
+///
+/// The flight outline is a terminal link cover (`data-link-cover`, see
+/// app.css's z-index ladder). It only travels within the sidebar column, but a
+/// link's destination preview is clamped to the window's right edge and can
+/// reach left over the sidebar, where the outline draws above it. It is the
+/// one cover exempt from the rule that a link's refusal explanation draws
+/// above every cover: it lasts 650 ms, has no fill, and outranking its 10000
+/// would put a terminal status line above everything in the app.
 pub(super) fn finish_row_cue(id: &str, archived: bool) {
     let id = serde_json::to_string(id).expect("string literal");
     document::eval(&format!(
@@ -921,6 +929,7 @@ pub(super) fn finish_row_cue(id: &str, archived: bool) {
         const target = button.getBoundingClientRect();
         const outline = document.createElement('div');
         outline.className = 'checkout-trash-flight'; outline.setAttribute('aria-hidden','true');
+        outline.setAttribute('data-link-cover','true');
         Object.assign(outline.style, {{left:origin.x+'px', top:origin.y+'px', width:origin.width+'px', height:origin.height+'px'}});
         document.body.append(outline);
         const x = target.x + target.width/2 - origin.x - origin.width/2;

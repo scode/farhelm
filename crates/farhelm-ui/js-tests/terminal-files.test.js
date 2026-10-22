@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 const { linkRangeText } = require('../assets/terminal-links.js');
-const { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, MAX_BYTES } = require('../assets/terminal-files.js');
+const { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, markedCoverRects, LINK_COVER_SELECTOR, MAX_BYTES } = require('../assets/terminal-files.js');
 
 /** A noninteractive clipped or covered disclosure is not inspectable. Both
  * dimensions and live cover rectangles matter, including changes after lookup.
@@ -36,6 +36,34 @@ test('only a visible fully fitting disclosure can authorize a transfer', () => {
     { top: 20, bottom: 20, left: 20, right: 30 },
     { top: 20, bottom: 40, left: 20, right: 20 },
   ]) assert.equal(disclosureFits(fits, viewport, [cover]), true, 'touching edges or an empty region covers nothing');
+});
+
+/** Covers are whatever surfaces mark themselves, never a selector list kept
+ * here: a hand-kept list is how the quick-launch pill went uncounted. Only a
+ * rendered, visible marked surface can hide a destination, so an idle hidden
+ * tooltip or a `visibility: hidden` surface must not refuse links, while
+ * every other marked surface contributes its live rectangle.
+ */
+test('the cover check measures every rendered marked surface and nothing else', () => {
+  const surface = (name, { rendered = true, visibility = 'visible' } = {}) => ({
+    name, visibility,
+    getClientRects: () => (rendered ? [{}] : []),
+    getBoundingClientRect: () => ({ name, top: 1, left: 2, bottom: 3, right: 4 }),
+  });
+  const marked = [
+    surface('approval-region'), surface('pill'),
+    surface('idle-tooltip', { rendered: false }), surface('hidden-notice', { visibility: 'hidden' }),
+  ];
+  const queried = [];
+  const doc = {
+    querySelectorAll: (selector) => { queried.push(selector); return marked; },
+    defaultView: { getComputedStyle: element => ({ visibility: element.visibility }) },
+  };
+  assert.deepEqual(markedCoverRects(doc).map(rect => rect.name), ['approval-region', 'pill']);
+  assert.deepEqual(queried, [LINK_COVER_SELECTOR], 'the marker is the only thing the check selects on');
+  assert.equal(LINK_COVER_SELECTOR, '[data-link-cover]', 'Rust and JS surfaces set this exact attribute');
+  doc.querySelectorAll = () => [];
+  assert.deepEqual(markedCoverRects(doc), [], 'no marked surface means no cover');
 });
 
 /** Decimal display and exact byte thresholds must agree with the host cap;
