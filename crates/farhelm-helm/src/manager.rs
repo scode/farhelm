@@ -4795,14 +4795,19 @@ fn diagnostic_excerpt(text: &str, cap: usize) -> String {
     }
 }
 
-/// Give an exact pasteable remedy only when the configured arguments fit.
-/// Clipping a path inside shell quotes would silently start a different install;
-/// unusually long configuration instead gets an explicit descriptive instruction.
+/// Give an exact pasteable remedy only when the command the user will copy is
+/// the command that was built: anything else could start a different install.
+/// Clipping would cut a path inside shell quotes, and `failure`'s final
+/// `peer_text` escaping rewrites backslashes (every apostrophe, which
+/// `shell_quote` spells `'\''`), double quotes and control characters; a
+/// doubled backslash inside single quotes names another path. Either way the
+/// remedy is the descriptive instruction instead, which names no paths.
 fn remote_supervisor_remedy(row: &HostRow) -> String {
+    const DESCRIPTIVE: &str = "start it there with `farhelm supervisor run`, using this host entry's configured Farhelm program and state directory (command shown without those arguments)";
     let program = row.remote_farhelm.as_deref().unwrap_or("farhelm");
     let state_dir = row.remote_state_dir.as_deref();
     if program.len() > 128 || state_dir.is_some_and(|path| path.len() > 128) {
-        return "start it there with `farhelm supervisor run`, using this host entry's configured Farhelm program and state directory (command shown without those arguments)".to_string();
+        return DESCRIPTIVE.to_string();
     }
     let mut command = format!("{} supervisor run", crate::ssh::shell_quote(program));
     if let Some(state_dir) = state_dir {
@@ -4811,8 +4816,12 @@ fn remote_supervisor_remedy(row: &HostRow) -> String {
             crate::ssh::shell_quote(state_dir)
         ));
     }
-    if command.len() > 192 {
-        return "start it there with `farhelm supervisor run`, using this host entry's configured Farhelm program and state directory (command shown without those arguments)".to_string();
+    // `peer_text` escapes each character on its own (it is `Debug`), so a
+    // command it leaves unchanged by itself stays unchanged inside the longer
+    // diagnostic. The 192-byte limit keeps its cap from clipping either one.
+    let survives_escaping = peer_text(&command) == format!("\"{command}\"");
+    if command.len() > 192 || !survives_escaping {
+        return DESCRIPTIVE.to_string();
     }
     format!("start it there with `{command}`")
 }
@@ -5080,7 +5089,8 @@ mod tests {
 
     /// SSH owns only 255; all other ordinary statuses came from the remote
     /// command, including zero before hello. Missing Farhelm and a positively
-    /// absent supervisor need different remedies, with the configured paths.
+    /// absent supervisor need different remedies; missing Farhelm names the
+    /// configured program.
     #[farhelm_testtrace::test]
     fn ssh_natural_exit_categories_preserve_the_remote_evidence() {
         let row = diagnostic_ssh_row();
@@ -5114,22 +5124,72 @@ mod tests {
                         "{text}"
                     );
                 }
-                75 => {
-                    assert!(text.contains("supervisor run"), "{text}");
-                    let command = remote_supervisor_remedy(&row);
-                    let pasted = command.split('`').nth(1).expect("exact quoted command");
-                    assert_eq!(
-                        shell_words::split(pasted).unwrap(),
-                        [
-                            "/opt/farhelm fixture",
-                            "supervisor",
-                            "run",
-                            "--state-dir",
-                            "/state/fixture's data"
-                        ],
-                    );
-                }
+                75 => assert!(text.contains("supervisor run"), "{text}"),
                 _ => assert!(!text.contains("supervisor run"), "{text}"),
+            }
+        }
+    }
+
+    /// What the user pastes is the diagnostic after `failure`'s final escaping,
+    /// not the remedy helper's output: checking the helper alone once passed
+    /// while the shown command named another state directory. Ordinary paths
+    /// get the exact command; a path that escaping would rewrite (an
+    /// apostrophe or a backslash, in either argument) gets the descriptive
+    /// instruction, which names no path.
+    #[farhelm_testtrace::test]
+    fn start_remedy_is_exact_after_the_final_escaping_or_descriptive() {
+        let shown = |program: &str, state_dir: &str| {
+            let mut row = diagnostic_ssh_row();
+            row.remote_farhelm = Some(program.into());
+            row.remote_state_dir = Some(state_dir.into());
+            let snapshot = SshSnapshot {
+                exit: Some(diagnostic_status(75)),
+                ..Default::default()
+            };
+            let raw = ssh_failure_detail(
+                &row,
+                ConnectionStage::ConnectingToHost,
+                false,
+                &snapshot,
+                true,
+                None,
+            );
+            let AttemptOutcome::Failed { error: text, .. } = failure(&row, anyhow::anyhow!(raw))
+            else {
+                unreachable!("a diagnostic is a failure");
+            };
+            text
+        };
+
+        let text = shown("/opt/farhelm fixture", "/state/fixture data");
+        let pasted = text.split('`').nth(1).expect("exact quoted command");
+        assert_eq!(
+            shell_words::split(pasted).unwrap(),
+            [
+                "/opt/farhelm fixture",
+                "supervisor",
+                "run",
+                "--state-dir",
+                "/state/fixture data"
+            ],
+            "{text}"
+        );
+
+        for hazard in ["/state/fixture's data", r"/state/fixture\data"] {
+            // The premise: quoting this path and then escaping it changes its
+            // bytes, so an exact command built from it would be a wrong one.
+            let quoted = crate::ssh::shell_quote(hazard);
+            assert_ne!(peer_text(&quoted), format!("\"{quoted}\""), "{quoted}");
+            for (program, state_dir) in [
+                ("/opt/farhelm fixture", hazard),
+                (hazard, "/state/fixture data"),
+            ] {
+                let text = shown(program, state_dir);
+                assert!(
+                    text.contains("command shown without those arguments"),
+                    "{text}"
+                );
+                assert!(!text.contains("fixture"), "{text}");
             }
         }
     }

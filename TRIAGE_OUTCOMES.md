@@ -17560,7 +17560,9 @@
   to the descriptive instruction when it would not; the test checks the text after the final escaping, including an
   apostrophe and a backslash. Size gate: about 100 lines; over it, discard instead. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/start-remedy-quoting.md`.
+- Execution: `complete` within the size gate (about 100 changed lines); draft PR
+  [#2567](https://github.com/scode/farhelm/pull/2567/changes) on bookmark
+  `plan/start-remedy-quoting/01-exact-start-remedy`, jj change `uxyzzroq`.
 
 ## uninstall-plan-normalizes-containing-paths-independently.md
 

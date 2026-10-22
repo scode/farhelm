@@ -15,10 +15,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`template-preservation-promise-omits-last-write-wins.md`](template-preservation-promise-omits-last-write-wins.md) —
   The agent-edit preservation promise omits accepted template overwrites; loss from reliance is conditional.
 
-- [`escaped-start-remedy-changes-program-and-state-path.md`](escaped-start-remedy-changes-program-and-state-path.md) —
-  The suggested start command changes path bytes and can migrate another inactive installation under a conditional path
-  pairing.
-
 - [`uninstall-plan-normalizes-containing-paths-independently.md`](uninstall-plan-normalizes-containing-paths-independently.md)
   — A home-alias uninstall plan can miss retained data inside its removal target; a conditional design counterexample,
   not a reviewed implementation.
