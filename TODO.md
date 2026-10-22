@@ -58,6 +58,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the UI for "reauthentication", "replay", "overlay" and failed-save retention to find the rest. Each removal should
   make the code smaller; the desktop app's own authentication path is out of scope, since it never signs in again.
 
+  Plan: `plans/queue/sign-in-preservation-sweep.md`.
+
 - **Bind GUI answers to what the user saw.** Review keeps finding the same class of GUI bug: a button, key or gesture
   handler acts on whatever state is current when it runs, not on what was on screen when the user acted. Each instance
   is a narrow timing window that nobody has reproduced, but the guards involved are safety ones (YOLO questions,
