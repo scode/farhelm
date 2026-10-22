@@ -4,14 +4,16 @@
 //! it back would lose unfinished quotes and change untouched peer values.
 //! Preview observations, confirmation and picker state stay with the form.
 //! `LaunchDraftState` shares the form's existing host, operation lock and retry
-//! handles for ordinary edits and finite source/naming reconciliation;
+//! handles for ordinary edits, placement and finite source/naming reconciliation;
 //! submission still owns mint/reply lifetime.
 //! Field memos are subscriptions, never live callback authority.
 //!
 //! Ordinary edit facts describe submitted changes, not admission or assignment:
 //! false still performs ownership, explicitness and dormant-buffer writes.
 //! Malformed affected word lists conservatively report change. Host/history
-//! authority and the supported explicit action exceptions remain with callers.
+//! authority is passed through existing handles; concrete placement operations
+//! own their supported explicit-action exceptions. Search/template, agent/model
+//! and recovery composites retain their caller policies during this migration.
 
 use dioxus::prelude::*;
 
@@ -21,10 +23,11 @@ use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, api}
 
 use super::{
     BrowseAuthority, CheckoutNameSource, CheckoutNaming, CloneHostAction, CloneHostState,
-    CommandLaunch, CreatePrefill, CreateTarget, DestinationDraft, GithubCheckoutRequest,
-    GithubRepo, HostId, HostOption, IntentBinding, LaunchIntent, LaunchTab, PermissionEscalation,
-    active_prompt, command_intent, display_peer, effective_title, invalidate_directory_browse,
-    resolve_clone_host, submitted_field,
+    CommandLaunch, CreatePrefill, CreateTarget, DestinationDraft, FolderChoice,
+    GithubCheckoutRequest, GithubRepo, HostId, HostOption, IntentBinding, LaunchIntent, LaunchTab,
+    PermissionEscalation, active_prompt, admit_history_destination, browse_activation_is_current,
+    command_intent, display_peer, effective_title, history_target, invalidate_directory_browse,
+    promote_history_snapshot, remembered_destination_matches, resolve_clone_host, submitted_field,
 };
 
 /// External or deliberately frozen facts for one envelope projection.
@@ -312,9 +315,9 @@ impl LaunchDraft {
             &self.checkout_naming,
         )
     }
-    // Placement edits do not decide host/history admission, preview generations,
-    // focus, operation locking or retry-key policy. The form retains their exact
-    // current order while these related semantic assignments move together.
+    // Plain placement transitions do not decide host/history admission, preview
+    // generations, focus or retry policy. Concrete owner operations compose
+    // those existing boundaries; search/template replay retains its own order.
 
     /// A typed folder exits managed mode and deliberately owns its spelling.
     /// Report operational path change, independently of editor ownership bits.
@@ -346,7 +349,8 @@ impl LaunchDraft {
         self.folder_is_explicit = false;
     }
     /// Mode changes retain the dormant editor; queries never become folders.
-    /// The control keeps its existing same-mode no-op gate before calling this.
+    /// The owner refuses same-mode choices before ancillary work; plain callers
+    /// such as template replay retain their own complete transaction policy.
     pub(super) fn choose_destination_type(&mut self, managed: bool) {
         if managed {
             self.edit_repository_query(String::new());
@@ -1097,6 +1101,61 @@ pub(super) struct SourceTargets {
     pub(super) template_panel: Signal<Option<(super::super::save_template::Candidate, String)>>,
 }
 
+/// Placement edits share the existing provenance and observation handles.
+/// These are aliases, not retained authority: admission reads the live claims
+/// before a captured history or browse result can replace any draft fields.
+#[derive(Clone, Copy)]
+pub(super) struct PlacementTargets {
+    pub(super) choices: ChoiceTargets,
+    pub(super) live_destination: Signal<Option<CreateTarget>>,
+    pub(super) remembered_destination: Signal<Option<CreateTarget>>,
+    pub(super) clone_host_state: Signal<CloneHostState>,
+    pub(super) history_activation_attempts: Signal<u64>,
+    pub(super) preview_revision: Signal<u64>,
+    pub(super) browse_generation: Signal<u64>,
+    pub(super) browse_request: Signal<Option<BrowseAuthority>>,
+    pub(super) browse_result: Signal<Option<(BrowseAuthority, api::DirectoryBrowse)>>,
+    pub(super) browse_error: Signal<Option<String>>,
+}
+
+impl PlacementTargets {
+    /// Capture invalid provenance before adoption or withdrawal can erase it.
+    /// Equal bytes still end the old pair when they repair an invalid claim.
+    fn correcting_invalid(self) -> bool {
+        !remembered_destination_matches(
+            self.remembered_destination.peek().as_ref(),
+            self.live_destination.peek().as_ref(),
+        )
+    }
+
+    /// Deliberate placement revokes generation as well as path evidence, even
+    /// when an equal choice keeps its retry identity.
+    fn invalidate_browse(self) {
+        invalidate_directory_browse(
+            self.browse_generation,
+            self.browse_request,
+            self.browse_result,
+            self.browse_error,
+        );
+    }
+}
+
+/// Repository completion keeps search and suggestion UI separate from the draft.
+#[derive(Clone, Copy)]
+pub(super) struct RepositoryTargets {
+    pub(super) open: Signal<bool>,
+    pub(super) index: Signal<usize>,
+    pub(super) search: Signal<String>,
+    pub(super) search_open: Signal<bool>,
+}
+
+/// Folder typing and accepted choices have different open/close completion.
+#[derive(Clone, Copy)]
+pub(super) struct FolderTargets {
+    pub(super) open: Signal<bool>,
+    pub(super) active: Signal<Option<usize>>,
+}
+
 /// Only concrete owner operations choose a rule; callers cannot bypass the gate.
 /// Source reconciliation and checkout naming are observations, allowed while a
 /// submit is busy, with different publication and ordinary-key consequences.
@@ -1116,7 +1175,7 @@ struct EditFacts {
 }
 
 /// Live publication and edit admission share the form's original handles.
-/// Concrete leaf/scalar and finite source/naming operations own their rules.
+/// Concrete leaf/scalar, placement and finite source/naming operations own rules.
 /// The raw edit entry remains temporarily for unconverted composite operations;
 /// their callers still own those policies until the next migration.
 #[derive(Clone, Copy)]
@@ -1289,6 +1348,400 @@ impl LaunchDraftState {
             targets.partial_template_hint.set(false);
             changed
         })
+    }
+
+    // Placement composes the existing live fences with pure assignments. Keep
+    // history reads inside admission and observation-only browse work outside.
+
+    /// Explicit host selection revokes historical authority even for the same id.
+    /// Publish no draft: host choice uses the parent's original shared handle,
+    /// and queued history callbacks must see its synchronous destination fence.
+    pub(super) fn choose_host(
+        mut self,
+        id: HostId,
+        hosts: &[HostOption],
+        mut targets: PlacementTargets,
+    ) -> bool {
+        self.apply_edit(EditRule::Ordinary, |_| {
+            targets.choices.partial_template_hint.set(false);
+            self.chosen_host.set(Some(id));
+            targets
+                .live_destination
+                .set(history_target(hosts, Some(id)));
+            targets.remembered_destination.set(None);
+            targets.invalidate_browse();
+            targets.clone_host_state.set(CloneHostState::UserTookOver);
+            (
+                (),
+                EditFacts {
+                    publish: false,
+                    changed: true,
+                },
+            )
+        })
+        .is_some()
+    }
+
+    /// Repository reselection explicitly requests fresh preview/name authority.
+    /// History promotion remains tracked and admitted; even the same repository
+    /// increments revision, closes its discovery search and retires the pair.
+    pub(super) fn select_repository(
+        self,
+        repo: GithubRepo,
+        mut targets: PlacementTargets,
+        mut ui: RepositoryTargets,
+    ) -> bool {
+        self.apply_edit(EditRule::Ordinary, |draft| {
+            targets.choices.partial_template_hint.set(false);
+            targets.choices.promote_history();
+            targets.invalidate_browse();
+            targets.remembered_destination.set(None);
+            ui.search.set(String::new());
+            ui.search_open.set(false);
+            draft.select_repository(repo);
+            targets.preview_revision.with_mut(|revision| {
+                *revision = revision.checked_add(1).expect("preview revision exhausted")
+            });
+            ui.open.set(false);
+            (
+                (),
+                EditFacts {
+                    publish: true,
+                    changed: true,
+                },
+            )
+        })
+        .is_some()
+    }
+
+    /// Same-mode selection refuses before any provenance, history or UI work.
+    /// A real mode change restores the dormant folder's existing raw ownership.
+    pub(super) fn choose_destination_type(
+        self,
+        managed: bool,
+        mut targets: PlacementTargets,
+        mut repository_open: Signal<bool>,
+    ) -> bool {
+        self.apply_edit(EditRule::Ordinary, |draft| {
+            if managed == draft.destination().is_managed() {
+                return (
+                    false,
+                    EditFacts {
+                        publish: false,
+                        changed: false,
+                    },
+                );
+            }
+            targets.choices.partial_template_hint.set(false);
+            targets.remembered_destination.set(None);
+            targets.choices.promote_history();
+            targets.invalidate_browse();
+            repository_open.set(false);
+            draft.choose_destination_type(managed);
+            (
+                true,
+                EditFacts {
+                    publish: true,
+                    changed: true,
+                },
+            )
+        })
+        .unwrap_or(false)
+    }
+
+    /// The rendered read-only restriction remains the captured interaction fact.
+    /// Refusal earns no ancillary work; accepted query text revokes selection
+    /// authority rather than treating a proposal as an executable destination.
+    pub(super) fn edit_repository_query(
+        self,
+        text: String,
+        captured_read_only: bool,
+        mut targets: PlacementTargets,
+        mut ui: RepositoryTargets,
+    ) -> bool {
+        self.apply_edit(EditRule::Ordinary, |draft| {
+            if captured_read_only {
+                return (
+                    false,
+                    EditFacts {
+                        publish: false,
+                        changed: false,
+                    },
+                );
+            }
+            targets.remembered_destination.set(None);
+            targets.invalidate_browse();
+            draft.edit_repository_query(text);
+            ui.index.set(0);
+            ui.open.set(true);
+            (
+                true,
+                EditFacts {
+                    publish: true,
+                    changed: true,
+                },
+            )
+        })
+        .unwrap_or(false)
+    }
+
+    /// Clearing inherited unsafe identity closes suggestions instead of typing.
+    /// This is a fixed explicit operation, independent of the input's read-only
+    /// restriction, and ends the old pair even when the query was already empty.
+    pub(super) fn clear_repository(
+        self,
+        mut targets: PlacementTargets,
+        mut ui: RepositoryTargets,
+    ) -> bool {
+        self.apply_edit(EditRule::Ordinary, |draft| {
+            targets.remembered_destination.set(None);
+            targets.invalidate_browse();
+            draft.edit_repository_query(String::new());
+            ui.index.set(0);
+            ui.open.set(false);
+            (
+                (),
+                EditFacts {
+                    publish: true,
+                    changed: true,
+                },
+            )
+        })
+        .is_some()
+    }
+
+    /// Equal literal paths still take editor ownership and complete suggestions.
+    /// Capture invalid inherited provenance before withdrawing it; repairing that
+    /// claim retires a pair even when the submitted path itself is unchanged.
+    pub(super) fn edit_folder(
+        self,
+        text: String,
+        mut targets: PlacementTargets,
+        mut ui: FolderTargets,
+    ) -> bool {
+        self.apply_edit(EditRule::Ordinary, |draft| {
+            if draft.destination().is_managed() {
+                return (
+                    false,
+                    EditFacts {
+                        publish: false,
+                        changed: false,
+                    },
+                );
+            }
+            targets.choices.promote_history();
+            let correcting_invalid = targets.correcting_invalid();
+            let changed = draft.edit_folder(text);
+            ui.active.set(None);
+            ui.open.set(true);
+            targets.remembered_destination.set(None);
+            targets.invalidate_browse();
+            (
+                true,
+                EditFacts {
+                    publish: true,
+                    changed: changed || correcting_invalid,
+                },
+            )
+        })
+        .unwrap_or(false)
+    }
+
+    /// Home is an ordinary folder choice; LocalHome also explicitly pins a host.
+    /// A Recent must prove its captured installation before copying its path.
+    /// Equal admitted paths still promote history and close the picker.
+    pub(super) fn choose_folder(
+        mut self,
+        choice: FolderChoice,
+        local_host: Option<HostId>,
+        local_destination: Option<CreateTarget>,
+        mut targets: PlacementTargets,
+        mut ui: FolderTargets,
+    ) -> bool {
+        let accepted = self
+            .apply_edit(EditRule::Ordinary, |draft| {
+                if draft.destination().is_managed() {
+                    return (
+                        false,
+                        EditFacts {
+                            publish: false,
+                            changed: false,
+                        },
+                    );
+                }
+                targets.choices.partial_template_hint.set(false);
+                let correcting_invalid = targets.correcting_invalid();
+                let host_action = matches!(&choice, FolderChoice::LocalHome);
+                let path = match choice {
+                    FolderChoice::Recent { cwd, target } => {
+                        if !admit_history_destination(
+                            target,
+                            targets.live_destination,
+                            targets.remembered_destination,
+                            targets.history_activation_attempts,
+                        ) {
+                            return (
+                                false,
+                                EditFacts {
+                                    publish: false,
+                                    changed: false,
+                                },
+                            );
+                        }
+                        cwd
+                    }
+                    FolderChoice::Home => {
+                        targets.remembered_destination.set(None);
+                        "~".to_string()
+                    }
+                    FolderChoice::LocalHome => {
+                        self.chosen_host.set(local_host);
+                        targets.live_destination.set(local_destination);
+                        targets.remembered_destination.set(None);
+                        targets.clone_host_state.set(CloneHostState::UserTookOver);
+                        "~".to_string()
+                    }
+                };
+                targets.choices.promote_history();
+                targets.invalidate_browse();
+                let changed = draft.choose_existing_folder(&path);
+                (
+                    true,
+                    EditFacts {
+                        publish: true,
+                        changed: changed || correcting_invalid || host_action,
+                    },
+                )
+            })
+            .unwrap_or(false);
+        // Picker completion follows key settlement, as on the original path.
+        if accepted {
+            ui.open.set(false);
+            ui.active.set(None);
+        }
+        accepted
+    }
+
+    /// A direct recent applies its captured history, not a newer fetched ranking.
+    /// True means admitted even on equality, so Enter can submit the completed
+    /// Agent setup. Command fields and one-time inputs remain retained. The old
+    /// escalation notice is cleared; this direct route adds no switch observer.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "captured history and existing UI lifetimes are independent inputs"
+    )]
+    pub(super) fn accept_recent(
+        self,
+        entry: api::LaunchHistoryEntry,
+        catalog: &[api::LaunchCatalogModel],
+        captured_target: Option<CreateTarget>,
+        history: Option<(CreateTarget, api::LaunchHistory)>,
+        mut targets: PlacementTargets,
+        mut notice: Signal<Option<PermissionEscalation>>,
+        mut reset_reason: Signal<Option<String>>,
+    ) -> bool {
+        self.apply_edit(EditRule::Ordinary, |draft| {
+            let tab_changed = draft.tab() != LaunchTab::Agent;
+            let correcting_invalid = targets.correcting_invalid();
+            if !admit_history_destination(
+                captured_target,
+                targets.live_destination,
+                targets.remembered_destination,
+                targets.history_activation_attempts,
+            ) {
+                return (
+                    false,
+                    EditFacts {
+                        publish: false,
+                        changed: false,
+                    },
+                );
+            }
+            promote_history_snapshot(
+                targets.choices.offered_history,
+                (targets.choices.create_target)(),
+                history,
+            );
+            targets.choices.partial_template_hint.set(false);
+            let mut selection = crate::launch_composer::select_recent(&entry);
+            selection.permissions = crate::launch_composer::normalized_permissions(
+                selection.harness,
+                selection.permissions,
+            );
+            notice.set(None);
+            // Direct recents retain ownership from the original entry. Search
+            // recents have a separate normalized-selection contract.
+            let owner = crate::launch_composer::custom_model_owner(&entry.selection, catalog);
+            let selection_changed = draft.restore_launch(&selection, owner);
+            targets.invalidate_browse();
+            let destination_changed = if let Some(repo) = entry.github_repo {
+                targets.remembered_destination.set(None);
+                draft.select_repository(repo);
+                targets.preview_revision.with_mut(|revision| {
+                    *revision = revision.checked_add(1).expect("preview revision exhausted")
+                });
+                true
+            } else {
+                draft.choose_existing_folder(entry.cwd.raw())
+            };
+            draft.choose_tab(LaunchTab::Agent);
+            reset_reason.set(None);
+            (
+                true,
+                EditFacts {
+                    publish: true,
+                    changed: tab_changed
+                        || selection_changed
+                        || destination_changed
+                        || correcting_invalid,
+                },
+            )
+        })
+        .unwrap_or(false)
+    }
+
+    /// A browse click is counted even when busy; authority reads occur only after
+    /// admission, in request/target/connection order against the live raw cwd.
+    /// Stale replies cannot promote history, publish fields or retire the pair.
+    pub(super) fn accept_browse_directory(
+        self,
+        raw_path: &str,
+        authority: &BrowseAuthority,
+        mut targets: PlacementTargets,
+        connection: Signal<Option<u64>>,
+        mut attempts: Signal<u64>,
+    ) -> bool {
+        attempts.with_mut(|count| *count = count.wrapping_add(1));
+        self.apply_edit(EditRule::Ordinary, |draft| {
+            if !browse_activation_is_current(
+                targets.browse_request,
+                authority,
+                targets.choices.create_target,
+                connection,
+                draft,
+            ) {
+                return (
+                    false,
+                    EditFacts {
+                        publish: false,
+                        changed: false,
+                    },
+                );
+            }
+            targets.choices.promote_history();
+            let correcting_invalid = targets.correcting_invalid();
+            let changed = draft.choose_existing_folder(raw_path);
+            targets.remembered_destination.set(None);
+            targets.invalidate_browse();
+            (
+                true,
+                EditFacts {
+                    publish: true,
+                    changed: changed || correcting_invalid,
+                },
+            )
+        })
+        .unwrap_or(false)
     }
 
     /// Seed launch fields once per source generation, but resolve its host every pass.
@@ -1664,6 +2117,691 @@ mod tests {
     fn system_fixture() -> Element {
         use_system_fixture();
         rsx! {}
+    }
+
+    /// Reuse the system fixture's real source/browse handles for placement.
+    /// UI state is deliberately distinguishable so a refused queued callback
+    /// cannot appear correct merely because every cleanup already held defaults.
+    #[derive(Clone, Copy)]
+    struct PlacementFixture {
+        system: SystemFixture,
+        targets: PlacementTargets,
+        repository: RepositoryTargets,
+        folder: FolderTargets,
+        connection: Signal<Option<u64>>,
+        attempts: Signal<u64>,
+    }
+
+    std::thread_local! {
+        static PLACEMENT_FIXTURE: std::cell::Cell<Option<PlacementFixture>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// Mount only production handles; measured transitions call the owner.
+    fn use_placement_fixture() -> PlacementFixture {
+        let system = use_system_fixture();
+        use_placement_handles(system)
+    }
+
+    /// Existing Memo probes can share these real aliases around their own
+    /// mount-time raw cwd without adding another draft or publication oracle.
+    fn use_placement_handles(system: SystemFixture) -> PlacementFixture {
+        let source = system.source;
+        let targets = PlacementTargets {
+            choices: system.ordinary.choices,
+            live_destination: use_signal(|| Some(CreateTarget::new(1, "install-a".into()))),
+            remembered_destination: source.remembered_destination,
+            clone_host_state: source.clone_host_state,
+            history_activation_attempts: use_signal(|| 0),
+            preview_revision: source.preview_revision,
+            browse_generation: source.browse_generation,
+            browse_request: source.browse_request,
+            browse_result: source.browse_result,
+            browse_error: source.browse_error,
+        };
+        let fixture = PlacementFixture {
+            system,
+            targets,
+            repository: RepositoryTargets {
+                open: use_signal(|| true),
+                index: use_signal(|| 3),
+                search: use_signal(|| "gh:pending".into()),
+                search_open: use_signal(|| true),
+            },
+            folder: FolderTargets {
+                open: use_signal(|| true),
+                active: use_signal(|| Some(2)),
+            },
+            connection: use_signal(|| Some(4)),
+            attempts: use_signal(|| 0),
+        };
+        PLACEMENT_FIXTURE.with(|slot| slot.set(Some(fixture)));
+        fixture
+    }
+
+    /// No render subscription can substitute for the operation's live gate.
+    fn placement_fixture() -> Element {
+        use_placement_fixture();
+        rsx! {}
+    }
+
+    /// Saved setup bytes come from the real plain selection projection.
+    fn placement_recent(cwd: &str) -> api::LaunchHistoryEntry {
+        let mut plain = LaunchDraft::new(None);
+        plain.choose_harness(
+            LaunchHarness::Codex,
+            None,
+            String::new(),
+            ChoiceOrigin::Control,
+        );
+        api::LaunchHistoryEntry {
+            host: 1,
+            github_repo: None,
+            canonical_cwd: None,
+            cwd: cwd.into(),
+            selection: plain.structured_selection().unwrap(),
+            created_at: 1,
+            creation_seq: Some(1),
+        }
+    }
+
+    /// Establish an executable Command draft through existing concrete edits.
+    /// A subsequent Recent must retain this dormant group and one-time inputs.
+    fn seed_placement_command(fixture: PlacementFixture) {
+        let owner = fixture.system.ordinary.owner;
+        assert!(owner.choose_launch_tab(LaunchTab::Command, fixture.targets.choices));
+        assert!(owner.edit_invocation("run-command".into()));
+        assert!(owner.choose_command_yolo(true));
+        assert!(owner.edit_prompt("keep prompt".into()));
+        assert!(owner.edit_conversation("keep conversation".into()));
+    }
+
+    /// Live locking precedes every new operation's reads and ancillary writes.
+    /// Browse alone counts entry before refusal. Same-mode and rendered read-only
+    /// refusals then prove domain rejection is distinct from an equal edit.
+    #[farhelm_testtrace::test]
+    fn placement_owner_gates_all_entries_and_keeps_domain_refusals_inert() {
+        PUBLICATIONS.with(|count| count.set(0));
+        let mut dom = VirtualDom::new(placement_fixture);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let mut f = PLACEMENT_FIXTURE.with(std::cell::Cell::get).unwrap();
+        let owner = f.system.ordinary.owner;
+        let mut key = owner.intent_key;
+        let target = Some(CreateTarget::new(1, "install-a".into()));
+        let authority = BrowseAuthority {
+            target: target.clone().unwrap(),
+            connection: Some(4),
+            cwd: "~".into(),
+            generation: 4,
+        };
+        let repo = GithubRepo::parse("acme/repo").unwrap();
+        let entry = placement_recent("~");
+        dom.in_runtime(|| {
+            seed_placement_command(f);
+            f.targets.choices.partial_template_hint.set(true);
+            f.targets.remembered_destination.set(target.clone());
+            f.targets.browse_request.set(Some(authority.clone()));
+            key.set(Some((
+                "locked-placement".into(),
+                request(&owner.snapshot()),
+            )));
+        });
+        dom.process_events();
+        let before = dom.in_runtime(|| owner.snapshot());
+        let before_publications = PUBLICATIONS.with(std::cell::Cell::get);
+        let pair = dom.in_runtime(|| key.peek().clone());
+        let offered = dom.in_runtime(|| f.targets.choices.offered_history.peek().clone());
+        let mut ops = owner.ops;
+        let guard = dom.in_runtime(|| ops.claim_guard().expect("real claim before rerender"));
+        dom.in_runtime(|| {
+            assert!(!owner.choose_host(1, &[], f.targets));
+            assert!(!owner.select_repository(repo.clone(), f.targets, f.repository));
+            assert!(!owner.choose_destination_type(true, f.targets, f.repository.open));
+            assert!(!owner.edit_repository_query(
+                "new/repo".into(),
+                false,
+                f.targets,
+                f.repository
+            ));
+            assert!(!owner.clear_repository(f.targets, f.repository));
+            assert!(!owner.edit_folder("/changed".into(), f.targets, f.folder));
+            assert!(!owner.choose_folder(
+                FolderChoice::Home,
+                Some(1),
+                target.clone(),
+                f.targets,
+                f.folder
+            ));
+            assert!(!owner.accept_recent(
+                entry.clone(),
+                &[],
+                target.clone(),
+                offered.clone(),
+                f.targets,
+                f.system.source.permission_escalation,
+                f.system.source.composer_reset_reason
+            ));
+            assert!(!owner.accept_browse_directory(
+                "/changed",
+                &authority,
+                f.targets,
+                f.connection,
+                f.attempts
+            ));
+            assert_eq!(owner.snapshot(), before);
+            assert_eq!(*key.peek(), pair);
+            assert_eq!(*owner.chosen_host.peek(), None);
+            assert_eq!(*f.targets.live_destination.peek(), target);
+            assert_eq!(
+                *f.targets.clone_host_state.peek(),
+                CloneHostState::Unconfirmable
+            );
+            assert_eq!(*f.targets.remembered_destination.peek(), target);
+            assert_eq!(*f.targets.browse_request.peek(), Some(authority.clone()));
+            assert_eq!(*f.targets.browse_generation.peek(), 4);
+            assert_eq!(*f.targets.history_activation_attempts.peek(), 0);
+            assert_eq!(*f.attempts.peek(), 1);
+            assert_eq!(*f.targets.choices.offered_history.peek(), offered);
+            assert!(*f.targets.choices.partial_template_hint.peek());
+            assert!(*f.folder.open.peek());
+            assert_eq!(*f.folder.active.peek(), Some(2));
+            assert!(*f.repository.open.peek());
+            assert_eq!(*f.repository.index.peek(), 3);
+            assert_eq!(*f.repository.search.peek(), "gh:pending");
+            assert!(*f.repository.search_open.peek());
+            assert_eq!(*f.targets.preview_revision.peek(), 0);
+        });
+        dom.process_events();
+        assert_eq!(
+            PUBLICATIONS.with(std::cell::Cell::get),
+            before_publications,
+            "locked operations never publish"
+        );
+        dom.in_runtime(|| drop(guard));
+        dom.in_runtime(|| {
+            assert!(!owner.choose_destination_type(false, f.targets, f.repository.open));
+            assert!(!owner.edit_repository_query("refused".into(), true, f.targets, f.repository));
+            assert_eq!(owner.snapshot(), before);
+            assert_eq!(*key.peek(), pair);
+            assert_eq!(*f.targets.browse_request.peek(), Some(authority));
+            assert!(*f.targets.choices.partial_template_hint.peek());
+        });
+        dom.process_events();
+        assert_eq!(
+            PUBLICATIONS.with(std::cell::Cell::get),
+            before_publications,
+            "domain refusals never publish"
+        );
+        dom.in_runtime(|| {
+            assert!(owner.choose_host(1, &[], f.targets));
+            assert_eq!(*owner.chosen_host.peek(), Some(1));
+            assert!(key.peek().is_none());
+            key.set(pair.clone());
+            assert!(owner.choose_host(1, &[], f.targets));
+            assert!(key.peek().is_none(), "same host is explicit retirement");
+            key.set(pair.clone());
+            assert!(owner.select_repository(repo.clone(), f.targets, f.repository));
+            assert_eq!(owner.snapshot().destination().repo(), Some(&repo));
+            assert!(
+                owner.fields().destination_draft.peek().repo().is_none(),
+                "memo has not settled in this event"
+            );
+            assert!(key.peek().is_none());
+            assert_eq!(*f.targets.preview_revision.peek(), 1);
+            key.set(pair.clone());
+            assert!(owner.select_repository(repo, f.targets, f.repository));
+            assert!(key.peek().is_none());
+            assert_eq!(*f.targets.preview_revision.peek(), 2);
+            assert!(!*f.repository.open.peek());
+            assert_eq!(*f.repository.search.peek(), "");
+            assert!(!owner.edit_folder("/forbidden".into(), f.targets, f.folder));
+            assert!(!owner.choose_folder(FolderChoice::Home, None, None, f.targets, f.folder));
+            key.set(pair.clone());
+            assert!(owner.edit_repository_query(
+                "new/query".into(),
+                false,
+                f.targets,
+                f.repository
+            ));
+            assert!(key.peek().is_none());
+            assert_eq!(
+                owner.snapshot().destination().repository_text(),
+                "new/query"
+            );
+            assert!(*f.repository.open.peek());
+            assert_eq!(*f.repository.index.peek(), 0);
+            key.set(pair.clone());
+            assert!(owner.clear_repository(f.targets, f.repository));
+            assert!(key.peek().is_none());
+            assert_eq!(owner.snapshot().destination().repository_text(), "");
+            assert!(!*f.repository.open.peek());
+            key.set(pair.clone());
+            assert!(owner.clear_repository(f.targets, f.repository));
+            assert!(
+                key.peek().is_none(),
+                "clearing the same empty proposal remains explicit"
+            );
+            key.set(pair.clone());
+            assert!(owner.choose_destination_type(false, f.targets, f.repository.open));
+            assert!(key.peek().is_none());
+            assert_eq!(owner.snapshot().submitted_cwd(), "~");
+            let dormant = owner.snapshot();
+            key.set(pair.clone());
+            assert!(owner.choose_destination_type(true, f.targets, f.repository.open));
+            assert!(key.peek().is_none());
+            assert!(owner.snapshot().destination().is_managed());
+            assert_eq!(owner.snapshot().cwd_raw_seed(), dormant.cwd_raw_seed());
+            assert!(owner.choose_destination_type(false, f.targets, f.repository.open));
+            assert_eq!(command(&owner.snapshot()).command, "run-command");
+            assert_eq!(owner.snapshot().prompt().as_deref(), Some("keep prompt"));
+        });
+        PLACEMENT_FIXTURE.with(|slot| slot.set(None));
+    }
+
+    /// Ordinary equality preserves the complete pair without skipping ownership,
+    /// UI or history work. Invalid remembered provenance and explicit LocalHome
+    /// are separate reasons to retire even when the raw path remains identical.
+    #[farhelm_testtrace::test]
+    fn placement_owner_preserves_equal_paths_and_direct_recents() {
+        let mut dom = VirtualDom::new(placement_fixture);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let mut f = PLACEMENT_FIXTURE.with(std::cell::Cell::get).unwrap();
+        let owner = f.system.ordinary.owner;
+        let mut key = owner.intent_key;
+        let target = Some(CreateTarget::new(1, "install-a".into()));
+        dom.in_runtime(|| {
+            seed_placement_command(f);
+            let mut prefill = source_prefill();
+            prefill.replace_source = Some("source".into());
+            owner.reconcile_source(Some(&prefill), false, &[], f.system.source);
+            owner.edit_prompt("keep prompt".into());
+            let raw = prefill.cwd.clone();
+            let pair = Some(("raw-path".into(), request(&owner.snapshot())));
+            key.set(pair.clone());
+            assert_ne!(
+                owner.snapshot().cwd(),
+                raw,
+                "unsafe peer path has distinct display bytes"
+            );
+            assert!(owner.choose_folder(
+                FolderChoice::Recent {
+                    cwd: raw.clone(),
+                    target: target.clone()
+                },
+                None,
+                None,
+                f.targets,
+                f.folder
+            ));
+            assert_eq!(*key.peek(), pair);
+            assert_eq!(*f.targets.remembered_destination.peek(), target);
+            assert_eq!(owner.snapshot().submitted_cwd(), raw);
+            assert!(!owner.snapshot().cwd_edited());
+            assert!(!*f.folder.open.peek());
+            assert_eq!(*f.folder.active.peek(), None);
+            assert_eq!(*f.targets.history_activation_attempts.peek(), 1);
+            assert!(owner.choose_folder(FolderChoice::Home, None, None, f.targets, f.folder));
+            assert!(key.peek().is_none(), "changed raw path retires");
+            let pair = Some(("home".into(), request(&owner.snapshot())));
+            key.set(pair.clone());
+            assert!(owner.choose_folder(FolderChoice::Home, None, None, f.targets, f.folder));
+            assert_eq!(*key.peek(), pair);
+            assert!(owner.edit_folder("~".into(), f.targets, f.folder));
+            assert_eq!(*key.peek(), pair);
+            assert!(owner.snapshot().cwd_edited());
+            assert!(*f.folder.open.peek());
+            assert_eq!(*f.folder.active.peek(), None);
+            f.targets
+                .remembered_destination
+                .set(Some(CreateTarget::new(2, "predecessor".into())));
+            assert!(owner.edit_folder("~".into(), f.targets, f.folder));
+            assert!(
+                key.peek().is_none(),
+                "equal bytes repair invalid provenance"
+            );
+            key.set(pair.clone());
+            assert!(owner.choose_folder(
+                FolderChoice::LocalHome,
+                Some(1),
+                target.clone(),
+                f.targets,
+                f.folder
+            ));
+            assert!(key.peek().is_none());
+            assert_eq!(*owner.chosen_host.peek(), Some(1));
+            assert_eq!(
+                *f.targets.clone_host_state.peek(),
+                CloneHostState::UserTookOver
+            );
+            let entry = placement_recent("~");
+            // First application changes the active kind. The second is the
+            // equality case, still admitting Enter and the captured history.
+            assert!(owner.accept_recent(
+                entry.clone(),
+                &[],
+                target.clone(),
+                None,
+                f.targets,
+                f.system.source.permission_escalation,
+                f.system.source.composer_reset_reason
+            ));
+            assert_eq!(owner.snapshot().tab(), LaunchTab::Agent);
+            let pair = Some(("equal-recent".into(), request(&owner.snapshot())));
+            key.set(pair.clone());
+            let captured = Some((
+                target.clone().unwrap(),
+                api::LaunchHistory {
+                    checkout_config_revision: 71,
+                    ..Default::default()
+                },
+            ));
+            let before_counter = *f.targets.history_activation_attempts.peek();
+            assert!(owner.accept_recent(
+                entry.clone(),
+                &[],
+                target.clone(),
+                captured.clone(),
+                f.targets,
+                f.system.source.permission_escalation,
+                f.system.source.composer_reset_reason
+            ));
+            assert_eq!(*key.peek(), pair);
+            assert_eq!(
+                *f.targets.history_activation_attempts.peek(),
+                before_counter + 1
+            );
+            assert_eq!(
+                *f.targets.choices.offered_history.peek(),
+                captured,
+                "direct Recent promotes its captured history"
+            );
+            assert_eq!(
+                owner.snapshot().invocation_raw_seed().as_deref(),
+                Some("source-command\u{1b}")
+            );
+            assert_eq!(owner.snapshot().prompt().as_deref(), Some("keep prompt"));
+            assert_eq!(owner.snapshot().conversation(), "keep conversation");
+            f.targets
+                .remembered_destination
+                .set(Some(CreateTarget::new(2, "old-install".into())));
+            assert!(owner.accept_recent(
+                entry.clone(),
+                &[],
+                target.clone(),
+                None,
+                f.targets,
+                f.system.source.permission_escalation,
+                f.system.source.composer_reset_reason
+            ));
+            assert!(
+                key.peek().is_none(),
+                "invalid claim is captured before Recent adopts the current target"
+            );
+            key.set(pair.clone());
+            let before = owner.snapshot();
+            assert!(!owner.accept_recent(
+                entry,
+                &[],
+                Some(CreateTarget::new(2, "stale".into())),
+                None,
+                f.targets,
+                f.system.source.permission_escalation,
+                f.system.source.composer_reset_reason
+            ));
+            assert_eq!(owner.snapshot(), before);
+            assert_eq!(*key.peek(), pair);
+            assert_eq!(
+                *f.targets.history_activation_attempts.peek(),
+                before_counter + 3
+            );
+            assert!(!owner.choose_folder(
+                FolderChoice::Recent {
+                    cwd: "/stale".into(),
+                    target: None
+                },
+                None,
+                None,
+                f.targets,
+                f.folder
+            ));
+            assert_eq!(owner.snapshot(), before);
+            assert_eq!(*key.peek(), pair);
+            let mut repository_recent = placement_recent("/old-allocation");
+            let repo = GithubRepo::parse("acme/repo").unwrap();
+            repository_recent.github_repo = Some(repo.clone());
+            let revision = *f.targets.preview_revision.peek();
+            assert!(owner.accept_recent(
+                repository_recent,
+                &[],
+                target,
+                None,
+                f.targets,
+                f.system.source.permission_escalation,
+                f.system.source.composer_reset_reason
+            ));
+            assert_eq!(owner.snapshot().destination().repo(), Some(&repo));
+            assert!(key.peek().is_none());
+            assert_eq!(*f.targets.preview_revision.peek(), revision + 1);
+            assert!(f.targets.remembered_destination.peek().is_none());
+        });
+        PLACEMENT_FIXTURE.with(|slot| slot.set(None));
+    }
+
+    /// Browse admission binds request generation, installation, connection and
+    /// raw cwd independently. Each negative changes one fact; equal and changed
+    /// accepted paths prove the guard is active and preserve their distinct keys.
+    #[farhelm_testtrace::test]
+    fn placement_owner_rechecks_browse_authority_and_live_raw_bytes() {
+        let mut dom = VirtualDom::new(placement_fixture);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let mut f = PLACEMENT_FIXTURE.with(std::cell::Cell::get).unwrap();
+        let owner = f.system.ordinary.owner;
+        let mut key = owner.intent_key;
+        let target = CreateTarget::new(1, "install-a".into());
+        dom.in_runtime(|| {
+            seed_placement_command(f);
+            let mut prefill = source_prefill();
+            prefill.replace_source = Some("source".into());
+            owner.reconcile_source(Some(&prefill), false, &[], f.system.source);
+            let authority = BrowseAuthority {
+                target: target.clone(),
+                connection: Some(4),
+                cwd: prefill.cwd.clone(),
+                generation: 9,
+            };
+            f.targets.browse_request.set(Some(authority.clone()));
+            let pair = Some(("browse".into(), request(&owner.snapshot())));
+            key.set(pair.clone());
+            let before = owner.snapshot();
+            let offered = f.targets.choices.offered_history.peek().clone();
+            assert!(
+                browse_activation_is_current(
+                    f.targets.browse_request,
+                    &authority,
+                    f.targets.choices.create_target,
+                    f.connection,
+                    &before
+                ),
+                "all authority facts initially match"
+            );
+            let mut stale = authority.clone();
+            stale.generation -= 1;
+            assert!(!owner.accept_browse_directory(
+                "/stale",
+                &stale,
+                f.targets,
+                f.connection,
+                f.attempts
+            ));
+            f.connection.set(Some(5));
+            assert!(!owner.accept_browse_directory(
+                "/stale",
+                &authority,
+                f.targets,
+                f.connection,
+                f.attempts
+            ));
+            f.connection.set(Some(4));
+            f.targets
+                .choices
+                .create_target
+                .set(Some(CreateTarget::new(2, "successor".into())));
+            assert!(!owner.accept_browse_directory(
+                "/stale",
+                &authority,
+                f.targets,
+                f.connection,
+                f.attempts
+            ));
+            f.targets.choices.create_target.set(Some(target.clone()));
+            assert_eq!(owner.snapshot(), before);
+            assert_eq!(*key.peek(), pair);
+            assert_eq!(*f.targets.choices.offered_history.peek(), offered);
+            assert_eq!(*f.attempts.peek(), 3);
+            assert!(owner.accept_browse_directory(
+                &prefill.cwd,
+                &authority,
+                f.targets,
+                f.connection,
+                f.attempts
+            ));
+            assert_eq!(*key.peek(), pair, "equal raw path retains full pair");
+            assert!(owner.snapshot().folder_is_explicit());
+            assert!(!owner.snapshot().cwd_edited());
+            assert!(f.targets.browse_request.peek().is_none());
+            f.targets
+                .remembered_destination
+                .set(Some(CreateTarget::new(2, "old-install".into())));
+            f.targets.browse_request.set(Some(authority.clone()));
+            assert!(owner.accept_browse_directory(
+                &prefill.cwd,
+                &authority,
+                f.targets,
+                f.connection,
+                f.attempts
+            ));
+            assert!(
+                key.peek().is_none(),
+                "equal browse corrects invalid inherited provenance"
+            );
+            // Typing the escaped spelling changes operational bytes even when
+            // the display remains identical in this same renderer turn.
+            f.targets.browse_request.set(Some(authority.clone()));
+            assert!(owner.edit_folder(owner.snapshot().cwd(), f.targets, f.folder));
+            let literal = owner.snapshot();
+            assert_eq!(literal.cwd(), before.cwd());
+            assert_ne!(literal.submitted_cwd(), authority.cwd);
+            f.targets.browse_request.set(Some(authority.clone()));
+            let literal_pair = Some(("literal".into(), request(&literal)));
+            key.set(literal_pair.clone());
+            assert!(!owner.accept_browse_directory(
+                "/stale",
+                &authority,
+                f.targets,
+                f.connection,
+                f.attempts
+            ));
+            assert_eq!(owner.snapshot(), literal);
+            assert_eq!(*key.peek(), literal_pair);
+            let current = BrowseAuthority {
+                cwd: literal.submitted_cwd(),
+                generation: 10,
+                ..authority
+            };
+            f.targets.browse_request.set(Some(current.clone()));
+            assert!(owner.accept_browse_directory(
+                "/new",
+                &current,
+                f.targets,
+                f.connection,
+                f.attempts
+            ));
+            assert_eq!(owner.snapshot().submitted_cwd(), "/new");
+            assert!(key.peek().is_none());
+        });
+        PLACEMENT_FIXTURE.with(|slot| slot.set(None));
+    }
+
+    /// Placement earns the same tracked history reads only after live admission.
+    /// Positive target/fetched changes rerun this real operation; unrelated draft
+    /// and claim changes remain peeks and cannot wake the effect.
+    #[farhelm_testtrace::test]
+    fn placement_owner_preserves_deliberate_history_subscriptions() {
+        std::thread_local! {
+            static RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        }
+        /// This deliberately invokes the actual edit from an effect to observe
+        /// its subscriptions, as opening/replay callers can do synchronously.
+        fn probe() -> Element {
+            let f = use_placement_fixture();
+            use_effect(move || {
+                RUNS.with(|count| count.set(count.get() + 1));
+                assert!(
+                    f.system
+                        .ordinary
+                        .owner
+                        .edit_folder("~".into(), f.targets, f.folder)
+                );
+            });
+            rsx! {}
+        }
+        RUNS.with(|count| count.set(0));
+        let mut dom = VirtualDom::new(probe);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let mut f = PLACEMENT_FIXTURE.with(std::cell::Cell::get).unwrap();
+        assert_eq!(
+            RUNS.with(std::cell::Cell::get),
+            1,
+            "initial deliberate choice subscribed"
+        );
+        dom.in_runtime(|| {
+            f.system.ordinary.owner.edit_prompt("unrelated".into());
+            f.targets
+                .live_destination
+                .set(Some(CreateTarget::new(2, "new-install".into())));
+        });
+        dom.process_events();
+        assert_eq!(RUNS.with(std::cell::Cell::get), 1);
+        dom.in_runtime(|| {
+            f.targets
+                .choices
+                .create_target
+                .set(Some(CreateTarget::new(2, "new-install".into())))
+        });
+        dom.process_events();
+        assert_eq!(RUNS.with(std::cell::Cell::get), 2, "target remains tracked");
+        dom.in_runtime(|| {
+            f.targets.choices.fetched_history.set(Some((
+                CreateTarget::new(2, "new-install".into()),
+                api::LaunchHistory {
+                    checkout_config_revision: 82,
+                    ..Default::default()
+                },
+            )))
+        });
+        dom.process_events();
+        assert_eq!(
+            RUNS.with(std::cell::Cell::get),
+            3,
+            "fetched history remains tracked after target"
+        );
+        dom.in_runtime(|| {
+            assert_eq!(
+                f.targets
+                    .choices
+                    .offered_history
+                    .peek()
+                    .as_ref()
+                    .unwrap()
+                    .1
+                    .checkout_config_revision,
+                82
+            )
+        });
+        PLACEMENT_FIXTURE.with(|slot| slot.set(None));
     }
 
     /// Relayed invocation deliberately differs from stored command metadata.
@@ -3440,6 +4578,12 @@ mod tests {
                 key,
                 chosen_host,
             );
+            let choices = use_choice_targets();
+            let source = use_source_targets(choices);
+            use_placement_handles(SystemFixture {
+                ordinary: OrdinaryFixture { owner, choices },
+                source,
+            });
             let fields = owner.fields();
             let preview = use_signal(|| PreviewState::Pending);
             use_effect(move || {
@@ -3477,6 +4621,7 @@ mod tests {
         dom.rebuild_in_place();
         dom.process_events();
         let owner = OWNER.with(Cell::get).unwrap();
+        let placement = PLACEMENT_FIXTURE.with(Cell::get).unwrap();
         let mut preview = PREVIEW.with(Cell::get).unwrap();
         let fields = owner.fields();
         assert_eq!(DEST_RUNS.with(Cell::get), 1, "destination observer mounted");
@@ -3487,9 +4632,18 @@ mod tests {
         dom.in_runtime(|| {
             let display = owner.snapshot().cwd();
             assert_ne!(display, owner.snapshot().submitted_cwd());
+            assert!(owner.choose_folder(
+                FolderChoice::Recent {
+                    cwd: display.clone(),
+                    target: Some(CreateTarget::new(1, "install-a".into())),
+                },
+                None,
+                None,
+                placement.targets,
+                placement.folder
+            ));
+            assert!(owner.select_repository(repo.clone(), placement.targets, placement.repository));
             owner.edit(|draft| {
-                draft.choose_existing_folder(&display);
-                draft.select_repository(repo.clone());
                 draft.apply_template_name(
                     "review".into(),
                     farhelm_proto::launcher::TemplateNameKind::Base,
@@ -3516,19 +4670,51 @@ mod tests {
                 let connection = Signal::new(Some(4));
                 assert!(
                     super::super::browse_activation_is_current(
-                        request, &authority, target, connection, owner,
+                        request,
+                        &authority,
+                        target,
+                        connection,
+                        &owner.snapshot(),
                     ),
                     "browse activation reads the new raw seed before memos settle"
                 );
                 let before = owner.snapshot();
-                owner.edit(|draft| draft.edit_folder("/other".into()));
+                assert!(owner.choose_destination_type(
+                    false,
+                    placement.targets,
+                    placement.repository.open
+                ));
+                assert!(owner.edit_folder("/other".into(), placement.targets, placement.folder));
                 assert!(
                     !super::super::browse_activation_is_current(
-                        request, &authority, target, connection, owner,
+                        request,
+                        &authority,
+                        target,
+                        connection,
+                        &owner.snapshot(),
                     ),
                     "a same-turn path edit immediately withdraws the old result"
                 );
-                owner.edit(|draft| draft.restore(before));
+                assert!(owner.choose_folder(
+                    FolderChoice::Recent {
+                        cwd: before.submitted_cwd(),
+                        target: Some(CreateTarget::new(1, "install-a".into())),
+                    },
+                    None,
+                    None,
+                    placement.targets,
+                    placement.folder
+                ));
+                assert!(owner.select_repository(
+                    repo.clone(),
+                    placement.targets,
+                    placement.repository
+                ));
+                assert_eq!(
+                    owner.snapshot(),
+                    before,
+                    "concrete placement choices restore the probe premise"
+                );
             });
             let saved = dom.in_scope(ScopeId::ROOT, || {
                 super::super::launcher_snapshot(template_targets(owner), &[], None)

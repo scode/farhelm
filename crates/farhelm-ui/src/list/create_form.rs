@@ -6,14 +6,16 @@
 //! module keeps preview observations, reactive subscriptions and the ordered
 //! host/submission guards. The draft assembles every complete request from the
 //! caller's accepted facts, including the variant and checkout frozen at a press.
-//! Ordinary leaf/scalar edits and finite source/naming reconciliation own their
-//! publication/key rules in draft; remaining composites retain caller policies.
+//! Ordinary leaf/scalar, placement/history/browse and finite source/naming edits
+//! own their publication/key rules in draft; search/template, agent/model and
+//! recovery composites retain caller policies during this migration.
 
 mod draft;
 
 use draft::{
-    CheckoutInput, ChoiceOrigin, ChoiceTargets, DraftFields, LaunchDraft, LaunchDraftState,
-    RequestContext, SourceTargets, use_launch_draft,
+    CheckoutInput, ChoiceOrigin, ChoiceTargets, DraftFields, FolderTargets, LaunchDraft,
+    LaunchDraftState, PlacementTargets, RepositoryTargets, RequestContext, SourceTargets,
+    use_launch_draft,
 };
 
 use dioxus::prelude::*;
@@ -1639,21 +1641,22 @@ fn browse_reply_is_current(
 }
 
 /// Recheck browse authority from an event handler, after its node rendered.
-/// Snapshot the live owner, not the folder memo: a queued activation may follow
-/// a raw-only reseed whose escaped display and edited bit did not change.
+/// The caller supplies the live working draft, never the folder memo: a queued
+/// activation may follow a raw-only reseed whose display and edited bit match.
+/// Keep request, target and connection observations tracked and in this order.
 fn browse_activation_is_current(
     request: Signal<Option<BrowseAuthority>>,
     candidate: &BrowseAuthority,
     target: Signal<Option<CreateTarget>>,
     connection: Signal<Option<u64>>,
-    draft: LaunchDraftState,
+    draft: &LaunchDraft,
 ) -> bool {
     browse_reply_is_current(
         &request(),
         candidate,
         target(),
         connection(),
-        &draft.snapshot().submitted_cwd(),
+        &draft.submitted_cwd(),
     )
 }
 
@@ -2552,7 +2555,7 @@ pub(super) fn CreateSessionForm(
     ///
     /// `ListView`'s signal rather than this form's so the same effective-host
     /// derivation also binds the idempotency key and connection claim.
-    mut chosen_host: Signal<Option<HostId>>,
+    chosen_host: Signal<Option<HostId>>,
     /// The installation currently selected for the create, for host safety
     /// checks.
     create_target: Signal<Option<CreateTarget>>,
@@ -2850,7 +2853,7 @@ pub(super) fn CreateSessionForm(
     // hostless clone, straight to `Unconfirmable`) every time a new
     // generation arrives, and otherwise updated only by the reseed effect
     // below (`resolve_clone_host`) and by an explicit host pick.
-    let mut clone_host_state = use_signal(|| CloneHostState::Unconfirmable);
+    let clone_host_state = use_signal(|| CloneHostState::Unconfirmable);
     // Why this clone's own host is not (or is no longer) in play, when there
     // is something worth telling the user about it — read
     // straight off `clone_host_state` every render, never cached, so a
@@ -2896,7 +2899,7 @@ pub(super) fn CreateSessionForm(
         live_destination.set(destination_now.clone());
     }
     let inherited_destination = initial_cwd.as_ref().and(destination_now.clone());
-    let mut remembered_destination = use_signal(move || inherited_destination);
+    let remembered_destination = use_signal(move || inherited_destination);
     let history_activation_attempts = use_signal(|| 0_u64);
     let remembered_destination_valid = remembered_destination_matches(
         remembered_destination.read().as_ref(),
@@ -2926,7 +2929,7 @@ pub(super) fn CreateSessionForm(
     // Count handler entry separately from successful activation. A result can
     // be removed by the next render, so the mounted browser regression needs
     // to distinguish "the stale click was refused" from "no callback ran".
-    let mut browse_activation_attempts = use_signal(|| 0_u64);
+    let browse_activation_attempts = use_signal(|| 0_u64);
     // Completion is distinct from rendering: rejected stale replies must not
     // become visible, but race tests still need to know the async task read
     // and checked the released response before continuing to another leg.
@@ -3057,6 +3060,30 @@ pub(super) fn CreateSessionForm(
         offered_history,
         create_target,
         fetched_history,
+    };
+    // Handles only: each concrete operation earns its existing tracked reads
+    // after live admission, rather than capturing authority at render time.
+    let placement_targets = PlacementTargets {
+        choices: choice_targets,
+        live_destination,
+        remembered_destination,
+        clone_host_state,
+        history_activation_attempts,
+        preview_revision,
+        browse_generation,
+        browse_request,
+        browse_result,
+        browse_error,
+    };
+    let repository_targets = RepositoryTargets {
+        open: repository_open,
+        index: repository_index,
+        search: composer_search,
+        search_open: composer_search_open,
+    };
+    let folder_targets = FolderTargets {
+        open: folder_open,
+        active: folder_active,
     };
     let mut partial_hint_timer_started = use_signal(|| false);
     let partial_template_text = partial_template_banner
@@ -3591,67 +3618,15 @@ pub(super) fn CreateSessionForm(
         let history = history_for_recents.clone();
         let history_target = current_history_target.clone();
         move |entry: api::LaunchHistoryEntry| {
-            if !draft_transition_allowed(ops) {
-                return false;
-            }
-            let tab_changed = draft.snapshot().tab() != LaunchTab::Agent;
-            let correcting_invalid = !remembered_destination_matches(
-                remembered_destination.peek().as_ref(),
-                live_destination.peek().as_ref(),
-            );
-            if !admit_history_destination(
+            draft.accept_recent(
+                entry,
+                &catalog,
                 history_target.clone(),
-                live_destination,
-                remembered_destination,
-                history_activation_attempts,
-            ) {
-                return false;
-            }
-            promote_history_snapshot(offered_history, create_target(), history.clone());
-            partial_template_hint.set(false);
-            let mut selection = crate::launch_composer::select_recent(&entry);
-            selection.permissions = crate::launch_composer::normalized_permissions(
-                selection.harness,
-                selection.permissions,
-            );
-            // A recent replaces the whole draft deliberately, so an earlier
-            // escalation notice no longer describes it, and its Undo would
-            // throw the recent away.
-            permission_escalation.set(None);
-            let owner = crate::launch_composer::custom_model_owner(&entry.selection, &catalog);
-            let selection_changed = draft.edit(|draft| draft.restore_launch(&selection, owner));
-            // Applying a recent is a deliberate whole-draft replacement, not
-            // a passive default — its permissions choice must filter
-            // further recents exactly as it always has.
-            invalidate_directory_browse(
-                browse_generation,
-                browse_request,
-                browse_result,
-                browse_error,
-            );
-            let destination_changed = if let Some(repo) = entry.github_repo {
-                remembered_destination.set(None);
-                draft.edit(|draft| draft.select_repository(repo));
-                preview_revision.with_mut(|value| {
-                    *value = value.checked_add(1).expect("preview revision exhausted")
-                });
-                true
-            } else {
-                draft.edit(|draft| draft.choose_existing_folder(entry.cwd.raw()))
-            };
-            // Admission precedes the mode transition so a stale destination
-            // cannot leave the user on a partially applied structured draft.
-            // Once admitted, the row's meaning is the whole structured setup;
-            // leaving command mode active would submit an unrelated dormant
-            // invocation when Enter follows this callback.
-            draft.edit(|draft| {
-                draft.choose_tab(LaunchTab::Agent);
-            });
-            composer_reset_reason.set(None);
-            if tab_changed || selection_changed || destination_changed || correcting_invalid {
-                intent_key.set(None);
-            }
-            true
+                history.clone(),
+                placement_targets,
+                permission_escalation,
+                composer_reset_reason,
+            )
         }
     });
     let template_targets = TemplateTargets {
@@ -4174,27 +4149,7 @@ pub(super) fn CreateSessionForm(
     // Selection is the same explicit intent transition as a gh: result,
     // including same-repository reselection after a refused preview.
     let select_repository = use_callback(move |repo: GithubRepo| {
-        if !draft_transition_allowed(ops) {
-            return;
-        }
-        partial_template_hint.set(false);
-        promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
-        invalidate_directory_browse(
-            browse_generation,
-            browse_request,
-            browse_result,
-            browse_error,
-        );
-        remembered_destination.set(None);
-        // This explicit choice completes repository selection, even if an
-        // earlier gh: query still owns the composer's discovery search.
-        composer_search.set(String::new());
-        composer_search_open.set(false);
-        draft.edit(|draft| draft.select_repository(repo));
-        preview_revision
-            .with_mut(|value| *value = value.checked_add(1).expect("preview revision exhausted"));
-        repository_open.set(false);
-        intent_key.set(None);
+        draft.select_repository(repo, placement_targets, repository_targets);
     });
     // Names need only mount seeding. Templates also need completed reads:
     // validating against temporary empty inputs would reject a valid choice.
@@ -4479,41 +4434,10 @@ pub(super) fn CreateSessionForm(
             focus_composer_surface(true);
         }
     });
-    // HostPicker owns only transient browsing. Keep the old select's complete
-    // destination transition here, including the synchronous history fence;
-    // queued callbacks must observe the new target before a render happens.
+    // HostPicker owns transient browsing. The concrete owner operation retains
+    // the synchronous history fence for callbacks queued before another render.
     let choose_host = EventHandler::new(move |id: HostId| {
-        if !draft_transition_allowed(ops) {
-            return;
-        }
-        partial_template_hint.set(false);
-        let next_host = Some(id);
-        chosen_host.set(next_host);
-        // A queued history callback can run before rerender.
-        // Revoke the old destination in this same event turn.
-        live_destination.set(history_target(&hosts_for_destination_choice, next_host));
-        remembered_destination.set(None);
-        invalidate_directory_browse(
-            browse_generation,
-            browse_request,
-            browse_result,
-            browse_error,
-        );
-        // The agent choice deliberately survives: every host
-        // consumes the same helm catalog.
-        // And it takes this generation's clone-derived
-        // binding off automatic handling for good
-        // (`CloneHostState::UserTookOver`): the user is now
-        // driving host selection by hand, so a later
-        // retarget of the CLONE's own row must not pull the
-        // rug out from under a choice the clone had nothing
-        // to do with anymore.
-        clone_host_state.set(CloneHostState::UserTookOver);
-        // A different host is a different intended create,
-        // exactly as a different directory is — so the key
-        // the last submit used stops applying (see this
-        // component's docs for both edges of that rule).
-        intent_key.set(None);
+        draft.choose_host(id, &hosts_for_destination_choice, placement_targets);
     });
     let host_select = rsx! {
         super::host_picker::HostPicker {
@@ -4560,52 +4484,13 @@ pub(super) fn CreateSessionForm(
     // unless they correct an invalid installation claim. Local home is still
     // a deliberate host pin even when selected; home changes only its folder.
     let choose_folder = Callback::new(move |choice: FolderChoice| {
-        if !draft_transition_allowed(ops) || draft.snapshot().destination().is_managed() {
-            return;
-        }
-        partial_template_hint.set(false);
-        let correcting_invalid = !remembered_destination_matches(
-            remembered_destination.peek().as_ref(),
-            live_destination.peek().as_ref(),
+        draft.choose_folder(
+            choice,
+            local_host_id,
+            local_destination.clone(),
+            placement_targets,
+            folder_targets,
         );
-        let host_action = matches!(&choice, FolderChoice::LocalHome);
-        let path = match choice {
-            FolderChoice::Recent { cwd, target } => {
-                if !admit_history_destination(
-                    target,
-                    live_destination,
-                    remembered_destination,
-                    history_activation_attempts,
-                ) {
-                    return;
-                }
-                cwd
-            }
-            FolderChoice::Home => {
-                remembered_destination.set(None);
-                "~".to_string()
-            }
-            FolderChoice::LocalHome => {
-                chosen_host.set(local_host_id);
-                live_destination.set(local_destination.clone());
-                remembered_destination.set(None);
-                clone_host_state.set(CloneHostState::UserTookOver);
-                "~".to_string()
-            }
-        };
-        promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
-        invalidate_directory_browse(
-            browse_generation,
-            browse_request,
-            browse_result,
-            browse_error,
-        );
-        let path_changed = draft.edit(|draft| draft.choose_existing_folder(&path));
-        if path_changed || correcting_invalid || host_action {
-            intent_key.set(None);
-        }
-        folder_open.set(false);
-        folder_active.set(None);
     });
     // This is the same deliberate permission transition for the row and the
     // guarded answer. Admission stays synchronous; a queued click must not
@@ -6426,16 +6311,7 @@ pub(super) fn CreateSessionForm(
                             span { class: "launch-composer-section-label", "destination" }
                             DestinationTypeControl { managed: checkout_mode, disabled: busy,
                                 on_change: move |managed| {
-                                    if !draft_transition_allowed(ops) || managed == draft.snapshot().destination().is_managed() { return; }
-                                    partial_template_hint.set(false);
-                                    remembered_destination.set(None);
-                                    promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
-                                    invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
-                                    repository_open.set(false);
-                                    // A proposal is not an existing path. Folder mode
-                                    // returns to its dormant raw editor ownership.
-                                    draft.edit(|draft| draft.choose_destination_type(managed));
-                                    intent_key.set(None);
+                                    draft.choose_destination_type(managed, placement_targets, repository_open);
                                 },
                             }
                             div { class: "launch-composer-destination-row",
@@ -6495,13 +6371,7 @@ pub(super) fn CreateSessionForm(
                                         onfocus: move |_| { if !repository_read_only { repository_open.set(true); } },
                                         onblur: move |_| repository_open.set(false),
                                         oninput: move |evt| {
-                                            if !draft_transition_allowed(ops) || repository_read_only { return; }
-                                            remembered_destination.set(None);
-                                            invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
-                                            draft.edit(|draft| draft.edit_repository_query(evt.value()));
-                                            repository_index.set(0);
-                                            repository_open.set(true);
-                                            intent_key.set(None);
+                                            draft.edit_repository_query(evt.value(), repository_read_only, placement_targets, repository_targets);
                                         },
                                         onkeydown: move |evt: KeyboardEvent| {
                                             match evt.key() {
@@ -6553,13 +6423,7 @@ pub(super) fn CreateSessionForm(
                                     button { r#type: "button", class: "btn btn-neutral launch-composer-repository-clear", disabled: busy,
                                         "data-tooltip": "clear repository: remove this selection before editing",
                                         onclick: move |_| {
-                                            if !draft_transition_allowed(ops) { return; }
-                                            remembered_destination.set(None);
-                                            invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
-                                            draft.edit(|draft| draft.edit_repository_query(String::new()));
-                                            repository_index.set(0);
-                                            repository_open.set(false);
-                                            intent_key.set(None);
+                                            draft.clear_repository(placement_targets, repository_targets);
                                         },
                                         "clear repository"
                                     }
@@ -6681,25 +6545,7 @@ pub(super) fn CreateSessionForm(
                                     }
                                 },
                                 oninput: move |evt| {
-                                    if !draft_transition_allowed(ops) { return; }
-                                    // A checkout path is evidence from the helm,
-                                    // never an editable suggestion. The folder
-                                    // segment is the only way back to typing.
-                                    if draft.snapshot().destination().is_managed() { return; }
-                                    promote_fetched_history_snapshot(
-                                        offered_history, create_target, fetched_history,
-                                    );
-                                    let correcting_invalid = !remembered_destination_matches(
-                                        remembered_destination.peek().as_ref(), live_destination.peek().as_ref(),
-                                    );
-                                    let changed = draft.edit(|draft| draft.edit_folder(evt.value()));
-                                    folder_active.set(None);
-                                    folder_open.set(true);
-                                    remembered_destination.set(None);
-                                    invalidate_directory_browse(
-                                        browse_generation, browse_request, browse_result, browse_error,
-                                    );
-                                    if changed || correcting_invalid { intent_key.set(None); }
+                                    draft.edit_folder(evt.value(), placement_targets, folder_targets);
                                 },
                             }
                             // Float like model/search suggestions. In-flow history
@@ -7158,27 +7004,8 @@ pub(super) fn CreateSessionForm(
                             let selected_cwd = result.cwd.clone();
                             let authority = result_authority.clone();
                             move |_| {
-                                browse_activation_attempts.with_mut(|attempts| *attempts = attempts.wrapping_add(1));
-                                if !draft_transition_allowed(ops)
-                                    || !browse_activation_is_current(
-                                        browse_request, &authority, browse_target,
-                                        live_browse_connection, draft,
-                                    )
-                                {
-                                    return;
-                                }
-                                promote_fetched_history_snapshot(
-                                    offered_history, create_target, fetched_history,
-                                );
-                                let correcting_invalid = !remembered_destination_matches(
-                                    remembered_destination.peek().as_ref(), live_destination.peek().as_ref(),
-                                );
-                                let changed = draft.edit(|draft| draft.choose_existing_folder(selected_cwd.raw()));
-                                remembered_destination.set(None);
-                                invalidate_directory_browse(
-                                    browse_generation, browse_request, browse_result, browse_error,
-                                );
-                                if changed || correcting_invalid { intent_key.set(None); }
+                                draft.accept_browse_directory(selected_cwd.raw(), &authority, placement_targets,
+                                    live_browse_connection, browse_activation_attempts);
                             }
                         },
                         "use {result.cwd.escaped()}"
@@ -7191,27 +7018,8 @@ pub(super) fn CreateSessionForm(
                             onclick: {
                                 let authority = result_authority.clone();
                                 move |_| {
-                                browse_activation_attempts.with_mut(|attempts| *attempts = attempts.wrapping_add(1));
-                                if !draft_transition_allowed(ops)
-                                    || !browse_activation_is_current(
-                                        browse_request, &authority, browse_target,
-                                        live_browse_connection, draft,
-                                    )
-                                {
-                                    return;
-                                }
-                                promote_fetched_history_snapshot(
-                                    offered_history, create_target, fetched_history,
-                                );
-                                let correcting_invalid = !remembered_destination_matches(
-                                    remembered_destination.peek().as_ref(), live_destination.peek().as_ref(),
-                                );
-                                let changed = draft.edit(|draft| draft.choose_existing_folder(parent.raw()));
-                                remembered_destination.set(None);
-                                invalidate_directory_browse(
-                                    browse_generation, browse_request, browse_result, browse_error,
-                                );
-                                if changed || correcting_invalid { intent_key.set(None); }
+                                draft.accept_browse_directory(parent.raw(), &authority, placement_targets,
+                                    live_browse_connection, browse_activation_attempts);
                             }
                             },
                             "parent: {parent.escaped()}"
@@ -7228,27 +7036,8 @@ pub(super) fn CreateSessionForm(
                             onclick: {
                                 let authority = result_authority.clone();
                                 move |_| {
-                                browse_activation_attempts.with_mut(|attempts| *attempts = attempts.wrapping_add(1));
-                                if !draft_transition_allowed(ops)
-                                    || !browse_activation_is_current(
-                                        browse_request, &authority, browse_target,
-                                        live_browse_connection, draft,
-                                    )
-                                {
-                                    return;
-                                }
-                                promote_fetched_history_snapshot(
-                                    offered_history, create_target, fetched_history,
-                                );
-                                let correcting_invalid = !remembered_destination_matches(
-                                    remembered_destination.peek().as_ref(), live_destination.peek().as_ref(),
-                                );
-                                let changed = draft.edit(|draft| draft.choose_existing_folder(child.raw()));
-                                remembered_destination.set(None);
-                                invalidate_directory_browse(
-                                    browse_generation, browse_request, browse_result, browse_error,
-                                );
-                                if changed || correcting_invalid { intent_key.set(None); }
+                                draft.accept_browse_directory(child.raw(), &authority, placement_targets,
+                                    live_browse_connection, browse_activation_attempts);
                             }
                             },
                             "{child.escaped()}"
