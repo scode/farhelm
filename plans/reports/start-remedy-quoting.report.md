@@ -79,3 +79,65 @@ test-authoring checklist) found nothing blocking. I made two of its low findings
 escaping function the error uses instead of reproducing it, and a test docstring that no longer matched (it promised the
 configured paths for exit 75) was reworded. Its third finding is the follow-up above. Its fourth agreed with leaving
 backticks out. The reviewer confirmed the size is within the gate but close to it.
+
+### Landing
+
+Landed as #2567, with the content the report describes and one changelog change described below. It was the third of
+five plans in this landing round, after triage-specs-oct21 and cheap-ui-hardening-oct21; uninstall-mixed-spelling and
+refused-retry-rollback-fence followed it.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained popover-anchor-close and documentation commits. A fresh-context reviewer and I read
+this plan against them and the round's other plans:
+
+- popover-anchor-close's landing notes recorded that a host's changing connection-attempt line closes menus below it.
+  The start command this plan changes is the same on every attempt, so it adds nothing to that, and no UI code reads the
+  command.
+- The other plans in the round do not touch the helm's connection errors.
+
+#### Fixes made during the landing
+
+- The plan's changelog fragment described a fix to the suggested start command that connection-stall-phase (#2505) added
+  on 2026-10-21, after the last release (v0.30.0, 2026-10-18), so it has not shipped. Following the repository's rule
+  for fixes to unreleased work, the landing deleted the new fragment and added its content as a context paragraph to
+  connection-stall-phase's fragment, in this PR.
+- The review-queue index conflicted with entries main had changed; the landing rebuilt it.
+
+#### Checks
+
+Together the five plans change about 650 lines of code, tests and specification text (more with review-queue
+bookkeeping) across the helm's connection errors and uninstall, the supervisor's create path and store, and the UI,
+including how every menu remembers its focused item and the terminal's file-link script; that reach is why this round
+ran the whole Rust workspace and the full browser suite. All of the following ran on the five plans stacked together on
+this round's main, including the landing's conflict resolutions. After the run, the landing moved changelog text between
+fragment files in cheap-ui-hardening-oct21's last PR (see its notes); that changed only changelog files:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on the changed Markdown files, `python3 scripts/check-agents-md.py` (one warning,
+  about a citation main already had), the workspace debug build, the UI's release web build and
+  `scripts/check-desktop-assets.sh` (which also builds the desktop app): all passed.
+  `python3 releasing/check-changelog.py format` passed again after every changelog change.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  slots, no retries, run `461bfc4c-651d-4a70-8498-7a9b5ae524cf`: 4291 passed, none failed; 40 tests marked as ignored
+  did not run.
+- `cargo nextest run -p farhelm-ui --features desktop`, run `4073dcb5-a14f-42e5-bddd-8b007925da68`: 900 passed.
+  `node --test` in `crates/farhelm-ui/js-tests`, run `4086a6d6-96a5-4691-b05e-e50169546906`: 329 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `b5e88d8c-8a25-4e9b-be8f-ada4f9d48bc3`: 2475 passed, 14 skipped by design (WebKit
+  clipboard cases and tests that need a real signed-in agent or run on one engine only), 1 failed: on WebKit, "don't ask
+  again on a refused YOLO replace marks the host, then replaces with the override", the open flake FLAKES.md recorded on
+  2026-10-20, which the deflake sweep already excludes. It exercises a host's YOLO question during Replace, which none
+  of the five plans touches; refused-retry-rollback-fence changes only the supervisor's handling of a stale create
+  retry.
+- An earlier start of these checks was stopped at its build step and discarded, because the landing changed the stack
+  while it ran; nothing from it is counted.
+- Reused: none. Skipped: the website build (no docs page changed), the doctests (no documentation example changed), the
+  desktop smoke test (the desktop app crate is unchanged, and the menu marker fix is covered by the desktop-feature unit
+  tests above, which mount real menus), the native Mac app (not runnable here) and the installer (unchanged).
+
+The report's checks were the helm's focused tests on its base; the round ran the whole Rust workspace and the browser
+suite above. Nothing in the executor's report became untrue at landing, apart from the changelog fragment moved as
+described above.
