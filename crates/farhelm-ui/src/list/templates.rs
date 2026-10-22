@@ -1420,6 +1420,57 @@ struct Undo {
     generation: u64,
 }
 
+/// Which Delete the editor's button offers for the open template: an ordinary
+/// one with a ten-second Undo, or a permanent one. The button's label and
+/// tooltip state the kind, so the click must carry out the kind they stated
+/// (`undo_after_delete`) rather than work it out again at click time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeleteKind {
+    /// Undo is offered after the delete succeeds.
+    Restorable,
+    /// No Undo: the stored template fails today's shape rules, and Undo
+    /// restores through the ordinary save path, which refuses such a value.
+    Permanent,
+}
+
+impl DeleteKind {
+    /// Classify the stored template named `previous` in the listed rows.
+    ///
+    /// The stored snapshot decides, not the editor's draft: Delete removes
+    /// the stored value even when unsaved edits have repaired it, and Undo
+    /// would have to save that original. A name missing from the rows (or no
+    /// list at all) reads as `Restorable`; the click then refuses on its own
+    /// because it has no stored template to snapshot.
+    fn of(rows: Option<&[LaunchTemplate]>, previous: Option<&str>) -> Self {
+        let stored_is_unsaveable = rows
+            .and_then(|rows| rows.iter().find(|t| Some(t.name.as_str()) == previous))
+            .is_some_and(|t| check_template_shape(t).is_err());
+        if stored_is_unsaveable {
+            DeleteKind::Permanent
+        } else {
+            DeleteKind::Restorable
+        }
+    }
+}
+
+/// The Undo notice a successful Delete leaves, decided by the kind the button
+/// showed, never by the template value the click went on to delete.
+///
+/// The label is drawn from one render's template list while the click reads
+/// the list as it is when the click is handled. If the two disagree, the
+/// user agreed to what the label said: "delete permanently" gets no Undo
+/// even if the deleted value would now pass the save rules, and "delete" gets
+/// its Undo. In that second case the Undo can fail, because the helm's save
+/// refuses a value outside the shape rules; the refusal shows as the
+/// dialog's ordinary error and the template stays deleted, which is where a
+/// permanent delete would have left it.
+fn undo_after_delete(shown: DeleteKind, template: LaunchTemplate, generation: u64) -> Option<Undo> {
+    (shown == DeleteKind::Restorable).then_some(Undo {
+        template,
+        generation,
+    })
+}
+
 /// Consult the resource's pending state before its retained value: a reload
 /// still displays an old list, which cannot establish that a new name is free.
 fn name_refusal(
@@ -1576,13 +1627,15 @@ pub(super) fn TemplatesDialog(
         .and_then(|r| r.as_ref().ok())
         .cloned();
     let list = templates.read().clone();
-    // Delete removes the stored snapshot, even when the unsaved draft has
-    // repaired an old value. Undo would have to save that original snapshot.
-    let permanent_delete = list
-        .as_ref()
-        .and_then(|r| r.as_ref().ok())
-        .and_then(|rows| rows.iter().find(|t| previous().as_ref() == Some(&t.name)))
-        .is_some_and(|t| check_template_shape(t).is_err());
+    // The Delete handler below captures this value, so the click does what
+    // this render's label says.
+    let delete_kind = DeleteKind::of(
+        list.as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .map(Vec::as_slice),
+        previous().as_deref(),
+    );
+    let permanent_delete = delete_kind == DeleteKind::Permanent;
     let names: Vec<String> = list
         .as_ref()
         .and_then(|r| r.as_ref().ok())
@@ -1775,9 +1828,6 @@ pub(super) fn TemplatesDialog(
             ));
             return;
         };
-        // Restoration uses the ordinary save path, which refuses old values
-        // outside today's shape rules. Do not offer an Undo that cannot work.
-        let restorable = check_template_shape(&template).is_ok();
         let base = delete_base.clone();
         busy.set(true);
         error.set(None);
@@ -1809,10 +1859,13 @@ pub(super) fn TemplatesDialog(
                         .retain(|_, owner| owner.raw() != name);
                     undo_generation += 1;
                     let generation = undo_generation();
-                    undo.set(restorable.then_some(Undo {
-                        template,
-                        generation,
-                    }));
+                    // Whether Undo follows is the kind this render's label
+                    // promised (`delete_kind`, captured by this closure), not
+                    // a fresh shape check of the value deleted: a list reload
+                    // landing between the render the user saw and the click
+                    // must not turn "delete" into a delete with no Undo, or
+                    // "delete permanently" into one that offers it.
+                    undo.set(undo_after_delete(delete_kind, template, generation));
                     leave_editor(
                         Departure::Back,
                         draft,
@@ -2989,6 +3042,60 @@ mod tests {
         assert!(copy.len() <= 128);
         assert!(copy.ends_with(" copy"));
     }
+
+    /// Spec: the delete kind a render computes for the label ("delete" offers
+    /// Undo, "delete permanently" does not) decides the Undo offer on its own:
+    /// `undo_after_delete` takes that kind and the clicked row and never
+    /// re-checks the template's shape. This covers the two helpers the Delete
+    /// handler calls; the handler itself is not mounted in unit tests, and the
+    /// reload race it guards against is not reachable from a browser.
+    ///
+    /// Why: the label comes from one render's list, and the handler used to
+    /// re-run the shape check on the list as it stood at the click. A reload
+    /// landing in between (the user's own repair being saved, say) could make
+    /// the click contradict the label the user acted on.
+    #[test]
+    fn delete_offers_undo_for_the_kind_the_label_showed() {
+        let stored = |session_name: &str| LaunchTemplate {
+            name: "legacy".into(),
+            fields: TemplateFields {
+                name: Some(session_name.into()),
+                ..Default::default()
+            },
+        };
+        // A zero-width space fails today's session-name rule; a plain name
+        // passes. Both are stored under the same template name.
+        let unsaveable = stored("hidden\u{200B}name");
+        let repaired = stored("plain");
+        let undo = |shown, template: &LaunchTemplate| {
+            undo_after_delete(shown, template.clone(), 7).map(|u| (u.template, u.generation))
+        };
+
+        let shown = DeleteKind::of(Some(std::slice::from_ref(&unsaveable)), Some("legacy"));
+        assert_eq!(shown, DeleteKind::Permanent);
+        assert_eq!(
+            undo(shown, &repaired),
+            None,
+            "a click after the template was repaired still deletes permanently"
+        );
+
+        let shown = DeleteKind::of(Some(std::slice::from_ref(&repaired)), Some("legacy"));
+        assert_eq!(shown, DeleteKind::Restorable);
+        assert_eq!(
+            undo(shown, &unsaveable),
+            Some((unsaveable.clone(), 7)),
+            "a click labelled \"delete\" offers Undo of the value it deleted"
+        );
+
+        // No list, or no row for the open template, labels an ordinary
+        // delete; the handler itself refuses when it finds no stored row.
+        assert_eq!(DeleteKind::of(None, Some("legacy")), DeleteKind::Restorable);
+        assert_eq!(
+            DeleteKind::of(Some(std::slice::from_ref(&unsaveable)), Some("other")),
+            DeleteKind::Restorable
+        );
+    }
+
     /// Spec: a new template, or a rename, is saved only once the template
     /// list has loaded with no read in progress and shows the name is free;
     /// while the list is loading (the first load or a reload) or failed to
