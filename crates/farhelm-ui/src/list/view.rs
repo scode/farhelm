@@ -19,7 +19,7 @@ use crate::api::{
 };
 use crate::app_bar::AppBar;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
-use crate::hosts::{HostsPanel, HostsRead};
+use crate::hosts::{HostFlow, HostsPanel, HostsRead, host_rows_moved};
 use crate::modal_dialog::FocusTarget;
 use crate::ops::{OpLock, ReadGate};
 use crate::peer::PeerText;
@@ -980,6 +980,11 @@ pub(crate) fn ListView(
     use_context_provider(|| super::templates::TemplatesRevision(templates_revision));
     let provisioning_trace_shapes = use_signal(HashMap::<HostId, ProvisioningTraceShape>::new);
     let provisioning_auto_details = use_signal(HashSet::<HostId>::new);
+    // One client-local checkbox for every host row, reset on page mount.
+    // HostsPanel remains permanently mounted below and owns every write;
+    // this shared handle lets accepted reads compare its actual visible
+    // lines synchronously. Automatic per-row disclosure never writes it.
+    let host_details_open = use_signal(|| false);
     // The panel can grow without changing its rows' logical shape: an
     // expanded setup failure adds text in place. Observe its rendered size
     // so fixed menus cannot remain beside a different row after that reflow.
@@ -1050,10 +1055,10 @@ pub(crate) fn ListView(
     // map edits retain the effect beside `order_hold`. These are causal
     // reports, not measurements, and this broad effect is not exhaustive.
     //
-    // `commit_listing`'s reconciliation is SESSION-only. The hosts list has
-    // no reorder guard, on the judgment that a small, largely id-ordered
-    // registry reordering under an open host menu is rare enough to accept
-    // rather than duplicate that machinery for a second row kind.
+    // Accepted host reads also compare displayed host prefix membership and
+    // disclosed lines before publication. That catches same-size reorders
+    // and balanced text changes that leave this whole-panel observer quiet;
+    // it supplements rather than narrows this existing broad layout rule.
     let layout_popovers = popovers.clone();
     use_effect(move || {
         layout_epoch();
@@ -1613,19 +1618,34 @@ pub(crate) fn ListView(
                 Err(_) => hosts_reads.peek().accept_failure(generation),
             };
             if accepted {
-                // Preview the same pure fold before publication. A pending
-                // host read already supplies visible "checking host" wording
-                // when stale session rows exist; a failed session listing has
-                // no row baseline and instead heals by remounting on recovery.
-                let moved = {
+                // Preview one real HostsRead fold for both consumers. Session
+                // wording uses effective lookup state; host rows keep drawing
+                // a retained snapshot after a refresh failure. A first host
+                // snapshot has no prior anchor baseline, while a failed
+                // session listing heals by remounting rather than comparing.
+                let (session_moved, host_moved) = {
+                    let before = hosts.peek();
+                    let mut after = before.clone();
+                    after.record(outcome.clone());
+                    let details_open = *host_details_open.peek();
+                    let auto_details = provisioning_auto_details.peek();
+                    let host_moved = host_rows_moved(
+                        before.hosts().map(|shown| HostFlow {
+                            shown,
+                            details_open,
+                            auto_details: &auto_details,
+                        }),
+                        HostFlow {
+                            shown: after.hosts().unwrap_or_default(),
+                            details_open,
+                            auto_details: &auto_details,
+                        },
+                    );
                     let current_listing = listing.peek();
                     let compact = compact_choice(preferences.0.peek().compact);
-                    if let Some(Ok(current)) = current_listing.as_ref()
+                    let session_moved = if let Some(Ok(current)) = current_listing.as_ref()
                         && !compact
                     {
-                        let before = hosts.peek();
-                        let mut after = before.clone();
-                        after.record(outcome.clone());
                         let held = order_hold.peek().clone().unwrap_or_default();
                         let shown = rows::held_display_order(&held, &current.sessions);
                         let current_errors = errors.peek();
@@ -1645,11 +1665,16 @@ pub(crate) fn ListView(
                         )
                     } else {
                         Vec::new()
-                    }
+                    };
+                    (session_moved, host_moved)
                 };
                 // No read guards survive dispatch, and there is no await or
                 // late effect that can replay this change at a fresh opening.
-                popovers.close_affected(&MovedRows::new(AnchorRegion::Sessions, moved));
+                popovers.close_affected(&MovedRows::new(AnchorRegion::Sessions, session_moved));
+                popovers.close_affected(&MovedRows::new(
+                    AnchorRegion::Hosts,
+                    host_moved.into_iter().map(|id| id.to_string()),
+                ));
                 hosts.write().record(outcome);
             }
             answered
@@ -3776,6 +3801,7 @@ pub(crate) fn ListView(
         // discovery, planning, and mutation replies must retain their owner.
         HostsPanel {
             hosts,
+            details_open: host_details_open,
             ops,
             mutation_busy_hosts,
             provisioning_busy_hosts,

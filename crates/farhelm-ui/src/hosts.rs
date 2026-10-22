@@ -912,6 +912,158 @@ pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
     }
 }
 
+// ===== Read-derived row lines and causal movement =====================
+
+/// The local setup surface owns this row's manual remedy, rather than the
+/// ordinary row drawing it a second time. Rendering and movement comparison
+/// must agree on that ownership when a host read changes its phase.
+fn local_setup_needed(host: &Host) -> bool {
+    host.kind.sets_up_locally()
+        && matches!(
+            &host.state,
+            HostPhase::Unreachable { cause, .. } if cause == LOCAL_SUPERVISOR_NOT_RUNNING
+        )
+}
+
+/// The three disclosed lines whose contents a host snapshot can change.
+///
+/// These are the actual PeerLine inputs used by HostRow, not an independent
+/// estimate of its height. Retained mutation outcomes and provisioning content
+/// keep their existing owners; a registry read does not replace those values.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct HostRowLines {
+    destination: Option<Vec<DetailPart>>,
+    detail: Option<Vec<DetailPart>>,
+    remedy: Option<Vec<DetailPart>>,
+}
+
+/// Resolve the visible lower lines once for rendering and causal comparison.
+///
+/// Closed Details contributes nothing. An aliased host reveals its concrete
+/// destination, and local setup keeps its remedy in the provisioning surface.
+/// None of these lower lines moves its own row's stable header toggle.
+fn host_row_lines(host: &Host, details_open: bool, local_setup: bool) -> HostRowLines {
+    HostRowLines {
+        destination: details_open
+            .then(|| {
+                host.alias
+                    .as_ref()
+                    .and_then(Option::as_ref)
+                    .and(host.destination.as_ref())
+                    .map(destination_detail_parts)
+            })
+            .flatten(),
+        detail: details_open.then(|| state_detail(&host.state)),
+        remedy: (details_open && !local_setup)
+            .then(|| state_remedy(&host.state))
+            .flatten(),
+    }
+}
+
+/// Borrow the displayed host order and its live disclosure at one publication.
+///
+/// A failed registry refresh keeps drawing HostsRead::hosts(), even though
+/// HostsRead::lookup() refuses that retained state for stale-session wording.
+/// Callers supply that displayed snapshot, never the lookup's failure view.
+#[derive(Clone, Copy)]
+pub(crate) struct HostFlow<'a> {
+    pub(crate) shown: &'a [Host],
+    pub(crate) details_open: bool,
+    pub(crate) auto_details: &'a HashSet<HostId>,
+}
+
+/// Peer isolation is part of a displayed line, even when its text matches
+/// authored text. Escaped peer text is the same value PeerLine writes to DOM.
+type DisplayedHostLine = Vec<(bool, String)>;
+
+/// Project each row once; identities route reports, while independently
+/// stacked line containers can cancel harmless exchanges above an anchor.
+struct FlowHost {
+    id: HostId,
+    lines: [Option<DisplayedHostLine>; 3],
+}
+
+/// Keep the exact visible escapes and span boundaries of each rendered line.
+/// Different raw spellings that display identically must not invent movement.
+fn displayed_host_line(parts: &[DetailPart]) -> DisplayedHostLine {
+    parts
+        .iter()
+        .map(|part| match part {
+            DetailPart::Text(text) => (false, text.clone()),
+            DetailPart::Peer(value) => (true, value.escaped()),
+        })
+        .collect()
+}
+
+/// Use the same disclosure and line helper as HostRow without subscribing or
+/// retaining an after-render cache that could invalidate a later opening.
+fn host_flow_rows(flow: HostFlow<'_>) -> Vec<FlowHost> {
+    flow.shown
+        .iter()
+        .map(|host| {
+            let lines = host_row_lines(
+                host,
+                flow.details_open || flow.auto_details.contains(&host.id),
+                local_setup_needed(host),
+            );
+            FlowHost {
+                id: host.id,
+                lines: [lines.destination, lines.detail, lines.remedy]
+                    .map(|parts| parts.map(|line| displayed_host_line(&line))),
+            }
+        })
+        .collect()
+}
+
+/// Compare prefix membership and per-container multisets, preserving duplicates.
+///
+/// Membership accounts for retained row-owned content crossing an anchor.
+/// Sorting only the selected prefix's line contributions makes exchanges of
+/// the same visible text wholly above an anchor inert; display order is never
+/// inferred from HostId or replaced by these comparison orders.
+fn host_prefix_contents(rows: &[FlowHost]) -> (HashSet<HostId>, [Vec<&DisplayedHostLine>; 3]) {
+    let mut lines: [Vec<&DisplayedHostLine>; 3] = std::array::from_fn(|_| Vec::new());
+    for row in rows {
+        for (container, line) in lines.iter_mut().zip(&row.lines) {
+            if let Some(line) = line {
+                container.push(line);
+            }
+        }
+    }
+    for container in &mut lines {
+        container.sort_unstable();
+    }
+    (rows.iter().map(|row| row.id).collect(), lines)
+}
+
+/// Select surviving host anchors whose strictly preceding contribution changed.
+///
+/// A first snapshot has no old measurement to invalidate. Own-row and lower
+/// text do not move a header toggle, and harmless permutations of the same
+/// prefix identities and line multisets keep an unchanged anchor valid. New
+/// and vanished rows keep their existing mount/unmount behavior. This reports
+/// host identities only; aggregate panel changes still use the broad closer.
+pub(crate) fn host_rows_moved(
+    previous: Option<HostFlow<'_>>,
+    current: HostFlow<'_>,
+) -> Vec<HostId> {
+    let Some(previous) = previous else {
+        return Vec::new();
+    };
+    let before = host_flow_rows(previous);
+    let after = host_flow_rows(current);
+    after
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| {
+            let previous_index = before.iter().position(|previous| previous.id == row.id)?;
+            (host_prefix_contents(&before[..previous_index])
+                != host_prefix_contents(&after[..index]))
+            .then_some(row.id)
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------
 // The hosts read, as four states
 // ---------------------------------------------------------------------
@@ -1220,6 +1372,10 @@ enum HostRequestDisplay {
 #[component]
 pub(crate) fn HostsPanel(
     hosts: Signal<HostsRead>,
+    /// The one page-local global disclosure. ListView holds the handle so its
+    /// accepted host read can compare the lines that are actually displayed;
+    /// this panel retains every checkbox/reveal write and their close timing.
+    mut details_open: Signal<bool>,
     mut ops: OpLock,
     mut mutation_busy_hosts: Signal<std::collections::HashSet<HostId>>,
     mut provisioning_busy_hosts: Signal<std::collections::HashSet<HostId>>,
@@ -1295,13 +1451,6 @@ pub(crate) fn HostsPanel(
     let mut dialog_write = use_signal(HashMap::<HostId, SettingsField>::new);
     let mut destination_draft = use_signal(String::new);
     let mut adding = use_signal(|| false);
-    // The global disclosure is the user's preference: one checkbox for every
-    // row. It stays client-local and resets on page mount; a host refresh
-    // changes facts, not the user's chosen level of detail. Each row's
-    // EFFECTIVE disclosure ORs this with its automatic per-row disclosure,
-    // which the provisioning panels publish per row and which never writes
-    // this checkbox.
-    let mut details_open = use_signal(|| false);
     // Provisioning stays mounted in each row, while its commands render in
     // the row-owned floating menu. These maps are the narrow bridge between
     // those two render locations: summaries flow out, one-shot requests in.
@@ -1820,12 +1969,7 @@ pub(crate) fn HostsPanel(
         list.iter()
             .cloned()
             .map(|host| {
-                let local_setup = host.kind.sets_up_locally()
-                    && matches!(
-                        &host.state,
-                        HostPhase::Unreachable { cause, .. }
-                            if cause == LOCAL_SUPERVISOR_NOT_RUNNING
-                    );
+                let local_setup = local_setup_needed(&host);
                 (host, local_setup)
             })
             .collect::<Vec<_>>()
@@ -3233,8 +3377,7 @@ fn HostRow(
     let adopt_label = adopt_identity
         .as_deref()
         .map(|reported| format!("adopt {}", display_identity(reported)));
-    let remedy = state_remedy(&host.state);
-    let detail = state_detail(&host.state);
+    let lines = host_row_lines(&host, details_open, local_setup);
     let shown_name = gui_host_name(host.name.raw(), host.kind.is_this_machine());
     // Keep peer-owned destination and version values isolated in the same
     // `PeerLine` contract used by the session menu. The menu header is a
@@ -4020,21 +4163,17 @@ fn HostRow(
                     }
             }
             }
-            if details_open {
-                if host.alias.clone().flatten().is_some() && let Some(destination) = host.destination.as_ref() {
-                    // The one place an alias never hides the real
-                    // destination — which makes it exactly the wrong place
-                    // to lose this module's peer-text safety boundary; see
-                    // `destination_detail_parts`'s own doc.
-                    PeerLine {
-                        class: "host-destination-detail",
-                        parts: destination_detail_parts(destination),
-                    }
-                }
+            // These shared inputs are also the accepted host read's causal
+            // contribution. Keep the three PeerLine containers independent:
+            // their displayed text can exchange rows without moving a prefix.
+            if let Some(destination) = lines.destination {
+                PeerLine { class: "host-destination-detail", parts: destination }
+            }
+            if let Some(detail) = lines.detail {
                 PeerLine { class: "host-detail", parts: detail }
-                if !local_setup && let Some(remedy) = remedy {
-                    PeerLine { class: "host-remedy", parts: remedy }
-                }
+            }
+            if let Some(remedy) = lines.remedy {
+                PeerLine { class: "host-remedy", parts: remedy }
             }
             // The refusal is the HELM's sentence and routinely embeds
             // peer-supplied text — an adoption superseded by a re-probe
@@ -4756,6 +4895,267 @@ mod tests {
             icon: Default::default(),
             color: Default::default(),
         }
+    }
+
+    /// Give host-flow cases distinct routing identities without introducing
+    /// phase, menu-offer or layout differences beyond the chosen build text.
+    fn flow_host(id: HostId, build: &str) -> Host {
+        Host {
+            id,
+            state: HostPhase::Connected {
+                identity: None,
+                build_version: build.into(),
+                old_version: false,
+                newer_version: false,
+                refresh: RefreshHealth::Ok { sessions: 0 },
+            },
+            ..host(HostPhase::Unrecognized)
+        }
+    }
+
+    /// Exercise the production comparison with one live disclosure on both
+    /// sides, as an accepted host read does; this helper adds no selection rule.
+    fn moved_host_rows(
+        before: &[Host],
+        after: &[Host],
+        details_open: bool,
+        auto_details: &HashSet<HostId>,
+    ) -> Vec<HostId> {
+        host_rows_moved(
+            Some(HostFlow {
+                shown: before,
+                details_open,
+                auto_details,
+            }),
+            HostFlow {
+                shown: after,
+                details_open,
+                auto_details,
+            },
+        )
+    }
+
+    /// The movement source must use the same three PeerLine inputs as the
+    /// renderer, including alias disclosure and the local setup remedy owner.
+    #[farhelm_testtrace::test]
+    fn host_flow_lines_are_the_rendered_disclosure() {
+        let mut row = host(HostPhase::VersionSkew {
+            peer_protocol: 1,
+            peer_build: "old build".into(),
+            our_protocol: 2,
+            our_build: "new build".into(),
+            remediation: "upgrade the supervisor".into(),
+        });
+        row.alias = Some(Some("short name".into()));
+        let visible = host_row_lines(&row, true, false);
+        assert_eq!(
+            visible.destination,
+            Some(destination_detail_parts(row.destination.as_ref().unwrap()))
+        );
+        assert_eq!(visible.detail, Some(state_detail(&row.state)));
+        assert_eq!(visible.remedy, state_remedy(&row.state));
+        assert_eq!(
+            host_row_lines(&row, false, false),
+            HostRowLines {
+                destination: None,
+                detail: None,
+                remedy: None,
+            }
+        );
+        row.alias = Some(None);
+        assert!(host_row_lines(&row, true, false).destination.is_none());
+
+        row.kind = HostKind::Local;
+        row.state = HostPhase::Unreachable {
+            cause: LOCAL_SUPERVISOR_NOT_RUNNING.into(),
+            last_error: "start the supervisor".into(),
+        };
+        assert!(local_setup_needed(&row));
+        let local_lines = host_row_lines(&row, true, local_setup_needed(&row));
+        assert_eq!(local_lines.detail, Some(state_detail(&row.state)));
+        assert!(local_lines.remedy.is_none());
+        assert!(state_remedy(&row.state).is_some());
+    }
+
+    /// Escaping and peer isolation belong to visible content. A literal escape
+    /// and the control it depicts draw alike; authored and peer spans do not
+    /// have the same bidi contract even when their words happen to match.
+    #[farhelm_testtrace::test]
+    fn host_flow_compares_displayed_peer_runs() {
+        assert_eq!(
+            displayed_host_line(&[DetailPart::peer("\u{200b}")]),
+            displayed_host_line(&[DetailPart::peer("<U+200B>")])
+        );
+        assert_ne!(
+            displayed_host_line(&[DetailPart::text("<U+200B>")]),
+            displayed_host_line(&[DetailPart::peer("<U+200B>")])
+        );
+        let before = [flow_host(3, "\u{200b}"), flow_host(1, "anchor")];
+        let after = [flow_host(3, "<U+200B>"), flow_host(1, "anchor")];
+        assert!(moved_host_rows(&before, &after, true, &HashSet::new()).is_empty());
+    }
+
+    /// HostId is opaque: select moved prefixes from actual vector positions,
+    /// preserving an earlier anchor and an unchanged equal-height prefix below
+    /// a harmless permutation. Membership also catches a same-index crossing.
+    #[farhelm_testtrace::test]
+    fn host_flow_order_uses_prefix_membership() {
+        let before = [
+            flow_host(3, "same"),
+            flow_host(1, "same"),
+            flow_host(2, "same"),
+        ];
+        let below = [before[0].clone(), before[2].clone(), before[1].clone()];
+        assert_eq!(
+            moved_host_rows(&before, &below, false, &HashSet::new()),
+            [2, 1]
+        );
+        let above = [before[1].clone(), before[0].clone(), before[2].clone()];
+        assert_eq!(
+            moved_host_rows(&before, &above, false, &HashSet::new()),
+            [1, 3]
+        );
+        let crossing = [before[2].clone(), before[1].clone(), before[0].clone()];
+        assert_eq!(
+            moved_host_rows(&before, &crossing, false, &HashSet::new()),
+            [2, 1, 3]
+        );
+        assert!(moved_host_rows(&before, &before, true, &HashSet::new()).is_empty());
+    }
+
+    /// Two disclosed text changes can keep total panel height fixed. The
+    /// middle anchor still moves when a long contribution crosses it, but an
+    /// exchange wholly above it must cancel rather than emit two suffixes.
+    #[farhelm_testtrace::test]
+    fn host_flow_balanced_lines_compare_prefix_multisets() {
+        let empty = HashSet::new();
+        let before = [
+            flow_host(3, "short"),
+            flow_host(1, "short"),
+            flow_host(2, "long detail"),
+        ];
+        let after = [
+            flow_host(3, "long detail"),
+            flow_host(1, "short"),
+            flow_host(2, "short"),
+        ];
+        assert_eq!(moved_host_rows(&before, &after, true, &empty), [1, 2]);
+
+        let below = [
+            flow_host(3, "short"),
+            flow_host(1, "long detail"),
+            flow_host(2, "short"),
+        ];
+        assert_eq!(moved_host_rows(&before, &below, true, &empty), [2]);
+        assert_eq!(moved_host_rows(&below, &after, true, &empty), [1]);
+    }
+
+    /// Detail and remedy containers stack independently. Exchanging only the
+    /// remedies above an anchor must cancel even when each row keeps a different
+    /// detail; pairing an entire row's lines would falsely invalidate it.
+    #[farhelm_testtrace::test]
+    fn host_flow_prefix_keeps_container_multisets_independent() {
+        let skew = |id, build: &str, remedy: &str| Host {
+            id,
+            state: HostPhase::VersionSkew {
+                peer_protocol: 1,
+                peer_build: build.into(),
+                our_protocol: 2,
+                our_build: "current".into(),
+                remediation: remedy.into(),
+            },
+            ..host(HostPhase::Unrecognized)
+        };
+        let before = [
+            skew(3, "first", "short remedy"),
+            skew(1, "second", "longer remedy words"),
+            flow_host(2, "anchor"),
+        ];
+        let after = [
+            skew(3, "first", "longer remedy words"),
+            skew(1, "second", "short remedy"),
+            before[2].clone(),
+        ];
+        assert_eq!(moved_host_rows(&before, &after, true, &HashSet::new()), [1]);
+    }
+
+    /// Hidden details have no flow contribution, while automatic disclosure
+    /// must obey the same rule as the global checkbox. Own-row and lower text
+    /// never invalidate the row's top-aligned header anchor.
+    #[farhelm_testtrace::test]
+    fn host_flow_respects_effective_disclosure_and_own_row() {
+        let before = [flow_host(3, "short"), flow_host(1, "anchor")];
+        let above_changed = [flow_host(3, "long detail"), before[1].clone()];
+        assert!(moved_host_rows(&before, &above_changed, false, &HashSet::new()).is_empty());
+        assert_eq!(
+            moved_host_rows(&before, &above_changed, false, &HashSet::from([3])),
+            [1]
+        );
+        assert!(moved_host_rows(&before, &above_changed, false, &HashSet::from([1])).is_empty());
+        let own_changed = [before[0].clone(), flow_host(1, "changed own detail")];
+        assert!(moved_host_rows(&before, &own_changed, true, &HashSet::new()).is_empty());
+        let mut invisible_changes = before.clone();
+        invisible_changes[0].incarnation += 1;
+        invisible_changes[0].yolo_without_asking = true;
+        invisible_changes[0].name = "new header name".into();
+        assert!(moved_host_rows(&before, &invisible_changes, true, &HashSet::new()).is_empty());
+    }
+
+    /// A multiset must retain duplicate lines: replacing one of two equal
+    /// details changes the prefix even when both spellings were already there.
+    #[farhelm_testtrace::test]
+    fn host_flow_prefix_preserves_line_multiplicity() {
+        let before = [
+            flow_host(3, "short"),
+            flow_host(1, "short"),
+            flow_host(2, "long detail"),
+            flow_host(4, "anchor"),
+        ];
+        let mut after = before.clone();
+        after[0] = flow_host(3, "long detail");
+        assert!(moved_host_rows(&before, &after, true, &HashSet::new()).contains(&4));
+    }
+
+    /// Failure retains the host panel's snapshot even while effective lookup
+    /// becomes Failed for stale sessions. A first mount, failure, and identical
+    /// recovery do not report host movement or invent a previous baseline.
+    #[farhelm_testtrace::test]
+    fn host_flow_uses_retained_snapshot_without_replaying_mount() {
+        let empty = HashSet::new();
+        let first = vec![flow_host(3, "short"), flow_host(1, "anchor")];
+        let mut read = HostsRead::default();
+        let mut current = read.clone();
+        current.record(Ok(first.clone()));
+        assert!(
+            host_rows_moved(
+                read.hosts().map(|shown| HostFlow {
+                    shown,
+                    details_open: true,
+                    auto_details: &empty
+                }),
+                HostFlow {
+                    shown: current.hosts().unwrap(),
+                    details_open: true,
+                    auto_details: &empty
+                },
+            )
+            .is_empty()
+        );
+        read = current;
+        let before = read.clone();
+        read.record(Err("registry refresh refused".into()));
+        assert!(matches!(read.lookup(Some(3)), HostLookup::Failed(_)));
+        assert!(
+            moved_host_rows(before.hosts().unwrap(), read.hosts().unwrap(), true, &empty)
+                .is_empty()
+        );
+        let failed = read.clone();
+        read.record(Ok(first));
+        assert!(matches!(read.lookup(Some(3)), HostLookup::Known(_)));
+        assert!(
+            moved_host_rows(failed.hosts().unwrap(), read.hosts().unwrap(), true, &empty)
+                .is_empty()
+        );
     }
 
     /// Decoding registry text must preserve the bytes that bind a host action,

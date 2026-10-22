@@ -3277,18 +3277,38 @@ test("two provisioning-busy rows reconcile independently", async ({
   // change to how this test OBSERVES the two rows, not to what it proves:
   // each row's own busy state still reconciles independently of the
   // other's, which is what every assertion below still pins.
-  await openHostMenu(rowOne);
-  await expect(rowOne.locator(".host-settings")).toBeDisabled();
-  await openHostMenu(rowTwo);
-  await expect(rowTwo.locator(".host-settings")).toBeDisabled();
+  //
+  // An open host menu now closes when a row above it changes its visible
+  // lines, or when the panel resizes or a setup changes status, since the
+  // menu would otherwise point at stale geometry. Both hosts here are
+  // unreachable, so the helm's connection retries keep rewriting row one's
+  // attempt line (Details is on), and row one's completion reshapes the
+  // panel; a menu opened just before such a change can close before its
+  // item is read. The page's own setup status is the premise for each
+  // phase, and each open-and-check is retried as one unit, well inside the
+  // backend's 30 s action hold. A Settings item in the wrong state fails
+  // every attempt.
+  const running = (row: Locator) => row.locator('[data-provisioning-status="running"]');
+  const settingsReads = async (row: Locator, enabled: boolean) => {
+    await expect(async () => {
+      await openHostMenu(row);
+      const settings = row.locator(".host-settings");
+      if (enabled) await expect(settings).toBeEnabled({ timeout: 1_000 });
+      else await expect(settings).toBeDisabled({ timeout: 1_000 });
+    }).toPass({ timeout: 8_000 });
+  };
+  await expect(running(rowOne), "premise: row one's setup is running on the page").not.toHaveCount(0);
+  await expect(running(rowTwo), "premise: row two's setup is running on the page").not.toHaveCount(0);
+  await settingsReads(rowOne, false);
+  await settingsReads(rowTwo, false);
   await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
 
   await configureBackend({ targets: { [target(second)]: { hold_actions: true } } });
   await waitForProgress(request, one.host_id, "completed");
-  await openHostMenu(rowOne);
-  await expect(rowOne.locator(".host-settings")).toBeEnabled();
-  await openHostMenu(rowTwo);
-  await expect(rowTwo.locator(".host-settings")).toBeDisabled();
+  await expect(running(rowOne), "the page has caught up with row one's completion").toHaveCount(0);
+  await settingsReads(rowOne, true);
+  await expect(running(rowTwo), "premise: row two's setup is still held").not.toHaveCount(0);
+  await settingsReads(rowTwo, false);
 });
 
 /** A retained setup failure opens its rail without a global Details change;
