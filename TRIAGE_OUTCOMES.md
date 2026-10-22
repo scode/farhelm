@@ -17624,7 +17624,9 @@
   generation-zero attempt with a pending reservation (checked in the store transaction, or under the lifecycle lock with
   a recheck as the retained branch does); a store-level test that an advanced generation is not deleted. Size gate:
   about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/refused-retry-rollback-fence.md`.
+- Execution: `complete` within the size gate (about 100 changed lines); draft PR
+  [#2570](https://github.com/scode/farhelm/pull/2570/changes) on bookmark
+  `plan/refused-retry-rollback-fence/01-spare-restarted-session`, jj change `xyyumxlx`.
 
 ## superseding-launcher-may-retain-old-replace-source.md
 

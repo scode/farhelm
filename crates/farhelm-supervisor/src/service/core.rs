@@ -9194,18 +9194,27 @@ impl Supervisor {
             // closed, nothing will ever reconcile that row again, so
             // leaving it would strand a session in the list that can never
             // resolve.
+            //
+            // Only while it is still the untouched attempt: a Restart (or a
+            // Delete) since then owns the row. Nothing is recorded then, so
+            // the reply says the key is not spent.
             Reserved::Retry(reservation) => {
-                let removed = self
-                    .store
-                    .delete_session(
-                        &reservation.session_id,
-                        Some(Settlement {
-                            intent_key: reservation.intent_key.clone(),
-                            session_id: reservation.session_id.clone(),
-                            outcome: ReservationOutcome::Failed { kind, message },
-                        }),
-                    )
-                    .await;
+                let settlement = Settlement {
+                    intent_key: reservation.intent_key.clone(),
+                    session_id: reservation.session_id.clone(),
+                    outcome: ReservationOutcome::Failed { kind, message },
+                };
+                let removed = match self.store.delete_untouched_retry(settlement).await {
+                    Ok(false) => {
+                        return Err(unrecorded_outcome(
+                            refusal,
+                            anyhow::anyhow!(
+                                "skipped: the session was restarted or deleted meanwhile"
+                            ),
+                        ));
+                    }
+                    removed => removed.map(drop),
+                };
                 if removed.is_ok() {
                     self.sessions.lock().await.remove(&reservation.session_id);
                     self.hint_sessions_changed();

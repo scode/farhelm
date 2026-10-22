@@ -15,10 +15,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`template-preservation-promise-omits-last-write-wins.md`](template-preservation-promise-omits-last-write-wins.md) —
   The agent-edit preservation promise omits accepted template overwrites; loss from reliance is conditional.
 
-- [`refused-create-retry-can-delete-restarted-session.md`](refused-create-retry-can-delete-restarted-session.md) — A
-  refused stale create retry can delete a concurrently restarted session; this conditional mechanism predates the review
-  range.
-
 ## High priority: material UX degradation
 
 - [`shell-inspection-drains-exhaust-planning-pool.md`](shell-inspection-drains-exhaust-planning-pool.md) — Pipe-draining
