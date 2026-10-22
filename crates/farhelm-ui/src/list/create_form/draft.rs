@@ -8,12 +8,40 @@
 
 use dioxus::prelude::*;
 
+use crate::github_checkout::GithubPreview;
 use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, api};
 
 use super::{
-    CheckoutNameSource, CheckoutNaming, CommandLaunch, CreateTarget, DestinationDraft, GithubRepo,
-    LaunchIntent, LaunchTab, command_intent, display_peer, effective_title, submitted_field,
+    CheckoutNameSource, CheckoutNaming, CommandLaunch, CreateTarget, DestinationDraft,
+    GithubCheckoutRequest, GithubRepo, HostId, IntentBinding, LaunchIntent, LaunchTab,
+    active_prompt, command_intent, display_peer, effective_title, submitted_field,
 };
+
+/// External or deliberately frozen facts for one envelope projection.
+/// The host pair comes from the selected row initially and the binding after
+/// minting; a retained binding must not acquire a newer row's incarnation.
+/// These borrows last only for assembly, never as another mutable state owner.
+/// Supplying them does not establish that submission admission has succeeded.
+pub(super) struct RequestContext<'a> {
+    pub(super) host: Option<(HostId, &'a str)>,
+    pub(super) launch: LaunchIntent,
+    pub(super) replace_source: Option<&'a str>,
+    pub(super) checkout: Option<CheckoutInput<'a>>,
+}
+
+/// A new admitted preview and a previously accepted checkout have different
+/// title contracts. Refreshing a binding may change its title without rewriting
+/// the accepted checkout's original title, path or preview/configuration facts.
+pub(super) enum CheckoutInput<'a> {
+    Preview {
+        repo: &'a GithubRepo,
+        preview: &'a GithubPreview,
+    },
+    Accepted {
+        cwd: &'a str,
+        request: &'a GithubCheckoutRequest,
+    },
+}
 
 /// Accepted launch choices and their raw-text ownership, retained across tabs.
 ///
@@ -21,7 +49,8 @@ use super::{
 /// text must remain available for correction. The request projection does not
 /// replace the form's ordered admission checks. Preview replies and host
 /// authority stay outside semantic destination ownership. Both tab drafts and
-/// one-time inputs survive mode changes; only the active intent is submitted.
+/// one-time inputs survive mode changes; request() uses the caller's frozen
+/// launch variant even if later edits have selected a different tab.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct LaunchDraft {
     harness: Option<LaunchHarness>,
@@ -466,7 +495,7 @@ impl LaunchDraft {
     /// Malformed wrapper text is omitted because render-time retry matching has always
     /// been lenient; actual submission must first enforce its wrapper guard.
     /// Custom flags likewise retain the existing caller-owned validation order.
-    pub(super) fn request(&self) -> Option<LaunchIntent> {
+    pub(super) fn launch_intent(&self) -> Option<LaunchIntent> {
         match self.tab {
             LaunchTab::Agent => self.structured_selection().map(LaunchIntent::Structured),
             LaunchTab::Command => command_intent(
@@ -486,6 +515,63 @@ impl LaunchDraft {
             )
             .map(LaunchIntent::Command),
         }
+    }
+
+    /// Assemble one complete binding from this draft and caller-accepted facts.
+    ///
+    /// This projection grants no submission authority. In particular an
+    /// unselected repository query still produces a candidate, so submit keeps
+    /// its existing prompt/selector/destination refusal order. Only an absent
+    /// host produces None; context.launch is already selected or frozen by the
+    /// caller, which need not have admitted this candidate. Wrapper, custom
+    /// flags, prompt and command validation stay with the ordered caller guards.
+    pub(super) fn request(&self, context: RequestContext<'_>) -> Option<IntentBinding> {
+        let (host, incarnation) = context.host?;
+        let title = self.effective_title();
+        let (cwd, github_checkout) = match context.checkout {
+            None => (
+                match &self.destination {
+                    DestinationDraft::Existing { cwd } => cwd.clone(),
+                    DestinationDraft::GithubInput { .. } | DestinationDraft::Github { .. } => {
+                        self.submitted_cwd()
+                    }
+                },
+                None,
+            ),
+            Some(CheckoutInput::Preview { repo, preview }) => (
+                preview.cwd.raw().to_owned(),
+                Some(GithubCheckoutRequest {
+                    repo: repo.identifier(),
+                    title: Some(title.clone()),
+                    preview: preview.clone(),
+                }),
+            ),
+            Some(CheckoutInput::Accepted { cwd, request }) => {
+                (cwd.to_owned(), Some(request.clone()))
+            }
+        };
+        let (prompt, conversation) = match &context.launch {
+            LaunchIntent::Structured(selection) => (
+                active_prompt(
+                    farhelm_proto::launcher::LauncherKind::Agent,
+                    Some(selection.harness),
+                    &self.prompt,
+                ),
+                (!self.conversation.is_empty()).then(|| self.conversation.clone()),
+            ),
+            LaunchIntent::Command(_) => (None, None),
+        };
+        Some(IntentBinding {
+            prompt,
+            conversation,
+            host,
+            incarnation: incarnation.to_owned(),
+            cwd,
+            github_checkout,
+            agent: context.launch,
+            title,
+            replace_source: context.replace_source.map(str::to_owned),
+        })
     }
 
     /// Reuse structured normalization after the post-mint missing-agent and
@@ -889,6 +975,49 @@ pub(super) fn use_launch_draft(
 mod tests {
     use super::*;
 
+    /// Initial destination resolution and post-mint raw reads must describe the
+    /// same folder. Exercise actual ownership transitions before relying on the
+    /// operational path as the request builder's one ordinary-folder rule.
+    #[test]
+    fn existing_destination_and_submitted_folder_agree_through_transitions() {
+        let assert_linked = |draft: &LaunchDraft| {
+            let DestinationDraft::Existing { cwd } = draft.destination() else {
+                panic!("premise: the transition selected an existing folder");
+            };
+            assert_eq!(cwd, draft.submitted_cwd());
+        };
+        let mut draft = LaunchDraft::new(None);
+        assert_linked(&draft);
+        let raw = "/work/source\u{1b}";
+        draft.seed_folder(raw);
+        let display = draft.cwd();
+        assert_ne!(display, raw, "premise: the seed requires display escaping");
+        assert_linked(&draft);
+        assert_eq!(draft.submitted_cwd(), raw);
+        draft.choose_destination_type(true);
+        draft.edit_repository_query("acme/repo".into());
+        draft.select_repository(GithubRepo::parse("acme/repo").unwrap());
+        draft.choose_destination_type(false);
+        assert_linked(&draft);
+        assert_eq!(draft.submitted_cwd(), raw);
+        draft.edit_folder(display.clone());
+        assert_linked(&draft);
+        assert_eq!(
+            draft.submitted_cwd(),
+            display,
+            "a literal edit owns the escaped spelling"
+        );
+        draft.choose_existing_folder(raw);
+        assert_linked(&draft);
+        assert_eq!(draft.submitted_cwd(), raw);
+        draft.seed_folder(&display);
+        assert_linked(&draft);
+        let before = draft.clone();
+        draft.edit_folder("/different".into());
+        draft.restore(before);
+        assert_linked(&draft);
+    }
+
     /// Linked placement must preserve raw ownership and dormant editors across
     /// managed mode. Display equality is deliberately insufficient evidence.
     #[test]
@@ -1075,13 +1204,273 @@ mod tests {
         );
     }
 
+    /// Use the real envelope builder with fixed external facts. This helper
+    /// supplies no alternate field projection or host/preview admission policy.
+    fn request(draft: &LaunchDraft) -> IntentBinding {
+        draft
+            .request(RequestContext {
+                host: Some((1, "fixture-incarnation")),
+                launch: draft
+                    .launch_intent()
+                    .expect("the fixture has a complete active intent"),
+                replace_source: None,
+                checkout: None,
+            })
+            .expect("the fixture supplies its accepted host fact")
+    }
+
+    /// A fixed admitted reply makes changes to draft naming and connection
+    /// context distinguishable from the checkout facts that must stay frozen.
+    fn accepted_preview() -> GithubPreview {
+        GithubPreview {
+            canonical_root: "/accepted".into(),
+            basename: "checkout".into(),
+            cwd: "/accepted/checkout".into(),
+            config_revision: 7,
+            host: "1".into(),
+            incarnation: 4,
+            installation_identity: "install-a".into(),
+        }
+    }
+
+    /// The complete envelope retains raw peer bytes and one-time literal
+    /// inputs together. Default normalization belongs to the launch projection;
+    /// parsing or trimming the surrounding fields would change retry identity.
+    #[test]
+    fn request_assembles_host_raw_placement_and_structured_one_time_inputs() {
+        let mut draft = LaunchDraft::new(None);
+        draft.choose_harness(
+            LaunchHarness::Codex,
+            None,
+            String::new(),
+            ChoiceOrigin::Control,
+        );
+        draft.choose_permissions(Some(LaunchPermission::Custom));
+        draft.edit_permission_flags("--mode 'ask me'".into());
+        draft.edit_wrapper("prefix 'two words'".into());
+        draft.seed_folder("/work/peer\u{202e}");
+        draft.seed_title("name\u{202e}", None);
+        draft.edit_prompt("--literal\nsecond line".into());
+        draft.edit_conversation("literal-conversation".into());
+        let binding = draft
+            .request(RequestContext {
+                host: Some((4, "press-incarnation")),
+                launch: draft.launch_intent().unwrap(),
+                replace_source: Some("replace-source"),
+                checkout: None,
+            })
+            .unwrap();
+        assert_eq!(
+            binding,
+            IntentBinding {
+                host: 4,
+                incarnation: "press-incarnation".into(),
+                cwd: "/work/peer\u{202e}".into(),
+                title: "name\u{202e}".into(),
+                prompt: Some("--literal\nsecond line".into()),
+                conversation: Some("literal-conversation".into()),
+                github_checkout: None,
+                agent: LaunchIntent::Structured(LaunchSelection {
+                    harness: LaunchHarness::Codex,
+                    model: None,
+                    effort: None,
+                    permissions: Some(LaunchPermission::Custom),
+                    permission_flags: Some(vec!["--mode".into(), "ask me".into()]),
+                    wrapper_prefix: Some(vec!["prefix".into(), "two words".into()]),
+                    workspace_trust: None,
+                }),
+                replace_source: Some("replace-source".into()),
+            }
+        );
+        draft.apply_template_prompt(Some(String::new()));
+        assert_eq!(request(&draft).prompt, Some(String::new()));
+        draft.edit_folder(draft.cwd());
+        assert_eq!(request(&draft).cwd, "/work/peer<U+202E>");
+        draft.edit_title(" \t".into());
+        assert_eq!(
+            request(&draft).title,
+            " \t",
+            "request assembly does not normalize blank titles"
+        );
+        draft.choose_harness(
+            LaunchHarness::Pi,
+            None,
+            String::new(),
+            ChoiceOrigin::Control,
+        );
+        assert_eq!(
+            request(&draft).prompt,
+            None,
+            "unsupported agents omit the dormant prompt"
+        );
+        assert_eq!(
+            draft.prompt(),
+            Some(String::new()),
+            "projection does not destroy template presence"
+        );
+    }
+
+    /// A preliminary binding is not destination admission. Refusing a query
+    /// inside the builder would move it ahead of the caller's prompt errors.
+    #[test]
+    fn request_keeps_unselected_repository_as_a_preliminary_candidate() {
+        let mut draft = LaunchDraft::new(None);
+        draft.choose_harness(
+            LaunchHarness::Codex,
+            None,
+            String::new(),
+            ChoiceOrigin::Control,
+        );
+        draft.seed_folder("/dormant/peer\u{1b}");
+        draft.edit_repository_query("acme/repo".into());
+        assert_eq!(
+            draft.destination().repo(),
+            None,
+            "premise: parseable text is still unselected"
+        );
+        let binding = request(&draft);
+        assert_eq!(binding.cwd, "/dormant/peer\u{1b}");
+        assert_eq!(binding.github_checkout, None);
+    }
+
+    /// A post-mint structured refresh changes current choices and binding title,
+    /// while preserving accepted checkout title/path/configuration and the
+    /// original host/source facts. New preview assembly has a different rule.
+    #[test]
+    fn request_distinguishes_new_preview_from_an_accepted_checkout() {
+        let mut draft = LaunchDraft::new(None);
+        draft.choose_harness(
+            LaunchHarness::Codex,
+            None,
+            String::new(),
+            ChoiceOrigin::Control,
+        );
+        draft.edit_title("first-title".into());
+        let repo = GithubRepo::parse("acme/repo").unwrap();
+        draft.select_repository(repo.clone());
+        let preview = accepted_preview();
+        let first = draft
+            .request(RequestContext {
+                host: Some((1, "original-incarnation")),
+                launch: draft.launch_intent().unwrap(),
+                replace_source: Some("original-source"),
+                checkout: Some(CheckoutInput::Preview {
+                    repo: &repo,
+                    preview: &preview,
+                }),
+            })
+            .unwrap();
+        let checkout = first.github_checkout.as_ref().unwrap();
+        assert_eq!(first.cwd, preview.cwd.raw());
+        assert_eq!(checkout.repo, repo.identifier());
+        assert_eq!(checkout.title.as_deref(), Some("first-title"));
+        assert_eq!(checkout.preview, preview);
+        draft.edit_title(String::new());
+        let unnamed = draft
+            .request(RequestContext {
+                host: Some((first.host, &first.incarnation)),
+                launch: first.agent.clone(),
+                replace_source: first.replace_source.as_deref(),
+                checkout: Some(CheckoutInput::Preview {
+                    repo: &repo,
+                    preview: &preview,
+                }),
+            })
+            .unwrap();
+        assert_eq!(unnamed.title, "");
+        assert_eq!(
+            unnamed.github_checkout.unwrap().title,
+            Some(String::new()),
+            "an unnamed preview keeps the existing explicit empty title projection"
+        );
+        draft.edit_title("new-title".into());
+        draft.select_repository(GithubRepo::parse("other/repo").unwrap());
+        draft.choose_custom_model("new-model".into(), LaunchHarness::Codex, None);
+        draft.edit_prompt("new prompt".into());
+        draft.edit_conversation("new-conversation".into());
+        // Accepted cwd is an input fact, not a value reconstructed from preview.
+        let frozen_cwd = "/accepted/path-spelling";
+        let after = draft
+            .request(RequestContext {
+                host: Some((first.host, &first.incarnation)),
+                launch: LaunchIntent::Structured(draft.structured_selection().unwrap()),
+                replace_source: first.replace_source.as_deref(),
+                checkout: Some(CheckoutInput::Accepted {
+                    cwd: frozen_cwd,
+                    request: checkout,
+                }),
+            })
+            .unwrap();
+        assert_eq!(after.host, first.host);
+        assert_eq!(after.incarnation, "original-incarnation");
+        assert_eq!(after.replace_source, first.replace_source);
+        assert_eq!(after.cwd, frozen_cwd);
+        assert_eq!(after.github_checkout, first.github_checkout);
+        assert_eq!(after.title, "new-title");
+        assert_eq!(after.prompt.as_deref(), Some("new prompt"));
+        assert_eq!(after.conversation.as_deref(), Some("new-conversation"));
+        let LaunchIntent::Structured(selection) = after.agent else {
+            panic!("the ordered recheck supplied Structured");
+        };
+        assert_eq!(selection.model.as_deref(), Some("new-model"));
+    }
+
+    /// Command freezes at the press even if a queued edit changes both tabs.
+    /// The envelope must project one-time inputs from that frozen variant, not
+    /// from today's selected tab or supported dormant structured harness.
+    #[test]
+    fn request_keeps_frozen_command_and_accepted_context_after_tab_edits() {
+        let mut draft = LaunchDraft::new(None);
+        draft.choose_tab(LaunchTab::Command);
+        draft.edit_invocation("original-command".into());
+        draft.choose_command_yolo(false);
+        let frozen = request(&draft);
+        let repo = GithubRepo::parse("acme/repo").unwrap();
+        let checkout = GithubCheckoutRequest {
+            repo: repo.identifier(),
+            title: Some("accepted-title".into()),
+            preview: accepted_preview(),
+        };
+        draft.choose_harness(
+            LaunchHarness::Codex,
+            None,
+            String::new(),
+            ChoiceOrigin::Control,
+        );
+        draft.choose_tab(LaunchTab::Agent);
+        draft.edit_invocation("later-command".into());
+        draft.choose_command_yolo(true);
+        draft.edit_title("current-title".into());
+        draft.edit_prompt("current prompt".into());
+        draft.edit_conversation("current-conversation".into());
+        assert!(
+            matches!(draft.launch_intent(), Some(LaunchIntent::Structured(_))),
+            "premise: the active draft now describes another variant"
+        );
+        let after = draft
+            .request(RequestContext {
+                host: Some((frozen.host, &frozen.incarnation)),
+                launch: frozen.agent.clone(),
+                replace_source: Some("frozen-source"),
+                checkout: Some(CheckoutInput::Accepted {
+                    cwd: "/frozen/path",
+                    request: &checkout,
+                }),
+            })
+            .unwrap();
+        assert_eq!(after.agent, frozen.agent);
+        assert_eq!(after.incarnation, frozen.incarnation);
+        assert_eq!(after.cwd, "/frozen/path");
+        assert_eq!(after.github_checkout, Some(checkout));
+        assert_eq!(after.replace_source.as_deref(), Some("frozen-source"));
+        assert_eq!(after.title, "current-title");
+        assert_eq!((after.prompt, after.conversation), (None, None));
+    }
+
     /// Assertions about agent choices must exercise the active request builder,
     /// rather than bypass tab selection through its normalization helper.
     fn structured(draft: &LaunchDraft) -> LaunchSelection {
-        match draft
-            .request()
-            .expect("the fixture has a complete active intent")
-        {
+        match request(draft).agent {
             LaunchIntent::Structured(selection) => selection,
             LaunchIntent::Command(_) => panic!("the fixture selects the agent tab"),
         }
@@ -1090,10 +1479,7 @@ mod tests {
     /// Inspect the actual command payload without rebuilding its ownership or
     /// hidden-resume rules inside the test.
     fn command(draft: &LaunchDraft) -> CommandLaunch {
-        match draft
-            .request()
-            .expect("the fixture has an answered command assertion")
-        {
+        match request(draft).agent {
             LaunchIntent::Command(command) => command,
             LaunchIntent::Structured(_) => panic!("the fixture selects the command tab"),
         }
@@ -1500,7 +1886,7 @@ mod tests {
             assert_eq!(saved.command_agent, None);
             assert_eq!(
                 saved.resume_command,
-                before.request().and_then(|intent| match intent {
+                before.launch_intent().and_then(|intent| match intent {
                     LaunchIntent::Command(command) => command.resume,
                     LaunchIntent::Structured(_) => None,
                 }),
@@ -1604,6 +1990,62 @@ mod tests {
             "raw seeds do not acquire a new preview subscription"
         );
 
+        dom.in_runtime(|| {
+            assert_eq!(
+                fields.cwd.peek().as_str(),
+                "~",
+                "premise: placement memos still hold the initial folder"
+            );
+            assert_eq!(fields.title.peek().as_str(), "");
+            owner.edit(|draft| {
+                draft.choose_harness(
+                    LaunchHarness::Claude,
+                    None,
+                    String::new(),
+                    ChoiceOrigin::Control,
+                );
+                draft.choose_tab(LaunchTab::Agent);
+                draft.seed_folder("/work/current\u{202e}");
+                draft.seed_title("current-name\u{202e}", None);
+                draft.edit_prompt("same-turn prompt".into());
+                draft.edit_conversation("same-turn-conversation".into());
+            });
+            assert_eq!(fields.cwd.peek().as_str(), "~");
+            assert_eq!(fields.title.peek().as_str(), "");
+            assert_eq!(
+                *fields.structured_harness.peek(),
+                Some(LaunchHarness::Codex)
+            );
+            let binding = request(&owner.snapshot());
+            assert_eq!(binding.cwd, "/work/current\u{202e}");
+            assert_eq!(binding.title, "current-name\u{202e}");
+            assert_eq!(binding.prompt.as_deref(), Some("same-turn prompt"));
+            assert_eq!(
+                binding.conversation.as_deref(),
+                Some("same-turn-conversation")
+            );
+            assert!(matches!(
+                binding.agent,
+                LaunchIntent::Structured(LaunchSelection {
+                    harness: LaunchHarness::Claude,
+                    ..
+                })
+            ));
+        });
+        dom.process_events();
+        dom.in_runtime(|| {
+            assert_eq!(fields.cwd.peek().as_str(), "/work/current<U+202E>");
+            assert_eq!(fields.title.peek().as_str(), "current-name<U+202E>");
+            assert_eq!(
+                *fields.structured_harness.peek(),
+                Some(LaunchHarness::Claude)
+            );
+            assert_eq!(fields.prompt.peek().as_deref(), Some("same-turn prompt"));
+            assert_eq!(
+                fields.conversation.peek().as_str(),
+                "same-turn-conversation"
+            );
+        });
         assert_eq!(
             RENDERS.with(Cell::get),
             1,
@@ -1616,7 +2058,7 @@ mod tests {
     #[test]
     fn request_requires_an_agent_and_preserves_raw_editor_text() {
         let mut draft = LaunchDraft::new(None);
-        assert_eq!(draft.request(), None);
+        assert_eq!(draft.launch_intent(), None);
         draft.choose_harness(
             LaunchHarness::Codex,
             None,
@@ -1850,7 +2292,7 @@ mod tests {
         let mut draft = LaunchDraft::new(None);
         draft.choose_tab(LaunchTab::Command);
         draft.edit_invocation("c {farhelm_args}".into());
-        assert_eq!(draft.request(), None);
+        assert_eq!(draft.launch_intent(), None);
         draft.choose_command_yolo(true);
         draft.choose_command_agent(Some(LaunchHarness::Claude));
         draft.apply_template_resume(Some("c --resume {conversation} {farhelm_args}".into()));
@@ -2089,6 +2531,6 @@ mod tests {
         assert_ne!(draft, before, "premise: every owned group has changed");
         draft.restore(before.clone());
         assert_eq!(draft, before);
-        assert_eq!(draft.request(), before.request());
+        assert_eq!(draft.launch_intent(), before.launch_intent());
     }
 }

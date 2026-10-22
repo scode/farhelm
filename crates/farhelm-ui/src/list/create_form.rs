@@ -4,11 +4,15 @@
 //! define when an idempotency key still describes the submitted create.
 //! Accepted tab choices, one-time inputs and placement live in `draft`; this
 //! module keeps preview observations, reactive subscriptions and the ordered
-//! host/submission guards.
+//! host/submission guards. The draft assembles every complete request from the
+//! caller's accepted facts, including the variant and checkout frozen at a press.
 
 mod draft;
 
-use draft::{ChoiceOrigin, DraftFields, LaunchDraft, LaunchDraftState, use_launch_draft};
+use draft::{
+    CheckoutInput, ChoiceOrigin, DraftFields, LaunchDraft, LaunchDraftState, RequestContext,
+    use_launch_draft,
+};
 
 use dioxus::prelude::*;
 use farhelm_proto::github_checkout::CheckoutNameSequence;
@@ -1250,6 +1254,10 @@ fn take_launcher_guarded_answer(
 ///   against this, which turns that gap into another mint rather than a key
 ///   that describes something the user did not submit — the attributes are
 ///   honesty about a create being in flight, not the guard.
+///
+/// LaunchDraft::request is the one envelope assembler. Admission stays with the
+/// form: a preliminary binding can exist before a repository preview is usable,
+/// while a retained managed attempt keeps its original binding and wire body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct IntentBinding {
     /// One-time first message; retries bind its exact bytes, never saved history.
@@ -1281,32 +1289,6 @@ struct IntentBinding {
     /// instead of `api::create_session` (see that call site's own
     /// comment).
     replace_source: Option<String>,
-}
-
-impl IntentBinding {
-    /// The binding for a submit, or `None` when there is no host to create
-    /// on — the one case a submit is refused locally rather than sent.
-    fn of(
-        selected: Option<HostId>,
-        hosts: &[HostOption],
-        cwd: String,
-        agent: LaunchIntent,
-        title: String,
-        replace_source: Option<String>,
-    ) -> Option<IntentBinding> {
-        let host = hosts.iter().find(|host| Some(host.id) == selected)?;
-        Some(IntentBinding {
-            prompt: None,
-            conversation: None,
-            host: host.id,
-            incarnation: host.incarnation.clone(),
-            cwd,
-            github_checkout: None,
-            agent,
-            title,
-            replace_source,
-        })
-    }
 }
 
 /// Reconciliation follows user intent and installation, not the latest config
@@ -3171,9 +3153,9 @@ pub(super) fn CreateSessionForm(
     // Display, preview authority, retry binding, submit, draft snapshot and
     // request-key re-read must share this policy. A stray raw-title read
     // would make the create disagree with its preview and be refused as stale.
-    let title_for_launch = move || {
-        // Preserve field subscriptions, but an imperative call in the same
-        // event turn must see accepted owner edits before those memos settle.
+    // Request assembly is plain; callers retain these exact subscriptions
+    // even when an early refusal prevents a complete binding from existing.
+    let observe_title_fields = move || {
         let _ = (
             destination_draft(),
             clone_checkout_naming(),
@@ -3181,6 +3163,9 @@ pub(super) fn CreateSessionForm(
             title(),
             title_edited(),
         );
+    };
+    let title_for_launch = move || {
+        observe_title_fields();
         draft.snapshot().effective_title()
     };
     let mut proposed_authority = destination_draft().repo().cloned().and_then(|repo| {
@@ -3381,27 +3366,22 @@ pub(super) fn CreateSessionForm(
                 command_resume_edited(),
             );
         }
-        draft.snapshot().request()
+        draft.snapshot().launch_intent()
     };
     let retry_binding = current_launch.and_then(|launch| {
-        let mut binding = IntentBinding::of(
-            selected,
-            &hosts,
-            cwd(),
+        let _ = cwd();
+        observe_title_fields();
+        let binding = draft.snapshot().request(RequestContext {
+            host: hosts
+                .iter()
+                .find(|host| Some(host.id) == selected)
+                .map(|host| (host.id, host.incarnation.as_str())),
             launch,
-            title_for_launch(),
-            prefill_for_submit
+            replace_source: prefill_for_submit
                 .as_ref()
-                .and_then(|prefill| prefill.replace_source.clone()),
-        )?;
-        binding.prompt = match &binding.agent {
-            LaunchIntent::Structured(selection) => active_prompt(
-                farhelm_proto::launcher::LauncherKind::Agent,
-                Some(selection.harness),
-                &draft.snapshot().prompt(),
-            ),
-            LaunchIntent::Command(_) => None,
-        };
+                .and_then(|prefill| prefill.replace_source.as_deref()),
+            checkout: None,
+        })?;
         let destination = destination_draft();
         let repo = destination.repo()?;
         let installation = hosts
@@ -4603,34 +4583,29 @@ pub(super) fn CreateSessionForm(
             if current.tab() != LaunchTab::Agent {
                 return None;
             }
-            let harness = current.harness()?;
+            current.harness()?;
             wrapper_words(&current.wrapper()).ok()?;
-            let LaunchIntent::Structured(selection) = current.request()? else {
+            let LaunchIntent::Structured(selection) = current.launch_intent()? else {
                 return None;
             };
             let selected = effective_create_host(&hosts, *chosen_host.peek(), open_host.as_ref());
             if !target_matches_selection(selected, &hosts, create_target.peek().as_ref()) {
                 return None;
             }
-            let mut binding = IntentBinding::of(
-                selected,
-                &hosts,
-                current.submitted_cwd(),
-                LaunchIntent::Structured(selection),
-                title_for_launch(),
-                prefill
+            observe_title_fields();
+            let mut binding = current.request(RequestContext {
+                host: hosts
+                    .iter()
+                    .find(|host| Some(host.id) == selected)
+                    .map(|host| (host.id, host.incarnation.as_str())),
+                launch: LaunchIntent::Structured(selection),
+                replace_source: prefill
                     .as_ref()
-                    .and_then(|prefill| prefill.replace_source.clone()),
-            )?;
-            binding.prompt = active_prompt(
-                farhelm_proto::launcher::LauncherKind::Agent,
-                Some(harness),
-                &current.prompt(),
-            );
-            binding.conversation =
-                (!current.conversation().is_empty()).then(|| current.conversation());
+                    .and_then(|prefill| prefill.replace_source.as_deref()),
+                checkout: None,
+            })?;
             match current.destination() {
-                DestinationDraft::Existing { cwd } => binding.cwd = cwd,
+                DestinationDraft::Existing { .. } => {}
                 DestinationDraft::Github { repo, .. } => {
                     let authority = live_preview_authority.peek().clone()?;
                     if authority.repo != repo || authority.agent != preview_agent_now() {
@@ -4648,8 +4623,15 @@ pub(super) fn CreateSessionForm(
                     // The refused request owns this exact preview and cwd.
                     // Reconciliation may retain them across a newer offer;
                     // admission must compare that request, not replace it.
-                    binding.cwd = refused.cwd;
-                    binding.github_checkout = refused.github_checkout;
+                    binding = current.request(RequestContext {
+                        host: Some((binding.host, &binding.incarnation)),
+                        launch: binding.agent.clone(),
+                        replace_source: binding.replace_source.as_deref(),
+                        checkout: Some(CheckoutInput::Accepted {
+                            cwd: &refused.cwd,
+                            request: refused.github_checkout.as_ref()?,
+                        }),
+                    })?;
                 }
                 DestinationDraft::GithubInput { .. } => return None,
             }
@@ -4746,7 +4728,7 @@ pub(super) fn CreateSessionForm(
                 // builder, including synchronous guarded-preview submission.
                 let _ = structured_permission_flags();
                 current
-                    .request()
+                    .launch_intent()
                     .expect("the live harness was checked above")
             } else {
                 // The RAW bytes while untouched, not the escaped display
@@ -4759,7 +4741,7 @@ pub(super) fn CreateSessionForm(
                     error.set(Some("enter an agent command before launching".to_string()));
                     return;
                 }
-                let Some(launch) = current.request() else {
+                let Some(launch) = current.launch_intent() else {
                     error.set(Some(
                         "say whether this command runs in YOLO mode (YOLO) before \
                          launching"
@@ -4853,14 +4835,17 @@ pub(super) fn CreateSessionForm(
             // still blank. Saying so beats creating on a machine the
             // user was never shown.
             let _ = (cwd(), cwd_edited());
-            let Some(mut binding) = IntentBinding::of(
-                selected_now,
-                &hosts,
-                draft.snapshot().submitted_cwd(),
+            observe_title_fields();
+            let current = draft.snapshot();
+            let Some(mut binding) = current.request(RequestContext {
+                host: hosts
+                    .iter()
+                    .find(|host| Some(host.id) == selected_now)
+                    .map(|host| (host.id, host.incarnation.as_str())),
                 launch,
-                title_for_launch(),
-                replace_source,
-            ) else {
+                replace_source: replace_source.as_deref(),
+                checkout: None,
+            }) else {
                 error.set(Some(if hosts_loaded {
                     "this helm reported no hosts at all, so there is nothing to create on"
                         .to_string()
@@ -4873,30 +4858,16 @@ pub(super) fn CreateSessionForm(
                 drop(op_guard);
                 return;
             };
-            let current = draft.snapshot();
-            binding.conversation = if matches!(binding.agent, LaunchIntent::Structured(_)) {
-                // This tracked read also belongs to a synchronously calling
-                // guarded-submit effect; the snapshot supplies same-turn values.
+            // A guarded-preview effect can call submit synchronously. Keep
+            // its old conditional subscriptions while request() alone supplies
+            // the projected values used by the ordered validations below.
+            if matches!(binding.agent, LaunchIntent::Structured(_)) {
                 let _ = conversation();
-                let conversation_text = current.conversation();
-                (!conversation_text.is_empty()).then(|| {
+                if binding.conversation.is_some() {
                     let _ = conversation();
-                    conversation_text
-                })
-            } else {
-                None
-            };
-            binding.prompt = match &binding.agent {
-                LaunchIntent::Structured(selection) => {
-                    let _ = prompt();
-                    active_prompt(
-                        farhelm_proto::launcher::LauncherKind::Agent,
-                        Some(selection.harness),
-                        &current.prompt(),
-                    )
                 }
-                LaunchIntent::Command(_) => None,
-            };
+                let _ = prompt();
+            }
             if let Some(message) = &binding.prompt {
                 let refusal = farhelm_proto::launcher::check_initial_prompt(message).err()
                     .or_else(|| match &binding.agent {
@@ -4953,9 +4924,7 @@ pub(super) fn CreateSessionForm(
             let fresh_snapshot = fresh_draft_snapshot();
             let mut replaying_fresh = false;
             match draft.snapshot().destination() {
-                DestinationDraft::Existing { cwd } => {
-                    binding.cwd = cwd;
-                }
+                DestinationDraft::Existing { .. } => {}
                 DestinationDraft::GithubInput { .. } => {
                     error.set(Some("select a GitHub repository before launching".into()));
                     return;
@@ -4992,12 +4961,20 @@ pub(super) fn CreateSessionForm(
                         && authority.agent == preview_agent_now()
                         && *preview_revision.peek() == *applied_preview_revision.peek()
                     {
-                        binding.cwd = preview.cwd.raw().to_owned();
-                        binding.github_checkout = Some(GithubCheckoutRequest {
-                            repo: repo.identifier(),
-                            title: Some(binding.title.clone()),
-                            preview,
-                        });
+                        // No await separates the preliminary binding and this
+                        // admitted preview: reuse its draft snapshot and frozen
+                        // launch rather than reading a different checkout title.
+                        binding = current
+                            .request(RequestContext {
+                                host: Some((binding.host, &binding.incarnation)),
+                                launch: binding.agent.clone(),
+                                replace_source: binding.replace_source.as_deref(),
+                                checkout: Some(CheckoutInput::Preview {
+                                    repo: &repo,
+                                    preview: &preview,
+                                }),
+                            })
+                            .expect("the preliminary binding already resolved its host");
                     } else {
                         error.set(Some(
                             "wait for a current checkout preview before launching".into(),
@@ -5122,7 +5099,7 @@ pub(super) fn CreateSessionForm(
                     // of the render that disables controls. Re-read that
                     // complete declarative intent so the next key binds
                     // exactly what the person now sees.
-                    if matches!(binding.agent, LaunchIntent::Structured(_)) {
+                    let launch = if matches!(binding.agent, LaunchIntent::Structured(_)) {
                         let current = draft.snapshot();
                         if current.harness().is_none() {
                             error.set(Some(
@@ -5155,32 +5132,31 @@ pub(super) fn CreateSessionForm(
                             drop(op_guard);
                             return;
                         }
-                        binding.agent = LaunchIntent::Structured(selection);
-                    }
-                    let current = draft.snapshot();
-                    binding = IntentBinding {
-                        prompt: match &binding.agent {
-                            LaunchIntent::Structured(selection) => active_prompt(
-                                farhelm_proto::launcher::LauncherKind::Agent,
-                                Some(selection.harness),
-                                &current.prompt(),
-                            ),
-                            LaunchIntent::Command(_) => None,
-                        },
-                        conversation: (matches!(binding.agent, LaunchIntent::Structured(_))
-                            && !current.conversation().is_empty())
-                        .then(|| current.conversation()),
-                        cwd: if binding.github_checkout.is_some() {
-                            binding.cwd.clone()
-                        } else {
-                            current.submitted_cwd()
-                        },
-                        // Re-read through the preview's effective-name
-                        // policy. The operation gate fixes the destination
-                        // during key minting; the snapshot check catches drift.
-                        title: title_for_launch(),
-                        ..binding
+                        LaunchIntent::Structured(selection)
+                    } else {
+                        binding.agent.clone()
                     };
+                    let current = draft.snapshot();
+                    observe_title_fields();
+                    // A managed path/checkout stays the accepted snapshot.
+                    // The binding's host facts also stay frozen, including an
+                    // older retained attempt's incarnation after reconnect.
+                    let checkout =
+                        binding
+                            .github_checkout
+                            .as_ref()
+                            .map(|request| CheckoutInput::Accepted {
+                                cwd: &binding.cwd,
+                                request,
+                            });
+                    binding = current
+                        .request(RequestContext {
+                            host: Some((binding.host, &binding.incarnation)),
+                            launch,
+                            replace_source: binding.replace_source.as_deref(),
+                            checkout,
+                        })
+                        .expect("an accepted binding retains its host");
                 };
                 // Key, fields, host AND creation mode all travel from ONE
                 // value, so there is no arrangement of edits or reads in
@@ -7604,15 +7580,18 @@ mod tests {
     /// repo, title or replacement source. Ordinary bindings never qualify.
     #[test]
     fn fresh_retry_matches_user_intent_independently_of_current_preview() {
-        let mut original = IntentBinding::of(
-            Some(1),
-            &[option(1, "target", true)],
-            "/old/bar-1".into(),
-            LaunchIntent::Command(test_command("agent-a")),
-            "work".into(),
-            Some("source-a".into()),
-        )
-        .unwrap();
+        let host = option(1, "target", true);
+        let mut draft = LaunchDraft::new(None);
+        draft.edit_folder("/old/bar-1".into());
+        draft.edit_title("work".into());
+        let mut original = draft
+            .request(RequestContext {
+                host: Some((host.id, &host.incarnation)),
+                launch: LaunchIntent::Command(test_command("agent-a")),
+                replace_source: Some("source-a"),
+                checkout: None,
+            })
+            .unwrap();
         let repo = GithubRepo::parse("acme/bar").unwrap();
         original.github_checkout = Some(GithubCheckoutRequest {
             repo: repo.identifier(),
@@ -7628,10 +7607,47 @@ mod tests {
             },
         });
         let mut current = original.clone();
+        for ignored in [
+            IntentBinding {
+                cwd: "/candidate/path".into(),
+                ..original.clone()
+            },
+            IntentBinding {
+                incarnation: "candidate-incarnation".into(),
+                ..original.clone()
+            },
+            IntentBinding {
+                conversation: Some("candidate-selector".into()),
+                ..original.clone()
+            },
+            IntentBinding {
+                github_checkout: None,
+                ..original.clone()
+            },
+        ] {
+            assert!(same_fresh_intent(&original, &ignored, &repo, "install-a"));
+            assert_ne!(
+                original, ignored,
+                "ordinary key equality still includes the ignored candidate member"
+            );
+        }
         current.incarnation = "reconnected".into();
         current.cwd = "/new/bar-2".into();
         current.github_checkout = None;
         assert!(same_fresh_intent(&original, &current, &repo, "install-a"));
+        // A render candidate is discarded after matching. These members never
+        // determine whether the retained original binding/body is selected.
+        let mut ignored = current.clone();
+        ignored.conversation = Some("candidate-only selector".into());
+        assert!(same_fresh_intent(&original, &ignored, &repo, "install-a"));
+        let mut ignored = current.clone();
+        let mut different_checkout = original.github_checkout.clone().unwrap();
+        different_checkout.repo = "unrelated/candidate".into();
+        different_checkout.title = Some("candidate checkout title".into());
+        different_checkout.preview.config_revision = 99;
+        different_checkout.preview.installation_identity = "candidate-install".into();
+        ignored.github_checkout = Some(different_checkout);
+        assert!(same_fresh_intent(&original, &ignored, &repo, "install-a"));
         assert!(!same_fresh_intent(&current, &current, &repo, "install-a"));
         assert!(!same_fresh_intent(&original, &current, &repo, "install-b"));
         assert!(!same_fresh_intent(
@@ -7672,32 +7688,33 @@ mod tests {
     /// flip between them.
     #[farhelm_testtrace::test]
     fn an_intent_binding_changes_with_the_host_incarnation_and_with_the_fields() {
-        let hosts = vec![option(1, "this machine", true)];
+        let hosts = [option(1, "this machine", true)];
         let command = || LaunchIntent::Command(test_command("agent"));
-        let base = IntentBinding::of(
-            Some(1),
-            &hosts,
-            "/tmp".to_string(),
-            command(),
-            "title".to_string(),
-            None,
-        )
-        .expect("the selected host is in the list");
+        let mut draft = LaunchDraft::new(None);
+        draft.edit_folder("/tmp".into());
+        draft.edit_title("title".into());
+        let base = draft
+            .request(RequestContext {
+                host: Some((hosts[0].id, &hosts[0].incarnation)),
+                launch: command(),
+                replace_source: None,
+                checkout: None,
+            })
+            .expect("the selected host is in the list");
 
         // Same id, different incarnation: a retarget or an adopt.
-        let moved = vec![HostOption {
+        let moved = [HostOption {
             incarnation: "incarnation-after-the-retarget".to_string(),
             ..hosts[0].clone()
         }];
-        let after = IntentBinding::of(
-            Some(1),
-            &moved,
-            "/tmp".to_string(),
-            command(),
-            "title".to_string(),
-            None,
-        )
-        .expect("still selectable");
+        let after = draft
+            .request(RequestContext {
+                host: Some((moved[0].id, &moved[0].incarnation)),
+                launch: command(),
+                replace_source: None,
+                checkout: None,
+            })
+            .expect("still selectable");
         assert_ne!(
             base, after,
             "the row is the same row; the machine behind it is not"
@@ -7750,15 +7767,14 @@ mod tests {
         // point of the key surviving a failure.
         assert_eq!(
             base,
-            IntentBinding::of(
-                Some(1),
-                &hosts,
-                "/tmp".to_string(),
-                command(),
-                "title".to_string(),
-                None,
-            )
-            .expect("still selectable")
+            draft
+                .request(RequestContext {
+                    host: Some((hosts[0].id, &hosts[0].incarnation)),
+                    launch: command(),
+                    replace_source: None,
+                    checkout: None,
+                })
+                .expect("still selectable")
         );
     }
 
@@ -7935,26 +7951,26 @@ mod tests {
         );
     }
 
+    /// Hostless bodies would silently default at the helm. The request
+    /// projection must preserve absence for both no selection and a vanished row.
     #[farhelm_testtrace::test]
     fn no_selected_host_yields_no_binding() {
-        let hosts = vec![option(1, "this machine", true)];
-        let nothing = || LaunchIntent::Command(test_command(""));
-        assert!(
-            IntentBinding::of(None, &hosts, String::new(), nothing(), String::new(), None)
-                .is_none()
-        );
-        assert!(
-            IntentBinding::of(
-                Some(99),
-                &hosts,
-                String::new(),
-                nothing(),
-                String::new(),
-                None
-            )
-            .is_none(),
-            "a selection the option list no longer contains is not a target either"
-        );
+        let hosts = [option(1, "this machine", true)];
+        let draft = LaunchDraft::new(None);
+        for selected in [None, Some(99)] {
+            let host = hosts.iter().find(|host| Some(host.id) == selected);
+            assert!(
+                draft
+                    .request(RequestContext {
+                        host: host.map(|host| (host.id, host.incarnation.as_str())),
+                        launch: LaunchIntent::Command(test_command("")),
+                        replace_source: None,
+                        checkout: None,
+                    })
+                    .is_none(),
+                "an absent selected row cannot supply a request target"
+            );
+        }
     }
 
     /// The effective create target is the user's choice while it exists and
@@ -8882,7 +8898,10 @@ mod tests {
                     String::new(),
                     ChoiceOrigin::Control,
                 );
-                match draft.request().expect("the refused request has an agent") {
+                match draft
+                    .launch_intent()
+                    .expect("the refused request has an agent")
+                {
                     LaunchIntent::Structured(selection) => selection,
                     LaunchIntent::Command(_) => panic!("the fixture is an agent launch"),
                 }
