@@ -17409,7 +17409,12 @@
   Farhelm may adopt and delete it, and the foreign-replacement guard does not extend inside that container. Stated as a
   principle covering both this item and `spare-builder-cleans-detected-replacement.md`. No code change. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-specs-oct21.md`.
+- Execution: `complete`; SPEC.md now says the foreign-replacement guard does not extend inside `.farhelm-spares`, so a
+  folder in it that Farhelm did not put there, including one removed and recreated, is out of band and may be adopted
+  and deleted. SPEC_impl.md says a take moves whatever occupies the ready slot into its claim. No code change; shared
+  with `spare-builder-cleans-detected-replacement.md`. jj change `vtrknnxroxsrnovtksyrlxklyrltuzzn`, bookmark
+  `plan/triage-specs-oct21/01-spare-container-out-of-band`;
+  [draft PR #2563](https://github.com/scode/farhelm/pull/2563/changes).
 
 ## spare-builder-cleans-detected-replacement.md
 
@@ -17421,7 +17426,11 @@
 - Decision: on 2026-10-21 the user said this is just a spec fix and to accept the behavior.
 - Completion criteria: covered by the same spec principle as `spare-take-adopts-replaced-ready-folder.md`; the two may
   share one change. No code change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-specs-oct21.md`.
+- Execution: `complete`; covered by the same spec principle as `spare-take-adopts-replaced-ready-folder.md`, in the same
+  change. SPEC_impl.md says recovery adopts a strict building directory at whatever identity it now has, so a building
+  folder the builder refused to publish is still removed. No code change. jj change `vtrknnxroxsrnovtksyrlxklyrltuzzn`,
+  bookmark `plan/triage-specs-oct21/01-spare-container-out-of-band`;
+  [draft PR #2563](https://github.com/scode/farhelm/pull/2563/changes).
 
 ## respawn-reflow-crosses-launch-excerpt-boundary.md
 

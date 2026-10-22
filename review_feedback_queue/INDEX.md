@@ -42,12 +42,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   — A home-alias uninstall plan can miss retained data inside its removal target; a conditional design counterexample,
   not a reviewed implementation.
 
-- [`spare-take-adopts-replaced-ready-folder.md`](spare-take-adopts-replaced-ready-folder.md) — A replaced ready-checkout
-  folder can become a cleanup-owned claim and later be deleted.
-
-- [`spare-builder-cleans-detected-replacement.md`](spare-builder-cleans-detected-replacement.md) — Spare cleanup deletes
-  an already detected building replacement; ordinary-use trigger and namespace authority remain ambiguous.
-
 - [`refused-create-retry-can-delete-restarted-session.md`](refused-create-retry-can-delete-restarted-session.md) — A
   refused stale create retry can delete a concurrently restarted session; this conditional mechanism predates the review
   range.
