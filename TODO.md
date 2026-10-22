@@ -361,10 +361,6 @@ which makes one such rule something a type, a single owner or a default enforces
 problem a refactor targets (making drifted copies consistent, say) is allowed in its own `fix:` PR; unrelated changes
 are not.
 
-- **One owner for closing popovers when their row moves.** Each change that can move a sidebar or host row closes the
-  open menu itself, and every new popover kind had to be added at each of those places. Changes report to one owner, and
-  the three gaps left open in a code comment are closed. Plan: `plans/queue/popover-anchor-close.md`.
-
 ## Maybe later
 
 - **Let an agent delete its own session.** `farhelm agent delete` refuses a session's own id (plan

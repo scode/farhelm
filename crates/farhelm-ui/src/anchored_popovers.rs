@@ -128,10 +128,20 @@ pub(crate) struct OpeningTicket {
     anchor: Weak<Anchor>,
 }
 
-/// A bounded snapshot of affected openings admitted at a cause boundary.
-/// Producers may deliver immediately or later; a fresh opening receives no
-/// replay, even when it uses the same row as a captured opening.
+/// A bounded set of weak openings admitted at actual cause boundaries.
+/// Producers may deliver immediately or union captures before later delivery;
+/// a fresh opening receives no replay of an earlier opening's cause.
 pub(crate) struct MovementTicket(Vec<OpeningTicket>);
+
+/// Comparable renders can affect different openings before effects drain.
+/// Merge retains those independent causes; Replace explicitly resets pending,
+/// including when a source loses its comparable displayed baseline.
+pub(crate) enum MovementCapture {
+    /// Retain all still-captured registrations across comparable transitions.
+    Merge(MovementTicket),
+    /// Discard previous causes, including when this ticket is empty.
+    Replace(MovementTicket),
+}
 
 /// One producer's last actual render key and its pending opening snapshot.
 /// The owner retains no event history: this bounded state belongs to the
@@ -433,7 +443,42 @@ impl OpeningTicket {
 }
 
 impl MovementTicket {
-    /// Preserve regional registration order while dropping superseded openings.
+    /// Union weak openings, not render events. A registration has one current
+    /// binding, so its newest captured opening supersedes its older ticket.
+    /// Insert by registration id within each owner to retain delivery order
+    /// even when later renders capture an earlier registered audience.
+    ///
+    /// Only weak identities are inspected here: no registry borrow, live row
+    /// reader or readiness callback runs while the hook updates pending.
+    fn merge(&mut self, newer: Self) {
+        self.0
+            .retain(|ticket| ticket.owner.strong_count() != 0 && ticket.anchor.strong_count() != 0);
+        for ticket in newer.0 {
+            if ticket.owner.strong_count() == 0 || ticket.anchor.strong_count() == 0 {
+                continue;
+            }
+            let same_registration = |previous: &OpeningTicket| {
+                Weak::ptr_eq(&previous.owner, &ticket.owner)
+                    && previous.registration == ticket.registration
+            };
+            if let Some(index) = self.0.iter().position(same_registration) {
+                self.0[index] = ticket;
+            } else {
+                let index = self
+                    .0
+                    .iter()
+                    .position(|previous| {
+                        Weak::ptr_eq(&previous.owner, &ticket.owner)
+                            && previous.registration > ticket.registration
+                    })
+                    .unwrap_or(self.0.len());
+                self.0.insert(index, ticket);
+            }
+        }
+    }
+
+    /// Preserve each registry's registration order and reject stale openings
+    /// through the existing exact-binding admission at delivery.
     pub(crate) fn close_if_current(self) {
         for ticket in self.0 {
             ticket.close_if_current();
@@ -470,23 +515,42 @@ pub(crate) fn use_anchor_binding(
     })
 }
 
-/// Capture changed rendered contents before DOM publication, then deliver only
-/// to the same scoped opening after that publication.
+/// Capture a changed render when selecting openings needs only its current
+/// contents. This uses the same baseline and pending-ticket lifecycle as
+/// [`use_rendered_movement_between`], without exposing the previous key. Every
+/// changed capture replaces pending, including an empty one, preserving this
+/// API's existing readiness-recovery and fixed-audience behavior.
+pub(crate) fn use_rendered_movement<K: Clone + PartialEq + 'static>(
+    key: &K,
+    capture: impl FnOnce() -> MovementTicket,
+) {
+    use_rendered_movement_between(key, |_, _| MovementCapture::Replace(capture()));
+}
+
+/// Compare consecutive rendered contents before DOM publication and capture
+/// only openings affected by that transition. Delivery still targets the same
+/// scoped opening after publication.
 ///
 /// Dioxus 0.7.10 runs synchronous component bodies before diffing their DOM
 /// edits; web flush and desktop edit acknowledgement precede effect polling.
 /// Effects are deduplicated and their stored callback is replaced on render,
 /// so a pending ticket must survive an A→B→A sequence outside that callback.
-/// Mount is a baseline. Every changed render replaces pending, including an
-/// empty capture; an unchanged render retains an earlier real cause.
+/// Mount is a baseline; an unchanged render retains pending. Comparable
+/// transitions can Merge their admitted openings so an unaffected later
+/// render does not erase an earlier cause. Replace discards pending, including
+/// for an empty capture used to reset an unavailable/recovery baseline.
 ///
 /// `key` must be the small value actually rendered by this producer, rather
-/// than unrelated model state. Capture and delivery run outside hook/registry
-/// borrows, and use untracked owner admission. This hook assumes synchronous
-/// rendering: introducing suspense here requires revisiting this boundary.
-pub(crate) fn use_rendered_movement<K: Clone + PartialEq + 'static>(
+/// than unrelated model state. On each changed render, `capture` receives the
+/// previous render's key and this render's key after the new key is installed
+/// in the existing slot. Those references are only for this call; snapshots
+/// needed by a deferred close belong in its returned ticket. Capture and
+/// delivery run outside hook/registry borrows and use untracked admission.
+/// This hook assumes synchronous rendering: introducing suspense here requires
+/// revisiting this boundary.
+pub(crate) fn use_rendered_movement_between<K: Clone + PartialEq + 'static>(
     key: &K,
-    capture: impl FnOnce() -> MovementTicket,
+    capture: impl FnOnce(&K, &K) -> MovementCapture,
 ) {
     let movement = use_hook(|| {
         Rc::new(RefCell::new(RenderedMovement {
@@ -494,18 +558,26 @@ pub(crate) fn use_rendered_movement<K: Clone + PartialEq + 'static>(
             pending: None,
         }))
     });
-    let changed = {
+    let previous = {
         let mut movement = movement.borrow_mut();
         if movement.previous == *key {
-            false
+            None
         } else {
-            movement.previous = key.clone();
-            true
+            Some(std::mem::replace(&mut movement.previous, key.clone()))
         }
     };
-    if changed {
-        let ticket = capture();
-        movement.borrow_mut().pending = Some(ticket);
+    if let Some(previous) = previous {
+        let capture = capture(&previous, key);
+        let mut movement = movement.borrow_mut();
+        match capture {
+            MovementCapture::Replace(ticket) => movement.pending = Some(ticket),
+            MovementCapture::Merge(ticket) => {
+                movement
+                    .pending
+                    .get_or_insert_with(|| MovementTicket(Vec::new()))
+                    .merge(ticket);
+            }
+        }
     }
     use_effect(use_reactive((key,), move |(_key,)| {
         let pending = movement.borrow_mut().pending.take();
@@ -588,11 +660,14 @@ mod tests {
         (!ticket.0.is_empty()).then_some(ticket)
     }
 
-    /// The two real producer audiences share one pending-ticket lifecycle.
+    /// Existing audiences and a transition-aware producer share one fixture
+    /// and the same pending-ticket lifecycle.
     #[derive(Clone, Copy)]
     enum RenderCapture {
         OwnRow,
         Region,
+        BetweenReplace,
+        BetweenMerge,
     }
 
     /// Cells let a test publish consecutive mutation batches without polling
@@ -608,7 +683,13 @@ mod tests {
         scope: Cell<Option<dioxus::core::ScopeId>>,
         bind: RefCell<Option<Callback<()>>>,
         captures: Cell<usize>,
-        mode: RenderCapture,
+        /// Record callback arguments rather than reconstructing them from
+        /// fixture input; mount-versus-latest comparisons would then fail.
+        transitions: RefCell<Vec<(usize, usize)>>,
+        /// Override the admitted audience without changing readiness or the
+        /// binding, distinguishing an unrelated render from a baseline reset.
+        capture_rows: RefCell<Option<Vec<String>>>,
+        mode: Cell<RenderCapture>,
     }
 
     impl PartialEq for RenderFixture {
@@ -650,7 +731,9 @@ mod tests {
                 scope: Cell::new(None),
                 bind: RefCell::new(None),
                 captures: Cell::new(0),
-                mode,
+                transitions: RefCell::new(Vec::new()),
+                capture_rows: RefCell::new(None),
+                mode: Cell::new(mode),
             })
         }
 
@@ -699,17 +782,37 @@ mod tests {
         fixture.bind.replace(Some(bind));
         use_hook(move || bind.call(()));
         let key = fixture.key.get();
-        use_rendered_movement(&key, || {
+        let capture = || {
             assert!(
                 fixture.owner.0.try_borrow_mut().is_ok(),
                 "capture runs outside the registry borrow"
             );
             fixture.captures.set(fixture.captures.get() + 1);
-            match fixture.mode {
-                RenderCapture::OwnRow => fixture.registration.capture_current("row"),
+            let selected = fixture.capture_rows.borrow().clone();
+            if let Some(rows) = selected {
+                return fixture
+                    .owner
+                    .capture_affected(&MovedRows::new(AnchorRegion::Sessions, rows));
+            }
+            match fixture.mode.get() {
+                RenderCapture::OwnRow
+                | RenderCapture::BetweenReplace
+                | RenderCapture::BetweenMerge => fixture.registration.capture_current("row"),
                 RenderCapture::Region => fixture.owner.capture_region(AnchorRegion::Sessions),
             }
-        });
+        };
+        match fixture.mode.get() {
+            RenderCapture::OwnRow | RenderCapture::Region => use_rendered_movement(&key, capture),
+            RenderCapture::BetweenReplace | RenderCapture::BetweenMerge => {
+                use_rendered_movement_between(&key, |previous, current| {
+                    fixture.transitions.borrow_mut().push((*previous, *current));
+                    match fixture.mode.get() {
+                        RenderCapture::BetweenMerge => MovementCapture::Merge(capture()),
+                        _ => MovementCapture::Replace(capture()),
+                    }
+                })
+            }
+        }
         rsx! { span { "{key}" } }
     }
 
@@ -720,6 +823,235 @@ mod tests {
                 RenderMovementProducer { fixture }
             }
         }
+    }
+
+    /// A closer that deliberately leaves its slot open exposes duplicate
+    /// delivery rather than letting the first close hide a duplicate ticket.
+    fn retaining_registration(
+        owner: &MovementOwner,
+        row: &'static str,
+        deliveries: Rc<RefCell<Vec<&'static str>>>,
+    ) -> (Registration, AnchorLease) {
+        let weak_owner = Rc::downgrade(&owner.0);
+        let registration = owner.register(
+            Interest::new(AnchorRegion::Sessions),
+            move || Some(row.to_owned()),
+            move || {
+                assert!(weak_owner.upgrade().unwrap().try_borrow_mut().is_ok());
+                deliveries.borrow_mut().push(row);
+            },
+        );
+        let opening = registration.bind_anchor(row.into(), || true).unwrap();
+        (registration, opening)
+    }
+
+    /// Several comparable renders can capture the same opening before an
+    /// effect runs. An unaffected empty Merge must retain those causes. The
+    /// pending value is a set even when the closer leaves its slot open, so
+    /// duplicate captures cannot manufacture repeated callbacks.
+    #[farhelm_testtrace::test]
+    fn rendered_movement_merge_delivers_a_repeated_opening_once() {
+        let fixture = RenderFixture::new(RenderCapture::BetweenMerge);
+        let deliveries = Rc::new(RefCell::new(Vec::new()));
+        let (_registration, _opening) =
+            retaining_registration(&fixture.owner, "retained", deliveries.clone());
+        fixture.capture_rows.replace(Some(vec!["retained".into()]));
+        let mut dom = fixture.mount();
+        for key in 1..=3 {
+            fixture.render_key(&mut dom, key);
+        }
+        fixture.capture_rows.replace(Some(Vec::new()));
+        fixture.render_key(&mut dom, 4);
+        assert_eq!(fixture.captures.get(), 4);
+        assert!(fixture.ready.get());
+        assert!(deliveries.borrow().is_empty());
+        dom.process_events();
+        assert_eq!(*deliveries.borrow(), vec!["retained"]);
+        dom.process_events();
+        assert_eq!(*deliveries.borrow(), vec!["retained"]);
+    }
+
+    /// A later successful render can affect a different nonempty audience.
+    /// Retain both causes and deliver in registry order, even when capture
+    /// order is reversed and both closers leave their slots open.
+    #[farhelm_testtrace::test]
+    fn rendered_movement_merge_retains_audiences_in_registration_order() {
+        let fixture = RenderFixture::new(RenderCapture::BetweenMerge);
+        let deliveries = Rc::new(RefCell::new(Vec::new()));
+        let (_first, _first_opening) =
+            retaining_registration(&fixture.owner, "first", deliveries.clone());
+        let (_second, _second_opening) =
+            retaining_registration(&fixture.owner, "second", deliveries.clone());
+        let mut dom = fixture.mount();
+        fixture.capture_rows.replace(Some(vec!["second".into()]));
+        fixture.render_key(&mut dom, 1);
+        fixture.capture_rows.replace(Some(vec!["first".into()]));
+        fixture.render_key(&mut dom, 2);
+        assert!(fixture.ready.get());
+        assert!(deliveries.borrow().is_empty());
+        dom.process_events();
+        assert_eq!(*deliveries.borrow(), vec!["first", "second"]);
+    }
+
+    /// An explicit baseline reset differs from an unaffected comparable
+    /// capture. Replace(empty) discards the earlier cause while the same
+    /// ready opening remains bound; a later actual cause still closes it.
+    #[farhelm_testtrace::test]
+    fn rendered_movement_replace_empty_resets_merged_causes() {
+        let fixture = RenderFixture::new(RenderCapture::BetweenMerge);
+        let mut dom = fixture.mount();
+        fixture.render_key(&mut dom, 1);
+        fixture.mode.set(RenderCapture::BetweenReplace);
+        fixture.capture_rows.replace(Some(Vec::new()));
+        fixture.render_key(&mut dom, 2);
+        assert!(fixture.ready.get());
+        assert_eq!(fixture.registration.capture_current("row").0.len(), 1);
+        dom.process_events();
+        assert_eq!(fixture.slot.deliveries.get(), 0);
+        fixture.mode.set(RenderCapture::BetweenMerge);
+        fixture.capture_rows.replace(None);
+        fixture.render_key(&mut dom, 3);
+        dom.process_events();
+        assert_eq!(fixture.slot.deliveries.get(), 1);
+    }
+
+    /// Keeping an old cause across an unrelated render never re-admits it
+    /// into a fresh same-row opening. Only a later cause that captures that
+    /// new binding may close it.
+    #[farhelm_testtrace::test]
+    fn rendered_movement_merge_does_not_replay_into_a_reopened_row() {
+        let fixture = RenderFixture::new(RenderCapture::BetweenMerge);
+        let mut dom = fixture.mount();
+        fixture.render_key(&mut dom, 1);
+        fixture.reopen(&dom);
+        fixture.capture_rows.replace(Some(Vec::new()));
+        fixture.render_key(&mut dom, 2);
+        dom.process_events();
+        assert_eq!(fixture.slot.deliveries.get(), 0);
+        fixture.capture_rows.replace(None);
+        fixture.render_key(&mut dom, 3);
+        dom.process_events();
+        assert_eq!(fixture.slot.deliveries.get(), 1);
+    }
+
+    /// Registration numbers are owner-local, and old leases can stay alive
+    /// after remeasurement. Union must retain separate owners while storing
+    /// only the latest captured binding for each owner/registration pair.
+    #[farhelm_testtrace::test]
+    fn movement_ticket_merge_uses_owner_and_latest_opening_identity() {
+        let owner = MovementOwner::default();
+        let other = MovementOwner::default();
+        let deliveries = Rc::new(RefCell::new(Vec::new()));
+        let (registration, old_opening) =
+            retaining_registration(&owner, "first-owner", deliveries.clone());
+        let (_other_registration, _other_opening) =
+            retaining_registration(&other, "other-owner", deliveries.clone());
+        let mut ticket = owner.capture_region(AnchorRegion::Sessions);
+        ticket.merge(other.capture_region(AnchorRegion::Sessions));
+        assert_eq!(
+            ticket.0.len(),
+            2,
+            "same numeric id in another owner is distinct"
+        );
+        let new_opening = registration
+            .bind_anchor("first-owner".into(), || true)
+            .unwrap();
+        ticket.merge(owner.capture_region(AnchorRegion::Sessions));
+        assert_eq!(
+            ticket.0.len(),
+            2,
+            "latest binding replaces rather than appends"
+        );
+        let captured = ticket
+            .0
+            .iter()
+            .find(|opening| Weak::ptr_eq(&opening.owner, &Rc::downgrade(&owner.0)))
+            .unwrap();
+        assert!(Weak::ptr_eq(
+            &captured.anchor,
+            &Rc::downgrade(&new_opening.anchor)
+        ));
+        assert!(
+            Rc::strong_count(&old_opening.anchor) > 0,
+            "old ticket was not merely expired"
+        );
+        let expired = {
+            let expired_owner = MovementOwner::default();
+            let (_registration, _opening) =
+                retaining_registration(&expired_owner, "expired", deliveries.clone());
+            expired_owner.capture_region(AnchorRegion::Sessions)
+        };
+        ticket.merge(expired);
+        assert_eq!(ticket.0.len(), 2, "expired weak identities are discarded");
+        ticket.close_if_current();
+        assert_eq!(*deliveries.borrow(), vec!["first-owner", "other-owner"]);
+    }
+
+    /// Atomic prefix selection needs each consecutive rendered pair, not
+    /// mount-versus-latest or an effect callback's last closure. Returning to
+    /// the old value still carries a real committed intermediate cause.
+    #[farhelm_testtrace::test]
+    fn rendered_movement_between_receives_consecutive_changed_keys() {
+        let fixture = RenderFixture::new(RenderCapture::BetweenReplace);
+        let mut dom = fixture.mount();
+        fixture.render_key(&mut dom, 0);
+        dom.process_events();
+        assert!(
+            fixture.transitions.borrow().is_empty(),
+            "mount and unchanged render do not capture"
+        );
+
+        let changed = fixture.render_key(&mut dom, 1);
+        let returned = fixture.render_key(&mut dom, 0);
+        fixture.render_key(&mut dom, 0);
+        assert!(changed.iter().any(|edit| matches!(edit,
+            dioxus::core::Mutation::SetText { value, .. } if value == "1")));
+        assert!(returned.iter().any(|edit| matches!(edit,
+            dioxus::core::Mutation::SetText { value, .. } if value == "0")));
+        assert_eq!(*fixture.transitions.borrow(), vec![(0, 1), (1, 0)]);
+        assert_eq!(fixture.captures.get(), 2);
+        assert_eq!(
+            fixture.slot.deliveries.get(),
+            0,
+            "capture precedes continuation delivery"
+        );
+        dom.process_events();
+        assert_eq!(
+            fixture.slot.deliveries.get(),
+            1,
+            "unchanged render retained pending cause"
+        );
+        dom.process_events();
+        assert_eq!(
+            fixture.slot.deliveries.get(),
+            1,
+            "the shared pending slot drains once"
+        );
+    }
+
+    /// A transition that selects no admitted opening still replaces pending.
+    /// The next comparison must start at that render's new key, even though
+    /// its captured ticket was empty and readiness recovered before delivery.
+    #[farhelm_testtrace::test]
+    fn rendered_movement_between_empty_capture_advances_baseline_and_replaces_pending() {
+        let fixture = RenderFixture::new(RenderCapture::BetweenReplace);
+        let mut dom = fixture.mount();
+        fixture.render_key(&mut dom, 1);
+        fixture.ready.set(false);
+        fixture.render_key(&mut dom, 2);
+        assert_eq!(*fixture.transitions.borrow(), vec![(0, 1), (1, 2)]);
+        fixture.ready.set(true);
+        dom.process_events();
+        assert_eq!(
+            fixture.slot.deliveries.get(),
+            0,
+            "empty replacement removed the older cause"
+        );
+
+        fixture.render_key(&mut dom, 3);
+        assert_eq!(*fixture.transitions.borrow(), vec![(0, 1), (1, 2), (2, 3)]);
+        dom.process_events();
+        assert_eq!(fixture.slot.deliveries.get(), 1);
     }
 
     /// Effect deduplication must retain an intermediate committed cause even

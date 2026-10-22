@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
+use crate::activity::ActivityStamp;
 use crate::anchored_popovers::{Registration, use_anchor_binding};
 
 use crate::icons::{
@@ -15,7 +16,7 @@ use crate::icons::{
     PermissionIcon, QualifierGlyph, QualifierIcon,
 };
 use crate::launch_composer::selection_explicit_before_permissions;
-use crate::peer::{DetailPart, PeerLine, display_peer};
+use crate::peer::{DetailPart, PeerLine, PeerText, display_peer};
 use crate::status::{StatusBadgeView, confirm_consequence, replace_consequence, status_badge};
 use crate::{LaunchHarness, Session, SessionStatus};
 
@@ -28,6 +29,87 @@ use crate::menu_panel::{
     measurement_outcome, record_menu_item_focus, remember_menu_item, session_menu_placement_style,
     session_menu_pointer_style, should_measure_on_mount,
 };
+
+// ===== Identity copy shared by rendering and movement comparison =====
+
+/// Resolve the actual in-flow identity children without changing peer storage.
+///
+/// The list uses this same resolver over its held, optimistically renamed rows.
+/// Keeping pin presence and the rendered delete label here prevents movement
+/// comparison from predicting a different title line from the one drawn below.
+struct SessionIdentityCopy {
+    title: PeerText,
+    pinned: bool,
+    delete_progress: Option<&'static str>,
+    has_bell: bool,
+}
+
+/// One row's identity contribution to a strictly later anchor's vertical flow.
+///
+/// Unpinned ordinary titles cannot split their sole flex child onto another
+/// line. Deleting changes the one-line font treatment; pinned noncompact copy
+/// can also wrap, so its actual text and available-width inputs stay paired.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum IdentityFlow {
+    Deleting,
+    Pinned {
+        text: IdentityFlowText,
+        age_columns: usize,
+        has_bell: bool,
+    },
+}
+
+/// Hidden titles have no flow while delete progress replaces them.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum IdentityFlowText {
+    Title(String),
+    Deleting(&'static str),
+}
+
+/// Share the row's actual title, pin, bell and delete-progress decisions.
+fn session_identity_copy(session: &Session, deleting: bool) -> SessionIdentityCopy {
+    SessionIdentityCopy {
+        title: session.title.clone(),
+        pinned: session.pinned,
+        delete_progress: deleting
+            .then(|| crate::status::delete_progress_label(&session.status, session.tabs.len())),
+        has_bell: !session.notifications.is_empty(),
+    }
+}
+
+impl SessionIdentityCopy {
+    /// Compare causal inputs, without measuring or predicting a flex line break.
+    ///
+    /// The activity grid has a 4ch floor in the inherited font, while ages use
+    /// 12px and the bell reserves 14px. Browser font defaults can change their
+    /// ratio, so a fixed age-column cutoff would omit supported wrap changes.
+    /// Equal-width age tokens and notification metadata remain inert. Compact
+    /// copy cannot wrap; its one-line delete treatment is retained separately.
+    fn flow(&self, compact: bool, activity: Option<&ActivityStamp>) -> Option<IdentityFlow> {
+        if !compact && self.pinned {
+            Some(IdentityFlow::Pinned {
+                text: match self.delete_progress {
+                    Some(label) => IdentityFlowText::Deleting(label),
+                    None => IdentityFlowText::Title(self.title.escaped()),
+                },
+                age_columns: activity.map_or(0, |stamp| stamp.age.len()),
+                has_bell: self.has_bell,
+            })
+        } else {
+            self.delete_progress.map(|_| IdentityFlow::Deleting)
+        }
+    }
+}
+
+/// Project exactly the identity values SessionRow consumes, before DOM changes.
+pub(super) fn session_identity_flow(
+    session: &Session,
+    deleting: bool,
+    compact: bool,
+    activity: Option<&ActivityStamp>,
+) -> Option<IdentityFlow> {
+    session_identity_copy(session, deleting).flow(compact, activity)
+}
 
 /// Which optional row controls exist for the current session state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -894,7 +976,7 @@ pub(super) fn SessionRow(
     session: Session,
     state: RowState,
     /// Whether the shared sidebar preference hides the host/directory line.
-    /// The identity row never changes, so compactness cannot hide status,
+    /// Compactness keeps identity controls visible: it cannot hide status,
     /// locality, or the menu target a keyboard user needs to reach.
     compact: bool,
     /// Stable root registrations supply existing closers; the row contributes
@@ -983,6 +1065,7 @@ pub(super) fn SessionRow(
         deleting,
         bell_open,
     } = state;
+    let identity = session_identity_copy(&session, deleting);
     let stale_tooltip = format!("{unavailable_cause}: this is the session's last-known state");
     #[cfg(test)]
     SESSION_ROW_RENDERS.with(|renders| renders.set(renders.get() + 1));
@@ -1068,7 +1151,7 @@ pub(super) fn SessionRow(
     let open_session = session.clone();
     // A row shows its bell while any notification is left uncleared; the
     // helm has already dropped the cleared ones.
-    let has_bell = !session.notifications.is_empty();
+    let has_bell = identity.has_bell;
     let bell_toggle_target = (
         session.id.raw().to_owned(),
         session.notifications_read_through,
@@ -1530,9 +1613,8 @@ pub(super) fn SessionRow(
         (class, true) => format!("{class} deleting"),
         (class, false) => class.to_string(),
     };
-    let delete_progress = crate::status::delete_progress_label(&session.status, session.tabs.len());
     // Clipped rather than removed while deleting; see the title line below.
-    let title_class: &'static str = if deleting {
+    let title_class: &'static str = if identity.delete_progress.is_some() {
         "session-title visually-hidden"
     } else {
         "session-title"
@@ -1672,18 +1754,18 @@ pub(super) fn SessionRow(
                             // than removed: assistive technology still names
                             // the row by it, and so does everything that
                             // finds a row by its `.session-title`.
-                            if deleting {
+                            if let Some(delete_progress) = identity.delete_progress {
                                 span { class: "delete-progress", role: "status",
                                     span { class: "delete-spinner", "aria-hidden": "true" }
                                     "{delete_progress}"
                                 }
                             }
-                            if session.pinned {
+                            if identity.pinned {
                                 span { class: "session-pin", role: "img", aria_label: "pinned", "data-tooltip": "pinned", "\u{f08d}" }
                             }
                             PeerTitle {
                                 class: title_class,
-                                title: session.title.clone(),
+                                title: identity.title.clone(),
                                 quoted: false,
                             }
                             if compact {
@@ -2706,6 +2788,113 @@ mod tests {
 
     use super::*;
 
+    /// Pin wrapping depends on actual displayed title and activity width, not
+    /// raw peer spelling or the timestamp tooltip. Unpinned/compact copy cannot
+    /// gain a flex line from these inputs; equal-column age changes are inert.
+    #[farhelm_testtrace::test]
+    fn identity_flow_uses_actual_copy_and_only_active_wrap_inputs() {
+        let mut session = row_specimen("copy");
+        session.title = "title\u{202e}".into();
+        let age = |age: &str, absolute: &str| ActivityStamp {
+            age: age.to_string(),
+            absolute: absolute.to_string(),
+        };
+        let short = age("9m", "first tooltip");
+        let equal = age("8h", "different tooltip");
+        let wider = age("10m", "first tooltip");
+        assert_eq!(
+            session_identity_flow(&session, false, false, Some(&short)),
+            None
+        );
+        session.pinned = true;
+        let pinned = session_identity_flow(&session, false, false, Some(&short));
+        assert_eq!(
+            pinned,
+            Some(IdentityFlow::Pinned {
+                text: IdentityFlowText::Title("title<U+202E>".to_string()),
+                age_columns: 2,
+                has_bell: false,
+            })
+        );
+        assert_eq!(
+            pinned,
+            session_identity_flow(&session, false, false, Some(&equal))
+        );
+        // This is a potential-width cause across supported font defaults, not
+        // a claim that the default-font 4ch floor changes on this transition.
+        assert_ne!(
+            pinned,
+            session_identity_flow(&session, false, false, Some(&wider))
+        );
+        assert_eq!(
+            session_identity_flow(&session, false, true, Some(&wider)),
+            None
+        );
+        let actual = session_identity_copy(&session, false);
+        assert_eq!(actual.title.raw(), "title\u{202e}");
+        session.title = "title<U+202E>".into();
+        assert_eq!(
+            pinned,
+            session_identity_flow(&session, false, false, Some(&short))
+        );
+
+        session.notifications.push(notification(1, "first"));
+        let belled = session_identity_flow(&session, false, false, Some(&short));
+        assert_ne!(pinned, belled);
+        session
+            .notifications
+            .push(notification(2, "different notification"));
+        session.notifications_read_through = 2;
+        session.annotation = Some("ordinary metadata".into());
+        assert_eq!(
+            belled,
+            session_identity_flow(&session, false, false, Some(&short))
+        );
+        session.pinned = false;
+        assert_eq!(
+            session_identity_flow(&session, false, false, Some(&wider)),
+            None
+        );
+    }
+
+    /// Deleting hides the title and changes its one-line font treatment. Only
+    /// pinned noncompact progress can wrap with a sibling, so unpinned/compact
+    /// label changes do not become blanket status-movement reports.
+    #[farhelm_testtrace::test]
+    fn identity_flow_separates_delete_style_from_wrapping_progress_label() {
+        let mut session = row_specimen("delete-copy");
+        session.status = SessionStatus::Running;
+        let actual = session_identity_copy(&session, true);
+        assert_eq!(actual.delete_progress, Some("Stopping agent…"));
+        for compact in [false, true] {
+            assert_eq!(session_identity_flow(&session, false, compact, None), None);
+            assert_eq!(
+                session_identity_flow(&session, true, compact, None),
+                Some(IdentityFlow::Deleting)
+            );
+        }
+        session.pinned = true;
+        let stopping = session_identity_flow(&session, true, false, None);
+        session.title = "hidden title changes".into();
+        session.status = SessionStatus::Unknown;
+        assert_eq!(stopping, session_identity_flow(&session, true, false, None));
+        session.status = SessionStatus::Exited { exit_code: Some(0) };
+        assert_ne!(stopping, session_identity_flow(&session, true, false, None));
+        assert_eq!(
+            session_identity_copy(&session, true).delete_progress,
+            Some("Deleting…")
+        );
+        assert_eq!(
+            session_identity_flow(&session, true, true, None),
+            Some(IdentityFlow::Deleting)
+        );
+        session.pinned = false;
+        assert_eq!(
+            session_identity_flow(&session, true, false, None),
+            Some(IdentityFlow::Deleting)
+        );
+    }
+
     /// Supply stable real registration props for render/memoization fixtures.
     /// Their root slots stay closed: these fixtures inspect markup without a
     /// renderer measurement, while owner tests exercise admitted openings.
@@ -3274,27 +3463,44 @@ mod tests {
         read_through: u64,
         open: bool,
     ) -> Vec<dioxus::core::Mutation> {
-        std::thread_local! {
-            static CASE: std::cell::RefCell<Option<(Vec<crate::SessionNotification>, u64, bool)>> =
-                const { std::cell::RefCell::new(None) };
-        }
-        CASE.with(|case| *case.borrow_mut() = Some((notifications, read_through, open)));
-        fn app() -> Element {
-            let (notifications, read_through, open) =
-                CASE.with(|case| case.borrow().clone()).expect("case set");
-            let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
-            let session = Session {
+        identity_row_edits(
+            Session {
                 notifications,
                 notifications_read_through: read_through,
                 ..row_specimen("belled")
-            };
+            },
+            false,
+            false,
+            open,
+        )
+    }
+
+    /// Render the real row across its ordinary/deleting identity treatments.
+    /// Root registrations stay closed; browser coverage supplies physical font
+    /// and wrapping premises while this fixture pins the actual markup inputs.
+    fn identity_row_edits(
+        session: Session,
+        deleting: bool,
+        compact: bool,
+        open: bool,
+    ) -> Vec<dioxus::core::Mutation> {
+        std::thread_local! {
+            static CASE: std::cell::RefCell<Option<(Session, bool, bool, bool)>> =
+                const { std::cell::RefCell::new(None) };
+        }
+        CASE.with(|case| *case.borrow_mut() = Some((session, deleting, compact, open)));
+        fn app() -> Element {
+            let (session, deleting, compact, open) =
+                CASE.with(|case| case.borrow().clone()).expect("case set");
+            let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
+            let read_through = session.notifications_read_through;
             rsx! {
                 SessionRow {
                     menu_registration: menu_registration.clone(),
                     bell_registration: bell_registration.clone(),
                     listing_ready,
                     session,
-                    compact: false,
+                    compact,
                     state: RowState {
                         error: None,
                         busy: false,
@@ -3310,7 +3516,7 @@ mod tests {
                         host_color: Default::default(),
                         unavailable_cause: "waiting for supervisor",
                         activity: None,
-                        deleting: false,
+                        deleting,
                         bell_open: open.then_some(read_through),
                     },
                     on_open: |_: Session| {},
@@ -3334,6 +3540,44 @@ mod tests {
             }
         }
         VirtualDom::new(app).rebuild_to_vec().edits
+    }
+
+    /// The movement resolver must describe the actual row, including the raw
+    /// title's unchanged escaping and the progress label replacing visible
+    /// copy. Keep this proof on SessionRow rather than a lookalike test render.
+    #[farhelm_testtrace::test]
+    fn identity_resolver_values_reach_the_real_row_markup() {
+        let mut session = row_specimen("render-copy");
+        session.title = "actual\u{202e}title".into();
+        session.pinned = true;
+        session.status = SessionStatus::Running;
+        for compact in [false, true] {
+            let ordinary = identity_row_edits(session.clone(), false, compact, false);
+            let ordinary_text = text_values(&ordinary);
+            assert!(
+                ordinary_text
+                    .iter()
+                    .any(|text| text == "actual<U+202E>title")
+            );
+            assert!(!ordinary_text.iter().any(|text| text == "Stopping agent…"));
+            let deleting = identity_row_edits(session.clone(), true, compact, false);
+            let deleting_text = text_values(&deleting);
+            assert!(
+                deleting_text
+                    .iter()
+                    .any(|text| text == "actual<U+202E>title")
+            );
+            assert!(deleting_text.iter().any(|text| text == "Stopping agent…"));
+            assert!(
+                attribute_values(&deleting, "class")
+                    .iter()
+                    .any(|class| class == "session-title visually-hidden peer-value")
+            );
+            assert_eq!(
+                session_identity_copy(&session, true).delete_progress,
+                Some("Stopping agent…")
+            );
+        }
     }
 
     /// Every text-valued attribute the edits set under `name`.
