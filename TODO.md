@@ -78,6 +78,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `launch-pill-can-cover-link-disclosure.md`, `restored-link-press-misses-intervening-drag.md` and
   `refused-sequence-displaces-later-binding-snapshots.md`.
 
+  Plan: `plans/queue/bind-gui-answers.md`.
+
 - **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
   indicates that one of those models is being used anyway.
 
