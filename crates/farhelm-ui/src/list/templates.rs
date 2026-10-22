@@ -1501,6 +1501,7 @@ pub(super) fn TemplatesDialog(
         spawn(async move {
             match crate::api::fetch_preferences(&base).await {
                 Ok(fresh) => {
+                    let read = fresh.template_shortcuts.clone();
                     apply_template_bindings(
                         &mut preferences.0.write(),
                         crate::api::template_bindings_after_read(fresh),
@@ -1525,8 +1526,18 @@ pub(super) fn TemplatesDialog(
                         }
                     };
                     drop(current);
-                    if let Some(value) = value {
-                        crate::api::store_preference(&base, value);
+                    match value {
+                        // A failed key save is reported and then discarded
+                        // (SPEC.md, "One GUI at a time"), so the dialog goes
+                        // back to the keys the helm reported.
+                        Some(value @ PreferenceValue::TemplateShortcuts(_)) => {
+                            if !crate::api::write_template_binding(&base, value).await {
+                                preferences.0.write().template_shortcuts = read;
+                                error.set(Some("the number key could not be saved".into()));
+                            }
+                        }
+                        Some(value) => crate::api::store_preference(&base, value),
+                        None => {}
                     }
                 }
                 Err(message) => error.set(Some(message)),
@@ -1694,6 +1705,8 @@ pub(super) fn TemplatesDialog(
                         )
                         .await
                         {
+                            // The failed map is discarded; show the helm's keys again.
+                            preferences.0.write().template_shortcuts = before;
                             busy.set(false);
                             error.set(Some("the new name was saved, but its number key could not be moved; the old template was kept".into()));
                             templates.restart();

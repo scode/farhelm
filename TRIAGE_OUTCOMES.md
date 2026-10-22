@@ -17673,7 +17673,15 @@
   equivalent that keeps agent changes made before the read); a unit test. Size gate: about 100 lines as above
   (verification estimated 60–120, borderline); over it, block and bring it back. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/gui-saves-last-write-wins.md`.
+- Execution: complete in jj change `lolnolnwqynluupqnpvwolxkzvklxnqv`, bookmark
+  `plan/gui-saves-last-write-wins/02-discard-failed-key-save`. The maintainer's 2026-10-22 decision on the blocked plan
+  replaced these criteria: SPEC.md now says a failed GUI save is reported and discarded, so the earlier fix that
+  replayed the user's own key changes (#2573, 194 lines) was closed unmerged. Instead the Templates dialog reports a
+  failed number-key save and goes back to the keys the helm reported, and the write queue drops the failed map, so no
+  later read or sign-in replay writes it back. The ⚡ mark and other preferences keep their behavior; the TODO entry
+  "Sweep out browser sign-in and failed-save preservation" covers them. About 35 lines of production code change, with
+  about 36 lines of code comments, 22 of SPEC_impl.md text and 106 of unit and browser tests. PR:
+  https://github.com/scode/farhelm/pull/2583/changes.
 
 ## guarded-preview-widens-source-deletion-consent.md
 
