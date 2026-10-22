@@ -251,10 +251,10 @@ impl TunnelController {
         self.finish_warning(result);
     }
 
-    /// Retire the result once, then release the warning for its source's return.
+    /// Release the owned warning before retiring its result and returning focus.
     ///
-    /// The result is delivered before close submission, as preparation retains
-    /// ownership of the original action. Settings restoration and source focus
+    /// Preparation retains ownership of the original action, so result delivery
+    /// still precedes the framed return. Settings restoration and source focus
     /// remain framed so the closing render can remove the child first.
     fn finish_warning(mut self, result: Result<bool, String>) {
         // A queued Cancel can arrive after Allow starts saving but before DOM
@@ -262,6 +262,10 @@ impl TunnelController {
         if *self.saving.peek() {
             return;
         }
+        if self.warning.peek().is_none() {
+            return;
+        }
+        DIALOG.release();
         let Some(warning) = self.warning.write().take() else {
             return;
         };

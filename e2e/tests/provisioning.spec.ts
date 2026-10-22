@@ -15,16 +15,21 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  cleanupSession,
+  createSession,
   hostRowByName,
   openHostMenu,
   openHostsPanel,
   patchPreferences,
+  pinAutoSelect,
   readPreferences,
   stubFeed,
   type FeedStub,
 } from "./helpers/fleet";
 import { requireHelmBuild } from "./helpers/helm-build";
 import { routeGate } from "./helpers/route-gate";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { disposeRelease, expectConnectedRelease, observeModalRelease, type ModalReleaseObservation } from "./helpers/modal-release";
 import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
 import { expectKeyboardScroll } from "./helpers/keyboard-scroll";
 import { currentStackSlot } from "../stack-slots";
@@ -472,6 +477,212 @@ for (const mode of ["plan", "refusal", "two plans"]) {
     } finally {
       gate.release();
       await page.unrouteAll({ behavior: "ignoreErrors" });
+    }
+  });
+}
+
+for (const admission of ["visible", "waiting behind another host"] as const) {
+  /**
+   * Retargeting retires only the offer owned by that provisioning panel.
+   * A waiting offer owns no isolation; retiring it must preserve the other
+   * host's actual admitted modal, its native keyboard owner and its inert set.
+   */
+  test(`offer retirement releases only its owner: ${admission}`, async ({ page, request }, testInfo) => {
+    const one = await startAdd(request, destination(testInfo, "release-retarget"));
+    const two = await startAdd(request, destination(testInfo, "release-other"));
+    await waitForProgress(request, one.host_id, "completed");
+    await waitForProgress(request, two.host_id, "completed");
+    const feed = await stubFeed(page);
+    const gates = [routeGate(), routeGate()];
+    const arrived = new Set<number>();
+    let observation: ModalReleaseObservation | undefined;
+    let bodyFailed = true;
+    for (const [index, id] of [one.host_id, two.host_id].entries()) {
+      await page.route(`**/api/hosts/${id}/uninstall`, async (route) => {
+        expect(route.request().method()).toBe("POST");
+        expect(route.request().postData(), "this test never confirms an uninstall").toBeNull();
+        arrived.add(id);
+        await gates[index].wait();
+        // The fake remote cannot satisfy live uninstall preflight. Keep the
+        // same bounded planning-reply seam as the delayed-admission cases.
+        await route.fulfill({ headers: { "x-farhelm-build": HELM_BUILD }, json: {
+          probe_id: `release-offer-${id}`,
+          confirmation: "uninstall the fixture host's Farhelm",
+          plan: { state_dir: "/tmp/fixture-retained-state" },
+        } });
+      });
+    }
+    try {
+      await page.goto("/");
+      await feed.waitForConnection(1);
+      await openHostsPanel(page);
+      const source = page.locator(`[data-provisioning-host="${one.host_id}"]`);
+      for (const id of admission === "visible" ? [one.host_id] : [one.host_id, two.host_id]) {
+        const row = page.locator(`[data-host-id="${id}"]`);
+        await openHostMenu(row);
+        await row.locator(".provisioning-uninstall").click();
+        await expect(row.locator('.host-update-pending[data-update-phase="planning"]')).toHaveCount(1);
+        await expect.poll(() => arrived.has(id)).toBe(true);
+      }
+      const owner = admission === "visible" ? one.host_id : two.host_id;
+      gates[admission === "visible" ? 0 : 1].release();
+      const dialog = page.locator(`[data-provisioning-host="${owner}"] .host-uninstall-dialog`);
+      const confirming = dialog.locator(".uninstall-confirm");
+      await expect(confirming).toBeFocused();
+      const backgroundSelector = `[data-host-id="${one.host_id}"] .host-row-menu`;
+      observation = await observeModalRelease(dialog, backgroundSelector, backgroundSelector);
+      if (admission !== "visible") {
+        gates[0].release();
+        // A real waiting HostModal slot proves the reply became an offer,
+        // rather than merely reaching the browser before it was decoded.
+        await expect(source.locator('[id^="host-modal-"]:not([data-host-modal-admitted])')).toHaveCount(1);
+        await expect(source.locator(".host-uninstall-dialog")).toHaveCount(0);
+      }
+      const changed = `${destination(testInfo, "release-retarget")}-moved`;
+      const retargeted = await request.post(`/api/hosts/${one.host_id}/destination`, { data: { ssh: changed } });
+      expect(retargeted.ok(), await responseBody(retargeted)).toBe(true);
+      expect((await hosts(request)).find((host) => host.id === one.host_id)?.destination).toBe(changed);
+      await notifyFeed(feed, 2);
+      await expect(source.locator('[id^="host-modal-"]'), "the owned stale offer must retire").toHaveCount(0);
+      if (admission === "visible") {
+        await expectConnectedRelease(observation);
+        expect(await page.locator(backgroundSelector).evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
+        expect((await observation.evaluate(({ events }) => events)).some((event) => event.kind === "focus"),
+          "retirement does not return to the old row").toBe(false);
+      } else {
+        await expect(dialog).toBeVisible();
+        await expect(confirming).toBeFocused();
+        expect(await page.locator(backgroundSelector).evaluate((node) => node.closest("[inert]") !== null)).toBe(true);
+        expect(await dialog.evaluate((node) => (node as HTMLElement & { __farhelmModalIsolated?: boolean }).__farhelmModalIsolated)).toBe(true);
+        expect(await observation.evaluate(({ events }) => events),
+          "another host's retirement must not even address the visible release hook").toEqual([]);
+        // Native containment must remain live, not only the installed marker.
+        const close = dialog.locator(".host-settings-dismiss");
+        await close.focus();
+        await expect(close).toBeFocused();
+        await page.keyboard.press("Shift+Tab");
+        await expect(confirming).toBeFocused();
+        await page.keyboard.press("Escape");
+        await expect(dialog).toHaveCount(0);
+        await expectConnectedRelease(observation);
+        await expect(page.locator(".host-uninstall-dialog")).toHaveCount(0);
+      }
+      bodyFailed = false;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["held plans", () => gates.forEach((gate) => gate.release())],
+        ["plan routes", () => page.unrouteAll({ behavior: "wait" })],
+        ["release observation", () => disposeRelease(observation)],
+      ]);
+    }
+  });
+}
+
+for (const reason of ["Remove success", "authoritative Settings disappearance"] as const) {
+  /**
+   * A host retirement releases its connected root and owes no old-row return.
+   * The newer owner is an actual enabled approval answer: an inert background
+   * button cannot make this preservation assertion pass vacuously.
+   */
+  test(`host retirement releases before removal and preserves approval focus: ${reason}`, async ({ page, request }, testInfo) => {
+    const remote = destination(testInfo, `release-${reason === "Remove success" ? "delete" : "gone"}`);
+    const accepted = await startAdd(request, remote);
+    await waitForProgress(request, accepted.host_id, "completed");
+    const previous = await readPreferences(request);
+    let session: Awaited<ReturnType<typeof createSession>> | undefined;
+    const feed = await stubFeed(page);
+    feed.notifyOnConnect(1);
+    const gate = routeGate();
+    let deleteArrived = false;
+    let waiting = false;
+    const answers: string[] = [];
+    const approvalId = `release-newer-owner-${Date.now()}`;
+    let observation: ModalReleaseObservation | undefined;
+    let bodyFailed = true;
+    try {
+      const requester = await createSession(request, { title: `release-approval-${Date.now()}` });
+      session = requester;
+      await patchPreferences(request, { skip_host_remove_confirmation: false });
+      await page.route((url) => url.pathname === "/api/approvals", (route) => route.fulfill({
+        headers: { "x-farhelm-build": HELM_BUILD }, json: { approvals: waiting ? [{
+          id: approvalId, host_id: 1, host_name: "fixture-host",
+          session: { id: requester.id, title: requester.title, host_name: "fixture-host" },
+          expires_at_ms: Date.now() + 540_000,
+          action: {
+            kind: "launch", verb: "create", host_name: "fixture-host", cwd: "/work/project",
+            title: null, source: null,
+            launch: { kind: "agent", selection: { harness: "claude", model: "opus", effort: "high", permissions: "guarded" },
+              start: ["claude", "--model", "opus", "--effort", "high", "--permission-mode", "auto", "{farhelm_args}"], resume: null },
+          },
+        }] : [] },
+      }));
+      await page.route((url) => url.pathname === `/api/approvals/${approvalId}`, async (route) => {
+        expect(route.request().method()).toBe("POST");
+        answers.push(route.request().postDataJSON().answer);
+        waiting = false;
+        await route.fulfill({ status: 204, headers: { "x-farhelm-build": HELM_BUILD } });
+      });
+      if (reason === "Remove success") {
+        await page.route(`**/api/hosts/${accepted.host_id}`, async (route) => {
+          if (route.request().method() !== "DELETE") return route.continue();
+          deleteArrived = true;
+          await gate.wait();
+          const response = await route.fetch();
+          expect(response.ok(), await response.text()).toBe(true);
+          await route.fulfill({ response });
+        });
+      }
+      await pinAutoSelect(page, requester.id);
+      await page.goto("/");
+      await feed.waitForConnection(1);
+      await openHostsPanel(page);
+      const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+      await expect(row).toBeVisible();
+      await openHostMenu(row);
+      await row.locator(reason === "Remove success" ? ".host-remove" : ".host-settings").click();
+      const dialog = page.locator(reason === "Remove success" ? '.host-remove-dialog[role="dialog"]' : '.host-settings-refreshed[role="dialog"]');
+      await expect(dialog).toBeVisible();
+      observation = await observeModalRelease(dialog, ".add-host-button", ".add-host-button");
+      if (reason === "Remove success") {
+        await expect(dialog.locator(".host-remove-confirm")).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect.poll(() => deleteArrived).toBe(true);
+        await expect(dialog.locator(".host-settings-close")).toBeDisabled();
+        expect((await hosts(request)).some((host) => host.id === accepted.host_id),
+          "the DELETE is held before the real handler").toBe(true);
+      }
+      waiting = true;
+      await notifyFeed(feed, 2);
+      const card = page.locator(`.approval-card[data-approval-id="${approvalId}"]`);
+      const answer = card.getByRole("button", { name: "allow", exact: true });
+      await expect(answer).toBeVisible();
+      await expect(answer).toBeEnabled();
+      expect(await answer.evaluate((node) => node.closest("[data-modal-exempt]") !== null)).toBe(true);
+      expect(await answer.evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
+      await answer.focus();
+      await expect(answer).toBeFocused();
+      if (reason === "Remove success") gate.release();
+      else {
+        const removed = await request.delete(`/api/hosts/${accepted.host_id}`);
+        expect(removed.ok(), await responseBody(removed)).toBe(true);
+        await notifyFeed(feed, 3);
+      }
+      await expect(dialog).toHaveCount(0);
+      await expect(row).toHaveCount(0);
+      await expect(answer, "retirement must leave the newer valid owner alone").toBeFocused();
+      await expectConnectedRelease(observation);
+      expect(await page.locator(".add-host-button").evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
+      expect(answers, "preserving focus must not answer an approval").toEqual([]);
+      expect((await hosts(request)).some((host) => host.id === accepted.host_id)).toBe(false);
+      bodyFailed = false;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["held DELETE", () => gate.release()],
+        ["owned routes", () => page.unrouteAll({ behavior: "wait" })],
+        ["release observation", () => disposeRelease(observation)],
+        ["remove preference", () => patchPreferences(request, { skip_host_remove_confirmation: previous.skip_host_remove_confirmation ?? null })],
+        ["approval requester", () => session && cleanupSession(request, session.id)],
+      ]);
     }
   });
 }
