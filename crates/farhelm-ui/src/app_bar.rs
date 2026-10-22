@@ -5,14 +5,17 @@
 //! the client build until a reported mismatch gives it a more useful helm
 //! value; a page never needs a loading placeholder to identify its bundle.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
 
 use std::collections::HashMap;
 
-use crate::anchored_popovers::{AnchorRegion, Interest, MovementOwner, use_registration};
-use crate::app_updater::{AppUpdater, use_app_updater};
+use crate::anchored_popovers::{
+    AnchorRegion, Interest, MovementOwner, Registration, use_registration,
+};
+use crate::app_updater::{AppUpdater, InlinePresentation, use_app_updater};
 use crate::menu_panel::{
     MenuFocusQueue, MenuOpenIntent, MenuOrder, MenuWiring, PanelPlacement, ROW_MENU_OUTSIDE_RELAY,
     cancel_menu_focus, closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus,
@@ -332,7 +335,8 @@ impl BarMenuState {
 /// Create one bar menu's state, with the two effects every such menu needs:
 /// close when the layout moves, and on close forget the focus bookkeeping
 /// and hand focus back to the toggle if it was inside the menu.
-fn use_bar_menu(layout_epoch: ReadSignal<u64>, name: &'static str) -> BarMenuState {
+/// The returned registration also admits causes local to this menu's anchor.
+fn use_bar_menu(layout_epoch: ReadSignal<u64>, name: &'static str) -> (BarMenuState, Registration) {
     let mut open = use_signal(|| false);
     let opened_epoch = use_signal(|| *layout_epoch.peek());
     let mut menu_focus = use_signal(|| None::<usize>);
@@ -366,10 +370,11 @@ fn use_bar_menu(layout_epoch: ReadSignal<u64>, name: &'static str) -> BarMenuSta
     );
     // Retain this menu's own epoch continuation: a pending effect for the
     // epoch captured by begin_open must not dismiss that fresh measurement.
+    let layout_registration = registration.clone();
     use_effect(move || {
         let epoch = layout_epoch();
         if *open.peek() && epoch != *opened_epoch.peek() {
-            registration.close_if_open();
+            layout_registration.close_if_open();
         }
     });
     use_effect(move || {
@@ -386,7 +391,49 @@ fn use_bar_menu(layout_epoch: ReadSignal<u64>, name: &'static str) -> BarMenuSta
             focus_menu_toggle("data-bar-menu", name, ".bar-menu-toggle");
         }
     });
-    state
+    (state, registration)
+}
+
+/// One mounted status producer's last render and undelivered opening cause.
+/// This is metadata for the Update anchor, not another owner of updater feedback.
+#[derive(Default)]
+struct RenderedUpdateStatus {
+    current: Option<InlinePresentation>,
+    pending_generation: Option<u64>,
+}
+
+/// Close only the Update opening that existed when visible status changed.
+///
+/// Capture happens during the status child's render, before its changed DOM is
+/// committed. Delivery uses the existing registration after commit. The pending
+/// generation preserves A→B→A renders even when Dioxus deduplicates their effect;
+/// a synchronous reopen advances the generation and rejects that earlier cause.
+/// Initial render seeds the baseline, and unchanged words never acquire a cause.
+fn use_update_status_movement(
+    menu: BarMenuState,
+    registration: Registration,
+) -> (Callback<InlinePresentation>, Callback<()>) {
+    let rendered = use_hook(|| Rc::new(RefCell::new(RenderedUpdateStatus::default())));
+    let captured = rendered.clone();
+    let on_render = use_callback(move |presentation| {
+        let mut captured = captured.borrow_mut();
+        if captured
+            .current
+            .replace(presentation)
+            .is_some_and(|old| old != presentation)
+        {
+            captured.pending_generation = (*menu.open.peek()).then(|| *menu.open_generation.peek());
+        }
+    });
+    let on_commit = use_callback(move |()| {
+        let pending = rendered.borrow_mut().pending_generation.take();
+        if pending.is_some_and(|generation| {
+            *menu.open.peek() && generation == *menu.open_generation.peek()
+        }) {
+            registration.close_if_open();
+        }
+    });
+    (on_render, on_commit)
 }
 
 /// A bar menu's toggle, inside the bar, with the hidden relay the
@@ -641,8 +688,10 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     let version_tooltip =
         crate::app_updater::version_tooltip(skew::CLIENT_BUILD, reported, readout.as_ref());
 
-    let help_menu = use_bar_menu(layout_epoch, "help");
-    let update_menu = use_bar_menu(layout_epoch, "update");
+    let (help_menu, _) = use_bar_menu(layout_epoch, "help");
+    let (update_menu, update_registration) = use_bar_menu(layout_epoch, "update");
+    let (status_rendered, status_committed) =
+        use_update_status_movement(update_menu, update_registration);
     // The update menu's toggle is the red readout, which goes away when no
     // update waits any more (a newer check, a reinstall); an open update
     // menu must not outlive it.
@@ -719,7 +768,11 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                 }
             }
             if let Some(updater) = updater.clone() {
-                crate::app_updater::UpdateCheckStatus { updater }
+                crate::app_updater::UpdateCheckStatus {
+                    updater,
+                    on_render: status_rendered,
+                    on_commit: status_committed,
+                }
             }
             button {
                 r#type: "button",
@@ -826,6 +879,120 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    /// Production handles exposed by the headless fixture after its hooks mount.
+    #[derive(Clone, Copy)]
+    struct StatusMenus {
+        help: BarMenuState,
+        update: BarMenuState,
+        epoch: ReadSignal<u64>,
+    }
+
+    /// Own only render input and menu handles; no native updater or web stand-in
+    /// is constructed. The production hooks supply registration and timing.
+    #[derive(Clone, Default)]
+    struct StatusFixture {
+        presentation: Rc<Cell<InlinePresentation>>,
+        menus: Rc<RefCell<Option<StatusMenus>>>,
+    }
+
+    /// Exercise the exact render-capture/effect boundary used by UpdateCheckStatus.
+    /// The no-op document permits the ordinary opening path without a webview;
+    /// geometry and actual keyboard focus are deliberately not asserted here.
+    fn status_fixture(fixture: StatusFixture) -> Element {
+        use_context_provider(MovementOwner::default);
+        use_context_provider(|| Rc::new(document::NoOpDocument) as Rc<dyn document::Document>);
+        let epoch = use_signal(|| 0_u64);
+        let (help, _) = use_bar_menu(epoch.into(), "help");
+        let (update, registration) = use_bar_menu(epoch.into(), "update");
+        let (on_render, on_commit) = use_update_status_movement(update, registration);
+        let presentation = fixture.presentation.get();
+        crate::app_updater::use_inline_status_movement(presentation, on_render, on_commit);
+        fixture.menus.replace(Some(StatusMenus {
+            help,
+            update,
+            epoch: epoch.into(),
+        }));
+        rsx! { span { "{presentation.shown:?}" } }
+    }
+
+    /// Render a new contribution without draining its after-commit continuation.
+    /// Keeping this boundary explicit distinguishes capture from close delivery.
+    fn render_status(dom: &mut VirtualDom, fixture: &StatusFixture, value: InlinePresentation) {
+        fixture.presentation.set(value);
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        let mutations = dom.render_immediate_to_vec();
+        assert!(
+            !mutations.edits.is_empty(),
+            "the visible status must change at this boundary"
+        );
+    }
+
+    /// A status change closes the captured Update opening after commit, retains
+    /// Help, and cannot replay against a fresh opening. Two committed changes
+    /// before an effect drain must not erase the first movement by returning to A.
+    #[farhelm_testtrace::test]
+    fn status_movement_delivers_only_to_the_captured_update_opening() {
+        let empty = InlinePresentation::default();
+        let failed = InlinePresentation {
+            shown: Some(crate::app_updater::InlineStatus::Failed),
+            separate_progress_spinner: false,
+        };
+        for scenario in [
+            "same opening",
+            "fresh reopen",
+            "return to original",
+            "unchanged",
+        ] {
+            let fixture = StatusFixture::default();
+            let mut dom = VirtualDom::new_with_props(status_fixture, fixture.clone());
+            dom.rebuild_in_place();
+            let StatusMenus {
+                help,
+                update,
+                epoch,
+            } = fixture.menus.borrow().expect("menu hooks rendered");
+            dom.in_scope(dioxus::core::ScopeId::APP, || {
+                help.begin_open(MenuOpenIntent::First, epoch);
+                update.begin_open(MenuOpenIntent::First, epoch);
+            });
+            // The first effect still has not run when these menus open. It
+            // seeds no movement and must not invalidate either fresh opening.
+            dom.process_events();
+            assert!(*help.open.peek(), "Help opened before the initial effect");
+            assert!(*update.open.peek(), "initial status is a no-op");
+            let opening = *update.open_generation.peek();
+
+            if scenario == "unchanged" {
+                dom.mark_dirty(dioxus::core::ScopeId::APP);
+                dom.render_immediate(&mut dioxus::core::NoOpMutations);
+            } else {
+                render_status(&mut dom, &fixture, failed);
+                assert!(*update.open.peek(), "capture must not close during render");
+                if scenario == "fresh reopen" {
+                    dom.in_scope(dioxus::core::ScopeId::APP, || {
+                        update.close_menu.call(());
+                        update.begin_open(MenuOpenIntent::First, epoch);
+                    });
+                    assert!(*update.open_generation.peek() > opening);
+                } else if scenario == "return to original" {
+                    render_status(&mut dom, &fixture, empty);
+                    assert!(*update.open.peek(), "both renders precede delivery");
+                }
+            }
+            dom.process_events();
+            assert_eq!(
+                *update.open.peek(),
+                matches!(scenario, "fresh reopen" | "unchanged"),
+                "{scenario}",
+            );
+            assert!(
+                *help.open.peek(),
+                "status movement must never select Help: {scenario}"
+            );
+        }
+    }
 
     /// `None` is both the pre-reply state and the healthy steady state after
     /// agreeing replies; either way the client build is the exact answer, so

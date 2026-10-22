@@ -211,6 +211,53 @@ pub(crate) fn inline_status(
     }
 }
 
+/// The inline feedback's actual in-flow contribution after local suppression.
+///
+/// Hidden readiness announcements, outcome identity and hover details occupy no
+/// width. Keeping them out of this value lets an unchanged visible status retain
+/// an update menu measured against it. Spinner animation is likewise irrelevant;
+/// only the presence of the separate ring contributes another inline element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct InlinePresentation {
+    pub(crate) shown: Option<InlineStatus>,
+    pub(crate) separate_progress_spinner: bool,
+}
+
+/// Resolve the same status words and ring that the status component renders.
+/// Suppression belongs to that component, so callers must supply its current
+/// dismissed or expired activity rather than deriving visibility from readout alone.
+pub(crate) fn inline_presentation(
+    readout: &Readout,
+    suppressed: Option<&Activity>,
+) -> InlinePresentation {
+    let shown = inline_status(&readout.activity, readout.update_ready, suppressed);
+    InlinePresentation {
+        shown,
+        separate_progress_spinner: shown
+            .is_some_and(|shown| separate_progress_spinner(readout, shown)),
+    }
+}
+
+/// Capture an existing opening before this synchronous render changes its anchor.
+///
+/// Dioxus 0.7 runs component bodies before applying their mutations and effects
+/// after those mutations. The render callback only records nonreactive metadata;
+/// the continuation may close through the existing registration after commit.
+/// Effects deduplicate and replace their callbacks, so the receiver must retain
+/// a changed render's opening even when another render restores the old value.
+/// This boundary assumes the status render does not suspend.
+pub(crate) fn use_inline_status_movement(
+    presentation: InlinePresentation,
+    on_render: Callback<InlinePresentation>,
+    on_commit: Callback<()>,
+) {
+    on_render.call(presentation);
+    use_effect(use_reactive!(|presentation| {
+        let _ = presentation;
+        on_commit.call(());
+    }));
+}
+
 /// Announce a successful waiting update without competing with its red readout.
 /// Failure and progress own their visible words; readiness from background work
 /// alone carries no user-check provenance and must remain silent.
@@ -277,7 +324,11 @@ impl InlineFeedback {
 // The shared tree still typechecks this component on the web, where its
 // uninhabited updater argument deliberately makes the whole body unreachable.
 #[cfg_attr(not(native_desktop), allow(unreachable_code, unused_variables))]
-pub(crate) fn UpdateCheckStatus(updater: AppUpdater) -> Element {
+pub(crate) fn UpdateCheckStatus(
+    updater: AppUpdater,
+    on_render: Callback<InlinePresentation>,
+    on_commit: Callback<()>,
+) -> Element {
     let watched = updater.clone();
     let activity = use_memo(move || {
         let readout = watched.readout();
@@ -297,11 +348,9 @@ pub(crate) fn UpdateCheckStatus(updater: AppUpdater) -> Element {
         }
     });
     let readout = updater.readout();
-    let shown = inline_status(
-        &readout.activity,
-        readout.update_ready,
-        feedback.read().suppressed.as_ref(),
-    );
+    let presentation = inline_presentation(&readout, feedback.read().suppressed.as_ref());
+    use_inline_status_movement(presentation, on_render, on_commit);
+    let shown = presentation.shown;
     let announce_ready = announce_update_ready(&readout);
     rsx! {
         span {
@@ -316,7 +365,7 @@ pub(crate) fn UpdateCheckStatus(updater: AppUpdater) -> Element {
                     key: "{readout.notice_id}",
                     class: "app-update-status-content",
                     if let Some(shown) = shown {
-                        if separate_progress_spinner(&readout, shown) {
+                        if presentation.separate_progress_spinner {
                             span { class: "delete-spinner", "aria-hidden": "true" }
                         }
                         if shown == InlineStatus::Failed {
@@ -574,6 +623,84 @@ pub(crate) fn use_app_updater() -> Option<AppUpdater> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Movement follows the visible words and ring after dismissal/expiry.
+    /// Readiness announcements, notice identity and failure details must not
+    /// acquire width merely because the native worker published a new readout.
+    #[farhelm_testtrace::test]
+    fn inline_presentation_tracks_only_rendered_feedback() {
+        let mut readout = Readout {
+            update_ready: true,
+            needs_reinstall: false,
+            withdrawn: false,
+            tooltip: String::new(),
+            activity: Activity::Idle,
+            notice_id: 1,
+            user_update_ready: false,
+        };
+        let empty = InlinePresentation::default();
+        assert_eq!(inline_presentation(&readout, None), empty);
+        readout.user_update_ready = true;
+        assert!(announce_update_ready(&readout));
+        assert_eq!(inline_presentation(&readout, None), empty);
+
+        for (activity, shown) in [
+            (Activity::Checking, InlineStatus::Checking),
+            (
+                Activity::Installing("1.2.4".into()),
+                InlineStatus::Installing,
+            ),
+        ] {
+            readout.activity = activity;
+            assert_eq!(
+                inline_presentation(&readout, None),
+                InlinePresentation {
+                    shown: Some(shown),
+                    separate_progress_spinner: true
+                },
+            );
+            readout.update_ready = false;
+            assert_eq!(
+                inline_presentation(&readout, None),
+                InlinePresentation {
+                    shown: Some(shown),
+                    separate_progress_spinner: false
+                },
+            );
+            readout.update_ready = true;
+        }
+
+        readout.activity = Activity::Failed("offline".into());
+        let failure = inline_presentation(&readout, None);
+        assert_eq!(failure.shown, Some(InlineStatus::Failed));
+        assert!(!failure.separate_progress_spinner);
+        readout.activity = Activity::Failed("different reason".into());
+        readout.notice_id += 1;
+        readout.tooltip = "different hover".into();
+        readout.needs_reinstall = true;
+        assert_eq!(inline_presentation(&readout, None), failure);
+
+        let mut feedback = InlineFeedback::default();
+        feedback.observe(&readout.activity, readout.notice_id);
+        feedback.dismiss(&readout.activity, readout.notice_id);
+        assert_eq!(
+            inline_presentation(&readout, feedback.suppressed.as_ref()),
+            empty
+        );
+        readout.activity = Activity::UpToDate("1.2.3".into());
+        assert_eq!(inline_presentation(&readout, None), empty);
+        readout.update_ready = false;
+        assert_eq!(
+            inline_presentation(&readout, None).shown,
+            Some(InlineStatus::UpToDate)
+        );
+        feedback.observe(&readout.activity, readout.notice_id);
+        feedback.expire(&readout.activity, readout.notice_id);
+        assert_eq!(
+            inline_presentation(&readout, feedback.suppressed.as_ref()),
+            empty
+        );
+    }
 
     /// Activating the production native button reaches its check callback.
     /// Inspect the actual template and attributes first so a no-op handler,
