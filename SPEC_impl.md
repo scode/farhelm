@@ -2408,14 +2408,18 @@ The namespace's inode and creation-time evidence uses the working-copy registry'
 rule. Cleanup opens the canonical checkout root without following a final symlink, confines each reserved child lookup
 below it, and verifies the opened namespace. Dedicated ownership of that namespace authorizes recovery of only
 `.<name>:building-<uuid>`, `.<name>:claimed-<session uuid>-<generation>` and `.<name>:trash-<uuid>` directories,
-including a builder interrupted before recording a per-tree identity. Unknown names and other repositories remain
-untouched. The colon is excluded by repository-name validation, so private names cannot match another repository's ready
-slot in the shared namespace. A ready `<name>` slot requires its own recorded identity; namespace ownership never adopts
-a replaced ready spare. Cleanup renames the selected directory to a fresh no-replace trash name, verifies it, then uses
-the archive's shared opened-handle confined recursive remover. It never recursively removes by checkout pathname or
-crosses links or mounts. The verified namespace is fsynced before a record can forget a removed ready identity or retire
-its location. A failed cleanup or namespace barrier retains the original identity and location, including when removal
-completed; an absence-only retry still needs that namespace barrier before retiring the evidence.
+including a builder interrupted before recording a per-tree identity. Recovery adopts such a directory at whatever
+identity it now has, so a building directory the builder refused to publish because it was replaced is still removed.
+Unknown names and other repositories remain untouched. The colon is excluded by repository-name validation, so private
+names cannot match another repository's ready slot in the shared namespace. Cleanup removes a ready `<name>` slot only
+at its own recorded identity, so cleanup by itself never adopts a replaced ready spare. A take, which never reads the
+recovery record, renames whatever occupies the ready slot into its claim, and startup removes a claim left behind after
+its launch's clone stage like any other. Both follow SPEC.md's acceptance that anything inside `.farhelm-spares` that
+Farhelm did not put there is out of band. Cleanup renames the selected directory to a fresh no-replace trash name,
+verifies it, then uses the archive's shared opened-handle confined recursive remover. It never recursively removes by
+checkout pathname or crosses links or mounts. The verified namespace is fsynced before a record can forget a removed
+ready identity or retire its location. A failed cleanup or namespace barrier retains the original identity and location,
+including when removal completed; an absence-only retry still needs that namespace barrier before retiring the evidence.
 
 Startup collects exact launch-generation, preparation-state and owned-pane evidence before the blocking cache sweep. A
 still-live clone claim is retained, including a live NotStarted preparation that can begin cloning after the sample;

@@ -1063,8 +1063,10 @@ Turning the global switch off affects future creates. Each repository's next cre
 instead of building, and a create using another checkout root discards the spare at the old root first. Accepted creates
 and retries keep their frozen choices. Startup removes leftover building and claimed directories except claims still in
 a live launch's clone stage, and spares are evicted with their caches after more than 30 days unused. Discard renames
-owned content to private trash names and uses the existing identity-checked confined removal; replaced directories,
-symlinks and mounts do not grant deletion authority.
+owned content to private trash names and uses the existing identity-checked confined removal, which never follows
+symlinks or crosses mounts. Nothing under `.farhelm-spares` that Farhelm did not put there is protected: a spare or
+building folder there that was removed and recreated, or otherwise replaced, is out of band, and Farhelm may adopt it
+and delete it (see the dedicated-ownership paragraph under Supported user environments).
 
 Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete. A
 completed preparation permits ordinary restart without repeating clone or hook. Interrupted, missing, corrupt or
@@ -3511,11 +3513,14 @@ trash (`farhelm-archived-working-copies`) and reserved spare container (`.farhel
 those paths is unsupported, including restoring a filesystem snapshot over them, user-instigated kernel-level overrides,
 or using uncommon filesystems such as FAT. Farhelm adds no complexity to detect or defend against these changes. The
 foreign-replacement guard protects ordinary replacement, such as a folder removed and recreated or a re-clone; replacing
-a folder inside the guard's check-then-move window is out of band too. This acceptance does not extend to the state
-directory or installation, or change the ownership checks required elsewhere: installer checksum matching, uninstall
-refusing unknown app-bundle entries, and the symlink and canonical-path rules still apply. Ordinary reboots and remounts
-on supported filesystems such as btrfs, NFS and overlayfs remain supported, as the managed-checkout identity rule above
-specifies.
+a folder inside the guard's check-then-move window is out of band too. The guard does not extend inside
+`.farhelm-spares` (accepted 2026-10-21): anything in that container that Farhelm did not put there, including a folder
+removed and recreated, is out of band, and Farhelm may adopt it and delete it. For example, a launch can take a replaced
+spare as its own, and startup cleanup then deletes what the launch left behind. Everywhere else the guard applies as
+stated. This acceptance does not extend to the state directory or installation, or change the ownership checks required
+elsewhere: installer checksum matching, uninstall refusing unknown app-bundle entries, and the symlink and
+canonical-path rules still apply. Ordinary reboots and remounts on supported filesystems such as btrfs, NFS and
+overlayfs remain supported, as the managed-checkout identity rule above specifies.
 
 ### Supported host setup
 
