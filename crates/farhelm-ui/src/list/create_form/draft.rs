@@ -1,24 +1,26 @@
-//! Accepted tab drafts and one-time inputs, independent of picker widgets.
+//! Accepted tab drafts, placement and one-time inputs, independent of widgets.
 //!
 //! Raw editor text and ownership belong together: parsing a draft and writing
 //! it back would lose unfinished quotes and change untouched peer values.
-//! Host authority, attempt keys, confirmation and transient picker state stay
-//! with the form. `LaunchDraftState` is only the renderer's ownership boundary.
+//! Host authority, preview observations, attempt keys, confirmation and picker
+//! state stay with the form. `LaunchDraftState` is the renderer's ownership
+//! boundary; field memos are subscriptions, never live callback authority.
 
 use dioxus::prelude::*;
 
 use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, api};
 
 use super::{
-    CommandLaunch, LaunchIntent, LaunchTab, command_intent, display_peer, submitted_field,
+    CheckoutNameSource, CheckoutNaming, CommandLaunch, CreateTarget, DestinationDraft, GithubRepo,
+    LaunchIntent, LaunchTab, command_intent, display_peer, effective_title, submitted_field,
 };
 
 /// Accepted launch choices and their raw-text ownership, retained across tabs.
 ///
 /// This is a draft, not a validated request: malformed custom flags and wrapper
 /// text must remain available for correction. The request projection does not
-/// replace the form's ordered admission checks. Destination fields still belong
-/// to the form while that independent group is migrated. Both tab drafts and
+/// replace the form's ordered admission checks. Preview replies and host
+/// authority stay outside semantic destination ownership. Both tab drafts and
 /// one-time inputs survive mode changes; only the active intent is submitted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct LaunchDraft {
@@ -45,6 +47,15 @@ pub(super) struct LaunchDraft {
     command_resume_edited: bool,
     prompt: Option<String>,
     conversation: String,
+    cwd: String,
+    cwd_raw_seed: Option<String>,
+    cwd_edited: bool,
+    folder_is_explicit: bool,
+    title: String,
+    title_raw_seed: Option<String>,
+    title_edited: bool,
+    destination: DestinationDraft,
+    checkout_naming: CheckoutNaming,
 }
 
 /// Preserve the existing control/search differences while sharing transitions.
@@ -90,6 +101,15 @@ impl LaunchDraft {
             command_resume_edited: false,
             prompt: None,
             conversation: String::new(),
+            cwd: "~".into(),
+            cwd_raw_seed: None,
+            cwd_edited: false,
+            folder_is_explicit: false,
+            title: String::new(),
+            title_raw_seed: None,
+            title_edited: false,
+            destination: DestinationDraft::Existing { cwd: "~".into() },
+            checkout_naming: CheckoutNaming::default(),
         }
     }
 
@@ -196,6 +216,142 @@ impl LaunchDraft {
     /// One-time literal selector, excluded from reusable launch choices.
     pub(super) fn conversation(&self) -> String {
         self.conversation.clone()
+    }
+
+    // Placement ownership. Existing.cwd is the operational destination, while
+    // the editor triple survives managed mode for an explicit return to Folder.
+    // All folder transitions keep those roles linked without caching previews.
+
+    /// Dormant folder display survives managed mode; it is never a preview path.
+    pub(super) fn cwd(&self) -> String {
+        self.cwd.clone()
+    }
+    /// Untouched folder requests retain peer bytes rather than their display.
+    pub(super) fn cwd_raw_seed(&self) -> Option<String> {
+        self.cwd_raw_seed.clone()
+    }
+    /// Typing claims even a display spelling identical to its escaped seed.
+    pub(super) fn cwd_edited(&self) -> bool {
+        self.cwd_edited
+    }
+    /// Picking a raw path is explicit placement without claiming its display.
+    pub(super) fn folder_is_explicit(&self) -> bool {
+        self.folder_is_explicit
+    }
+    /// Name editor display, independently of a resolved checkout suffix.
+    pub(super) fn title(&self) -> String {
+        self.title.clone()
+    }
+    /// Copied title ownership survives a temporary managed destination.
+    pub(super) fn title_raw_seed(&self) -> Option<String> {
+        self.title_raw_seed.clone()
+    }
+    /// Whether the name is the user's exact spelling rather than a copied seed.
+    pub(super) fn title_edited(&self) -> bool {
+        self.title_edited
+    }
+    /// Semantic destination only; preview completion cannot rewrite this value.
+    pub(super) fn destination(&self) -> DestinationDraft {
+        self.destination.clone()
+    }
+    /// Existing name source and bounded occupancy sequence, without authority.
+    pub(super) fn checkout_naming(&self) -> CheckoutNaming {
+        self.checkout_naming.clone()
+    }
+    /// Operational folder bytes for live browse and ordinary request checks.
+    pub(super) fn submitted_cwd(&self) -> String {
+        submitted_field(&self.cwd, self.cwd_edited, self.cwd_raw_seed.as_deref())
+    }
+    /// Shared name policy for snapshots that must not wait on renderer memos.
+    pub(super) fn effective_title(&self) -> String {
+        effective_title(
+            &self.title,
+            self.title_edited,
+            self.title_raw_seed.as_deref(),
+            &self.destination,
+            &self.checkout_naming,
+        )
+    }
+    // Placement edits do not decide host/history admission, preview generations,
+    // focus, operation locking or retry-key policy. The form retains their exact
+    // current order while these related semantic assignments move together.
+
+    /// A typed folder exits managed mode and deliberately owns its spelling.
+    pub(super) fn edit_folder(&mut self, text: String) {
+        self.destination = DestinationDraft::Existing { cwd: text.clone() };
+        self.cwd = text;
+        self.cwd_edited = true;
+        self.folder_is_explicit = true;
+    }
+    /// Relayed path choices preserve exact bytes and count as explicit placement.
+    pub(super) fn choose_existing_folder(&mut self, raw: &str) {
+        self.seed_folder(raw);
+        self.folder_is_explicit = true;
+    }
+    /// Inherited placement is visible without preselecting the template checkbox.
+    pub(super) fn seed_folder(&mut self, raw: &str) {
+        self.destination = DestinationDraft::Existing { cwd: raw.into() };
+        self.cwd = display_peer(raw);
+        self.cwd_raw_seed = Some(raw.into());
+        self.cwd_edited = false;
+        self.folder_is_explicit = false;
+    }
+    /// Mode changes retain the dormant editor; queries never become folders.
+    /// The control keeps its existing same-mode no-op gate before calling this.
+    pub(super) fn choose_destination_type(&mut self, managed: bool) {
+        if managed {
+            self.edit_repository_query(String::new());
+        } else {
+            self.choose_existing_folder(&self.submitted_cwd());
+        }
+    }
+    /// Query text has no repository-selection or request authority.
+    pub(super) fn edit_repository_query(&mut self, query: String) {
+        self.destination = DestinationDraft::GithubInput { query };
+    }
+    /// Callers separately invalidate preview revision on every explicit choice.
+    pub(super) fn select_repository(&mut self, repo: GithubRepo) {
+        self.destination = DestinationDraft::github(repo);
+    }
+    /// Hand edits replace Clone/template naming while retaining dormant raw bytes.
+    pub(super) fn edit_title(&mut self, text: String) {
+        self.checkout_naming = CheckoutNaming::default();
+        self.title = text;
+        self.title_edited = true;
+    }
+    /// Clone alone supplies a source repository; Replace keeps its copied name.
+    pub(super) fn seed_title(&mut self, raw: &str, source_repo: Option<GithubRepo>) {
+        self.title = display_peer(raw);
+        self.title_raw_seed = Some(raw.into());
+        self.title_edited = false;
+        self.checkout_naming = CheckoutNaming {
+            source: source_repo.map(CheckoutNameSource::Clone),
+            ..Default::default()
+        };
+    }
+    /// Template policy replaces Clone numbering even when the text is unchanged.
+    pub(super) fn apply_template_name(
+        &mut self,
+        name: String,
+        kind: farhelm_proto::launcher::TemplateNameKind,
+    ) {
+        self.title = name.clone();
+        self.title_raw_seed = None;
+        self.title_edited = true;
+        self.checkout_naming = CheckoutNaming {
+            source: Some(CheckoutNameSource::Template { base: name, kind }),
+            ..Default::default()
+        };
+    }
+    /// Render reconciliation resets only occupancy search, even while busy.
+    /// The caller keeps this system edit outside user admission/key policy.
+    pub(super) fn retarget_naming(&mut self, host: Option<CreateTarget>) {
+        self.checkout_naming
+            .retarget(host, self.destination.repo().cloned());
+    }
+    /// Only the form may decide that an authoritative occupied reply may advance.
+    pub(super) fn advance_naming(&mut self, reconciling: bool) -> bool {
+        self.checkout_naming.advance(reconciling)
     }
 
     /// Tab changes select a request variant without copying or clearing drafts.
@@ -548,7 +704,7 @@ impl LaunchDraft {
     /// Reapply New's passive permission seed while preserving launch context.
     /// Clearing the selected agent also ends its ownership of custom words;
     /// leaving them dormant would let search restore them under another CLI.
-    /// Command, tab and one-time values remain exactly as they were.
+    /// Command, tab, one-time inputs and placement remain exactly as they were.
     pub(super) fn reset_choices(&mut self, permission: Option<LaunchPermission>) {
         self.harness = None;
         self.choose_default_model();
@@ -560,7 +716,7 @@ impl LaunchDraft {
         self.wrapper_explicit = false;
     }
 
-    /// A stored launch replaces the whole structured choice and is explicit.
+    /// A stored launch replaces only the structured group and is explicit.
     /// The caller supplies model-owner evidence: Clone has source ownership;
     /// a recent uses the current catalog's custom_model_owner decision.
     pub(super) fn restore_launch(
@@ -581,7 +737,7 @@ impl LaunchDraft {
 
     /// A command/legacy prefill has no hidden structured choice to inherit.
     /// Clear only that group: the caller has already seeded its new command,
-    /// and mounted source changes preserve the one-time conversation selector.
+    /// and mounted source changes preserve conversation, placement and naming.
     pub(super) fn clear_for_command_seed(&mut self) {
         self.reset_choices(None);
         self.permissions_explicit = true;
@@ -629,6 +785,13 @@ fn joined(words: Option<&Vec<String>>) -> String {
 /// Memo peeks can be stale in one event turn; imperative callers use snapshot().
 #[derive(Clone, Copy)]
 pub(super) struct DraftFields {
+    pub(super) cwd: Memo<String>,
+    pub(super) cwd_edited: Memo<bool>,
+    pub(super) title: Memo<String>,
+    pub(super) title_raw_seed: Memo<Option<String>>,
+    pub(super) title_edited: Memo<bool>,
+    pub(super) destination_draft: Memo<DestinationDraft>,
+    pub(super) clone_checkout_naming: Memo<CheckoutNaming>,
     pub(super) launch_tab: Memo<LaunchTab>,
     pub(super) invocation: Memo<String>,
     pub(super) invocation_edited: Memo<bool>,
@@ -677,10 +840,27 @@ impl LaunchDraftState {
 
 /// Mount one draft and equality-filtered projections of its accepted fields.
 /// Only these memos subscribe to the aggregate; effects subscribe to the
-/// individual values they already observed, not every unrelated edit.
-pub(super) fn use_launch_draft(permission: Option<LaunchPermission>) -> LaunchDraftState {
-    let value = use_signal(|| LaunchDraft::new(permission));
+/// individual values they already observed, not every unrelated edit. Initial
+/// cwd is a mount-only raw seed; later source changes use explicit transitions.
+pub(super) fn use_launch_draft(
+    permission: Option<LaunchPermission>,
+    initial_cwd: Option<String>,
+) -> LaunchDraftState {
+    let value = use_signal(|| {
+        let mut draft = LaunchDraft::new(permission);
+        if let Some(raw) = initial_cwd {
+            draft.seed_folder(&raw);
+        }
+        draft
+    });
     let fields = DraftFields {
+        cwd: use_memo(move || value.read().cwd()),
+        cwd_edited: use_memo(move || value.read().cwd_edited()),
+        title: use_memo(move || value.read().title()),
+        title_raw_seed: use_memo(move || value.read().title_raw_seed()),
+        title_edited: use_memo(move || value.read().title_edited()),
+        destination_draft: use_memo(move || value.read().destination()),
+        clone_checkout_naming: use_memo(move || value.read().checkout_naming()),
         launch_tab: use_memo(move || value.read().tab()),
         invocation: use_memo(move || value.read().invocation()),
         invocation_edited: use_memo(move || value.read().invocation_edited()),
@@ -709,6 +889,192 @@ pub(super) fn use_launch_draft(permission: Option<LaunchPermission>) -> LaunchDr
 mod tests {
     use super::*;
 
+    /// Linked placement must preserve raw ownership and dormant editors across
+    /// managed mode. Display equality is deliberately insufficient evidence.
+    #[test]
+    fn placement_keeps_raw_folder_and_explicit_choice_separate() {
+        let raw = "/work/peer\u{202e}";
+        let mut draft = LaunchDraft::new(None);
+        assert_eq!(
+            draft.destination(),
+            DestinationDraft::Existing { cwd: "~".into() }
+        );
+        assert_eq!(draft.cwd_raw_seed(), None);
+        draft.seed_folder(raw);
+        let display = draft.cwd();
+        assert_ne!(
+            display, raw,
+            "premise: the inherited path requires escaping"
+        );
+        assert_eq!(draft.submitted_cwd(), raw);
+        assert!(!draft.cwd_edited() && !draft.folder_is_explicit());
+        draft.choose_destination_type(true);
+        draft.edit_repository_query("acme/repo".into());
+        assert_eq!(
+            draft.destination().repo(),
+            None,
+            "parseable input is still unselected"
+        );
+        assert!(draft.destination().is_managed());
+        let repo = GithubRepo::parse("acme/repo").unwrap();
+        draft.select_repository(repo.clone());
+        assert_eq!(draft.destination().repo(), Some(&repo));
+        assert_eq!(draft.cwd(), display, "the folder editor remains dormant");
+        draft.choose_destination_type(false);
+        assert_eq!(
+            draft.destination(),
+            DestinationDraft::Existing { cwd: raw.into() }
+        );
+        assert_eq!(draft.submitted_cwd(), raw);
+        assert!(draft.folder_is_explicit());
+        assert!(
+            !draft.cwd_edited(),
+            "an explicit pick does not claim its display"
+        );
+        draft.edit_folder(display.clone());
+        assert_eq!(draft.submitted_cwd(), display);
+        assert_eq!(draft.cwd_raw_seed().as_deref(), Some(raw));
+        assert!(draft.cwd_edited());
+        draft.choose_existing_folder(raw);
+        draft.seed_folder(&display);
+        assert_eq!(draft.cwd(), display, "two raw paths can share one display");
+        assert_eq!(
+            draft.submitted_cwd(),
+            display,
+            "the latest raw seed owns the path"
+        );
+        assert_eq!(
+            draft.destination(),
+            DestinationDraft::Existing { cwd: display }
+        );
+        assert!(!draft.folder_is_explicit());
+    }
+
+    /// Clone defaults, template bases and exact manual names keep their existing
+    /// policy. Occupancy freezes for reconciliation, caps at 50 and resets only
+    /// its sequence on installation/repository retargeting.
+    #[test]
+    fn placement_naming_retains_policy_across_retargets_and_edits() {
+        use farhelm_proto::launcher::TemplateNameKind;
+        let repo = GithubRepo::parse("acme/repo").unwrap();
+        let other = GithubRepo::parse("acme/other").unwrap();
+        let host = Some(CreateTarget::new(1, "install-a".into()));
+        let mut draft = LaunchDraft::new(None);
+        draft.seed_title("source\u{202e}", Some(repo.clone()));
+        let source_display = draft.title();
+        assert_ne!(source_display, "source\u{202e}");
+        draft.select_repository(repo.clone());
+        draft.retarget_naming(host.clone());
+        assert_eq!(draft.effective_title(), "source\u{202e}-clone");
+        assert!(!draft.advance_naming(true));
+        assert!(draft.advance_naming(false));
+        assert_eq!(draft.effective_title(), "source\u{202e}-clone-2");
+        draft.retarget_naming(host.clone());
+        assert_eq!(draft.effective_title(), "source\u{202e}-clone-2");
+        draft.select_repository(other);
+        draft.retarget_naming(host.clone());
+        assert_eq!(draft.effective_title(), "");
+        draft.choose_destination_type(false);
+        assert_eq!(
+            draft.effective_title(),
+            "source\u{202e}",
+            "folder restores the copied bytes"
+        );
+        draft.select_repository(repo);
+        draft.retarget_naming(host.clone());
+        assert_eq!(draft.effective_title(), "source\u{202e}-clone");
+        draft.apply_template_name("review".into(), TemplateNameKind::Fixed);
+        assert!(
+            draft
+                .checkout_naming()
+                .default_title(draft.title_edited(), None, draft.destination().repo())
+                .is_none()
+        );
+        assert_eq!(draft.effective_title(), "review");
+        draft.apply_template_name("review".into(), TemplateNameKind::Base);
+        draft.retarget_naming(host);
+        assert_eq!(draft.title_raw_seed(), None);
+        assert!(draft.title_edited());
+        assert_eq!(
+            draft.checkout_naming().template_name(),
+            Some(("review", TemplateNameKind::Base))
+        );
+        for _ in 2..=50 {
+            assert!(draft.advance_naming(false));
+        }
+        assert_eq!(draft.effective_title(), "review-50");
+        assert!(
+            !draft.advance_naming(false),
+            "the bounded sequence keeps its final conflict"
+        );
+        draft.retarget_naming(Some(CreateTarget::new(1, "install-b".into())));
+        assert_eq!(draft.effective_title(), "review");
+        assert_eq!(
+            draft.checkout_naming().template_name(),
+            Some(("review", TemplateNameKind::Base))
+        );
+        draft.edit_title(source_display.clone());
+        assert_eq!(draft.effective_title(), source_display);
+        assert_eq!(draft.checkout_naming(), CheckoutNaming::default());
+        draft.seed_title("copied", None);
+        assert_eq!(
+            draft.effective_title(),
+            "",
+            "Replace has no Clone naming policy"
+        );
+        draft.edit_title(draft.title());
+        assert_eq!(draft.effective_title(), "copied");
+        assert_eq!(draft.title_raw_seed().as_deref(), Some("copied"));
+    }
+
+    /// Enlarging the owner must not enlarge agent-only reset/restore. Compare
+    /// every placement dimension so a whole-value replacement cannot hide here.
+    #[test]
+    fn agent_resets_and_restore_preserve_placement_and_naming() {
+        let mut draft = LaunchDraft::new(None);
+        draft.choose_existing_folder("/work/raw\u{1b}");
+        draft.seed_title(
+            "copied\u{202e}",
+            Some(GithubRepo::parse("acme/repo").unwrap()),
+        );
+        draft.select_repository(GithubRepo::parse("acme/repo").unwrap());
+        draft.retarget_naming(Some(CreateTarget::new(1, "install-a".into())));
+        assert!(draft.advance_naming(false));
+        let before = draft.clone();
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+            permission_flags: None,
+            wrapper_prefix: None,
+            workspace_trust: None,
+        };
+        for operation in 0..3 {
+            match operation {
+                0 => draft.reset_choices(Some(LaunchPermission::Guarded)),
+                1 => draft.clear_for_command_seed(),
+                _ => draft.restore_launch(&selection, None),
+            }
+            assert_eq!(draft.cwd(), before.cwd());
+            assert_eq!(draft.cwd_raw_seed(), before.cwd_raw_seed());
+            assert_eq!(draft.cwd_edited(), before.cwd_edited());
+            assert_eq!(draft.folder_is_explicit(), before.folder_is_explicit());
+            assert_eq!(draft.title(), before.title());
+            assert_eq!(draft.title_raw_seed(), before.title_raw_seed());
+            assert_eq!(draft.title_edited(), before.title_edited());
+            assert_eq!(draft.destination(), before.destination());
+            assert_eq!(draft.checkout_naming(), before.checkout_naming());
+        }
+        draft.edit_folder("changed".into());
+        draft.edit_title("changed".into());
+        draft.restore(before.clone());
+        assert_eq!(
+            draft, before,
+            "Undo alone deliberately restores the complete semantic owner"
+        );
+    }
+
     /// Assertions about agent choices must exercise the active request builder,
     /// rather than bypass tab selection through its normalization helper.
     fn structured(draft: &LaunchDraft) -> LaunchSelection {
@@ -733,7 +1099,7 @@ mod tests {
         }
     }
 
-    /// Supply unrelated placement/UI handles to the real template adapter.
+    /// Supply external authority/UI handles to the real template adapter.
     /// The owner under test still supplies every moved field; reconstructing
     /// those fields here would hide a stale-memo or hidden-resume regression.
     /// Call inside the DOM's root scope so it owns these temporary handles.
@@ -742,20 +1108,234 @@ mod tests {
             draft,
             composer_reset_reason: Signal::new(None),
             chosen_host: Signal::new(None),
-            destination: Signal::new(crate::github_checkout::DestinationDraft::Existing {
-                cwd: "/workspace".into(),
-            }),
-            cwd: Signal::new("/workspace".into()),
-            cwd_raw_seed: Signal::new(None),
-            cwd_edited: Signal::new(false),
-            title: Signal::new(String::new()),
-            title_raw_seed: Signal::new(None),
-            title_edited: Signal::new(false),
-            clone_checkout_naming: Signal::new(super::super::CheckoutNaming::default()),
             preview_revision: Signal::new(0),
             template_error: Signal::new(None),
             intent_key: Signal::new(None),
         }
+    }
+
+    /// Preview completion is external observation. It must wake status readers
+    /// without rewriting repository intent or subscribing unrelated agent fields
+    /// to placement. Live snapshots must also beat memo scheduling within a turn.
+    #[farhelm_testtrace::test]
+    fn placement_owner_and_external_preview_have_independent_subscriptions() {
+        use crate::github_checkout::{GithubPreview, PreviewAuthority, PreviewState};
+        use std::cell::Cell;
+        std::thread_local! {
+            static OWNER: Cell<Option<LaunchDraftState>> = const { Cell::new(None) };
+            static PREVIEW: Cell<Option<Signal<PreviewState>>> = const { Cell::new(None) };
+            static DEST_RUNS: Cell<usize> = const { Cell::new(0) };
+            static NAME_RUNS: Cell<usize> = const { Cell::new(0) };
+            static AGENT_RUNS: Cell<usize> = const { Cell::new(0) };
+            static PREVIEW_RUNS: Cell<usize> = const { Cell::new(0) };
+        }
+        /// No render reads: process_events settles the production field memos
+        /// and effects without requiring a renderer to acknowledge a new frame.
+        fn probe() -> Element {
+            let owner = use_launch_draft(None, Some("/work/peer\u{202e}".into()));
+            let fields = owner.fields();
+            let preview = use_signal(|| PreviewState::Pending);
+            use_effect(move || {
+                let _ = (fields.destination_draft)();
+                DEST_RUNS.with(|count| count.set(count.get() + 1));
+            });
+            use_effect(move || {
+                let _ = (
+                    (fields.title)(),
+                    (fields.title_raw_seed)(),
+                    (fields.title_edited)(),
+                    (fields.clone_checkout_naming)(),
+                );
+                NAME_RUNS.with(|count| count.set(count.get() + 1));
+            });
+            use_effect(move || {
+                let _ = (fields.structured_harness)();
+                AGENT_RUNS.with(|count| count.set(count.get() + 1));
+            });
+            use_effect(move || {
+                let _ = preview();
+                PREVIEW_RUNS.with(|count| count.set(count.get() + 1));
+            });
+            OWNER.with(|slot| slot.set(Some(owner)));
+            PREVIEW.with(|slot| slot.set(Some(preview)));
+            rsx! {}
+        }
+        OWNER.with(|slot| slot.set(None));
+        PREVIEW.with(|slot| slot.set(None));
+        DEST_RUNS.with(|count| count.set(0));
+        NAME_RUNS.with(|count| count.set(0));
+        AGENT_RUNS.with(|count| count.set(0));
+        PREVIEW_RUNS.with(|count| count.set(0));
+        let mut dom = VirtualDom::new(probe);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let owner = OWNER.with(Cell::get).unwrap();
+        let mut preview = PREVIEW.with(Cell::get).unwrap();
+        let fields = owner.fields();
+        assert_eq!(DEST_RUNS.with(Cell::get), 1, "destination observer mounted");
+        assert_eq!(NAME_RUNS.with(Cell::get), 1);
+        assert_eq!(AGENT_RUNS.with(Cell::get), 1);
+        assert_eq!(PREVIEW_RUNS.with(Cell::get), 1);
+        let repo = GithubRepo::parse("acme/repo").unwrap();
+        dom.in_runtime(|| {
+            let display = owner.snapshot().cwd();
+            assert_ne!(display, owner.snapshot().submitted_cwd());
+            owner.edit(|draft| {
+                draft.choose_existing_folder(&display);
+                draft.select_repository(repo.clone());
+                draft.apply_template_name(
+                    "review".into(),
+                    farhelm_proto::launcher::TemplateNameKind::Base,
+                );
+            });
+            assert!(
+                !fields.destination_draft.peek().is_managed(),
+                "premise: destination memo has not settled"
+            );
+            assert_eq!(fields.title.peek().as_str(), "");
+            assert_eq!(owner.snapshot().destination().repo(), Some(&repo));
+            assert_eq!(owner.snapshot().submitted_cwd(), display);
+            assert_eq!(owner.snapshot().effective_title(), "review");
+            dom.in_scope(ScopeId::ROOT, || {
+                let target = CreateTarget::new(1, "install-a".into());
+                let authority = super::super::BrowseAuthority {
+                    target: target.clone(),
+                    connection: Some(4),
+                    cwd: display.clone(),
+                    generation: 1,
+                };
+                let request = Signal::new(Some(authority.clone()));
+                let target = Signal::new(Some(target));
+                let connection = Signal::new(Some(4));
+                assert!(
+                    super::super::browse_activation_is_current(
+                        request, &authority, target, connection, owner,
+                    ),
+                    "browse activation reads the new raw seed before memos settle"
+                );
+                let before = owner.snapshot();
+                owner.edit(|draft| draft.edit_folder("/other".into()));
+                assert!(
+                    !super::super::browse_activation_is_current(
+                        request, &authority, target, connection, owner,
+                    ),
+                    "a same-turn path edit immediately withdraws the old result"
+                );
+                owner.edit(|draft| draft.restore(before));
+            });
+            let saved = dom.in_scope(ScopeId::ROOT, || {
+                super::super::launcher_snapshot(template_targets(owner), &[], None)
+            });
+            assert_eq!(
+                saved.destination,
+                Some(farhelm_proto::launcher::TemplateDestination::Github(
+                    repo.identifier()
+                ))
+            );
+            assert_eq!(saved.name.as_deref(), Some("review"));
+        });
+        dom.process_events();
+        assert_eq!(DEST_RUNS.with(Cell::get), 2);
+        assert_eq!(NAME_RUNS.with(Cell::get), 2);
+        assert_eq!(AGENT_RUNS.with(Cell::get), 1);
+        let semantic_before = dom.in_runtime(|| owner.snapshot());
+        let authority = PreviewAuthority {
+            generation: 2,
+            config_revision: 3,
+            host: "1".into(),
+            incarnation: 4,
+            installation_identity: "install-a".into(),
+            repo,
+            title: Some("review".into()),
+            agent: "fixture-agent".into(),
+        };
+        let reply = GithubPreview {
+            canonical_root: "/checkouts".into(),
+            basename: "review".into(),
+            cwd: "/checkouts/review".into(),
+            config_revision: 3,
+            host: "1".into(),
+            incarnation: 4,
+            installation_identity: "install-a".into(),
+        };
+        assert!(
+            authority.accepts(&authority, &reply),
+            "premise: completion is current"
+        );
+        for state in [
+            PreviewState::Ready {
+                authority: authority.clone(),
+                preview: reply,
+            },
+            PreviewState::Failed {
+                authority,
+                message: "occupied".into(),
+            },
+            PreviewState::Pending,
+        ] {
+            dom.in_runtime(|| preview.set(state));
+            dom.process_events();
+            assert_eq!(dom.in_runtime(|| owner.snapshot()), semantic_before);
+            assert_eq!(DEST_RUNS.with(Cell::get), 2);
+            assert_eq!(NAME_RUNS.with(Cell::get), 2);
+            assert_eq!(AGENT_RUNS.with(Cell::get), 1);
+        }
+        assert_eq!(
+            PREVIEW_RUNS.with(Cell::get),
+            4,
+            "every preview state remains observable"
+        );
+        dom.in_runtime(|| {
+            owner.edit(|draft| {
+                draft.apply_template_name(
+                    "review".into(),
+                    farhelm_proto::launcher::TemplateNameKind::Fixed,
+                );
+            })
+        });
+        dom.process_events();
+        assert_eq!(
+            NAME_RUNS.with(Cell::get),
+            3,
+            "same text with a changed naming policy stays observed"
+        );
+        dom.in_runtime(|| {
+            owner.edit(|draft| {
+                draft.apply_template_name(
+                    "review".into(),
+                    farhelm_proto::launcher::TemplateNameKind::Base,
+                );
+            })
+        });
+        dom.process_events();
+        assert_eq!(NAME_RUNS.with(Cell::get), 4);
+        dom.in_runtime(|| {
+            owner.edit(|draft| {
+                assert!(draft.advance_naming(false));
+            })
+        });
+        dom.process_events();
+        assert_eq!(
+            NAME_RUNS.with(Cell::get),
+            5,
+            "occupied-name advancement keeps its field trigger"
+        );
+        assert_eq!(
+            dom.in_runtime(|| owner.snapshot().effective_title()),
+            "review-2"
+        );
+        dom.in_runtime(|| owner.edit(|draft| draft.edit_title("typed".into())));
+        dom.process_events();
+        assert_eq!(NAME_RUNS.with(Cell::get), 6, "a hand edit remains observed");
+        assert_eq!(DEST_RUNS.with(Cell::get), 2);
+        assert_eq!(AGENT_RUNS.with(Cell::get), 1);
+        assert_eq!(
+            PREVIEW_RUNS.with(Cell::get),
+            4,
+            "semantic edits do not impersonate preview completion"
+        );
+        OWNER.with(|slot| slot.set(None));
+        PREVIEW.with(|slot| slot.set(None));
     }
 
     /// Same-turn submissions must see accepted edits before memo tasks run.
@@ -776,7 +1356,7 @@ mod tests {
         /// production memos and observer without a pending render boundary.
         fn probe() -> Element {
             RENDERS.with(|count| count.set(count.get() + 1));
-            let owner = use_launch_draft(None);
+            let owner = use_launch_draft(None, None);
             let fields = owner.fields();
             use_effect(move || {
                 let _ = (
