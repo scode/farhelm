@@ -62,6 +62,7 @@ use web_time::Instant;
 
 use dioxus::prelude::*;
 
+use crate::anchored_popovers::{MovementTicket, use_rendered_movement};
 use crate::api::{
     PlanSteps, PreferenceValue, ProbeResponse, ProvisioningAccepted, ProvisioningOperation,
     ProvisioningStatus, ProvisioningSubmission, ProvisioningView, SubmissionError,
@@ -76,7 +77,7 @@ use crate::modal_dialog::{
     DialogFocus, DialogHandle, FocusTarget, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
 };
 use crate::ops::{OpGuard, OpLock, ReadGate};
-use crate::peer::{DetailPart, PeerBlock, PeerLine, display_peer};
+use crate::peer::{DetailPart, PeerBlock, PeerBlockBody, PeerLine, PeerText, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{ApiBase, Host, HostId, HostKind};
 
@@ -1052,6 +1053,152 @@ fn confirmed_submission_refusal(
     })
 }
 
+/// Peer text retains its original bytes for the renderer, but only its
+/// displayed spelling contributes to an in-flow change. In particular,
+/// different control-character spellings that escape identically do not
+/// manufacture a new movement cause.
+#[derive(Clone, Debug)]
+struct FlowText(PeerText);
+
+impl PartialEq for FlowText {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.escaped() == other.0.escaped()
+    }
+}
+
+impl Eq for FlowText {}
+
+/// Keep peer isolation and authored wording intact while comparing exactly
+/// the runs PeerLine displays. Flattening the sentence would lose its bidi
+/// boundaries; comparing raw peer bytes would include invisible differences.
+#[derive(Clone, Debug)]
+struct FlowParts(Vec<DetailPart>);
+
+impl PartialEq for FlowParts {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.len() == other.0.len()
+            && self
+                .0
+                .iter()
+                .zip(&other.0)
+                .all(|(left, right)| match (left, right) {
+                    (DetailPart::Text(left), DetailPart::Text(right)) => left == right,
+                    (DetailPart::Peer(left), DetailPart::Peer(right)) => {
+                        left.escaped() == right.escaped()
+                    }
+                    _ => false,
+                })
+    }
+}
+
+impl Eq for FlowParts {}
+
+/// A plan body contains the actual legacy/stepper render decision. Copy
+/// bytes belong to its caller, and hover paths and list keys remain render
+/// metadata rather than reasons to invalidate an anchored surface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PlanBody {
+    // The renderer still receives raw bytes for its strict component props.
+    // Movement uses PeerBlock's shared actual line body in `same_flow`.
+    Legacy(PeerText),
+    Steps {
+        lead: FlowText,
+        steps: Vec<PlanBodyStep>,
+        kept: Option<FlowText>,
+    },
+}
+
+impl PlanBody {
+    /// Freeze the same body both inline and modal confirmations draw. The
+    /// legacy renderer keeps raw line boundaries; structured plans ignore
+    /// confirmation bytes here because those bytes are only used by Copy.
+    fn new(confirmation: &str, steps: Option<&PlanSteps>) -> Self {
+        let Some(steps) = steps else {
+            return Self::Legacy(confirmation.into());
+        };
+        Self::Steps {
+            lead: FlowText(steps.lead.clone()),
+            steps: steps
+                .steps
+                .iter()
+                .map(|step| PlanBodyStep {
+                    id: step.id.clone(),
+                    name: FlowText(step.name.clone()),
+                    paths: step
+                        .paths
+                        .iter()
+                        .map(|path| PlanBodyPath {
+                            short: FlowText(path.short.clone()),
+                            full: path.full.clone(),
+                        })
+                        .collect(),
+                    explanation: step.explanation.clone().map(FlowText),
+                })
+                .collect(),
+            kept: steps.kept.clone().map(FlowText),
+        }
+    }
+
+    /// Dioxus props must retain strict equality so a changed tooltip or key
+    /// reaches the renderer. Movement alone ignores that metadata; keeping
+    /// this comparison separate avoids suppressing a legitimate prop update.
+    /// Legacy text uses PeerBlock's actual displayed line structure, including
+    /// CRLF normalization, editable escaping and literal final terminators.
+    fn same_flow(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Legacy(left), Self::Legacy(right)) => {
+                PeerBlockBody::new(left) == PeerBlockBody::new(right)
+            }
+            (
+                Self::Steps {
+                    lead: left_lead,
+                    steps: left,
+                    kept: left_kept,
+                },
+                Self::Steps {
+                    lead: right_lead,
+                    steps: right,
+                    kept: right_kept,
+                },
+            ) => {
+                left_lead == right_lead
+                    && left_kept == right_kept
+                    && left.len() == right.len()
+                    && left.iter().zip(right).all(|(left, right)| {
+                        left.name == right.name
+                            && left.explanation == right.explanation
+                            && left.paths.len() == right.paths.len()
+                            && left
+                                .paths
+                                .iter()
+                                .zip(&right.paths)
+                                .all(|(left, right)| left.short == right.short)
+                    })
+            }
+            _ => false,
+        }
+    }
+}
+
+/// A step's key preserves its existing DOM lifetime without becoming a
+/// content-change cause. Only the name, displayed paths and explanation
+/// occupy the plan's ordinary flow.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PlanBodyStep {
+    id: String,
+    name: FlowText,
+    paths: Vec<PlanBodyPath>,
+    explanation: Option<FlowText>,
+}
+
+/// The full path is hover-only. Strict prop equality retains its updates;
+/// `same_flow` compares only the short path actually drawn in flow.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PlanBodyPath {
+    short: FlowText,
+    full: PeerText,
+}
+
 /// Show the helm's ordered actions without reconstructing their wording.
 ///
 /// Each path uses the helm's short spelling in the narrow dialog and exposes
@@ -1059,16 +1206,19 @@ fn confirmed_submission_refusal(
 /// escaped display text and separate chips cannot reproduce those bytes by
 /// native selection. Older replies without steps retain the text renderer.
 #[component]
-fn PlanStepList(confirmation: String, steps: Option<PlanSteps>) -> Element {
-    let Some(steps) = steps else {
-        return rsx! { PeerBlock { class: "provisioning-plan", text: confirmation.into() } };
+fn PlanStepList(confirmation: String, body: PlanBody) -> Element {
+    let (lead, steps, kept) = match body {
+        PlanBody::Legacy(text) => {
+            return rsx! { PeerBlock { class: "provisioning-plan", text } };
+        }
+        PlanBody::Steps { lead, steps, kept } => (lead, steps, kept),
     };
     rsx! {
         div { class: "provisioning-plan provisioning-stepper-plan",
             div { class: "provisioning-plan-heading",
                 PeerLine {
                     class: "provisioning-plan-lead",
-                    parts: vec![DetailPart::peer(steps.lead)],
+                    parts: vec![DetailPart::peer(lead.0)],
                 }
                 button {
                     r#type: "button",
@@ -1079,13 +1229,13 @@ fn PlanStepList(confirmation: String, steps: Option<PlanSteps>) -> Element {
                 }
             }
             ol { class: "provisioning-plan-steps",
-                for (index, step) in steps.steps.into_iter().enumerate() {
+                for (index, step) in steps.into_iter().enumerate() {
                     li { key: "{step.id}", class: "provisioning-plan-step",
                         span { class: "provisioning-plan-number", aria_hidden: "true", "{index + 1}" }
                         div { class: "provisioning-plan-detail",
                             PeerLine {
                                 class: "provisioning-plan-step-name",
-                                parts: vec![DetailPart::peer(step.name)],
+                                parts: vec![DetailPart::peer(step.name.0)],
                             }
                             if !step.paths.is_empty() {
                                 div { class: "provisioning-plan-paths",
@@ -1094,7 +1244,7 @@ fn PlanStepList(confirmation: String, steps: Option<PlanSteps>) -> Element {
                                             class: "provisioning-plan-path peer-value",
                                             dir: "ltr",
                                             "data-tooltip": "{path.full.escaped()}",
-                                            "{path.short.escaped()}"
+                                            "{path.short.0.escaped()}"
                                         }
                                     }
                                 }
@@ -1102,17 +1252,17 @@ fn PlanStepList(confirmation: String, steps: Option<PlanSteps>) -> Element {
                             if let Some(explanation) = step.explanation {
                                 PeerLine {
                                     class: "provisioning-plan-explanation",
-                                    parts: vec![DetailPart::peer(explanation)],
+                                    parts: vec![DetailPart::peer(explanation.0)],
                                 }
                             }
                         }
                     }
                 }
             }
-            if let Some(kept) = steps.kept {
+            if let Some(kept) = kept {
                 PeerLine {
                     class: "provisioning-plan-kept",
-                    parts: vec![DetailPart::peer(kept)],
+                    parts: vec![DetailPart::peer(kept.0)],
                 }
             }
         }
@@ -1126,9 +1276,9 @@ fn PlanStepList(confirmation: String, steps: Option<PlanSteps>) -> Element {
 /// run consumes. This defensive update path shares the setup presentation so
 /// it cannot invent different promises for the same action.
 #[component]
-pub(crate) fn PlanConfirmation(
+fn PlanConfirmation(
     confirmation: String,
-    steps: Option<PlanSteps>,
+    body: PlanBody,
     busy: bool,
     confirm_label: &'static str,
     on_confirm: EventHandler<()>,
@@ -1136,7 +1286,7 @@ pub(crate) fn PlanConfirmation(
 ) -> Element {
     rsx! {
         div { class: "provisioning-confirmation",
-            PlanStepList { confirmation, steps }
+            PlanStepList { confirmation, body }
             div { class: "provisioning-confirm-actions",
                 button {
                     r#type: "button",
@@ -1189,6 +1339,7 @@ pub(crate) fn SetupPlanConfirmation(
     on_confirm: EventHandler<bool>,
     on_cancel: EventHandler<()>,
 ) -> Element {
+    let body = PlanBody::new(&confirmation, steps.as_ref());
     rsx! {
         settings_dialog::HostDialogHeader {
             host,
@@ -1201,7 +1352,7 @@ pub(crate) fn SetupPlanConfirmation(
         ScrollRegion { class: "host-settings-body",
             handle: settings_dialog::ADD_DIALOG, selector: ".host-settings-body", name: "host setup plan",
             recovery: RecoveryFocus::new(".add-host-cancel", None, true, RecoveryDelay::OneFrame),
-            PlanStepList { confirmation, steps }
+            PlanStepList { confirmation, body }
             if let Some(error) = error { {error} }
         }
         div { class: "host-settings-footer host-dialog-footer",
@@ -1263,6 +1414,7 @@ pub(crate) fn UninstallConfirmation(
     on_cancel: EventHandler<()>,
 ) -> Element {
     let name = crate::hosts::gui_host_name(host.name.raw(), host.kind == HostKind::Local);
+    let body = PlanBody::new(&confirmation, steps.as_ref());
     rsx! {
         settings_dialog::HostDialogHeader {
             host: Some(host),
@@ -1274,7 +1426,7 @@ pub(crate) fn UninstallConfirmation(
         ScrollRegion { class: "host-settings-body",
             handle: DialogHandle::new(settings_dialog::UNINSTALL_DIALOG_SELECTOR), selector: ".host-settings-body", name: "host uninstall plan",
             recovery: RecoveryFocus::new(".uninstall-cancel", None, true, RecoveryDelay::OneFrame),
-            PlanStepList { confirmation, steps }
+            PlanStepList { confirmation, body }
         }
         div { class: "host-settings-footer host-dialog-footer",
             div { class: "host-dialog-answers",
@@ -2230,6 +2382,284 @@ fn set_planning_diagnostic(
     }));
 }
 
+/// The panel's actual in-flow contribution. A body with no children still
+/// defeats `.provisioning-panel:empty`, so it must remain distinct from an
+/// empty panel even when its only offer is a fixed-position modal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ProvisioningFlow {
+    Empty,
+    Trace(ProvisioningTraceShape),
+    Body(Box<ProvisioningBody>),
+}
+
+/// Only content drawn below the host header participates here. Modal
+/// payloads, control callbacks, copy bytes and lifecycle identity stay with
+/// their existing owners; the defensive inline Update plan is real flow.
+#[derive(Clone, Debug)]
+struct ProvisioningBody {
+    run: Option<ExpandedRun>,
+    inline_plan: Option<PlanBody>,
+    pending: Option<PendingLine>,
+    error: Option<FlowParts>,
+    warning: Option<FlowParts>,
+    read_error: Option<FlowParts>,
+    manual: Option<ManualLine>,
+}
+
+impl PartialEq for ProvisioningBody {
+    fn eq(&self, other: &Self) -> bool {
+        let same_plan = match (&self.inline_plan, &other.inline_plan) {
+            (Some(left), Some(right)) => left.same_flow(right),
+            (None, None) => true,
+            _ => false,
+        };
+        self.run == other.run
+            && same_plan
+            && self.pending == other.pending
+            && self.error == other.error
+            && self.warning == other.warning
+            && self.read_error == other.read_error
+            && self.manual == other.manual
+    }
+}
+
+impl Eq for ProvisioningBody {}
+
+/// A run's displayed controls and prose can rewrap independently of its
+/// identity. The fold id remains available for the existing guarded handler,
+/// but equality compares only whether that control occupies the header.
+#[derive(Clone, Debug)]
+struct ExpandedRun {
+    operation: &'static str,
+    status: &'static str,
+    fold_run: Option<String>,
+    steps: Vec<ExpandedStep>,
+    message: Option<FlowParts>,
+}
+
+impl PartialEq for ExpandedRun {
+    fn eq(&self, other: &Self) -> bool {
+        self.operation == other.operation
+            && self.status == other.status
+            && self.fold_run.is_some() == other.fold_run.is_some()
+            && self.steps == other.steps
+            && self.message == other.message
+    }
+}
+
+impl Eq for ExpandedRun {}
+
+/// Keep the original step attributes for CSS and browser handles. They do
+/// not add flow: the marker has fixed geometry, while the displayed status
+/// word owns an auto-sized column and can change its neighbor's wrapping.
+#[derive(Clone, Debug)]
+struct ExpandedStep {
+    id: String,
+    raw_status: String,
+    name: String,
+    status: String,
+    message: Option<FlowParts>,
+}
+
+impl PartialEq for ExpandedStep {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.status == other.status && self.message == other.message
+    }
+}
+
+impl Eq for ExpandedStep {}
+
+/// Offer precedence is resolved before choosing this line. The variants
+/// carry both its existing class and words, so rendering cannot drift from
+/// the value used to detect a content change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingLine {
+    CheckingLocalSetup,
+    Planning,
+    WaitingToSubmit,
+    Submitting,
+}
+
+impl PendingLine {
+    /// Preserve the separate CSS hooks even where two stages have the same
+    /// dimensions at today's width.
+    fn class(self) -> &'static str {
+        match self {
+            Self::CheckingLocalSetup | Self::Planning => "provisioning-planning",
+            Self::WaitingToSubmit => "provisioning-waiting",
+            Self::Submitting => "provisioning-submitting",
+        }
+    }
+
+    /// These are the existing authored stage labels; no lifecycle model is
+    /// exposed through the render value.
+    fn text(self) -> &'static str {
+        match self {
+            Self::CheckingLocalSetup => "checking automatic setup…",
+            Self::Planning => "planning…",
+            Self::WaitingToSubmit => "waiting to submit…",
+            Self::Submitting => "submitting…",
+        }
+    }
+}
+
+/// Secondary manual advice has an extra top margin. Its class therefore
+/// belongs in equality alongside the actual peer-isolated remedy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ManualLine {
+    parts: FlowParts,
+    secondary: bool,
+}
+
+/// Borrow only facts the current renderer has already resolved. This is a
+/// pure render boundary, not a second lifecycle snapshot or async getter;
+/// the existing signal reads and their short-circuit subscriptions stay at
+/// the component's original read sites.
+#[derive(Default)]
+struct ProvisioningFlowInput<'a> {
+    snapshot: Option<&'a ProvisioningView>,
+    offer: Option<&'a PendingPlan>,
+    details_open: bool,
+    local_setup: bool,
+    manual_remedy: Option<&'a [DetailPart]>,
+    is_planning: bool,
+    is_waiting_claim: bool,
+    is_submitting: bool,
+    accepted_run_waiting: bool,
+    local_auto_retry: bool,
+    error: Option<&'a str>,
+    warning: Option<&'a str>,
+    read_error: Option<&'a str>,
+    fold_run: Option<&'a str>,
+    visible_trace: Option<ProvisioningTraceShape>,
+}
+
+impl ProvisioningFlow {
+    /// Resolve exactly the branches the panel draws, including an empty
+    /// body's wrapper and the in-flow defensive confirmation. Hidden runs,
+    /// hover data and ids never become movement causes through this value.
+    fn resolve(input: ProvisioningFlowInput<'_>) -> Self {
+        let has_details_content = input.snapshot.is_some_and(|view| view.run_id.is_some())
+            || input.offer.is_some()
+            || input.is_planning
+            || input.is_waiting_claim
+            || input.is_submitting
+            || input.error.is_some()
+            || input.warning.is_some()
+            || input.read_error.is_some()
+            || (input.local_setup && input.manual_remedy.is_some());
+        if !((input.details_open && has_details_content) || input.offer.is_some()) {
+            return input.visible_trace.map_or(Self::Empty, Self::Trace);
+        }
+        let line = |text: &str| FlowParts(vec![DetailPart::peer(text)]);
+        let run = input
+            .details_open
+            .then_some(input.snapshot)
+            .flatten()
+            .filter(|view| view.run_id.is_some())
+            .map(|view| ExpandedRun {
+                operation: operation_label(view.operation),
+                status: status_label(view.status),
+                fold_run: input.fold_run.map(str::to_owned),
+                steps: view
+                    .steps
+                    .iter()
+                    .map(|step| ExpandedStep {
+                        id: step.step.clone(),
+                        raw_status: step.status.clone(),
+                        name: display_peer(progress_step_name(step)),
+                        status: progress_step_status(&step.status).to_owned(),
+                        message: step.message.as_ref().map(|text| line(text.raw())),
+                    })
+                    .collect(),
+                message: view.message.as_ref().map(|text| line(text.raw())),
+            });
+        let inline_plan = input
+            .offer
+            .filter(|plan| {
+                !matches!(
+                    plan.operation,
+                    ProvisioningOperation::Add | ProvisioningOperation::Uninstall
+                )
+            })
+            .map(|plan| PlanBody::new(&plan.confirmation, plan.steps.as_ref()));
+        let pending = if input.offer.is_some() || !input.details_open {
+            None
+        } else if input.is_planning {
+            Some(if input.local_setup {
+                PendingLine::CheckingLocalSetup
+            } else {
+                PendingLine::Planning
+            })
+        } else if input.is_waiting_claim {
+            Some(PendingLine::WaitingToSubmit)
+        } else if input.is_submitting {
+            Some(PendingLine::Submitting)
+        } else {
+            None
+        };
+        let run_active = input.snapshot.is_some_and(|view| {
+            view.run_id.is_some() && view.status == ProvisioningStatus::Running
+        });
+        let failed_operation = input.snapshot.and_then(|view| {
+            (view.run_id.is_some() && view.status == ProvisioningStatus::Failed)
+                .then_some(view.operation)
+                .flatten()
+        });
+        let automatic_local_remedy = input.local_setup
+            && (input.offer.is_some()
+                || input.is_planning
+                || run_active
+                || input.accepted_run_waiting
+                || failed_operation.is_some()
+                || input.local_auto_retry);
+        let manual = (input.details_open && input.local_setup)
+            .then_some(input.manual_remedy)
+            .flatten()
+            .map(|parts| ManualLine {
+                parts: FlowParts(parts.to_vec()),
+                secondary: automatic_local_remedy,
+            });
+        Self::Body(Box::new(ProvisioningBody {
+            run,
+            inline_plan,
+            pending,
+            error: input
+                .details_open
+                .then_some(input.error)
+                .flatten()
+                .map(line),
+            warning: input
+                .details_open
+                .then_some(input.warning)
+                .flatten()
+                .map(line),
+            read_error: input
+                .details_open
+                .then_some(input.read_error)
+                .flatten()
+                .map(line),
+            manual,
+        }))
+    }
+}
+
+/// Capture only changes to the panel's actual body before its DOM publishes.
+/// Folded trace changes retain their existing shape route. The shared hook
+/// owns baseline seeding and guarded deferred delivery; this projection adds
+/// no lifecycle state and keeps an empty body's real wrapper occupancy.
+fn use_provisioning_flow_movement(
+    flow: &ProvisioningFlow,
+    host_id: HostId,
+    capture_lower_hosts: Callback<HostId, MovementTicket>,
+) {
+    let body = match flow {
+        ProvisioningFlow::Body(body) => Some(body.clone()),
+        ProvisioningFlow::Empty | ProvisioningFlow::Trace(_) => None,
+    };
+    use_rendered_movement(&body, || capture_lower_hosts.call(host_id));
+}
+
 /// One registered host's provisioning actions and latest retained run.
 ///
 /// `manual_remedy` is passed for every phase because the host row derives it
@@ -2269,6 +2699,10 @@ pub(crate) fn ProvisioningPanel(
     /// Reveal global details for the local ADD handoff's hidden diagnostic.
     /// Remote confirmations stay visible even when every row is folded.
     on_reveal_details: EventHandler<()>,
+    /// Capture current openings strictly below this host in the retained
+    /// displayed vector. The parent owns row selection and host admission;
+    /// this panel contributes only its actual in-flow content change.
+    capture_lower_hosts: Callback<HostId, MovementTicket>,
     /// Paint-only busy bookkeeping for this row in the parent. It never
     /// excludes a run.
     on_running: EventHandler<bool>,
@@ -3254,14 +3688,6 @@ pub(crate) fn ProvisioningPanel(
     let is_accepted_run_waiting = *accepted_run_waiting.read();
     let can_retry_local_setup = *local_auto_retry.read();
     let page_busy = ops.busy();
-    let run_active = snapshot
-        .as_ref()
-        .is_some_and(|view| view.run_id.is_some() && view.status == ProvisioningStatus::Running);
-    let failed_operation = snapshot.as_ref().and_then(|view| {
-        (view.run_id.is_some() && view.status == ProvisioningStatus::Failed)
-            .then_some(view.operation)
-            .flatten()
-    });
     // The folded row's one-line trace stands down while the host row shows
     // inline update status (see `derive_row_update_progress`); every other
     // running or failed retained run keeps it. Suppressing it here, where the trace
@@ -3302,27 +3728,29 @@ pub(crate) fn ProvisioningPanel(
             trace_shapes.write().remove(&host_id);
         }
     }));
-    let automatic_local_remedy = local_setup
-        && (offer.is_some()
-            || is_planning
-            || run_active
-            || is_accepted_run_waiting
-            || failed_operation.is_some()
-            || can_retry_local_setup);
-    let has_details_content = snapshot.as_ref().is_some_and(|view| view.run_id.is_some())
-        || offer.is_some()
-        || is_planning
-        || is_waiting_claim
-        || is_submitting
-        || current_error.is_some()
-        || current_warning.is_some()
-        || current_progress_error.is_some()
-        || (local_setup && manual_remedy.is_some());
     let foldable_run = (!global_details_open && details_open)
         .then(|| confirmed_disclosure.read().clone())
         .flatten()
         .filter(|run| !run.folded && !run.failed)
         .map(|run| run.run_id);
+    let flow = ProvisioningFlow::resolve(ProvisioningFlowInput {
+        snapshot: snapshot.as_ref(),
+        offer: offer.as_ref(),
+        details_open,
+        local_setup,
+        manual_remedy: manual_remedy.as_deref(),
+        is_planning,
+        is_waiting_claim,
+        is_submitting,
+        accepted_run_waiting: is_accepted_run_waiting,
+        local_auto_retry: can_retry_local_setup,
+        error: current_error.as_deref(),
+        warning: current_warning.as_deref(),
+        read_error: current_progress_error.as_deref(),
+        fold_run: foldable_run.as_deref(),
+        visible_trace,
+    });
+    use_provisioning_flow_movement(&flow, host_id, capture_lower_hosts);
 
     rsx! {
         div {
@@ -3330,20 +3758,19 @@ pub(crate) fn ProvisioningPanel(
             "data-provisioning-host": "{host_id}",
             // Confirmation modals live outside row disclosure: opening one
             // must not switch on the global details checkbox.
-            if (details_open && has_details_content) || offer.is_some() {
+            if let ProvisioningFlow::Body(body) = flow {
             div {
-            if details_open {
-            if let Some(view) = snapshot && view.run_id.is_some() {
+            if let Some(run) = body.run {
                 div {
                         class: "provisioning-run",
-                        "data-provisioning-status": "{status_label(view.status)}",
-                        "data-provisioning-operation": "{operation_label(view.operation)}",
+                        "data-provisioning-status": "{run.status}",
+                        "data-provisioning-operation": "{run.operation}",
                         div { class: "provisioning-run-header",
                             span { class: "provisioning-title",
-                                "{operation_label(view.operation)} provisioning"
+                                "{run.operation} provisioning"
                             }
-                            span { class: "provisioning-status", "{status_label(view.status)}" }
-                            if let Some(fold_run_id) = foldable_run {
+                            span { class: "provisioning-status", "{run.status}" }
+                            if let Some(fold_run_id) = run.fold_run {
                                 button {
                                     r#type: "button",
                                     class: "btn provisioning-run-fold",
@@ -3365,32 +3792,31 @@ pub(crate) fn ProvisioningPanel(
                             }
                         }
                         ol { class: "provisioning-steps",
-                            for step in view.steps {
+                            for step in run.steps {
                                 li {
                                     class: "provisioning-step",
-                                    "data-step": "{step.step}",
-                                    "data-status": "{step.status}",
-                                    "data-current": if step.status == "running" { "true" },
+                                    "data-step": "{step.id}",
+                                    "data-status": "{step.raw_status}",
+                                    "data-current": if step.raw_status == "running" { "true" },
                                     span { class: "provisioning-step-marker", aria_hidden: "true" }
-                                    span { class: "provisioning-step-name peer-value", dir: "ltr", "{display_peer(progress_step_name(&step))}" }
-                                    span { class: "provisioning-step-status", "{progress_step_status(&step.status)}" }
+                                    span { class: "provisioning-step-name peer-value", dir: "ltr", "{step.name}" }
+                                    span { class: "provisioning-step-status", "{step.status}" }
                                     if let Some(message) = step.message {
                                         PeerLine {
                                             class: "provisioning-step-message",
-                                            parts: vec![DetailPart::peer(message)],
+                                            parts: message.0,
                                         }
                                     }
                                 }
                             }
                         }
-                        if let Some(message) = view.message {
+                        if let Some(message) = run.message {
                             PeerLine {
                                 class: "provisioning-run-message",
-                                parts: vec![DetailPart::peer(message)],
+                                parts: message.0,
                             }
                         }
                 }
-            }
             }
 
             if let Some(plan) = offer {
@@ -3497,10 +3923,10 @@ pub(crate) fn ProvisioningPanel(
                         }
                     }
                     }
-                } else {
+                } else if let Some(inline_plan) = body.inline_plan {
                     PlanConfirmation {
                         confirmation: plan.confirmation,
-                        steps: plan.steps,
+                        body: inline_plan,
                         busy: page_busy,
                         confirm_label: "confirm update",
                         on_confirm: move |_| confirm.call(false),
@@ -3516,57 +3942,43 @@ pub(crate) fn ProvisioningPanel(
                         },
                     }
                 }
-            } else if details_open && is_planning {
+            } else if let Some(pending_line) = body.pending {
                 div {
-                    class: "provisioning-planning",
-                    if local_setup { "checking automatic setup…" } else { "planning…" }
-                }
-            } else if details_open && is_waiting_claim {
-                // The minted plan is stored while the row stays folded;
-                // submission follows as soon as the page token frees.
-                div {
-                    class: "provisioning-waiting",
-                    "waiting to submit…"
-                }
-            } else if details_open && is_submitting {
-                div {
-                    class: "provisioning-submitting",
-                    "submitting…"
+                    class: pending_line.class(),
+                    "{pending_line.text()}"
                 }
             }
 
-            if details_open {
-            if let Some(error) = current_error {
+            if let Some(error) = body.error {
                 PeerLine {
                     class: "action-error provisioning-error",
-                    parts: vec![DetailPart::peer(error)],
+                    parts: error.0,
                 }
             }
-            if let Some(warning) = current_warning {
+            if let Some(warning) = body.warning {
                 PeerLine {
                     class: "host-warning provisioning-warning",
-                    parts: vec![DetailPart::peer(warning)],
+                    parts: warning.0,
                 }
             }
-            if let Some(error) = current_progress_error {
+            if let Some(error) = body.read_error {
                 PeerLine {
                     class: "action-error provisioning-read-error",
-                    parts: vec![DetailPart::peer(error)],
+                    parts: error.0,
                 }
             }
-            if local_setup && let Some(remedy) = manual_remedy {
+            if let Some(remedy) = body.manual {
                 PeerLine {
-                    class: if automatic_local_remedy {
+                    class: if remedy.secondary {
                         "host-remedy provisioning-manual secondary"
                     } else {
                         "host-remedy provisioning-manual"
                     },
-                    parts: remedy,
+                    parts: remedy.parts.0,
                 }
             }
             }
-            }
-            } else if let Some(shape) = visible_trace {
+            } else if let ProvisioningFlow::Trace(shape) = flow {
                 div {
                     class: "provisioning-trace",
                     "data-provisioning-status": "{status_label(shape.status)}",
@@ -3600,6 +4012,546 @@ fn operation_label(operation: Option<ProvisioningOperation>) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anchored_popovers::{AnchorLease, AnchorRegion, Interest, MovedRows, MovementOwner};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    /// A named step prevents the compatibility id fallback from confusing
+    /// metadata-only changes with actual name changes in these tests.
+    fn flow_view() -> ProvisioningView {
+        ProvisioningView {
+            run_id: Some("run-a".into()),
+            operation: Some(ProvisioningOperation::Update),
+            status: ProvisioningStatus::Running,
+            steps: vec![crate::api::ProvisioningStep {
+                step: "step-a".into(),
+                name: Some("upload\u{200b}build".into()),
+                status: "running".into(),
+                message: Some("message\u{202e}".into()),
+                ..Default::default()
+            }],
+            message: Some("run\u{2066}".into()),
+        }
+    }
+
+    /// Render-only fixtures need an offer's normal identity without any
+    /// request, runtime scope, page lock or mutable process environment.
+    fn flow_plan(operation: ProvisioningOperation) -> PendingPlan {
+        PendingPlan {
+            operation,
+            binding: HostBinding {
+                id: 1,
+                kind: HostKind::Ssh,
+                destination: None,
+                identity: None,
+                remote_farhelm: None,
+                remote_state_dir: None,
+                incarnation: 0,
+            },
+            probe_id: "plan-a".into(),
+            confirmation: "legacy plan".into(),
+            steps: None,
+            kept_state_dir: None,
+        }
+    }
+
+    /// Hold one ordinary admitted lower-host opening while exercising the
+    /// production provisioning projection. Host vector selection, measurement
+    /// and generic admission interleavings have their own tests; this fixture
+    /// neither simulates a rectangle nor starts provisioning transport.
+    struct FlowMovementFixture {
+        flow: RefCell<ProvisioningFlow>,
+        owner: MovementOwner,
+        open: Rc<RefCell<Option<String>>>,
+        closes: Rc<Cell<usize>>,
+        captured_sources: RefCell<Vec<HostId>>,
+        scope: Cell<Option<dioxus::core::ScopeId>>,
+        _opening: AnchorLease,
+    }
+
+    impl FlowMovementFixture {
+        /// Establish the opening before mount so an erroneous initial capture
+        /// cannot hide behind a closed slot. The lease stays live throughout
+        /// these producer tests; no admission policy is reproduced here.
+        fn new(flow: ProvisioningFlow) -> Rc<Self> {
+            let owner = MovementOwner::default();
+            let open = Rc::new(RefCell::new(Some("lower".to_owned())));
+            let closes = Rc::new(Cell::new(0));
+            let current = open.clone();
+            let closing = open.clone();
+            let delivered = closes.clone();
+            let registration = owner.register(
+                Interest::new(AnchorRegion::Hosts),
+                move || current.borrow().clone(),
+                move || {
+                    delivered.set(delivered.get() + 1);
+                    *closing.borrow_mut() = None;
+                },
+            );
+            let opening = registration
+                .bind_anchor("lower".into(), || true)
+                .expect("the fixture lower-host opening must be admitted");
+            Rc::new(Self {
+                flow: RefCell::new(flow),
+                owner,
+                open,
+                closes,
+                captured_sources: RefCell::new(Vec::new()),
+                scope: Cell::new(None),
+                _opening: opening,
+            })
+        }
+
+        /// Mount the real production hook helper and drain only its initial
+        /// effect. The probe has no async readers or application contexts.
+        fn mount(self: &Rc<Self>) -> VirtualDom {
+            let mut dom = VirtualDom::new_with_props(provisioning_flow_probe, self.clone());
+            dom.rebuild_to_vec();
+            dom.process_events();
+            assert!(
+                self.captured_sources.borrow().is_empty(),
+                "mount seeds the baseline"
+            );
+            assert_eq!(self.closes.get(), 0);
+            assert_eq!(self.open.borrow().as_deref(), Some("lower"));
+            dom
+        }
+
+        /// Publish one changed render while deliberately leaving its deferred
+        /// effect pending. Returned edits prove the component actually reran;
+        /// capture and delivery can then be observed at distinct boundaries.
+        fn render(
+            &self,
+            dom: &mut VirtualDom,
+            flow: ProvisioningFlow,
+        ) -> Vec<dioxus::core::Mutation> {
+            self.flow.replace(flow);
+            dom.mark_dirty(self.scope.get().expect("producer mounted"));
+            dom.render_immediate_to_vec().edits
+        }
+    }
+
+    /// Exercise the exact helper ProvisioningPanel calls before its RSX.
+    /// Debug text is only a render witness: this proves production projection
+    /// and capture timing, while the browser fixture covers the actual panel's
+    /// markup, transport and physical anchor movement.
+    fn provisioning_flow_probe(fixture: Rc<FlowMovementFixture>) -> Element {
+        fixture.scope.set(Some(dioxus::core::current_scope_id()));
+        let capturing = fixture.clone();
+        let capture_lower_hosts = use_callback(move |source: HostId| {
+            assert!(
+                capturing.flow.try_borrow_mut().is_ok(),
+                "capture holds no input borrow"
+            );
+            capturing.captured_sources.borrow_mut().push(source);
+            capturing
+                .owner
+                .capture_affected(&MovedRows::new(AnchorRegion::Hosts, ["lower".into()]))
+        });
+        let flow = fixture.flow.borrow().clone();
+        use_provisioning_flow_movement(&flow, 41, capture_lower_hosts);
+        rsx! { span { "{flow:?}" } }
+    }
+
+    /// Empty/Trace renders stay on the existing trace route. A later first
+    /// Body still captures a lower opening, including the real occupancy of
+    /// a body whose only offer is a fixed-position modal.
+    #[farhelm_testtrace::test]
+    fn provisioning_producer_seeds_then_captures_the_first_empty_body() {
+        let fixture = FlowMovementFixture::new(ProvisioningFlow::Empty);
+        let mut dom = fixture.mount();
+        for flow in [
+            ProvisioningFlow::Empty,
+            ProvisioningFlow::Trace(ProvisioningTraceShape {
+                operation: ProvisioningOperation::Update,
+                status: ProvisioningStatus::Running,
+            }),
+            ProvisioningFlow::Trace(ProvisioningTraceShape {
+                operation: ProvisioningOperation::Update,
+                status: ProvisioningStatus::Failed,
+            }),
+            ProvisioningFlow::Empty,
+        ] {
+            fixture.render(&mut dom, flow);
+            dom.process_events();
+        }
+        assert!(fixture.captured_sources.borrow().is_empty());
+        assert_eq!(fixture.closes.get(), 0);
+        let plan = flow_plan(ProvisioningOperation::Add);
+        let body = ProvisioningFlow::resolve(ProvisioningFlowInput {
+            offer: Some(&plan),
+            ..Default::default()
+        });
+        fixture.render(&mut dom, body);
+        assert_eq!(*fixture.captured_sources.borrow(), vec![41]);
+        assert_eq!(
+            fixture.closes.get(),
+            0,
+            "capture precedes deferred delivery"
+        );
+        dom.process_events();
+        assert_eq!(fixture.closes.get(), 1);
+        assert!(fixture.open.borrow().is_none());
+    }
+
+    /// An unchanged visible body must not capture on retained metadata churn.
+    /// A later wrapped-message change captures during the committed render,
+    /// before the shared continuation delivers to the admitted lower opening.
+    #[farhelm_testtrace::test]
+    fn provisioning_producer_ignores_metadata_and_defers_changed_body_delivery() {
+        let mut view = flow_view();
+        let resolve = |view: &ProvisioningView| {
+            ProvisioningFlow::resolve(ProvisioningFlowInput {
+                snapshot: Some(view),
+                details_open: true,
+                ..Default::default()
+            })
+        };
+        let fixture = FlowMovementFixture::new(resolve(&view));
+        let mut dom = fixture.mount();
+        fixture.render(&mut dom, resolve(&view));
+        view.run_id = Some("metadata-only-run".into());
+        view.steps[0].step = "metadata-only-step".into();
+        view.steps[0].explanation = Some("hidden explanation".into());
+        let edits = fixture.render(&mut dom, resolve(&view));
+        assert!(
+            edits.iter().any(|edit| matches!(edit,
+            dioxus::core::Mutation::SetText { value, .. }
+                if value.contains("metadata-only-step"))),
+            "the metadata render really committed"
+        );
+        dom.process_events();
+        assert!(fixture.captured_sources.borrow().is_empty());
+        assert_eq!(fixture.closes.get(), 0);
+        view.steps[0].message = Some("a changed wrapped message".into());
+        let edits = fixture.render(&mut dom, resolve(&view));
+        assert!(
+            edits.iter().any(|edit| matches!(edit,
+            dioxus::core::Mutation::SetText { value, .. }
+                if value.contains("a changed wrapped message"))),
+            "the changed body render committed"
+        );
+        assert_eq!(*fixture.captured_sources.borrow(), vec![41]);
+        assert_eq!(
+            fixture.closes.get(),
+            0,
+            "the post-render continuation has not run"
+        );
+        dom.process_events();
+        assert_eq!(fixture.closes.get(), 1);
+    }
+
+    /// Removing visible content can move a lower row as surely as adding it.
+    /// Body-to-Trace must report that removal even though later Trace-only
+    /// transitions remain delegated to the original trace producer.
+    #[farhelm_testtrace::test]
+    fn provisioning_producer_captures_body_removal() {
+        let flow = ProvisioningFlow::resolve(ProvisioningFlowInput {
+            details_open: true,
+            error: Some("visible diagnostic"),
+            ..Default::default()
+        });
+        let fixture = FlowMovementFixture::new(flow);
+        let mut dom = fixture.mount();
+        fixture.render(
+            &mut dom,
+            ProvisioningFlow::Trace(ProvisioningTraceShape {
+                operation: ProvisioningOperation::Update,
+                status: ProvisioningStatus::Running,
+            }),
+        );
+        assert_eq!(*fixture.captured_sources.borrow(), vec![41]);
+        assert_eq!(fixture.closes.get(), 0);
+        dom.process_events();
+        assert_eq!(fixture.closes.get(), 1);
+    }
+
+    /// These independently accepted inputs all change the production Body,
+    /// even when no retained run changes its trace summary. Exercise the
+    /// actual projection and hook together: a first read refusal, manual
+    /// advice, a pending-stage transition and the defensive inline plan must
+    /// capture before deferred delivery rather than depend on panel resize.
+    #[farhelm_testtrace::test]
+    fn provisioning_producer_reports_diagnostic_manual_pending_and_plan_changes() {
+        let read_error = ProvisioningFlow::resolve(ProvisioningFlowInput {
+            details_open: true,
+            read_error: Some("first accepted read refusal"),
+            ..Default::default()
+        });
+        let manual_short = vec![DetailPart::peer("run the supervisor")];
+        let manual_long = vec![DetailPart::peer(
+            "run the supervisor with a longer state directory",
+        )];
+        let manual = |parts| {
+            ProvisioningFlow::resolve(ProvisioningFlowInput {
+                details_open: true,
+                local_setup: true,
+                manual_remedy: Some(parts),
+                ..Default::default()
+            })
+        };
+        let waiting = ProvisioningFlow::resolve(ProvisioningFlowInput {
+            details_open: true,
+            is_waiting_claim: true,
+            ..Default::default()
+        });
+        let planning = ProvisioningFlow::resolve(ProvisioningFlowInput {
+            details_open: true,
+            is_planning: true,
+            ..Default::default()
+        });
+        let mut plan = flow_plan(ProvisioningOperation::Update);
+        let original_plan = ProvisioningFlow::resolve(ProvisioningFlowInput {
+            offer: Some(&plan),
+            ..Default::default()
+        });
+        plan.confirmation = "changed defensive inline plan".into();
+        let changed_plan = ProvisioningFlow::resolve(ProvisioningFlowInput {
+            offer: Some(&plan),
+            ..Default::default()
+        });
+
+        for (cause, before, after) in [
+            ("first read refusal", ProvisioningFlow::Empty, read_error),
+            ("manual advice", manual(&manual_short), manual(&manual_long)),
+            ("pending stage", waiting, planning),
+            ("inline plan", original_plan, changed_plan),
+        ] {
+            assert_ne!(before, after, "{cause} must change actual rendered flow");
+            let fixture = FlowMovementFixture::new(before);
+            let mut dom = fixture.mount();
+            let edits = fixture.render(&mut dom, after);
+            assert!(!edits.is_empty(), "{cause} must commit its changed render");
+            assert_eq!(*fixture.captured_sources.borrow(), vec![41], "{cause}");
+            assert_eq!(fixture.closes.get(), 0, "{cause}: delivery is pending");
+            dom.process_events();
+            assert_eq!(fixture.closes.get(), 1, "{cause}");
+            assert!(fixture.open.borrow().is_none(), "{cause}");
+        }
+    }
+
+    /// Folded payloads are invisible, but an offer's inner wrapper occupies
+    /// flow even when only its fixed-position modal is rendered. A later
+    /// first progress response must differ from the seeded empty baseline.
+    #[farhelm_testtrace::test]
+    fn flow_preserves_empty_body_occupancy_and_first_expanded_reply() {
+        let view = flow_view();
+        let empty = ProvisioningFlow::resolve(ProvisioningFlowInput::default());
+        assert_eq!(empty, ProvisioningFlow::Empty);
+        assert_eq!(
+            empty,
+            ProvisioningFlow::resolve(ProvisioningFlowInput {
+                snapshot: Some(&view),
+                ..Default::default()
+            })
+        );
+        let mut plan = flow_plan(ProvisioningOperation::Add);
+        let body = ProvisioningFlow::resolve(ProvisioningFlowInput {
+            offer: Some(&plan),
+            ..Default::default()
+        });
+        assert!(matches!(body, ProvisioningFlow::Body(_)));
+        assert_ne!(empty, body);
+        plan.probe_id = "new-plan".into();
+        plan.confirmation = "different modal words".into();
+        assert_eq!(
+            body,
+            ProvisioningFlow::resolve(ProvisioningFlowInput {
+                offer: Some(&plan),
+                ..Default::default()
+            })
+        );
+        assert_ne!(
+            empty,
+            ProvisioningFlow::resolve(ProvisioningFlowInput {
+                snapshot: Some(&view),
+                details_open: true,
+                ..Default::default()
+            })
+        );
+    }
+
+    /// Equality follows the expanded words and controls actually rendered.
+    /// Run identity, CSS/browser step handles, hidden explanation and paths
+    /// must not turn an unchanged row into a new movement cause.
+    #[farhelm_testtrace::test]
+    fn expanded_flow_compares_displayed_text_and_fold_presence() {
+        let mut view = flow_view();
+        let resolve = |view: &ProvisioningView, fold_run: Option<&str>| {
+            ProvisioningFlow::resolve(ProvisioningFlowInput {
+                snapshot: Some(view),
+                details_open: true,
+                fold_run,
+                ..Default::default()
+            })
+        };
+        let original = resolve(&view, Some("run-a"));
+        let ProvisioningFlow::Body(body) = &original else {
+            panic!("expected expanded body")
+        };
+        let run = body.run.as_ref().unwrap();
+        assert_eq!(run.steps[0].name, "upload<U+200B>build");
+        assert_eq!(run.steps[0].status, "running");
+        assert_eq!(run.steps[0].id, "step-a");
+        assert_eq!(run.steps[0].raw_status, "running");
+        assert_eq!(
+            run.steps[0].message.as_ref().unwrap().0,
+            vec![DetailPart::peer("message\u{202e}")]
+        );
+        view.run_id = Some("run-b".into());
+        view.steps[0].step = "different-id".into();
+        view.steps[0].explanation = Some("hover-only explanation".into());
+        assert_eq!(original, resolve(&view, Some("run-b")));
+        assert_ne!(original, resolve(&view, None));
+        view.steps[0].status = "completed".into();
+        assert_ne!(original, resolve(&view, Some("run-b")));
+        view.steps[0].status = "running".into();
+        view.steps[0].message = Some("changed wrapped message".into());
+        assert_ne!(original, resolve(&view, Some("run-b")));
+        view.steps[0].message = Some("message\u{202e}".into());
+        view.steps[0].name = Some("".into());
+        assert_ne!(original, resolve(&view, Some("run-b")));
+    }
+
+    /// Advice slots and the manual remedy can rewrap while disclosure stays
+    /// open. Secondary advice also changes margin; neither distinction may
+    /// disappear when the render branches are extracted.
+    #[farhelm_testtrace::test]
+    fn flow_keeps_diagnostic_slots_and_manual_secondary_margin() {
+        let remedy = vec![
+            DetailPart::text("run "),
+            DetailPart::peer("command\u{200b}"),
+        ];
+        let resolve = |retry, error| {
+            ProvisioningFlow::resolve(ProvisioningFlowInput {
+                details_open: true,
+                local_setup: true,
+                manual_remedy: Some(&remedy),
+                local_auto_retry: retry,
+                error: Some(error),
+                warning: Some("warning"),
+                read_error: Some("read failed"),
+                ..Default::default()
+            })
+        };
+        let primary = resolve(false, "error");
+        let secondary = resolve(true, "error");
+        assert_ne!(primary, secondary);
+        assert_ne!(primary, resolve(false, "a longer error"));
+        let ProvisioningFlow::Body(body) = secondary else {
+            panic!("expected advice body")
+        };
+        assert_eq!(body.error, Some(FlowParts(vec![DetailPart::peer("error")])));
+        assert_eq!(
+            body.warning,
+            Some(FlowParts(vec![DetailPart::peer("warning")]))
+        );
+        assert_eq!(
+            body.read_error,
+            Some(FlowParts(vec![DetailPart::peer("read failed")]))
+        );
+        assert_eq!(
+            body.manual,
+            Some(ManualLine {
+                parts: FlowParts(remedy),
+                secondary: true
+            })
+        );
+        assert_ne!(
+            FlowParts(vec![DetailPart::text("peer")]),
+            FlowParts(vec![DetailPart::peer("peer")])
+        );
+        assert_eq!(
+            FlowParts(vec![DetailPart::peer("\u{200b}")]),
+            FlowParts(vec![DetailPart::peer("<U+200B>")])
+        );
+    }
+
+    /// An offer suppresses all pending-stage lines even while Details is
+    /// folded. The defensive Update offer is an inline plan, so its words
+    /// participate where Add and Uninstall modal words do not.
+    #[farhelm_testtrace::test]
+    fn flow_resolves_offer_precedence_and_defensive_inline_plan() {
+        let mut plan = flow_plan(ProvisioningOperation::Update);
+        /// Resolve each snapshot with a call-local borrow: the fixture edits
+        /// the same plan between two owned presentation values.
+        fn resolve(offer: Option<&PendingPlan>) -> ProvisioningFlow {
+            ProvisioningFlow::resolve(ProvisioningFlowInput {
+                offer,
+                details_open: true,
+                is_planning: true,
+                is_waiting_claim: true,
+                is_submitting: true,
+                ..Default::default()
+            })
+        }
+        let planning = resolve(None);
+        let ProvisioningFlow::Body(body) = planning else {
+            panic!("expected planning body")
+        };
+        assert_eq!(body.pending, Some(PendingLine::Planning));
+        let offered = resolve(Some(&plan));
+        let ProvisioningFlow::Body(body) = &offered else {
+            panic!("expected offer body")
+        };
+        assert!(body.pending.is_none());
+        assert_eq!(
+            body.inline_plan,
+            Some(PlanBody::Legacy("legacy plan".into()))
+        );
+        plan.confirmation = "changed inline plan".into();
+        assert_ne!(offered, resolve(Some(&plan)));
+    }
+
+    /// Plan flow equality excludes Copy bytes, DOM keys and full hover paths
+    /// while strict props still update those render details. Legacy equality
+    /// shares the actual line renderer's normalization and keeps terminators
+    /// structural rather than flattening them into one escaped label.
+    #[farhelm_testtrace::test]
+    fn plan_body_excludes_copy_and_hover_metadata() {
+        let mut steps: PlanSteps = serde_json::from_value(serde_json::json!({
+            "lead": "lead\u{200b}",
+            "steps": [{
+                "id": "step-a", "name": "name", "paths": [{"short": "~/a", "full": "/host/a"}],
+                "explanation": "why"
+            }],
+            "kept": "kept"
+        }))
+        .unwrap();
+        let original = PlanBody::new("raw copy a", Some(&steps));
+        let resolve = |steps: &PlanSteps| {
+            let mut plan = flow_plan(ProvisioningOperation::Update);
+            plan.steps = Some(steps.clone());
+            ProvisioningFlow::resolve(ProvisioningFlowInput {
+                offer: Some(&plan),
+                ..Default::default()
+            })
+        };
+        let original_flow = resolve(&steps);
+        steps.steps[0].id = "step-b".into();
+        steps.steps[0].paths[0].full = "/other/full/path".into();
+        let metadata_changed = PlanBody::new("different copy bytes", Some(&steps));
+        assert_ne!(original, metadata_changed);
+        assert!(original.same_flow(&metadata_changed));
+        assert_eq!(original_flow, resolve(&steps));
+        steps.steps[0].paths[0].short = "~/different".into();
+        assert!(!original.same_flow(&PlanBody::new("raw copy a", Some(&steps))));
+        assert_ne!(original_flow, resolve(&steps));
+        for (left, right) in [
+            ("line\r\n- step\r\n", "line\n- step\n"),
+            ("peer\u{202e}", "peer<U+202E>"),
+        ] {
+            let left = PlanBody::new(left, None);
+            let right = PlanBody::new(right, None);
+            assert_ne!(left, right, "raw legacy props still change");
+            assert!(
+                left.same_flow(&right),
+                "identical displayed legacy bodies do not move"
+            );
+        }
+        assert!(!PlanBody::new("line\n", None).same_flow(&PlanBody::new("line", None)));
+        assert!(!PlanBody::new("line\n", None).same_flow(&PlanBody::new("line<U+000A>", None)));
+    }
 
     /// A decoded plan must keep its copyable bytes while both production
     /// renderers show hostile text visibly. The fallback also preserves blank
@@ -3609,7 +4561,8 @@ mod tests {
         /// Mount the production renderer with the local confirmation snapshot;
         /// neither branch gets a test-only presentation path.
         fn render((confirmation, steps): (String, Option<PlanSteps>)) -> Element {
-            rsx! { PlanStepList { confirmation, steps } }
+            let body = PlanBody::new(&confirmation, steps.as_ref());
+            rsx! { PlanStepList { confirmation, body } }
         }
 
         let raw = "heading\r\n- remove path\u{202e}\r\n   \r\n\t\n";

@@ -848,7 +848,7 @@ pub(crate) fn ListView(
             slot.set(None);
         },
     );
-    use_registration(
+    let host_registration = use_registration(
         popovers.clone(),
         Interest {
             direct_host_disclosure: true,
@@ -3857,6 +3857,7 @@ pub(crate) fn ListView(
         // discovery, planning, and mutation replies must retain their owner.
         HostsPanel {
             hosts,
+            host_registration,
             details_open: host_details_open,
             ops,
             mutation_busy_hosts,

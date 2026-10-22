@@ -57,6 +57,10 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
+use crate::anchored_popovers::{
+    AnchorRegion, MovedRows, MovementOwner, MovementTicket, Registration, use_anchor_binding,
+    use_rendered_movement,
+};
 use crate::api::{
     Commit, PlanSteps, PreferenceValue, ProbeResponse, ProvisioningOperation,
     ProvisioningSubmission, adopt_host, probe_ssh_host, provision_host, remove_host, retry_host,
@@ -1277,6 +1281,52 @@ pub(crate) fn stale_session_notice(
 // The panel
 // ---------------------------------------------------------------------
 
+/// Select lower anchors in the current displayed vector, never by host id.
+///
+/// A source's diagnostic/provisioning content sits below its own stable
+/// header. Missing sources contribute no flow, including during row removal.
+fn lower_host_rows(shown: &[Host], source: HostId) -> Vec<String> {
+    shown
+        .iter()
+        .position(|host| host.id == source)
+        .map(|position| {
+            shown[position + 1..]
+                .iter()
+                .map(|host| host.id.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Retained rows remain anchors after a failed refresh, until removed.
+///
+/// The lookup failure view belongs to stale-session wording; host rendering
+/// still uses the retained snapshot. New membership revokes an anchor before
+/// its old DOM is physically removed.
+fn host_is_displayed(read: &HostsRead, id: HostId) -> bool {
+    read.hosts()
+        .is_some_and(|shown| shown.iter().any(|host| host.id == id))
+}
+
+/// Share one live-vector capture between independent lower-content producers.
+///
+/// Only callbacks peek this signal, so this hook adds no render dependency.
+/// End the read before admission: registry callbacks can inspect host state.
+fn use_lower_host_capture(
+    hosts: Signal<HostsRead>,
+    owner: MovementOwner,
+) -> Callback<HostId, MovementTicket> {
+    use_callback(move |source| {
+        let lower = {
+            let read = hosts.peek();
+            read.hosts()
+                .map(|shown| lower_host_rows(shown, source))
+                .unwrap_or_default()
+        };
+        owner.capture_affected(&MovedRows::new(AnchorRegion::Hosts, lower))
+    })
+}
+
 /// One host mutation, already built and ready to await.
 ///
 /// Boxed because the five verbs return five different futures and the
@@ -1372,6 +1422,8 @@ enum HostRequestDisplay {
 #[component]
 pub(crate) fn HostsPanel(
     hosts: Signal<HostsRead>,
+    /// The existing root slot; rows bind only their current measurement scope.
+    host_registration: Registration,
     /// The one page-local global disclosure. ListView holds the handle so its
     /// accepted host read can compare the lines that are actually displayed;
     /// this panel retains every checkbox/reveal write and their close timing.
@@ -1408,6 +1460,7 @@ pub(crate) fn HostsPanel(
     let base = use_context::<ApiBase>().0;
     let mut preferences = use_context::<crate::list::SharedPreferences>();
     let popovers = use_context::<crate::anchored_popovers::MovementOwner>();
+    let capture_lower_hosts = use_lower_host_capture(hosts, popovers.clone());
     // The parent owns one compact update status per row and passes it to both
     // the renderer and the provisioning child that publishes it.
     let row_update_progress = use_signal(HashMap::<HostId, HostUpdateProgress>::new);
@@ -2271,6 +2324,8 @@ pub(crate) fn HostsPanel(
                     for (host, local_setup) in list {
                         HostRow {
                             key: "{host.id}",
+                            host_registration: host_registration.clone(),
+                            capture_lower_hosts,
                             controls: HostRowControls {
                                 menu_open: *host_menu_open.read() == Some(host.id),
                             },
@@ -2311,6 +2366,7 @@ pub(crate) fn HostsPanel(
                             provisioning_section: rsx! {
                                 ProvisioningPanel {
                                     host: host.clone(),
+                                    capture_lower_hosts,
                                     ops,
                                     details_open: details_open()
                                         || provisioning_auto_details.read().contains(&host.id),
@@ -2387,16 +2443,22 @@ pub(crate) fn HostsPanel(
                                 host_menu_open.set(None);
                                 provisioning_action_requests.write().insert(id, request);
                             },
-                            on_menu_toggle: move |id: HostId| {
-                                let currently = *host_menu_open.peek() == Some(id);
-                                host_menu_open.set(if currently { None } else { Some(id) });
-                                // Opening a host row's menu must close
-                                // whichever session row's menu is open —
-                                // see this component's own "one row menu
-                                // open, across BOTH panels" doc.
-                                if !currently {
-                                    session_menu_open.set(None);
-                                                            }
+                            on_menu_toggle: {
+                                let host_registration = host_registration.clone();
+                                move |id: HostId| {
+                                    let currently = *host_menu_open.peek() == Some(id);
+                                    if !currently {
+                                        host_registration.forget_anchor();
+                                    }
+                                    host_menu_open.set(if currently { None } else { Some(id) });
+                                    // Opening a host row's menu must close
+                                    // whichever session row's menu is open —
+                                    // see this component's own "one row menu
+                                    // open, across BOTH panels" doc.
+                                    if !currently {
+                                        session_menu_open.set(None);
+                                    }
+                                }
                             },
                             host,
                         }
@@ -2812,10 +2874,11 @@ struct HostRowControls {
 /// Not one lifecycle, and the grouping does not claim one: `busy` is CURRENT
 /// disablement, raised by this host's own mutation or provisioning run or by
 /// any other row holding the page's operation token, while `error` and
-/// `warning` are RETAINED, mutually exclusive outcomes of the last ordinary
-/// mutation (transport and authentication failures land in `error` too, not
-/// only helm-authored refusals; a confirmed success clears both). They are
-/// grouped because they are what the row shows about operations, full stop.
+/// `warning` are independent RETAINED slots for ordinary mutation outcomes
+/// (transport and authentication failures land in `error` too, not only
+/// helm-authored refusals). A new request clears both, but local validation
+/// can add an error beside an older warning. They are grouped because they
+/// are what the row shows about operations, full stop.
 /// The row derives none of them — the panel owns the busy sets and the two
 /// per-host maps, and reduces them per row before rendering.
 ///
@@ -2843,6 +2906,27 @@ struct HostRowActivity {
     /// Kept apart from `error` because it means the opposite thing: the
     /// change HAPPENED and only its confirmation was unreadable.
     warning: Option<String>,
+}
+
+/// The two retained containers HostRow actually draws below its header.
+///
+/// Settings suppression already happened in the parent. Keep raw values for
+/// PeerLine, but compare their displayed peer spelling for movement only;
+/// component-prop equality remains strict on HostRowActivity. Empty containers
+/// occupy flow and must not compare equal to absent ones.
+#[derive(Clone, Debug)]
+struct HostRowDiagnostics {
+    error: Option<String>,
+    warning: Option<String>,
+}
+
+impl PartialEq for HostRowDiagnostics {
+    /// Compare the two painted containers without altering their raw props.
+    fn eq(&self, other: &Self) -> bool {
+        self.error.as_deref().map(display_peer) == other.error.as_deref().map(display_peer)
+            && self.warning.as_deref().map(display_peer)
+                == other.warning.as_deref().map(display_peer)
+    }
 }
 
 #[cfg(test)]
@@ -3291,6 +3375,10 @@ fn format_elapsed(seconds: u64) -> String {
 #[component]
 fn HostRow(
     host: Host,
+    /// Bind the root open slot to this row's existing measurement lifetime.
+    host_registration: Registration,
+    /// Capture current lower hosts once for each actual retained-line change.
+    capture_lower_hosts: Callback<HostId, MovementTicket>,
     /// Whether automatic local setup replaces the ordinary remedy slot.
     local_setup: bool,
     /// Which control surface this row is showing: its menu (grouped state).
@@ -3336,6 +3424,7 @@ fn HostRow(
         error,
         warning,
     } = activity;
+    let diagnostics = HostRowDiagnostics { error, warning };
     // In a desktop app whose updater runs, the local row's Update is the
     // app's own update check, offered whatever provisioning says
     // (`update_menu_item`). Folding it into the menu state here keeps every
@@ -3353,6 +3442,9 @@ fn HostRow(
     #[cfg(test)]
     HOST_ROW_RENDERS.with(|renders| *renders.borrow_mut().entry(host.id).or_insert(0) += 1);
     let id = host.id;
+    let hosts = use_context::<Signal<HostsRead>>();
+    let ready = use_callback(move |()| host_is_displayed(&hosts.peek(), id));
+    let bind_anchor = use_anchor_binding(host_registration, id.to_string(), ready);
     let update_is_active = update_progress.is_some();
     let inline_update = (remote_update_available && !update_is_active)
         .then(|| host_update_kind(&host.state))
@@ -3467,6 +3559,7 @@ fn HostRow(
         let handle = toggle_handle;
         let mut placement = placement;
         let generation = open_generation();
+        bind_anchor.call(());
         spawn(async move {
             let measured = match handle.peek().clone() {
                 Some(handle) => handle.get_client_rect().await.ok(),
@@ -3588,6 +3681,10 @@ fn HostRow(
             focus_menu_toggle("data-host-id", &dismiss_id.to_string(), ".host-row-menu");
         }
     }));
+
+    // Only retained diagnostics report here. Snapshot-derived ordinary lines
+    // keep their atomic prefix comparison at the accepted host-read boundary.
+    use_rendered_movement(&diagnostics, || capture_lower_hosts.call(id));
 
     rsx! {
         div {
@@ -4182,7 +4279,7 @@ fn HostRow(
             // peer value gets. A refusal able to lay itself out is the worst
             // place to lose that: it is the message a user acts on, and it
             // arrives exactly when two identities are being compared.
-            if let Some(error) = error {
+            if let Some(error) = diagnostics.error {
                 PeerLine {
                     class: "action-error host-error",
                     parts: vec![DetailPart::peer(error)],
@@ -4190,7 +4287,7 @@ fn HostRow(
             }
             // Distinct from an error on purpose: this one says the change
             // HAPPENED and only its confirmation was unreadable.
-            if let Some(warning) = warning {
+            if let Some(warning) = diagnostics.warning {
                 PeerLine {
                     class: "host-warning",
                     parts: vec![DetailPart::peer(warning)],
@@ -6631,6 +6728,381 @@ mod tests {
         }
     }
 
+    /// Give standalone real-row fixtures the same root capability and host
+    /// context as production, without inventing a measurement or a fetcher.
+    fn use_host_row_test_state() -> (Registration, Callback<HostId, MovementTicket>) {
+        let hosts = use_context_provider(|| {
+            let mut read = HostsRead::default();
+            read.record(Ok([1, 2, 3].into_iter().map(row_specimen).collect()));
+            Signal::new(read)
+        });
+        let owner = use_hook(MovementOwner::default);
+        let registration = crate::anchored_popovers::use_registration(
+            owner.clone(),
+            crate::anchored_popovers::Interest::new(AnchorRegion::Hosts),
+            || None,
+            || {},
+        );
+        let capture = use_lower_host_capture(hosts, owner);
+        (registration, capture)
+    }
+
+    /// New content selects a suffix of displayed order; numeric rank and the
+    /// source's own header must never become alternate selection rules.
+    #[farhelm_testtrace::test]
+    fn lower_host_selection_uses_current_vector_positions() {
+        let shown = [9303, 9301, 9302].map(row_specimen);
+        assert_eq!(lower_host_rows(&shown, 9303), vec!["9301", "9302"]);
+        assert_eq!(lower_host_rows(&shown, 9301), vec!["9302"]);
+        assert!(lower_host_rows(&shown, 9302).is_empty());
+        assert!(lower_host_rows(&shown, 9999).is_empty());
+        assert!(lower_host_rows(&[], 9303).is_empty());
+    }
+
+    /// Refresh failures do not unmount hosts, while removal invalidates an
+    /// anchor before its old component's physical teardown can run.
+    #[farhelm_testtrace::test]
+    fn host_anchor_readiness_follows_retained_displayed_membership() {
+        let mut read = HostsRead::default();
+        assert!(!host_is_displayed(&read, 9301));
+        read.record(Ok(vec![row_specimen(9301)]));
+        assert!(host_is_displayed(&read, 9301));
+        read.record(Err("registry refresh failed".into()));
+        assert!(host_is_displayed(&read, 9301));
+        read.record(Ok(vec![row_specimen(9302)]));
+        assert!(!host_is_displayed(&read, 9301));
+    }
+
+    /// The displayed slots are independent and preserve empty container
+    /// occupancy, but raw spellings that paint the same peer escape are inert.
+    #[farhelm_testtrace::test]
+    fn host_diagnostics_compare_displayed_slots_without_losing_raw_input() {
+        let empty = HostRowDiagnostics {
+            error: None,
+            warning: None,
+        };
+        let error = HostRowDiagnostics {
+            error: Some(String::new()),
+            warning: None,
+        };
+        let warning = HostRowDiagnostics {
+            error: None,
+            warning: Some(String::new()),
+        };
+        assert_ne!(empty, error);
+        assert_ne!(empty, warning);
+        assert_ne!(error, warning);
+        let raw = HostRowDiagnostics {
+            error: Some("refusal \u{202e}".into()),
+            warning: Some("committed \u{200b}".into()),
+        };
+        let spelled = HostRowDiagnostics {
+            error: Some("refusal <U+202E>".into()),
+            warning: Some("committed <U+200B>".into()),
+        };
+        assert_eq!(raw, spelled);
+        assert_eq!(raw.error.as_deref(), Some("refusal \u{202e}"));
+        assert_eq!(raw.warning.as_deref(), Some("committed \u{200b}"));
+        assert!(
+            HostRowActivity {
+                busy: false,
+                error: raw.error.clone(),
+                warning: raw.warning.clone()
+            } != HostRowActivity {
+                busy: false,
+                error: spelled.error.clone(),
+                warning: spelled.warning.clone()
+            },
+            "component props must still receive raw input changes"
+        );
+        let changed_warning = HostRowDiagnostics {
+            warning: Some("different committed result".into()),
+            ..spelled
+        };
+        assert_ne!(raw, changed_warning);
+    }
+
+    /// Keep inputs outside the renderer so a saved callback can be invoked
+    /// against a newer host snapshot without refreshing its closure first.
+    struct HostCaptureFixture {
+        owner: MovementOwner,
+        hosts: std::cell::RefCell<Option<Signal<HostsRead>>>,
+        capture: std::cell::RefCell<Option<Callback<HostId, MovementTicket>>>,
+    }
+
+    impl PartialEq for HostCaptureFixture {
+        /// Cells are changing test inputs, not new component prop identity.
+        fn eq(&self, other: &Self) -> bool {
+            std::ptr::eq(self, other)
+        }
+    }
+
+    /// Mount the production callback in a real hook scope. The test binds
+    /// explicit leases; a headless renderer supplies no mounted rectangle.
+    fn host_capture_app(fixture: Rc<HostCaptureFixture>) -> Element {
+        let hosts = use_signal(|| {
+            let mut read = HostsRead::default();
+            read.record(Ok([9303, 9301, 9302]
+                .into_iter()
+                .map(row_specimen)
+                .collect()));
+            read
+        });
+        fixture.hosts.replace(Some(hosts));
+        let capture = use_lower_host_capture(hosts, fixture.owner.clone());
+        fixture.capture.replace(Some(capture));
+        rsx! { span { "host capture fixture" } }
+    }
+
+    /// The real callback reads current retained order and releases its borrow
+    /// before admission, which may reenter the signal. A removed target cannot
+    /// receive a previously captured cause even before its scope drops. Two
+    /// independent content reports remain causal events when their final
+    /// displayed contributions exchange wholly above the target.
+    #[farhelm_testtrace::test]
+    fn lower_host_callback_peeks_live_order_and_rechecks_retained_admission() {
+        let fixture = Rc::new(HostCaptureFixture {
+            owner: MovementOwner::default(),
+            hosts: Default::default(),
+            capture: Default::default(),
+        });
+        let mut dom = VirtualDom::new_with_props(host_capture_app, fixture.clone());
+        dom.rebuild_to_vec();
+        let mut hosts = fixture.hosts.borrow().expect("host context mounted");
+        let capture = fixture.capture.borrow().expect("capture callback mounted");
+        let open = Rc::new(std::cell::Cell::new(Some(9301)));
+        let closes = Rc::new(std::cell::Cell::new(0));
+        let read_open = open.clone();
+        let close_open = open.clone();
+        let closed = closes.clone();
+        let registration = fixture.owner.register(
+            crate::anchored_popovers::Interest::new(AnchorRegion::Hosts),
+            move || read_open.get().map(|id| id.to_string()),
+            move || {
+                let mut current_hosts = hosts;
+                assert!(
+                    current_hosts.try_write().is_ok(),
+                    "delivery retained a host borrow"
+                );
+                closed.set(closed.get() + 1);
+                close_open.set(None);
+            },
+        );
+        let ready = move || {
+            let mut current_hosts = hosts;
+            assert!(
+                current_hosts.try_write().is_ok(),
+                "capture retained a host borrow"
+            );
+            host_is_displayed(&hosts.peek(), 9301)
+        };
+        let lease = registration.bind_anchor("9301".into(), ready).unwrap();
+
+        dom.in_runtime(|| capture.call(9302).close_if_current());
+        assert_eq!(closes.get(), 0, "source below the target selects nothing");
+        dom.in_runtime(|| {
+            hosts.write().record(Ok([9302, 9303, 9301]
+                .into_iter()
+                .map(row_specimen)
+                .collect()));
+            hosts.write().record(Err("retained refresh failure".into()));
+            let before = [
+                HostRowDiagnostics {
+                    error: Some("short refusal".into()),
+                    warning: None,
+                },
+                HostRowDiagnostics {
+                    error: Some("a longer retained refusal contribution".into()),
+                    warning: None,
+                },
+            ];
+            let after = [before[1].clone(), before[0].clone()];
+            assert_ne!(before[0], after[0]);
+            assert_ne!(before[1], after[1]);
+            assert_eq!(before[0], after[1]);
+            assert_eq!(before[1], after[0]);
+
+            // These calls are two accepted lower-content producer boundaries,
+            // not one ordinary host-list snapshot. Even an exchanged final
+            // content multiset cannot cancel their already captured causes.
+            // This unit test establishes routing/admission, not pixel balance.
+            let first = capture.call(9302);
+            let second = capture.call(9303);
+            assert_eq!(open.get(), Some(9301), "delivery is deliberately pending");
+            assert_eq!(closes.get(), 0);
+            first.close_if_current();
+            second.close_if_current();
+        });
+        assert_eq!(
+            closes.get(),
+            1,
+            "independent balanced causes close the current lower opening once"
+        );
+
+        drop(lease);
+        registration.forget_anchor();
+        open.set(Some(9301));
+        let lease = registration.bind_anchor("9301".into(), ready).unwrap();
+        let ticket = dom.in_runtime(|| capture.call(9302));
+        dom.in_runtime(|| hosts.write().record(Ok(vec![row_specimen(9302)])));
+        dom.in_runtime(|| ticket.close_if_current());
+        assert_eq!(
+            closes.get(),
+            1,
+            "removed row is ineligible before lease drop"
+        );
+        assert_eq!(
+            open.get(),
+            Some(9301),
+            "row-gone bookkeeping stays outside movement"
+        );
+        drop(lease);
+    }
+
+    /// Drive the real row and its shared movement hook, so an ordinary line
+    /// or busy change cannot accidentally join the new per-row producer and
+    /// defeat the atomic host-read comparison's balanced-prefix negatives.
+    #[farhelm_testtrace::test]
+    fn real_host_row_reports_only_retained_diagnostic_changes() {
+        std::thread_local! {
+            static ACTIVITY: std::cell::RefCell<HostRowActivity> =
+                const { std::cell::RefCell::new(HostRowActivity { busy: false, error: None, warning: None }) };
+            static CHANGED_BUILD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+            static CAPTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        }
+
+        /// Trace the production capture callback without supplying a fake
+        /// rectangle or replacing the actual row's diagnostic renderer.
+        fn app() -> Element {
+            let (host_registration, capture) = use_host_row_test_state();
+            let capture_lower_hosts = use_callback(move |id| {
+                CAPTURES.with(|count| count.set(count.get() + 1));
+                capture.call(id)
+            });
+            let mut host = row_specimen(1);
+            if CHANGED_BUILD.with(std::cell::Cell::get)
+                && let HostPhase::Connected { build_version, .. } = &mut host.state
+            {
+                *build_version = "different ordinary detail".into();
+            }
+            rsx! {
+                HostRow {
+                    host,
+                    host_registration,
+                    capture_lower_hosts,
+                    local_setup: false,
+                    controls: HostRowControls { menu_open: false },
+                    activity: ACTIVITY.with(|activity| activity.borrow().clone()),
+                    details_open: true,
+                    update_progress: None,
+                    provisioning_menu: ProvisioningMenuState::default(),
+                    remote_update_available: false,
+                    provisioning_section: dioxus::core::VNode::empty(),
+                    on_retry: use_callback(|_: HostId| {}),
+                    on_adopt: use_callback(|_: (HostId, String)| {}),
+                    on_settings_start: use_callback(|_: HostId| {}),
+                    on_remove_start: use_callback(|_: HostId| {}),
+                    on_provisioning: use_callback(|_: (HostId, ActionRequest)| {}),
+                    on_menu_toggle: use_callback(|_: HostId| {}),
+                }
+            }
+        }
+
+        /// Publish an actual parent render while leaving the movement effect
+        /// pending; capture must already have occurred before its drain.
+        fn render(dom: &mut VirtualDom) -> Vec<dioxus::core::Mutation> {
+            dom.mark_dirty(dioxus::core::ScopeId::APP);
+            dom.render_immediate_to_vec().edits
+        }
+
+        /// Inspect the production PeerLine's edits rather than reimplementing
+        /// its escaping in a test-only diagnostic renderer.
+        fn has_text(edits: &[dioxus::core::Mutation], expected: &str) -> bool {
+            edits.iter().any(|edit| {
+                matches!(edit,
+                    dioxus::core::Mutation::CreateTextNode { value, .. }
+                        | dioxus::core::Mutation::SetText { value, .. } if value == expected
+                )
+            })
+        }
+
+        ACTIVITY.with(|activity| {
+            *activity.borrow_mut() = HostRowActivity {
+                busy: false,
+                error: None,
+                warning: None,
+            }
+        });
+        CHANGED_BUILD.with(|changed| changed.set(false));
+        CAPTURES.with(|count| count.set(0));
+        HOST_ROW_RENDERS.with(|renders| renders.borrow_mut().clear());
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_to_vec();
+        dom.process_events();
+        assert_eq!(
+            CAPTURES.with(std::cell::Cell::get),
+            0,
+            "mount is a baseline"
+        );
+
+        ACTIVITY.with(|activity| activity.borrow_mut().error = Some("refusal \u{202e}".into()));
+        let edits = render(&mut dom);
+        assert_eq!(
+            CAPTURES.with(std::cell::Cell::get),
+            1,
+            "first later error is a cause"
+        );
+        assert!(has_text(&edits, "refusal <U+202E>"));
+        dom.process_events();
+
+        let renders = host_row_renders()[0].1;
+        ACTIVITY.with(|activity| activity.borrow_mut().error = Some("refusal <U+202E>".into()));
+        render(&mut dom);
+        assert_eq!(
+            host_row_renders()[0].1,
+            renders + 1,
+            "raw prop equality stays strict"
+        );
+        assert_eq!(
+            CAPTURES.with(std::cell::Cell::get),
+            1,
+            "same displayed error is inert"
+        );
+        dom.process_events();
+
+        ACTIVITY.with(|activity| activity.borrow_mut().warning = Some("committed \u{200b}".into()));
+        let edits = render(&mut dom);
+        assert!(has_text(&edits, "committed <U+200B>"));
+        assert_eq!(
+            CAPTURES.with(std::cell::Cell::get),
+            2,
+            "warning beside error remains independent"
+        );
+        dom.process_events();
+
+        ACTIVITY.with(|activity| activity.borrow_mut().busy = true);
+        render(&mut dom);
+        CHANGED_BUILD.with(|changed| changed.set(true));
+        render(&mut dom);
+        assert_eq!(
+            CAPTURES.with(std::cell::Cell::get),
+            2,
+            "busy and ordinary lines stay outside this key"
+        );
+
+        ACTIVITY.with(|activity| {
+            let mut activity = activity.borrow_mut();
+            activity.error = None;
+            activity.warning = None;
+        });
+        render(&mut dom);
+        assert_eq!(
+            CAPTURES.with(std::cell::Cell::get),
+            3,
+            "one render reports the joint clear once"
+        );
+    }
+
     /// A published Update offer can lag the parent's run-start notice.
     /// The header must skip that busy row even while a separate remote row
     /// remains eligible, or a fleet click can queue work its row refuses.
@@ -6709,6 +7181,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn repeated_parent_refreshes_do_not_rerender_an_unchanged_host_row() {
         fn app() -> Element {
+            let (host_registration, capture_lower_hosts) = use_host_row_test_state();
             let on_retry = use_callback(|_: HostId| {});
             let on_adopt = use_callback(|_: (HostId, String)| {});
             let on_remove_start = use_callback(|_: HostId| {});
@@ -6717,6 +7190,8 @@ mod tests {
             rsx! {
                 HostRow {
                     host: row_specimen(1),
+                    host_registration,
+                    capture_lower_hosts,
                     local_setup: false,
                     controls: HostRowControls {
                         menu_open: false,
@@ -6780,6 +7255,7 @@ mod tests {
         }
 
         fn app() -> Element {
+            let (host_registration, capture_lower_hosts) = use_host_row_test_state();
             let on_retry = use_callback(|_: HostId| {});
             let on_adopt = use_callback(|_: (HostId, String)| {});
             let on_remove_start = use_callback(|_: HostId| {});
@@ -6791,6 +7267,8 @@ mod tests {
                     HostRow {
                         key: "{id}",
                         host: row_specimen(id),
+                        host_registration: host_registration.clone(),
+                        capture_lower_hosts,
                         local_setup: false,
                         controls: HostRowControls { menu_open: false },
                         activity: HostRowActivity {

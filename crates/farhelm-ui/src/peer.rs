@@ -328,6 +328,56 @@ pub(crate) fn PeerLine(
     }
 }
 
+/// The actual line content and structure PeerBlock renders. Equality is
+/// useful to callers whose layout depends on that body: CRLF normalization
+/// and editable escaping can make distinct raw text render identically.
+/// Raw transport, component props and Copy values keep their own bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PeerBlockBody {
+    lines: Vec<PeerBlockLine>,
+}
+
+/// A literal newline stays a separate text node inside its isolated span.
+/// The raw `- ` prefix chooses the existing hanging-indent class before
+/// escaping; no interpretation of a plan action belongs at this boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PeerBlockLine {
+    text: String,
+    newline: bool,
+    step: bool,
+}
+
+impl PeerBlockBody {
+    /// Resolve PeerBlock's displayed spelling without placeholders or lost
+    /// terminators. CRLF becomes the same literal LF as before; a bare CR
+    /// remains peer content and is escaped visibly rather than stripped.
+    pub(crate) fn new(text: &PeerText) -> Self {
+        let lines = text
+            .raw()
+            .split_inclusive('\n')
+            .map(|line| {
+                let content = line
+                    .strip_suffix("\r\n")
+                    .or_else(|| line.strip_suffix('\n'))
+                    .unwrap_or(line);
+                PeerBlockLine {
+                    text: editable_peer(content),
+                    newline: line.ends_with('\n'),
+                    step: content.starts_with("- "),
+                }
+            })
+            .collect();
+        Self { lines }
+    }
+
+    /// The final empty marker preserves the terminal LF in native selection
+    /// without adding selectable content. It follows the same line value as
+    /// the literal newline, so equality cannot forget that rendered box.
+    fn has_end_marker(&self) -> bool {
+        self.lines.last().is_some_and(|line| line.newline)
+    }
+}
+
 /// Render peer-authored multiline text without surrendering its line shape.
 ///
 /// The newlines are structural and trusted: the server uses them to separate
@@ -350,36 +400,24 @@ pub(crate) fn PeerLine(
 /// boundaries; each line still passes through the existing editable escape.
 #[component]
 pub(crate) fn PeerBlock(class: String, text: PeerText, scroll_label: Option<String>) -> Element {
-    let lines = text
-        .raw()
-        .split_inclusive('\n')
-        .map(|line| {
-            // Keep the existing CRLF normalization for peer command blocks;
-            // the helm's generated plans use LF separators.
-            let content = line
-                .strip_suffix("\r\n")
-                .or_else(|| line.strip_suffix('\n'))
-                .unwrap_or(line);
-            (content, line.ends_with('\n'))
-        })
-        .collect::<Vec<_>>();
+    let body = PeerBlockBody::new(&text);
     rsx! {
         pre { class: "{class}",
             tabindex: if scroll_label.is_some() { Some("0") } else { None },
             role: if scroll_label.is_some() { Some("region") } else { None },
             aria_label: scroll_label,
-            for (index, (line, newline)) in lines.iter().enumerate() {
+            for (index, line) in body.lines.iter().enumerate() {
                 span {
                     key: "{index}",
-                    class: if line.starts_with("- ") { "peer-value peer-line peer-plan-step" } else { "peer-value peer-line" },
+                    class: if line.step { "peer-value peer-line peer-plan-step" } else { "peer-value peer-line" },
                     dir: "ltr",
-                    "{editable_peer(line)}"
-                    if *newline {
+                    "{line.text}"
+                    if line.newline {
                         "\n"
                     }
                 }
             }
-            if text.raw().ends_with('\n') {
+            if body.has_end_marker() {
                 span { class: "peer-block-end", "aria-hidden": "true" }
             }
         }
@@ -389,6 +427,212 @@ pub(crate) fn PeerBlock(class: String, text: PeerText, scroll_label: Option<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Layout equality follows the actual isolated lines, not transport
+    /// spelling. Normalizing CRLF and escaping unsafe text must not invent a
+    /// movement, while literal line breaks retain their distinct structure.
+    #[farhelm_testtrace::test]
+    fn block_body_compares_displayed_lines_and_literal_terminators() {
+        let body = |raw: &str| PeerBlockBody::new(&raw.into());
+        assert_eq!(body("heading\r\n- path\r\n"), body("heading\n- path\n"));
+        assert_eq!(body("path\u{202e}"), body("path<U+202E>"));
+        assert_eq!(body("bare\r"), body("bare<U+000D>"));
+        for (left, right) in [
+            ("", "\n"),
+            ("line", "line\n"),
+            ("line\n", "line\n\n"),
+            ("line\n", "line<U+000A>"),
+            ("bare", "bare\r"),
+        ] {
+            assert_ne!(
+                body(left),
+                body(right),
+                "{left:?} and {right:?} differ in flow"
+            );
+        }
+        assert!(body("").lines.is_empty());
+        assert_eq!(
+            body("\n\n").lines,
+            vec![
+                PeerBlockLine {
+                    text: String::new(),
+                    newline: true,
+                    step: false
+                },
+                PeerBlockLine {
+                    text: String::new(),
+                    newline: true,
+                    step: false
+                },
+            ]
+        );
+        assert_eq!(body("   ").lines[0].text, "   ");
+        assert_eq!(body("\t").lines[0].text, "<U+0009>");
+        assert!(body("- path").lines[0].step);
+        assert!(!body(" - path").lines[0].step);
+        assert!(body("line\n").has_end_marker());
+        assert!(!body("line").has_end_marker());
+        assert!(!body("").has_end_marker());
+    }
+
+    /// Read the production PeerBlock's exact span/text structure. Static
+    /// newlines, dir and end-marker attributes live in Dioxus templates, so
+    /// text mutations alone cannot prove they remain inside the same span.
+    fn rendered_block(raw: &str) -> (Vec<(String, bool, String)>, bool) {
+        use dioxus::core::{AttributeValue, DynamicNode, TemplateAttribute, TemplateNode};
+
+        /// Only static attributes are needed for dir and the fixed end
+        /// marker; line class is dynamic and is inspected separately below.
+        fn static_attribute(node: &TemplateNode, name: &str) -> Option<&'static str> {
+            let TemplateNode::Element { attrs, .. } = node else {
+                return None;
+            };
+            attrs.iter().find_map(|attr| match attr {
+                TemplateAttribute::Static {
+                    name: attr_name,
+                    value,
+                    ..
+                } if *attr_name == name => Some(*value),
+                _ => None,
+            })
+        }
+
+        let mut dom = VirtualDom::new_with_props(
+            PeerBlock,
+            PeerBlockProps {
+                class: "provisioning-plan".into(),
+                text: raw.into(),
+                scroll_label: None,
+            },
+        );
+        dom.rebuild_in_place();
+        // Dioxus's base scope is its suspense/error wrapper. Inspect the
+        // mounted application component whose literal structure we promise.
+        let root = dom
+            .get_scope(dioxus::core::ScopeId::APP)
+            .expect("PeerBlock application mounted")
+            .root_node();
+        assert!(matches!(
+            root.template.roots,
+            [TemplateNode::Element { tag: "pre", .. }]
+        ));
+        let lines = match &root.dynamic_nodes[0] {
+            DynamicNode::Fragment(lines) => lines.as_slice(),
+            DynamicNode::Placeholder(_) => &[],
+            _ => panic!("PeerBlock must render its line list"),
+        };
+        let rendered = lines
+            .iter()
+            .enumerate()
+            .map(|(index, line)| {
+                assert_eq!(line.key.as_deref(), Some(index.to_string().as_str()));
+                let [
+                    TemplateNode::Element {
+                        tag: "span",
+                        children,
+                        ..
+                    },
+                ] = line.template.roots
+                else {
+                    panic!("each line must remain one span")
+                };
+                assert!(matches!(
+                    *children,
+                    [
+                        TemplateNode::Dynamic { id: 0 },
+                        TemplateNode::Dynamic { id: 1 }
+                    ]
+                ));
+                assert_eq!(
+                    static_attribute(&line.template.roots[0], "dir"),
+                    Some("ltr")
+                );
+                let class = line
+                    .dynamic_attrs
+                    .iter()
+                    .flatten()
+                    .find_map(|attr| match &attr.value {
+                        AttributeValue::Text(value) if attr.name == "class" => Some(value.clone()),
+                        _ => None,
+                    })
+                    .expect("line class remains a rendered attribute");
+                let DynamicNode::Text(text) = &line.dynamic_nodes[0] else {
+                    panic!("escaped content must remain the line's text node")
+                };
+                let newline = match &line.dynamic_nodes[1] {
+                    DynamicNode::Fragment(nodes) => {
+                        assert_eq!(nodes.len(), 1);
+                        if matches!(nodes[0].template.roots, [TemplateNode::Text { text: "\n" }]) {
+                            true
+                        } else {
+                            assert!(matches!(
+                                nodes[0].dynamic_nodes.as_ref(),
+                                [DynamicNode::Placeholder(_)]
+                            ));
+                            false
+                        }
+                    }
+                    DynamicNode::Placeholder(_) => false,
+                    _ => panic!("newline must remain a literal child inside its line span"),
+                };
+                (text.value.clone(), newline, class)
+            })
+            .collect();
+        let end_marker = match &root.dynamic_nodes[1] {
+            DynamicNode::Fragment(nodes) => {
+                assert_eq!(nodes.len(), 1);
+                let marker = &nodes[0].template.roots[0];
+                if let TemplateNode::Element { tag, children, .. } = marker {
+                    assert_eq!(*tag, "span");
+                    assert_eq!(static_attribute(marker, "class"), Some("peer-block-end"));
+                    assert_eq!(static_attribute(marker, "aria-hidden"), Some("true"));
+                    assert!(children.is_empty());
+                    true
+                } else {
+                    assert!(matches!(
+                        nodes[0].dynamic_nodes.as_ref(),
+                        [DynamicNode::Placeholder(_)]
+                    ));
+                    false
+                }
+            }
+            DynamicNode::Placeholder(_) => false,
+            _ => panic!("end marker must remain separate from selectable text"),
+        };
+        (rendered, end_marker)
+    }
+
+    /// The helper must feed the real renderer without double escaping,
+    /// placeholders or moved newline nodes. The end marker is the existing
+    /// native-selection fence for the final LF, not another blank plan line.
+    #[farhelm_testtrace::test]
+    fn peer_block_renders_literal_lines_classes_and_native_selection_marker() {
+        let ordinary = "peer-value peer-line".to_string();
+        let step = "peer-value peer-line peer-plan-step".to_string();
+        let expected = (
+            vec![
+                ("heading".into(), true, ordinary.clone()),
+                ("- path<U+202E>".into(), true, step.clone()),
+                (String::new(), true, ordinary.clone()),
+                ("  ".into(), false, ordinary.clone()),
+            ],
+            false,
+        );
+        assert_eq!(rendered_block("heading\n- path\u{202e}\n\n  "), expected);
+        assert_eq!(
+            rendered_block("heading\r\n- path\u{202e}\r\n\r\n  "),
+            expected
+        );
+        assert_eq!(
+            rendered_block("- \t\n"),
+            (vec![("- <U+0009>".into(), true, step)], true)
+        );
+        assert_eq!(rendered_block(""), (Vec::new(), false));
+        assert_eq!(
+            rendered_block("\n"),
+            (vec![(String::new(), true, ordinary)], true)
+        );
+    }
 
     /// Choosing a presentation must never change bytes later sent or compared.
     /// Transparent JSON and String-compatible Debug also preserve the former

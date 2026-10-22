@@ -203,8 +203,9 @@ impl MovementOwner {
 
     /// Capture current openings in a region with an actual row-local lease.
     /// Legacy reports remain independent of this optional admission. Caller
-    /// readiness excludes Err before teardown; the scoped lease excludes Ok
-    /// before a recovery mount starts its measurement.
+    /// readiness checks that the source still displays the row: sessions reject
+    /// a failed listing, while hosts retain their displayed rows after Err.
+    /// The scoped lease excludes a root slot before its row measurement mounts.
     pub(crate) fn capture_region(&self, region: AnchorRegion) -> MovementTicket {
         self.capture_selected(|entry, _| entry.region == region)
     }
@@ -355,8 +356,9 @@ impl Registration {
 
     /// Bind at an existing measurement start, only for the live row.
     /// A late callback for A must not replace B's newer binding. `ready` is an
-    /// untracked successful-listing check; scope and opening identity come from
-    /// this lease, without a second handle, placement or generation policy.
+    /// untracked, source-specific check that the row is still displayed; scope
+    /// and opening identity come from this lease, without a second handle,
+    /// placement or generation policy.
     pub(crate) fn bind_anchor(
         &self,
         row: String,
