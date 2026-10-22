@@ -36,3 +36,11 @@ was performed.
 
 Original finding IDs: `template-editing-contracts-1/f1`, `template-editing-implementation-1/f2`,
 `template-editing-tests-1/f1`, `audit-template-preference-race/a1`, `audit-template-field-contract/f1`.
+
+Note for the spec change, from the 2026-10-22 prioritized persistent review (group `181-ui-templates-2of2`, finding f2,
+dropped as covered by this item's recorded decision): the accepted overwrite also reaches the Templates dialog's rename
+and Undo paths at `08ab6e08f9ddd40b5494f2cbbeaaeb9d4e3332b7`. A rename writes the dialog's earlier draft under the new
+name and then deletes the old name, which held the agent's newer definition (`crates/farhelm-ui/src/list/templates.rs`
+around 1637 and 1701-1709). Delete snapshots the Undo copy from the list the dialog loaded, so Undo restores that older
+copy rather than the one deleted (around 1742-1757 and 1849-1850). The exception's wording may want to cover these
+explicitly.

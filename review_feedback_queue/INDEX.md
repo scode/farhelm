@@ -15,6 +15,93 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`template-preservation-promise-omits-last-write-wins.md`](template-preservation-promise-omits-last-write-wins.md) —
   The agent-edit preservation promise omits accepted template overwrites; loss from reliance is conditional.
 
+- [`tunnel-can-take-standalone-helm-port.md`](tunnel-can-take-standalone-helm-port.md) — A localhost tunnel can serve a
+  remote page at the standalone helm's address and read the browser's helm credential; how often one is stored is
+  unverified.
+
+- [`offline-uninstall-retry-skips-session-check.md`](offline-uninstall-retry-skips-session-check.md) — An uninstall
+  retry without a connection checks no sessions yet still ends the host's terminal server; how sessions survive to that
+  point is unverified.
+
+- [`tunnel-shadows-busy-wildcard-port.md`](tunnel-shadows-busy-wildcard-port.md) — A Mac tunnel may take a port a local
+  service serves on all addresses and divert its clients to the remote host; macOS bind behavior is unverified.
+
+- [`link-classifier-misses-embedded-ipv4.md`](link-classifier-misses-embedded-ipv4.md) — Some IPv6 forms of local IPv4
+  addresses open as public links without a card; whether they reach the user's network is unverified.
+
+- [`agent-stop-kills-shared-personal-tmux.md`](agent-stop-kills-shared-personal-tmux.md) — Stop or Restart kills the
+  user's own tmux server or ssh master, with outside work in it, when the agent started it first; spec coverage is
+  ambiguous.
+
+- [`trash-entry-delete-hits-shifted-row.md`](trash-entry-delete-hits-shifted-row.md) — A one-click trash delete can
+  permanently delete a different checkout when rows shift under the pointer; click timing is unmeasured.
+
+- [`tab-owns-first-personal-tmux.md`](tab-owns-first-personal-tmux.md) — The accepted rule that a tab owns services its
+  startup files start first rests on a premise tmux autostart contradicts; tmux environment inheritance is untested.
+
+- [`shared-checkout-root-archives-other-host-work.md`](shared-checkout-root-archives-other-host-work.md) — A checkout
+  root shared between hosts lets one host trash, then permanently delete, a checkout another host's session works in;
+  whether a shared root is supported is unsettled.
+
+- [`update-copies-launch-files-group-writable.md`](update-copies-launch-files-group-writable.md) — Under a permissive
+  umask an update briefly leaves new launch files group-writable in the app, letting another account inject code; the
+  race's practicality is unverified.
+
+- [`create-retry-takeover-replaces-restarted-session.md`](create-retry-takeover-replaces-restarted-session.md) — A stale
+  create retry can take over a session restarted since, reverting its record and possibly duplicating its agent; spec
+  coverage of the fault pair is ambiguous.
+
+- [`startup-reload-adopts-surviving-tab-as-agent.md`](startup-reload-adopts-surviving-tab-as-agent.md) — After an
+  interrupted restart, recovery can take a surviving tab for the agent so Stop and Restart kill it; reaching that shape
+  without direct private-tmux use is unverified.
+
+- [`interrupted-delete-loses-attachments-at-startup.md`](interrupted-delete-loses-attachments-at-startup.md) — A session
+  that survives an interrupted Delete loses its attachments at the next supervisor start; the partial-deletion allowance
+  and a ledger decision conflict.
+
+- [`named-restart-with-keeps-unreported-old-conversation.md`](named-restart-with-keeps-unreported-old-conversation.md) —
+  After a named Restart with that cannot report, Resume reopens the previous conversation indefinitely; the unhooked
+  spawn path is not traced end to end.
+
+- [`no-birth-time-checkout-archives-reclone.md`](no-birth-time-checkout-archives-reclone.md) — On a filesystem without
+  creation times, a folder re-cloned over a checkout is trashed as Farhelm's; which supported filesystems lack them is
+  unverified.
+
+- [`nested-goose-report-replaces-resume-target.md`](nested-goose-report-replaces-resume-target.md) — A nested or
+  sub-agent Goose run can replace its Goose session's Resume target; a lore decision deferred this outside the coverage
+  sources.
+
+- [`uninstall-notice-copies-raw-remote-path.md`](uninstall-notice-copies-raw-remote-path.md) — The uninstall notice
+  copies a host-reported kept-data path raw with no hidden-characters warning; a later helm rejection is unverified.
+
+- [`templates-dialog-new-name-overwrites-outside-template.md`](templates-dialog-new-name-overwrites-outside-template.md)
+  — A new or renamed template in an open Templates dialog replaces one an agent or the CLI created meanwhile; coverage
+  by the last-write-wins decision is unsettled.
+
+- [`grok-unrecognized-pane-admits-nested-grok.md`](grok-unrecognized-pane-admits-nested-grok.md) — A nested Grok's
+  conversation can become the Resume target when the session's Grok has an unrecognized program name; such names are
+  unverified.
+
+- [`omp-direct-bun-pane-admits-nested-omp.md`](omp-direct-bun-pane-admits-nested-omp.md) — A direct Bun OMP launch with
+  an unrecognized entry file can credit a nested OMP's conversation; the nested reporter premise is unverified.
+
+- [`private-tmux-terminfo-path-under-tmp.md`](private-tmux-terminfo-path-under-tmp.md) — The shipped Linux tmux searches
+  a deleted /tmp build path for terminal definitions another account could plant; only hand-run use reads it.
+
+- [`plans-queue-counts-fork-prs-as-plan-work.md`](plans-queue-counts-fork-prs-as-plan-work.md) — The planning system
+  treats an outsider's fork PR named like a plan branch as the plan's own work; an executor building on it is
+  unverified, and the bucket is unsettled.
+
+- [`centos-ssh-scrub-drops-config-after-unmatched-marker.md`](centos-ssh-scrub-drops-config-after-unmatched-marker.md) —
+  The CentOS test deletes the user's ssh config after a leftover start marker with no end marker; an accidental trigger
+  is unverified, and the bucket is unsettled.
+
+- [`grok-clock-step-pins-old-conversation.md`](grok-clock-step-pins-old-conversation.md) — After a backward clock step a
+  Grok session refuses /new and Restart resumes the conversation the user left; spec coverage is ambiguous.
+
+- [`pi-child-report-replaces-resume-target.md`](pi-child-report-replaces-resume-target.md) — A child Pi carrying
+  Farhelm's reporter can replace its Pi session's Resume target; a forwarding extension is unverified.
+
 ## High priority: material UX degradation
 
 - [`shell-inspection-drains-exhaust-planning-pool.md`](shell-inspection-drains-exhaust-planning-pool.md) — Pipe-draining
@@ -39,6 +126,29 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`cancelled-startup-sweep-outlives-directory-ownership.md`](cancelled-startup-sweep-outlives-directory-ownership.md) —
   Blocking cleanup can outlive supervisor ownership and delete a successor's claimed checkout or retry input; resulting
   failures are unmeasured.
+
+- [`power-loss-version-folder-never-repaired.md`](power-loss-version-folder-never-repaired.md) — A Mac version folder
+  damaged by power loss after an update is kept by every rerun and update; APFS exposing the damage is unverified.
+
+- [`terminal-reveal-takes-focus-from-plain-button.md`](terminal-reveal-takes-focus-from-plain-button.md) — A terminal
+  finishing its load takes focus from a keyboard-focused button, so Enter may answer an agent prompt; timing and bucket
+  are unsettled.
+
+- [`commands-setting-help-omits-delete.md`](commands-setting-help-omits-delete.md) — The help for running farhelm
+  commands without asking omits that agents may delete sessions and templates; bucket is unsettled.
+
+- [`replace-with-recent-row-says-launch.md`](replace-with-recent-row-says-launch.md) — In Replace with, Enter on a
+  recent setup replaces while the row says only launch; whether it misleads in practice is unverified.
+
+- [`stale-confirmation-optout-replayed-after-sign-in.md`](stale-confirmation-optout-replayed-after-sign-in.md) — A
+  browser's failed confirmation opt-out is replayed over a later restore after sign-in; not reproduced.
+
+- [`devbuild-update-strands-host-on-newer-schema.md`](devbuild-update-strands-host-on-newer-schema.md) — Updating back
+  from a devbuild that migrated a shared remote host's database leaves the host unreachable; not reproduced, and the
+  bucket is unsettled.
+
+- [`devbuild-tmux-skips-release-signature.md`](devbuild-tmux-skips-release-signature.md) — A devbuild pushes a tmux to
+  remote hosts checked only against an unsigned checksum list from the release site; spec coverage is ambiguous.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -200,3 +310,16 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`tunnel-consent-conflicts-with-restart-dialog.md`](tunnel-consent-conflicts-with-restart-dialog.md) — Tunnel consent
   and Restart with can become mutually inert; native behavior and Escape recovery remain untested.
+
+- [`claude-dialog-text-mimics-input-box.md`](claude-dialog-text-mimics-input-box.md) — Agent-written text in a Claude
+  question dialog can read as the input box; dormant while agent prompts are off, multi-row rendering unverified.
+
+- [`codex-output-mimics-queued-question.md`](codex-output-mimics-queued-question.md) — Codex output shaped like a
+  queued-question hint reads waiting mid-turn, so Restart skips its question; the rendering premise is unverified.
+
+- [`todo-picker-port-squatter-steers-planner.md`](todo-picker-port-squatter-steers-planner.md) — Another local account
+  holding the TODO picker's fixed address can feed the planning agent text as the maintainer's; tab reuse is unverified,
+  and the bucket is unsettled.
+
+- [`sticky-parent-guard-contradicts-own-docs.md`](sticky-parent-guard-contradicts-own-docs.md) — The test recorder's and
+  deflake's docs claim to refuse another account's /tmp/farhelm-tmp, which a sticky one passes.
