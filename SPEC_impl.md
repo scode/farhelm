@@ -1727,7 +1727,8 @@ drainer. Dropping the last owner aborts stderr drainage and drops the kill-on-dr
 cancelled connection alive.
 
 Before hello, natural SSH exit 255 identifies an SSH connection/login failure, 126/127 identify a remote Farhelm that
-could not be executed/found, and 75 identifies Farhelm with no supervisor running and supplies the start command. Other
+could not be executed/found, and 75 identifies Farhelm with no supervisor running and supplies the start command, or
+describes it when the shown command would not be exact (too long, or altered by the diagnostic's escaping). Other
 numeric statuses, including zero before hello, report a failed remote command. Missing status, a signal or a failed wait
 does not invent a numeric exit code. Already observed malformed or partial protocol data keeps its protocol diagnosis.
 Without a current connected marker, a timeout remains uncertain between connecting/logging in and an older remote that
