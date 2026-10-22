@@ -201,3 +201,106 @@ The final general review found the pending-close loss described above. It was fi
 reviewers passed the corrected source and browser additions. Fresh own-model scope assessments accepted the bounded
 mechanisms where needed, and the final inventory reconciled all original candidates. Commit and PR wording passed
 separate cold reads. The two notification focus items remain explicitly outside the accepted fixes.
+
+### Landing
+
+Landed as #2540, #2542, #2544, #2545, #2547, #2548, #2550, #2552, #2555 and #2556, merged bottom-up, with the content
+the report describes plus one browser-test update described below, rebased onto this round's main with one TODO.md
+conflict resolution. It was the only plan in this landing round.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained launcher-draft-model (12 PRs moving the session launcher's choices into one draft
+value with one set of editing rules) and #2557, which records review findings and changes no code. During this round
+main also gained documentation only: triage records, review-queue records, plan files and a TODO.md entry (#2558 to
+#2568); the stack rebased over them without conflicts. The two plans share no code files. A fresh-context reviewer and I
+read this plan against launcher-draft-model and against the recent dialog work already in its base (modal-dialog-shell,
+ui-session-actions):
+
+- launcher-draft-model's change to the lock that keeps a second launch from starting while one is in flight only adds a
+  read, and this plan adds no new use of that lock.
+- The notice shown while a session is being deleted now tells the new owner when it moves the rows below it; every place
+  that shows it, including the launcher's rewritten New and Replace with completion, goes through the one path that
+  reports.
+- The template shortcut menus this plan closes share no state with the launcher's template shortcuts; they only read the
+  shortcut bindings to size their labels.
+- Opening the launcher still closes open menus, in the same order. The new owner never moves focus, so it cannot disturb
+  the order in which a closing dialog makes the page usable again and then returns focus.
+- Replace and Delete confirmations that are waiting for an answer survive a menu closing because its row moved, as
+  SPEC_impl.md requires.
+
+#### Fixes made during the landing
+
+- The full browser suite and repeats found that "two provisioning-busy rows reconcile independently", an existing host
+  setup test that passed on both engines in the previous landing round's full run
+  (`c731cfe8-d581-46ff-ae8d-58b90ca2346e`), now failed about one time in three on both engines. It sets up two hosts at
+  fake addresses the helm can never reach, holds both setups, then opens each host's menu and checks its Settings item
+  while that host's setup is busy and after it completes. With this plan a menu closes when a row above it changes or a
+  setup changes status, and the test opened menus at such moments: just after the API reported a completion the page had
+  not shown yet, and while the helm's connection retries to the unreachable first host rewrote that row (see the first
+  follow-up below). The landing kept what the test proves and changed how it observes: it now checks on the page that
+  each setup is running, waits for the page to show the first host's completion, and retries each menu-open-and-check
+  for up to 8 seconds. A Settings item in the wrong state still fails every attempt. What the retry gives up is failing
+  when a menu closes by itself soon after opening, which is exactly the behavior the first follow-up asks about; if that
+  follow-up is fixed, it should come with a test that a menu below an unreachable host stays open. The updated test
+  passed ten times out of ten on both engines. The change is in #2545, the PR that started closing host menus when rows
+  change. An independent reviewer checked an earlier version against the repository's test-authoring checklist and
+  accepted it with changes; the landed version applies those changes except one, turning Details off for this test, and
+  was not re-reviewed.
+- Its TODO.md removal conflicted with launcher-draft-model's, landed just before it; the landing kept both removals.
+
+#### Possible follow-ups
+
+- Found at landing, a consequence of this plan's rules the report does not mention: with Details shown, a host that is
+  connecting or unreachable shows a line describing its current connection attempt and the last failure. That line
+  changes with every attempt (the waits between attempts grow from about one second to tens of seconds) and as each
+  attempt moves through its steps, and each change closes any open menu on a host row below it. Before this plan, a
+  changed line of the same height did not close those menus. The report accepts conservative closes on changed text, but
+  a menu that closes on a timer under an unreachable host may be more than intended. Possible follow-up, if not: stop
+  treating a rewrite of that connection-attempt line as movement.
+- Found at landing, low severity, a gap the plan's inventory missed rather than one it introduced: the sidebar's YOLO
+  question for Replace sits directly above the session list, and it appears, disappears and shows or clears its error
+  line whenever the helm's answers arrive. Each change shifts every session row, but none is reported to the new owner,
+  so menus on those rows stay open. For example, choose Replace on one row, open another row's menu while the request is
+  in flight, and when the YOLO question appears that menu is left beside a different row. Possible follow-up: report the
+  question's appearance and error line as row movement, the way the deletion notice now does.
+
+#### Checks
+
+The plan adds about 10,500 lines, all in the UI and its browser tests, and changes how menus behave on every session
+row, host row and the app bar, while its own runs were per-PR selections; that is why this round ran the full browser
+suite. No helm, supervisor or asset JavaScript changed, so the rest of the Rust workspace and the JavaScript harness did
+not run. All of the following ran on the stack before the landing's test update, which changes no product code, except
+where noted:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, `dprint check` on the
+  changed Markdown files, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, the
+  workspace debug build, the UI's release web build and `scripts/check-desktop-assets.sh` (which also builds the desktop
+  app): all passed. The isolated test-sleep check passed on the stack as it landed.
+- `cargo nextest run -p farhelm-ui` through the test recorder with pinned nextest and tmux, four slots, no retries, run
+  `93107480-4749-47e9-8644-2be305108785`: 737 passed. `cargo nextest run -p farhelm-ui --features desktop`, run
+  `25b14ca2-1c16-41ee-a737-e2fc0db4e09d`: 898 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `3e6c5c80-5120-4a7f-9b0d-af205ded9491`, retained: 2468 passed, 14 skipped by design
+  (WebKit clipboard cases and tests that need a real signed-in agent or run on one engine only), 8 failed. The run took
+  2.5 hours against the usual 1.5, which points to heavy machine load. Each failure was on one engine only; three
+  repeats of all eight on both engines (run `47725046-13a1-4b60-92e6-361519c6812f`) passed every case except "two
+  provisioning-busy rows reconcile independently", which failed once on each engine and is the test the landing updated
+  above. After the update it passed ten times out of ten on both engines (run `543f2062-e186-4c06-ab40-f4f298d4db1e`).
+  The other seven, all passing three times on both engines in the repeats, were two terminal flood tests, a delete
+  refusal test, a launcher test on two hosts, a sidebar flyout stacking test and two host setup menu tests. One of those
+  two, "expanded setup failure closes the menu below it", also opens a menu just below an unreachable test host with
+  Details on, so the connection-retry closes in the first follow-up may explain it as well as the load. I did not add
+  any of the seven to FLAKES.md on one observation.
+- Reused: none. Skipped: the rest of the Rust workspace and the JavaScript harness (no helm, supervisor or asset
+  JavaScript changed), the website build (no docs page changed), the doctests (no documentation example changed), the
+  desktop smoke test (the desktop app crate is unchanged), the native Mac app (not runnable here) and the installer
+  (unchanged).
+
+The report's checks were per-PR unit-test and browser selections; this round ran the full browser suite and the full UI
+unit tests on the plan as it landed (before the test update, which changes no product code), on top of
+launcher-draft-model. The report's statement that its final inventory found no further uncovered movement no longer
+holds in full: the second follow-up above is a cause that inventory missed. Nothing else in the executor's report became
+untrue at landing.
