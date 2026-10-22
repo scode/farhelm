@@ -2029,7 +2029,8 @@ fn PreferencesGate(children: Element) -> Element {
     // read it mount only once `loaded` says the seed is in the signal.
     let mut preferences =
         use_context_provider(|| list::SharedPreferences(Signal::new(api::Preferences::default())));
-    use_context_provider(|| list::DeleteNotice(Signal::new(None)));
+    let popovers = use_context::<anchored_popovers::MovementOwner>();
+    use_context_provider(|| list::DeleteNotice::new(Signal::new(None), popovers));
     #[cfg(native_desktop)]
     tunnels::use_controller();
     let mut loaded = use_signal(|| false);

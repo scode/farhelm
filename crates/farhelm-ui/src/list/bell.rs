@@ -36,6 +36,7 @@ use dioxus::prelude::*;
 
 use crate::SessionNotification;
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
+use crate::anchored_popovers::{Registration, use_anchor_binding};
 use crate::icons::BellIcon;
 use crate::menu_panel::{
     PanelPlacement, clamp_title, measurement_outcome, session_menu_placement_style,
@@ -93,6 +94,10 @@ pub(super) fn NotificationBell(
     /// the overlay's right-aligned layout puts the bell on its slot (see the
     /// module doc).
     activity_age: Option<String>,
+    /// This row binds the shared root slot only at its existing measurement
+    /// start; new reports must not reach a retained but unmounted opening.
+    registration: Registration,
+    listing_ready: Callback<(), bool>,
     open: Option<u64>,
     /// The bell's click: `ListView` opens or closes this session's list.
     on_toggle: EventHandler<()>,
@@ -124,7 +129,11 @@ pub(super) fn NotificationBell(
     // is discarded, as in the row menus (`menu_panel::measurement_outcome`).
     let mut open_generation = use_signal(|| 0_u64);
     let is_open = open.is_some();
+    // Root opening already revoked any preceding lease. Bind only when this
+    // existing effect/remount path actually starts its own measurement.
+    let bind_anchor = use_anchor_binding(registration, session_id.clone(), listing_ready);
     let spawn_measurement = move || {
+        bind_anchor.call(());
         let generation = *open_generation.peek();
         spawn(async move {
             let measured = match bell_handle.peek().clone() {
