@@ -36,7 +36,7 @@ use dioxus::prelude::*;
 
 use crate::SessionNotification;
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
-use crate::anchored_popovers::{Registration, use_anchor_binding};
+use crate::anchored_popovers::{Registration, use_anchor_binding, use_rendered_movement};
 use crate::icons::BellIcon;
 use crate::menu_panel::{
     PanelPlacement, clamp_title, measurement_outcome, session_menu_placement_style,
@@ -76,6 +76,13 @@ pub(super) fn BellSlot() -> Element {
     rsx! {
         span { class: "session-bell-slot", "aria-hidden": "true" }
     }
+}
+
+/// The hidden spacer uses the ActivityStamp formatter's ASCII monospace age,
+/// so columns, rather than timestamps or tooltip text, determine bell motion.
+/// Absent age occupies no width; equal-width changes such as 10m→11m are inert.
+fn age_spacer_columns(age: Option<&str>) -> usize {
+    age.map_or(0, str::len)
 }
 
 /// The bell control and, while `open` is `Some`, its notification list.
@@ -131,7 +138,7 @@ pub(super) fn NotificationBell(
     let is_open = open.is_some();
     // Root opening already revoked any preceding lease. Bind only when this
     // existing effect/remount path actually starts its own measurement.
-    let bind_anchor = use_anchor_binding(registration, session_id.clone(), listing_ready);
+    let bind_anchor = use_anchor_binding(registration.clone(), session_id.clone(), listing_ready);
     let spawn_measurement = move || {
         bind_anchor.call(());
         let generation = *open_generation.peek();
@@ -158,6 +165,10 @@ pub(super) fn NotificationBell(
             spawn_measurement();
         }
     }));
+    // Capture during this render, before the existing open effect could bind
+    // a fresh opening. Deferred delivery can only reach that captured lifetime.
+    let age_columns = age_spacer_columns(activity_age.as_deref());
+    use_rendered_movement(&age_columns, || registration.capture_current(&session_id));
     let label = bell_label(&title, unread);
     let tooltip = format!(
         "notifications: {}; click to list them",
@@ -367,6 +378,46 @@ fn close_when_focus_leaves(key: &str) {
 mod tests {
     use super::*;
     use crate::peer::display_peer;
+
+    /// The actual age formatter can change text without moving the spacer.
+    /// Pin both digit-boundary movements and same-width clock/tooltip updates,
+    /// so this cause never becomes an unconditional clock-tick close.
+    #[farhelm_testtrace::test]
+    fn spacer_columns_follow_actual_formatted_age_width() {
+        const ACTIVE: i64 = 1_700_000_000;
+        let age = |elapsed| ActivityStamp::new(Some(ACTIVE + elapsed), ACTIVE).unwrap();
+        let nine = age(9 * 60);
+        let ten = age(10 * 60);
+        let eleven = age(11 * 60);
+        assert_eq!(
+            (nine.age.as_str(), ten.age.as_str(), eleven.age.as_str()),
+            ("9m", "10m", "11m")
+        );
+        assert_eq!(age_spacer_columns(Some(&nine.age)), 2);
+        assert_eq!(age_spacer_columns(Some(&ten.age)), 3);
+        assert_eq!(age_spacer_columns(Some(&eleven.age)), 3);
+        assert_eq!(age_spacer_columns(Some(&age(59 * 60).age)), 3);
+        assert_eq!(age_spacer_columns(Some(&age(60 * 60).age)), 2);
+        assert_eq!(age_spacer_columns(Some(&age(0).age)), 3);
+        assert_eq!(age_spacer_columns(Some(&age(10).age)), 3);
+        let other_stamp = ActivityStamp::new(Some(ACTIVE + 10 * 60), ACTIVE - 1).unwrap();
+        assert_eq!(ten.age, other_stamp.age);
+        assert_ne!(ten.absolute, other_stamp.absolute);
+        assert_eq!(
+            age_spacer_columns(Some(&ten.age)),
+            age_spacer_columns(Some(&other_stamp.age))
+        );
+        for absent in [
+            ActivityStamp::new(None, ACTIVE),
+            ActivityStamp::new(Some(ACTIVE), 0),
+        ] {
+            assert!(absent.is_none());
+            assert_eq!(
+                age_spacer_columns(absent.as_ref().map(|stamp| stamp.age.as_str())),
+                0
+            );
+        }
+    }
 
     /// Session titles are peer text, and an accessible name is read aloud,
     /// so the bell's name carries the escaped title: a bidi override or an

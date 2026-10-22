@@ -9,6 +9,8 @@
 //! New content reports additionally capture a weak row-local opening
 //! binding. That admission distinguishes retained root slots from mounted
 //! measurement lifetimes; it does not narrow any existing legacy dispatch.
+//! Rendered-content producers retain only their last small render key and one
+//! weak pending snapshot, captured before edits and delivered after publication.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -126,10 +128,18 @@ pub(crate) struct OpeningTicket {
     anchor: Weak<Anchor>,
 }
 
-/// A bounded regional snapshot of the openings admitted at a cause boundary.
+/// A bounded snapshot of affected openings admitted at a cause boundary.
 /// Producers may deliver immediately or later; a fresh opening receives no
 /// replay, even when it uses the same row as a captured opening.
 pub(crate) struct MovementTicket(Vec<OpeningTicket>);
+
+/// One producer's last actual render key and its pending opening snapshot.
+/// The owner retains no event history: this bounded state belongs to the
+/// component whose synchronous render establishes the causal change.
+struct RenderedMovement<K> {
+    previous: K,
+    pending: Option<MovementTicket>,
+}
 
 /// A mount's registration; clones share one lease and unregister together.
 ///
@@ -322,6 +332,18 @@ impl MovementOwner {
 }
 
 impl Registration {
+    /// Capture this registration only for the row producing the change.
+    /// A shared bell slot may currently name B while row A renders; matching
+    /// both the live slot and scoped binding prevents A from capturing B.
+    pub(crate) fn capture_current(&self, producer_row: &str) -> MovementTicket {
+        let captured = self.0.owner.upgrade().and_then(|registry| {
+            let owner = MovementOwner(registry);
+            let entry = self.entry()?;
+            owner.capture_entry(self.0.id, &entry, producer_row)
+        });
+        MovementTicket(captured.into_iter().collect())
+    }
+
     /// Revoke old admission synchronously before publishing a fresh root open.
     /// Bell measurement still begins in its existing effect; this metadata
     /// boundary prevents a deferred old ticket from reaching that new open.
@@ -446,6 +468,51 @@ pub(crate) fn use_anchor_binding(
     })
 }
 
+/// Capture changed rendered contents before DOM publication, then deliver only
+/// to the same scoped opening after that publication.
+///
+/// Dioxus 0.7.10 runs synchronous component bodies before diffing their DOM
+/// edits; web flush and desktop edit acknowledgement precede effect polling.
+/// Effects are deduplicated and their stored callback is replaced on render,
+/// so a pending ticket must survive an A→B→A sequence outside that callback.
+/// Mount is a baseline. Every changed render replaces pending, including an
+/// empty capture; an unchanged render retains an earlier real cause.
+///
+/// `key` must be the small value actually rendered by this producer, rather
+/// than unrelated model state. Capture and delivery run outside hook/registry
+/// borrows, and use untracked owner admission. This hook assumes synchronous
+/// rendering: introducing suspense here requires revisiting this boundary.
+pub(crate) fn use_rendered_movement<K: Clone + PartialEq + 'static>(
+    key: &K,
+    capture: impl FnOnce() -> MovementTicket,
+) {
+    let movement = use_hook(|| {
+        Rc::new(RefCell::new(RenderedMovement {
+            previous: key.clone(),
+            pending: None,
+        }))
+    });
+    let changed = {
+        let mut movement = movement.borrow_mut();
+        if movement.previous == *key {
+            false
+        } else {
+            movement.previous = key.clone();
+            true
+        }
+    };
+    if changed {
+        let ticket = capture();
+        movement.borrow_mut().pending = Some(ticket);
+    }
+    use_effect(use_reactive((key,), move |(_key,)| {
+        let pending = movement.borrow_mut().pending.take();
+        if let Some(ticket) = pending {
+            ticket.close_if_current();
+        }
+    }));
+}
+
 impl Lease {
     /// Idempotent cleanup also handles explicit scope teardown before Drop.
     fn unregister(&self) {
@@ -517,6 +584,344 @@ mod tests {
         let ticket =
             owner.capture_affected(&MovedRows::new(AnchorRegion::Sessions, [row.to_owned()]));
         (!ticket.0.is_empty()).then_some(ticket)
+    }
+
+    /// The two real producer audiences share one pending-ticket lifecycle.
+    #[derive(Clone, Copy)]
+    enum RenderCapture {
+        OwnRow,
+        Region,
+    }
+
+    /// Cells let a test publish consecutive mutation batches without polling
+    /// the intentionally unsettled effect. Root state outlives the child scope,
+    /// matching the session list's retained-slot/remount arrangement.
+    struct RenderFixture {
+        owner: MovementOwner,
+        slot: Slot,
+        registration: Registration,
+        ready: Rc<Cell<bool>>,
+        key: Cell<usize>,
+        mounted: Cell<bool>,
+        scope: Cell<Option<dioxus::core::ScopeId>>,
+        bind: RefCell<Option<Callback<()>>>,
+        captures: Cell<usize>,
+        mode: RenderCapture,
+    }
+
+    impl PartialEq for RenderFixture {
+        /// Mutable cells are test inputs, not changing component prop identity.
+        fn eq(&self, other: &Self) -> bool {
+            std::ptr::eq(self, other)
+        }
+    }
+
+    impl RenderFixture {
+        /// Start with a live root slot so the initial effect exposes any
+        /// mistaken mount invalidation rather than hiding behind a closed slot.
+        fn new(mode: RenderCapture) -> Rc<Self> {
+            let owner = MovementOwner::default();
+            let slot = Slot::default();
+            slot.open("row");
+            let current = slot.clone();
+            let close = slot.clone();
+            let weak_owner = Rc::downgrade(&owner.0);
+            let registration = owner.register(
+                Interest::new(AnchorRegion::Sessions),
+                move || current.row.borrow().clone(),
+                move || {
+                    assert!(
+                        weak_owner.upgrade().unwrap().try_borrow_mut().is_ok(),
+                        "delivery runs outside the registry borrow"
+                    );
+                    close.deliveries.set(close.deliveries.get() + 1);
+                    *close.row.borrow_mut() = None;
+                },
+            );
+            Rc::new(Self {
+                owner,
+                slot,
+                registration,
+                ready: Rc::new(Cell::new(true)),
+                key: Cell::new(0),
+                mounted: Cell::new(true),
+                scope: Cell::new(None),
+                bind: RefCell::new(None),
+                captures: Cell::new(0),
+                mode,
+            })
+        }
+
+        /// Run the real production hook and establish its initial baseline.
+        fn mount(self: &Rc<Self>) -> VirtualDom {
+            let mut dom = VirtualDom::new_with_props(render_movement_app, self.clone());
+            dom.rebuild_to_vec();
+            dom.process_events();
+            assert_eq!(
+                self.registration.capture_current("row").0.len(),
+                1,
+                "fixture measurement-start lease must exist before a cause"
+            );
+            assert_eq!(self.slot.deliveries.get(), 0);
+            dom
+        }
+
+        /// Return this render's real edits while leaving effect processing
+        /// pending. Dirty scope work must precede effects in Dioxus's scheduler.
+        fn render_key(&self, dom: &mut VirtualDom, key: usize) -> Vec<dioxus::core::Mutation> {
+            self.key.set(key);
+            dom.mark_dirty(self.scope.get().expect("producer mounted"));
+            dom.render_immediate_to_vec().edits
+        }
+
+        /// Mirror root revocation followed by the existing measurement start.
+        /// The test does not advance or replace any placement generation.
+        fn reopen(&self, dom: &VirtualDom) {
+            self.registration.forget_anchor();
+            self.slot.open("row");
+            let bind = self.bind.borrow().expect("mounted binding callback");
+            dom.in_runtime(|| bind.call(()));
+            assert_eq!(self.registration.capture_current("row").0.len(), 1);
+        }
+    }
+
+    /// The production binding and rendered-key hook share a real child scope.
+    /// Calling bind names the existing measurement-start boundary; the headless
+    /// renderer neither supplies nor fabricates a rectangle or focus handoff.
+    #[component]
+    fn RenderMovementProducer(fixture: Rc<RenderFixture>) -> Element {
+        fixture.scope.set(Some(dioxus::core::current_scope_id()));
+        let ready = fixture.ready.clone();
+        let ready = use_callback(move |()| ready.get());
+        let bind = use_anchor_binding(fixture.registration.clone(), "row".into(), ready);
+        fixture.bind.replace(Some(bind));
+        use_hook(move || bind.call(()));
+        let key = fixture.key.get();
+        use_rendered_movement(&key, || {
+            assert!(
+                fixture.owner.0.try_borrow_mut().is_ok(),
+                "capture runs outside the registry borrow"
+            );
+            fixture.captures.set(fixture.captures.get() + 1);
+            match fixture.mode {
+                RenderCapture::OwnRow => fixture.registration.capture_current("row"),
+                RenderCapture::Region => fixture.owner.capture_region(AnchorRegion::Sessions),
+            }
+        });
+        rsx! { span { "{key}" } }
+    }
+
+    /// Keep the root owner/open slot while dropping only the producer subtree.
+    fn render_movement_app(fixture: Rc<RenderFixture>) -> Element {
+        rsx! {
+            if fixture.mounted.get() {
+                RenderMovementProducer { fixture }
+            }
+        }
+    }
+
+    /// Effect deduplication must retain an intermediate committed cause even
+    /// when its callback is replaced and the final key equals the baseline.
+    #[farhelm_testtrace::test]
+    fn rendered_movement_keeps_intermediate_and_unchanged_pending_causes() {
+        let fixture = RenderFixture::new(RenderCapture::OwnRow);
+        let mut dom = fixture.mount();
+        fixture.render_key(&mut dom, 0);
+        dom.process_events();
+        assert_eq!(
+            fixture.captures.get(),
+            0,
+            "mount and unchanged key are inert"
+        );
+        let b = fixture.render_key(&mut dom, 1);
+        let a = fixture.render_key(&mut dom, 0);
+        assert!(b.iter().any(
+            |edit| matches!(edit, dioxus::core::Mutation::SetText { value, .. } if value == "1")
+        ));
+        assert!(a.iter().any(
+            |edit| matches!(edit, dioxus::core::Mutation::SetText { value, .. } if value == "0")
+        ));
+        fixture.render_key(&mut dom, 0);
+        assert_eq!(
+            fixture.captures.get(),
+            2,
+            "unchanged render must retain the pending cause"
+        );
+        assert_eq!(
+            fixture.slot.deliveries.get(),
+            0,
+            "two DOM batches precede effect delivery"
+        );
+        dom.process_events();
+        assert_eq!(fixture.slot.deliveries.get(), 1);
+        dom.process_events();
+        assert_eq!(
+            fixture.slot.deliveries.get(),
+            1,
+            "pending is drained only once"
+        );
+    }
+
+    /// A same-row opening after DOM publication has fresh coordinates. An old
+    /// pending cause must not close it; a later cause may capture it normally.
+    #[farhelm_testtrace::test]
+    fn rendered_movement_does_not_replay_into_a_fresh_same_row_opening() {
+        let fixture = RenderFixture::new(RenderCapture::OwnRow);
+        let mut dom = fixture.mount();
+        fixture.render_key(&mut dom, 1);
+        assert_eq!(fixture.slot.deliveries.get(), 0);
+        fixture.reopen(&dom);
+        dom.process_events();
+        assert_eq!(fixture.slot.deliveries.get(), 0);
+        fixture.render_key(&mut dom, 2);
+        dom.process_events();
+        assert_eq!(fixture.slot.deliveries.get(), 1);
+    }
+
+    /// A second changed render with no admitted opening replaces pending even
+    /// when readiness recovers before delivery. Keeping the old ticket would
+    /// close this unchanged binding and is observably different.
+    #[farhelm_testtrace::test]
+    fn rendered_movement_empty_capture_replaces_an_earlier_pending_ticket() {
+        let fixture = RenderFixture::new(RenderCapture::OwnRow);
+        let mut dom = fixture.mount();
+        fixture.render_key(&mut dom, 1);
+        fixture.ready.set(false);
+        fixture.render_key(&mut dom, 2);
+        assert_eq!(fixture.captures.get(), 2);
+        fixture.ready.set(true);
+        dom.process_events();
+        assert_eq!(
+            fixture.slot.deliveries.get(),
+            0,
+            "the second capture was empty"
+        );
+        fixture.render_key(&mut dom, 3);
+        dom.process_events();
+        assert_eq!(
+            fixture.slot.deliveries.get(),
+            1,
+            "subsequent eligible causes still work"
+        );
+    }
+
+    /// A producer owns its pending effect and row lease. Removing that scope
+    /// discards both; remount starts a key baseline rather than replaying a
+    /// captured event against the retained root open slot.
+    #[farhelm_testtrace::test]
+    fn rendered_movement_drop_and_remount_discard_pending_delivery() {
+        let fixture = RenderFixture::new(RenderCapture::OwnRow);
+        let mut dom = fixture.mount();
+        fixture.render_key(&mut dom, 1);
+        fixture.mounted.set(false);
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate_to_vec();
+        assert!(fixture.registration.capture_current("row").0.is_empty());
+        dom.process_events();
+        assert_eq!(fixture.slot.deliveries.get(), 0);
+        fixture.mounted.set(true);
+        dom.mark_dirty(dioxus::core::ScopeId::APP);
+        dom.render_immediate_to_vec();
+        dom.process_events();
+        assert_eq!(fixture.registration.capture_current("row").0.len(), 1);
+        assert_eq!(
+            fixture.slot.deliveries.get(),
+            0,
+            "remount starts a fresh baseline"
+        );
+        fixture.render_key(&mut dom, 2);
+        dom.process_events();
+        assert_eq!(fixture.slot.deliveries.get(), 1);
+    }
+
+    /// Err revokes live admission before physical drop, and explicit registry
+    /// retirement also makes already-captured continuations inert.
+    #[farhelm_testtrace::test]
+    fn rendered_movement_rechecks_readiness_and_registration_at_delivery() {
+        let fixture = RenderFixture::new(RenderCapture::OwnRow);
+        let mut dom = fixture.mount();
+        fixture.render_key(&mut dom, 1);
+        fixture.ready.set(false);
+        dom.process_events();
+        assert_eq!(
+            fixture.slot.deliveries.get(),
+            0,
+            "Err before row teardown is excluded"
+        );
+        fixture.ready.set(true);
+        fixture.render_key(&mut dom, 2);
+        fixture.registration.unregister();
+        dom.process_events();
+        assert_eq!(
+            fixture.slot.deliveries.get(),
+            0,
+            "retired callback is never invoked"
+        );
+    }
+
+    /// Trash's regional capture reaches every admitted session registration,
+    /// while the bell's local wrapper reaches neither another row nor another
+    /// registration on the same row, even with inconsistent simultaneous slots.
+    #[farhelm_testtrace::test]
+    fn rendered_capture_audiences_keep_local_row_and_regional_selection_distinct() {
+        let fixture = RenderFixture::new(RenderCapture::OwnRow);
+        fixture.slot.open("other");
+        let _other = fixture
+            .registration
+            .bind_anchor("other".into(), || true)
+            .unwrap();
+        let action = Slot::default();
+        action.open("row");
+        let action_registration = action.register(&fixture.owner, AnchorRegion::Sessions);
+        let _action = action_registration
+            .bind_anchor("row".into(), || true)
+            .unwrap();
+        let mut dom = VirtualDom::new_with_props(render_movement_app, fixture.clone());
+        dom.rebuild_to_vec();
+        dom.process_events();
+        assert_eq!(
+            fixture.owner.capture_region(AnchorRegion::Sessions).0.len(),
+            2,
+            "other bell and actions both have real live bindings"
+        );
+        fixture.render_key(&mut dom, 1);
+        dom.process_events();
+        assert_eq!(
+            (fixture.slot.deliveries.get(), action.deliveries.get()),
+            (0, 0)
+        );
+        fixture.reopen(&dom);
+        fixture.render_key(&mut dom, 2);
+        dom.process_events();
+        assert_eq!(
+            (fixture.slot.deliveries.get(), action.deliveries.get()),
+            (1, 0)
+        );
+
+        let region = RenderFixture::new(RenderCapture::Region);
+        let action = Slot::default();
+        action.open("another-session");
+        let action_registration = action.register(&region.owner, AnchorRegion::Sessions);
+        let _action = action_registration
+            .bind_anchor("another-session".into(), || true)
+            .unwrap();
+        let host = Slot::default();
+        host.open("host");
+        let host_registration = host.register(&region.owner, AnchorRegion::Hosts);
+        let _host = host_registration
+            .bind_anchor("host".into(), || true)
+            .unwrap();
+        let mut dom = region.mount();
+        region.render_key(&mut dom, 1);
+        dom.process_events();
+        assert_eq!(
+            (
+                region.slot.deliveries.get(),
+                action.deliveries.get(),
+                host.deliveries.get()
+            ),
+            (1, 1, 0)
+        );
     }
 
     /// Optional scoped admission must not narrow any existing close policy,
