@@ -9,7 +9,6 @@
 use super::shared::HostOption;
 use crate::ApiBase;
 use crate::api::{PreferenceValue, Preferences};
-use crate::hosts::settings_dialog::install_dialog_with_selector;
 use crate::launch_sequence::TEMPLATE_SHORTCUTS;
 use crate::menu_panel::{
     MenuFocusQueue, MenuOpenIntent, MenuOrder, MenuWiring, PanelPlacement, ROW_MENU_OUTSIDE_RELAY,
@@ -17,6 +16,7 @@ use crate::menu_panel::{
     handle_menu_key, install_row_menu_outside_dismiss, measurement_outcome, record_menu_item_focus,
     remember_menu_item, session_menu_placement_style,
 };
+use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog};
 use crate::peer::{PeerText, display_peer};
 use dioxus::prelude::*;
 pub(super) use farhelm_proto::launcher::quick_launch_eligible;
@@ -28,7 +28,8 @@ use farhelm_proto::{LaunchHarness, LaunchPermission};
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
-const DIALOG_SELECTOR: &str = r#".templates-dialog[role="dialog"]"#;
+/// The list owns actual close, while editor departures may keep this root mounted.
+pub(super) const DIALOG_SELECTOR: &str = r#".templates-dialog[role="dialog"]"#;
 
 /// Giving a key to a template moves it from its old owner and releases its
 /// previous key. This whole-map edit preserves one key per template by construction.
@@ -244,14 +245,9 @@ const DEFAULT: &str = "default";
 #[derive(Clone, Copy)]
 pub(super) struct TemplatesRevision(pub(super) Signal<u64>);
 
-/// Release modal isolation before returning focus; the opener is inert until
-/// the lock is released, so focusing it in the opposite order does nothing.
-pub(super) fn return_focus_to_templates_button() {
-    document::eval(&format!(
-        "{} requestAnimationFrame(() => document.querySelector('.templates-button')?.focus({{ preventScroll: true }}))",
-        crate::modal_isolation::release_js(DIALOG_SELECTOR),
-    ));
-}
+/// Shared close schedules this only after an approved whole-dialog departure.
+pub(super) const RETURN_FOCUS: &str =
+    "document.querySelector('.templates-button')?.focus({ preventScroll: true });";
 
 /// Move focus after responsive navigation has mounted its destination. A phone
 /// row or Back button disappears when activated, so retaining focus there would
@@ -1705,12 +1701,13 @@ pub(super) fn TemplatesDialog(
             // The capped dialog can move while keeping its own size. Its
             // full-window backdrop also observes width-only viewport changes.
             onresize: move |_| dialog_epoch += 1,
-            div { class: if opened() { "templates-dialog templates-editor-open" } else { "templates-dialog" }, role: "dialog", aria_modal: "true", aria_label: "templates", tabindex: "-1",
+            ModalDialog { class: if opened() { "templates-dialog templates-editor-open" } else { "templates-dialog" }, role: "dialog", aria_modal: "true", aria_label: "templates", tabindex: "-1",
+                handle: DialogHandle::new(DIALOG_SELECTOR),
+                focus: DialogFocus::remembered(".templates-new", Some(".templates-close"), false, None),
                 onscroll: move |_| dialog_epoch += 1,
                 onresize: move |_| dialog_epoch += 1,
-                onmounted: move |_| install_dialog_with_selector(DIALOG_SELECTOR,".templates-new",Some(".templates-close"), None),
-                onkeydown: move |event: KeyboardEvent| {
-                    if event.key()==Key::Escape && !event.is_composing() {
+                on_escape: move |event: KeyboardEvent| {
+                    if !event.is_composing() {
                         event.stop_propagation();
                         if add_open() { add_open.set(false); focus_template_control(".templates-add"); }
                         else { depart.call(Departure::Close); }

@@ -146,6 +146,7 @@ pub(crate) fn ClaudeTrustBand(session: ReadSignal<Session>, agent_visible: bool)
     });
     let mut occurrences = use_context::<OccurrenceDismissals>();
     let mut settings_open = use_signal(|| false);
+    let settings_dialog = crate::modal_dialog::DialogHandle::new(crate::settings::DIALOG_SELECTOR);
     let session = session.read();
     let value = state
         .read()
@@ -197,7 +198,7 @@ pub(crate) fn ClaudeTrustBand(session: ReadSignal<Session>, agent_visible: bool)
                 on_close: move |_| {
                     settings_open.set(false);
                     state.restart();
-                    crate::settings::return_focus_to_gear();
+                    settings_dialog.close(crate::settings::RETURN_FOCUS);
                 },
             }
         }

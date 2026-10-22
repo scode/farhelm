@@ -24,13 +24,17 @@ use farhelm_proto::feedback::{
     fit_machine_field, is_blank,
 };
 
+use crate::ApiBase;
 use crate::api::{PreferenceValue, store_preference};
-use crate::hosts::settings_dialog::install_dialog_with_selector;
 use crate::list::SharedPreferences;
+use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog};
 use crate::reader::sleep_ms;
-use crate::{ApiBase, modal_isolation};
 
-const DIALOG_SELECTOR: &str = r#".feedback-dialog[role="dialog"]"#;
+/// The app bar releases the modal before announcing a successful send outside it.
+pub(crate) const DIALOG_SELECTOR: &str = r#".feedback-dialog[role="dialog"]"#;
+/// Dismissal and the success timer both return to the Help menu's toggle.
+pub(crate) const RETURN_FOCUS: &str =
+    "document.querySelector('.app-help-toggle')?.focus({ preventScroll: true });";
 
 /// What a successful send says, in the dialog and in the bar's status
 /// region that announces it (`app_bar::AppBar`).
@@ -85,16 +89,6 @@ pub(crate) fn os_name(reported: &str) -> String {
 /// Read the platform the page reports. A renderer that cannot answer leaves
 /// an empty string, which [`fit_machine_field`] shows as `unknown`.
 const PLATFORM_JS: &str = "return (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';";
-
-/// Undo the dialog's modal isolation and give focus back to the help menu's
-/// toggle, which opened it. The frame lets the closing render remove the
-/// dialog before focus returns.
-pub(crate) fn return_focus_to_help() {
-    document::eval(&format!(
-        "{} requestAnimationFrame(() => document.querySelector('.app-help-toggle')?.focus({{ preventScroll: true }}))",
-        modal_isolation::release_js(DIALOG_SELECTOR),
-    ));
-}
 
 /// Move focus to a control inside the dialog once the render that changed
 /// it has landed. Focus is only taken back from the page body or the dialog
@@ -245,25 +239,23 @@ pub(crate) fn FeedbackDialog(
 
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
-            div {
+            ModalDialog {
+                handle: DialogHandle::new(DIALOG_SELECTOR),
+                focus: DialogFocus::remembered(
+                    "textarea", Some(".feedback-cancel"), false, Some(".feedback-send"),
+                ),
                 class: "app-settings-dialog feedback-dialog host-dialog-framed",
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: "send feedback",
                 tabindex: "-1",
-                onmounted: move |_| install_dialog_with_selector(
-                    DIALOG_SELECTOR,
-                    "textarea",
-                    Some(".feedback-cancel"),
-                    Some(".feedback-send"),
-                ),
                 // Closing while a send is in flight would cancel it with no
                 // word on whether it arrived and lose the text, so Escape
                 // and cancel wait for the send (bounded by the helm's
                 // timeout), reading the live state (`may_close`). Cancel is
                 // also natively disabled meanwhile, once that render lands.
-                onkeydown: move |event: KeyboardEvent| {
-                    if event.key() == Key::Escape && !event.is_composing()
+                on_escape: move |event: KeyboardEvent| {
+                    if !event.is_composing()
                         && may_close(&state.peek())
                     {
                         on_close.call(());

@@ -943,6 +943,8 @@ pub(crate) fn ListView(
     let mut initial_create_error = use_signal(|| None::<String>);
     // The Templates dialog, opened from the button beside New.
     let mut templates_open = use_signal(|| false);
+    let templates_dialog =
+        crate::modal_dialog::DialogHandle::new(super::templates::DIALOG_SELECTOR);
     let mut quick_launch_hint = use_signal(|| false);
     let mut number_shortcut_hint = use_signal(|| false);
     // A launcher save hands the actual stored snapshot to the next dialog;
@@ -3859,7 +3861,7 @@ pub(crate) fn ListView(
                     quick_launch_hint: quick_launch_hint(),
                     number_shortcut_hint: number_shortcut_hint(),
                     on_close: move |_| {
-                        super::templates::return_focus_to_templates_button();
+                        templates_dialog.close(super::templates::RETURN_FOCUS);
                         templates_open.set(false);
                         initial_template.set(None);
                         templates_revision += 1;
