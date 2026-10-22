@@ -796,9 +796,9 @@ resolving new-request permissions through `LaunchHarness::request_permission` ra
 and also fills the command tab's command with the composed start command, YOLO unanswered, as a starting point for
 turning the setup into a command launch; the launch still comes from whichever tab is selected at submit. A
 command-launch source opens the command tab with its command, YOLO answer, declared agent type and resume command, and a
-legacy source opens the command tab with only its stored command. The two tabs are one `LaunchTab` value over two sets
-of signals, so switching shows and submits the other draft without copying anything between them. Destination, folder
-browser, optional name, search, and submission remain shared; only the tab's own controls differ.
+legacy source opens the command tab with only its stored command. One `LaunchTab` value selects between two retained
+field groups in `LaunchDraft`, so switching shows and submits the other kind without copying anything between them.
+Destination, folder browser, optional name, search, and submission remain shared; only the tab's own controls differ.
 
 The prefill keeps the source's raw directory and title while separately carrying its repository, preferring checkout
 membership over launch provenance. Clone seeds that repository as a fresh destination; Replace with keeps the folder.
@@ -5334,9 +5334,9 @@ template offers the current prefix but checks it only when the user explicitly c
 remembered value does not become a template edit. Quick launch uses the same snapshot and submit path as New. Restart
 with keeps its own raw input and updates its selection only after parsing succeeds; an invalid edit cannot be sent.
 
-The launcher's initial prompt is a separate optional draft signal. The agent tab's template snapshot retains it when the
-agent is unset or supported; a request requires a selected supported agent. Recent setups leave the draft alone and
-Clone/Replace prefills clear it. Templates replay the shared application result, preserving an empty prompt edit as
+The launcher's initial prompt is a separate optional field in its draft. The agent tab's template snapshot retains it
+when the agent is unset or supported; a request requires a selected supported agent. Recent setups leave the draft alone
+and Clone/Replace prefills clear it. Templates replay the shared application result, preserving an empty prompt edit as
 distinct from absence. Permission-switch Undo captures it with the other draft values. The full raw prompt is bound to
 the create key and fresh-checkout retry identity, re-read after asynchronous key minting, and sent by the same API body
 builder for ordinary, named, fresh-checkout and Replace-with creates. It never enters `LaunchSelection`, `SessionLaunch`
