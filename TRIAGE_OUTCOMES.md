@@ -17409,7 +17409,7 @@
   Farhelm may adopt and delete it, and the foreign-replacement guard does not extend inside that container. Stated as a
   principle covering both this item and `spare-builder-cleans-detected-replacement.md`. No code change. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-specs-oct21.md`.
 
 ## spare-builder-cleans-detected-replacement.md
 
@@ -17421,7 +17421,7 @@
 - Decision: on 2026-10-21 the user said this is just a spec fix and to accept the behavior.
 - Completion criteria: covered by the same spec principle as `spare-take-adopts-replaced-ready-folder.md`; the two may
   share one change. No code change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-specs-oct21.md`.
 
 ## respawn-reflow-crosses-launch-excerpt-boundary.md
 
@@ -17437,7 +17437,7 @@
 - Completion criteria: SPEC.md's failed-launch excerpt rule says the excerpt can include text from the preceding run in
   rare cases (such as a terminal resized while a full-screen program ran), and that this is accepted. No code change.
   Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-specs-oct21.md`.
 
 ## menu-focus-marker-exposes-native-address.md
 
@@ -17453,7 +17453,7 @@
   the signal ID, keeping the component-remount, opening and action freshness distinctions the marker exists for; a test.
   Size gate: about 100 lines as above; over it, discard instead of blocking, since the user asked only for super cheap
   fixes here. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/cheap-ui-hardening-oct21.md`.
 
 ## numeric-token-regex-performance-remains-unresolved.md
 
@@ -17470,7 +17470,7 @@
   covers the long near-match staying fast and ordinary version tokens (`1.2-rc.3`, `v1.5x`, `2.0.1+build.5`) staying
   excluded from file links. If the change is not that small, or it changes which ordinary tokens are accepted, discard
   instead (remove the file without a code change). Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/cheap-ui-hardening-oct21.md`.
 
 ## repository-label-ambiguity-has-unresolved-selection-risk.md
 
@@ -17482,7 +17482,7 @@
 - Decision: on 2026-10-21 the user chose to fix what is super cheap with no real downside and discard the rest. Triage
   did not judge this one super cheap: changing how every repository label renders has a visible downside to weigh.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-specs-oct21.md`.
 
 ## changed-host-warning-flattens-compared-identities.md
 
@@ -17498,7 +17498,7 @@
   (`display_identity`) before it goes into the warning; a test that two identities differing only in a bidi control and
   its literal spelling render differently. The structural change to per-value parts is out of scope. Size gate: about
   100 lines; over it, discard instead. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/cheap-ui-hardening-oct21.md`.
 
 ## same-destination-recovery-loses-trash-location.md
 
@@ -17510,7 +17510,7 @@
 - Decision: on 2026-10-21 the user chose to fix what is super cheap with no real downside and discard the rest; this one
   is neither cheap nor shown on a supported platform.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-specs-oct21.md`.
 
 ## escaped-start-remedy-changes-program-and-state-path.md
 
@@ -17527,7 +17527,7 @@
   to the descriptive instruction when it would not; the test checks the text after the final escaping, including an
   apostrophe and a backslash. Size gate: about 100 lines; over it, discard instead. Remove the feedback file and its
   index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/start-remedy-quoting.md`.
 
 ## uninstall-plan-normalizes-containing-paths-independently.md
 
@@ -17547,7 +17547,7 @@
   resolved spelling or the alias-rewritten one, so a layout it cannot tell apart is refused; a test for the mixed
   spelling. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its
   index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/uninstall-mixed-spelling.md`.
 
 ## template-preservation-promise-omits-last-write-wins.md
 
@@ -17565,7 +17565,7 @@
   it saves; that overwriting is accepted. The failed-save case is excluded from the acceptance (fixed under
   `shortcut-save-overwrites-intervening-agent-binding.md`). SPEC_impl.md agrees. No code change. Remove the feedback
   file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/gui-saves-last-write-wins.md`.
 
 ## refused-create-retry-can-delete-restarted-session.md
 
@@ -17582,7 +17582,7 @@
   generation-zero attempt with a pending reservation (checked in the store transaction, or under the lifecycle lock with
   a recheck as the retained branch does); a store-level test that an advanced generation is not deleted. Size gate:
   about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/refused-retry-rollback-fence.md`.
 
 ## superseding-launcher-may-retain-old-replace-source.md
 
@@ -17623,7 +17623,7 @@
   equivalent that keeps agent changes made before the read); a unit test. Size gate: about 100 lines as above
   (verification estimated 60–120, borderline); over it, block and bring it back. Remove the feedback file and its index
   entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/gui-saves-last-write-wins.md`.
 
 ## guarded-preview-widens-source-deletion-consent.md
 
