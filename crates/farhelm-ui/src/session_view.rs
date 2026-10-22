@@ -24,6 +24,7 @@ use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{
     HostLookup, HostsRead, SessionUnavailableNotice, is_connected, stale_session_notice,
 };
+use crate::modal_dialog::DialogHandle;
 use crate::ops::{ConfirmSlot, OpGuard, ReadGate, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
@@ -66,20 +67,10 @@ const RESTART_WITH_DESCRIPTION_ID: &str = "restart-with-description";
 const COPY_DIRECTORY_DESCRIPTION_ID: &str = "header-copy-directory-description";
 const COPY_COMMAND_DESCRIPTION_ID: &str = "header-copy-command-description";
 
-/// Return keyboard focus to the header action after its modal unmounts.
-///
-/// The dialog's isolation is released first, synchronously. The trigger is
-/// outside the dialog and so `inert` while it is isolated, and `focus()` on an
-/// inert element silently does nothing. Waiting for the isolation's own
-/// unmount observer is not enough: nothing orders Dioxus's removal of the
-/// dialog against this animation frame. Release is idempotent, so the
-/// observer firing afterwards is harmless.
-fn focus_restart_with_trigger() {
-    document::eval(&format!(
-        "{} requestAnimationFrame(() => document.querySelector('.restart-with-trigger')?.focus({{ preventScroll: true }}))",
-        crate::modal_isolation::release_js(crate::restart_with::RESTART_WITH_DIALOG_SELECTOR),
-    ));
-}
+/// Both cancellation and successful restart return to the same header action.
+/// Isolation release and frame timing belong to the shared dialog handle.
+const RESTART_WITH_RETURN_FOCUS: &str =
+    "document.querySelector('.restart-with-trigger')?.focus({ preventScroll: true });";
 
 /// Remount native listener state when ownership changes, even for a retained session id.
 #[component]
@@ -652,6 +643,7 @@ pub(crate) fn SessionView(
     // change the current offer, but they must not rewrite a draft in progress.
     let mut restart_with_open = use_signal(|| None::<Session>);
     let mut restart_with_error = use_signal(|| None::<String>);
+    let restart_dialog = DialogHandle::new(crate::restart_with::RESTART_WITH_DIALOG_SELECTOR);
     // A restart-with the helm refused as a YOLO launch on a host that asks before YOLO launches:
     // what the restart-with dialog's confirmation explains (see
     // `yolo_confirm`). It is a `ConfirmSlot` (`RestartYoloQuestion`): an
@@ -1477,7 +1469,7 @@ pub(crate) fn SessionView(
                         relaunched.set(true);
                         if with.is_some() {
                             restart_with_open.set(None);
-                            focus_restart_with_trigger();
+                            restart_dialog.close(RESTART_WITH_RETURN_FOCUS);
                         }
                     }
                 }
@@ -2580,7 +2572,7 @@ pub(crate) fn SessionView(
                         restart_yolo.clear();
                         restart_yolo_error.set(None);
                         view_claim.set(None);
-                        focus_restart_with_trigger();
+                        restart_dialog.close(RESTART_WITH_RETURN_FOCUS);
                     },
                     on_yolo_cancel: {
                         let question = restart_question.clone();

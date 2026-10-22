@@ -159,6 +159,7 @@ mod launch_controls;
 mod launch_sequence;
 mod list;
 mod menu_panel;
+mod modal_dialog;
 mod modal_isolation;
 mod ntfy_settings;
 mod ops;
