@@ -1251,6 +1251,7 @@ pub(crate) fn HostsPanel(
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let mut preferences = use_context::<crate::list::SharedPreferences>();
+    let popovers = use_context::<crate::anchored_popovers::MovementOwner>();
     // The parent owns one compact update status per row and passes it to both
     // the renderer and the provisioning child that publishes it.
     let row_update_progress = use_signal(HashMap::<HostId, HostUpdateProgress>::new);
@@ -1345,21 +1346,11 @@ pub(crate) fn HostsPanel(
         }
     });
 
-    // Closes BOTH row-menu signals every time the add form mounts,
-    // unmounts, or (via `on_added` setting `adding` back to `false`)
-    // commits: `AddHostForm` sits ABOVE `.host-list` in the rsx below, so
-    // toggling it moves the vertical position of every host row beneath it.
-    // Any row menu open at that instant is a `position: fixed` panel
-    // measured at its toggle's OLD coordinates (see `menu_panel_style`),
-    // and this component's own signals are exactly what a click on either
-    // menu's items still carries the ORIGINAL host or session id inside —
-    // so a stale panel here is not merely misplaced, it is a control aimed
-    // at whichever row visually slides underneath it, including this
-    // panel's own destructive `remove`.
-    //
-    // `ListView` closes both signals for layout changes it owns — see its
-    // own effect's doc — but `adding` is this component's private state,
-    // invisible there. That is why this needs a second, narrower effect.
+    // Add is a modal interaction, not an in-flow form that moves host rows.
+    // Retain its existing host/session action-menu dismissal on every adding
+    // transition, including the initial run and successful completion. This
+    // interaction policy stays separate from causal movement reporting; it
+    // deliberately does not add the notification list to its audience.
     use_effect(move || {
         adding();
         host_menu_open.set(None);
@@ -1952,17 +1943,18 @@ pub(crate) fn HostsPanel(
                     r#type: "checkbox",
                     class: "host-details-toggle",
                     checked: details_open(),
-                    onchange: move |event| {
-                        // The local setup handoff may reveal details before
-                        // this render reaches the checkbox. Honor the native
-                        // requested state instead of inverting a newer signal.
-                        details_open.set(event.checked());
-                        // Every row changes height together. A fixed menu is
-                        // measured once, so it cannot survive that reflow
-                        // with trustworthy geometry.
-                        host_menu_open.set(None);
-                        session_menu_open.set(None);
-                                    },
+                    onchange: {
+                        let popovers = popovers.clone();
+                        move |event| {
+                            // The local setup handoff may reveal details before
+                            // this render reaches the checkbox. Honor the native
+                            // requested state instead of inverting a newer signal.
+                            details_open.set(event.checked());
+                            // Preserve the immediate action-panel dismissal;
+                            // bells still follow later rendered layout reports.
+                            popovers.close_for_host_disclosure();
+                        }
+                    },
                     }
                     "details"
                 }
@@ -2186,10 +2178,12 @@ pub(crate) fn HostsPanel(
                                     trace_shapes: provisioning_trace_shapes,
                                     auto_details: provisioning_auto_details,
                                     row_update_progress,
-                                    on_reveal_details: move |_| {
-                                                                        details_open.set(true);
-                                        host_menu_open.set(None);
-                                        session_menu_open.set(None);
+                                    on_reveal_details: {
+                                        let popovers = popovers.clone();
+                                        move |_| {
+                                            details_open.set(true);
+                                            popovers.close_for_host_disclosure();
+                                        }
                                     },
                                     on_running: {
                                         let id = host.id;
