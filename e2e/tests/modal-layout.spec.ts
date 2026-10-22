@@ -296,6 +296,12 @@ test("sent-feedback scrollports have keyboard entry points", async ({ page }) =>
   expect(sends, "the controlled send completed before inspecting its text-only state").toBe(1);
   await expect(dialog.locator(".feedback-message")).toHaveCount(0);
   await page.setViewportSize({ width: 360, height: 220 });
+  // The paused clock also holds requestAnimationFrame, so the body has not yet
+  // run the reconciliation frame, queued when Send replaced the editors with
+  // text, that gives it a named Tab stop. Fifty milliseconds runs that frame,
+  // well before Feedback's 1500 ms close timer, which stays held.
+  await page.clock.runFor(50);
+  await expect(dialog.locator(".feedback-thanks"), "premise: the sent state is still open").toBeVisible();
   await expectKeyboardReachableScrollers(dialog);
 });
 

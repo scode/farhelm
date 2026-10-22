@@ -71,7 +71,10 @@ use crate::menu_panel::{
     measurement_outcome, record_menu_item_focus, remember_menu_item, session_menu_placement_style,
     session_menu_pointer_style, should_measure_on_mount,
 };
-use crate::modal_dialog::{DialogFocus, DialogHandle, DialogRoot, FocusTarget, ModalDialog};
+use crate::modal_dialog::{
+    DialogFocus, DialogHandle, DialogRoot, FocusTarget, ModalDialog, RecoveryDelay, RecoveryFocus,
+    ScrollRegion,
+};
 use crate::ops::{ConfirmSlot, OpGuard, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_identity, display_peer};
 use crate::provisioning::{
@@ -179,7 +182,9 @@ fn HostRefusalDialog(
                     dismiss_tooltip: "close this refusal",
                     on_dismiss: on_close,
                 }
-                div { class: "host-settings-body", tabindex: "0", role: "region", aria_label: "reason for refusal",
+                ScrollRegion { class: "host-settings-body",
+                    handle: DialogHandle::new(".host-refusal-dialog"), selector: ".host-settings-body", name: "reason for refusal",
+                    recovery: RecoveryFocus::new(".host-refusal-close", None, true, RecoveryDelay::OneFrame),
                     p { class: "host-settings-value peer-value host-dialog-destination", dir: "ltr", "{destination}" }
                     PeerLine {
                         class: "host-refusal-reason",

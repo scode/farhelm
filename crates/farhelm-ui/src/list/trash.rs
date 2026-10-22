@@ -4,13 +4,15 @@
 //! confirmations and immediate single deletes freeze IDs and connection incarnations, while the supervisor
 //! rechecks ownership before any mutation. Read generations prevent an earlier
 //! count/measurement from restoring entries removed by this client's cleanup.
-//! The list has its own named tab stop: its actions can all be disabled while
-//! a read is pending, but keyboard users must still be able to scroll the
-//! retained host information in WebKit.
+//! The list gains a named tab stop when none of its actions can take focus,
+//! so keyboard users can still scroll retained host information in WebKit
+//! while a read or deletion is pending.
 
 use crate::hosts::HostsRead;
 use crate::icons::{BranchIcon, TrashIcon};
-use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog};
+use crate::modal_dialog::{
+    DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
+};
 use crate::ops::{OpGuard, PaneGate};
 use crate::peer::display_peer;
 use crate::{ApiBase, Host, HostId, HostPhase};
@@ -641,7 +643,9 @@ pub(super) fn TrashControl(
                             }
                         }
                     }
-                    div { class: "checkout-trash-body", tabindex: "0", role: "region", aria_label: "archived checkouts",
+                    ScrollRegion { class: "checkout-trash-body",
+                    handle: DialogHandle::new(DIALOG), selector: ".checkout-trash-body", name: "archived checkouts",
+                    recovery: RecoveryFocus::new(".trash-close", None, true, RecoveryDelay::OneFrame),
                     if let Some(confirm) = confirmation().filter(|confirm| confirm.host.is_none()) {
                         ConfirmBand { confirm, busy, submit_disabled: busy || gate.busy(), oncancel: move |_| cancel_confirmation(confirmation), onsubmit: submit }
                     }

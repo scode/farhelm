@@ -7,6 +7,8 @@
 //! dialog's contents or request ownership.
 //! Every root shares one sequential Tab boundary and page isolation; callers
 //! choose their initial handoff and optional gap behavior independently.
+//! Scroll bodies use that same native entry rule, with node-local observation
+//! and lost-focus repair that yields to a usable current owner.
 //!
 //! Closing is explicit: the caller decides whether its live operation permits
 //! dismissal and which focus destination belongs to that close reason. DOM
@@ -319,6 +321,240 @@ fn target_js(scope: &str, target: &FocusTarget, root_fallback: bool) -> String {
     )
 }
 
+/// Native usability is shared by Tab entry, scroll entry and lost-focus repair.
+/// Sequential entry additionally requires nonnegative tabIndex; a deliberately
+/// focused heading or approval answer can own focus with a negative tabIndex.
+/// A managed scroll node whose stop was withdrawn must not become remembered
+/// focus merely because an engine leaves it active after the attribute change.
+const NATIVE_FOCUS_RULES: &str = r#"
+    const nativeFocusSelector = 'button, input, textarea, select, a[href], summary, [tabindex]';
+    const usableFocus = node => node instanceof HTMLElement && node.isConnected
+        && !node.matches(':disabled') && !node.matches('input[type="hidden"]')
+        && !node.closest('[hidden], [inert]') && node.getClientRects().length > 0
+        && !['hidden', 'collapse'].includes(getComputedStyle(node).visibility);
+    const sequentialFocus = (node, scope) => usableFocus(node)
+        && scope.contains(node) && node.tabIndex >= 0;
+    const chosenFocus = (node, dialog) => node !== document.body
+        && node !== document.documentElement && node !== dialog && usableFocus(node)
+        && !(node.__farhelmScrollRegion && !node.__farhelmScrollRegion.stop);
+"#;
+
+/// Existing response and write recovery retain their one- or two-frame priority.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum RecoveryDelay {
+    OneFrame,
+    TwoFrames,
+}
+
+/// A lost-focus destination, independent of request state and recovery triggers.
+/// Callers keep their existing write/reset timing. Scroll entry uses the same
+/// final owner check, so a later approval or programmatic heading keeps focus.
+#[derive(Clone, PartialEq)]
+pub(crate) struct RecoveryFocus {
+    target: FocusTarget,
+    remember: bool,
+    delay: RecoveryDelay,
+}
+
+impl RecoveryFocus {
+    /// Preserve domain target priority without accepting arbitrary recovery code.
+    pub(crate) fn new(
+        preferred: &str,
+        fallback: Option<&str>,
+        remember: bool,
+        delay: RecoveryDelay,
+    ) -> Self {
+        Self {
+            target: FocusTarget::new(preferred, fallback, false),
+            remember,
+            delay,
+        }
+    }
+
+    /// Generate only the final action, with the exact captured `dialog` in scope.
+    /// Domain wrappers run checkbox resets and their existing frame delay first.
+    pub(crate) fn script(&self) -> String {
+        let policy = self.policy();
+        format!("(() => {{ {NATIVE_FOCUS_RULES} const recovery = {policy}; {RECOVER_FOCUS} }})();")
+    }
+
+    /// Serialize destination facts rather than transporting another state owner.
+    fn policy(&self) -> String {
+        serde_json::json!({
+            "preferred": self.target.selector,
+            "fallback": self.target.fallback,
+            "remember": self.remember,
+            "frames": if self.delay == RecoveryDelay::TwoFrames { 2 } else { 1 },
+        })
+        .to_string()
+    }
+}
+
+/// Recheck the current owner at execution time, including exempt outside input.
+/// A withdrawn managed stop is the exception to preserving an active -1 node.
+const RECOVER_FOCUS: &str = r#"
+    if (!usableFocus(dialog) || chosenFocus(document.activeElement, dialog)) return;
+    const last = dialog.__farhelmLastFocus;
+    const preferred = dialog.querySelector(recovery.preferred);
+    const fallback = recovery.fallback ? dialog.querySelector(recovery.fallback) : null;
+    const target = recovery.remember && dialog.contains(last) && chosenFocus(last, dialog)
+        ? last : chosenFocus(preferred, dialog) ? preferred
+        : chosenFocus(fallback, dialog) ? fallback : dialog;
+    target.focus({ preventScroll: true });
+"#;
+
+/// Render the existing body div and own its conditional keyboard entry point.
+/// The name is present only when no native sequential descendant supplies entry.
+/// This does not measure overflow or create another scroll container. Local DOM
+/// observation follows busy, loading and responsive changes without domain flags.
+/// Callers supply an exact local selector for their existing body class; this
+/// component owns tabindex, role and aria-label rather than forwarding copies.
+#[component]
+pub(crate) fn ScrollRegion(
+    handle: DialogHandle,
+    selector: &'static str,
+    name: String,
+    recovery: RecoveryFocus,
+    #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
+    children: Element,
+) -> Element {
+    // Feedback changes its meaningful name after sending. Reconfiguration only
+    // updates node-local data; it cannot stack listeners or repeat opening focus.
+    use_effect(use_reactive((&name, &recovery), move |(name, recovery)| {
+        install_scroll_region(handle, Some(selector), Some(&name), &recovery);
+    }));
+    rsx! {
+        div {
+            onmounted: move |_| install_scroll_region(handle, Some(selector), Some(&name), &recovery),
+            ..attributes,
+            {children}
+        }
+    }
+}
+
+/// Bind one scroll owner to one captured modal, retaining native root semantics.
+/// Body mode owns region attributes; root mode changes only tabindex, restoring
+/// -1 when ordinary controls return. No delayed operation queries a replacement.
+fn install_scroll_region(
+    handle: DialogHandle,
+    selector: Option<&str>,
+    name: Option<&str>,
+    recovery: &RecoveryFocus,
+) {
+    let dialog = serde_json::to_string(handle.selector).expect("a string always serializes");
+    let selector = serde_json::to_string(&selector).expect("a selector always serializes");
+    let name = serde_json::to_string(&name).expect("a name always serializes");
+    let generation_guard = handle.generation_guard();
+    let policy = recovery.policy();
+    document::eval(&format!(
+        r#"(() => {{
+            const dialog = document.querySelector({dialog});
+            if (!dialog{generation_guard}) return;
+            const selector = {selector};
+            const region = selector ? dialog.querySelector(selector) : dialog;
+            if (!region) return;
+            const config = {{ name: {name}, recovery: {policy} }};
+            const installed = region.__farhelmScrollRegion;
+            if (installed?.dialog === dialog) {{
+                installed.config = config;
+                installed.schedule();
+                return;
+            }}
+            {NATIVE_FOCUS_RULES}
+            // Ownership survives native blur to body, but an independent focus
+            // choice retires it. No request or draft state is captured here.
+            const state = {{ dialog, config, stop: false, owned: region.contains(document.activeElement), frame: null, recoveryFrame: null }};
+            region.__farhelmScrollRegion = state;
+            const attribute = (name, value) => {{
+                if (value === null) {{ if (region.hasAttribute(name)) region.removeAttribute(name); }}
+                else if (region.getAttribute(name) !== value) region.setAttribute(name, value);
+            }};
+            const recover = () => {{
+                state.recoveryFrame = null;
+                if (!region.isConnected || !usableFocus(region) || !usableFocus(dialog)
+                    || chosenFocus(document.activeElement, dialog)) return;
+                if (state.stop) {{
+                    // Automatic parking must not replace the control whose
+                    // loss caused recovery. Manual Tab into the region still
+                    // records its ordinary focus choice through the listener.
+                    const last = dialog.__farhelmLastFocus;
+                    region.focus({{ preventScroll: true }});
+                    dialog.__farhelmLastFocus = last;
+                    return;
+                }}
+                const recovery = state.config.recovery;
+                {RECOVER_FOCUS}
+            }};
+            const reconcile = initial => {{
+                if (!region.isConnected || !dialog.isConnected) {{ dispose(); return; }}
+                const active = document.activeElement;
+                const wasStop = state.stop;
+                state.stop = ![...region.querySelectorAll(nativeFocusSelector)]
+                    .some(node => sequentialFocus(node, region));
+                attribute('tabindex', state.stop ? '0' : selector ? null : '-1');
+                if (selector) {{
+                    attribute('role', state.stop ? 'region' : null);
+                    attribute('aria-label', state.stop ? state.config.name : null);
+                }}
+                // Withdrawing text-only entry also repairs a scrim click's
+                // document/root focus, even when this body never owned it.
+                // Other off-focus attribute changes do not gain that claim.
+                const withdrewFocus = wasStop && !state.stop
+                    && (active === region || active === document.body
+                        || active === document.documentElement || active === dialog);
+                // Engines differ on whether disabling a control immediately
+                // blurs it. Both forms of that same loss need native entry.
+                const lost = state.owned && !chosenFocus(active, dialog)
+                    && (active === document.body || active === document.documentElement
+                        || active === dialog || region.contains(active));
+                if (!initial && (withdrewFocus || lost) && usableFocus(region) && usableFocus(dialog)) {{
+                    // Reconciliation already runs in frame one. SSH recovers
+                    // here; the two-frame policies yield once more to navigation.
+                    if (state.config.recovery.frames === 1) recover();
+                    else if (state.recoveryFrame === null) state.recoveryFrame = requestAnimationFrame(recover);
+                }}
+            }};
+            const schedule = () => {{
+                if (state.frame === null) state.frame = requestAnimationFrame(() => {{ state.frame = null; reconcile(false); }});
+            }};
+            state.schedule = schedule;
+            const focus = event => {{
+                if (region.contains(event.target)) state.owned = true;
+                // Isolation can park focus on the root after a loss; it is
+                // not an independent control that retires this body's claim.
+                else if (event.target !== dialog && event.target !== document.body
+                    && event.target !== document.documentElement) state.owned = false;
+            }};
+            const observer = new MutationObserver(records => {{
+                if (!region.isConnected || !dialog.isConnected) {{ dispose(); return; }}
+                if (records.some(record => !(record.type === 'attributes'
+                    && record.target === region && record.attributeName === 'tabindex'))) schedule();
+            }});
+            const resize = new ResizeObserver(schedule);
+            const dispose = () => {{
+                observer.disconnect(); resize.disconnect();
+                document.removeEventListener('focusin', focus, true);
+                window.removeEventListener('resize', schedule);
+                if (state.frame !== null) cancelAnimationFrame(state.frame);
+                if (state.recoveryFrame !== null) cancelAnimationFrame(state.recoveryFrame);
+                if (region.__farhelmScrollRegion === state) delete region.__farhelmScrollRegion;
+            }};
+            observer.observe(region, {{ childList: true, subtree: true, attributes: true,
+                attributeFilter: ['disabled', 'hidden', 'tabindex', 'class', 'style', 'inert', 'type', 'href', 'open'] }});
+            // Direct-child removal still arrives after explicit close released
+            // isolation. Hidden parents remain installed and merely reconcile.
+            for (let parent = region.parentElement; parent; parent = parent.parentElement) {{
+                observer.observe(parent, {{ childList: true, attributes: true,
+                    attributeFilter: ['disabled', 'hidden', 'inert', 'class', 'style'] }});
+            }}
+            resize.observe(region);
+            document.addEventListener('focusin', focus, true);
+            window.addEventListener('resize', schedule);
+            reconcile(true);
+        }})();"#,
+    ));
+}
+
 /// Give every modal the same sequential boundary without changing interior Tab.
 ///
 /// Boundary wrapping deliberately uses native focus scrolling: a contained
@@ -332,18 +568,13 @@ fn trap_js(handle: DialogHandle, initial_focus: &str) -> String {
                 // Every selector branch passes the same native eligibility test.
                 // In particular, arrow-owned buttons with tabindex=-1 and controls
                 // disabled by a fieldset must not become scripted Tab destinations.
-                const eligible = node => node.isConnected && dialog.contains(node)
-                    && node.tabIndex >= 0 && !node.matches(':disabled')
-                    && !node.closest('[hidden], [inert]') && node.getClientRects().length > 0
-                    && !['hidden', 'collapse'].includes(getComputedStyle(node).visibility);
+                const eligible = node => sequentialFocus(node, dialog);
                 const sameRadioGroup = (left, right) => left instanceof HTMLInputElement
                     && right instanceof HTMLInputElement && left.type === 'radio' && right.type === 'radio'
                     && left.name !== '' && left.name === right.name && left.form === right.form;
                 dialog.addEventListener('keydown', event => {
                     if (event.key !== 'Tab') return;
-                    const candidates = [...dialog.querySelectorAll(
-                        'button, input, textarea, select, a[href], summary, [tabindex]',
-                    )].filter(eligible);
+                    const candidates = [...dialog.querySelectorAll(nativeFocusSelector)].filter(eligible);
                     // Radio groups are one native Tab stop. An unanswered group
                     // admits its first answer forward and its last answer backward;
                     // arrow navigation within it remains entirely browser-owned.
@@ -374,6 +605,7 @@ fn trap_js(handle: DialogHandle, initial_focus: &str) -> String {
                 if (!dialog{generation_guard} || dialog.__farhelmDialogTrap) return;
                 dialog.__farhelmDialogTrap = true;
                 {initial_focus}
+                {NATIVE_FOCUS_RULES}
                 {listener}
             }})();"#,
     )
@@ -626,6 +858,8 @@ pub(crate) enum DialogRoot {
 /// change the boundary that records whether an async close still owns focus.
 /// Form-only validity suppression remains explicit rather than acquiring
 /// browser validation when its root moves behind this component boundary.
+/// Root scroll entry changes only tabindex and retains the dialog's role/name;
+/// its -1 baseline stays out of sequential navigation when controls are usable.
 #[component]
 pub(crate) fn ModalDialog(
     handle: DialogHandle,
@@ -633,6 +867,7 @@ pub(crate) fn ModalDialog(
     on_escape: EventHandler<KeyboardEvent>,
     #[props(default)] root: DialogRoot,
     #[props(default)] novalidate: Option<bool>,
+    #[props(default)] root_scroll: Option<RecoveryFocus>,
     #[props(default)] before_install_release: Option<DialogHandle>,
     #[props(default)] after_install_focus: Option<FocusTarget>,
     #[props(default)] onkeydown: Option<EventHandler<KeyboardEvent>>,
@@ -648,6 +883,7 @@ pub(crate) fn ModalDialog(
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
+    let scrolls_root = root_scroll.is_some();
     // Native roots share one lifecycle boundary. Keeping their handlers here
     // avoids giving forms a second copy of focus installation or Escape rules.
     let mut root_attributes = vec![
@@ -662,6 +898,9 @@ pub(crate) fn ModalDialog(
             if let Some(onmounted) = onmounted {
                 onmounted.call(event);
             }
+            if let Some(recovery) = &root_scroll {
+                install_scroll_region(handle, None, None, recovery);
+            }
         }),
         dioxus::html::onkeydown(move |event: KeyboardEvent| {
             if event.key() == Key::Escape {
@@ -672,6 +911,9 @@ pub(crate) fn ModalDialog(
         }),
     ];
     root_attributes.extend(attributes);
+    if scrolls_root {
+        root_attributes.push(Attribute::new("tabindex", "-1", None, false));
+    }
     // GlobalAttributes forwards presentation attributes, but native events
     // need explicit props. Absent listeners remain absent.
     if let Some(onscroll) = onscroll {

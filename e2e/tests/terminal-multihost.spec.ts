@@ -1,5 +1,5 @@
 import { chooseLauncherHost } from "./helpers/host-picker";
-import { expectKeyboardScroll } from "./helpers/keyboard-scroll";
+import { expectKeyboardScroll, expectKeyboardScrollFromControl } from "./helpers/keyboard-scroll";
 import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
 // =====================================================================
 // Multi-host: the hosts panel, the stale list, and host management
@@ -4331,8 +4331,8 @@ test.describe("multi-host", () => {
    * rest of the suite once the row is restored.
    * Initial Uninstall focus stays visibly outlined and quiet; later hover and
    * keyboard help remain available while the user reads the real plan.
-   * The overflowing plan must also take Tab focus and native scrolling keys;
-   * its sibling answer buttons cannot provide that access in WebKit.
+   * The overflowing plan must also take native scrolling keys through Copy
+   * plan, its own enabled entry control, without a redundant body stop.
    */
   test("uninstall-remote-host: the plan names the kept data, confirming removes the host", async ({
     page,
@@ -4387,7 +4387,11 @@ test.describe("multi-host", () => {
         await testInfo.attach(`host-uninstall-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
       }
       await page.setViewportSize({ width: 390, height: 420 });
-      await expectKeyboardScroll(page, dialog.locator(".host-settings-dismiss"), dialog.getByRole("region", { name: "host uninstall plan", exact: true }));
+      const planBody = dialog.locator(".host-settings-body");
+      await expect(planBody).not.toHaveAttribute("tabindex");
+      await expect(planBody).not.toHaveAttribute("role");
+      await expect(planBody).not.toHaveAttribute("aria-label");
+      await expectKeyboardScrollFromControl(page, dialog.locator(".host-settings-dismiss"), dialog.locator(".provisioning-copy-plan"), planBody);
       await page.setViewportSize({ width: 390, height: 160 });
       await dialog.hover();
       await page.mouse.wheel(0, -100_000);

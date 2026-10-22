@@ -16,7 +16,7 @@ use crate::menu_panel::{
     handle_menu_key, install_row_menu_outside_dismiss, measurement_outcome, record_menu_item_focus,
     remember_menu_item, session_menu_placement_style,
 };
-use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog};
+use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus};
 use crate::peer::{PeerText, display_peer};
 use dioxus::prelude::*;
 pub(super) use farhelm_proto::launcher::quick_launch_eligible;
@@ -260,22 +260,28 @@ fn focus_template_control(selector: &str) {
 }
 
 /// Recover focus lost to a disabled or removed control after a write or reload.
-/// Reuse the dialog installer's focus memory, and leave a usable focused control
-/// alone. Two frames let explicit navigation/prompt focus win before fallback.
+/// Reuse the dialog installer's focus memory, and preserve any usable chosen
+/// owner, including exempt approval input. Two frames let explicit navigation
+/// and prompt focus win before fallback.
 fn restore_template_focus() {
+    let recovery = template_recovery().script();
     document::eval(&format!(
         r#"requestAnimationFrame(() => requestAnimationFrame(() => {{
             const dialog = document.querySelector('{DIALOG_SELECTOR}');
             if (!dialog) return;
-            const usable = el => el instanceof HTMLElement && el.isConnected
-                && dialog.contains(el) && !el.disabled && el.getClientRects().length;
-            if (usable(document.activeElement)) return;
-            const last = dialog.__farhelmLastFocus;
-            const name = dialog.querySelector('.templates-name');
-            (usable(last) ? last : usable(name) ? name
-                : dialog.querySelector('.templates-new') ?? dialog).focus({{preventScroll: true}});
+            {recovery}
         }}))"#,
     ));
+}
+
+/// Keep phone navigation and departure prompts ahead of fallback after writes.
+fn template_recovery() -> RecoveryFocus {
+    RecoveryFocus::new(
+        ".templates-name",
+        Some(".templates-new"),
+        true,
+        RecoveryDelay::TwoFrames,
+    )
 }
 
 /// The same wire words serve as select values on both renderers.
@@ -1701,8 +1707,11 @@ pub(super) fn TemplatesDialog(
             // The capped dialog can move while keeping its own size. Its
             // full-window backdrop also observes width-only viewport changes.
             onresize: move |_| dialog_epoch += 1,
-            ModalDialog { class: if opened() { "templates-dialog templates-editor-open" } else { "templates-dialog" }, role: "dialog", aria_modal: "true", aria_label: "templates", tabindex: "-1",
+            ModalDialog { class: if opened() { "templates-dialog templates-editor-open" } else { "templates-dialog" }, role: "dialog", aria_modal: "true", aria_label: "templates",
                 handle: DialogHandle::new(DIALOG_SELECTOR),
+                // The existing dialog itself scrolls. Busy entry must not add
+                // a nested region or replace its dialog role and name.
+                root_scroll: template_recovery(),
                 focus: DialogFocus::remembered(".templates-new", Some(".templates-close"), false, None),
                 onscroll: move |_| dialog_epoch += 1,
                 onresize: move |_| dialog_epoch += 1,

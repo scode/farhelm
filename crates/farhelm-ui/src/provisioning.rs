@@ -72,7 +72,9 @@ use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::settings_dialog;
 use crate::hosts::{HostRefusal, HostRefusalAction, HostRefusalEntry};
 use crate::list::SharedPreferences;
-use crate::modal_dialog::{DialogFocus, DialogHandle, FocusTarget, ModalDialog};
+use crate::modal_dialog::{
+    DialogFocus, DialogHandle, FocusTarget, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
+};
 use crate::ops::{OpGuard, OpLock, ReadGate};
 use crate::peer::{DetailPart, PeerBlock, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
@@ -1169,8 +1171,8 @@ pub(crate) fn PlanConfirmation(
 /// pinning chrome that cannot fit. The helm supplies the plan;
 /// this component owns presentation, never its actions or authorization. The
 /// caller supplies an already escaped display name and its cancel lifecycle.
-/// The plan body has its own named tab stop: WebKit does not make
-/// scrolling regions keyboard-reachable just because they overflow.
+/// Text-only plans need a named entry stop in WebKit. Structured plans already
+/// provide entry through Copy Plan; the shared scroll boundary distinguishes them.
 ///
 /// `busy` disables only the two answers that would submit. Cancel stays
 /// live: this renders inside a modal, and a modal must never hold the user
@@ -1196,7 +1198,9 @@ pub(crate) fn SetupPlanConfirmation(
             dismiss_tooltip: "cancel: change nothing on this host",
             on_dismiss: on_cancel,
         }
-        div { class: "host-settings-body", tabindex: "0", role: "region", aria_label: "host setup plan",
+        ScrollRegion { class: "host-settings-body",
+            handle: settings_dialog::ADD_DIALOG, selector: ".host-settings-body", name: "host setup plan",
+            recovery: RecoveryFocus::new(".add-host-cancel", None, true, RecoveryDelay::OneFrame),
             PlanStepList { confirmation, steps }
             if let Some(error) = error { {error} }
         }
@@ -1247,8 +1251,8 @@ pub(crate) fn SetupPlanConfirmation(
 /// normally pin the host identity and answers around the scrollable plan; a
 /// very short window scrolls the whole card to keep every part reachable. Header
 /// dismissal uses the caller's Cancel path, including its row-focus return.
-/// The plan's named tab stop lets keyboard users scroll its steps in WebKit
-/// without accepting the uninstall or moving answers that still fit pinned.
+/// Copy Plan provides keyboard scroll entry when present; an older text-only
+/// plan gets a named body stop without moving answers that still fit pinned.
 #[component]
 pub(crate) fn UninstallConfirmation(
     confirmation: String,
@@ -1267,7 +1271,9 @@ pub(crate) fn UninstallConfirmation(
             dismiss_tooltip: "cancel: leave Farhelm installed on this host",
             on_dismiss: on_cancel,
         }
-        div { class: "host-settings-body", tabindex: "0", role: "region", aria_label: "host uninstall plan",
+        ScrollRegion { class: "host-settings-body",
+            handle: DialogHandle::new(settings_dialog::UNINSTALL_DIALOG_SELECTOR), selector: ".host-settings-body", name: "host uninstall plan",
+            recovery: RecoveryFocus::new(".uninstall-cancel", None, true, RecoveryDelay::OneFrame),
             PlanStepList { confirmation, steps }
         }
         div { class: "host-settings-footer host-dialog-footer",

@@ -16,6 +16,8 @@ installTerminalSuiteHooks();
  * child can accidentally supply keyboard access for its scroll owner. Tab from
  * the pinned Close button must still reach and scroll that overflowing list in
  * WebKit as well as Chromium; no pointer or script scroll substitutes for it.
+ * Once measurement restores real actions, the redundant body stop disappears
+ * without taking focus from Close, and Tab enters the first enabled action.
  */
 test("trash list stays keyboard-scrollable while every list action is disabled", async ({ page, request }) => {
   await stubArchives(page, request, ["keyboard-local"], 20);
@@ -37,12 +39,31 @@ test("trash list stays keyboard-scrollable while every list action is disabled",
     const dialog = page.locator(".checkout-trash-dialog");
     await expect.poll(() => measuring, { message: "measurement remains held during keyboard input" }).toBe(true);
     await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(20);
-    const region = dialog.getByRole("region", { name: "archived checkouts", exact: true });
+    const region = dialog.locator(".checkout-trash-body");
+    await expect(region).toHaveAccessibleName("archived checkouts");
     const actions = region.getByRole("button");
     expect(await actions.count(), "the list contains disabled actions, not an empty placeholder").toBeGreaterThan(0);
     for (const action of await actions.all()) await expect(action).toBeDisabled();
     await expectKeyboardScroll(page, dialog.locator(".trash-close"), region);
     for (const action of await actions.all()) await expect(action).toBeDisabled();
+    const close = dialog.locator(".trash-close");
+    await close.focus();
+    await expect(close).toBeFocused();
+    release();
+    for (const action of await actions.all()) await expect(action).toBeEnabled();
+    await expect(region).not.toHaveAttribute("tabindex");
+    await expect(region).not.toHaveAttribute("role");
+    await expect(region).not.toHaveAttribute("aria-label");
+    // The shared recovery can defer two frames. Cross that boundary before
+    // claiming that withdrawing the old stop preserved the chosen header.
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(close).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(dialog.locator(".trash-host-delete").first()).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect.poll(() => region.evaluate((node) => node.scrollTop)).toBe(0);
+    await page.keyboard.press("PageDown");
+    await expect.poll(() => region.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
   } finally {
     release();
     await page.unrouteAll({ behavior: "wait" });

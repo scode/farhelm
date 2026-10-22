@@ -31,7 +31,7 @@ import { routeGate } from "./helpers/route-gate";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { disposeRelease, expectConnectedRelease, observeModalRelease, type ModalReleaseObservation } from "./helpers/modal-release";
 import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
-import { expectKeyboardScroll } from "./helpers/keyboard-scroll";
+import { expectKeyboardScroll, expectKeyboardScrollFromControl } from "./helpers/keyboard-scroll";
 import { currentStackSlot } from "../stack-slots";
 import { openSettings } from "./helpers/settings";
 
@@ -1057,6 +1057,85 @@ async function expectPlanCopyAndRail(page: Page, plan: Locator, confirmation: st
   expect(result.chipRight, "the chip fits within the step column").toBeLessThanOrEqual(result.detailRight + 1);
 }
 
+for (const operation of ["setup", "uninstall"] as const) {
+  /**
+   * Older planning replies have no structured Copy Plan control. Their exact
+   * plain text still needs a named body stop and native scrolling, while the
+   * same renderers omit that stop when a structured plan supplies Copy entry.
+   * These offers are cancelled, never used as authority for a real mutation.
+   */
+  test(`unstructured ${operation} plan keeps a named keyboard entry`, async ({ page, request }, testInfo) => {
+    const remote = destination(testInfo, `unstructured-${operation}`);
+    const confirmation = Array.from({ length: 45 }, (_, index) =>
+      `Plan line ${index + 1}: inspect the complete host changes before deciding.`).join("\n") + "\n";
+    let plans = 0;
+    let confirmations = 0;
+    const accepted = operation === "uninstall" ? await startAdd(request, remote) : undefined;
+    if (accepted) await waitForProgress(request, accepted.host_id, "completed");
+    if (operation === "setup") {
+      await page.route("**/api/hosts/probe", async (route) => {
+        expect(route.request().method()).toBe("POST");
+        expect(route.request().postDataJSON()).toMatchObject({ target: { kind: "ssh", destination: remote } });
+        plans++;
+        await route.fulfill({ headers: { "x-farhelm-build": HELM_BUILD }, json: {
+          result: "provisionable", probe_id: "unstructured-setup-plan", confirmation,
+        } });
+      });
+      await page.route("**/api/hosts/provision", async (route) => {
+        confirmations++;
+        await route.fulfill({ status: 409, headers: { "x-farhelm-build": HELM_BUILD }, body: "this plan must only be cancelled" });
+      });
+    } else {
+      await page.route(`**/api/hosts/${accepted!.host_id}/uninstall`, async (route) => {
+        expect(route.request().method()).toBe("POST");
+        if (route.request().postData()) {
+          confirmations++;
+          await route.fulfill({ status: 409, headers: { "x-farhelm-build": HELM_BUILD }, body: "this plan must only be cancelled" });
+          return;
+        }
+        plans++;
+        // As in the existing uninstall fixtures, the fake remote cannot
+        // perform the live preflight. Only its read-only planning reply is owned.
+        await route.fulfill({ headers: { "x-farhelm-build": HELM_BUILD }, json: {
+          probe_id: "unstructured-uninstall-plan", confirmation, plan: { state_dir: "/tmp/fixture-retained-state" },
+        } });
+      });
+    }
+    try {
+      await patchPreferences(request, { skip_host_setup_confirmation: null });
+      await page.setViewportSize({ width: 390, height: 420 });
+      await page.goto("/");
+      if (operation === "setup") await probeRemote(page, remote);
+      else {
+        await openHostsPanel(page);
+        const row = page.locator(`[data-host-id="${accepted!.host_id}"]`);
+        await expect(row).toBeVisible();
+        await openHostMenu(row);
+        await row.locator(".provisioning-uninstall").click();
+      }
+      const dialog = page.locator(operation === "setup" ? ".host-add-dialog" : ".host-uninstall-dialog");
+      const body = dialog.locator(".host-settings-body");
+      await expect(dialog).toBeVisible();
+      await expect.poll(() => plans).toBe(1);
+      expect(await dialog.locator(".provisioning-plan").textContent(),
+        "the plain renderer preserves every line and the final LF").toBe(confirmation);
+      await expect(body.locator(".provisioning-copy-plan")).toHaveCount(0);
+      await expect(body.locator("button, input, select, textarea, a[href], summary")).toHaveCount(0);
+      await expect(body).toHaveAccessibleName(`host ${operation} plan`);
+      await expect(body).toHaveAttribute("tabindex", "0");
+      await expectKeyboardScroll(page, dialog.locator(".host-settings-dismiss"), body);
+      await dialog.locator(".host-settings-dismiss").click();
+      await expect(dialog).toHaveCount(0);
+      expect(confirmations, "reading and cancelling supplies no confirmation authority").toBe(0);
+      if (operation === "setup") expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
+    } finally {
+      // All offers are read-only, and route teardown precedes the spec's
+      // backend/registry cleanup so no late browser request can reach it.
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  });
+}
+
 for (const phone of [false, true]) {
   /**
    * Keyboard submission must keep the same dialog width and land on Set up,
@@ -1064,8 +1143,8 @@ for (const phone of [false, true]) {
    * Initial focus keeps its ring without a covering tooltip, but subsequent
    * hover and keyboard navigation must still explain the answers.
    * Dismissing through the new header must retire the offer without a write.
-   * A short viewport also proves keyboard access to the overflowing plan:
-   * WebKit needs a tab stop on the scroll owner, not on the footer.
+   * A short viewport also proves keyboard access through the plan's Copy
+   * control, without adding a redundant stop to its enclosing scrollport.
    * Header controls must also scroll the whole card when fixed chrome cannot fit.
    */
   test(`host-setup-layout ${phone ? "phone" : "desktop"} keeps answers and exact plan text`, async ({ page, request }, testInfo) => {
@@ -1106,7 +1185,11 @@ for (const phone of [false, true]) {
     await expectPlanCopyAndRail(page, plan, planned.confirmation);
     await testInfo.attach(`host-setup-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
     await page.setViewportSize({ width: phone ? 390 : 1100, height: 420 });
-    await expectKeyboardScroll(page, dialog.locator(".host-settings-dismiss"), dialog.getByRole("region", { name: "host setup plan", exact: true }));
+    const body = dialog.locator(".host-settings-body");
+    await expect(body).not.toHaveAttribute("tabindex");
+    await expect(body).not.toHaveAttribute("role");
+    await expect(body).not.toHaveAttribute("aria-label");
+    await expectKeyboardScrollFromControl(page, dialog.locator(".host-settings-dismiss"), plan.locator(".provisioning-copy-plan"), body);
     await page.setViewportSize({ width: phone ? 390 : 1100, height: 160 });
     await dialog.locator(".host-settings-dismiss").focus();
     await expect(dialog.locator(".host-settings-dismiss")).toBeFocused();

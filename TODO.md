@@ -319,10 +319,6 @@ are not.
   most-fixed file after 2026-10-15, and one handler still skips that check. The draft becomes one value whose only
   mutator applies those rules. Restart with stays out (see "Stop treating Restart with as a separate launch surface by
   default"). Plan: `plans/queue/launcher-draft-model.md`.
-- **One modal dialog shell that owns focus.** About twenty dialogs each assemble their own Tab trap, isolation of the
-  page behind them, return of focus on close and keyboard-reachable scroll regions, and focus fixes kept landing one
-  dialog at a time. Every modal dialog gets isolation and a Tab trap through the shell. Plan:
-  `plans/queue/modal-dialog-shell.md`.
 - **One owner for closing popovers when their row moves.** Each change that can move a sidebar or host row closes the
   open menu itself, and every new popover kind had to be added at each of those places. Changes report to one owner, and
   the three gaps left open in a code comment are closed. Plan: `plans/queue/popover-anchor-close.md`.
