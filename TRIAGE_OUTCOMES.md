@@ -17648,3 +17648,180 @@
   removed now.
 - Execution: complete for the queue removal (feedback file and index entry removed in the change that recorded this
   triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw".
+
+## selection-history-plan-forgets-upgrade-selection.md
+
+- Outcome: `discard`.
+- Assessment: already fixed on main 287bd81c. The plan for returning to the last visited session landed, and the shipped
+  automatic selection uses the remembered session while the visit history is still empty
+  (`crates/farhelm-ui/src/list/view.rs` around 374–387). The regression test
+  `automatic_selection_preserves_a_known_visit_with_empty_history` covers the finding's exact upgrade case; `git log -S`
+  attributes it to 56dd4d2d (#2441). SPEC.md (around 1812–1813) says the same. Nothing in the finding remains open.
+- Decision: already fixed, so recorded without asking per `review_feedback_queue/.agents/triage.md`, "Preparing each
+  item"; confirmed by a fresh-context adversarial review on 2026-10-21.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete; the feedback file and index entry were removed in the change that recorded this triage.
+
+## approval-poll-http-await-exceeds-deadline.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 287bd81c (not run). The real-stack test helper `await_cli_approval`
+  (`crates/farhelm/tests/e2e/agent_listing_real_stack.rs` around 205–227) awaits each HTTP poll without a bound and
+  checks its 90 second deadline only between polls, so a helm that stalls mid-response hangs the test until the outer
+  runner kills it, losing the helper's own diagnostic. It does not cause a false pass. The sibling readiness probe in
+  the same file (around 509–524) states the rule ("The readiness deadline includes each HTTP response and its body") and
+  already bounds each request with `timeout_at(deadline, get_json(..))`, added by 17bee471 (#489). Also
+  `.agents/test-authoring.md`, "Bound polling time".
+- Decision: on 2026-10-21 the user asked that queue items be triaged without asking when they clearly fit: "it's
+  DEFINITELY a bug or can be discarded due to spec (no ambiguity or judgement needed relative to spec/product)" and
+  "fixing it is reasonably straight-forward - it's not a major refactor, complexity creep or scope creep". Read-only
+  verification and a fresh-context adversarial review, with one round of back-and-forth, classed this finding that way.
+  This also follows the 2026-10-15 delegation of test-quality findings recorded under
+  `claude-trust-browser-fixtures-escape-cleanup.md`.
+- Completion criteria: bound each poll in `await_cli_approval` by the helper's existing deadline, mirroring the
+  readiness probe. Scope is this polling helper only; single-shot `get_json` calls elsewhere stay as they are, and a new
+  test that holds a response open is not required. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the
+  feedback file and its index entry.
+- Execution: pending.
+
+## changed-template-test-allows-missing-retry-key.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 287bd81c (not run). The changed-template browser test
+  (`e2e/tests/quick-launch.spec.ts` around 1426) only asserts that the second launch's retry key differs from the first,
+  so a launch that sends no key at all passes. The app sends a key today, so this is a test gap, not a product bug. The
+  required behavior is in the ledger in so many words: `unchanged-template-drops-launch-retry-key.md`'s completion
+  criteria say "a change that alters the request still mints a new one". The sibling
+  `e2e/tests/custom-permissions.spec.ts` (around 94–95 and 129–131) already asserts a non-empty string key.
+- Decision: on 2026-10-21 the user asked that queue items be triaged without asking when they clearly fit (quoted under
+  `approval-poll-http-await-exceeds-deadline.md`). Read-only verification and a fresh-context adversarial review classed
+  this finding that way.
+- Completion criteria: the test also asserts that the changed launch carries a non-empty retry key, copying the
+  sibling's assertion. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file
+  and its index entry.
+- Execution: pending.
+
+## held-reveal-fixture-pins-before-cleanup.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 287bd81c (not run). In `e2e/tests/clone.spec.ts` (around 686–692) the
+  held-reveal test creates a session, then writes the auto-select preference and adds an init script, and only then
+  enters the `try` whose `finally` deletes the session. If either step fails, the session keeps running in the shared
+  stack. Same shape as `terminal-focus-tests-arm-cleanup-late.md` ("cleanup is armed as soon as the session exists") and
+  the "Fix all, with gate" decisions recorded under `history-fixture-enables-yolo-installing-restoration-guard.md`.
+- Decision: on 2026-10-21 the user asked that queue items be triaged without asking when they clearly fit (quoted under
+  `approval-poll-http-await-exceeds-deadline.md`). Read-only verification and a fresh-context adversarial review classed
+  this finding that way, following the precedents above.
+- Completion criteria: the session is owned by cleanup as soon as it exists (the `try` starts right after creation).
+  Test-only, confined to this test. Size gate: about 100 lines as above; over it, block and bring it back. Remove the
+  feedback file and its index entry.
+- Execution: pending.
+
+## model-effort-test-never-proves-model-accepted.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 287bd81c (not run). The model-effort browser test, now in
+  `e2e/tests/custom-permissions.spec.ts` (around 306–328; the finding's line numbers are stale), checks the model field
+  while it is still open, where it shows the typed draft (`crates/farhelm-ui/src/create/launch_controls.rs` around
+  169–171). Some Enter outcomes leave the draft in place without accepting it (`create_form.rs` around 6202–6213), and
+  both rounds reuse one model name, so the test passes even if Enter never accepts the custom model, which its title
+  claims to cover. Blur discards an unaccepted draft (`create_form.rs` around 6171–6178), so closing the field and then
+  checking the value tells the two apart. The review did not confirm that a successful Enter closes the field; blur
+  closes it either way.
+- Decision: on 2026-10-21 the user asked that queue items be triaged without asking when they clearly fit (quoted under
+  `approval-poll-http-await-exceeds-deadline.md`). Read-only verification and a fresh-context adversarial review classed
+  this finding that way, following the 2026-10-15 delegation of tests that pass without proving their operation.
+- Completion criteria: each round uses a distinct model name and proves the model was accepted (field closed, accepted
+  value shown) before the effort checks. Test-only, confined to this test. Size gate: about 100 lines as above; over it,
+  block and bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## notification-fixtures-register-ownership-too-late.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 287bd81c (not run). In `e2e/tests/notifications.spec.ts` (around 458–460
+  and 515–517) two tests create two sessions and register both for cleanup only after the second create returns, so a
+  failed second create leaves the first session running in the shared stack. These are the only two paired sites in the
+  file; the others register each session as it is created (around 192–198). Same class as the "Fix all, with gate"
+  precedents recorded under `history-fixture-enables-yolo-installing-restoration-guard.md` and
+  `claude-trust-browser-fixtures-escape-cleanup.md`.
+- Decision: on 2026-10-21 the user asked that queue items be triaged without asking when they clearly fit (quoted under
+  `approval-poll-http-await-exceeds-deadline.md`). Read-only verification and a fresh-context adversarial review classed
+  this finding that way, following the precedents above.
+- Completion criteria: in both tests each session is registered for cleanup right after its own create. Test-only,
+  confined to these two sites. Size gate: about 100 lines as above; over it, block and bring it back. Remove the
+  feedback file and its index entry.
+- Execution: pending.
+
+## replacement-cleanup-test-never-proves-child-lived.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 287bd81c (not run). `scripts/test-start-stack-cleanup.sh` (around
+  378–386) starts a stand-in supervisor and signals the stack without first checking the stand-in is alive, and the
+  later check (`await_gone`, around 192–204) passes on absence, so a stand-in that died early makes the test pass
+  without proving cleanup. `.agents/test-authoring.md` says it in so many words: "Assert the fixture premise before the
+  action ... A successful setup command alone does not establish the state."
+- Decision: on 2026-10-21 the user asked that queue items be triaged without asking when they clearly fit (quoted under
+  `approval-poll-http-await-exceeds-deadline.md`). Read-only verification and a fresh-context adversarial review classed
+  this finding that way, following the 2026-10-15 delegation of tests that pass without proving their operation.
+- Completion criteria: before signalling, the test waits (bounded) until the stand-in is running with the command line
+  `start-stack.sh` matches, and fails if it never is. Confined to this test script. Size gate: about 100 lines as above;
+  over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## settings-test-restores-before-final-spare-save.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 287bd81c (not run). In `e2e/tests/settings.spec.ts` (around 106–108) the
+  prepared-checkout settings test's final switch-on save is never recorded or awaited, though the test's own cleanup
+  comment (around 123–124) says restoration must wait until "the owned write settles"; only the held request is drained.
+  A late save can then overtake the restoration. Harm needs the switch to start off, which takes an earlier fixture's
+  failed restore. Same class, file and fix shape as `checkout-settings-test-restores-before-save-settles.md` (PR #2154).
+- Decision: on 2026-10-21 the user asked that queue items be triaged without asking when they clearly fit (quoted under
+  `approval-poll-http-await-exceeds-deadline.md`). Read-only verification and a fresh-context adversarial review classed
+  this finding that way, following that precedent.
+- Completion criteria: cleanup records and awaits every save the page sends in this test before restoring, as the
+  checkout-folder tests in the same file do. Test-only, confined to this test. Size gate: about 100 lines as above; over
+  it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## spare-owner-tests-register-child-cleanup-after-readiness.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 287bd81c (not run). In `crates/farhelm/tests/spare_builder.rs` (around
+  603–620 and 677–702) two owner-death tests wait for all readiness files before taking cleanup ownership of a
+  background `sleep 300`. A readiness timeout kills the owner process, which skips the owner's own cleanup of that
+  child, so the child outlives the test. Only these two tests have the gap; the other `sleep 300` sites are reaped by a
+  tethered group. Same class as the "Fix all, with gate" precedents recorded under
+  `history-fixture-enables-yolo-installing-restoration-guard.md`.
+- Decision: on 2026-10-21 the user asked that queue items be triaged without asking when they clearly fit (quoted under
+  `approval-poll-http-await-exceeds-deadline.md`). Read-only verification and a fresh-context adversarial review classed
+  this finding that way, following those precedents.
+- Completion criteria: each test waits for the child's own pid file, takes cleanup ownership of the child, and only then
+  waits for the remaining readiness files. Test-only, confined to these two tests. Size gate: about 100 lines as above;
+  over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## duplicate-uninstall-advice-points-to-removed-owner.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 287bd81c (not run). When two host entries reach the same machine and the
+  user removes the one that holds it, the surviving entry stays a duplicate until Retry. Its Uninstall refusal then says
+  "choose uninstall on another entry (host N), then remove this entry"
+  (`crates/farhelm-helm/src/provisioning/uninstall_refusal.rs` around 83–91), naming an entry that no longer exists.
+  SPEC.md gives the remedy as removing the other entry or changing this one's destination "and then press Retry", and
+  says uninstall's refusal explains the remedy. The helm test `retry_clears_a_duplicate_once_the_other_entry_is_gone`
+  (`crates/farhelm-helm/src/manager.rs`) shows that Retry then connects the surviving entry, after which uninstall no
+  longer takes this refusal path. The comment at `provisioning/service.rs` (around 1314–1318) makes the fallback name
+  ("another entry (host N)") deliberate, not the instruction to act on it. The GUI host-details status text ("which
+  another entry (host N) already holds") describes a state that stays true until Retry and gives no instruction; it is
+  deliberately out of scope.
+- Decision: on 2026-10-21 the user asked that queue items be triaged without asking when they clearly fit (quoted under
+  `approval-poll-http-await-exceeds-deadline.md`). The adversarial reviewer first proposed asking because of the GUI
+  text; after the points above it agreed to auto-triage with this narrowed scope.
+- Completion criteria: only when the other entry is gone, the uninstall refusal tells the user to press Retry and then
+  uninstall through this entry, without promising that uninstall will then succeed (its ordinary checks still apply);
+  the tests that pin the old wording are updated. The name fallback and the GUI host-details text stay as they are. Size
+  gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
