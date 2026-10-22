@@ -42,10 +42,80 @@ impl DialogHandle {
         ));
     }
 
+    /// Release for a modal handoff without scheduling a competing focus return.
+    ///
+    /// The next modal owns its initial focus. Ordinary DOM-removal cleanup is
+    /// still the fallback for success paths that do not explicitly close.
+    pub(crate) fn release(self) {
+        document::eval(&crate::modal_isolation::release_js(self.selector));
+    }
+
     /// Install the opening's focus policy without repeating it on rerenders.
     fn install(self, focus: &DialogFocus) {
         install_focus(self.selector, focus);
     }
+}
+
+/// Select a domain focus destination without owning modal release or timing.
+///
+/// Explicit handoffs resolve both selectors from document in priority order;
+/// the installer uses the same rule relative to its mounted dialog. A missing
+/// destination does nothing, preserving handoffs whose opener vanished. The
+/// target can run after installation, on offer arrival, or as the destination-
+/// only body of an already-approved close.
+#[derive(Clone, PartialEq)]
+pub(crate) struct FocusTarget {
+    selector: String,
+    fallback: Option<String>,
+    quiet: bool,
+}
+
+impl FocusTarget {
+    /// Describe the preferred target and optional fallback without moving focus.
+    pub(crate) fn new(selector: impl Into<String>, fallback: Option<&str>, quiet: bool) -> Self {
+        Self {
+            selector: selector.into(),
+            fallback: fallback.map(str::to_owned),
+            quiet,
+        }
+    }
+
+    /// Generate only the destination action; close owns release and scheduling.
+    pub(crate) fn script(&self) -> String {
+        target_js("document", self, false)
+    }
+
+    /// Perform a caller-owned handoff now, without reinstalling modal behavior.
+    pub(crate) fn focus(&self) {
+        document::eval(&self.script());
+    }
+}
+
+/// Share target preference and quiet focus while retaining each lookup scope.
+///
+/// `scope` is an internal JS receiver, either the mounted dialog or document.
+/// Remembered initial focus also falls back to its root; explicit handoffs do
+/// not. The self-contained conditional never returns from an enclosing trap
+/// installer when its initial target is absent, since the trap is still needed.
+fn target_js(scope: &str, target: &FocusTarget, root_fallback: bool) -> String {
+    let preferred = serde_json::to_string(&target.selector).expect("a string always serializes");
+    let fallback = target.fallback.as_ref().map_or(String::new(), |selector| {
+        let selector = serde_json::to_string(selector).expect("a string always serializes");
+        format!(" ?? {scope}.querySelector({selector})")
+    });
+    let root = if root_fallback { " ?? dialog" } else { "" };
+    let quiet = target.quiet;
+    format!(
+        r#"(() => {{
+            const target = {scope}.querySelector({preferred}){fallback}{root};
+            if (target) {{
+                // Focus safety does not depend on the tooltip asset finishing load.
+                // A later installation observes new events, not this past focus.
+                if ({quiet} && window.farhelmTooltip?.focusWithoutTooltip) window.farhelmTooltip.focusWithoutTooltip(target);
+                else target.focus({{ preventScroll: true }});
+            }}
+        }})();"#,
+    )
 }
 
 /// Keep the existing trap's first focus and listener behind the same guard.
@@ -97,9 +167,8 @@ pub(crate) fn install_focus(dialog_selector: &str, focus: &DialogFocus) {
     let dialog = serde_json::to_string(dialog_selector).expect("a string always serializes");
     let setup = match &focus.initial_focus {
         InitialFocus::Target(selector) => {
-            let selector = serde_json::to_string(selector).expect("a string always serializes");
-            let initial =
-                format!("dialog.querySelector({selector})?.focus({{ preventScroll: true }});");
+            let target = FocusTarget::new(selector.clone(), None, false);
+            let initial = target_js("dialog", &target, false);
             if let Some(trap) = focus.trap {
                 trap_js(&dialog, trap, &initial)
             } else {
@@ -109,8 +178,14 @@ pub(crate) fn install_focus(dialog_selector: &str, focus: &DialogFocus) {
             }
         }
         InitialFocus::Remembered { selector, quiet } => {
-            let initial_focus =
-                serde_json::to_string(selector).expect("a string always serializes");
+            // Disabled confirming answers retain a separate Cancel/root fallback;
+            // the independent Escape selector still chooses its ordinary handler.
+            let target = FocusTarget::new(
+                selector.clone(),
+                Some(".host-settings-close, .uninstall-cancel"),
+                *quiet,
+            );
+            let initial_focus = target_js("dialog", &target, true);
             let mut setup = format!(
                 r#"(() => {{
                     const dialog = document.querySelector({dialog});
@@ -121,14 +196,7 @@ pub(crate) fn install_focus(dialog_selector: &str, focus: &DialogFocus) {
                             if (event.target !== dialog) dialog.__farhelmLastFocus = event.target;
                         }});
                     }}
-                    // Disabled confirming answers do not receive focus. Keep their
-                    // Cancel fallback separate from the independent Escape selector.
-                    const initial = dialog.querySelector({initial_focus})
-                        ?? dialog.querySelector('.host-settings-close, .uninstall-cancel') ?? dialog;
-                    // Focus safety does not depend on the tooltip asset finishing load.
-                    // A later installation observes new events, not this past focus.
-                    if ({quiet} && window.farhelmTooltip?.focusWithoutTooltip) window.farhelmTooltip.focusWithoutTooltip(initial);
-                    else initial.focus({{ preventScroll: true }});
+                    {initial_focus}
                 }})();"#,
             );
             if let Some(trap) = focus.trap {
@@ -229,11 +297,14 @@ impl DialogFocus {
 /// work such as Settings' delayed trust-section scroll, not a second installer.
 /// Movement callbacks attach to this same root only when supplied, so dialogs
 /// without resize behavior do not acquire an otherwise unused resize observer.
+/// An optional second focus target preserves setup's existing root-first
+/// isolation, then quiet confirmation handoff, before domain mounted work.
 #[component]
 pub(crate) fn ModalDialog(
     handle: DialogHandle,
     focus: DialogFocus,
     on_escape: EventHandler<KeyboardEvent>,
+    #[props(default)] after_install_focus: Option<FocusTarget>,
     #[props(default)] onkeydown: Option<EventHandler<KeyboardEvent>>,
     #[props(default)] onmounted: Option<EventHandler<MountedEvent>>,
     #[props(default)] onscroll: Option<EventHandler<ScrollEvent>>,
@@ -258,6 +329,9 @@ pub(crate) fn ModalDialog(
         div {
             onmounted: move |event| {
                 handle.install(&focus);
+                if let Some(target) = &after_install_focus {
+                    target.focus();
+                }
                 if let Some(onmounted) = onmounted {
                     onmounted.call(event);
                 }

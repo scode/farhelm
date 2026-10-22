@@ -72,6 +72,7 @@ use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::settings_dialog;
 use crate::hosts::{HostRefusal, HostRefusalAction, HostRefusalEntry};
 use crate::list::SharedPreferences;
+use crate::modal_dialog::{DialogFocus, DialogHandle, FocusTarget, ModalDialog};
 use crate::ops::{OpGuard, OpLock, ReadGate};
 use crate::peer::{DetailPart, PeerBlock, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
@@ -3111,6 +3112,10 @@ pub(crate) fn ProvisioningPanel(
     let notice_host_name = host.name.raw().to_owned();
     let confirmed_submission_host = host.clone();
     let preference_base = base.clone();
+    let host_dialog = settings_dialog::DIALOG;
+    // Both explicit cancellations return to this row; confirmation and
+    // lifecycle retirement intentionally leave focus to the next surface.
+    let row_focus = move || settings_dialog::row_focus(host_id).script();
     // `skip_future` is setup's permanent answer ("don't ask in the
     // future"), remembered only once this confirmation has consumed the plan
     // below: an answer queued behind Cancel finds no plan and must change no
@@ -3367,24 +3372,32 @@ pub(crate) fn ProvisioningPanel(
                 if plan.operation == ProvisioningOperation::Add {
                     crate::modal_isolation::HostModal { key: "{plan.probe_id}",
                     div { class: "host-settings-backdrop", role: "presentation",
-                        div {
+                        ModalDialog {
+                            handle: DialogHandle::new(settings_dialog::ADD_DIALOG_SELECTOR),
+                            focus: DialogFocus::remembered(
+                                ".add-host-ssh", Some(".add-host-cancel"), false,
+                                Some(".provisioning-confirm, .add-host-submit"),
+                            ),
+                            // Setup first focuses the root and isolates it, then
+                            // hands focus to the quiet confirming answer. Keep
+                            // that handoff after the shared gap/Enter install.
+                            after_install_focus: FocusTarget::new(
+                                ".host-add-dialog .provisioning-confirm:enabled",
+                                Some(".add-host-cancel"), true,
+                            ),
                             class: "host-settings-dialog host-add-dialog host-dialog-framed",
                             role: "dialog",
                             aria_modal: "true",
                             aria_label: "host setup",
                             tabindex: "-1",
-                            onmounted: move |_| {
-                                settings_dialog::install_add_dialog();
-                                settings_dialog::focus_add_confirm();
-                            },
                             // Cancel and Escape stay live while another
                             // operation holds the page token: dismissing the
                             // question starts nothing, and the confirm path
                             // takes `pending` before it submits, so there is
                             // no request of this row's to strand.
-                            onkeydown: move |evt: KeyboardEvent| {
-                                if evt.key() == Key::Escape && !evt.is_composing() {
-                                    settings_dialog::return_focus_to_row(host_id);
+                            on_escape: move |evt: KeyboardEvent| {
+                                if !evt.is_composing() {
+                                    host_dialog.close(&row_focus());
                                     pending.set(None);
                                     action_error.set(None);
                                     action_warning.set(None);
@@ -3404,7 +3417,7 @@ pub(crate) fn ProvisioningPanel(
                                 // `confirm`, once it has consumed the plan.
                                 on_confirm: move |skip_future| confirm.call(skip_future),
                                 on_cancel: move |_| {
-                                    settings_dialog::return_focus_to_row(host_id);
+                                    host_dialog.close(&row_focus());
                                     pending.set(None);
                                     action_error.set(None);
                                     action_warning.set(None);
@@ -3424,16 +3437,20 @@ pub(crate) fn ProvisioningPanel(
                     // and Escape stay live for the reason the setup
                     // dialog's do.
                     div { class: "host-settings-backdrop", role: "presentation",
-                        div {
+                        ModalDialog {
+                            handle: DialogHandle::new(settings_dialog::UNINSTALL_DIALOG_SELECTOR),
+                            focus: DialogFocus::remembered(
+                                ".uninstall-confirm:enabled", Some(".uninstall-cancel"), true,
+                                Some(".uninstall-confirm"),
+                            ),
                             class: "host-settings-dialog host-uninstall-dialog host-dialog-framed",
                             role: "dialog",
                             aria_modal: "true",
                             aria_label: "uninstall Farhelm from this host",
                             tabindex: "-1",
-                            onmounted: move |_| settings_dialog::install_uninstall_dialog(),
-                            onkeydown: move |evt: KeyboardEvent| {
-                                if evt.key() == Key::Escape && !evt.is_composing() {
-                                    settings_dialog::return_focus_to_row(host_id);
+                            on_escape: move |evt: KeyboardEvent| {
+                                if !evt.is_composing() {
+                                    host_dialog.close(&row_focus());
                                     pending.set(None);
                                     action_error.set(None);
                                     action_warning.set(None);
@@ -3446,7 +3463,7 @@ pub(crate) fn ProvisioningPanel(
                                 busy: page_busy,
                                 on_confirm: move |_| confirm.call(false),
                                 on_cancel: move |_| {
-                                    settings_dialog::return_focus_to_row(host_id);
+                                    host_dialog.close(&row_focus());
                                     pending.set(None);
                                     action_error.set(None);
                                     action_warning.set(None);
