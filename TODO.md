@@ -33,6 +33,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- Initial version of agent2agent comms.
+
 - **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
   indicates that one of those models is being used anyway.
 
