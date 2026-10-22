@@ -1804,11 +1804,13 @@ whatever the agent renders is what you see. There is no composer, no message abs
   a day later, and the buffer is still there. Farhelm avoids storing terminal output except where it directly helps the
   user, such as error reporting. When an agent never starts, its durable error may include the failed launch's last five
   nonblank lines, bounded to 500 UTF-8 bytes after unsafe characters are escaped. Farhelm omits the excerpt when it
-  cannot safely attribute the text to that launch. This is an error detail, not a separate conversation history: a host
-  reboot loses the terminal's contents, and recovering the conversation is the agent's job (resume). A stopped or exited
-  session's terminal stays viewable while its host is up, since the terminal outlives the process. Viewable means what
-  the terminal itself holds: a full-screen program's last frame is not retained after it exits, and no snapshot of it is
-  taken or stored.
+  cannot safely attribute the text to that launch. In rare cases the excerpt can still include text from the previous
+  run in the same terminal, for example when the terminal was narrowed while a full-screen program from that run was
+  showing and the session was restarted before it exited; accepted 2026-10-21. This is an error detail, not a separate
+  conversation history: a host reboot loses the terminal's contents, and recovering the conversation is the agent's job
+  (resume). A stopped or exited session's terminal stays viewable while its host is up, since the terminal outlives the
+  process. Viewable means what the terminal itself holds: a full-screen program's last frame is not retained after it
+  exits, and no snapshot of it is taken or stored.
 - Opening a session attaches to it — and opening a CLIENT counts as opening a session. A freshly loaded client and a
   client whose open session disappears use the same choice: the first currently listed session in the helm's shared
   visit history, excluding the session just removed, else the newest-created listed session. While history is empty, the
