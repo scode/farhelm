@@ -41,8 +41,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   race's practicality is unverified.
 
 - [`create-retry-takeover-replaces-restarted-session.md`](create-retry-takeover-replaces-restarted-session.md) — A stale
-  create retry can take over a session restarted since, reverting its record and possibly duplicating its agent; spec
-  coverage of the fault pair is ambiguous.
+  create retry may take over a later launch, losing newer settings or executing a different approved launch under
+  additional failures; full reachability and spec coverage remain unresolved.
 
 - [`startup-reload-adopts-surviving-tab-as-agent.md`](startup-reload-adopts-surviving-tab-as-agent.md) — After an
   interrupted restart, recovery can take a surviving tab for the agent so Stop and Restart kill it; reaching that shape
@@ -54,7 +54,7 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`named-restart-with-keeps-unreported-old-conversation.md`](named-restart-with-keeps-unreported-old-conversation.md) —
   After a named Restart with that cannot report, Resume reopens the previous conversation indefinitely; the unhooked
-  spawn path is not traced end to end.
+  backend path is traced, but vendor behavior and spec coverage remain unresolved.
 
 - [`no-birth-time-checkout-archives-reclone.md`](no-birth-time-checkout-archives-reclone.md) — On a filesystem without
   creation times, a folder re-cloned over a checkout is trashed as Farhelm's; which supported filesystems lack them is
@@ -94,6 +94,52 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`pi-child-report-replaces-resume-target.md`](pi-child-report-replaces-resume-target.md) — A child Pi carrying
   Farhelm's reporter can replace its Pi session's Resume target; a forwarding extension is unverified.
+
+- [`restart-with-trusts-replaced-borrowed-checkout.md`](restart-with-trusts-replaced-borrowed-checkout.md) — Restart
+  with can grant managed-checkout trust to a replacement folder through a separately created session; runtime behavior
+  and security severity remain unsettled.
+
+- [`cached-directory-ui-skips-navigation-guard.md`](cached-directory-ui-skips-navigation-guard.md) — Cached directory UI
+  can skip foreign-navigation admission in a matching browser fixture; authenticated Farhelm viewer displacement remains
+  unverified.
+
+- [`approval-command-display-removes-carriage-returns.md`](approval-command-display-removes-carriage-returns.md) —
+  Command cards remove CR bytes that retained arguments can interpret differently; consequential execution is
+  unverified.
+
+- [`approval-values-collapse-distinguishing-spaces.md`](approval-values-collapse-distinguishing-spaces.md) — Approval
+  folder and template-flag rows collapse significant spaces; harmful wrong-target work remains unverified.
+
+- [`native-ui-handshake-blocks-later-admission.md`](native-ui-handshake-blocks-later-admission.md) — An idle
+  unauthenticated framework connection can block later UI admission; practical cross-account timing and bucket are
+  unsettled.
+
+- [`direct-launch-redirect-inherits-helm-navigation-grant.md`](direct-launch-redirect-inherits-helm-navigation-grant.md)
+  — A directly opened untrusted address may redirect into authenticated startup; the intended grant and viewer
+  displacement are unverified.
+
+- [`adoption-misses-revived-actor-connection.md`](adoption-misses-revived-actor-connection.md) — Adoption can miss a
+  revived worker's predecessor connection, allowing conditional fresh routing there; failure and scheduling are
+  unverified.
+
+- [`approval-folder-escape-collides-with-literal-path.md`](approval-folder-escape-collides-with-literal-path.md) —
+  Approval folder escaping gives distinct paths the same spelling; meaningful alternate folders and harmful reliance are
+  unverified.
+
+- [`legacy-restart-card-omits-literal-argument.md`](legacy-restart-card-omits-literal-argument.md) — An older session's
+  Restart card omits a literal argument; historical writer support and consequential security impact are unresolved.
+
+- [`osc-link-navigation-disagrees-with-disclosed-host.md`](osc-link-navigation-disagrees-with-disclosed-host.md) — An
+  unusual terminal link can disclose one host but navigate within the Farhelm browser origin; browser effects and
+  security priority remain unverified.
+
+- [`retained-create-refusal-hides-restarted-terminal.md`](retained-create-refusal-hides-restarted-terminal.md) — A
+  failed create retry can hide a restarted live terminal and remove its Delete warning; the full failure sequence and
+  coverage by the compounded-fault exception remain unresolved.
+
+- [`adjacent-link-label-edit-keeps-stale-warning.md`](adjacent-link-label-edit-keeps-stale-warning.md) — Changing a
+  neighboring row of a terminal link can leave its mismatch warning stale; the real host stays visible and security
+  significance remains unverified.
 
 ## High priority: material UX degradation
 
@@ -316,3 +362,21 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`sticky-parent-guard-contradicts-own-docs.md`](sticky-parent-guard-contradicts-own-docs.md) — The test recorder's and
   deflake's docs claim to refuse another account's /tmp/farhelm-tmp, which a sticky one passes.
+
+- [`approval-answer-acknowledges-expired-request.md`](approval-answer-acknowledges-expired-request.md) — An approval
+  answer can report delivery after expiry wins, hiding the late-answer notice; adverse scheduling is untested.
+
+- [`link-approval-arrives-after-session-deletion.md`](link-approval-arrives-after-session-deletion.md) — A delayed link
+  approval can appear after its session is deleted and still open its URL on Allow; adverse scheduling is untested.
+
+- [`first-contact-retry-keeps-unidentified-row-snapshot.md`](first-contact-retry-keeps-unidentified-row-snapshot.md) —
+  Retry can accept a custom identity-less peer after recording first contact; shipped supervisors cannot trigger it.
+
+- [`cancelled-refresh-restores-older-offline-list.md`](cancelled-refresh-restores-older-offline-list.md) — A cancelled
+  old cache write may undo a newer list across offline restarts; no actual session or work loss is established.
+
+- [`overlapping-download-success-erases-failure.md`](overlapping-download-success-erases-failure.md) — A successful
+  overlapping download can erase another download's failure notice without a new user click.
+
+- [`trimmed-wrapped-path-becomes-relative-link.md`](trimmed-wrapped-path-becomes-relative-link.md) — A wrapped path
+  whose beginning leaves scrollback can become a relative link to a different disclosed file.
