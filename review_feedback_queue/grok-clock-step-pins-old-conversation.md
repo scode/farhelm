@@ -35,9 +35,11 @@ Why the spec coverage is ambiguous (the independent check's reasoning): SPEC.md 
 after supervisor restart, without a general event log or clock-recovery protocol." That accepts the ordering design. But
 elsewhere in the same section "fail closed" means no Resume is offered (around 2269, 2279 and 2298: for example "its
 resume offer withdraws — fail closed, not a silent fresh start"), while here the old conversation stays resumable and
-Restart appends to it. The only text that accepts keeping the previous conversation is the delivery race at around
-2259-2261 ("If Grok exits or crashes before the replacement `SessionStart` callback arrives, the previous UUID can
-remain Farhelm's last known selection"), which is a different trigger. SPEC.md "First-class harnesses" (around
+Restart appends to it. Text accepting the previous conversation includes both the delivery race at around 2259-2261 ("If
+Grok exits or crashes before the replacement `SessionStart` callback arrives, the previous UUID can remain Farhelm's
+last known selection") and an explicit rule that a refused report changes no stored identity, offer or pending state
+(`SPEC.md:2276–2277` at the original reviewed commit). The latter directly supports keeping the previous offer after an
+older report is refused; the earlier version of this record omitted it. SPEC.md "First-class harnesses" (around
 3445-3450) keeps resuming the wrong conversation in scope for non-first-class harnesses, except for "a resume they
 accept" under Durability and resume, so the item turns on whether "fail closed" above accepts this outcome.
 
@@ -58,6 +60,14 @@ Confidence: likely. Confirmed from code: an older-timestamped competing `Session
 previous resumable binding in place, and the timestamp and its high-water mark persist as described. Unverified premise:
 that Grok stamps `timestamp` from the host's wall clock at emission time rather than from a monotonic or server-side
 clock.
+
+Coverage correction: reviewed commit `9d266e28595e8c2c07b378174f35eedf84258a70`, `SPEC.md:2280–2281`, retains the
+no-change-on-refusal rule; at pinned tip `616d79f45d6a1d817833291429d144a5c686bb4b` it is `2283–2284`. Source at the
+additional revision refuses before writing (`agent_kind/grok.rs:169–174`;
+`service/core/vendor/grok.rs:157–169,199–207`). The suggested withdrawal above therefore conflicts with an explicit
+contract and needs that conflict surfaced. This correction does not unilaterally settle acceptance of the original
+clock-step consequence or establish the vendor clock premise. Highest candidate remains open. Provenance: run
+`4fae501c-3686-4822-aa6c-037266637632`, `g019/f2`. Static only.
 
 Possible cover, for triage to judge: SPEC.md "Durability and resume" (around 2245-2261, the Grok ordering rule and the
 accepted delivery race); SPEC.md "First-class harnesses". FILTER.md "Rare edge cases in harnesses without first-class

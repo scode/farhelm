@@ -84,10 +84,16 @@ Farhelm tab, open a second window from an SSH login, then detach in the tab. The
 - Keep the behavior and correct the spec sentence at 1371-1372 (and the user documentation) so it does not promise that
   a tab usually reuses an existing service; say plainly that a TMUX-guarded tmux autostart makes the first tab the
   owner.
-- Change the behavior: exclude tmux (or any process whose tmux socket differs from Farhelm's) from tab markers, or start
-  tab containment after the startup files, as the agent launch does. That reverses the principle the decision recorded
-  ("tab containment deliberately starts before the shell's startup files, because the tab shell is itself what close
-  promises to kill").
+- Change the behavior: address both marker ownership and scope containment, or start tab containment after the startup
+  files, as the agent launch does. Excluding tmux from markers alone leaves systemd's independent cgroup kill intact.
+  Moving containment reverses the principle the decision recorded ("tab containment deliberately starts before the
+  shell's startup files, because the tab shell is itself what close promises to kill").
 
 Related: `agent-stop-kills-shared-personal-tmux.md` covers the agent-side case, where an agent rather than a tab's
 startup file starts the user's first tmux server.
+
+Remedy correction provenance: reviewed commit `9d266e28595e8c2c07b378174f35eedf84258a70`, trailing-review run
+`4fae501c-3686-4822-aa6c-037266637632`, `g021/f1`. At the product revision named above, `launch.rs:716–723,739–756`
+places startup descendants inside the tab scope; `service/sweep.rs:1398–1406,1653–1677` kills that scope independently
+of environment markers. Confidence: confirmed source-level limitation of the marker-only recommendation. The underlying
+highest concern and its unverified vendor/environment premises remain open. No reproduction or proposed drop.

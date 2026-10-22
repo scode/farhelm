@@ -35,3 +35,23 @@ Provenance: `audit-host-destination-disclosure/f3`, discovery pass 1, trailing r
 old heading-omission exclusions remain narrow. No runtime reproduction was performed.
 
 Original finding IDs: `audit-host-destination-disclosure/f3`, `audit-discovery-display-dataflows/f1`.
+
+### Manual supervisor-start guidance has the same presentation defect
+
+Additional reviewed commit: `6788c67974e6ae533ffd3fb58295a3ec3f171d17`. The SSH exit-75 startup remedy preserves the
+actual quoted executable/state command (`crates/farhelm-helm/src/manager.rs:4812–4826,4866–4868,4975`), but the hosts
+detail renders it through normal-whitespace inline peer spans (`crates/farhelm-ui/src/hosts.rs:711–715,4271–4272`;
+`peer.rs:159–179,304–328`; `assets/app.css:4760–4765,4781–4787,4863–4865,5196–5202`). Registered paths retain repeated
+ordinary spaces (`farhelm-helm/src/store.rs:1737–1768,5770–5773`). The displayed command can therefore collapse a
+distinction present in the exact Rust command. This predates the reviewed patch.
+
+Suggested bucket: **other** for confirmed visual mismatch; possible highest impact remains conditional. Unlike Remove,
+this guidance is a manual shell action, so the earlier captured-HostId refutation does not exclude a harmful copied
+command. However, browser clipboard serialization and a supported wrong-installation or work-loss chain remain missing
+premises. No pinned source establishes them, and no reproduction occurred. The earlier Debug-escaping repair and
+descriptive fallback address a different transformation; they do not restore whitespace here.
+
+Possible cover: this is additional substance for the same renderer concern, not an already-covered identical trigger. No
+exact accepted exclusion was established. Proposed drop: none. Provenance: trailing review through
+`616d79f45d6a1d817833291429d144a5c686bb4b`, run `4fae501c-3686-4822-aa6c-037266637632`, `g073/f1`. That investigation
+stops incomplete on copying and harmful-action premises; the displayed-space mismatch itself is confirmed.

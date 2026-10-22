@@ -13,8 +13,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   unverified.
 
 - [`offline-uninstall-retry-skips-session-check.md`](offline-uninstall-retry-skips-session-check.md) — An uninstall
-  retry without a connection checks no sessions yet still ends the host's terminal server; how sessions survive to that
-  point is unverified.
+  retry can stop unchecked live sessions when a custom command disappears after a failed removal; the conditional
+  still-active-supervisor route is source-established.
 
 - [`tunnel-shadows-busy-wildcard-port.md`](tunnel-shadows-busy-wildcard-port.md) — A Mac tunnel may take a port a local
   service serves on all addresses and divert its clients to the remote host; macOS bind behavior is unverified.
@@ -30,7 +30,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   permanently delete a different checkout when rows shift under the pointer; click timing is unmeasured.
 
 - [`tab-owns-first-personal-tmux.md`](tab-owns-first-personal-tmux.md) — The accepted rule that a tab owns services its
-  startup files start first rests on a premise tmux autostart contradicts; tmux environment inheritance is untested.
+  startup files start first rests on a premise tmux autostart contradicts; marker-only exclusion also leaves cgroup
+  termination intact, and runtime inheritance is untested.
 
 - [`shared-checkout-root-archives-other-host-work.md`](shared-checkout-root-archives-other-host-work.md) — A checkout
   root shared between hosts lets one host trash, then permanently delete, a checkout another host's session works in;
@@ -41,8 +42,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   race's practicality is unverified.
 
 - [`create-retry-takeover-replaces-restarted-session.md`](create-retry-takeover-replaces-restarted-session.md) — A stale
-  create retry can take over a session restarted since, reverting its record and possibly duplicating its agent; spec
-  coverage of the fault pair is ambiguous.
+  create retry may take over a session after an ambiguous Restart failure; active Restart is locked, and the complete
+  record-loss/survivor chain and fault-pair coverage remain unresolved.
 
 - [`startup-reload-adopts-surviving-tab-as-agent.md`](startup-reload-adopts-surviving-tab-as-agent.md) — After an
   interrupted restart, recovery can take a surviving tab for the agent so Stop and Restart kill it; reaching that shape
@@ -62,10 +63,11 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`nested-goose-report-replaces-resume-target.md`](nested-goose-report-replaces-resume-target.md) — A nested or
   sub-agent Goose run can replace its Goose session's Resume target; a lore decision deferred this outside the coverage
-  sources.
+  sources, and an inherited nonce alone cannot establish foreground ownership.
 
 - [`uninstall-notice-copies-raw-remote-path.md`](uninstall-notice-copies-raw-remote-path.md) — The uninstall notice
-  copies a host-reported kept-data path raw with no hidden-characters warning; a later helm rejection is unverified.
+  copies a remote path without warning; successful uninstall rejects controls, but concurrent removal can expose an owed
+  notice after failure. Unsafe downstream paste remains unverified.
 
 - [`templates-dialog-new-name-overwrites-outside-template.md`](templates-dialog-new-name-overwrites-outside-template.md)
   — A new or renamed template in an open Templates dialog replaces one an agent or the CLI created meanwhile; coverage
@@ -90,10 +92,42 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   is unverified, and the bucket is unsettled.
 
 - [`grok-clock-step-pins-old-conversation.md`](grok-clock-step-pins-old-conversation.md) — After a backward clock step a
-  Grok session refuses /new and Restart resumes the conversation the user left; spec coverage is ambiguous.
+  Grok session refuses /new and Restart resumes the conversation the user left; the explicit no-change-on-refusal rule
+  strengthens possible coverage, while the vendor-clock premise remains unverified.
 
 - [`pi-child-report-replaces-resume-target.md`](pi-child-report-replaces-resume-target.md) — A child Pi carrying
   Farhelm's reporter can replace its Pi session's Resume target; a forwarding extension is unverified.
+
+- [`uninstall-two-home-aliases-hide-kept-data.md`](uninstall-two-home-aliases-hide-kept-data.md) — Two alternate home
+  paths with divergent nested mounts can hide retained data from uninstall; the configured source chain is established,
+  but occurrence and support scope are unresolved.
+
+- [`uninstall-home-bind-inside-installation.md`](uninstall-home-bind-inside-installation.md) — A home bind inside the
+  installation can expose retained files to recursive uninstall; traversal is untested and configuration coverage is
+  ambiguous.
+
+- [`lost-shortcut-save-restores-misleading-assignment.md`](lost-shortcut-save-restores-misleading-assignment.md) — A
+  lost committed-save reply restores an old shortcut indication while the next key resolves the new template; harmful
+  reliance and coverage remain unproved.
+
+- [`sign-in-retains-failed-shortcut-assignment.md`](sign-in-retains-failed-shortcut-assignment.md) — Sign-in recovery
+  can retain attempted shortcut keys after their save fails; later launch resolves the stored map, with harmful reliance
+  unproved.
+
+- [`replace-cancel-can-erase-admitted-recovery-key.md`](replace-cancel-can-erase-admitted-recovery-key.md) — Cancel may
+  discard an admitted Replace's recovery key and permit duplication; the required trusted native input ordering is
+  source-incomplete.
+
+- [`reseeded-launcher-retains-conversation-selector.md`](reseeded-launcher-retains-conversation-selector.md) — A
+  superseded mounted launcher retains a conversation selector; an accessible shipped action completing the sequence is
+  unestablished.
+
+- [`recovery-retains-displaced-session-menu.md`](recovery-retains-displaced-session-menu.md) — Fast desktop recovery can
+  leave a session menu displaced after header wrapping; consequential mistaken Stop/Delete use remains unverified.
+
+- [`loading-cancel-may-discard-admitted-launch.md`](loading-cancel-may-discard-admitted-launch.md) — Loading Cancel may
+  discard an admitted launch and recovery identity; its post-admission delivery and harmful duplication remain
+  source-incomplete.
 
 ## High priority: material UX degradation
 
@@ -164,7 +198,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   ignores its documented manual port override.
 
 - [`catalog-cleanup-can-start-untracked-test-session.md`](catalog-cleanup-can-start-untracked-test-session.md) —
-  Releasing a held catalog during cleanup may start a test session after observation ends; scheduling is unverified.
+  Releasing a held catalog or finishing a pending key mint during cleanup may start an untracked fake test session;
+  adverse scheduling is unmeasured.
 
 - [`changed-template-test-allows-missing-retry-key.md`](changed-template-test-allows-missing-retry-key.md) — The
   changed-template regression can pass with no fresh retry key; no production omission is established.
@@ -209,8 +244,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   curated release heading can inject review-page script; attacker influence and practical impact are unverified.
 
 - [`removal-destination-collapses-distinguishing-spaces.md`](removal-destination-collapses-distinguishing-spaces.md) —
-  Removal and refusal paragraphs collapse spaces distinguishing registered destinations; live SSH examples are
-  unverified.
+  Removal/refusal destinations and manual startup paths collapse distinguishing spaces; live SSH examples, clipboard
+  serialization and harmful startup reliance remain unverified.
 
 - [`replacement-cleanup-test-never-proves-child-lived.md`](replacement-cleanup-test-never-proves-child-lived.md) — The
   replacement cleanup test never proves its stand-in was alive before checking absence; an actual false pass is
@@ -239,7 +274,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   items leaves their machine-readable sweep exclusions orphaned.
 
 - [`landing-leaves-baseline-flake-unrecorded.md`](landing-leaves-baseline-flake-unrecorded.md) — Landing reports defer
-  recording recurring baseline flakes; their private runtime evidence was not authenticated here.
+  recording recurring baseline flakes, including the initial-prompt regression; their private runtime evidence was not
+  authenticated here.
 
 - [`launcher-report-confuses-apply-with-launch.md`](launcher-report-confuses-apply-with-launch.md) — The landing report
   says Enter launches where the launcher actually applies queued templates to the draft.
@@ -311,8 +347,24 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   queued-question hint reads waiting mid-turn, so Restart skips its question; the rendering premise is unverified.
 
 - [`todo-picker-port-squatter-steers-planner.md`](todo-picker-port-squatter-steers-planner.md) — Another local account
-  holding the TODO picker's fixed address can feed the planning agent text as the maintainer's; tab reuse is unverified,
-  and the bucket is unsettled.
+  holding the picker or triage page's fixed address can forge pasted input; token-path routing alone does not
+  authenticate that server. Tab reuse is unverified and the bucket is unsettled.
 
 - [`sticky-parent-guard-contradicts-own-docs.md`](sticky-parent-guard-contradicts-own-docs.md) — The test recorder's and
   deflake's docs claim to refuse another account's /tmp/farhelm-tmp, which a sticky one passes.
+
+- [`uninstall-completion-bypasses-size-decision.md`](uninstall-completion-bypasses-size-decision.md) — Uninstall work
+  entered unattended landing eligibility after exceeding a required size gate, without a maintainer waiver in the pinned
+  record; no product harm is established.
+
+- [`launcher-subscription-test-masks-missing-observers.md`](launcher-subscription-test-masks-missing-observers.md) — A
+  launcher regression shares replay subscriptions and changes several positive-control fields, masking the omission it
+  claims to catch; no production defect is established.
+
+- [`closed-popovers-repeat-prefix-scans.md`](closed-popovers-repeat-prefix-scans.md) — Refreshes repeat scans and sorted
+  prefix work even with popups closed; supported-scale latency is unmeasured and browser availability coverage is
+  ambiguous.
+
+- [`held-preference-reply-blocks-fixture-restoration.md`](held-preference-reply-blocks-fixture-restoration.md) — A
+  failed held reply can block four tests' preference/template restoration; the conditional contamination schedule is
+  untested.

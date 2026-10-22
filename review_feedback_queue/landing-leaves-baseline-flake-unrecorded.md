@@ -44,3 +44,16 @@ do not cover either omission. No filter match was established. Proposed drop: no
 
 Provenance: original trailing-review run `a7b93df6-ca17-4bff-8608-f443575ae5e6`, `g021/f2`; held-save extension from run
 `30f46c42-a021-475f-96a8-eac06930471b`, `g006/f1`.
+
+### Additional initial-prompt recurrence
+
+Additional reviewed commits: `f49e4c0c94ff85b58ca3c1dbe7ca30ea21b0fa6c` and `9394188108a1f5e0249fb4f2dd81253d76690be6`.
+`plans/reports/gui-saves-last-write-wins.report.md:68–73` describes failures of “initial prompt survives a recent but
+clears on Clone and Replace prefills” on both plan code and unchanged main, while deferring the required FLAKES, Deflake
+TODO and exclusion entries. Searches of the tracking files at pinned tip `616d79f45d6a1d817833291429d144a5c686bb4b`
+found no matching entry. This is another test under the same recording omission, not a duplicate count of the held-save
+recurrence repeated later in that report.
+
+Confidence and bucket remain **confirmed committed omission, other**. Private runs and diagnosis were not authenticated;
+verify them before recording a cause. No product bug or flake was reproduced. No exact coverage or filter match was
+found. Provenance: run `4fae501c-3686-4822-aa6c-037266637632`, `g010/f1`. Proposed drop: none.

@@ -4,11 +4,9 @@ Reviewed commit: 08ab6e08f9ddd40b5494f2cbbeaaeb9d4e3332b7
 
 ## TLDR
 
-When removing Farhelm from a remote host fails partway and the host has since dropped its connection, choosing uninstall
-again goes ahead without checking for sessions at all, yet it still ends the host's private terminal server. Sessions
-started on that host after the failed attempt, while it was still connected, can keep running in that server after the
-supervisor goes away. The retry kills them, along with their agents and terminal tabs, without ever naming them or
-asking the user to stop them first.
+After a failed uninstall, retry without a connection can stop live sessions without checking them. One conditional
+source route uses a custom Farhelm command that becomes unavailable while the supervisor stays active. The original
+route, where the supervisor exits but its private terminal server survives, retains an unverified survival premise.
 
 ## Details
 
@@ -64,3 +62,30 @@ documentation and SPEC.md:169-171 should then state which of these the retry rel
 Reviewer's original `proposed_drop` (rejected for this remainder by the independent check): SPEC.md:157-159 and 169-171
 cover both the confirmation window and the no-connection retry. The independent reviewer agreed for the first and
 disagreed for the second, as above.
+
+### Still-active supervisor through an unavailable custom command
+
+Additional reviewed commit: `0f6ad6e0d680a518b46bf43b50ff704877931216`. A normal host registration can retain a bare
+custom executable such as `fh` (`crates/farhelm-helm/src/hosts.rs:753–787`; `store.rs:1725–1741,1779–1793,5757–5807`).
+Successful connection records identity without replacing that name (`store.rs:6628–6679`; `transport.rs:134–163`).
+Initially let `fh` resolve to a symlink of the ordinary panel-installed binary so connected uninstall's binary check
+passes.
+
+Removal deletes the unit file, then fails before stopping the supervisor (`provisioning/service.rs:1984–2005`). Sessions
+are started after that failed run ends. If `fh` subsequently becomes unavailable and the helm loses its connection, the
+supervisor can remain active while reconnect attempts fail. Probe fallback to the private binary applies only to literal
+`farhelm`, not `fh` (`provisioning/backend.rs:1252–1258,2100–2104`). Offline planning accepts absence, omits the
+nonabsolute binary check and requires the unit file gone, without rejecting this active unit
+(`service.rs:1347–1360,1422–1429`). Confirmation repeats those facts (`1847–1889`); execution stops the active service
+and its private tmux (`backend.rs:2625–2642`; `plan.rs:841–848`).
+
+Confidence for this extension: **confirmed conditional source mechanism**, without the original supervisor-exit premise.
+The custom-command disappearance and failed-uninstall history are conditions, not observed occurrence. It establishes
+unchecked process termination, not deletion of unrelated filesystem work; that separate allegation remains
+source-incomplete. Suggested bucket: highest. Possible cover remains ambiguous under deliberate-configuration and paired
+fault allowances (`SPEC.md:3181–3194,1336–1348`). The accepted window for sessions started while removal runs does not
+exactly match sessions started after its failed run ended. Fresh independent review agrees only that literal `farhelm`
+with an answering standard fallback is source-refuted; that does not exclude custom names. Proposed drop: none.
+
+Provenance: trailing review through `616d79f45d6a1d817833291429d144a5c686bb4b`, run
+`4fae501c-3686-4822-aa6c-037266637632`, `a001/f7`, scoped fallback audit `a005/x11`. No runtime reproduction.
