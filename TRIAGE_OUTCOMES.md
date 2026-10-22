@@ -17299,3 +17299,352 @@
   unchanged request and mints a new key for a changed one. Browser coverage commits a quick launch while losing its
   reply, reapplies unchanged or changed templates through both shortcut kinds, and checks request keys, session counts
   and the resulting live attachment.
+
+## launch-pill-can-cover-link-disclosure.md
+
+- Outcome: `other` (revised from `fix code` the same day).
+- Assessment: confirmed by code reading on main 0154eb35 (not run). The link-disclosure cover check (`linkCoveringRects`
+  in `crates/farhelm-ui/assets/terminal.js`) still lists only the approval cards and the tunnel error notice, so the
+  quick-launch sequence pill (`.launch-sequence-indicator`, layer 50, above the disclosure's 40) never counts as
+  covering a link's destination. Pressing a link, starting a sequence while the button is held, then releasing is the
+  route the review proposed; whether the pill really overlaps the disclosure, and the event and paint order, are
+  unverified. SPEC.md ("not covered by another Farhelm surface") already covers the pill. Bucket highest.
+- Decision: on 2026-10-21 the user chose "fix if small" for the five GUI timing windows nobody reached through real
+  input (this item, `refused-sequence-displaces-later-binding-snapshots.md`,
+  `restored-link-press-misses-intervening-drag.md`, `header-yolo-answer-may-cross-question-opening.md`,
+  `superseding-launcher-may-retain-old-replace-source.md`): fix each where a small GUI-only guard does it, discard any
+  that needs more. The user also asked whether a GUI practice is missing that keeps producing this class of finding;
+  that question is answered separately and does not change this scope.
+- Completion criteria: the pill counts as a cover for both web and file link activation; the raised refusal explanation
+  stays readable over it (pick the layer order and update the layer-ladder comment); `SPEC_impl.md`'s list of covering
+  surfaces names it. A browser regression reusing the existing cover helpers in
+  `e2e/tests/terminal-link-clicks.spec.ts`. Size gate: about 100 lines of diff (code, tests and docs, not counting this
+  ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the feedback file and
+  its index entry.
+- Revision: later on 2026-10-21 the user folded this outcome into the Near term TODO entry "Bind GUI answers to what the
+  user saw", to be planned at once, so that plan rather than a separate executor makes this fix and the two cannot
+  conflict. The assessment and completion criteria above stand as the case that plan must cover; the queue item is
+  removed now.
+- Execution: complete for the queue removal (feedback file and index entry removed in the change that recorded this
+  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw".
+
+## refused-sequence-displaces-later-binding-snapshots.md
+
+- Outcome: `other` (revised from `fix code` the same day).
+- Assessment: confirmed by code reading on main 0154eb35 (not run). The page saves an Enter snapshot of the displayed
+  template bindings whenever it believes a sequence is armed (`template-shortcuts.js`), but the app refuses Begin from
+  live state and dispatches Enter only for a non-empty queue (`list/view.rs`), so a refused sequence leaves its snapshot
+  queued. Each later keyboard batch then takes the previous batch's snapshot, and a sequence can launch with an earlier
+  template name than it showed. The verification also found that without an intervening dialog the very next sequence
+  uses the orphan directly. The stale-render trigger (Begin still enabled on the page while the app refuses it) was not
+  shown reachable. Bucket highest.
+- Decision: as for `launch-pill-can-cover-link-disclosure.md` (2026-10-21, "fix if small").
+- Completion criteria: captured Enter snapshots and dispatched batches pair one to one, so a refused or empty sequence
+  consumes or discards its own snapshot and never shifts later ones; a regression test. Size gate: about 100 lines as
+  above; the verification estimated the code at 30–50 lines but a faithful test (Begin enabled on the page while the app
+  refuses it) as awkward, so this is the item most likely to block. Over the gate, block and bring it back. Remove the
+  feedback file and its index entry.
+- Revision: later on 2026-10-21 the user folded this outcome into the Near term TODO entry "Bind GUI answers to what the
+  user saw", to be planned at once, so that plan rather than a separate executor makes this fix and the two cannot
+  conflict. The assessment and completion criteria above stand as the case that plan must cover; the queue item is
+  removed now.
+- Execution: complete for the queue removal (feedback file and index entry removed in the change that recorded this
+  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw".
+
+## restored-link-press-misses-intervening-drag.md
+
+- Outcome: `other` (revised from `fix code` the same day).
+- Assessment: confirmed by code reading on main 0154eb35 (not run). Reconnect keeps the terminal's link-gesture object
+  and only removes its listeners on teardown, so a press held through recovery keeps its state while mouse movement goes
+  unobserved; dragging away and back then releasing can still open the link. All other link gates (disclosure, file-type
+  policy, save checks) still apply. Native event and hover ordering are unverified. Bucket highest.
+- Decision: as for `launch-pill-can-cover-link-disclosure.md` (2026-10-21, "fix if small").
+- Completion criteria: the gesture object gets a reset that clears any pending press and click, called on both teardown
+  paths, resetting in place so link providers keep the object they captured; a unit test in
+  `crates/farhelm-ui/js-tests/terminal-links.test.js` (press, reset, release elsewhere, no click). Size gate: about 100
+  lines as above. Remove the feedback file and its index entry.
+- Revision: later on 2026-10-21 the user folded this outcome into the Near term TODO entry "Bind GUI answers to what the
+  user saw", to be planned at once, so that plan rather than a separate executor makes this fix and the two cannot
+  conflict. The assessment and completion criteria above stand as the case that plan must cover; the queue item is
+  removed now.
+- Execution: complete for the queue removal (feedback file and index entry removed in the change that recorded this
+  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw".
+
+## header-yolo-answer-may-cross-question-opening.md
+
+- Outcome: `other` (revised from `fix code` the same day).
+- Assessment: confirmed by code reading on main 0154eb35 (not run). The session header's YOLO confirm, stop-asking and
+  Cancel buttons act on whatever question is current (`answer_current` in `crates/farhelm-ui/src/replace.rs`), while the
+  sidebar answers the opening it rendered (`answer_stamped`). No input route that delivers an old header click to a
+  reopened question was found. The verification found this is a documented deliberate choice: `replace.rs` says header
+  answers "intentionally use the current opening instead, preserving that surface's existing live-question semantics".
+  Bucket highest.
+- Decision: as for `launch-pill-can-cover-link-disclosure.md` (2026-10-21, "fix if small"). The user answered from the
+  page before the note about the deliberate choice was added, so this reverses it on a pick made without that note; they
+  were told when the outcome was recorded.
+- Completion criteria: header buttons capture the question they rendered and answer or cancel only that opening,
+  refusing when the live question differs, like the sidebar; the comment explaining the old choice is replaced; a
+  controller unit test in `replace.rs`. Size gate: about 100 lines as above. Remove the feedback file and its index
+  entry.
+- Revision: later on 2026-10-21 the user folded this outcome into the Near term TODO entry "Bind GUI answers to what the
+  user saw", to be planned at once, so that plan rather than a separate executor makes this fix and the two cannot
+  conflict. The assessment and completion criteria above stand as the case that plan must cover; the queue item is
+  removed now.
+- Execution: complete for the queue removal (feedback file and index entry removed in the change that recorded this
+  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw".
+
+## spare-take-adopts-replaced-ready-folder.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by code reading on main 0154eb35 (not run). Taking a prepared checkout renames the ready folder
+  inside `.farhelm-spares` into a claim without checking its recorded identity, and startup's sweep later adopts and
+  removes claims that are not live, so a folder someone removed and recreated there can be deleted. The specs conflict:
+  SPEC.md's 2026-10-11 ownership paragraph makes out-of-band changes to `.farhelm-spares` unsupported while saying the
+  foreign-replacement guard still protects "a folder removed and recreated", SPEC.md's prepared-checkout section says
+  replaced directories grant no deletion authority, and SPEC_impl.md says namespace ownership never adopts a replaced
+  ready spare while a take never reads the recovery record. Bucket highest as filed.
+- Decision: on 2026-10-21 the user said this is just a spec fix and to accept the behavior.
+- Completion criteria: SPEC.md (and SPEC_impl.md where it promises otherwise) states that anything inside the reserved
+  `.farhelm-spares` container that Farhelm did not put there, including a folder removed and recreated, is out of band:
+  Farhelm may adopt and delete it, and the foreign-replacement guard does not extend inside that container. Stated as a
+  principle covering both this item and `spare-builder-cleans-detected-replacement.md`. No code change. Remove the
+  feedback file and its index entry.
+- Execution: pending.
+
+## spare-builder-cleans-detected-replacement.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by code reading on main 0154eb35 (not run). The prepared-checkout builder refuses to publish a
+  building folder that was replaced, but its cleanup then captures the replacement's current identity and removes it.
+  The building folder lives inside `.farhelm-spares`; no ordinary Farhelm operation that replaces it was found. Same
+  spec conflict as `spare-take-adopts-replaced-ready-folder.md`. Bucket highest as filed.
+- Decision: on 2026-10-21 the user said this is just a spec fix and to accept the behavior.
+- Completion criteria: covered by the same spec principle as `spare-take-adopts-replaced-ready-folder.md`; the two may
+  share one change. No code change. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## respawn-reflow-crosses-launch-excerpt-boundary.md
+
+- Outcome: `fix spec`.
+- Assessment: partly confirmed by code reading on main 0154eb35 (not run). Restart samples the pane's history size
+  before respawning and later trusts it as the boundary of the failed launch's own output (`tmux.rs`). The tmux-side
+  claim (leaving the alternate screen during respawn reflows the old primary screen into history after that sample) was
+  read from tmux 3.7c source by the reviewer and not rechecked. The excerpt goes into the session's durable error
+  detail; agents on other hosts see only the status word "error", so the old text reaches no new reader. It does
+  contradict SPEC.md: "Farhelm omits the excerpt when it cannot safely attribute the text to that launch." The
+  confidentiality reading that put it in highest does not hold; as a wrong diagnostic it is bucket other.
+- Decision: on 2026-10-21 the user chose to accept it in the spec.
+- Completion criteria: SPEC.md's failed-launch excerpt rule says the excerpt can include text from the preceding run in
+  rare cases (such as a terminal resized while a full-screen program ran), and that this is accepted. No code change.
+  Remove the feedback file and its index entry.
+- Execution: pending.
+
+## menu-focus-marker-exposes-native-address.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 0154eb35 (not run). Menu focus markers (`data-menu-focus`) are built by
+  Debug-formatting a signal ID (`menu_item_focus_key` in `crates/farhelm-ui/src/menu_panel.rs`), and the pinned
+  generational-box 0.7.10 prints its storage pointer, so the desktop page can read a native address. Only script already
+  in the page can read it, and that script already has broad helm authority; no exploit is shown. Bucket highest as
+  filed; as hardening it is closer to other.
+- Decision: on 2026-10-21 the user chose, for this theme's remaining items, to fix what is super cheap with no real
+  downside and discard the rest. This one is cheap (about 40–70 lines).
+- Completion criteria: menu wiring gets an opaque per-instance identity (for example a process-wide counter) in place of
+  the signal ID, keeping the component-remount, opening and action freshness distinctions the marker exists for; a test.
+  Size gate: about 100 lines as above; over it, discard instead of blocking, since the user asked only for super cheap
+  fixes here. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## numeric-token-regex-performance-remains-unresolved.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed on main 0154eb35 by code reading; the slowdown was measured by the reviewer. The numeric-version
+  guard in `crates/farhelm-ui/assets/terminal-files.js` lets hyphens be consumed by both its dotted-component class and
+  its optional suffix, so a near-match like `1.1` followed by thousands of hyphens and `@` backtracks roughly
+  quadratically, bounded by the 8192-unit cap: about 85–125 ms per line in Chromium and WebKit at that length. Nothing
+  shows ordinary output looks like that; bucket other on the evidence.
+- Decision: on 2026-10-21 the user chose to fix what is super cheap with no real downside and discard the rest. Triage
+  judged this super cheap if dropping `-` from the dotted-component class removes the overlap without changing which
+  ordinary version tokens the guard accepts.
+- Completion criteria: the guard no longer has two ways to consume the same hyphens; existing tests pass and a test
+  covers the long near-match staying fast and ordinary version tokens (`1.2-rc.3`, `v1.5x`, `2.0.1+build.5`) staying
+  excluded from file links. If the change is not that small, or it changes which ordinary tokens are accepted, discard
+  instead (remove the file without a code change). Remove the feedback file and its index entry.
+- Execution: pending.
+
+## repository-label-ambiguity-has-unresolved-selection-risk.md
+
+- Outcome: `discard`.
+- Assessment: confirmed presentation ambiguity on main 0154eb35 (not run): repository labels go through the
+  non-injective `display_peer` (`icons.rs`, `list/summary_card.rs`), so malformed repository metadata can produce two
+  labels that look alike. Launch validation rejects the malformed names and every session action is bound to the
+  session, not the label; no harmful choice was shown.
+- Decision: on 2026-10-21 the user chose to fix what is super cheap with no real downside and discard the rest. Triage
+  did not judge this one super cheap: changing how every repository label renders has a visible downside to weigh.
+- Completion criteria: remove the feedback file and its index entry; no spec or code change.
+- Execution: pending.
+
+## changed-host-warning-flattens-compared-identities.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 0154eb35 (not run). The changed-host warning (`changed_host_warning` in
+  `crates/farhelm-ui/src/provisioning.rs`) writes both installation identities into one string rendered once through
+  `display_peer`, so an actual U+202E and its literal spelling look the same and the values get no isolation. SPEC.md
+  says identity labels the user compares "never look alike". Adoption is a separate exact step this warning does not
+  drive; no harmful reliance was shown.
+- Decision: on 2026-10-21 the user chose to fix what is super cheap with no real downside. The narrow fix is about 30–50
+  lines.
+- Completion criteria: each identity value is spelled with the existing injective identity formatter
+  (`display_identity`) before it goes into the warning; a test that two identities differing only in a bidi control and
+  its literal spelling render differently. The structural change to per-value parts is out of scope. Size gate: about
+  100 lines; over it, discard instead. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## same-destination-recovery-loses-trash-location.md
+
+- Outcome: `discard`.
+- Assessment: the conditional mechanism is present on main 0154eb35 (`rename_exclusive_into` in
+  `crates/farhelm-supervisor/src/working_copies.rs` repoints on `AlreadyExists` and a later failure leaves the record
+  pointing elsewhere). It needs overlapping recoveries plus a filesystem that reports "destination exists" before
+  "source missing"; Linux checks the other way round and no supported filesystem with that order was found.
+- Decision: on 2026-10-21 the user chose to fix what is super cheap with no real downside and discard the rest; this one
+  is neither cheap nor shown on a supported platform.
+- Completion criteria: remove the feedback file and its index entry; no spec or code change.
+- Execution: pending.
+
+## escaped-start-remedy-changes-program-and-state-path.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 0154eb35 (not run). The supervisor-start remedy shell-quotes the program
+  and state paths, then the whole diagnostic is Debug-escaped (`peer_text` in `crates/farhelm-helm/src/manager.rs`),
+  doubling backslashes and breaking apostrophe quoting; the code's own test path `/state/fixture's data` comes out
+  broken. Pasting the command can start Farhelm on a different folder, which the reviewer traced to migrating an older
+  inactive installation there (that chain was not rechecked). SPEC.md's 2026-10-14 copied-command trust covers host
+  names, SSH destinations and the helm state path, not these paths.
+- Decision: on 2026-10-21 the user chose to fix what is super cheap with no real downside. This one is about 20–50
+  lines.
+- Completion criteria: the copyable command survives the diagnostic's final escaping unchanged, or the remedy falls back
+  to the descriptive instruction when it would not; the test checks the text after the final escaping, including an
+  apostrophe and a backslash. Size gate: about 100 lines; over it, discard instead. Remove the feedback file and its
+  index entry.
+- Execution: pending.
+
+## uninstall-plan-normalizes-containing-paths-independently.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 0154eb35 (not run), against the landed implementation (ac1cec35, "fix:
+  recognize aliased homes during host uninstall"). The uninstall inspection rewrites each path through the home alias
+  independently, keeping a rewrite only when the full path matches, and the plan checks containment as text. With the
+  home reached through a non-recursive bind mount, `~/.local/lib` symlinked into it, and a mount nested under the real
+  home that the bind lacks, the library folder is rewritten but the state folder is not, containment is missed, and
+  uninstall can remove retained data it promised to keep. Before ac1cec35 both spellings matched and uninstall refused.
+  SPEC.md (home-alias exception): "It still refuses layouts it cannot tell apart safely." The code contradicts it for
+  this layout. Bucket highest; the layout is contrived.
+- Decision: recorded as `fix code` without asking, under the 2026-10-19 clearly-settled rule (triage.md, "Preparing each
+  item"). The user's 2026-10-21 answer, given from the page before this item moved to the settled list, grouped it with
+  "fix what is super cheap, discard the rest"; they were told it was recorded this way and can revise it.
+- Completion criteria: uninstall refuses whenever the state folder is inside the removal target in either the raw
+  resolved spelling or the alias-rewritten one, so a layout it cannot tell apart is refused; a test for the mixed
+  spelling. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its
+  index entry.
+- Execution: pending.
+
+## template-preservation-promise-omits-last-write-wins.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed contract conflict on main 0154eb35. SPEC.md says "A GUI write must not undo a change an agent or
+  the command line made while that view was open", while SPEC.md's Concepts says template edits are last-write-wins with
+  no optimistic-concurrency check wanted, and SPEC_impl.md says the GUI's template and preference writes keep their
+  last-write-wins behavior. The GUI template editor saves its whole earlier draft (`list/templates.rs`) and the helm
+  upserts it unconditionally, so saving any field can put back a command an agent edited meanwhile.
+- Decision: on 2026-10-21 the user chose "spec, plus fix the failed-save case" for this item and
+  `shortcut-save-overwrites-intervening-agent-binding.md`, adding: "and to be clear spec means that this (excluding the
+  fail case) is accepted."
+- Completion criteria: SPEC.md's GUI-write preservation sentence gets an explicit exception: GUI saves of templates and
+  number-key bindings are last-write-wins against agent and command-line edits, with the GUI re-reading bindings before
+  it saves; that overwriting is accepted. The failed-save case is excluded from the acceptance (fixed under
+  `shortcut-save-overwrites-intervening-agent-binding.md`). SPEC_impl.md agrees. No code change. Remove the feedback
+  file and its index entry.
+- Execution: pending.
+
+## refused-create-retry-can-delete-restarted-session.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 0154eb35 (not run). When a retry of an interrupted create is refused for
+  an ordinary reason, rollback deletes the session by ID and drops its in-memory entry
+  (`crates/farhelm-supervisor/src/service/core.rs`, `store.rs` `delete_session`) without taking the session's lifecycle
+  lock (the retained-refusal branch does) and without checking generation, outcome or reservation. A Restart in between
+  can therefore lose its session row, leaving the new agent unlisted or killed by rollback; the successful retry path
+  rechecks in a transaction. The exact restart-during-retry ordering was not confirmed reachable. Predates the reviewed
+  range. Bucket highest.
+- Decision: on 2026-10-21 the user chose to fix it.
+- Completion criteria: the refused-retry rollback deletes the session only while it is still the untouched
+  generation-zero attempt with a pending reservation (checked in the store transaction, or under the lifecycle lock with
+  a recheck as the retained branch does); a store-level test that an advanced generation is not deleted. Size gate:
+  about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## superseding-launcher-may-retain-old-replace-source.md
+
+- Outcome: `other` (revised from `fix code` the same day).
+- Assessment: confirmed by code reading on main 0154eb35 and rechecked after the launcher-draft-model refactor on
+  004b40de (not run). Opening another source bumps the opening counter and swaps the launcher's prefill without
+  unmounting it, but the Guarded answer handler and the submit path still take the Replace source from the render-time
+  prefill and check no opening generation before submitting (`crates/farhelm-ui/src/list/create_form.rs`), so an answer
+  delivered before the rerender would replace the earlier source. The full-screen backdrop and focus trap block the
+  obvious route; no shipped route was found. Bucket highest.
+- Decision: as for `launch-pill-can-cover-link-disclosure.md` (2026-10-21, "fix if small").
+- Completion criteria: the Guarded answer captures the opening generation it rendered for and refuses when the live one
+  differs; the deferred GitHub-checkout submit stamp records that captured opening rather than the one current at the
+  click; tests extending the existing pure-function Guarded-answer tests. Size gate: about 100 lines as above. Remove
+  the feedback file and its index entry.
+- Revision: later on 2026-10-21 the user folded this outcome into the Near term TODO entry "Bind GUI answers to what the
+  user saw", to be planned at once, so that plan rather than a separate executor makes this fix and the two cannot
+  conflict. The assessment and completion criteria above stand as the case that plan must cover; the queue item is
+  removed now.
+- Execution: complete for the queue removal (feedback file and index entry removed in the change that recorded this
+  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw".
+
+## shortcut-save-overwrites-intervening-agent-binding.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code reading on main 0154eb35 and rechecked on 004b40de (not run). A number-key edit re-reads
+  the bindings, changes one key and writes the whole map with no precondition, so an agent assignment landing between
+  the read and the write is undone. After a failed save the whole local map stays unsaved and is overlaid on the next
+  fresh read (`template_bindings_after_read` in `crates/farhelm-ui/src/api.rs`), so the next edit also undoes agent
+  changes made before that read; a later key press then launches the restored template. The overlay was kept knowingly
+  when the earlier fresh-read decision (`stale-template-dialog-undoes-agent-shortcut.md`) was executed. Preference loss
+  alone would be bucket other; filed highest for the later wrong launch.
+- Decision: on 2026-10-21 the user chose "spec, plus fix the failed-save case", adding: "and to be clear spec means that
+  this (excluding the fail case) is accepted." The race between the GUI's fresh read and its write is accepted.
+- Completion criteria: spec: the exception recorded under `template-preservation-promise-omits-last-write-wins.md`
+  covers this race (one spec change for both; land it with or before this). Code: after a failed bindings save, the next
+  save no longer writes the stale whole map over what it re-read; it reapplies only the key change the user made (or an
+  equivalent that keeps agent changes made before the read); a unit test. Size gate: about 100 lines as above
+  (verification estimated 60–120, borderline); over it, block and bring it back. Remove the feedback file and its index
+  entry.
+- Execution: pending.
+
+## guarded-preview-widens-source-deletion-consent.md
+
+- Outcome: `other` (revised from `fix code` the same day).
+- Assessment: confirmed by code reading on main 0154eb35 and rechecked on 004b40de (not run). After a Guarded answer in
+  Replace with, the pending submit stamp holds the opening, preview authority, prompt and conversation but not the
+  deletion precondition, which is recomputed every render from the source's live status; when the checkout preview
+  completes, submit sends the recomputed one. A source started by another client during the wait is therefore deleted
+  unconditionally. SPEC.md (Replace with): "launching carries the precondition matching what the launcher showed at the
+  click … A source that has more alive by then, such as one restarted while the launcher was open, is kept: the new
+  session is still created first". Also SPEC.md: "a destructive confirmation authorizes only what the prompt the user
+  answered said would happen." Bucket highest.
+- Decision: recorded as `fix code` under the 2026-10-19 clearly-settled rule; the user's 2026-10-21 answer ("fix both"
+  for this item and `refused-create-retry-can-delete-restarted-session.md`) chose the same.
+- Completion criteria: the click-time deletion precondition is captured with the pending Guarded submit and sent when
+  the preview completes, so a source that became alive meanwhile is kept as SPEC.md describes; a unit test beside the
+  existing Guarded-answer tests. Size gate: about 100 lines as above; over it, block and bring it back. Remove the
+  feedback file and its index entry.
+- Revision: later on 2026-10-21 the user folded this outcome into the Near term TODO entry "Bind GUI answers to what the
+  user saw", to be planned at once, so that plan rather than a separate executor makes this fix and the two cannot
+  conflict. The assessment and completion criteria above stand as the case that plan must cover; the queue item is
+  removed now.
+- Execution: complete for the queue removal (feedback file and index entry removed in the change that recorded this
+  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw".

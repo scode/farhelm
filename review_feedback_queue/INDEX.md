@@ -12,17 +12,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   recovery with the same destination may hide retained checkout files from the trash; an affected platform is
   unverified.
 
-- [`launch-pill-can-cover-link-disclosure.md`](launch-pill-can-cover-link-disclosure.md) — Launch status may hide a
-  link's destination at activation; overlap and event timing are unverified.
-
 - [`menu-focus-marker-exposes-native-address.md`](menu-focus-marker-exposes-native-address.md) — Desktop menu IDs
   disclose a native allocation address; usefulness to a separate exploit is unverified.
-
-- [`refused-sequence-displaces-later-binding-snapshots.md`](refused-sequence-displaces-later-binding-snapshots.md) — A
-  refused sequence may displace later Enter bindings; native event reachability remains unresolved.
-
-- [`restored-link-press-misses-intervening-drag.md`](restored-link-press-misses-intervening-drag.md) — A held press may
-  activate a link after recovery misses dragging; native delivery and security impact are unverified.
 
 - [`shortcut-save-overwrites-intervening-agent-binding.md`](shortcut-save-overwrites-intervening-agent-binding.md) — A
   shortcut save can restore an older target, including a pre-read agent edit after save failure; harmful launch is
@@ -30,15 +21,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`template-preservation-promise-omits-last-write-wins.md`](template-preservation-promise-omits-last-write-wins.md) —
   The agent-edit preservation promise omits accepted template overwrites; loss from reliance is conditional.
-
-- [`guarded-preview-widens-source-deletion-consent.md`](guarded-preview-widens-source-deletion-consent.md) — A delayed
-  Guarded preview can widen consent to delete a source session that has started running.
-
-- [`header-yolo-answer-may-cross-question-opening.md`](header-yolo-answer-may-cross-question-opening.md) — An old answer
-  could authorize a reopened header question; the complete shipped input route remains unestablished.
-
-- [`superseding-launcher-may-retain-old-replace-source.md`](superseding-launcher-may-retain-old-replace-source.md) — A
-  superseded launcher could retain an earlier replacement source; normal event reachability remains unresolved.
 
 - [`numeric-token-regex-performance-remains-unresolved.md`](numeric-token-regex-performance-remains-unresolved.md) — A
   synthetic numeric-token slowdown is measured; ordinary occurrence and security impact remain unestablished.
