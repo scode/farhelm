@@ -6,6 +6,115 @@ This is the exclusive starting point for the next trailing code review of `main`
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
 
+## Incomplete review toward 616d79f4
+
+Pinned range: `5c6e49937b1e779be2a5445059637aadf3757356..616d79f45d6a1d817833291429d144a5c686bb4b`, 341 commits. The
+review is **incomplete**. `Last reviewed commit` remains unchanged; merging this result does not advance it.
+
+The first 258 commits explicitly reuse private run `30f46c42-a021-475f-96a8-eac06930471b` and its earlier run
+`a7b93df6-ca17-4bff-8608-f443575ae5e6`. All 1,221 prior individual patch parts were compared with immutable Git history,
+and all 213 delivery audits were rerun successfully. The 207 completed prior reviewer identities did not perform new
+searches. Six incomplete identities continued on their original threads. New recorded decisions settle five of those
+historical blockers; the sixth has a distinct same-opening Cancel lead below.
+
+The additional 83 commits contain 330 patch parts assigned exactly once to 75 new bounded functional groups. Across both
+inventories, all 1,551 individual commit/file patch parts are assigned, including intermediate changes and deleted text.
+Mandatory groups remain within 2,000 lines and 64 KiB, including the complete commit list. Surrounding source and
+coverage sections were inspected selectively, not exhaustively across the repository.
+
+Twelve reviewer identities stop on these substantive source or causal gaps:
+
+- Resumed `legacy-g125` and fresh `a010`: the same-opening permanent Replace answer can leave a Cancel callback able to
+  clear admitted recovery identity. Locked framework source establishes the bridge/render boundary, but not trusted
+  native Cancel delivery before the disabled edit. Partial creation could duplicate a replacement; work-loss impact is
+  unproved. The old cross-opening ledger disposition does not cover this trigger.
+- `g027`, `g041`, `g042` and `a012`: source reseeding retains a conversation selector, but no accessible shipped
+  source-opening action after editing was established through modal barriers. Direct owner tests prove retention, not
+  reachability. Narrow ordinary-route withdrawals do not settle the full conditional lead.
+- `a017`: loading Cancel lacks the ordinary operation guard, but no shipped input/render route delivering it after
+  admission was established. This removes a launcher rather than clearing the permanent-answer question's key, so it is
+  a separate lead. Harmful duplication also remains unproved.
+- `g060`: no shipped summary publication retaining the open template-number menu was established. `g066`: no supported
+  font/glyph example established a complete untracked row-height change. Neither empty finding log means a clean review.
+- `g036`: pre-POST key minting can still be pending at cleanup, but the exact Playwright route-removal-to-page-disposal
+  ordering remains unestablished. Unlike the confirmed neighboring tests, this cleanup has no subsequent await providing
+  a live-form interval. No additional verified cleanup instance is claimed.
+- `g073`: manual startup advice visually collapses repeated path spaces; clipboard serialization and a supported harmful
+  alternate-installation chain remain unestablished. The existing whitespace record retains the confirmed presentation
+  mismatch and stronger conditional concern separately.
+- `a001`: a custom-command disappearance route to unchecked termination of a still-active supervisor is established and
+  extends the existing offline-uninstall item. The separate allegation of deleting unrelated filesystem work through an
+  omitted binary check still lacks a supported history.
+
+These groups have complete mandatory text delivery. Their gaps are substantive premises, not skipped patches or merely
+unmeasured frequency. They stop under the stuck-investigation rule; nominal empty searches were not used to claim
+completion. Other progressing groups finished later synthesis and separate credible empty discovery on their original
+identities. Verified new discoveries received further searches. The final ledger distinguishes newly verified findings
+from duplicates, refutations and the unresolved Cancel discovery.
+
+There are 12 new queue records: eight provisionally highest, zero high and four other. The highest records concern two
+conditional home-alias uninstall layouts, two shortcut-indication/dispatch mismatches, the permanent-answer Cancel lead,
+retained conversation selector, loading Cancel lead, and a desktop recovery menu displaced by header wrapping. The
+configured uninstall and shortcut mechanisms are source-established, but actual loss, harmful admitted template
+configuration and consequential reliance remain unproved. Support scope and failed-save acceptance remain ambiguous. The
+three source-incomplete launcher leads are not promoted into verified reachable defects by their conservative buckets.
+
+The desktop recovery schedule was resolved using locked Dioxus 0.7.10 and reqwest 0.13.5 source: native recovery can
+replace Err before equally ranked dirty rows rerender, retaining menu coordinates while the count heading changes. An
+independent auditor could not approve whole-finding exclusion as a rare visual glitch because Stop has no second naming
+confirmation. Actual wrapping and mistaken activation remain unmeasured. An intermediate local-remedy placement omission
+was independently verified repaired by later commit `2f83c53ed5d3cab2637b847e9a788473e42e87eb`; its historical defect
+and unresolved harmful-reliance interpretation remain in the private dispositions, without a new current-tip record.
+
+The four other records concern a bypassed maintainer size-decision gate, a subscription-test oracle that masks missing
+observers, repeated prefix work even with popovers closed, and failed held-reply cleanup blocking shared test-state
+restoration. Material supported-scale latency is unmeasured; malicious-host native availability acceptance is kept
+separate from ambiguous browser scope. No production subscription omission, catastrophic tooling harm or runtime fixture
+escape was demonstrated.
+
+Eleven existing items are extended or corrected. Additional evidence concerns baseline-flake bookkeeping, local
+picker/triage-page trust, inherited Goose nonces, Grok's explicit no-change-on-refusal contract, tmux scope termination,
+the stale retry takeover, macOS tunnel evidence, raw uninstall-path copying, pending-mint test cleanup, manual startup
+whitespace, and offline uninstall. Stronger old claims were corrected rather than left definite beside new caveats.
+Ordinary successful uninstall rejects line feeds/Cc controls before ForgetHost, while independent other-window removal
+can expose an owed notice after failure. The takeover transaction still admits advanced generations, but active Restart
+is locked and unpublished Restart-with failure alone does not prove loss of a newly stored launch.
+
+Fresh auditors checked possibly-highest proposed exclusions, including withdrawn candidates and prose-only hypotheses.
+Their agreements cover exact recorded decisions, source equivalence, matching-key/installation/opening admission,
+generation-fenced refusal rollback, private launch-artifact retention, scoped marker payloads and raw-versus-displayed
+identity separation. They do not establish general subsystem safety. Ambiguous exclusions remain recorded with their
+possible coverage. No finding was fixed or triaged.
+
+Reviewers used Codex `gpt-6.1-sol`, high reasoning, with at most 19 concurrent children. Across reused and new evidence
+there are 305 distinct identities: 214 primary groups and 91 independent auditors. Of these, 293 meet the protocol and
+12 remain incomplete. The current continuation has 75 new primary groups, 17 fresh auditors and six resumed identities.
+The two affected delivery audits (`g007`, `g030`) encountered unsupported `function_call` records. The user explicitly
+authorized targeted manual inspection; actual delivered output was matched to pinned text, preserving the original
+failed helper audits. The helper was neither changed nor bypassed by sanitized transcripts. Other audits succeeded
+through the launcher; incomplete packet audits, including a supplemental report's final provenance line, were repaired
+on the same reviewer identities.
+
+Evidence remains private under run `4fae501c-3686-4822-aa6c-037266637632`. `completion.md` is the compact record;
+`completion.json` contains stable assignments, manifests, identities, actual turn/attempt counts, synthesis/discovery
+passes, audit references and stop reasons. `dispositions.json` preserves latest finding identities, revision/withdrawal
+history, retained records, exact scoped exclusion evidence and candidates from delivered final replies, with references
+to both prior disposition sets. Each group retains its append-only findings, progress, reports and audits. Supplemental
+auditor inputs have separate delivery audits. Delivery proves neither attention nor understanding, correctness or
+exhaustiveness.
+
+Recording-time main is `4fe949f08db9ad6824d864a318eec8e1e9fadaad`, one later plan-report commit. Its checkpoint, queue,
+specifications, Planned bucket, known bugs and ledger were unchanged from the pinned tip. The clean working copy moved
+to that main before recording. A later fetch found the same main and checkpoint. Later commits are outside this review
+and are not claimed reviewed.
+
+This continuation was source-only. No product runtime, browser, native Mac, vendor-agent or filesystem-fault test ran,
+and no historical runtime pass was reused as current evidence. Private historical runtime reports and maintainer
+conversations were not authenticated. This result changes only queue records, their index and this incomplete-review
+note. Validation covers changed Markdown, whitespace, queue/index consistency, record fields, assignments and
+instruction pointers. The result stays a draft PR for separate manual review and merging; no checkpoint advancement is
+proposed.
+
 ## Incomplete review toward 2ea2826c
 
 Pinned range: `5c6e49937b1e779be2a5445059637aadf3757356..2ea2826caa0eec867c4e2bddc01badbac7bbe6c7`, 258 commits. The

@@ -4,11 +4,10 @@ Reviewed commit: 08ab6e08f9ddd40b5494f2cbbeaaeb9d4e3332b7
 
 ## TLDR
 
-A create can be interrupted, for example by a supervisor crash. Its session then shows up never launched, and the
-create's request stays open for a retry. If you restart that session and the restart fails ambiguously with its terminal
-gone, a later retry of the original create treats the session as never launched. Farhelm then throws away the session's
-current record, including a Restart with choice and any remembered conversation, and starts the original create's
-command in it again. If the failed restart left an agent running in the background, that agent is duplicated.
+After an interrupted create and a later ambiguous Restart failure, a stale create retry may treat the session as never
+launched and replace its record with the original launch. The transaction permits the advanced generation, but a
+complete supported sequence losing a newly stored Restart-with choice or duplicating a surviving agent remains
+unestablished. An in-flight Restart is protected by its lifecycle claim.
 
 ## Details
 
@@ -40,8 +39,8 @@ Mechanism:
   sentinel and whether the tmux session exists now; its comment states the assumption outright ("a reservation's session
   is one this create is still trying to launch for the FIRST time"). A same-key retry therefore reads Absent, and the
   takeover returns Acquired. It deletes the row and reinserts the create-time row (core.rs 9573-9605), which reverts a
-  Restart with launch (store.rs 4764-4792), clears the captured conversation, and relaunches the original command. An
-  agent the failed restart left running in its generation-1 scope keeps running beside it.
+  stored launch if that differs (store.rs 4764-4792), clears the captured conversation, and relaunches the original
+  command. A surviving generation-1 agent would then run beside it; that survivor shape is unestablished.
 - Precondition: a Pending reservation on a session the user can restart. TRIAGE_OUTCOMES.md
   "archived-retry-resurrects-session.md" confirms that an interrupted keyed create can leave exactly that.
 
@@ -72,3 +71,20 @@ Possible cover, for triage to judge: SPEC.md "Lifecycle operations", 2026-10-10 
 "refused-create-retry-can-delete-restarted-session.md" (sibling, different mechanism, see above); TRIAGE_OUTCOMES.md
 "archived-retry-resurrects-session.md" (the same takeover class for archived sessions, closed by removing Archive; does
 not cover restarted sessions).
+
+### Later review correction
+
+Additional reviewed commit: `22059381631d91901a44fb70c49dab2f9ab24223`,
+`plans/reports/refused-retry-rollback-fence.report.md`, and product source rechecked at
+`b228a4e5b850c4dde87f1e661494984a9bb33d7f`. The report's active-Restart overlap is refuted: the lifecycle claim was
+moved into the owned task, so takeover waits for Restart settlement. The remaining concern starts after an ambiguous
+failure, not while that claim is held.
+
+Restart with records the new stored launch only after successful publication (`store.rs:4765–4787`). An unpublished
+failure alone therefore does not prove that takeover reverts a newly chosen stored launch. The original record's
+definite claim was too strong. The generation-admitting takeover transaction remains, but its complete
+survivor/record-loss chain and exact coincident-fault acceptance remain unresolved. Fresh independent review agreed with
+this narrowing, not a whole-item exclusion. Suggested bucket remains provisionally highest; no loss was reproduced.
+
+Provenance: trailing review through `616d79f45d6a1d817833291429d144a5c686bb4b`, run
+`4fae501c-3686-4822-aa6c-037266637632`, `g007/f1`, `a006/f1`, `g074` synthesis. No runtime reproduction.

@@ -46,10 +46,11 @@ How to verify: start two Goose sessions S1 and S2 through Farhelm. In S1's agent
 `goose session --resume --session-id <S2's conversation>` (or `goose run --resume`), then check S1's stored conversation
 id or its Restart target. For the sub-agent case, have S1's agent use a Goose sub-agent and check the same.
 
-Fix sketch (the reviewers'): pin Goose reports to the session's foreground Goose process, as Codex reports are pinned;
-or have the supervisor mint a per-launch nonce in the gate that the report must match; or have the reporter refuse when
-it is not under the session's own agent process. The lore note's preserved strict design (tag
-`goose-capture-complex-2026-09-23`) also checked Goose's own store for a root session with no parent.
+Fix constraint: establish foreground conversation ownership, not only launch membership. An inherited per-launch nonce
+also reaches nested reporters and cannot distinguish them. Process attribution alone cannot distinguish native children
+sharing the foreground OS process. A non-inherited/root-conversation discriminator is needed for those cases. The lore
+note's preserved strict design (tag `goose-capture-complex-2026-09-23`) also checked Goose's store for a root session
+with no parent.
 
 Suggested bucket: highest (resuming the wrong conversation and losing the valid Resume offer). The 144 reviewer leaned
 `high` because the original conversation is not deleted; the 145 reviewer said highest.
@@ -102,3 +103,10 @@ Added from group 205 (finding f2), confidence likely, suggested bucket highest:
 
 Related: `pi-child-report-replaces-resume-target.md` records the same missing ownership check for Pi, under the same
 SPEC.md sentence; triage will probably want to decide the two together.
+
+Remedy correction provenance: reviewed commit `9d266e28595e8c2c07b378174f35eedf84258a70`, trailing-review run
+`4fae501c-3686-4822-aa6c-037266637632`, `g019/f1`. Source at this record's original revision confirms inherited controls
+(`agent_kind/goose.rs:57–70,111–126`; CLI `main.rs:1477–1503`). The preserved research at
+`lore/2026-09-23-goose-session-tracking.md:9–13,20–28,32–47` and `SPEC_impl.md:2995–2997` at the additional reviewed
+commit distinguish process attribution from root-role proof. This corrects guidance only; it neither resolves coverage
+of the highest product concern nor independently verifies vendor behavior. No runtime reproduction or proposed drop.

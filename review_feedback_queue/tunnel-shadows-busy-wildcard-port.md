@@ -58,9 +58,16 @@ Possible cover, for triage to judge (the reviewer's `proposed_drop`): `TRIAGE_OU
 "tunnel-port-can-divert-local-traffic.md" (2026-10-18, `fix spec+code`, PR #2364) triaged same-port diversion in
 general. The user called the port behavior "aids, not safeguards" and chose a warning sentence. That record explicitly
 lists as unverified "whether address reuse on macOS lets a tunnel take 127.0.0.1:port while another program holds the
-same port on all addresses", which this finding answers from source. The warning that decision added says a tunnel uses
-the remote port "when free, so a Mac program expecting that port may reach the remote host instead"; it is conditioned
-on the port being free, and hijacking a running local service is a different consequence from taking a free port. The
-same SPEC.md section says its acceptances never relax the remote-host boundary. Related but separate:
-`tunnel-can-take-standalone-helm-port.md` (a tunnel on the helm's own port) and
+same port on all addresses", which this finding does not yet answer from matching operating-system source. The warning
+that decision added says a tunnel uses the remote port "when free, so a Mac program expecting that port may reach the
+remote host instead"; it is conditioned on the port being free, and hijacking a running local service is a different
+consequence from taking a free port. The same SPEC.md section says its acceptances never relax the remote-host boundary.
+Related but separate: `tunnel-can-take-standalone-helm-port.md` (a tunnel on the helm's own port) and
 `removed-host-strands-tunnel-listeners.md`.
+
+Evidence correction provenance: reviewed commit `9d266e28595e8c2c07b378174f35eedf84258a70`, trailing-review run
+`4fae501c-3686-4822-aa6c-037266637632`, `g022/f4`. Mio's option setting establishes neither successful macOS wildcard
+coexistence nor subsequent routing. Those are missing source premises, not just unmeasured frequency. The original
+review did not inspect matching XNU/BSD conflict and delivery paths or run the proposed check. Preserve the highest
+conditional allegation and its partial coverage; no whole-item exclusion or runtime verification follows from this
+wording correction.
