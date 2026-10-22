@@ -382,7 +382,14 @@ impl<K> ConfirmToken<K> {
 /// changes before leaving?" prompt is the third: its "save" answer leaves the
 /// prompt up through the save and after a failed one, the save's success
 /// retires it, and the dialog's busy flag refuses its other answers
-/// meanwhile. Every other prompt answers through `take`.
+/// meanwhile. The fourth is a session's Replace YOLO question answered with
+/// "don't ask again" (`ReplaceController::answer_session` in `replace.rs`):
+/// it stays up while the host setting saves, and the save's success
+/// retires it. Unlike the other three, nothing yet refuses a second answer
+/// meanwhile, so a Cancel queued with that answer still matches, closes
+/// the question while the Replace carries on, and leaves a failed save's
+/// reason with no question to show it on. Every other prompt answers
+/// through `take`.
 ///
 /// `Copy` because it is a handle to a signal, like [`OpLock`]. Render code
 /// uses the tracked readers ([`Self::is_open`], [`Self::current`]);

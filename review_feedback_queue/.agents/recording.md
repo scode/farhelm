@@ -60,6 +60,10 @@ Tell each reviewer:
   requires; those artifacts supplement the final reply and stay outside the checkout.
 - Do not spawn nested helper agents. In the audited run, helpers' caveats and dropped candidates were not carried
   forward by the reviewers that spawned them.
+- Flag a GUI handler that decides what a user-confirmed action acts on by reading live state when it runs (whichever
+  prompt or dialog is open, the current list, a precondition recomputed at send time) instead of using what the render
+  the user acted on showed. `SPEC_impl.md`, "GUI: Dioxus" (the paragraph "Answers bind to what was drawn"), states the
+  rule and the mechanism every prompt answers through. Reviews kept finding such handlers one at a time.
 - End the reply with three parts:
   - the findings, each with the template's fields plus a suggested bucket, a confidence (confirmed, or likely with the
     unverified premise named), `proposed_drop` and `possible_cover`;

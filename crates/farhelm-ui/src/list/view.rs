@@ -1082,6 +1082,10 @@ pub(crate) fn ListView(
     let mut auto_launch = use_signal(|| false);
     // One opening generation fences the fresh read and any queued DOM submit.
     // Ordinary New, Clone/Replace and Templates revoke it synchronously.
+    // It names an opening of the launcher, which answers and deferred work
+    // check before acting; it is not itself an answer to a prompt, so it
+    // deliberately stays outside `ops::ConfirmSlot` (SPEC_impl.md,
+    // "GUI: Dioxus", the paragraph "Answers bind to what was drawn").
     let mut opening_generation = use_signal(|| 0_u64);
     // Diagnostic settlement only, so held-read tests can observe a revoked
     // continuation actually finishing instead of using a delay as proof.

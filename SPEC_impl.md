@@ -774,6 +774,37 @@ Delete question on Escape, releases its lifecycle claim and returns focus to the
 dialogs retain quiet scripted focus and independent Escape selectors; trash focuses and scrolls its confirming answer
 into view. YOLO and Restart with keep their Cancel default.
 
+**Answers bind to what was drawn.** A handler for something the user answered or confirmed acts on what the render that
+drew the control showed, never on state it reads when it runs. A click or key can be handled after later renders, a
+desktop round trip or a listing refresh, so state read at that point may describe a prompt, a target or a precondition
+the user never saw. Review kept finding handlers that read it anyway, while the surfaces that did bind correctly each
+had their own check, so binding now goes through one mechanism instead of being left to each handler. Every question,
+confirmation and destructive prompt goes through `ConfirmSlot` in `crates/farhelm-ui/src/ops.rs` (or `ConfirmSlots`, its
+per-row form for the sidebar rows, whose questions coexist and outlive the row components): opening a prompt mints an
+opening number from one process-wide counter, the render that draws the prompt reads that token with what the prompt
+shows, every button carries the token, and an answer whose token is not the open one does nothing and leaves the current
+prompt up, with no notice. The slot's answer methods (`take`, `cancel_for`, `is_current`) all require a token, and no
+token can be made outside `ops.rs`; what keeps a handler from fetching the live token at click time and answering with
+it is convention, stated in `ConfirmSlot`'s docs and checked by review (`review_feedback_queue/.agents/recording.md`).
+Four prompts stay up through the request their answer starts (host Remove, the desktop tunnel warning, the templates
+editor's "Save these changes before leaving?" prompt, and a session's Replace YOLO question answered with "don't ask
+again", which waits for the host setting to save); they accept an answer while its token is still the open one and let
+the request's outcome retire the prompt, and `ConfirmSlot`'s docs name them as the only exception. The first three
+refuse a second answer while their request runs; the YOLO question does not yet, so a Cancel queued with its "don't ask
+again" still closes it while the Replace carries on, and a failed save then has no question to report on. Destructive
+preconditions travel the same way: the launcher's Guarded answer submits the Replace with precondition and the launcher
+opening of the render the user answered, and its YOLO answers refuse once the launcher has moved to another opening and
+otherwise submit the precondition their render showed, so nothing is recomputed at send time. Two counters stay outside
+the mechanism on purpose, because neither binds an answer to a prompt: the launcher's opening generation identifies one
+opening of the launcher (answers and deferred work check that their opening is still the current one), and the approval
+cards' arm generation times the 700 ms pause SPEC.md names, while the answers themselves are bound by the helm's request
+id. Input the page holds across time is retired when its owner stops observing: a held terminal link press is dropped
+whenever the terminal removes its pointer listeners (as it does when it reconnects), and each snapshot of a quick-launch
+key press is used or dropped by exactly the launch it was taken for, with any still waiting dropped when the sidebar
+list goes away. The link covers under "Session-host file reads" apply the same rule to the destination preview: a
+surface that can hide it marks itself in its own markup, so counting a new cover no longer depends on updating a central
+list.
+
 The dialog installers share a pointer rule: primary mouse-down on unused space cancels the browser's focus change, but
 controls and text keep their native behavior. An Enter listener runs only when the dialog container itself has focus; it
 submits the launcher form or clicks the dialog's named main button. The selector is resolved at keypress time so a
