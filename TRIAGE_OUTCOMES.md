@@ -17466,7 +17466,12 @@
   the signal ID, keeping the component-remount, opening and action freshness distinctions the marker exists for; a test.
   Size gate: about 100 lines as above; over it, discard instead of blocking, since the user asked only for super cheap
   fixes here. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/cheap-ui-hardening-oct21.md`.
+- Execution: complete in jj change `wmsyqkvrxtwszqnpuwqruxnzruqyxszz`, bookmark
+  `plan/cheap-ui-hardening-oct21/01-menu-marker-id`. Each mounted menu now draws a number from a process-wide counter
+  once per mount, and its focus markers carry that in place of the signal ID. The code, test and documentation total
+  about 120 added/deleted lines: about 35 for the code and its documentation, about 85 for the test. That is a fifth
+  over the gate's nominal 100 lines; it was kept as a fix because the gate is approximate and the code itself is well
+  inside the triage estimate of 40–70 lines. PR: https://github.com/scode/farhelm/pull/2569/changes.
 
 ## numeric-token-regex-performance-remains-unresolved.md
 

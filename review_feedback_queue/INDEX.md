@@ -8,9 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`menu-focus-marker-exposes-native-address.md`](menu-focus-marker-exposes-native-address.md) — Desktop menu IDs
-  disclose a native allocation address; usefulness to a separate exploit is unverified.
-
 - [`shortcut-save-overwrites-intervening-agent-binding.md`](shortcut-save-overwrites-intervening-agent-binding.md) — A
   shortcut save can restore an older target, including a pre-read agent edit after save failure; harmful launch is
   unverified.

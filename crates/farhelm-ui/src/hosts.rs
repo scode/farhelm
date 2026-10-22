@@ -3526,6 +3526,7 @@ fn HostRow(
     let mut toggle_handle = use_signal(|| None::<Rc<MountedData>>);
     let placement = use_signal(|| PanelPlacement::Unmeasured);
     let mut item_handles: HostMenuItemHandles = use_signal(HashMap::new);
+    let menu_instance = menu_panel::use_menu_instance();
     let mut menu_focus = use_signal(|| None::<usize>);
     // The last position a keyboard step asked focus to move TO — see
     // `MenuWiring::requested`'s own doc for why this has to exist
@@ -3600,6 +3601,7 @@ fn HostRow(
         requested: menu_requested,
         open_intent,
         close_menu: on_menu_toggle,
+        instance: menu_instance,
     };
     // The item set can change UNDER an open menu exactly the way the
     // session row's can: a poll landing while the menu is open can flip

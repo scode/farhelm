@@ -17,7 +17,7 @@ use crate::menu_panel::{
     MenuFocusQueue, MenuOpenIntent, MenuOrder, MenuWiring, PanelPlacement, ROW_MENU_OUTSIDE_RELAY,
     cancel_menu_focus, closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus,
     handle_menu_key, install_row_menu_outside_dismiss, measurement_outcome, record_menu_item_focus,
-    remember_menu_item, session_menu_placement_style,
+    remember_menu_item, session_menu_placement_style, use_menu_instance,
 };
 use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus};
 use crate::peer::{PeerText, display_peer};
@@ -256,6 +256,7 @@ fn NumberShortcutMenu(
     let mut placement = use_signal(|| PanelPlacement::Unmeasured);
     let mut toggle = use_signal(|| None::<Rc<MountedData>>);
     let mut handles = use_signal(HashMap::new);
+    let instance = use_menu_instance();
     let mut focused = use_signal(|| None::<usize>);
     let mut requested = use_signal(|| None::<usize>);
     let mut intent = use_signal(|| None::<MenuOpenIntent>);
@@ -319,6 +320,7 @@ fn NumberShortcutMenu(
         requested,
         open_intent: intent,
         close_menu,
+        instance,
     };
     let mut begin = move |opening: MenuOpenIntent| {
         generation += 1;

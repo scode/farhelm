@@ -1267,6 +1267,7 @@ pub(super) fn SessionRow(
     // and each one is a strong `Rc` keeping a dead DOM node alive with
     // it.
     let mut item_handles: MenuItemHandles = use_signal(HashMap::new);
+    let menu_instance = menu_panel::use_menu_instance();
     // Which item currently holds keyboard focus, as a position in this
     // render's `MenuOrder`, or `None` when focus is not on an item at
     // all. Two things read it and each needs it to mean exactly that: the
@@ -1458,6 +1459,7 @@ pub(super) fn SessionRow(
         requested: menu_requested,
         open_intent,
         close_menu: on_menu_toggle,
+        instance: menu_instance,
     };
     // Ending a session withdraws mark-seen from an open menu. Losing the
     // seen-state field would do the same; the predicate does not assume it

@@ -57,6 +57,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::html::geometry::PixelsRect;
 use dioxus::prelude::*;
@@ -307,16 +308,29 @@ pub(crate) fn install_menu_focus() {
     document::eval(include_str!("../assets/menu-focus.js"));
 }
 
+/// Mint the opaque number that names one mounted menu in its focus markers.
+///
+/// Call it from the component (or menu-state hook) that owns the menu's other
+/// signals, so the number lives exactly as long as that mount: a remount gets
+/// a new one, and a rerender keeps the old one. Keeping it per mount is what
+/// lets a held focus request survive the rerenders its own key presses cause.
+/// A process-wide counter rather than anything derived from a signal, because
+/// a signal's ID formats as its storage pointer and the marker is page-visible.
+pub(crate) fn use_menu_instance() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    use_hook(|| NEXT.fetch_add(1, Ordering::Relaxed))
+}
+
 /// Name one action without reusing its marker after a close or a component remount.
-/// The generational signal ID separates menu instances; the open generation
+/// The per-mount instance number separates menu instances; the open generation
 /// prevents an old bridge request from finding a freshly mounted replacement.
 pub(crate) fn menu_item_focus_key<A: std::fmt::Debug, Id: 'static, const N: usize>(
     wiring: MenuWiring<A, Id, N>,
     action: A,
 ) -> String {
     format!(
-        "{:?}-{}-{action:?}",
-        wiring.handles.id(),
+        "{}-{}-{action:?}",
+        wiring.instance,
         wiring.generation.peek()
     )
 }
@@ -511,6 +525,9 @@ pub(crate) struct MenuWiring<A: 'static, Id: 'static, const N: usize> {
     /// The row's own close path — the parent's toggle callback, which is
     /// the same one a click on the "⋯" uses.
     pub(crate) close_menu: EventHandler<Id>,
+    /// This menu's mount, from [`use_menu_instance`]; the part of each focus
+    /// marker that tells two menus, or two mounts of one menu, apart.
+    pub(crate) instance: u64,
 }
 
 // Written by hand rather than `#[derive(Clone, Copy)]`: the derive macro
@@ -2156,6 +2173,89 @@ mod tests {
         assert_eq!(
             reconcile_menu_focus(before, after, Some(2), false),
             MenuFocusReconciliation::Moved(1)
+        );
+    }
+
+    /// The focus marker lands in a page-visible attribute, so it must not
+    /// carry a signal ID, which formats as a native storage pointer. It still
+    /// has to tell menus apart and survive rerenders: a held focus request
+    /// finds its item by an exact marker match, so a marker that changed per
+    /// render would lose it, and one shared across mounts could land on a
+    /// replacement. Two mounted menus, a rerender of one, and a remount of the other.
+    #[farhelm_testtrace::test]
+    fn focus_markers_are_opaque_per_mount_and_stable_across_rerenders() {
+        use std::cell::{Cell, RefCell};
+        thread_local! {
+            static KEYS: RefCell<Vec<(u8, String)>> = const { RefCell::new(Vec::new()) };
+            static CONTROLS: Cell<Option<(Signal<u8>, Signal<bool>)>> = const { Cell::new(None) };
+        }
+        #[component]
+        fn Probe(slot: u8, tick: u8) -> Element {
+            let wiring: MenuWiring<u8, (), 1> = MenuWiring {
+                order: MenuOrder::pack([tick], |_| true),
+                handles: use_signal(HashMap::new),
+                focus: MenuFocusQueue {
+                    target: use_signal(|| None),
+                    in_flight: use_signal(|| None),
+                    draining: use_signal(|| false),
+                },
+                generation: use_signal(|| 0),
+                focused: use_signal(|| None),
+                requested: use_signal(|| None),
+                open_intent: use_signal(|| None),
+                close_menu: use_callback(|()| ()),
+                instance: use_menu_instance(),
+            };
+            let key = menu_item_focus_key(wiring, 0_u8);
+            KEYS.with(|keys| keys.borrow_mut().push((slot, key)));
+            rsx! {}
+        }
+        fn app() -> Element {
+            let (tick, show) = (use_signal(|| 0_u8), use_signal(|| true));
+            CONTROLS.with(|cell| cell.set(Some((tick, show))));
+            rsx! {
+                Probe { slot: 0, tick: tick() }
+                if show() { Probe { slot: 1, tick: 0 } }
+            }
+        }
+        // How often a menu has rendered, and the marker it rendered last.
+        let seen = |slot| {
+            KEYS.with(|keys| {
+                let keys = keys.borrow();
+                let mine: Vec<_> = keys.iter().filter(|(s, _)| *s == slot).collect();
+                (
+                    mine.len(),
+                    mine.last().map(|(_, key)| key.clone()).unwrap_or_default(),
+                )
+            })
+        };
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let (mut tick, mut show) = CONTROLS.with(Cell::get).unwrap();
+        let ((first_renders, first), (_, second)) = (seen(0), seen(1));
+        for key in [&first, &second] {
+            assert!(
+                key.split('-')
+                    .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())),
+                "marker {key:?} holds only counters and the action, nothing pointer-shaped"
+            );
+        }
+        assert_ne!(first, second, "two mounted menus get distinct markers");
+        let mut step = |change: &mut dyn FnMut()| {
+            dom.in_runtime(&mut *change);
+            dom.render_immediate(&mut dioxus::dioxus_core::NoOpMutations);
+        };
+        step(&mut || tick += 1);
+        assert!(seen(0).0 > first_renders, "the first menu rerendered");
+        assert_eq!(seen(0).1, first, "a rerender keeps the marker");
+        step(&mut || show.set(false));
+        let second_renders = seen(1).0;
+        step(&mut || show.set(true));
+        assert!(seen(1).0 > second_renders, "the second menu mounted again");
+        assert_ne!(
+            seen(1).1,
+            second,
+            "a remounted menu does not reuse its old marker"
         );
     }
 }
