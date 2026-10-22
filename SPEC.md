@@ -3288,10 +3288,19 @@ as it stays proportionate.
 Confirmed 2026-10-01: the desktop app is the primary supported surface. Decided 2026-10-02: the desktop app never
 involves a user-visible credential, and the split between its embedded helm and its window is an implementation detail.
 Its own credentials are not revoked by browser sign-in token rotation or evicted by the cap on remembered client
-credentials, so in ordinary operation it never signs in again. When a browser has to sign in again, for example after
-the browser sign-in token was rotated or its device credential was evicted, that recovery may reset the page and lose
-open forms, dialogs and drafts. Friction in the browser's token prompt is acceptable too. Do not spend significant
-complexity preserving UI state across a sign-in.
+credentials, so in ordinary operation it never signs in again.
+
+Decided 2026-10-22: when a browser GUI's sign-in expires (the browser sign-in token was rotated, its device credential
+was evicted, or the helm otherwise stops accepting it), the browser is treated as if the interface were reloaded from
+scratch. Everything the page held that the helm had not accepted is lost: open forms, dialogs and drafts, unsaved edits,
+a save or click that failed or was cut off because the sign-in had expired (including one that happened just as it
+expired), pending retries and queued reconciliation. After signing in, the page starts over from what the helm reports;
+nothing is replayed, restored or merged back, and the user redoes what was lost. Recovery is a literal page reload, or
+as close to one as the browser allows. The browser keeps its credential in local storage, so a reload does not by itself
+require signing in again; where that does not hold, the token prompt simply reappears, and no mechanism is added to
+avoid it. Spend no complexity making browser sign-in expiry fine-grained or preserving any browser state across it,
+however narrow the case. Work the helm already accepted is unaffected, since it is the helm's. Friction in the browser's
+token prompt is acceptable too.
 
 Three things still hold. In the desktop app, an action the user started is never lost silently: it either completes and
 reports its outcome, or reports that its outcome is unknown. The browser is excepted: an action still pending when its
@@ -3323,6 +3332,11 @@ GUI must behave correctly, and the best-effort qualifier above applies only to s
 
 A GUI write must not undo a change an agent or the command line made while that view was open; the view's display may
 lag until the next interaction.
+
+Decided 2026-10-22: a GUI save that fails, for any reason and in the browser or the desktop app, is reported to the user
+and then discarded. The GUI does not keep the change it tried to save, does not treat it as the current state, and does
+not retry or replay it later; the next view or save starts from what the helm reports, and the user redoes the change if
+they still want it. Reporting the failure keeps the rule that an action is never lost silently (see Signing in again).
 
 Confirmed 2026-10-10: an action a user takes inside a sub-second window before the screen updates, or in a dialog hidden
 behind another, may be carried out as delivered. A Cancel and a submit of the same dialog that arrive together before a
