@@ -77,7 +77,9 @@ use crate::modal_dialog::{
     DialogFocus, DialogHandle, FocusTarget, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
 };
 use crate::ops::{OpGuard, OpLock, ReadGate};
-use crate::peer::{DetailPart, PeerBlock, PeerBlockBody, PeerLine, PeerText, display_peer};
+use crate::peer::{
+    DetailPart, PeerBlock, PeerBlockBody, PeerLine, PeerText, display_identity, display_peer,
+};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{ApiBase, Host, HostId, HostKind};
 
@@ -373,8 +375,14 @@ fn same_update_target(before: &HostBinding, now: &HostBinding) -> bool {
 ///
 /// The caller already decided that continuity broke. Entry/kind changes
 /// have no useful pair of values; otherwise destination takes precedence
-/// when both fields changed. Keep values raw here: the diagnostic's existing
-/// peer renderer escapes them once, including invisible controls.
+/// when both fields changed. Destinations stay raw: the diagnostic's peer
+/// renderer escapes the whole sentence once, including invisible controls.
+/// Identities are spelled with [`display_identity`] first, because that
+/// renderer is not injective (an actual U+202E and the literal text
+/// `<U+202E>` come out alike) and the user compares the two identities to
+/// tell whether a different install answered. Its output is plain ASCII,
+/// which the renderer passes through unchanged and which carries no text
+/// direction of its own, so the identities need no isolated runs either.
 fn changed_host_warning(before: &HostBinding, now: &HostBinding, submitting: bool) -> String {
     let when = if submitting {
         "while its update was being sent"
@@ -400,10 +408,13 @@ fn changed_host_warning(before: &HostBinding, now: &HostBinding, submitting: boo
         } else {
             "the install at its ssh destination can no longer be identified"
         };
+        let spell = |identity: Option<&str>| {
+            identity.map_or_else(|| "no identity reported".to_string(), display_identity)
+        };
         format!(
             "this host's identity changed from ‹{}› to ‹{}› {when} ({meaning})",
-            before.identity.as_deref().unwrap_or("no identity reported"),
-            now.identity.as_deref().unwrap_or("no identity reported"),
+            spell(before.identity.as_deref()),
+            spell(now.identity.as_deref()),
         )
     };
     let consequence = if submitting {
@@ -5194,8 +5205,8 @@ mod tests {
 
     /// Retarget advice names the changed fact and the action the user can take.
     ///
-    /// Destination wins when both fields change. Values stay raw until the
-    /// peer renderer, so controls cannot be double-escaped and missing
+    /// Destination wins when both fields change. Destinations stay raw until
+    /// the peer renderer, so controls cannot be double-escaped, and missing
     /// identity remains the same phrase the host detail line uses.
     #[farhelm_testtrace::test]
     fn changed_host_advice_names_values_and_submission_boundary() {
@@ -5243,6 +5254,36 @@ mod tests {
             assert!(!text.contains("identity-1"));
             assert!(!text.contains("e2e@example.invalid"));
         }
+    }
+
+    /// The user reads the two identities in this warning to judge whether a
+    /// different install now answers, so two different identities must never
+    /// render alike. The warning reaches the page as one peer run, and the
+    /// peer renderer alone shows an actual U+202E and the literal text
+    /// `<U+202E>` identically; spelling each identity first keeps them apart,
+    /// while an ordinary identity still reads as itself.
+    #[farhelm_testtrace::test]
+    fn changed_host_identities_never_render_alike() {
+        let before = ssh_binding(7);
+        let rendered = |identity: &str| {
+            let now = HostBinding {
+                identity: Some(identity.to_string()),
+                ..before.clone()
+            };
+            crate::peer::detail_text(&[DetailPart::peer(changed_host_warning(
+                &before, &now, false,
+            ))])
+        };
+        let (control, literal) = ("x\u{202e}y", "x<U+202E>y");
+        assert_eq!(
+            display_peer(control),
+            display_peer(literal),
+            "premise: the peer renderer alone conflates the two"
+        );
+        assert_ne!(rendered(control), rendered(literal));
+        assert!(rendered(control).contains("to ‹x<U+202E>y›"));
+        assert!(rendered(literal).contains("to ‹x<U+003C>U+202E>y›"));
+        assert!(rendered("identity-2").contains("to ‹identity-2›"));
     }
 
     /// A later host change must not turn unresolved update evidence into clearable advice.
