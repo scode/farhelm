@@ -8,10 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`same-destination-recovery-loses-trash-location.md`](same-destination-recovery-loses-trash-location.md) — Overlapping
-  recovery with the same destination may hide retained checkout files from the trash; an affected platform is
-  unverified.
-
 - [`menu-focus-marker-exposes-native-address.md`](menu-focus-marker-exposes-native-address.md) — Desktop menu IDs
   disclose a native allocation address; usefulness to a separate exploit is unverified.
 
@@ -24,9 +20,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`numeric-token-regex-performance-remains-unresolved.md`](numeric-token-regex-performance-remains-unresolved.md) — A
   synthetic numeric-token slowdown is measured; ordinary occurrence and security impact remain unestablished.
-
-- [`repository-label-ambiguity-has-unresolved-selection-risk.md`](repository-label-ambiguity-has-unresolved-selection-risk.md)
-  — Ambiguous repository labels have an unresolved harmful-selection interpretation; launch bypasses were refuted.
 
 - [`changed-host-warning-flattens-compared-identities.md`](changed-host-warning-flattens-compared-identities.md) — A
   changed-host warning loses distinct identities and isolation; consequential reliance remains unestablished.
