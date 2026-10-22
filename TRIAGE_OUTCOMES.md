@@ -17488,7 +17488,14 @@
   covers the long near-match staying fast and ordinary version tokens (`1.2-rc.3`, `v1.5x`, `2.0.1+build.5`) staying
   excluded from file links. If the change is not that small, or it changes which ordinary tokens are accepted, discard
   instead (remove the file without a code change). Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/cheap-ui-hardening-oct21.md`.
+- Execution: complete in jj change `unrvxloxstwxtvwzurmyvwwmnznznonz`, bookmark
+  `plan/cheap-ui-hardening-oct21/03-version-guard-backtracking`. Dropping `-` from the dotted-component class alone
+  would have changed the accepted tokens (`1.2.3-rc.1+build.5`, `1.0.0-beta+exp.sha.5114f85` and `1.2-` would have
+  become file links), so the suffix instead takes three forms that between them accept exactly what the old pattern did.
+  Checked against the old pattern on every string of up to eight characters over `1 a . - + _ v` and four million random
+  longer ones, with no difference; the long near-match went from about 120 ms to 0.1 ms per call in V8. The separate
+  file-name pattern keeps a smaller near-match cost of its own on such a line, outside this outcome. The code, test and
+  documentation total 38 added/deleted lines. PR: https://github.com/scode/farhelm/pull/2575/changes.
 
 ## repository-label-ambiguity-has-unresolved-selection-risk.md
 
