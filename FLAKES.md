@@ -2652,3 +2652,64 @@ Error: element(s) not found
 Class: unknown
 
 Cause: hypothesis
+
+## 2026-10-22 — `api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline` (crates/farhelm-ui/src/api/save_order.rs)
+
+This unit test failed its final assertion, that at least 30 ms had passed since the wait began, in full `farhelm-ui`
+library runs `b58752ff-a0ec-4ef7-8e37-703505a27267` (739 of 740 passed) and `8c2c8de7-66df-42ba-a20d-a63beb7451e0` (754
+of 755), and once in a 20-attempt repetition of the test alone, batch `d0add185-5ac7-4a46-91c6-a43af09cd9d8` (attempt 8,
+run `25743180-1f33-4ad5-8460-a715f08363a9`; the other 19 passed). The machine's retained runs show three more failures
+on the same line, each the only failure of its run, in another agent's landing validation on clean commits:
+`d8ff6545-9b27-45f8-aa33-7dfac8f07108` (2026-10-20, desktop Rust targets), `68a7a44f-3142-4013-aaef-7d0dc5350e0c`
+(2026-10-21, workspace Rust targets, 4154 of 4155 executed passed, 40 skipped) and
+`825930bd-9b5b-47a2-9d1d-a9b8e3163821` (2026-10-22, desktop Rust targets). Every retained run from 2026-10-19 to
+2026-10-22 that executed the test adds up to 6 failures in 128 executions; many full `farhelm-ui` library runs that day
+passed it, for example `826469b6-70da-4299-a52e-d6b85a3baa4d`, `7770ab3b-3c32-4e89-b472-f6e7f61ba2a5` and
+`e6fedc0b-6163-4076-9ec0-55a59940a1cd`. Every failure was fast: nextest timed the failing attempts at 0.051 to 0.058 s
+(0.135 s once, inside the 4195-test workspace run), against 0.044 to 0.448 s with a median of 0.057 s for the 122
+passes, so the wait ended early rather than stalling. The `matches!` assertion just before it passed, so the wait ended
+through its timeout path and not because the hung save settled. Hypothesis, from reading the code and tokio 1.53.2's
+timer, not from an instrumented run: `remaining` arms its timer with `budget.as_millis()`, which rounds the budget left
+over down to whole milliseconds. With even a few microseconds of the 30 ms already spent, the timer is armed for 29 ms
+from when it is first polled, and its deadline lands up to a millisecond before `started + 30 ms`. Tokio never fires a
+sleep before its own deadline, but it rounds that deadline up only to the end of its millisecond tick, which in nearly
+every run still falls inside the gap. What normally carries the check past 30 ms is how the runtime parks: it sleeps a
+whole number of ticks counted from the current, truncated tick, so it wakes at the deadline's tick boundary plus however
+far into its millisecond it was when it parked, about 30 ms after arming when it parks right away. If a tick boundary
+passes between arming the timer and parking (or a later re-park), the wake lands just past that boundary, inside the
+gap, and the wait reports a timeout early. Preemption on a loaded machine would do that, but which delay occurred has
+not been observed. The timer and the `started.elapsed() >= timeout` check are the only ways the wait can time out, and
+the latter cannot fire early, which is why this is the leading hypothesis rather than one of several. In the product it
+would mean a request queued behind a hung save is reported as timed out up to a millisecond before its budget ends. Open
+in TODO.md and excluded from future sweeps.
+
+The two full runs selected `cargo nextest run -p farhelm-ui --lib`; the repetition added
+`-E 'test(=api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline)'`. All six failing runs used nextest
+0.9.148 with four slots and zero retries, locale `LANG=C.UTF-8`, on one 18-CPU Linux x86_64 machine with kernel
+6.8.0-147-generic. `b58752ff` and the batch tested local, unlanded commit `bcfd39c64ae5ad1aa2c71dabefbc59069a5d095d`
+with uncommitted edits to `crates/farhelm-ui/src/replace.rs` and `crates/farhelm-ui/src/session_view.rs`; `8c2c8de7`
+tested local, unlanded commit `8d31c2243d5b75f950212427b633af0d717a022e` with an uncommitted edit to
+`crates/farhelm-ui/src/list/create_form.rs`. Both commits belong to a stack of GUI fixes, and neither the stack nor the
+edits touch `save_order.rs`, the `sleep_ms` helper in `crates/farhelm-ui/src/reader.rs`, or the error type the test
+matches. The other agent's three runs tested clean commits `0c4be977c498323fbdbefb8fc388f0545064963d`,
+`de5457bb1f618a78eec004828eeb0a278aff25a1` and `17c1142f77a5af8dcc84742b7026f97cf8f2bbd7`, landing candidates that are
+not in this checkout's history. The test does not use tmux. The repetition batch recorded pinned tmux 3.7c executable
+SHA256 `7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`, and workspace run `68a7a44f` recorded tmux
+3.7c SHA256 `1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`; the other four ran with tmux checking
+off, so their tmux identity is unavailable. Ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`,
+`FARHELM_SUPERVISOR_SOCK`, and `FARHELM_TMUX` were scrubbed; only recorder-owned `FARHELM_TEST_TRACE_DIR` reached the
+child. The test ran on a current-thread tokio runtime with real (not paused) time. The machine was shared with other
+agents' builds and tests, and load averages in the 30s were seen that day; the agent running the repetition batch saw
+about 4.8 while it ran. The recorder does not capture load, and load and slot peers at each failing test's start were
+not recorded. No reproduction under added load or with instrumentation was attempted. The test and the code it covers
+were added in #2062 on 2026-10-15 and have not changed since; no earlier entry for this test exists. Retained runs are
+under the local test-runs directory; their lifetime is the machine's temporary-file cleanup.
+
+```
+thread 'api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline' (2121129) panicked at crates/farhelm-ui/src/api/save_order.rs:212:9:
+assertion failed: started.elapsed() >= Duration::from_millis(30)
+```
+
+Class: product
+
+Cause: hypothesis
