@@ -8,7 +8,9 @@
 
 use super::shared::HostOption;
 use crate::ApiBase;
-use crate::anchored_popovers::{AnchorRegion, Interest, MovementOwner, use_registration};
+use crate::anchored_popovers::{
+    AnchorRegion, Interest, MovementOwner, Registration, use_registration,
+};
 use crate::api::{PreferenceValue, Preferences};
 use crate::launch_sequence::TEMPLATE_SHORTCUTS;
 use crate::menu_panel::{
@@ -26,6 +28,7 @@ use farhelm_proto::launcher::{
     TemplateFields, TemplateNameKind, check_template_shape,
 };
 use farhelm_proto::{LaunchHarness, LaunchPermission};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
@@ -73,12 +76,174 @@ fn rename_number_binding(bindings: &mut BTreeMap<String, PeerText>, old: &str, n
     }
 }
 
+/// The rendered facts that can displace a template's number toggle.
+///
+/// Name and summary each occupy one nowrap line. Only the bolt chord adds a
+/// line, and the toggle is centered in its own row. Counting earlier marked
+/// rows preserves a harmless permutation above an unchanged anchor; comparing
+/// the entire ordered prefix would close that anchor unnecessarily. The bound
+/// value stays exact for prop updates and rendering; movement groups only
+/// labels whose equal width is established by the current physical-key/font rules.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TemplateAnchorKey {
+    index: usize,
+    marked_before: usize,
+    marked: bool,
+    bound: Option<String>,
+}
+
+impl TemplateAnchorKey {
+    /// Separate strict presentation equality from possible anchor displacement.
+    /// Known digits have distinct labels but equal width in the inherited
+    /// monospace face; changing one to another must still update the menu's
+    /// binding without invalidating its placement.
+    fn movement_key(&self) -> (usize, usize, bool, String) {
+        (
+            self.index,
+            self.marked_before,
+            self.marked,
+            template_number_width_shape(self.bound.as_deref()),
+        )
+    }
+}
+
+/// Keep only proven equal-width digit chords equivalent for movement.
+///
+/// Use the actual formatter so physical-key remaps and fallback labels retain
+/// their presentation. Normalize only a complete label matching a configured
+/// single-ASCII-Digit chord; other Unicode, combining sequences and unknown
+/// multi-character values retain their exact formatted strings. The unbound
+/// placeholder includes its leading space and is not a one-digit chord.
+fn template_number_width_shape(bound: Option<&str>) -> String {
+    let label = TEMPLATE_SHORTCUTS.number_chord(bound.unwrap_or(" –"));
+    let digit_chord = TEMPLATE_SHORTCUTS.number.keys.iter().any(|key| {
+        key.code
+            .strip_prefix("Digit")
+            .is_some_and(|suffix| suffix.len() == 1 && suffix.as_bytes()[0].is_ascii_digit())
+            && TEMPLATE_SHORTCUTS.number_chord(key.value) == label
+    });
+    if digit_chord {
+        label
+            .chars()
+            .map(|glyph| if glyph.is_ascii_digit() { '0' } else { glyph })
+            .collect()
+    } else {
+        label
+    }
+}
+
+/// One saved row and the presentation values its markup and menus share.
+/// The key is deliberately built from the actual received order and binding
+/// lookup; it is not a second template catalog or a copy of draft state.
+struct TemplateListRow {
+    template: LaunchTemplate,
+    anchor: TemplateAnchorKey,
+}
+
+/// Resolve row placement inputs once, then use them in both markup and admission.
+/// An absent marked name or binding contributes nothing to the displayed list.
+fn template_list_rows(
+    rows: &[LaunchTemplate],
+    marked_name: Option<&str>,
+    bindings: &BTreeMap<String, PeerText>,
+) -> Vec<TemplateListRow> {
+    let mut marked_before = 0;
+    rows.iter()
+        .enumerate()
+        .map(|(index, template)| {
+            let marked = marked_name == Some(template.name.as_str());
+            let bound = bindings
+                .iter()
+                .find_map(|(key, owner)| (owner.raw() == template.name).then(|| key.clone()));
+            let anchor = TemplateAnchorKey {
+                index,
+                marked_before,
+                marked,
+                bound,
+            };
+            marked_before += usize::from(marked);
+            TemplateListRow {
+                template: template.clone(),
+                anchor,
+            }
+        })
+        .collect()
+}
+
+/// Retain the opening invalidated by a changed render until effects can run.
+///
+/// Dioxus can replace a queued effect's callback after another render. Keeping
+/// this capture outside that callback preserves an A→B→A cause, while the
+/// existing synchronous opening generation rejects a later same-row reopen.
+/// Nothing survives this menu's component scope or replays through the owner.
+struct TemplateAnchorMovement {
+    previous: (usize, usize, bool, String),
+    pending: Option<u64>,
+}
+
+impl TemplateAnchorMovement {
+    /// Mounting establishes the first rendered baseline, not a movement event.
+    fn new(previous: TemplateAnchorKey) -> Self {
+        Self {
+            previous: previous.movement_key(),
+            pending: None,
+        }
+    }
+
+    /// Capture before this synchronous component render commits its DOM edits.
+    /// A later changed render may invalidate a newer opening, so replace an old
+    /// capture only when there is a live opening at this new causal boundary.
+    fn observe(&mut self, current: &TemplateAnchorKey, opening: Option<u64>) {
+        let current = current.movement_key();
+        if self.previous != current {
+            self.previous = current;
+            if let Some(opening) = opening {
+                self.pending = Some(opening);
+            }
+        }
+    }
+
+    /// Drain once, and admit only the opening that existed before the change.
+    fn take_for(&mut self, opening: Option<u64>) -> bool {
+        let pending = self.pending.take();
+        pending.is_some() && pending == opening
+    }
+}
+
+/// Add row-content movement without changing the legacy epoch effect's policy.
+///
+/// Dioxus 0.7 runs component render bodies before emitting their mutations and
+/// effects after the renderer applies them. Capture the existing generation in
+/// that render body, not inside the deduplicated effect's replaceable callback.
+/// Another popup on these rows can consume the same key and this local adapter;
+/// the list/mark producer never enumerates popup kinds. This assumes the row
+/// remains synchronous: adding suspense here requires revisiting the boundary.
+fn use_template_anchor_movement(
+    anchor: &TemplateAnchorKey,
+    open: Signal<bool>,
+    generation: Signal<u64>,
+    registration: Registration,
+) {
+    let movement = use_hook(|| Rc::new(RefCell::new(TemplateAnchorMovement::new(anchor.clone()))));
+    let opening = (*open.peek()).then(|| *generation.peek());
+    movement.borrow_mut().observe(anchor, opening);
+    let key = anchor.movement_key();
+    use_effect(use_reactive((&key,), move |(_key,)| {
+        let opening = (*open.peek()).then(|| *generation.peek());
+        let admitted = movement.borrow_mut().take_for(opening);
+        if admitted {
+            registration.close_if_open();
+        }
+    }));
+}
+
 /// A row-local popup stays inside modal isolation while using the app's menu
 /// keyboard, placement and outside-dismiss machinery. Escape closes this menu
 /// without bubbling into the containing Templates dialog.
 #[component]
 fn NumberShortcutMenu(
     name: String,
+    anchor: TemplateAnchorKey,
     launchable: bool,
     disabled: bool,
     bindings: BTreeMap<String, PeerText>,
@@ -86,9 +251,7 @@ fn NumberShortcutMenu(
     dialog_epoch: ReadSignal<u64>,
     on_choose: EventHandler<Option<String>>,
 ) -> Element {
-    let bound = bindings
-        .iter()
-        .find_map(|(key, owner)| (owner.raw() == name).then(|| key.clone()));
+    let bound = anchor.bound.clone();
     let mut open = use_signal(|| false);
     let mut placement = use_signal(|| PanelPlacement::Unmeasured);
     let mut toggle = use_signal(|| None::<Rc<MountedData>>);
@@ -126,6 +289,7 @@ fn NumberShortcutMenu(
         move || (*open.peek()).then(|| anchor_name.clone()),
         move || close_menu.call(()),
     );
+    use_template_anchor_movement(&anchor, open, generation, registration.clone());
     // Fixed coordinates become stale when either the dialog or its ancestors
     // move. Opening is deliberately not a dependency; the popup's own scroller
     // also leaves these epochs untouched, so its ten choices stay reachable.
@@ -1712,6 +1876,25 @@ pub(super) fn TemplatesDialog(
     let prompt = pending();
     let inferred =
         previous().is_some() && baseline().fields.kind.is_none() && current.fields.kind.is_some();
+    // The same resolved mark and number label drive both visible controls and
+    // each menu's movement admission. Resource pending/error semantics remain
+    // in the existing list match below; this does not introduce another read.
+    let rendered_rows = {
+        let preferences = preferences.0.read();
+        list.as_ref()
+            .and_then(|result| result.as_ref().ok())
+            .map(|rows| {
+                template_list_rows(
+                    rows,
+                    preferences
+                        .quick_launch_template
+                        .as_ref()
+                        .map(PeerText::raw),
+                    &preferences.template_shortcuts,
+                )
+            })
+            .unwrap_or_default()
+    };
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
             // The capped dialog can move while keeping its own size. Its
@@ -1751,34 +1934,35 @@ pub(super) fn TemplatesDialog(
                         match list.clone() {
                             None => rsx! { p { class: "templates-hint", "loading templates" } },
                             Some(Err(_)) => rsx! {},
-                            Some(Ok(rows)) => rsx! {
+                            Some(Ok(_)) => rsx! {
                                 ul { class: "templates-list",
-                                    for template in rows {
-                                        li { key: "{template.name}",
+                                    for row in rendered_rows {
+                                        li { key: "{row.template.name}",
                                             button {
                                                 r#type: "button", class: "templates-quick-mark",
                                                 // A lit bolt stays clickable even when its template has since
                                                 // become ineligible (edited through the API, say): clicking
                                                 // the lit bolt is how a mark is cleared, and a disabled one
                                                 // would leave an unusable mark with no way to turn it off.
-                                                disabled: disabled || templates.pending() || (!quick_launch_eligible(&template.fields) && preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) != Some(template.name.as_str())),
-                                                aria_label: "quick launch {display_peer(&template.name)}",
-                                                aria_pressed: preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) == Some(template.name.as_str()),
-                                                "data-tooltip": if preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) == Some(template.name.as_str()) { format!("{quick_launch_chord} starts a session from this template right away, without opening New. Only one template can hold ⚡. Click to turn off.") } else if !quick_launch_eligible(&template.fields) { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Can't mark this one: an agent launch needs an agent; a command launch needs a nonblank command.") } else { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Click to mark this one.") },
-                                                onclick: { let name = template.name.clone(); move |_| { let lit = preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) == Some(name.as_str()); edit_binding.call(BindingEdit::Bolt(name.clone(), !lit)) } },
+                                                disabled: disabled || templates.pending() || (!quick_launch_eligible(&row.template.fields) && !row.anchor.marked),
+                                                aria_label: "quick launch {display_peer(&row.template.name)}",
+                                                aria_pressed: row.anchor.marked,
+                                                "data-tooltip": if row.anchor.marked { format!("{quick_launch_chord} starts a session from this template right away, without opening New. Only one template can hold ⚡. Click to turn off.") } else if !quick_launch_eligible(&row.template.fields) { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Can't mark this one: an agent launch needs an agent; a command launch needs a nonblank command.") } else { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Click to mark this one.") },
+                                                onclick: { let name = row.template.name.clone(); move |_| { let lit = preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) == Some(name.as_str()); edit_binding.call(BindingEdit::Bolt(name.clone(), !lit)) } },
                                                 "⚡"
                                             }
                                             NumberShortcutMenu {
-                                                key: "number-{template.name}", name: template.name.clone(),
-                                                launchable: quick_launch_eligible(&template.fields), disabled: disabled || templates.pending(),
+                                                key: "number-{row.template.name}", name: row.template.name.clone(),
+                                                anchor: row.anchor.clone(),
+                                                launchable: quick_launch_eligible(&row.template.fields), disabled: disabled || templates.pending(),
                                                 bindings: preferences.0.read().template_shortcuts.clone(),
                                                 layout_epoch, dialog_epoch,
-                                                on_choose: { let name = template.name.clone(); move |key| edit_binding.call(BindingEdit::Number(name.clone(), key)) },
+                                                on_choose: { let name = row.template.name.clone(); move |key| edit_binding.call(BindingEdit::Number(name.clone(), key)) },
                                             }
-                                            button { r#type: "button", class: "templates-row", disabled: disabled || templates.pending(), aria_pressed: previous().as_ref()==Some(&template.name), "data-tooltip": "edit template {display_peer(&template.name)}", onclick: move |_| depart.call(Departure::Open(Box::new(template.clone()))),
-                                                span { class: "templates-row-name peer-value", dir: "ltr", "{display_peer(&template.name)}" }
-                                                span { class: "templates-row-summary", "{template_summary(&template.fields)}" }
-                                                if preferences.0.read().quick_launch_template.as_ref().map(PeerText::raw) == Some(template.name.as_str()) { span { class: "templates-quick-chord", "{quick_launch_chord}" } }
+                                            button { r#type: "button", class: "templates-row", disabled: disabled || templates.pending(), aria_pressed: previous().as_ref()==Some(&row.template.name), "data-tooltip": "edit template {display_peer(&row.template.name)}", onclick: move |_| depart.call(Departure::Open(Box::new(row.template.clone()))),
+                                                span { class: "templates-row-name peer-value", dir: "ltr", "{display_peer(&row.template.name)}" }
+                                                span { class: "templates-row-summary", "{template_summary(&row.template.fields)}" }
+                                                if row.anchor.marked { span { class: "templates-quick-chord", "{quick_launch_chord}" } }
                                             }
                                         }
                                     }
@@ -1890,6 +2074,340 @@ pub(super) fn TemplatesDialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    /// Keep projection tests independent of catalog lookup and launcher rules.
+    /// Empty fields still render the nonempty one-line summary used by real rows.
+    fn movement_templates(names: &[&str]) -> Vec<LaunchTemplate> {
+        names
+            .iter()
+            .map(|name| LaunchTemplate {
+                name: (*name).into(),
+                fields: TemplateFields::default(),
+            })
+            .collect()
+    }
+
+    /// A target's key must describe its own centered line and its prefix height,
+    /// while preserving harmless equal-height permutations elsewhere in the list.
+    #[test]
+    fn template_anchor_keys_follow_rendered_order_mark_and_number() {
+        let rows = movement_templates(&["a", "b", "c", "d"]);
+        let bindings = BTreeMap::from([("2".into(), PeerText::from("b"))]);
+        let before = template_list_rows(&rows, Some("c"), &bindings);
+        let after = template_list_rows(&rows, Some("a"), &bindings);
+        assert_ne!(
+            before[0].anchor, after[0].anchor,
+            "own centered toggle moves"
+        );
+        assert_ne!(before[1].anchor, after[1].anchor, "the new line is above b");
+        assert_ne!(before[2].anchor, after[2].anchor, "c loses its own line");
+        assert_eq!(
+            before[3].anchor, after[3].anchor,
+            "balanced prefix is inert"
+        );
+        assert_eq!(after[1].anchor.bound.as_deref(), Some("2"));
+
+        let reordered = movement_templates(&["c", "b", "a", "d"]);
+        let permuted = template_list_rows(&reordered, Some("c"), &bindings);
+        assert_ne!(
+            before[1].anchor, permuted[1].anchor,
+            "a marked row crosses b"
+        );
+        assert_eq!(
+            before[3].anchor, permuted[3].anchor,
+            "same prefix height at d"
+        );
+        let changed_binding = BTreeMap::from([("8".into(), PeerText::from("b"))]);
+        let rebound = template_list_rows(&rows, Some("c"), &changed_binding);
+        assert_ne!(
+            before[1].anchor, rebound[1].anchor,
+            "raw binding still updates props"
+        );
+        assert_eq!(
+            before[1].anchor.movement_key(),
+            rebound[1].anchor.movement_key(),
+            "known digits retain chord width"
+        );
+        assert_eq!(
+            before[0].anchor, rebound[0].anchor,
+            "other labels are inert"
+        );
+
+        let renamed = movement_templates(&["b", "c", "d", "z"]);
+        let renamed = template_list_rows(&renamed, Some("c"), &bindings);
+        assert_ne!(
+            before[1].anchor, renamed[0].anchor,
+            "surviving b changes index"
+        );
+    }
+
+    /// Monospace digit changes must not close a popup; unknown text must not
+    /// acquire guessed Unicode widths or lose the formatter's fallback behavior.
+    #[test]
+    fn template_number_width_shape_groups_only_actual_known_digit_chords() {
+        let digit_shape = template_number_width_shape(Some("0"));
+        let mut labels = std::collections::HashSet::new();
+        for key in TEMPLATE_SHORTCUTS.number.keys {
+            labels.insert(TEMPLATE_SHORTCUTS.number_chord(key.value));
+            assert_eq!(template_number_width_shape(Some(key.value)), digit_shape);
+        }
+        assert_eq!(labels.len(), 10, "all actual digit labels remain distinct");
+        assert_eq!(
+            TEMPLATE_SHORTCUTS.number_chord("Digit8"),
+            TEMPLATE_SHORTCUTS.number_chord("8")
+        );
+        assert_eq!(
+            template_number_width_shape(Some("Digit8")),
+            digit_shape,
+            "identical fallback rendering stays equivalent"
+        );
+
+        let unbound = TEMPLATE_SHORTCUTS.number_chord(" –");
+        assert_eq!(template_number_width_shape(None), unbound);
+        assert_ne!(template_number_width_shape(None), digit_shape);
+        for unknown in [
+            "x2",
+            "x8",
+            "二",
+            "2\u{fe0f}\u{20e3}",
+            "8\u{fe0f}\u{20e3}",
+            "ab",
+            "😀",
+        ] {
+            assert_eq!(
+                template_number_width_shape(Some(unknown)),
+                TEMPLATE_SHORTCUTS.number_chord(unknown)
+            );
+        }
+        assert_ne!(
+            template_number_width_shape(Some("x2")),
+            template_number_width_shape(Some("x8")),
+            "do not normalize digits inside arbitrary text"
+        );
+    }
+
+    /// Only a changed movement shape captures an opening. Raw binding churn
+    /// remains visible through strict props without replaying a synthetic cause.
+    #[test]
+    fn template_movement_ignores_digit_rebinding_but_retains_placeholder_changes() {
+        let key = |bound: Option<&str>| TemplateAnchorKey {
+            index: 0,
+            marked_before: 0,
+            marked: false,
+            bound: bound.map(str::to_string),
+        };
+        let mut movement = TemplateAnchorMovement::new(key(Some("2")));
+        movement.observe(&key(Some("8")), Some(1));
+        assert!(
+            !movement.take_for(Some(1)),
+            "same-width known digit is inert"
+        );
+        movement.observe(&key(Some("Digit8")), Some(1));
+        assert!(
+            !movement.take_for(Some(1)),
+            "same displayed fallback label is inert"
+        );
+        movement.observe(&key(None), Some(1));
+        assert!(
+            movement.take_for(Some(1)),
+            "bound to unbound changes width shape"
+        );
+        movement.observe(&key(Some("0")), Some(1));
+        assert!(
+            movement.take_for(Some(1)),
+            "unbound to bound changes width shape"
+        );
+    }
+
+    /// Callback replacement must not forget a committed intermediate layout.
+    /// A fresh same-row opening, however, measures after the old cause and is safe.
+    #[test]
+    fn template_movement_retains_a_b_a_and_rejects_a_new_opening() {
+        let rows = movement_templates(&["a"]);
+        let a = template_list_rows(&rows, None, &BTreeMap::new())
+            .remove(0)
+            .anchor;
+        let b = template_list_rows(&rows, Some("a"), &BTreeMap::new())
+            .remove(0)
+            .anchor;
+        let mut movement = TemplateAnchorMovement::new(a.clone());
+        movement.observe(&a, Some(1));
+        assert!(
+            !movement.take_for(Some(1)),
+            "first/same render is a baseline"
+        );
+        movement.observe(&b, Some(1));
+        movement.observe(&a, Some(1));
+        assert!(
+            movement.take_for(Some(1)),
+            "A→B→A still invalidated opening 1"
+        );
+        assert!(!movement.take_for(Some(1)), "delivery is drained once");
+        movement.observe(&b, Some(1));
+        assert!(
+            !movement.take_for(Some(2)),
+            "same-row reopen rejects old cause"
+        );
+        movement.observe(&a, Some(2));
+        assert!(
+            movement.take_for(Some(2)),
+            "a later change can invalidate reopening"
+        );
+        movement.observe(&b, None);
+        assert!(!movement.take_for(Some(3)), "closed changes never replay");
+    }
+
+    /// Own the actual local adapter and registration under a controllable VDOM.
+    /// Inputs are cells so tests can request consecutive synchronous renders
+    /// without polling effects between them or touching process environment.
+    #[derive(PartialEq)]
+    struct TemplateMovementFixture {
+        index: Cell<usize>,
+        mounted: Cell<bool>,
+        scope: Cell<Option<ScopeId>>,
+        controls: RefCell<Option<(Signal<bool>, Signal<u64>)>>,
+        closes: Cell<usize>,
+    }
+
+    impl TemplateMovementFixture {
+        /// Start open before the initial effect to expose baseline mistakes.
+        fn new() -> Rc<Self> {
+            Rc::new(Self {
+                index: Cell::new(0),
+                mounted: Cell::new(true),
+                scope: Cell::new(None),
+                controls: RefCell::new(None),
+                closes: Cell::new(0),
+            })
+        }
+
+        /// Publish mutations while intentionally leaving the post-render effect
+        /// unsettled. This is the boundary the race tests exist to exercise.
+        fn render_index(self: &Rc<Self>, dom: &mut VirtualDom, index: usize) {
+            self.index.set(index);
+            dom.mark_dirty(self.scope.get().expect("fixture anchor mounted"));
+            dom.render_immediate_to_vec();
+        }
+
+        /// Mirror the existing opener's synchronous generation increment.
+        /// No layout effect is allowed to treat this as the preceding opening.
+        fn reopen(&self, dom: &VirtualDom) {
+            let (mut open, mut generation) = self.controls.borrow().expect("fixture controls");
+            dom.in_runtime(|| {
+                generation += 1;
+                open.set(true);
+            });
+        }
+    }
+
+    /// Keep the adapter in its own scope so removal exercises real cleanup.
+    #[component]
+    fn TemplateMovementTestAnchor(fixture: Rc<TemplateMovementFixture>) -> Element {
+        let open = use_signal(|| true);
+        let generation = use_signal(|| 1_u64);
+        fixture.scope.set(Some(dioxus::core::current_scope_id()));
+        fixture.controls.replace(Some((open, generation)));
+        let closed = fixture.clone();
+        let registration = use_registration(
+            use_context::<MovementOwner>(),
+            Interest::new(AnchorRegion::Templates),
+            move || (*open.peek()).then(|| "fixture".into()),
+            move || {
+                closed.closes.set(closed.closes.get() + 1);
+                let mut slot = open;
+                slot.set(false);
+            },
+        );
+        let anchor = TemplateAnchorKey {
+            index: fixture.index.get(),
+            marked_before: 0,
+            marked: false,
+            bound: None,
+        };
+        use_template_anchor_movement(&anchor, open, generation, registration);
+        rsx! { span { "{anchor.index}" } }
+    }
+
+    /// The context remains mounted when the anchor scope is deliberately removed.
+    fn template_movement_test_app(fixture: Rc<TemplateMovementFixture>) -> Element {
+        use_context_provider(MovementOwner::default);
+        rsx! {
+            if fixture.mounted.get() {
+                TemplateMovementTestAnchor { fixture }
+            }
+        }
+    }
+
+    /// Exercise the production hook under Dioxus's real render/effect scheduler.
+    /// A→B→A is two published mutation batches before the deduplicated continuation.
+    #[test]
+    fn template_movement_component_keeps_intermediate_cause_after_callback_replacement() {
+        let fixture = TemplateMovementFixture::new();
+        let mut dom = VirtualDom::new_with_props(template_movement_test_app, fixture.clone());
+        dom.rebuild_to_vec();
+        dom.process_events();
+        assert_eq!(fixture.closes.get(), 0, "initial effect must not close");
+        fixture.render_index(&mut dom, 0);
+        dom.process_events();
+        assert_eq!(fixture.closes.get(), 0, "same key is inert");
+        fixture.render_index(&mut dom, 1);
+        fixture.render_index(&mut dom, 0);
+        assert_eq!(fixture.closes.get(), 0, "continuation is still pending");
+        dom.process_events();
+        assert_eq!(
+            fixture.closes.get(),
+            1,
+            "intermediate change survives A→B→A"
+        );
+    }
+
+    /// A same-row reopening before delivery must reject the earlier capture.
+    /// The generation also covers an in-flight placement measurement: this
+    /// adapter must not wait for a DOM rectangle before invalidating an opening.
+    #[test]
+    fn template_movement_component_does_not_replay_into_same_row_reopen() {
+        let fixture = TemplateMovementFixture::new();
+        let mut dom = VirtualDom::new_with_props(template_movement_test_app, fixture.clone());
+        dom.rebuild_to_vec();
+        dom.process_events();
+        fixture.render_index(&mut dom, 1);
+        fixture.reopen(&dom);
+        dom.process_events();
+        assert_eq!(fixture.closes.get(), 0);
+        fixture.render_index(&mut dom, 2);
+        dom.process_events();
+        assert_eq!(fixture.closes.get(), 1, "new cause reaches the new opening");
+    }
+
+    /// Queued work belongs to the old scope and cannot reach a replacement.
+    /// Removal uses the framework's normal queued-effect and registration cleanup.
+    #[test]
+    fn template_movement_component_drops_pending_delivery_with_scope() {
+        let fixture = TemplateMovementFixture::new();
+        let mut dom = VirtualDom::new_with_props(template_movement_test_app, fixture.clone());
+        dom.rebuild_to_vec();
+        dom.process_events();
+        fixture.render_index(&mut dom, 1);
+        fixture.mounted.set(false);
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate_to_vec();
+        dom.process_events();
+        assert_eq!(
+            fixture.closes.get(),
+            0,
+            "dead scope's pending effect is removed"
+        );
+        fixture.mounted.set(true);
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate_to_vec();
+        dom.process_events();
+        assert_eq!(
+            fixture.closes.get(),
+            0,
+            "replacement mount starts a new baseline"
+        );
+    }
 
     /// Removing a name must remove its policy; re-adding it starts a new Base
     /// choice instead of resurrecting a hidden Fixed setting.
