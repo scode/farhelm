@@ -8,4 +8,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `start-remedy-quoting.md` — Offer the copyable supervisor-start command only when it survives the diagnostic's escaping unchanged.
 - [complete] `uninstall-mixed-spelling.md` — Host uninstall refuses when a home alias hides that kept data lies inside the folder it removes.
 - [complete] `refused-retry-rollback-fence.md` — A refused create retry no longer deletes a session that was restarted meanwhile.
-- [pending] `bind-gui-answers.md` — Bind every GUI answer to what the user saw: one shared prompt mechanism with opening tokens, click-time preconditions, declarative link covers and retired held input, plus the six GUI outcomes folded in at the 2026-10-21 triage (after `popover-anchor-close.md`)
+- [in-flight 049983] `bind-gui-answers.md` — Bind every GUI answer to what the user saw: one shared prompt mechanism with opening tokens, click-time preconditions, declarative link covers and retired held input, plus the six GUI outcomes folded in at the 2026-10-21 triage (after `popover-anchor-close.md`)
