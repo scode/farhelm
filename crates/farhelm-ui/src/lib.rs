@@ -129,6 +129,7 @@ use peer::PeerText;
 use serde::Deserialize;
 
 mod activity;
+mod anchored_popovers;
 mod api;
 mod app_bar;
 mod app_updater;
@@ -1633,6 +1634,9 @@ fn install_composition_guard() {
 /// has completed. Browser builds mount it immediately.
 #[component]
 fn AppBody() -> Element {
+    // Movement registration is nonreactive; opening a popup must not schedule
+    // an old layout effect or change its existing focus/measurement owner.
+    use_context_provider(anchored_popovers::MovementOwner::default);
     let mut menu_focus_source = use_signal(|| (0_u64, false));
     use_context_provider(|| menu_panel::MenuFocusSource(menu_focus_source));
     // This must precede every page shortcut: capture listeners on the same
