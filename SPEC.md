@@ -1943,19 +1943,20 @@ whatever the agent renders is what you see. There is no composer, no message abs
 - In the Mac app, a loopback link in a remote session's terminal offers Cmd-click to tunnel and open it in the browser.
   Its hover names the host and port, explains that a plain click still opens on the Mac, and preserves any OSC hyperlink
   mismatch warning. The offer applies to `localhost` and its subdomains, `127.0.0.0/8`, `::1`, `0.0.0.0` and `::`, not
-  LAN addresses or other single-label names. A tunnel listens on `127.0.0.1` on the Mac, using the remote port number
-  when free and otherwise an available port. The opened URL uses that IPv4 literal and the actual local port, preserving
-  the rest of the URL. Bytes travel over Farhelm's existing helm-to-supervisor connection to the supervisor's loopback;
-  this is raw TCP, including WebSockets, with no HTTP rewriting. Named localhost and wildcard addresses try IPv4 then
-  IPv6 loopback; an explicit loopback IP is used as given. Browser clients and sessions on the local host have no offer,
-  and a standalone helm refuses tunnel requests. Before the first tunnel opens, the user must accept the security
-  warning in Security below. This choice is a shared helm preference, off until accepted; Settings shows it and can turn
-  it off, closing existing tunnels. A later tunnel request then needs the warning again. Each tunnel is kept only in
-  helm memory until the session is deleted, Farhelm quits, or the user closes it. Restarting or stopping the agent does
-  not close it. Reopening a link for the same session and loopback target reuses its tunnel. A host disconnect fails new
-  connections until the host returns; an existing TCP stream is never replayed. A strip under the top row shows one
-  local-port → host-port chip per tunnel, with a close button. The list and close actions stay available while the host
-  is disconnected. This feature does not forward login callbacks.
+  LAN addresses or other single-label names. A tunnel listens on the Mac's `127.0.0.1` at a port the operating system
+  picks, never the remote port number, so a remote service cannot take an address a Mac program or a standalone helm
+  uses. The opened URL uses that IPv4 literal and the actual local port, preserving the rest of the URL. Bytes travel
+  over Farhelm's existing helm-to-supervisor connection to the supervisor's loopback; this is raw TCP, including
+  WebSockets, with no HTTP rewriting. Named localhost and wildcard addresses try IPv4 then IPv6 loopback; an explicit
+  loopback IP is used as given. Browser clients and sessions on the local host have no offer, and a standalone helm
+  refuses tunnel requests. Before the first tunnel opens, the user must accept the security warning in Security below.
+  This choice is a shared helm preference, off until accepted; Settings shows it and can turn it off, closing existing
+  tunnels. A later tunnel request then needs the warning again. Each tunnel is kept only in helm memory until the
+  session is deleted, Farhelm quits, or the user closes it. Restarting or stopping the agent does not close it.
+  Reopening a link for the same session and loopback target reuses its tunnel. A host disconnect fails new connections
+  until the host returns; an existing TCP stream is never replayed. A strip under the top row shows one local-port →
+  host-port chip per tunnel, with a close button. The list and close actions stay available while the host is
+  disconnected. This feature does not forward login callbacks.
 
 - File paths in terminal output can be downloaded from the session's host, including the local host. Absolute and `~/`
   paths, relative paths containing a slash or a file extension, and `file://` hyperlinks emitted by a program count;
@@ -3235,12 +3236,10 @@ Localhost tunnels deliberately extend that browser boundary. Before enabling the
 a tunneled page is served from `127.0.0.1` on the Mac: cookies are not isolated by port, so it can read cookies from
 other services on that address; the browser treats it as a local page and skips private-network checks. The tunnel's
 loopback listener has no authentication and accepts connections from any program on the Mac, like SSH port forwarding.
-The warning also explains that a tunnel uses the remote service's port number on the Mac when free, so a Mac program
-expecting that port may reach the remote host instead. The helm's same-site navigation hardening also means an ordinary
-link from another `127.0.0.1` page cannot open a standalone helm on that Mac. The user accepted these consequences for
-this feature; consent is off until they accept the warning, and Settings can revoke it and close the tunnels. A tunnel
-does not give a supervisor an arbitrary network dialer: only the helm may open a relay, and the supervisor independently
-confines its destination to loopback.
+The helm's same-site navigation hardening also means an ordinary link from another `127.0.0.1` page cannot open a
+standalone helm on that Mac. The user accepted these consequences for this feature; consent is off until they accept the
+warning, and Settings can revoke it and close the tunnels. A tunnel does not give a supervisor an arbitrary network
+dialer: only the helm may open a relay, and the supervisor independently confines its destination to loopback.
 
 A program in an attached remote terminal may write the viewer machine's system clipboard through OSC 52, without a
 separate local selection or copy gesture. This is an explicitly allowed, bounded effect across the remote-host boundary,

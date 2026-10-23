@@ -100,13 +100,14 @@ The first time, Farhelm asks you to accept a security warning. A page opened thi
 browser: it can read cookies from other services on `127.0.0.1`, since ports do not separate cookies, and it bypasses
 your browser's private-network checks. Any program on your Mac can connect to the tunnel. Ordinary links from another
 `127.0.0.1` page into the browser helm are also refused; opening the helm from the address bar or a bookmark still works.
-A tunnel uses the remote service's port number on your Mac when it is free, so a Mac program expecting that port may
-reach the remote host instead.
 You can turn tunnels off under **terminal** in settings, which closes the ones already open.
 
 Open tunnels appear below the row of tabs and action buttons, with the port on your Mac, the host's port, and a close
-button. Opening another link to the same service reuses its tunnel. Deleting the session or quitting Farhelm closes it;
-stopping or restarting the agent leaves it open. A disconnected host makes new connections fail until it returns.
+button. The port on your Mac is one your Mac picks, never the host's port number, so an app that puts its own
+`localhost` address and port into links or redirects does not reach the tunnel that way; open it through the tunnel's
+link instead. Opening another link to the same service reuses its tunnel. Deleting the session or quitting Farhelm
+closes it; stopping or restarting the agent leaves it open. A disconnected host makes new connections fail until it
+returns.
 
 This works for localhost names and loopback addresses, including a development server that listens only on IPv6. It
 does not forward browser-login callbacks automatically. When an agent asks to open a link, its

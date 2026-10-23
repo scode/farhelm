@@ -37,6 +37,5 @@ and browser clicks only download; check the disclosed host and path first
 host's link permission, an agent on that host can make your browser open a web address, and the local-network permission
 lets it reach addresses on your own machine and network without asking. The Mac app's optional localhost tunnels also
 let you open a remote development server as a local page, after accepting a separate warning about cookies,
-local-network access and other programs using the tunnel. A tunnel uses the remote service's port number on your Mac
-when free, so a Mac program expecting that port may reach the remote host instead
+local-network access and other programs using the tunnel
 ([Open a remote localhost link](/docs/using/work-in-a-session/#open-a-remote-localhost-link)).

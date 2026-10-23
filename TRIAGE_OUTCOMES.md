@@ -18407,7 +18407,12 @@
   preference is replaced. Covers `tunnel-shadows-busy-wildcard-port.md` too; one change for both is fine. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/tunnel-port-and-link-ranges.md`.
+- Execution: complete in jj change `wkwutpqqnrvtvunonwysmmlttmzwrpyl`, bookmark
+  `plan/tunnel-port-and-link-ranges/02-kernel-chosen-tunnel-port`. Tunnels always listen on a kernel-chosen 127.0.0.1
+  port bound without address reuse, never the remote port number; the specs, the tunnel warning, two docs pages and the
+  unreleased tunnel-port-warning fragment no longer promise or warn about the remote number. About 127 changed lines of
+  code, tests and docs, about 25 of them rewrapped unchanged text, so about 100 lines of real change, within the gate.
+  Both tunnel outcomes share this change. [Draft PR #2635](https://github.com/scode/farhelm/pull/2635/changes).
 
 ## tunnel-shadows-busy-wildcard-port.md
 
@@ -18421,7 +18426,12 @@
 - Completion criteria: as `tunnel-can-take-standalone-helm-port.md`, which this outcome shares: with no preferred port
   the wildcard collision cannot happen, and the kernel-chosen bind is made without address reuse. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/tunnel-port-and-link-ranges.md`.
+- Execution: complete in jj change `wkwutpqqnrvtvunonwysmmlttmzwrpyl`, bookmark
+  `plan/tunnel-port-and-link-ranges/02-kernel-chosen-tunnel-port`. Tunnels always listen on a kernel-chosen 127.0.0.1
+  port bound without address reuse, never the remote port number; the specs, the tunnel warning, two docs pages and the
+  unreleased tunnel-port-warning fragment no longer promise or warn about the remote number. About 127 changed lines of
+  code, tests and docs, about 25 of them rewrapped unchanged text, so about 100 lines of real change, within the gate.
+  Both tunnel outcomes share this change. [Draft PR #2635](https://github.com/scode/farhelm/pull/2635/changes).
 
 ## stale-confirmation-optout-replayed-after-sign-in.md
 
