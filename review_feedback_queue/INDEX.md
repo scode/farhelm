@@ -290,10 +290,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`spare-owner-tests-register-child-cleanup-after-readiness.md`](spare-owner-tests-register-child-cleanup-after-readiness.md)
   — Owner-death tests can leave a disposable child outside cleanup after readiness failure.
 
-- [`settings-test-restores-before-final-spare-save.md`](settings-test-restores-before-final-spare-save.md) — A final
-  test save can overtake restoration of an initially disabled switch; the established starting state requires earlier
-  cleanup failure.
-
 - [`checkout-test-skips-new-spare-setting-restoration.md`](checkout-test-skips-new-spare-setting-restoration.md) — An
   earlier caller-cleanup failure can skip restoring the new prepared-checkout switch; historical coverage remains
   ambiguous.

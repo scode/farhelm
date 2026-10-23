@@ -40,6 +40,9 @@ test("prepared checkout settings preserve saved choices across reads, refusals a
   let mode: "read-failure" | "normal" | "refuse" | "hold-write" = "read-failure";
   let readEntered = false;
   let heldRequest: Request | undefined;
+  // Every save the page sends, not only the held one: cleanup restores the
+  // shared setting only after each has settled, or a late one could overtake it.
+  const submitted: Request[] = [];
   let bodyFailed = true;
   const intercept = async (route: Route) => {
     if (route.request().method() === "GET" && mode === "read-failure") {
@@ -48,6 +51,7 @@ test("prepared checkout settings preserve saved choices across reads, refusals a
       return route.fulfill({ status: 500, headers: { "x-farhelm-build": build! }, body: "fixture initial read refusal" });
     }
     if (route.request().method() === "PUT") {
+      submitted.push(route.request());
       if (mode === "refuse") return route.fulfill({ status: 500, headers: { "x-farhelm-build": build! }, body: "fixture spare save refusal" });
       if (mode === "hold-write") {
         heldRequest = route.request();
@@ -116,11 +120,16 @@ test("prepared checkout settings preserve saved choices across reads, refusals a
     readGate.release();
     writeGate.release();
     await cleanupOwnedSteps(bodyFailed, [
-      ["owned spare save", async () => { const reply = await heldRequest?.response(); if (reply) await reply.finished(); }],
+      ["owned spare saves", async () => {
+        for (const outgoing of submitted) {
+          const reply = await outgoing.response().catch(() => null);
+          if (reply) await reply.finished().catch(() => null);
+        }
+      }],
       ["spare route", () => page.unroute("**/api/checkout-spare", intercept)],
       ["prepared checkout choice", async () => {
         // Timeout can dispose the per-test request before finally runs. This
-        // shared mutation still needs restoration after the owned write settles.
+        // shared mutation still needs restoration after every owned save settles.
         const slot = currentStackSlot();
         const cleanup = await independentRequest.newContext({ baseURL: slot.baseURL,
           extraHTTPHeaders: harnessAuthorizationHeaders(slot.authStatePath), timeout: 10_000 });

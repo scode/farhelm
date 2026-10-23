@@ -17878,7 +17878,11 @@
 - Completion criteria: cleanup records and awaits every save the page sends in this test before restoring, as the
   checkout-folder tests in the same file do. Test-only, confined to this test. Size gate: about 100 lines as above; over
   it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
+- Execution: complete in jj change `ksolulkyoonyzuprlqstxspwxumpsyso`, bookmark
+  `plan/test-hygiene-oct21/07-spare-saves-settle`. The intercept now records every PUT the page sends to
+  `/api/checkout-spare`, and cleanup awaits each response (tolerating failure) before its restore, as the
+  checkout-folder draft test in the same file does. The test change totals 13 added/deleted lines, below the 100-line
+  gate. PR: https://github.com/scode/farhelm/pull/2615/changes.
 
 ## spare-owner-tests-register-child-cleanup-after-readiness.md
 
