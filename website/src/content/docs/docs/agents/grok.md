@@ -66,6 +66,7 @@ restart Grok. The hooks do nothing for a Grok you start outside Farhelm.
 - Grok works through a [wrapper prefix](/docs/agents/agent-wrappers/) that `exec`s it or stays as its one parent
   process, as long as the wrapper passes through its arguments and environment. A deeper chain of resident wrappers, a
   package-manager launcher, or a renamed binary runs it normally, but Farhelm cannot follow its conversation, so
-  **restart** stays greyed out.
+  **restart** stays greyed out. So does a resident wrapper that is itself named `grok`, or whose program is named
+  `grok-` followed by anything.
 - Grok is not told about `$farhelm` requests, because Farhelm's hooks for it are the ones you install.
 - Tested on Linux with Grok Build 1.0.40 and 1.0.50; not yet on a Mac.

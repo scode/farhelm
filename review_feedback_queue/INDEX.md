@@ -35,10 +35,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   — A new or renamed template in an open Templates dialog replaces one an agent or the CLI created meanwhile; coverage
   by the last-write-wins decision is unsettled.
 
-- [`grok-unrecognized-pane-admits-nested-grok.md`](grok-unrecognized-pane-admits-nested-grok.md) — A nested Grok's
-  conversation can become the Resume target when the session's Grok has an unrecognized program name; such names are
-  unverified.
-
 - [`omp-direct-bun-pane-admits-nested-omp.md`](omp-direct-bun-pane-admits-nested-omp.md) — A direct Bun OMP launch with
   an unrecognized entry file can credit a nested OMP's conversation; the nested reporter premise is unverified.
 

@@ -2885,7 +2885,9 @@ file is introduced.
   capture claim, complete-binding CAS, ownership provenance, and mirror helper as Codex. Its corridor requires exactly
   one native `grok` image with `--no-leader` in the option region, followed only by the hook-shaped reporter and the
   same narrow shell trampoline. A nested Grok, foreign session runtime, missing option, or unreadable argv refuses the
-  report. This is the supported native corridor; wrappers may still launch but cannot establish capture ownership.
+  report. This is the supported native corridor. The pane process is accepted by position, so one resident wrapper keeps
+  capture, unless it looks like a Grok Farhelm does not recognise (argv[0] basename `grok`, or an image basename
+  `grok-*`): that refuses, so a recognised nested Grok cannot stand in for the session's own.
 
   The hook parser accepts the observed snake_case and camelCase spellings for session id, event name, and transcript
   path, and requires duplicate spellings to agree after event-name normalization. `SessionStart` alone selects a UUID

@@ -2984,6 +2984,37 @@ mod tests {
         );
     }
 
+    /// A session pane that looks like a Grok runtime under an image name the
+    /// attribution does not recognise must refuse, or a recognised nested Grok
+    /// below it would be the only emitter and its conversation admitted. A
+    /// resident wrapper pane that does not look like Grok keeps working.
+    #[farhelm_testtrace::test]
+    fn grok_refuses_an_unrecognised_grok_pane_above_a_nested_grok() {
+        let reporter = || {
+            corridor_link(
+                13,
+                "/opt/test/bin/farhelm",
+                &["farhelm", "internal", "hook", "--vendor", "grok"],
+            )
+        };
+        let nested = || corridor_link(12, "/opt/test/bin/grok", &["grok", "--no-leader"]);
+        for pane in [
+            corridor_link(
+                11,
+                "/opt/test/bin/grok-darwin-arm64",
+                &["grok-darwin-arm64"],
+            ),
+            corridor_link(11, "/opt/test/bin/xai-cli", &["grok", "--no-leader"]),
+        ] {
+            let refusal = grok_corridor(&[reporter(), nested(), pane])
+                .expect_err("an unrecognised Grok pane must refuse");
+            assert!(refusal.contains("looks like a Grok runtime"), "{refusal}");
+        }
+        let wrapper = corridor_link(11, "/bin/bash", &["-bash"]);
+        let emitter = grok_corridor(&[reporter(), nested(), wrapper]).expect("wrapper pane");
+        assert_eq!(emitter.pid, 12);
+    }
+
     /// The installed hook command for OMP reports, as the kernel captures
     /// it on the reporter.
     fn omp_hook_argv() -> Vec<&'static str> {

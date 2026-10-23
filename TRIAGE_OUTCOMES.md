@@ -18129,7 +18129,13 @@
   or an image basename `grok` or `grok-*`), the report is refused; resident wrapper panes keep working. A unit test
   covers the uncounted-pane chain. Size gate: about 100 lines as above; over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/resume-target-fixes-oct22.md`.
+- Execution: complete in jj change `ymvvzoywwusznpusyplwvmumnnkoqnyr`, bookmark
+  `plan/resume-target-fixes-oct22/02-grok-unrecognised-pane`. The Grok corridor still accepts the session pane by
+  position, except when it is not the emitter and looks like a Grok runtime (argv[0] basename `grok`, or an image
+  basename `grok-*`; a `grok` image is already the recognised emitter), which it now refuses; `is_grok_image` is
+  unchanged. A unit test covers both shapes of an unrecognised Grok pane above a nested Grok, and a resident wrapper
+  pane that keeps working. SPEC_impl.md now records the pane rule. The code, test and documentation total 69
+  added/deleted lines, below the 100-line gate. PR: https://github.com/scode/farhelm/pull/2639/changes.
 
 ## omp-direct-bun-pane-admits-nested-omp.md
 
