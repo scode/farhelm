@@ -311,3 +311,39 @@ above, each PR passed its review gate, and each outcome's `TRIAGE_OUTCOMES.md` E
 bookmark and PR. Open, not merged. If a `## Decisions` section exists, its latest entry must also be satisfied. Then
 close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the
 queue script, write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-10-23 (claim 8c534c).
+
+### Build the home-alias uninstall refusal at about 150 lines, or discard it?
+
+**The problem.** Uninstalling Farhelm from a host deletes its installation folder and promises to keep the host's
+Farhelm data folder. On a host where the home folder can be reached under two different paths (for example two bind
+mounts of it), with another mount visible under only one of them, the installation can be named through one path and the
+data folder through the other. Uninstall's check that the data folder is not inside the installation compares path
+spellings, so it can miss that layout and delete the data it promised to keep. Nobody has reported this happening; it
+was found by reading the code. On 2026-10-22 you chose to refuse such layouts (SPEC.md's home-alias decision already
+says uninstall "still refuses layouts it cannot tell apart safely"). The triage entry,
+`uninstall-two-home-aliases-hide-kept-data.md`, set a size gate of about 100 lines and said to bring it back if larger.
+
+**What I built, measured and did not push.** The fix asks the host, for each path it checks, whether any folder above it
+is the same folder as the one uninstall would delete, comparing the folders themselves rather than their names, and
+uninstall refuses when the data folder's answer is yes. It only adds a refusal. A test runs the real host-side check
+against a fake aliased home and confirms the refusal (it fails without the fix). It came to about 154 changed lines:
+roughly 80 of code and comments, 75 of tests. About 30 of those are mechanical, because the host's answer is a new field
+in a result that several fakes, a parser test and other call sites build. It does not fit in 100 without dropping the
+test or the explanation. The plan's four other uninstall fixes in this group are built as draft PRs; they land once you
+answer, either way.
+
+**Options.**
+
+- **Build it at about 150 lines.** Uninstall then refuses every layout where the data folder sits inside the
+  installation under another name. It also refuses a few layouts that would in fact be safe (one alias with a nested
+  mount where removal would leave the data alone); that is the refusal side SPEC.md already accepts. Cost: one more PR
+  of this size.
+- **Discard the outcome.** Uninstall keeps today's check by spelling. The data-loss layout stays possible on hosts set
+  up that way, which no user has reported.
+
+**Recommendation:** build it. It closes a data-loss path with a refusal only, the excess over the gate is mostly
+mechanical plumbing and a real end-to-end test, and the approach is proven; the next run would rebuild it as described.
