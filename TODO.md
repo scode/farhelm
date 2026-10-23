@@ -262,6 +262,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Sidebar build-skew interceptor fulfils an already handled route again.** The Chromium test
+  `the sidebar app bar explains the helm and window builds` in `e2e/tests/sidebar.spec.ts` fails in the build-skew
+  interceptor (`forceBuildSkew` in `e2e/tests/helpers/fleet.ts`) with "Route is already handled!", the error the
+  2026-09-05 FLAKES.md entry marked fixed. It failed in full browser run `0f56085c-045c-42df-9d2d-93583fd67eb9`, then 4
+  of 10 Chromium repeats on that stack (`8000f125-1f43-45c9-9493-63f3d6020c31`) and 3 of 10 on main `45e0bedb`
+  (`5888f7a6-44e2-4c33-87fc-6b1afec0fa57`). Cause unknown; the test still drains handlers before removing the
+  interceptor (FLAKES.md, 2026-10-23).
+
 - **Re-added host's session reads "new output" on WebKit.** The WebKit test
   `remove-and-re-add-host: removal forgets, re-adding rediscovers` in `e2e/tests/terminal-multihost.spec.ts` sees the
   rediscovered session's status as "idle — new output" instead of a plain live status, after the host is removed and
