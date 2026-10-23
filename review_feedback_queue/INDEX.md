@@ -69,10 +69,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   lost committed-save reply restores an old shortcut indication while the next key resolves the new template; harmful
   reliance and coverage remain unproved.
 
-- [`reseeded-launcher-retains-conversation-selector.md`](reseeded-launcher-retains-conversation-selector.md) — A
-  superseded mounted launcher retains a conversation selector; an accessible shipped action completing the sequence is
-  unestablished.
-
 - [`recovery-retains-displaced-session-menu.md`](recovery-retains-displaced-session-menu.md) — Fast desktop recovery can
   leave a session menu displaced after header wrapping; consequential mistaken Stop/Delete use remains unverified.
 
