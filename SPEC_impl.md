@@ -3590,6 +3590,15 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   exact ambiguous name an alias write had just been refused for. The alias rides the manager's host snapshot with the
   destination and connection state, so session rows, single-session reads, and agent relay views derive one coherent
   name without each joining the registry.
+- The add host dialog marks its `POST /api/hosts/probe` as a new entry (`new_entry`, carrying the optional alias); no
+  other caller sends it. Without the marker the probe keeps converging onto an existing row for the destination, which
+  is how a host row's "set up again", path repair, a confirmed add's own second registration and update confirmation
+  work. With it, the alias passes the alias syntax rules and the helm refuses a destination that already has a row
+  (naming the row's display name) or an alias equal to any host's current display name, at three points: a read before
+  the probe contacts ssh, again when a pending setup confirmation is confirmed (before the run claims the host), and
+  inside the registration transaction, which is the only race-free one and writes the alias with the new row. The marker
+  rides the pending confirmation, and the registration derived from the stored row after the insert carries none, so the
+  run's later registration converges as before. Spellings are not normalized.
 - A host's `host_identity` is `NULL` until first contact ever succeeds for that row — including the local row, which is
   minted with no identity and learns one the same way any other host does. Recording it is split into two operations so
   silent identity merging is structurally impossible at the storage layer (SPEC.md: never silently merge): first contact

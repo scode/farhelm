@@ -2425,6 +2425,7 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
             | store::HostStoreError::InvalidAlias(_) => ErrorKind::InvalidRequest,
             store::HostStoreError::DuplicateDestination(_)
             | store::HostStoreError::AliasTaken(_)
+            | store::HostStoreError::AlreadyAdded(_)
             | store::HostStoreError::LocalHostImmutable
             | store::HostStoreError::IdentityMismatch { .. }
             | store::HostStoreError::IdentityClaimed { .. }

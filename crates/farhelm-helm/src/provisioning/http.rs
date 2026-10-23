@@ -41,6 +41,22 @@ pub(crate) struct ProbeRequest {
     pub(super) remote_farhelm: Option<String>,
     #[serde(default)]
     pub(super) remote_state_dir: Option<String>,
+    /// Present only on an add from the add host dialog, which asks for a NEW
+    /// host entry (see `crate::store::NewHostEntry`): an existing entry for
+    /// the destination is then refused instead of set up again, and the new
+    /// entry gets the alias. Every other caller of this request (a host
+    /// row's "set up again", update confirmation, a browser tab from before
+    /// this field existed) leaves it out and keeps the converging behavior.
+    #[serde(default)]
+    pub(super) new_entry: Option<NewEntryRequest>,
+}
+
+/// The add host dialog's new-entry marker and its optional alias, as sent.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct NewEntryRequest {
+    #[serde(default)]
+    pub(super) alias: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

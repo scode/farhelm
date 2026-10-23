@@ -1499,6 +1499,14 @@ pub enum HostStoreError {
     /// current display name, not an internal id.
     #[error("a host is already displayed as {0:?}")]
     AliasTaken(String),
+    /// An add from the add host dialog ([`NewHostEntry`]) named a destination
+    /// that is already a host entry. Unlike
+    /// [`HostStoreError::DuplicateDestination`], this carries the existing
+    /// entry's current display name, because the person adding the host
+    /// knows their hosts by that name (its alias, when it has one), and the
+    /// remedy is that entry's own row rather than a second entry.
+    #[error("this host is already added as {0:?}; set it up again from that host's own row")]
+    AlreadyAdded(String),
     /// A call named a [`HostId`] no row currently holds — including one
     /// that once existed and was removed.
     #[error("host {0} does not exist")]
@@ -1596,6 +1604,92 @@ fn validate_alias(alias: Option<&str>) -> Result<Option<String>, HostStoreError>
         ));
     }
     Ok(Some(alias.to_string()))
+}
+
+/// What the add host dialog asks of registration beyond the destination: that
+/// the destination become a NEW host entry, under an optional alias.
+///
+/// Only an add from the dialog carries one. Every other registration (a
+/// host row's "set up again", the second registration inside a confirmed
+/// add, update confirmation, `--ensure-hosts`) passes none and keeps
+/// converging onto an existing row, which is how those flows repair a row's
+/// paths. With one, an existing row for the destination is a refusal
+/// ([`HostStoreError::AlreadyAdded`]): adding a host that is already added is
+/// almost certainly a mistake, and converging would silently rewrite the
+/// existing entry's paths instead of telling the person so.
+///
+/// The alias has already passed the alias shape rules ([`Self::new`] is the
+/// only constructor), so the store checks only its collisions.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NewHostEntry {
+    alias: Option<String>,
+}
+
+impl NewHostEntry {
+    /// Apply the alias rules every alias write uses: trimmed, whitespace
+    /// alone means none, no control characters, at most 64 characters.
+    pub fn new(alias: Option<&str>) -> Result<Self, HostStoreError> {
+        Ok(Self {
+            alias: validate_alias(alias)?,
+        })
+    }
+
+    /// The canonical alias, if one was given.
+    pub fn alias(&self) -> Option<&str> {
+        self.alias.as_deref()
+    }
+}
+
+/// Refuse a [`NewHostEntry`] for `destination` when an entry already holds
+/// that destination ([`HostStoreError::AlreadyAdded`]) or its alias equals
+/// another host's current display name ([`HostStoreError::AliasTaken`]).
+///
+/// "Already holds" is the destination string exactly as given: no spelling
+/// normalization, the same comparison the `hosts_ssh_destination` index
+/// makes. The alias comparison is the wide one [`HelmStore::update_alias`]
+/// uses, against every row's display name, because a new row's alias can
+/// collide with an unaliased destination as easily as with another alias.
+/// Run inside the transaction of the write it gates, and once before any ssh
+/// contact through [`HelmStore::check_new_entry`].
+fn new_entry_conflict(
+    tx: &rusqlite::Transaction<'_>,
+    destination: &str,
+    entry: &NewHostEntry,
+) -> anyhow::Result<()> {
+    let mut rows = tx
+        .prepare("SELECT kind, destination, alias FROM hosts")
+        .context("reading host display names before adding a new entry")?;
+    let rows = rows
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .context("querying host display names")?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut taken = None;
+    for (kind, existing, alias) in rows {
+        // As in `update_alias`: a row this build cannot decode refuses the
+        // write rather than dropping out of the comparison.
+        let name = host_display_name(
+            HostKind::from_column(&kind)?,
+            existing.as_deref(),
+            alias.as_deref(),
+        );
+        // Only rows reached over ssh carry a destination.
+        if existing.as_deref() == Some(destination) {
+            return Err(anyhow::Error::new(HostStoreError::AlreadyAdded(name)));
+        }
+        if taken.is_none() && entry.alias() == Some(name.as_str()) {
+            taken = Some(name);
+        }
+    }
+    match taken {
+        Some(name) => Err(anyhow::Error::new(HostStoreError::AliasTaken(name))),
+        None => Ok(()),
+    }
 }
 
 /// Whether `candidate` matches another row's current explicit alias or the
@@ -5810,6 +5904,35 @@ impl HelmStore {
         .context("add ssh host task panicked")?
     }
 
+    /// Refuse a [`NewHostEntry`] for `destination` now, before the add
+    /// contacts the destination over ssh: a destination that is already a
+    /// host entry, or an alias another host already displays as.
+    ///
+    /// A cheap read so the person is told at once rather than after a
+    /// probe. It is not the guarantee: a conflicting write can land between
+    /// this read and registration, which is why
+    /// [`Self::register_probed_ssh_host`] repeats the same check inside its
+    /// own transaction.
+    pub async fn check_new_entry(
+        &self,
+        destination: &str,
+        entry: &NewHostEntry,
+    ) -> anyhow::Result<()> {
+        let destination = destination.to_string();
+        let entry = entry.clone();
+        self.conn
+            .call(
+                "check new host entry task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning the new-entry check")?;
+                    new_entry_conflict(&tx, &destination, &entry)
+                },
+            )
+            .await
+    }
+
     /// Register a supervisor discovered through one resolved SSH dial.
     ///
     /// The connection-defining paths and reported identity land in the same
@@ -5828,12 +5951,18 @@ impl HelmStore {
     /// The CONVERGE branch (an already-registered destination) never runs
     /// it: that branch never writes `destination`, so it cannot introduce a
     /// new collision.
+    ///
+    /// `new_entry` is an add from the add host dialog: it turns the CONVERGE
+    /// branch into [`HostStoreError::AlreadyAdded`] and gives the inserted
+    /// row its alias, both checked in this same transaction
+    /// ([`NewHostEntry`]).
     pub async fn register_probed_ssh_host(
         &self,
         destination: &str,
         remote_farhelm: Option<&str>,
         remote_state_dir: Option<&str>,
         host_identity: Option<&str>,
+        new_entry: Option<&NewHostEntry>,
     ) -> anyhow::Result<(HostId, bool)> {
         if !destination_is_usable(destination) {
             return Err(anyhow::Error::new(HostStoreError::InvalidDestination(
@@ -5850,6 +5979,7 @@ impl HelmStore {
         let remote_farhelm = remote_farhelm.map(str::to_string);
         let remote_state_dir = remote_state_dir.map(str::to_string);
         let host_identity = host_identity.map(str::to_string);
+        let new_entry = new_entry.cloned();
         self.conn
             .call(
                 "register discovered ssh host task panicked",
@@ -5857,6 +5987,10 @@ impl HelmStore {
                     let tx = conn
                         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                         .context("beginning discovered-host registration")?;
+                    if let Some(entry) = &new_entry {
+                        new_entry_conflict(&tx, &destination, entry)?;
+                    }
+                    let alias = new_entry.as_ref().and_then(NewHostEntry::alias);
                     let existing: Option<(HostId, Option<String>)> = tx
                         .query_row(
                             concat!(
@@ -5928,11 +6062,11 @@ impl HelmStore {
                         tx.execute(
                     concat!(
                         "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, \
-                         host_identity, entry_uuid) VALUES ('",
+                         host_identity, entry_uuid, alias) VALUES ('",
                         host_kind_sql!(ssh),
-                        "', ?1, ?2, ?3, ?4, ?5)"
+                        "', ?1, ?2, ?3, ?4, ?5, ?6)"
                     ),
-                    rusqlite::params![destination, remote_farhelm, remote_state_dir, host_identity, uuid::Uuid::new_v4().to_string()],
+                    rusqlite::params![destination, remote_farhelm, remote_state_dir, host_identity, uuid::Uuid::new_v4().to_string(), alias],
                 )
                 .context("inserting the discovered ssh host")?;
                         (tx.last_insert_rowid(), true)
@@ -12644,7 +12778,7 @@ mod tests {
         let added = host_with_identity(&store, "added@host", "identity-before").await;
         let reported_identity = "abcdefab-1234-4000-8000-123456789abc";
         let (probed, inserted) = store
-            .register_probed_ssh_host("probed@host", None, None, Some(reported_identity))
+            .register_probed_ssh_host("probed@host", None, None, Some(reported_identity), None)
             .await
             .unwrap();
         assert!(inserted);
@@ -12689,6 +12823,7 @@ mod tests {
                     Some("farhelm-remote"),
                     None,
                     Some(reported_identity),
+                    None,
                 )
                 .await
                 .unwrap(),
@@ -15463,6 +15598,7 @@ mod tests {
                     None,
                     Some(rejected),
                     None,
+                    None,
                 )
                 .await;
             if rejected.is_empty() || rejected.contains('\0') {
@@ -16286,7 +16422,7 @@ mod tests {
             .expect("seed the alias");
 
         let err = store
-            .register_probed_ssh_host("Probed Name", None, None, Some("identity-probed"))
+            .register_probed_ssh_host("Probed Name", None, None, Some("identity-probed"), None)
             .await
             .expect_err("a freshly discovered destination colliding with another host's alias must be refused");
         assert!(
@@ -16312,7 +16448,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
 
         let err = store
-            .register_probed_ssh_host("this machine", None, None, Some("identity-probed"))
+            .register_probed_ssh_host("this machine", None, None, Some("identity-probed"), None)
             .await
             .expect_err("a probed registration must not duplicate the local display name");
         assert!(
@@ -16338,7 +16474,13 @@ mod tests {
         let owner = host_with_identity(&store, "identity-owner@host", "identity-owned").await;
 
         let err = store
-            .register_probed_ssh_host("new-destination@host", None, None, Some("identity-owned"))
+            .register_probed_ssh_host(
+                "new-destination@host",
+                None,
+                None,
+                Some("identity-owned"),
+                None,
+            )
             .await
             .expect_err("a new destination cannot claim another host's identity");
         assert!(
@@ -16365,7 +16507,7 @@ mod tests {
         let host = host_with_identity(&store, "mismatch@host", "identity-recorded").await;
 
         let err = store
-            .register_probed_ssh_host("mismatch@host", None, None, Some("identity-reported"))
+            .register_probed_ssh_host("mismatch@host", None, None, Some("identity-reported"), None)
             .await
             .expect_err("a changed probed identity must not silently replace the recorded one");
         assert!(
@@ -16421,7 +16563,13 @@ mod tests {
         }
 
         let (host, inserted) = store
-            .register_probed_ssh_host("converge-owner@host", Some("farhelm-remote"), None, None)
+            .register_probed_ssh_host(
+                "converge-owner@host",
+                Some("farhelm-remote"),
+                None,
+                None,
+                None,
+            )
             .await
             .expect(
                 "converging fields on an already-registered destination must not be refused, \
@@ -16432,6 +16580,132 @@ mod tests {
             "must resolve to the SAME row, not insert a new one"
         );
         assert!(!inserted, "the row already existed");
+    }
+
+    /// An add from the add host dialog writes its alias in the same
+    /// transaction that inserts the host, and refuses a destination that is
+    /// already an entry by that entry's display name.
+    ///
+    /// Why it matters: the dialog's whole contract rests on this write. A
+    /// separate alias write after the insert could leave a host added
+    /// without the alias it was given, and converging onto the existing row
+    /// (what every other registration does) would silently rewrite that
+    /// entry's paths when the person almost certainly made a mistake.
+    /// Specified: a new destination is inserted with its alias; the same
+    /// destination again is refused as `AlreadyAdded` naming the existing
+    /// entry's alias, and that entry's paths are untouched.
+    #[farhelm_testtrace::test]
+    async fn register_probed_ssh_host_new_entry_writes_its_alias_and_refuses_a_duplicate() {
+        let (_dir, store) = fresh_store().await;
+        let entry = NewHostEntry::new(Some("  Build box  ")).unwrap();
+        let (host, inserted) = store
+            .register_probed_ssh_host(
+                "new-entry@host",
+                Some("/remote/farhelm"),
+                None,
+                None,
+                Some(&entry),
+            )
+            .await
+            .unwrap();
+        assert!(inserted);
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert_eq!(row.alias.as_deref(), Some("Build box"), "stored trimmed");
+
+        let again = NewHostEntry::new(None).unwrap();
+        let err = store
+            .register_probed_ssh_host(
+                "new-entry@host",
+                Some("/elsewhere/farhelm"),
+                None,
+                None,
+                Some(&again),
+            )
+            .await
+            .expect_err("a new entry for an existing destination must be refused");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AlreadyAdded(name)) if name == "Build box"
+            ),
+            "{err:#}"
+        );
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert_eq!(row.remote_farhelm.as_deref(), Some("/remote/farhelm"));
+    }
+
+    /// A new entry's alias may not equal any host's current display name,
+    /// an unaliased destination included, and the refusal comes from the
+    /// registering transaction itself, with nothing inserted.
+    ///
+    /// Why it matters: the dialog checks this before contacting the host,
+    /// but a host added or renamed meanwhile can make the alias collide by
+    /// the time the add registers; only the write can refuse that without a
+    /// race. Specified: both `check_new_entry` (the read before ssh) and the
+    /// registration refuse an alias equal to another host's destination as
+    /// `AliasTaken`, and the registry still has no row for the new
+    /// destination.
+    #[farhelm_testtrace::test]
+    async fn a_new_entry_alias_equal_to_another_hosts_name_is_refused_before_and_in_the_write() {
+        let (_dir, store) = fresh_store().await;
+        store.add_ssh_host("taken@host", None, None).await.unwrap();
+        let entry = NewHostEntry::new(Some("taken@host")).unwrap();
+        let check = store
+            .check_new_entry("fresh@host", &entry)
+            .await
+            .expect_err("the read before ssh must refuse a taken alias");
+        let write = store
+            .register_probed_ssh_host("fresh@host", None, None, None, Some(&entry))
+            .await
+            .expect_err("the write must refuse a taken alias");
+        for err in [check, write] {
+            assert!(
+                matches!(
+                    err.downcast_ref::<HostStoreError>(),
+                    Some(HostStoreError::AliasTaken(name)) if name == "taken@host"
+                ),
+                "{err:#}"
+            );
+        }
+        assert!(
+            !store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.destination.as_deref() == Some("fresh@host"))
+        );
+    }
+
+    /// A new entry's alias follows the shape rules every alias write does.
+    ///
+    /// Why it matters: the alias reaches line-oriented agent output and the
+    /// sidebar, and the add dialog must not become a way around the rules
+    /// the settings dialog enforces. Specified: control characters and more
+    /// than 64 characters are `InvalidAlias`; whitespace alone means none.
+    #[farhelm_testtrace::test]
+    fn a_new_entry_alias_follows_the_alias_rules() {
+        assert!(matches!(
+            NewHostEntry::new(Some("tab\there")),
+            Err(HostStoreError::InvalidAlias(_))
+        ));
+        assert!(matches!(
+            NewHostEntry::new(Some(&"x".repeat(65))),
+            Err(HostStoreError::InvalidAlias(_))
+        ));
+        assert_eq!(NewHostEntry::new(Some("   ")).unwrap().alias(), None);
     }
 
     /// `ensure_ssh_hosts` refuses a batch where one genuinely NEW entry

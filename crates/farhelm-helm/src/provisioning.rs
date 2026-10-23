@@ -1330,6 +1330,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -1382,6 +1383,213 @@ mod tests {
         assert!(backend.operations.lock().unwrap().is_empty());
     }
 
+    /// A probe from the add host dialog: a new entry for `destination`,
+    /// optionally under `alias`.
+    fn new_entry_probe(destination: &str, alias: Option<&str>) -> ProbeRequest {
+        ProbeRequest {
+            target: ProbeDestination::Ssh {
+                destination: destination.to_string(),
+            },
+            remote_farhelm: None,
+            remote_state_dir: None,
+            new_entry: Some(http::NewEntryRequest {
+                alias: alias.map(str::to_string),
+            }),
+        }
+    }
+
+    /// The stored row for `host`, which the test expects to exist.
+    async fn stored_row(store: &HelmStore, host: HostId) -> HostRow {
+        store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .expect("the host row exists")
+    }
+
+    /// Whether the scripted probe answer is still unspent, which is how these
+    /// tests prove a request never contacted the destination over ssh.
+    fn probe_unused(backend: &FakeBackend) -> bool {
+        backend.probe.lock().unwrap().is_some()
+    }
+
+    /// Adding, from the add host dialog, a destination that is already a host
+    /// entry is refused before ssh, naming the entry by its display name.
+    ///
+    /// Why it matters: the maintainer decided a duplicate add is almost
+    /// certainly a mistake. Converging (what a host row's "set up again"
+    /// still does) silently rewrote the existing entry's paths and told the
+    /// person nothing. Specified: the probe fails as `AlreadyAdded` carrying
+    /// the existing entry's alias, the destination is never probed, and the
+    /// existing row keeps its paths.
+    #[farhelm_testtrace::test]
+    async fn an_add_of_an_existing_destination_is_refused_before_ssh() {
+        let harness = harness().await;
+        let existing = harness
+            .store
+            .add_ssh_host("dup@host", Some("/kept/farhelm"), None)
+            .await
+            .unwrap();
+        harness
+            .store
+            .update_alias(existing, Some("Old box"))
+            .await
+            .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::supervisor(root.path().to_path_buf());
+        let provisioner = service(&harness, backend.clone(), root.path());
+        let err = provisioner
+            .probe(new_entry_probe("dup@host", Some("New name")))
+            .await
+            .expect_err("a duplicate add must be refused");
+        assert!(
+            matches!(
+                err.downcast_ref::<crate::store::HostStoreError>(),
+                Some(crate::store::HostStoreError::AlreadyAdded(name)) if name == "Old box"
+            ),
+            "{err:#}"
+        );
+        assert!(
+            probe_unused(&backend),
+            "nothing may contact the destination"
+        );
+        let row = stored_row(&harness.store, existing).await;
+        assert_eq!(row.remote_farhelm.as_deref(), Some("/kept/farhelm"));
+        assert_eq!(row.alias.as_deref(), Some("Old box"));
+    }
+
+    /// The add host dialog's alias is checked before ssh: a taken alias and
+    /// a malformed one are refused without probing the destination.
+    ///
+    /// Why it matters: a probe can take seconds and, for a host without
+    /// Farhelm, leads to a setup confirmation; refusing the alias only at
+    /// registration would let the person go through all of that first.
+    /// Specified: an alias equal to another host's display name is
+    /// `AliasTaken` and a control character is `InvalidAlias`, both with the
+    /// probe unspent and no row for the destination.
+    #[farhelm_testtrace::test]
+    async fn an_add_with_a_taken_or_malformed_alias_is_refused_before_ssh() {
+        let harness = harness().await;
+        harness
+            .store
+            .add_ssh_host("named@host", None, None)
+            .await
+            .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::supervisor(root.path().to_path_buf());
+        let provisioner = service(&harness, backend.clone(), root.path());
+        let taken = provisioner
+            .probe(new_entry_probe("fresh@host", Some("named@host")))
+            .await
+            .expect_err("a taken alias must be refused");
+        assert!(
+            matches!(
+                taken.downcast_ref::<crate::store::HostStoreError>(),
+                Some(crate::store::HostStoreError::AliasTaken(name)) if name == "named@host"
+            ),
+            "{taken:#}"
+        );
+        let malformed = provisioner
+            .probe(new_entry_probe("fresh@host", Some("bad\u{7}alias")))
+            .await
+            .expect_err("a malformed alias must be refused");
+        assert!(
+            matches!(
+                malformed.downcast_ref::<crate::store::HostStoreError>(),
+                Some(crate::store::HostStoreError::InvalidAlias(_))
+            ),
+            "{malformed:#}"
+        );
+        assert!(
+            probe_unused(&backend),
+            "nothing may contact the destination"
+        );
+        assert!(
+            !harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.destination.as_deref() == Some("fresh@host"))
+        );
+    }
+
+    /// The alias typed in the add host dialog survives a setup confirmation
+    /// and is on the host the confirmed add registers.
+    ///
+    /// Why it matters: a host without Farhelm goes through a confirmation
+    /// page before anything is registered, and an alias dropped there would
+    /// leave the person renaming the host by hand right after adding it.
+    /// Specified: a probe that finds nothing yields a confirmable plan, and
+    /// confirming it registers the destination with the alias.
+    #[farhelm_testtrace::test]
+    async fn a_setup_confirmation_registers_the_dialogs_alias() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let provisioner = service(&harness, backend, root.path());
+        let ProbeResponse::Provisionable { probe_id, .. } = provisioner
+            .probe(new_entry_probe("confirm.example", Some("Build box")))
+            .await
+            .unwrap()
+        else {
+            panic!("an absent supervisor must yield a confirmable plan")
+        };
+        let accepted = provisioner
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap();
+        let row = stored_row(&harness.store, accepted.host_id).await;
+        assert_eq!(row.destination.as_deref(), Some("confirm.example"));
+        assert_eq!(row.alias.as_deref(), Some("Build box"));
+        wait_finished(&provisioner, accepted.host_id).await;
+    }
+
+    /// A duplicate that appears while the setup confirmation is open is
+    /// refused when the add is confirmed, before anything is installed.
+    ///
+    /// Why it matters: the check before ssh ran when the plan was made; the
+    /// same destination can be added meanwhile (another tab, the command
+    /// line). Confirming must not then converge onto that entry and run an
+    /// install under it. Specified: the confirmation fails as `AlreadyAdded`,
+    /// no run starts, and the other entry is unchanged.
+    #[farhelm_testtrace::test]
+    async fn a_duplicate_added_before_confirmation_is_refused_at_confirmation() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let provisioner = service(&harness, backend.clone(), root.path());
+        let ProbeResponse::Provisionable { probe_id, .. } = provisioner
+            .probe(new_entry_probe("late.example", None))
+            .await
+            .unwrap()
+        else {
+            panic!("an absent supervisor must yield a confirmable plan")
+        };
+        let other = harness
+            .store
+            .add_ssh_host("late.example", Some("/other/farhelm"), None)
+            .await
+            .unwrap();
+        let err = provisioner
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .expect_err("the confirmation must refuse the duplicate");
+        assert!(
+            matches!(
+                err.downcast_ref::<crate::store::HostStoreError>(),
+                Some(crate::store::HostStoreError::AlreadyAdded(name)) if name == "late.example"
+            ),
+            "{err:#}"
+        );
+        assert!(backend.operations.lock().unwrap().is_empty());
+        let row = stored_row(&harness.store, other).await;
+        assert_eq!(row.remote_farhelm.as_deref(), Some("/other/farhelm"));
+    }
+
     /// A probe that finds a supervisor finishes registering the host even if
     /// its request is dropped after the host's row is saved.
     ///
@@ -1413,6 +1621,7 @@ mod tests {
                         },
                         remote_farhelm: None,
                         remote_state_dir: None,
+                        new_entry: None,
                     })
                     .await
             }
@@ -1479,6 +1688,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -1577,6 +1787,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -1620,6 +1831,7 @@ mod tests {
                     },
                     remote_farhelm: farhelm.map(str::to_string),
                     remote_state_dir: state_dir.map(str::to_string),
+                    new_entry: None,
                 })
                 .await
                 .expect_err("a non-absolute remote path must be refused");
@@ -1687,6 +1899,7 @@ mod tests {
                     },
                     remote_farhelm,
                     remote_state_dir,
+                    new_entry: None,
                 })
                 .await
                 .unwrap_or_else(|error| {
@@ -1727,6 +1940,7 @@ mod tests {
                     },
                     remote_farhelm: None,
                     remote_state_dir: None,
+                    new_entry: None,
                 })
                 .await
                 .unwrap();
@@ -1787,6 +2001,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -1822,6 +2037,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -1858,6 +2074,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -1889,6 +2106,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -1930,6 +2148,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -2496,6 +2715,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -2546,6 +2766,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -2885,6 +3106,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -2933,6 +3155,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .expect_err("an SSH failure must not become an offer");
@@ -2965,6 +3188,7 @@ mod tests {
             },
             remote_farhelm: None,
             remote_state_dir: None,
+            new_entry: None,
         };
         let ProbeResponse::Provisionable { probe_id, .. } = service.probe(request()).await.unwrap()
         else {
@@ -3044,6 +3268,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -3062,6 +3287,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -3109,6 +3335,7 @@ mod tests {
             },
             remote_farhelm: None,
             remote_state_dir: state_dir,
+            new_entry: None,
         };
         let ProbeResponse::Provisionable { probe_id, .. } =
             service.probe(probe(None)).await.unwrap()
@@ -3135,6 +3362,7 @@ mod tests {
                 "user@busy",
                 Some("/custom/bin/farhelm"),
                 Some("/custom/state"),
+                None,
                 None,
             )
             .await
@@ -3185,6 +3413,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -3235,6 +3464,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -3353,6 +3583,7 @@ mod tests {
                     },
                     remote_farhelm: None,
                     remote_state_dir: None,
+                    new_entry: None,
                 })
                 .await
                 .unwrap();
@@ -7551,6 +7782,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -7605,6 +7837,7 @@ mod tests {
                     },
                     remote_farhelm: None,
                     remote_state_dir: None,
+                    new_entry: None,
                 })
                 .await
                 .unwrap();
@@ -7761,6 +7994,7 @@ mod tests {
                         target: ProbeDestination::Local,
                         remote_farhelm: None,
                         remote_state_dir: None,
+                        new_entry: None,
                     })
                     .await
                     .map(|_| ())
@@ -7848,6 +8082,7 @@ mod tests {
                     target: ProbeDestination::Local,
                     remote_farhelm: None,
                     remote_state_dir: None,
+                    new_entry: None,
                 })
                 .await
         });
@@ -7922,6 +8157,7 @@ mod tests {
                     target: ProbeDestination::Local,
                     remote_farhelm: None,
                     remote_state_dir: None,
+                    new_entry: None,
                 })
                 .await
         });
@@ -7992,6 +8228,7 @@ mod tests {
                     target: ProbeDestination::Local,
                     remote_farhelm: None,
                     remote_state_dir: None,
+                    new_entry: None,
                 })
                 .await
                 .unwrap();
@@ -8064,6 +8301,7 @@ mod tests {
                     target: ProbeDestination::Local,
                     remote_farhelm: None,
                     remote_state_dir: None,
+                    new_entry: None,
                 })
                 .await
                 .unwrap();
@@ -8302,6 +8540,7 @@ mod tests {
                 target: ProbeDestination::Local,
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -8350,6 +8589,7 @@ mod tests {
                 target: ProbeDestination::Local,
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -8376,6 +8616,7 @@ mod tests {
                 target: ProbeDestination::Local,
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .expect_err("an unreadable unit is not permission to install");
@@ -8408,6 +8649,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -9145,6 +9387,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -9196,6 +9439,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -10265,6 +10509,7 @@ mod tests {
                     },
                     remote_farhelm: probe_remote_farhelm,
                     remote_state_dir: probe_remote_state_dir,
+                    new_entry: None,
                 })
                 .await
                 .unwrap();
@@ -10380,6 +10625,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
@@ -11959,6 +12205,7 @@ mod tests {
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
+                new_entry: None,
             })
             .await
             .unwrap();
