@@ -1304,11 +1304,13 @@ test("the Templates dialog creates, edits, renames, deletes and undoes", async (
 /**
  * A long summary cannot size the list wider than the dialog. Editing that row
  * must be reachable and collision refusals must preserve the other template,
- * including when another client takes a deleted template's name before undo.
+ * including when another client takes a name after the dialog loaded its list:
+ * a rename to it re-reads the names before writing, and so does undo.
  */
 test("long summaries stay reachable and taken names refuse save and undo", async ({ page, request }) => {
   const name = `e2e-long-${Date.now()}`;
   const taken = `${name}-taken`;
+  const late = `${name}-late`;
   const fields = { kind: "agent", agent: "claude", model: "long-model-".repeat(70) };
   try {
     await putTemplate(request, name, fields);
@@ -1328,6 +1330,14 @@ test("long summaries stay reachable and taken names refuse save and undo", async
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-error")).toContainText("already exists");
     expect((await storedTemplate(request, taken)).fields).toEqual({ name: "untouched" });
+    // The dialog read its list on opening, so only a fresh read sees this one.
+    await putTemplate(request, late, { name: "outside" });
+    await expect(dialog.locator(".templates-row-name", { hasText: late })).toHaveCount(0);
+    await dialog.locator(".templates-name").fill(late);
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-error")).toContainText(`"${late}" already exists`);
+    expect((await storedTemplate(request, late)).fields).toEqual({ name: "outside" });
+    expect((await storedTemplate(request, name)).fields).toEqual(fields);
     await dialog.locator(".templates-name").fill(name);
     await dialog.locator(".templates-delete").click();
     await expect(dialog.locator(".templates-undo")).toBeVisible();
@@ -1337,7 +1347,7 @@ test("long summaries stay reachable and taken names refuse save and undo", async
     await expect(dialog.locator(".templates-error")).toContainText("already exists");
     expect((await storedTemplate(request, name)).fields).toEqual({ name: "replacement" });
   } finally {
-    for (const value of [name, taken]) await deleteTemplate(request, value);
+    for (const value of [name, taken, late]) await deleteTemplate(request, value);
   }
 });
 
