@@ -291,6 +291,7 @@ fn should_forget(error: &anyhow::Error) -> bool {
                     error,
                     WorkingCopyError::IdentityMismatch { .. }
                         | WorkingCopyError::DeviceChangedUnconfirmed { .. }
+                        | WorkingCopyError::CreationTimeUnconfirmed { .. }
                         | WorkingCopyError::WrongState(_)
                 ) || matches!(error, WorkingCopyError::Io(error) if error.kind() == std::io::ErrorKind::NotFound)
             })

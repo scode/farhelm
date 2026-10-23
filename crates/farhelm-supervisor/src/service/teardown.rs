@@ -90,13 +90,18 @@ struct ArchiveSkipped {
     may_have_moved: Option<Option<String>>,
 }
 
-/// Whether an archive error is the filesystem refusing the rename outright
-/// (see `working_copies::WorkingCopyError::RenameRefused`), which moved
-/// nothing, as opposed to a failure whose outcome is unknown.
+/// Whether an archive error is a refusal that moved nothing: the filesystem
+/// refusing the rename outright (see
+/// `working_copies::WorkingCopyError::RenameRefused`), or Farhelm refusing to
+/// move a folder no creation time vouches for. Either releases the checkout
+/// untouched, as opposed to a failure whose outcome is unknown.
 fn rename_refused(error: &anyhow::Error) -> bool {
     matches!(
         error.downcast_ref::<crate::working_copies::WorkingCopyError>(),
-        Some(crate::working_copies::WorkingCopyError::RenameRefused { .. })
+        Some(
+            crate::working_copies::WorkingCopyError::RenameRefused { .. }
+                | crate::working_copies::WorkingCopyError::CreationTimeUnconfirmed { .. }
+        )
     )
 }
 

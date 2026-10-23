@@ -23,10 +23,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   that survives an interrupted Delete loses its attachments at the next supervisor start; the partial-deletion allowance
   and a ledger decision conflict.
 
-- [`no-birth-time-checkout-archives-reclone.md`](no-birth-time-checkout-archives-reclone.md) — On a filesystem without
-  creation times, a folder re-cloned over a checkout is trashed as Farhelm's; which supported filesystems lack them is
-  unverified.
-
 - [`uninstall-notice-copies-raw-remote-path.md`](uninstall-notice-copies-raw-remote-path.md) — The uninstall notice
   copies a remote path without warning; successful uninstall rejects controls, but concurrent removal can expose an owed
   notice after failure. Unsafe downstream paste remains unverified.
