@@ -15,10 +15,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`trash-entry-delete-hits-shifted-row.md`](trash-entry-delete-hits-shifted-row.md) — A one-click trash delete can
   permanently delete a different checkout when rows shift under the pointer; click timing is unmeasured.
 
-- [`tab-owns-first-personal-tmux.md`](tab-owns-first-personal-tmux.md) — The accepted rule that a tab owns services its
-  startup files start first rests on a premise tmux autostart contradicts; marker-only exclusion also leaves cgroup
-  termination intact, and runtime inheritance is untested.
-
 - [`shared-checkout-root-archives-other-host-work.md`](shared-checkout-root-archives-other-host-work.md) — A checkout
   root shared between hosts lets one host trash, then permanently delete, a checkout another host's session works in;
   whether a shared root is supported is unsettled.

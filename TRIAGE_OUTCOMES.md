@@ -18066,7 +18066,8 @@
   the first tab routinely becomes the owner of the user's tmux server, and that with `exec tmux` a detach ends it.
   Correct the Doc todo in TODO.md that says services started for the agent launch are not affected. No code change.
   Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-docs-oct22.md`.
+- Execution: `complete`; draft PR [#2627](https://github.com/scode/farhelm/pull/2627/changes) on bookmark
+  `plan/triage-docs-oct22/02-tab-tmux-premise`, jj change `yskmnpnp`.
 
 ## named-restart-with-keeps-unreported-old-conversation.md
 

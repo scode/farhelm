@@ -1371,12 +1371,17 @@ whatever its shell's startup files start: containment begins before those files 
 belongs to that tab and dies when the tab is closed, reaped, or deleted with its session (within the cleanup guarantee's
 limits on hosts without a usable systemd user manager; see above). This is deliberately unlike the agent launch, which
 leaves detached services started by shell initialization before the agent outside its cleanup guarantee (see above),
-though cleanup may still reach one that stays in the agent's process tree; since the agent's launch has normally already
-run the same startup files, a tab usually finds such a service running and only reuses it. A tab whose process exits on
-its own is reaped automatically and silently: the tab disappears as if closed, its dead pane's scrollback is discarded,
-and no notice or exit code is shown. This is deliberately NOT the agent terminal's contract — an exited agent stays
-viewable with its scrollback — because a tab's shell exiting is the user being done with the tab. A shell that dies
-before the tab's open completes still refuses the open loudly, with the shell's last words as the error.
+though cleanup may still reach one that stays in the agent's process tree. The agent's launch has normally already run
+the same startup files, so a tab usually finds such a service running and only reuses it, with one routine exception:
+the launch runs those files while `TMUX` still names Farhelm's private tmux server and removes it only afterwards (see
+[Ownership during cleanup and provisioning](#ownership-during-cleanup-and-provisioning)), so a tmux autostart guarded by
+`TMUX` being unset does not fire there. When the user's tmux server is not already running, the first tab's startup
+files therefore routinely start it, and the tab owns it; when they `exec tmux`, detaching from it ends the tab and the
+server with it. A tab whose process exits on its own is reaped automatically and silently: the tab disappears as if
+closed, its dead pane's scrollback is discarded, and no notice or exit code is shown. This is deliberately NOT the agent
+terminal's contract — an exited agent stays viewable with its scrollback — because a tab's shell exiting is the user
+being done with the tab. A shell that dies before the tab's open completes still refuses the open loudly, with the
+shell's last words as the error.
 
 When a session's terminal contents no longer exist on a reachable host after a reboot, opening it shows the session's
 metadata and says why there is no terminal, rather than an empty pane.

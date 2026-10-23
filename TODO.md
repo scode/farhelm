@@ -219,11 +219,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   roots shared with or writable by other local accounts, and does not check. SPEC.md's fresh-checkout section states the
   rule.
 - Tell users that closing, exiting, or deleting a terminal tab also stops services the tab shell's startup files started
-  there first (an `ssh-agent`, an editor daemon, a detached tmux server), and that services started for the agent launch
-  are not affected. Likewise, a personal tmux server or an ssh ControlMaster that the agent is the first to start ends
-  with Stop, Restart, Replace or Delete, and one a command in a tab is the first to start ends when the tab closes or
-  the session is deleted, each with everything the user later ran in it or through it, including from outside Farhelm.
-  SPEC.md's session view section and "Ownership during cleanup and provisioning" state the rules.
+  there first (an `ssh-agent`, an editor daemon, a detached tmux server), and that services the agent's launch started
+  first are not affected, though a tmux autostart guarded by `TMUX` never fires during the agent's launch, so when no
+  tmux server of the user's is running yet, the first tab usually starts and owns it, and with `exec tmux` a detach ends
+  the tab and the server. Likewise, a personal tmux server or an ssh ControlMaster that the agent is the first to start
+  ends with Stop, Restart, Replace or Delete, and one a command in a tab is the first to start ends when the tab closes
+  or the session is deleted, each with everything the user later ran in it or through it, including from outside
+  Farhelm. SPEC.md's session view section and "Ownership during cleanup and provisioning" state the rules.
 - Tell users what Stop, Restart, Delete and closing a tab can and cannot kill on a Mac, and on a Linux host whose
   supervisor runs without a usable systemd user manager. There, a background process that has detached from the
   session's terminal is found only through an environment marker, so one that hides or overwrites its environment
