@@ -38,10 +38,11 @@ without a spec or code change. The outcome ledger lives outside this directory a
 `INDEX.md`.
 
 Exception: when triage verifies that a finding is fully covered by an accepted specification rule, an existing `Planned`
-item in TODO.md, a known bug recorded in root `BUGS.md`, or a filter in `FILTER.md`, record the basis in the ledger and
-remove the feedback file and index entry immediately. These items must not remain in the queue to be skipped repeatedly.
-Completing this queue cleanup does not mean the planned implementation is complete. A filter match likewise says nothing
-about whether the behavior is acceptable in code; it only means the finding is not worth triage.
+item in TODO.md, a plan in `plans/queue/` that has not landed and whose work fixes it, a known bug recorded in root
+`BUGS.md`, or a filter in `FILTER.md`, record the basis in the ledger and remove the feedback file and index entry
+immediately. These items must not remain in the queue to be skipped repeatedly. Completing this queue cleanup does not
+mean the planned implementation is complete. A filter match likewise says nothing about whether the behavior is
+acceptable in code; it only means the finding is not worth triage.
 
 ## Priority buckets
 
@@ -87,9 +88,10 @@ the documented complexity or scope gate rather than silently expanding it.
 
 ## Flows and reading lists
 
-Coverage sources, named in several lists here: `SPEC.md`, `SPEC_impl.md`, the `Planned` bucket of `TODO.md`, `BUGS.md`,
-`review_feedback_queue/INDEX.md` and the queue files it lists, and `TRIAGE_OUTCOMES.md`. These are searched for the
-finding at hand, with the matching sections read in full; they are not read end to end.
+Coverage sources, named in several lists here: `SPEC.md`, `SPEC_impl.md`, the `Planned` bucket of `TODO.md`, the plans
+in `plans/queue/` that have not landed, `BUGS.md`, `review_feedback_queue/INDEX.md` and the queue files it lists, and
+`TRIAGE_OUTCOMES.md`. These are searched for the finding at hand, with the matching sections read in full; they are not
+read end to end.
 
 ### Recording a finding ("record review feedback", "add this to the review queue", "queue this finding")
 

@@ -16,12 +16,12 @@ recording one only to have triage verify and delete it costs a human's time and 
 to recording time.
 
 - Covered: do not record a finding that is fully covered by behavior SPEC.md or SPEC_impl.md explicitly accepts, by an
-  item in TODO.md's `Planned` bucket, by a known bug root `BUGS.md` records as one we have decided to live with, by an
-  item already in this queue, or by a decision already recorded for the same finding in root `TRIAGE_OUTCOMES.md`. Apply
-  the test triage applies: the trigger, the consequence, and the scope must all match. Sharing a subsystem or a keyword
-  is not enough. When only part of a finding is covered, record the remainder and name what covers the rest. When a new
-  finding adds substance to an existing queue item, extend that item rather than dropping the finding or writing a
-  duplicate.
+  item in TODO.md's `Planned` bucket, by a plan in `plans/queue/` that has not landed and whose stated work removes the
+  finding's cause, by a known bug root `BUGS.md` records as one we have decided to live with, by an item already in this
+  queue, or by a decision already recorded for the same finding in root `TRIAGE_OUTCOMES.md`. Apply the test triage
+  applies: the trigger, the consequence, and the scope must all match. Sharing a subsystem or a keyword is not enough.
+  When only part of a finding is covered, record the remainder and name what covers the rest. When a new finding adds
+  substance to an existing queue item, extend that item rather than dropping the finding or writing a duplicate.
 - Filtered: do not record a finding from an automated review of committed code that fully matches a filter in
   `FILTER.md`. The filters never apply to findings about a change still under review, or to a problem a person reported
   or asked to have fixed.
