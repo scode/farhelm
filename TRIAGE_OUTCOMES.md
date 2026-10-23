@@ -18584,7 +18584,11 @@
 - Decision: the user accepted the recommendation (2026-10-22 high-bucket triage page).
 - Completion criteria: both help texts and the tooltip name deleting sessions and templates, and the SPEC.md summary
   list names delete. Size gate: about 100 lines as above. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/dialog-saves-oct22.md`.
+- Execution: complete in change `pzrssvptrsorklurmnruuwuwkxosxzrw`, bookmark
+  `plan/dialog-saves-oct22/04-commands-help-names-delete`. Both help texts and the tooltip of "Run farhelm commands
+  without asking" name deleting sessions and templates, and SPEC.md "Local authority and trust between hosts" lists
+  deleting sessions and templates. Size: 28 lines (mostly SPEC.md reflow), within the gate. PR:
+  https://github.com/scode/farhelm/pull/2661/changes.
 
 ## spare-checkout-rewind-keeps-removed-history.md
 
