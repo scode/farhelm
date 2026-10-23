@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`menu-arrow-focus-race`](reports/menu-arrow-focus-race.report.md) landed 2026-10-20 in #2438: Drop a desktop menu focus move that would land after the user moved focus elsewhere (1 TODO entry).
 - [`select-newest-on-close`](reports/select-newest-on-close.report.md) landed 2026-10-20 in #2439, #2441: When the open session goes away, open the most recently visited one, from a history kept on the helm (1 TODO entry).
 - [`structured-settings-dialog`](reports/structured-settings-dialog.report.md) landed 2026-10-21 in #2447, #2448: Restructure the Settings dialog into a sidebar of seven sections, like the Templates dialog (1 TODO entry).
 - [`launcher-enter-feedback`](reports/launcher-enter-feedback.report.md) landed 2026-10-21 in #2444, #2450: Make Enter in the session launcher always launch, pick a visible row, or say why not (1 TODO entry).
