@@ -576,18 +576,24 @@ their answers across replay reveal, availability recovery and automatic selected
 inside the question, so explicitly selecting a terminal still allows typing there. Header Escape cancellation keeps its
 existing post-unmount return to the selected terminal.
 
-Restart with uses a separate dialog because it relaunches the current session rather than creating one. For an agent
-launch it renders the same `LaunchControls` component as the session launcher, with the harness fixed to the session's
-stored selection. For a command launch that declared an agent type and a resume command it shows the command, the resume
-command and the YOLO answer instead, checks the edit in the browser with the same `CommandLaunch::validate` the helm and
-supervisor apply, and sends it under `with_command` rather than `with`. Its two command fields follow the launcher's
-peer-text rule: they show the stored commands escaped and send the stored bytes back exactly when untouched. One
-component serves both kinds, so the focus rules, modal isolation, YOLO question and footer below exist once. The dialog
-owns its draft and comparison baseline; the launcher keeps its own create-only state and effects. Only edited fields get
-changed markers; a marker's old model is a stored string and renders as an escaped, direction-isolated peer value. The
-dialog's submit uses Restart's stop-first consent and handles the reply through the same terminal reattachment path as
-an ordinary restart. That path reattaches the terminal even when the restart is refused and the dialog stays open,
-beneath a modal whose keystrokes must never reach the agent.
+Restart with is a mode of the shared session launcher. Its source seeds the same draft that New, Clone and Replace with
+use; the mode controls held-field applicability and submit routing. Templates, search and shortcut batches obey the same
+applicability checks before any edit lands. The stored launch supplies the comparison baseline, preserving old
+permission omissions and ignoring historical workspace trust. Agent changed markers use `LaunchControls`; an old model
+in a marker remains escaped and direction-isolated. Command fields retain the launcher's peer-text ownership: they show
+stored commands escaped and submit their original bytes until edited, with `CommandLaunch::validate` before dispatch.
+Agent edits travel under `with`, command edits under `with_command`, and a named conversation remains a one-time sibling
+field. Restart sends no create retry key and does not consume or update the host's folder default.
+
+The launcher owns Restart with's draft, validation, YOLO question and guarded answer. The originating session view
+retains restart admission and terminal lifecycle through local before-send and every-reply hooks carried by the existing
+header-prefill channel. The action carries the stop-first consent its render showed; a newer status cannot widen it.
+Before dispatch the view invalidates old detail reads. Every actual reply, success or refusal, remounts the terminal,
+invalidates reads begun during the restart and refreshes authoritative detail. A refused restart therefore reattaches
+beneath the still-open launcher, whose modal isolation keeps keystrokes from reaching the agent. A failed YOLO
+host-setting save sends no restart and needs no terminal remount. Cancel returns focus to the header action; success
+closes without returning it, so terminal reveal can receive focus. Restart mode starts on Cancel, while other launcher
+modes keep their ordinary initial focus.
 
 Every modal renders through the shared `ModalDialog` boundary, which isolates the page and traps sequential Tab. Its
 targets are connected, visible native Tab stops, excluding disabled controls (including fieldset descendants), hidden or
@@ -5352,9 +5358,9 @@ attempt direct launch; the mounted form retains full validation, catalog, host a
 in the protocol crate and also judges a single template for ⚡ marking, its hints, and agent writes. Only the active
 kind counts: Agent needs an agent, Command a nonblank command, and omitted kind starts on Agent.
 
-The same dispatch serializes fresh reads when shortcuts arrive in a visible New, Clone or Replace with launcher. Each
-press or completed sequence becomes its own captured batch in a form-owned FIFO, fenced by the opening generation and
-the shared modal context and epoch. The form validates the whole batch against one draft snapshot, then replays its
+The same dispatch serializes fresh reads when shortcuts arrive in the visible session launcher, including restart mode.
+Each press or completed sequence becomes its own captured batch in a form-owned FIFO, fenced by the opening generation
+and the shared modal context and epoch. The form validates the whole batch against one draft snapshot, then replays its
 templates synchronously through the draft owner's search acceptance operation and private template replay. A refusal
 drops only that batch before it changes the draft, leaving later presses queued. Shortcut batches do not enter the
 opening replay's loading or auto-submit predicates, and their acceptance keeps the query and focus in place. If a

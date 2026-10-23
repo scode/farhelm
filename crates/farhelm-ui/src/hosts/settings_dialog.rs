@@ -25,7 +25,7 @@
 //! nothing behind the backdrop (a session's terminal in particular) can be
 //! focused or typed into. Escape cancels an open field edit, or otherwise
 //! closes the dialog; clicking the backdrop does nothing, as in the rename
-//! and restart-with dialogs. On close, focus returns to the host row's "⋯"
+//! dialog. On close, focus returns to the host row's "⋯"
 //! toggle the dialog was opened from.
 //!
 //! Pending writes can temporarily remove the current focus target:
@@ -33,8 +33,8 @@
 //! - A write natively disables the control that started it (the field, its
 //!   save button, the YOLO checkbox) for as long as the request holds the
 //!   page's operation token, and a disabled element drops focus to `body`.
-//!   The restart-with dialog avoids that with `aria-disabled` everywhere
-//!   (see its module doc); here the controls are the hosts panel's shared
+//!   The session launcher transfers focus to its surviving primary action
+//!   before disabling fields. Here the controls are the hosts panel's shared
 //!   ones, so instead the isolation's Escape goes to the field's own cancel
 //!   button when a field is open (natively disabled mid-save, so Escape then
 //!   does nothing, as the dialog's own handler would), and focus is put back

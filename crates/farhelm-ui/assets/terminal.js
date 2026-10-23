@@ -1083,12 +1083,12 @@
   // compares against to decide whether a still-wanted island is the SAME
   // attachment or a different one that has to be torn down and rebuilt.
   /**
-   * Any open modal dialog: the restart-with dialog, the rename dialog, and
-   * the session launcher all render `role="dialog"` with `aria-modal="true"`.
+   * Open modals, including the session launcher in restart mode, render
+   * `role="dialog"` with `aria-modal="true"`.
    * While one is open a terminal must not take focus, or the next keystroke
-   * aimed at the dialog lands in the agent beneath its scrim. Only the
-   * restart-with dialog also marks the page `inert`, so for the other two
-   * this check is the only guard. Matching the ARIA contract rather than
+   * aimed at the dialog lands in the agent beneath its scrim. ModalDialog
+   * also makes the page inert; this veto protects engines without that
+   * structural isolation. Matching the ARIA contract rather than
    * each dialog's class is what keeps a new modal covered by default.
    */
   const OPEN_MODAL_SELECTOR = '[role="dialog"][aria-modal="true"]';
@@ -3078,7 +3078,7 @@
       // deferred mount to see it.
       //
       // The intent is recorded even when the focus itself is withheld. An
-      // open modal dialog (OPEN_MODAL_SELECTOR: restart-with, rename, the
+      // open modal dialog (OPEN_MODAL_SELECTOR: rename or the
       // session launcher) sits over this view, and the target can change
       // under it without the user doing anything: a selected tab whose
       // shell exits (or that another client closes) drops out of the
@@ -3093,11 +3093,9 @@
       // break switching tabs from the keyboard, and the selection that
       // calls this is the origin its origin rule records.
       //
-      // For the restart-with dialog this veto is the second layer: it marks
-      // the rest of the page `inert` while mounted (restart_with.rs,
-      // modal_isolation.rs), which already turns this `focus()` into a no-op.
-      // The rename dialog and the launcher do not, so for them this is the
-      // only thing keeping focus in the dialog.
+      // ModalDialog's isolation marks the page inert while mounted, making
+      // focus() behind it a no-op. Keep this second layer for engines where
+      // that structural guard is unavailable (modal_isolation.rs).
       const focusEl = specs.find((spec) => spec.focus)?.el ?? null;
       if (focusEl !== focusedEl) {
         focusedEl = focusEl;
@@ -4543,7 +4541,7 @@
          * because pulling keystrokes out from under active typing is the theft
          * this guard exists to prevent.
          *
-         * A mounted restart-with dialog is a structural veto: the dialog is
+         * A mounted restart launcher is a structural veto: the dialog is
          * modal, focus usually sits on one of its buttons (which can be the
          * recorded selection origin, when the selected tab falls back to the
          * agent under the open dialog), and a refused restart remounts this
@@ -4556,11 +4554,9 @@
          * `sync()` focuses an already-revealed island when the selection
          * changes, which is the other way a terminal can take focus, and
          * it carries the same dialog veto. Both vetoes cover every open modal
-         * dialog (OPEN_MODAL_SELECTOR), not only restart-with: the rename
-         * dialog and the session launcher have no `inert` isolation, so for
-         * them the vetoes are the only guard; for restart-with they are the
-         * second layer behind its `inert` marking (restart_with.rs,
-         * modal_isolation.rs).
+         * dialog (OPEN_MODAL_SELECTOR), including rename and every launcher
+         * mode. They remain a second layer behind the shared ModalDialog's
+         * inert marking (modal_isolation.rs).
          *
          * Otherwise focus is taken only from where the selection that asked
          * for this terminal left it (`focusOrigin`, which a click on a row or

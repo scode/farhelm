@@ -666,11 +666,6 @@ fn install_focus(handle: DialogHandle, focus: &DialogFocus) {
     let dialog = serde_json::to_string(dialog_selector).expect("a string always serializes");
     let generation_guard = handle.generation_guard();
     let setup = match &focus.initial_focus {
-        InitialFocus::Target(selector) => {
-            let target = FocusTarget::new(selector.clone(), None, false);
-            let initial = target_js("dialog", &target, false);
-            trap_js(handle, &initial)
-        }
         InitialFocus::Remembered { selector, quiet } => {
             // Disabled confirming answers retain a separate Cancel/root fallback;
             // the independent Escape selector still chooses its ordinary handler.
@@ -718,7 +713,7 @@ fn install_focus(handle: DialogHandle, focus: &DialogFocus) {
     };
     let isolate = handle.isolation_script(focus.escape_target.as_deref());
     match &focus.initial_focus {
-        InitialFocus::Target(_) | InitialFocus::Handoff { .. } => {
+        InitialFocus::Handoff { .. } => {
             document::eval(&format!("{setup}\n{gap}\n{isolate}"));
         }
         InitialFocus::Remembered { .. } => {
@@ -740,12 +735,10 @@ fn install_focus(handle: DialogHandle, focus: &DialogFocus) {
 
 /// Preserve each dialog family's initial-focus and installation-order contract.
 ///
-/// The remembered policy keeps the host fallback and recovery memory together;
-/// the direct target retains Restart with's focus inside the trap's guard.
+/// The remembered policy keeps host fallback and recovery memory together;
+/// launcher openings use their existing handoff or preparable surface policy.
 #[derive(Clone, PartialEq)]
 pub(crate) enum InitialFocus {
-    /// Focus only the named descendant, without fallback or focus memory.
-    Target(String),
     /// Remember focus before moving it, with the host family's Cancel/root fallback.
     ///
     /// Memory installation is idempotent; initial focus still runs on every

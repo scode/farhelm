@@ -68,6 +68,9 @@ pub(super) enum CheckoutInput<'a> {
 /// launch variant even if later edits have selected a different tab.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct LaunchDraft {
+    /// Restart compares against stored choices; it must never acquire create's
+    /// permission defaults or permit a search action to replace held context.
+    restart_baseline: Option<api::RestartEdit>,
     harness: Option<LaunchHarness>,
     model: Option<String>,
     model_raw_seed: Option<String>,
@@ -120,9 +123,17 @@ pub(super) struct AgentChoiceOutcome {
 }
 
 impl LaunchDraft {
+    /// Prefill reconciliation copies Restart's stored baseline once per
+    /// opening. Edits retain it, so its presence also names the draft's held
+    /// mode without a second independently mutable flag.
+    fn is_restart(&self) -> bool {
+        self.restart_baseline.is_some()
+    }
+
     /// Seed only remembered permissions; New never guesses an agent or model.
     pub(super) fn new(remembered_permission: Option<LaunchPermission>) -> Self {
         Self {
+            restart_baseline: None,
             harness: None,
             model: None,
             model_raw_seed: None,
@@ -673,11 +684,76 @@ impl LaunchDraft {
     /// wrapper guards, before that caller refuses a changed active mode.
     pub(super) fn structured_selection(&self) -> Option<LaunchSelection> {
         let mut selection = self.editing_selection(self.harness?);
-        selection.permissions = crate::launch_composer::normalized_permissions(
-            selection.harness,
-            selection.permissions,
-        );
+        if !self.is_restart() {
+            selection.permissions = crate::launch_composer::normalized_permissions(
+                selection.harness,
+                selection.permissions,
+            );
+        }
         Some(selection)
+    }
+
+    /// Restart's one-time conversation is separate from reusable choices.
+    /// The command projection already preserves each untouched field's bytes.
+    pub(super) fn restart_edit(&self) -> Option<api::RestartEdit> {
+        match self.launch_intent()? {
+            LaunchIntent::Structured(selection) if self.conversation.is_empty() => {
+                Some(api::RestartEdit::Agent(selection))
+            }
+            LaunchIntent::Structured(selection) => Some(api::RestartEdit::NamedAgent(
+                selection,
+                self.conversation.clone(),
+            )),
+            LaunchIntent::Command(command) => Some(api::RestartEdit::Command(command)),
+        }
+    }
+
+    /// A Guarded answer must still make an actual edit to the stored launch.
+    pub(super) fn restart_guarded_changes(&self) -> bool {
+        let mut guarded = self.clone();
+        guarded.permissions = Some(LaunchPermission::Guarded);
+        guarded.permission_flags.clear();
+        guarded
+            .restart_baseline
+            .as_ref()
+            .is_none_or(|baseline| guarded.restart_edit().as_ref() != Some(baseline))
+    }
+
+    /// Templates name fields explicitly, so even assigning the held value is
+    /// a refusal. Reject before the existing fold or any semantic publication.
+    pub(super) fn restart_template_refusal(
+        &self,
+        template: &farhelm_proto::launcher::LaunchTemplate,
+    ) -> Option<String> {
+        if !self.is_restart() {
+            return None;
+        }
+        let f = &template.fields;
+        let field = if f.kind.is_some() {
+            Some("launch kind")
+        } else if f.agent.is_some() {
+            Some("agent type")
+        } else if f.host.is_some() {
+            Some("host")
+        } else if f.destination.is_some() {
+            Some("destination")
+        } else if f.name.is_some() {
+            Some("session name")
+        } else if f.prompt.is_some() {
+            Some("initial prompt")
+        } else if self.tab == LaunchTab::Command && f.resume_command == Some(None) {
+            Some("resume choice")
+        } else {
+            None
+        };
+        field.map(|field| {
+            farhelm_proto::launcher::TemplateRefusal {
+                template: template.name.clone(),
+                field,
+                reason: format!("cannot change here: this dialog keeps {field} fixed for restart"),
+            }
+            .to_string()
+        })
     }
 
     /// Compatibility operates on the raw choice, before request defaults apply.
@@ -710,8 +786,11 @@ impl LaunchDraft {
     /// Effective permission and Custom words share one request identity. Raw
     /// omission and an explicit default can differ without changing that pair.
     fn retry_permissions(&self) -> Option<(Option<LaunchPermission>, Option<Vec<String>>)> {
-        let permission =
-            crate::launch_composer::normalized_permissions(self.harness?, self.permissions);
+        let permission = if self.is_restart() {
+            self.permissions
+        } else {
+            crate::launch_composer::normalized_permissions(self.harness?, self.permissions)
+        };
         let words = if self.permissions == Some(LaunchPermission::Custom) {
             Some(farhelm_proto::split_permission_flags(&self.permission_flags).ok()?)
         } else {
@@ -985,7 +1064,15 @@ impl LaunchDraft {
         permission: Option<LaunchPermission>,
         flags: String,
     ) {
-        self.permissions = permission;
+        // An explicit template reset requests today's default. Unlike an
+        // absent template field, it must not restore a historical no-flag
+        // baseline and appear changed when the helm would compile Guarded.
+        self.permissions = if self.is_restart() && permission.is_none() {
+            self.harness
+                .and_then(|harness| harness.request_permission(None))
+        } else {
+            permission
+        };
         self.permission_flags = flags;
         self.permissions_explicit = true;
     }
@@ -1735,6 +1822,13 @@ impl LaunchDraftState {
         mut notice: Signal<Option<PermissionEscalation>>,
         mut reset_reason: Signal<Option<String>>,
     ) -> bool {
+        if self.snapshot().is_restart() {
+            reset_reason.set(Some(
+                "destination cannot change here: this dialog keeps destination fixed for restart"
+                    .into(),
+            ));
+            return false;
+        }
         self.apply_edit(EditRule::Ordinary, |draft| {
             let tab_changed = draft.tab() != LaunchTab::Agent;
             let correcting_invalid = targets.correcting_invalid();
@@ -1873,6 +1967,15 @@ impl LaunchDraftState {
         mut choices: ChoiceTargets,
         mut recovery: RecoveryTargets,
     ) -> Option<PermissionSwitchBefore> {
+        if self.snapshot().is_restart()
+            && (self.snapshot().tab() != LaunchTab::Agent
+                || self.snapshot().harness() != Some(harness))
+        {
+            recovery.composer_reset_reason.set(Some(
+                "agent type cannot change here: this dialog keeps the session's agent type".into(),
+            ));
+            return None;
+        }
         self.apply_edit(EditRule::Ordinary, |draft| {
             choices.partial_template_hint.set(false);
             let before = self.capture_permission_switch(draft, recovery);
@@ -1907,6 +2010,15 @@ impl LaunchDraftState {
         mut choices: ChoiceTargets,
         mut recovery: RecoveryTargets,
     ) -> Option<PermissionSwitchBefore> {
+        if self.snapshot().is_restart()
+            && (self.snapshot().tab() != LaunchTab::Agent
+                || self.snapshot().harness() != Some(harness))
+        {
+            recovery.composer_reset_reason.set(Some(
+                "agent type cannot change here: this dialog keeps the session's agent type".into(),
+            ));
+            return None;
+        }
         self.apply_edit(EditRule::Ordinary, |draft| {
             choices.promote_history();
             choices.partial_template_hint.set(false);
@@ -1979,9 +2091,10 @@ impl LaunchDraftState {
         .is_some()
     }
 
-    /// Reset uses current preference memory and clears only the agent group.
-    /// Its explicit retirement is independent of equality; command and one-time
-    /// inputs, host, placement and naming survive.
+    /// Create resets the agent group to preference memory. Restart instead
+    /// restores its stored baseline and clears the one-time conversation;
+    /// clearing the held agent would leave a draft it can never submit.
+    /// Both retire confirmation identity even when no field changes.
     pub(super) fn reset_choices(
         self,
         preferences: SharedPreferences,
@@ -1992,7 +2105,16 @@ impl LaunchDraftState {
     ) -> bool {
         self.apply_edit(EditRule::Ordinary, |draft| {
             choices.partial_template_hint.set(false);
-            draft.reset_choices(initial_structured_permissions(&preferences.0.peek()));
+            if let Some(api::RestartEdit::Agent(selection)) = draft.restart_baseline.clone() {
+                draft.restore_launch(
+                    &selection,
+                    selection.model.as_ref().map(|_| selection.harness),
+                );
+                draft.permissions = selection.permissions;
+                draft.conversation.clear();
+            } else {
+                draft.reset_choices(initial_structured_permissions(&preferences.0.peek()));
+            }
             reset.set(None);
             choices.promote_history();
             search.set(String::new());
@@ -2321,6 +2443,30 @@ impl LaunchDraftState {
         let mut composer_reset_reason = targets.recovery.composer_reset_reason;
         let mut action_error = targets.template_error;
         use crate::launch_composer::ComposerSearchResult;
+        if draft.is_restart() {
+            let held = match &result {
+                ComposerSearchResult::Harness(_) => Some("agent type"),
+                ComposerSearchResult::Model { harness, .. }
+                    if draft.tab != LaunchTab::Agent || draft.harness != Some(*harness) =>
+                {
+                    Some("agent type")
+                }
+                ComposerSearchResult::Host(_) => Some("host"),
+                ComposerSearchResult::Folder(_)
+                | ComposerSearchResult::UsePath(_)
+                | ComposerSearchResult::BrowsePath(_)
+                | ComposerSearchResult::Github(_) => Some("destination"),
+                ComposerSearchResult::Name(_) => Some("session name"),
+                ComposerSearchResult::Recent(_) => Some("destination"),
+                _ => None,
+            };
+            if let Some(field) = held {
+                action_error.set(Some(format!(
+                    "{field} cannot change here: this dialog keeps {field} fixed for restart"
+                )));
+                return (None, false, false);
+            }
+        }
         // Capture before history adoption or path override can clear the old claim.
         let correcting_invalid = !remembered_destination_matches(
             remembered_destination.peek().as_ref(),
@@ -2524,6 +2670,10 @@ impl LaunchDraftState {
             targets.prefill_applied.set(Some(prefill.generation));
             let _ = self.apply_edit(EditRule::SourceReconciliation, |draft| {
                 draft.clear_prompt_for_prefill();
+                draft.restart_baseline = match &prefill.mode {
+                    super::LauncherMode::Restart { baseline, .. } => Some(baseline.clone()),
+                    _ => None,
+                };
                 targets.permission_escalation.set(None);
                 // Invalidate before seeding: A→B→A source changes must never
                 // revive an old directory listing whose raw path matches again.
@@ -2554,6 +2704,11 @@ impl LaunchDraftState {
                 if let Some(launch) = &prefill.launch {
                     draft.choose_tab(LaunchTab::Agent);
                     draft.restore_launch(launch, launch.model.as_ref().map(|_| launch.harness));
+                    if draft.is_restart() {
+                        // Create's default normalization is intentional for
+                        // Clone, but Restart compares the stored command.
+                        draft.permissions = launch.permissions;
+                    }
                 } else {
                     draft.choose_tab(LaunchTab::Command);
                     draft.clear_for_command_seed();
@@ -2749,6 +2904,137 @@ fn observe_search_agent_fields(fields: DraftFields) {
 mod tests {
     use super::super::LauncherMode;
     use super::*;
+
+    /// Exercise the stored-command comparison without mounting catalog readers.
+    /// The production source seeder supplies this same normalized baseline.
+    fn restart_draft(permission: Option<LaunchPermission>) -> LaunchDraft {
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: permission,
+            permission_flags: None,
+            wrapper_prefix: None,
+            workspace_trust: None,
+        };
+        let mut draft = LaunchDraft::new(None);
+        draft.restart_baseline = Some(api::RestartEdit::Agent(selection.clone()));
+        draft.restore_launch(&selection, None);
+        draft.permissions = permission;
+        draft
+    }
+
+    /// Own-setting omission is a historical command, not create's default.
+    /// Guarded must be a real edit and retire confirmation identity in both
+    /// directions even though ordinary creation normalizes omission to Guarded.
+    #[test]
+    fn restart_preserves_own_setting_and_counts_guarded_as_an_edit() {
+        let mut draft = restart_draft(None);
+        assert_eq!(draft.restart_edit(), draft.restart_baseline);
+        assert!(draft.choose_permissions(Some(LaunchPermission::Guarded)));
+        assert_ne!(draft.restart_edit(), draft.restart_baseline);
+        assert!(draft.choose_permissions(None));
+        assert_eq!(draft.restart_edit(), draft.restart_baseline);
+    }
+
+    /// Template null means today's request default, while an omitted field
+    /// leaves a historical own-setting launch alone. Restart equality must
+    /// agree with what the helm compiles, rather than enabling a no-op edit.
+    #[test]
+    fn restart_template_permission_reset_uses_the_current_default() {
+        for stored in [None, Some(LaunchPermission::Guarded)] {
+            let mut draft = restart_draft(stored);
+            draft.choose_permissions(Some(LaunchPermission::Yolo));
+            draft.apply_template_permissions(None, String::new());
+            assert_eq!(draft.permissions(), Some(LaunchPermission::Guarded));
+            assert_eq!(
+                draft.restart_edit() == draft.restart_baseline,
+                stored.is_some()
+            );
+        }
+    }
+
+    /// The Guarded answer cannot erase the only edit and submit an unchanged
+    /// restart. A named conversation or another changed setting still qualifies.
+    #[test]
+    fn restart_guarded_offer_requires_an_edit_after_guarding() {
+        let mut draft = restart_draft(Some(LaunchPermission::Guarded));
+        draft.choose_permissions(Some(LaunchPermission::Yolo));
+        assert!(!draft.restart_guarded_changes());
+        draft.edit_conversation("chosen-id".into());
+        assert!(draft.restart_guarded_changes());
+        draft.edit_conversation(String::new());
+        draft.choose_effort(Some(LaunchEffort::High));
+        assert!(draft.restart_guarded_changes());
+    }
+
+    /// Restart keeps raw command bytes across an unrelated YOLO edit, including
+    /// peer formatting that the controls must show escaped rather than execute.
+    #[test]
+    fn restart_command_projection_preserves_unedited_bytes() {
+        let command = CommandLaunch {
+            command: "claude  --flag='a b' {farhelm_args}\u{202e}".into(),
+            resume: Some("claude  --resume {conversation} {farhelm_args}\u{200b}".into()),
+            yolo: false,
+            agent: Some(LaunchHarness::Claude),
+        };
+        let mut draft = LaunchDraft::new(None);
+        draft.restart_baseline = Some(api::RestartEdit::Command(command.clone()));
+        draft.seed_invocation(&command.command);
+        draft.seed_command_fields(Some(&command));
+        assert_eq!(
+            draft.restart_edit(),
+            Some(api::RestartEdit::Command(command.clone()))
+        );
+        draft.choose_command_yolo(true);
+        let mut expected = command;
+        expected.yolo = true;
+        assert_eq!(
+            draft.restart_edit(),
+            Some(api::RestartEdit::Command(expected))
+        );
+    }
+
+    /// Held fields are assignments, even when they repeat the current value.
+    /// An earlier ordinary refusal must still win over a later held-field
+    /// refusal in a shortcut batch; validation never publishes partial edits.
+    #[test]
+    fn restart_templates_refuse_held_fields_in_batch_order() {
+        use farhelm_proto::launcher::{LaunchTemplate, LauncherKind, TemplateFields};
+        let draft = restart_draft(None);
+        let held = LaunchTemplate {
+            name: "same kind".into(),
+            fields: TemplateFields {
+                kind: Some(LauncherKind::Agent),
+                effort: Some(Some(LaunchEffort::High)),
+                ..Default::default()
+            },
+        };
+        assert!(
+            draft
+                .restart_template_refusal(&held)
+                .is_some_and(|text| text.contains("launch kind cannot change here"))
+        );
+        let invalid = LaunchTemplate {
+            name: "bad command".into(),
+            fields: TemplateFields {
+                command: Some("not an agent field".into()),
+                ..Default::default()
+            },
+        };
+        let error =
+            super::super::validated_template_batch(&[invalid, held], &[], &[], true, &draft, None)
+                .unwrap_err();
+        assert!(
+            error.contains("bad command"),
+            "the first refusal describes the first template: {error}"
+        );
+        assert_eq!(
+            draft.restart_edit(),
+            draft.restart_baseline,
+            "validation did not apply the later effort"
+        );
+    }
 
     /// Give deliberate choices distinguishable offered/fetched installation data.
     /// Real signals keep promotion and effect subscriptions observable without

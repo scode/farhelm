@@ -1,4 +1,4 @@
-//! Shared launch choices for the session launcher, restart-with and template editor.
+//! Shared launch choices for every session launcher mode and the template editor.
 //!
 //! Values enter as props and user changes leave through callbacks. The caller owns
 //! the selected harness, model draft, and every consequential state transition;
@@ -333,7 +333,7 @@ pub(crate) fn LaunchControls(
                                     // tabbable row would be the target of Tab from the input,
                                     // but the input's blur closes the list and unmounts that
                                     // row, so focus would fall to the document: out of the
-                                    // restart-with modal, and out of the launcher's Tab loop.
+                                    // launcher modal and its Tab loop.
                                     tabindex: "-1",
                                     // Keep focus on the input until a transient row's click
                                     // applies the choice; blur would otherwise unmount the row.

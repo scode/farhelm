@@ -133,51 +133,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   agent instructions and docs, un-ignoring the end-to-end delivery tests, and writing a new changelog fragment. SPEC.md,
   Agent-spawned sessions, keeps the design.
 
-- **Stop treating Restart with as a separate launch surface by default.** Launch-related features keep needing a
-  separate decision for Restart with (and sometimes plain Restart and Replace), and agents default to leaving it out:
-  planning the "launch guarded from the YOLO confirmation" entry on 2026-10-20, the planner recommended "the session
-  launcher only" and called Restart with "a second, separate wiring"; the maintainer chose to include it and asked why
-  this keeps happening. Revisit the choices that make Restart with a second implementation of launching, so a launch
-  feature covers it unless there is a product reason not to. What the code and history show (main at 2897c914): (1) New,
-  Clone, Replace with and quick launch are all one component, the session launcher (`CreateSessionForm` in
-  `crates/farhelm-ui/src/list/create_form.rs`, about 8,850 lines), so a launcher feature reaches all four at once.
-  Restart with is a separate dialog (`crates/farhelm-ui/src/restart_with.rs`, about 780 lines) mounted by the session
-  view, with its own draft state, validation, Enter handling, focus trap and modal isolation (it sits over a live agent
-  terminal, so the page behind it is made inert), its own submit (`POST /api/sessions/<id>/restart` with `with` or
-  `with_command`, `api::restart_session`) instead of a create, and no retry key. The only code the two share is the
-  model, effort and permission controls (`LaunchControls` in `launch_controls.rs`, extracted for Restart with in #976 so
-  "two copies would drift apart"). Everything around those controls is per dialog. (2) The YOLO question is wired four
-  times: `YoloConfirmation` (`yolo_confirm.rs`) is one component, but each caller owns its own question type,
-  answer-taking and resubmit (`LauncherYoloQuestion` in `create_form.rs`, `RestartYoloQuestion` and `take_restart_yolo`
-  in `session_view.rs`, and the Replace questions in `list/view.rs` and `session_view.rs`). (3) Fixes have repeatedly
-  landed once per surface: the cancel-then-answer race was fixed separately for Replace (#1658), the launcher (#1659)
-  and Restart with (#1660) on one day; Enter on choices came to Restart with on its own (#1737); the two dialogs
-  diverged on whether a failed or pending model-list fetch makes a saved choice incompatible and on how effort
-  compatibility is checked (triage outcomes for #1659's catalog fix and the custom-flags effort fix both had to say
-  "apply to Restart with too" or note that Restart with already differs). (4) SPEC.md describes Restart with as its own
-  action with its own fixed fields (agent type, host, folder) and its own Enter paragraph, and says it "does not offer
-  templates", while Replace with is the launcher with the host held fixed. So the launcher already supports fixed
-  fields; why Restart with was built as its own dialog rather than a launcher mode with agent type, host and folder held
-  fixed is not recorded (#978's description gives the live-terminal isolation and the resume request, not a reason
-  against reusing the launcher). (5) Plain Restart and plain Replace relaunch the stored launch with no editor (SPEC.md,
-  Restart; "plain Restart or Replace" keep stored words), so a feature that edits a launch has nothing to attach to
-  there; that part is a real product distinction, not an accident. Why agents scope Restart with out: an entry written
-  about "the launcher" covers four flows for the cost of one, while Restart with always costs a second wiring with its
-  own state, tests and SPEC paragraph, so "launcher only" looks like the cheap literal reading; nothing in the code
-  makes Restart with inherit a launcher feature. The queued `plans/queue/ui-session-actions.md` merges the two Replace
-  copies, the operation lock and the refusal-flag decoding, and adds Restart and Delete only if they duplicate the
-  Replace flow; it does not touch the launcher-versus-Restart-with split. Options to discuss: (a) Restart with becomes a
-  mode of the session launcher (agent type, host and folder held fixed, conversation field shown, submit sends a
-  restart), so launcher features reach it by default and SPEC.md describes one surface; costs a large change to an
-  8,850-line component and to the modal isolation; (b) a shared launch-draft model and controller (choices,
-  compatibility rules, YOLO question, Enter rules) that both dialogs drive, with the dialogs reduced to layout; (c) keep
-  two surfaces but add a standing rule in SPEC_impl.md or AGENTS.md that every launch-editing feature names its Restart
-  with behavior explicitly, plus shared helpers for the pieces that diverged (catalog compatibility, YOLO
-  answer-taking). Decide whether plain Restart and plain Replace stay outside any of these, as SPEC.md's "relaunch the
-  stored launch" suggests.
-
-  Plan: `plans/queue/restart-with-as-launcher.md`.
-
 - **Move the trash into a hidden folder.** Deleting a managed checkout's last session moves the checkout into
   `farhelm-archived-working-copies` inside the checkout folder (`ARCHIVE_DIR_NAME` in
   `crates/farhelm-supervisor/src/working_copies.rs`; SPEC.md, Managed checkouts, and the ownership statement that names
