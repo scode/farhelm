@@ -147,9 +147,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`replace-with-recent-row-says-launch.md`](replace-with-recent-row-says-launch.md) — In Replace with, Enter on a
   recent setup replaces while the row says only launch; whether it misleads in practice is unverified.
 
-- [`stale-confirmation-optout-replayed-after-sign-in.md`](stale-confirmation-optout-replayed-after-sign-in.md) — A
-  browser's failed confirmation opt-out is replayed over a later restore after sign-in; not reproduced.
-
 - [`devbuild-update-strands-host-on-newer-schema.md`](devbuild-update-strands-host-on-newer-schema.md) — Updating back
   from a devbuild that migrated a shared remote host's database leaves the host unreachable; not reproduced, and the
   bucket is unsettled.
