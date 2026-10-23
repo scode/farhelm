@@ -90,3 +90,71 @@ gap is closed and found no product problems, but showed the test could not tell 
 or late. The test now makes startup stop right after taking the claim and checks the claim is already held outside,
 which the second deliberately broken version above confirms. Its remaining points (clearer failure messages, naming, a
 rewrapped comment) are applied.
+
+### Landing
+
+Landed as #2637, with the content the report describes and one changelog note described below. It was the second of two
+plans in this landing round, after checkout-ownership-oct22.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained sign-in-preservation-sweep (browser sign-in and GUI preference saves only),
+tunnel-port-and-link-ranges (the helm's link classification and localhost tunnel port), triage-docs-oct22 (specification
+text), resume-target-fixes-oct22 (Restart with and Grok and OMP process checks in the supervisor) and TODO.md commits,
+and checkout-ownership-oct22 landed just before it in this round. A fresh-context reviewer and I read this plan against
+all of them:
+
+- Every supervisor starts through the `farhelm supervisor run` command, which both the service unit and the desktop app
+  start as a separate process, so the change reaches every supervisor start.
+- checkout-ownership-oct22 adds startup work (putting a surviving session's attachments back) and changes Delete's
+  archive move. Both are background work of the supervisor process, which now keeps its state folder claimed until such
+  work has finished, so they are covered by the same guarantee.
+- resume-target-fixes-oct22's change to Restart with is in a different part of the supervisor's code and does not depend
+  on when the state folder is released.
+- The other plans change the helm, the GUI or specification text only.
+
+#### Fixes made during the landing
+
+- The changelog entry says a reopened supervisor's first launch could fail because the old one deleted the checkout or
+  launch files it had just prepared. The checkout half only concerns prepared checkouts, which have not shipped yet, so
+  the landing added a note for the release curator that users of the last release could only have lost launch files, in
+  #2637.
+
+#### Things you should know
+
+- As the report says, a background job that never finishes (for example a user-account lookup on a host whose account
+  service hangs) now keeps the old supervisor's hold on its state folder, not just its process. A reopened desktop app
+  then refuses after about 20 seconds, saying the previous supervisor may still be shutting down, until that process
+  ends or is killed. The helm already behaves this way.
+
+#### Checks
+
+The round's two plans change supervisor lifecycle code: Delete and the checkout trash, create retries, attachments after
+an interrupted Delete, startup's checkout protection, prepared-checkout launches, and when a stopping supervisor
+releases its state folder. The executors tested each change with filtered selections, and both plans meet
+resume-target-fixes-oct22 (landed just before this round) in the same part of the supervisor's code, so this round ran
+the whole Rust workspace suite on the two plans stacked together on this round's main. The first two items below ran
+before the round's landing fixes, which change only code comments and changelog fragments; the third ran after them:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the isolated test-sleep check, `dprint check` on the changed Markdown
+  files, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (one warning, about a
+  citation main already had), the docs website build and the workspace debug build: all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  slots, no retries, run `9a73719e-adf4-41dc-a1ea-ecdf4543b785`: 4312 of 4313 passed, 40 skipped by design (34 helper
+  entries that run only as child processes of other tests, and 6 tests that need a real signed-in Claude or Codex). This
+  includes the real-process end-to-end tests that stop a running supervisor by signal and by the desktop app's
+  connection closing. The one failure, `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` (a paused
+  terminal view getting a catch-up reset it should not), is a known open flake recorded in FLAKES.md on 2026-09-03,
+  2026-10-09 and 2026-10-17, which failed two of three exact repetitions in its latest record; it tests terminal output
+  flow control, which neither plan touches, so I did not repeat it here.
+- After the landing fixes: `cargo fmt --all -- --check`,
+  `cargo clippy -p farhelm-supervisor --all-targets -- -D warnings` and the changelog format check passed again.
+- Reused: none. Skipped: the doctests (no documentation example changed), the browser suite and the UI, desktop and
+  JavaScript tests (no UI code changed), the desktop smoke test (the desktop app starts the supervisor as a separate
+  process, whose stop paths the end-to-end tests above cover), the native Mac app (not runnable here) and the installer
+  (unchanged).
+
+The report's checks ran the new claim-lifetime test and the real-process supervisor stop tests; this round ran the whole
+Rust workspace suite, which includes both, on the plan as it landed, apart from the changelog note. Nothing in the
+executor's report became untrue at landing.
