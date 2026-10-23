@@ -264,7 +264,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   another session or host), so `localhost` alone does not identify which session's service it reaches. Audit how port
   forwarding chooses its port, owns/binds it, and maps a bound local port back to the session and host that opened it,
   then make the destination a click resolves to match the session that displayed the link, even when the port is already
-  taken by something else.
+  taken by something else. Also give visibility into all active forwards across sessions and hosts — not just the one
+  for the session currently being viewed — so a port collision is seen instead of silently resolving to the wrong
+  target.
 
 ## Doc todo
 
