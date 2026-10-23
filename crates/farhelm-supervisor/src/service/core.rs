@@ -11380,12 +11380,20 @@ impl Supervisor {
         // be created instead; the driver's session-paired target remains
         // the cross-session safety barrier either way.
         let terminal_survives = pane_state.is_some();
+        // Keep the old capture only while a report can replace it; otherwise a
+        // later plain Restart would reopen the old conversation indefinitely.
         let clear_capture = named_start.is_some()
             && entry
                 .info
                 .launch
                 .agent_selection()
-                .is_some_and(|selection| !selection.harness.captures_named_conversation());
+                .is_some_and(|selection| {
+                    !selection.harness.captures_named_conversation()
+                        || self
+                            .seams
+                            .agent_hooks
+                            .silences(selection.harness.agent_kind())
+                });
         let relaunch = tokio::spawn(async move {
             // The claim MOVES into the task with the work it protects.
             // Holding it in the caller instead would release it the moment
@@ -20596,10 +20604,28 @@ pub(crate) mod tests {
     /// then succeeding against the restored capture.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn named_goose_restart_clears_live_capture_and_restores_it_on_definitive_failure() {
+        named_restart_clears_and_restores_capture(LaunchHarness::Goose, Default::default()).await;
+    }
+
+    /// A reporting harness whose reporter the hooks opt-out silences must take
+    /// the same clear-and-restore path: no report will ever replace the old
+    /// capture, so keeping it would let every later plain Restart reopen it.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn named_restart_clears_capture_when_hooks_silence_the_harness() {
+        let hooks = crate::agent_kind::AgentHooks::None;
+        named_restart_clears_and_restores_capture(LaunchHarness::Claude, hooks).await;
+    }
+
+    /// The shared body of the two tests above, for a harness whose named
+    /// Restart with must clear the old capture.
+    async fn named_restart_clears_and_restores_capture(
+        harness: LaunchHarness,
+        agent_hooks: crate::agent_kind::AgentHooks,
+    ) {
         let state = StateDir::new();
         // This existing fixture pattern supplies a live pane without an
         // installed vendor agent. It stands in for the launch shim, not
-        // Goose's reporting or resume implementation; capture is seeded
+        // the agent's reporting or resume implementation; capture is seeded
         // through the supervisor's generation-fenced reporting seam.
         let shim = state.path().join("restart-shim");
         std::fs::write(&shim, "#!/bin/sh\nexec sleep 300\n").expect("write restart stand-in");
@@ -20611,6 +20637,7 @@ pub(crate) mod tests {
             SupervisorTimeouts::default(),
             SupervisorSeams {
                 launch_shell: Some("/bin/sh".into()),
+                agent_hooks,
                 ..scopeless_seams()
             },
         )
@@ -20620,7 +20647,7 @@ pub(crate) mod tests {
         std::fs::create_dir(&cwd).expect("private session directory");
         let launch = SessionLaunch::Agent {
             selection: farhelm_proto::LaunchSelection {
-                harness: LaunchHarness::Goose,
+                harness,
                 model: None,
                 effort: None,
                 permissions: None,
@@ -20659,7 +20686,7 @@ pub(crate) mod tests {
                 None,
             )
             .await
-            .expect("create Goose agent session");
+            .expect("create agent session");
         sup.record_conversation_for_test(&created.id, TEST_CONVERSATION)
             .await;
         let before = sup.store.session(&created.id).await.unwrap().unwrap();

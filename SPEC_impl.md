@@ -5224,10 +5224,12 @@ ordinary launch. New managed checkouts refuse it before their separate recovery 
 and transient serialized inputs count toward the existing request bounds.
 
 Reporting harnesses retain old capture until an accepted report replaces it. Goose's named restart clears capture,
-source and ownership version in the generation-opening transaction because its resume has no reporter. `PriorRun`
-retains those columns only for the existing definitive-abort restoration, fenced by the new generation. Success and
-ambiguous failures publish a cleared mirror; an abort restores that mirror only if its durable restoration succeeded. No
-capture is seeded from request data and no new report admission rule or database schema is needed.
+source and ownership version in the generation-opening transaction because its resume has no reporter. The same clear
+applies to any kind `AgentHooks::silences` reports as having no reporter under the supervisor's opt-out, decided from
+the seam value the spawn uses. `PriorRun` retains those columns only for the existing definitive-abort restoration,
+fenced by the new generation. Success and ambiguous failures publish a cleared mirror; an abort restores that mirror
+only if its durable restoration succeeded. No capture is seeded from request data and no new report admission rule or
+database schema is needed.
 
 ### Launch kinds: one resolved launch
 

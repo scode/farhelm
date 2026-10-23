@@ -2452,6 +2452,22 @@ impl AgentHooks {
             AgentHooks::Only(kinds) => kinds.contains(&kind),
         }
     }
+
+    /// Whether this opt-out leaves `kind` with no reporter, so a launch of it
+    /// never names a new conversation (a named Restart with then clears the
+    /// old capture). Never Grok: its callbacks are the user's own, which this
+    /// switch cannot remove (see [`parse_agent_hooks`]).
+    #[warn(clippy::wildcard_enum_match_arm)]
+    pub fn silences(&self, kind: AgentKind) -> bool {
+        match kind {
+            AgentKind::Claude
+            | AgentKind::Codex
+            | AgentKind::Goose
+            | AgentKind::Pi
+            | AgentKind::Omp => !self.allows(kind),
+            AgentKind::Grok | AgentKind::Generic => false,
+        }
+    }
 }
 
 /// Parse the `FARHELM_AGENT_HOOKS` environment variable's value into an
@@ -4149,7 +4165,8 @@ mod tests {
     /// `AgentHooks::allows` is what every hook-injection call site actually
     /// consults; this pins its three-way behavior directly, independent of
     /// how the value was constructed, plus the unconditional `All` default
-    /// that [`AgentHooks`]'s own doc comment promises.
+    /// that [`AgentHooks`]'s own doc comment promises, and which kinds
+    /// `AgentHooks::silences` reports as left without a reporter.
     #[farhelm_testtrace::test]
     fn agent_hooks_allows_reflects_its_variant() {
         assert!(AgentHooks::All.allows(AgentKind::Claude));
@@ -4158,6 +4175,13 @@ mod tests {
 
         assert!(!AgentHooks::None.allows(AgentKind::Claude));
         assert!(!AgentHooks::None.allows(AgentKind::Codex));
+
+        // Only kinds whose reporter Farhelm installs can be silenced; a named
+        // Restart with clears their old capture exactly then.
+        assert!(AgentHooks::None.silences(AgentKind::Claude));
+        assert!(!AgentHooks::All.silences(AgentKind::Claude));
+        assert!(!AgentHooks::All.silences(AgentKind::Codex));
+        assert!(!AgentHooks::None.silences(AgentKind::Grok));
 
         let only_claude = AgentHooks::Only(vec![AgentKind::Claude]);
         assert!(only_claude.allows(AgentKind::Claude));

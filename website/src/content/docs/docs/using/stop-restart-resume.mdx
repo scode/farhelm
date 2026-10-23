@@ -44,7 +44,8 @@ Plain **restart** and **replace** keep the trust carried by the saved launch.
 The entered conversation is a choice for this start only, as in [the session launcher](/docs/using/start-a-session/#continue-a-conversation-you-know).
 Farhelm keeps the previous conversation until the agent reports the new one. Codex reports at your first prompt, so
 Restart before then still opens the previous conversation. Goose cannot report after this kind of start; naming a new
-conversation forgets the old one and leaves later Restart unavailable.
+conversation forgets the old one and leaves later Restart unavailable. The same happens for an agent whose Farhelm
+hooks are turned off with `FARHELM_AGENT_HOOKS`, except Grok, whose hooks are the ones you install.
 
 **replace** starts the agent again from a fresh conversation, with the same agent, settings, and directory. It makes a
 new session in this one's place, so the old conversation, shell tabs, and terminal history all go, and it asks you to

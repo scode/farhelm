@@ -18087,7 +18087,14 @@
   Claude or Codex with hooks off. The Pi and OMP materialisation-failure variant is out of scope; mention it in the PR
   if it stays open. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and
   its index entry.
-- Execution: planned in `plans/queue/resume-target-fixes-oct22.md`.
+- Execution: complete in jj change `vvpnmuwqwxxkztzqmsqzzrmslnyoukws`, bookmark
+  `plan/resume-target-fixes-oct22/01-restart-with-hooks-off`. A named Restart with now also clears the old capture,
+  through the existing Goose clear-and-restore path, when the hooks opt-out silences the harness reporter
+  (`AgentHooks::silences`, never true for Grok, whose callbacks the opt-out cannot remove). The Goose named-restart
+  service test now runs for Claude with hooks off too, covering both the clear and the restore after a definitive
+  pre-spawn failure; SPEC.md and SPEC_impl.md say the same. The Pi and OMP reporter-materialisation failure stays open,
+  as the outcome scoped. The code, test and documentation total 91 added/deleted lines, below the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2636/changes.
 
 ## nested-goose-report-replaces-resume-target.md
 

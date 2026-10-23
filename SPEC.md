@@ -2188,15 +2188,17 @@ captured identity. Claude, Codex, Grok, Pi and OMP can report the resulting conv
 named Restart with keeps the old capture until that report replaces it; Codex reports at the first prompt, so plain
 Restart before then still enters the old conversation. Goose cannot report on this resume, so a named Restart with
 clears its old capture in the relaunch transaction; a definitive pre-spawn abort restores it, an ambiguous failure does
-not. Muse, Cursor, OpenCode and named Goose starts do not gain later plain Restart from this choice. Heuristics that
-cannot be relied upon, such as correlating the vendor's files on disk with a launch, are not supported, because a wrong
-match resumes, and appends to, a conversation that is not the session's own. Checking the exact file a report names is
-verification of that report, not identification. A launch whose harness cannot report, or whose report never arrived,
-has no captured identity and cannot be restarted: Restart says why, and Replace starts the session over. What capture
-never does is write to the agent's own configuration or record directories. The opt-in managed-checkout Claude trust
-edit is a separate, narrowly scoped exception to the no-agent-configuration rule; it does not participate in capture. A
-hook passed on the command line for one launch is allowed because it writes nothing the vendor owns — no configuration
-file, no conversation record, no trust state — and cannot outlive the launch that carried it. It is not invisible in the
+not. The same clearing applies when Farhelm's conversation hooks are turned off for the agent (`FARHELM_AGENT_HOOKS`),
+since no report can then replace the old capture; Grok's own callbacks are not affected by that switch. Muse, Cursor,
+OpenCode and named Goose starts do not gain later plain Restart from this choice. Heuristics that cannot be relied upon,
+such as correlating the vendor's files on disk with a launch, are not supported, because a wrong match resumes, and
+appends to, a conversation that is not the session's own. Checking the exact file a report names is verification of that
+report, not identification. A launch whose harness cannot report, or whose report never arrived, has no captured
+identity and cannot be restarted: Restart says why, and Replace starts the session over. What capture never does is
+write to the agent's own configuration or record directories. The opt-in managed-checkout Claude trust edit is a
+separate, narrowly scoped exception to the no-agent-configuration rule; it does not participate in capture. A hook
+passed on the command line for one launch is allowed because it writes nothing the vendor owns — no configuration file,
+no conversation record, no trust state — and cannot outlive the launch that carried it. It is not invisible in the
 absolute: the report it delivers is written to a file in farhelm's own state directory and from there lands in farhelm's
 own database, and every run leaves a line in farhelm's own hook log. Vendor-owned state is the boundary the
 no-agent-configuration rule from Status is protecting, and that rule's own example — hooks written into the agent's
