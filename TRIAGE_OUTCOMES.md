@@ -17351,7 +17351,9 @@
   conflict. The assessment and completion criteria above stand as the case that plan must cover; the queue item is
   removed now.
 - Execution: complete for the queue removal (feedback file and index entry removed in the change that recorded this
-  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw".
+  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw". Fixed by jj change
+  `vuyrrxplwursznpymmsrtwpyypwxmmwo`, bookmark `plan/bind-gui-answers/16-launch-snapshot-pairing`;
+  [draft PR #2598](https://github.com/scode/farhelm/pull/2598/changes).
 
 ## restored-link-press-misses-intervening-drag.md
 
