@@ -2289,6 +2289,10 @@ alone adds no foreground protection. Old senders that predate the discriminator 
 untagged. A refused report changes nothing: no stored identity, no offer, no pending state. Resume is never silently
 turned into fresh, and historical captures are never rewritten to look proven.
 
+Confirmed 2026-10-22, an accepted exception to restart resuming exactly the session's own conversation (above): Goose's
+reporter does not tell a native Goose sub-agent, or a nested Goose run that inherits the reporter, from the session's
+foreground conversation, so such a run can replace the session's Resume target.
+
 OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. An OMP agent
 launch gets Farhelm's private extension, and so does a command launch that declares OMP, where its `{farhelm_args}`
 stands; Farhelm does not inspect the command to decide whether the extension fits, so a command declared as OMP that
@@ -3489,7 +3493,8 @@ included), a session that fails to launch or run, an effect on other sessions, o
 consequence. This may change as those integrations mature.
 
 The conversation-tracking limits under Durability and resume apply to every harness, first-class or not; a resume they
-accept is not the lost user work this allowance excludes.
+accept is not the lost user work this allowance excludes. They include the session's Resume target being replaced by a
+Goose sub-agent or a nested Goose run.
 
 ### Supported user environments
 

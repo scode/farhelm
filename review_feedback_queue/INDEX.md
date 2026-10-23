@@ -35,10 +35,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   creation times, a folder re-cloned over a checkout is trashed as Farhelm's; which supported filesystems lack them is
   unverified.
 
-- [`nested-goose-report-replaces-resume-target.md`](nested-goose-report-replaces-resume-target.md) — A nested or
-  sub-agent Goose run can replace its Goose session's Resume target; a lore decision deferred this outside the coverage
-  sources, and an inherited nonce alone cannot establish foreground ownership.
-
 - [`uninstall-notice-copies-raw-remote-path.md`](uninstall-notice-copies-raw-remote-path.md) — The uninstall notice
   copies a remote path without warning; successful uninstall rejects controls, but concurrent removal can expose an owed
   notice after failure. Unsafe downstream paste remains unverified.

@@ -18105,7 +18105,8 @@
   a nested Goose run that inherits it from the foreground conversation, so such a run can replace the session's Resume
   target, and that this is accepted. "First-class harnesses" makes clear this counts among the conversation-tracking
   limits it accepts. No code change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-docs-oct22.md`.
+- Execution: `complete`; draft PR [#2628](https://github.com/scode/farhelm/pull/2628/changes) on bookmark
+  `plan/triage-docs-oct22/03-goose-child-reports`, jj change `onnkxlnt`.
 
 ## grok-unrecognized-pane-admits-nested-grok.md
 
