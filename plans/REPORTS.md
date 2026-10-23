@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`terminal-link-and-copy-fixes`](reports/terminal-link-and-copy-fixes.report.md) landed 2026-10-20 in #2388, #2392, #2396, #2399, #2401, #2403: Fix six terminal link, hover and copy problems, from unescaped host errors to hovers on frozen snapshots (6 triage outcomes).
 - [`transfer-leftover-cleanup`](reports/transfer-leftover-cleanup.report.md) landed 2026-10-20 in #2395, #2400: Release a cancelled download's route and a cancelled upload's admission entry, if each fix is super cheap (2 triage outcomes).
 - [`trash-unknown-totals`](reports/trash-unknown-totals.report.md) landed 2026-10-20 in #2402, #2404: Stop trash summaries calling unchecked archives empty or an over-limit total complete (2 triage outcomes).
 - [`reachable-at-small-sizes`](reports/reachable-at-small-sizes.report.md) landed 2026-10-20 in #2406, #2411, #2419: Keep approval cards, the outage card and host dialogs reachable in very small windows (3 triage outcomes).
