@@ -695,9 +695,19 @@ test("post-clone command stays locked until its initial read completes", async (
     await expect(command).toHaveValue(previous.command ?? "");
     expect(writes).toBe(0);
     expect(await readPostClone(request)).toEqual(previous);
+    // Loaded but untouched, Save still writes nothing: a disabled command shows
+    // as an empty box, and writing that back would store "no command" instead.
+    await expect(save).toHaveAttribute("aria-disabled", "true");
+    await save.dispatchEvent("click");
+    await command.fill("printf 'edited after load'");
+    await save.click();
+    await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+    expect(writes, "saves go out in click order, so only the edited one was sent").toBe(1);
   } finally {
     release();
     await page.unroute("**/api/checkout-post-clone", intercept);
+    const restored = await request.put("/api/checkout-post-clone", { data: previous });
+    expect(restored.ok(), await restored.text()).toBe(true);
   }
 });
 
@@ -926,11 +936,12 @@ test("checkout drafts survive switching sections and are discarded on close", as
   expect(writes).toHaveLength(0);
 });
 
-/** Saving without editing must not rename a literal CLI-configured folder.
- * Only edited text loses surrounding whitespace; independent API readback
- * distinguishes stored spelling from the text left visible in the editor.
+/** An untouched Save writes nothing: Settings read the folder once, so writing
+ * that draft back would undo a command-line change made while it was open
+ * (SPEC.md, "One GUI at a time"). Only edited text is saved, without its
+ * surrounding whitespace; independent API readback checks the stored spelling.
  */
-test("settings preserves untouched literal checkout folders and trims edited paths", async ({ page, request }) => {
+test("an untouched checkout folder save writes nothing and edited paths are trimmed", async ({ page, request }) => {
   const previous = await readCheckoutRoot(request);
   const submitted: Request[] = [];
   let bodyFailed = false;
@@ -959,11 +970,17 @@ test("settings preserves untouched literal checkout folders and trims edited pat
       expect((await finished).ok()).toBe(true);
       await expect(field.getByRole("status")).toHaveText("checkout folder saved");
     };
-    await saveAndWait();
-    expect(await readCheckoutRoot(request)).toEqual({ root: literal });
+    const outside = await request.put("/api/checkout-root", { data: { root: "~/changed-outside" } });
+    expect(outside.ok(), "premise: the folder changes while Settings shows the old one").toBe(true);
     await expect(folder).toHaveValue(literal);
+    const save = field.getByRole("button", { name: "save", exact: true });
+    await expect(save).toHaveAttribute("aria-disabled", "true");
+    // Playwright waits on aria-disabled buttons; force the click a user can still make.
+    await save.click({ force: true });
     await folder.fill("  ~/edited-checkouts  ");
     await saveAndWait();
+    // Saves are sent in click order, so an untouched write would show up here.
+    expect(submitted.map((put) => put.postDataJSON())).toEqual([{ root: "~/edited-checkouts" }]);
     expect(await readCheckoutRoot(request)).toEqual({ root: "~/edited-checkouts" });
     await expect(folder).toHaveValue("~/edited-checkouts");
   } catch (error) {

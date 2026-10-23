@@ -8,7 +8,9 @@ use dioxus::prelude::*;
 use std::{cell::Cell, rc::Rc};
 
 /// Keep refused drafts editable and distinguish a typed value from a saved one.
-/// Saving trims edited text; an untouched saved folder keeps its exact name.
+/// Save writes only an edited draft, trimmed: the draft is read once, so an
+/// untouched Save would put back that old value over a change the command
+/// line made while the field was open (SPEC.md, "One GUI at a time").
 /// An empty result clears the global folder. Loading or saving cannot submit a
 /// surrounding launcher form, and disabling is semantic rather than native so
 /// a write does not drop keyboard focus into the page behind a modal.
@@ -75,14 +77,14 @@ pub(crate) fn CheckoutRootField(note: String, on_saved: EventHandler<()>) -> Ele
                 }
             } else {
                 button {
-                    r#type: "button", aria_disabled: locked,
+                    r#type: "button", aria_disabled: locked || !edited(),
                     "data-tooltip": "save the checkout folder for every host",
                     onclick: move |_| {
-                        if !initialized() || saving() { return; }
+                        if !initialized() || saving() || !edited() { return; }
                         saving.set(true);
                         outcome.set(None);
                         let base = base.clone();
-                        let value = if edited() { draft().trim().to_string() } else { draft() };
+                        let value = draft().trim().to_string();
                         draft.set(value.clone());
                         let mounted = mounted.clone();
                         let saving_request = save_checkout_root(&base,

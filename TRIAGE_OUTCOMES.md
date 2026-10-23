@@ -18620,7 +18620,12 @@
 - Completion criteria: an unedited Save writes nothing for the checkout folder and post-clone command fields, and the
   regression test that expects an unedited Save to write is updated. Size gate: about 100 lines as above. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/dialog-saves-oct22.md`.
+- Execution: complete in change `lurxnntnsktzmsxkuuxxklostwrqkzvu`, bookmark
+  `plan/dialog-saves-oct22/05-untouched-settings-save`. The checkout folder and post-clone command fields in Settings
+  write only an edited draft (save is unavailable until the field is edited), and the browser test that expected an
+  untouched Save to write now changes the folder from outside while Settings is open and checks that only the later
+  edited save is sent; the post-clone lock test also clicks an untouched Save after loading. Size: 54 lines, within the
+  gate. PR: https://github.com/scode/farhelm/pull/2663/changes.
 
 ## short-window-outage-blocks-pointer-recovery.md
 

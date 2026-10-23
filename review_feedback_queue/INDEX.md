@@ -21,9 +21,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## High priority: material UX degradation
 
-- [`untouched-checkout-folder-save-undoes-cli-edit.md`](untouched-checkout-folder-save-undoes-cli-edit.md) — Saving an
-  untouched checkout-folder field can overwrite a newer CLI setting.
-
 - [`power-loss-version-folder-never-repaired.md`](power-loss-version-folder-never-repaired.md) — A Mac version folder
   damaged by power loss after an update is kept by every rerun and update; APFS exposing the damage is unverified.
 
