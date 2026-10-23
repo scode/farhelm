@@ -55,17 +55,19 @@ decides, not when the fix is made. Briefly report these items with their basis a
 revise any of them.
 
 Before presenting an item for a decision, check whether its behavior is explicitly accepted by the current SPEC.md or
-SPEC_impl.md, its fix is already covered by an item in TODO.md's `Planned` bucket, it is a known bug root `BUGS.md`
-already records as one we have decided to live with, or it matches a review-only filter in
-`review_feedback_queue/FILTER.md`. Verify the actual trigger, consequence, and scope against that acceptance, planned
-work, known bug, or filter; sharing a subsystem or keyword is not enough. If fully covered, skip renewed discussion and
-record `other` with the exact spec section, planned item, `BUGS.md` entry, or filter as the reason. Remove the feedback
-file and its index entry immediately, and record execution as complete for that queue cleanup; do not leave the item to
-be skipped again in later sessions. Already planned means acknowledged work, not an implemented fix. Do not implement
-it, broaden its scope, or create another TODO merely because the same issue appears in feedback. If only part is
-covered, bring the uncovered part to the user. Briefly report skipped items and their basis, then continue to the next
-undecided item. This is an exception to the per-item decision question in `review_feedback_queue/.agents/triage.md`,
-"Asking for a decision".
+SPEC_impl.md, its fix is already covered by an item in TODO.md's `Planned` bucket or by a plan in `plans/queue/` that
+has not landed, it is a known bug root `BUGS.md` already records as one we have decided to live with, or it matches a
+review-only filter in `review_feedback_queue/FILTER.md`. A queued plan counts when its stated work (its acceptance
+criteria, not its subject area) removes the finding's cause; such a plan does not know about the queue item, so nothing
+else would ever remove it (maintainer, 2026-10-22). Verify the actual trigger, consequence, and scope against that
+acceptance, planned work, known bug, or filter; sharing a subsystem or keyword is not enough. If fully covered, skip
+renewed discussion and record `other` with the exact spec section, planned item or plan, `BUGS.md` entry, or filter as
+the reason. Remove the feedback file and its index entry immediately, and record execution as complete for that queue
+cleanup; do not leave the item to be skipped again in later sessions. Already planned means acknowledged work, not an
+implemented fix. Do not implement it, broaden its scope, or create another TODO merely because the same issue appears in
+feedback. If only part is covered, bring the uncovered part to the user. Briefly report skipped items and their basis,
+then continue to the next undecided item. This is an exception to the per-item decision question in
+`review_feedback_queue/.agents/triage.md`, "Asking for a decision".
 
 ## Presenting items on one page
 
