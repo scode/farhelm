@@ -277,3 +277,102 @@ of the mechanism. The reviews caught two real defects in the stack's own work an
 
 The findings I did not follow were naming and small refactoring suggestions. They are recorded, with reasons, in the
 plan's working log (`farhelm-plan-bind-gui-answers-log.md`).
+
+### Landing
+
+Landed as #2576, #2578, #2579, #2581, #2582, #2584, #2585, #2586, #2590, #2591, #2592, #2593, #2595, #2596, #2597,
+#2598, #2599 and #2600, merged bottom-up, with the content the report describes and two changelog changes described
+below. It was the only plan in this landing round.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing but queue bookkeeping landed after the stack's base. The plan was written while several UI changes landed
+underneath it, though, so a fresh-context reviewer and I checked that the prompts it changes (each now acting on what
+the user saw when answering) keep what that recent work added:
+
+- The specification rules added on 2026-10-22 (#2580) mostly hold: none of the changed prompts keeps or replays state
+  across an expired browser sign-in, and the plan adds no new retention of failed saves. The plan's new cleanup when the
+  sidebar list goes away (which signing in again causes) drops queued snapshots of the shortcut bindings, not the queued
+  sequences themselves. One exception predates the plan but is now asserted by it; see "Things you should know".
+- The Templates dialog lock during a number-key save (gui-saves-last-write-wins) is respected: every answer to the
+  template leave prompt is refused while that save is in progress.
+- The launcher gains no new close path, so it still makes the page usable again before handing off (modal-dialog-shell).
+- Closing menus when their rows move (popover-anchor-close) never touches the sidebar's row questions.
+- The menu focus markers, the changed-host warning, the shared Replace handling for the sidebar and session header
+  (ui-session-actions) and the guarded YOLO answer from the recent rounds are unchanged in behavior.
+
+#### Fixes made during the landing
+
+- Two of the plan's changelog fragments described fixes to work that landed after the last release (v0.30.0, 2026-10-18)
+  and has not shipped. A terminal link press held through a reconnect could only survive since the restored frozen
+  screen started handling link clicks (#2403, 2026-10-20), and the snapshot a quick-launch sequence takes when Enter is
+  pressed came in #2355 (2026-10-20). Following the repository's rule that a fix to unreleased work edits that work's
+  fragment, the landing deleted the two new fragments and added their content as context paragraphs to the original
+  fragments, in the same PRs (#2597 and #2598). The plan's other twelve fragments concern behavior that shipped (half of
+  them mark changes with nothing user-facing), so they stay.
+
+#### Things you should know
+
+- The template editor's leave prompt still lets the user save the same draft again after a failed save. SPEC.md's
+  2026-10-22 rule says a failed save is reported and discarded and the GUI does not keep the change it tried to save, so
+  this departs from it. The behavior predates this plan, but the plan's new test and code comment now assert it. The
+  near-term TODO entry "Sweep out browser sign-in and failed-save preservation" covers removing it; that would also mean
+  changing this plan's test.
+- A browser test from the launcher rework (launcher-draft-model), "a template shortcut preserves editor focus when
+  clearing a quick-launch YOLO question", failed on WebKit 3 of 10 times on main and 3 of 10 with this plan (see
+  Checks). It passed on both engines in each of the previous three landing rounds' full browser runs. At that failure
+  rate three passes in a row is not unusual, so it may always have been flaky, but a regression from what landed in
+  those rounds is not ruled out. It has no FLAKES.md entry yet.
+- This plan's last PR adds a FLAKES.md entry, a Deflake entry and a sweep exclusion for the hung-save timing test
+  (`a_hung_save_releases_waiters_at_their_deadline`). My draft PR #2528 from an earlier landing round records the same
+  test; it duplicates this plan's more thorough record, so I am closing it after this landing.
+
+#### Possible follow-ups
+
+- Record the WebKit template-shortcut focus test above as a flake (a FLAKES.md entry, Deflake entry and exclusion), or
+  investigate it as a possible regression. I am opening a draft PR that records it.
+- Add to the landed hung-save entry the evidence from #2528: run alone with the desktop feature, the test failed 1, 4
+  and 5 times in three 50-iteration stress runs on main, and 9 to 20 times in 50 on the stack of an unrelated landing
+  (gui-saves-last-write-wins). That is a higher rate than the entry's 6 failures in 128 executions; I recommend adding
+  it, since it shows the test fails alone, not only under load.
+- Found at landing, low severity: in the shared confirmation code, the comment on the check that a prompt is still the
+  one shown lists three prompts that stay up through their request, while the comment on the type itself and
+  SPEC_impl.md list four; the session Replace's YOLO "don't ask again" is the one left out. Possible follow-up: add it.
+
+#### Checks
+
+The plan adds about 5,300 lines and removes about 1,400, almost all in the UI, its asset scripts and browser tests (the
+rest is SPEC_impl.md, a reviewer instruction file, the flake record and changelog fragments), and changes prompts across
+the whole UI, while its own browser run was a 26-spec selection; that is why this round ran the full browser suite. No
+helm or supervisor code changed, so the rest of the Rust workspace did not run. All of the following ran on the stack
+before the landing's changelog folds, which changed only changelog files:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on the changed Markdown files, `python3 scripts/check-agents-md.py` (an instruction
+  file changed; one warning, about a citation main already had), the workspace debug build, the UI's release web build
+  and `scripts/check-desktop-assets.sh` (which also builds the desktop app): all passed.
+  `python3 releasing/check-changelog.py format` passed again after the folds.
+- `cargo nextest run -p farhelm-ui` through the test recorder with pinned nextest and tmux, four slots, no retries, run
+  `9e08df55-8251-41e5-992d-83e37d2742e2`: 758 passed. `cargo nextest run -p farhelm-ui --features desktop`, run
+  `9fac815f-451e-48c1-8727-330f463f85c7`: 923 passed. `node --test` in `crates/farhelm-ui/js-tests`, run
+  `e101ec26-49e8-4f4a-a7fd-c3442403ecb6`: 333 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `4120dcb9-412d-4a76-8ac1-f89e6c8fd37f`: 2482 passed, 14 skipped by design (WebKit
+  clipboard cases and tests that need a real signed-in agent or run on one engine only), 2 failed, both on WebKit:
+  - "don't ask again on a refused YOLO replace marks the host, then replaces with the override", the open flake
+    FLAKES.md recorded on 2026-10-20, which the deflake sweep already excludes;
+  - "a template shortcut preserves editor focus when clearing a quick-launch YOLO question", a test the launcher rework
+    (launcher-draft-model) added, which timed out waiting for the launcher's name field to keep focus. Repeated ten
+    times on WebKit it failed 3 of 10 on this stack (run `527195e7-3cbc-4855-94a0-27b0e207d9e9`) and also 3 of 10 on
+    main rebuilt on its own (run `108dcf3d-bd51-451c-ba63-9a7e222d7b3d`); five Chromium repeats passed (run
+    `8a88b650-5ba1-4686-8937-f5c6eb767d49`). So it predates this plan; see "Things you should know".
+- Reused: none. Skipped: the rest of the Rust workspace (no helm or supervisor code changed), the website build (no docs
+  page changed), the doctests (no documentation example changed), the desktop smoke test (the desktop app crate is
+  unchanged; the tunnel warning change is covered by the desktop-feature unit tests above), the native Mac app (not
+  runnable here) and the installer (unchanged).
+
+The report's checks on the rebased stack were the full UI unit, desktop and JavaScript runs and a 26-spec browser
+selection; this round also ran the full browser suite. Nothing in the executor's report became untrue at landing, apart
+from the two changelog fragments moved as described above.
