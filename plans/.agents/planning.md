@@ -125,11 +125,14 @@ request, served from this machine on loopback only, the way the todo picker is. 
 - Facts that are not questions (the delegation mode, where the plan files go) are stated on the page or in chat, not
   asked.
 
-Write the page in your scratch directory (`AGENTS.md`, "Agent scratch space") and serve it with any static file server
-bound to `127.0.0.1` on port 14003, the todo picker's port, after stopping the picker; the maintainer keeps that one URL
-open in a browser. For example, `python3 -m http.server 14003 --bind 127.0.0.1 -d <dir>` as a background command. If
-something else holds the port, use the next free port above it and give the maintainer that URL instead, without asking;
-never stop a process you did not start. Put the page's URL in the last message of the turn, after every tool call.
+Write the page as `index.html` in a directory of its own inside your scratch directory (`AGENTS.md`, "Agent scratch
+space") and serve that directory with `scripts/serve-page.ts <dir>`, run from the checkout root as a background command,
+never with another server, after stopping the picker; if it fails to start, stop and report why. The maintainer keeps
+that one URL open in a browser. It binds `127.0.0.1` on port 14003, the todo picker's port, and marks every response
+uncacheable: every flow shares that URL, so a cached copy can be another session's page or an older version of this one.
+If something else holds the port, it moves to the next free port above and prints the URL it got; give the maintainer
+that URL without asking, and say plainly that the port changed, since a forward of 14003 does not reach it. Never stop a
+process you did not start. Put the page's URL in the last message of the turn, after every tool call.
 
 After acting on a pasted block (research, follow-up questions), update the same page in place: the questions still open,
 any new follow-ups, and the settled answers shown read-only, so the maintainer can see what is still needed. A plan

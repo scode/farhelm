@@ -77,12 +77,14 @@ immediate removal of covered, filtered and already-fixed items), then write one 
 serve it, and give the maintainer its URL. Walk through items one at a time in conversation only when the maintainer
 asks for it. Do not publish the page as a snippet or anywhere else unless the maintainer asks.
 
-Write the page in your scratch directory (`AGENTS.md`, "Agent scratch space") and serve it with any static file server
-bound to `127.0.0.1` on port 14003, the todo picker's port, for example
-`python3 -m http.server 14003 --bind 127.0.0.1 -d <dir>` as a background command. Never bind anything other than
-loopback. If something else holds the port, use the next free port above it and give the maintainer that URL instead,
-without asking; never stop a process you did not start. Put the page's URL in the last message of the turn, after every
-tool call. Stop the server when no undecided item is left on the page.
+Write the page as `index.html` in a directory of its own inside your scratch directory (`AGENTS.md`, "Agent scratch
+space") and serve that directory with `scripts/serve-page.ts <dir>`, run from the checkout root as a background command,
+never with another server; if it fails to start, stop and report why. It binds `127.0.0.1` on port 14003, the todo
+picker's port, and marks every response uncacheable: every flow shares that URL, so a cached copy can be another
+session's page. If something else holds the port, it moves to the next free port above and prints the URL it got; give
+the maintainer that URL without asking, and say plainly that the port changed, since a forward of 14003 does not reach
+it. Never stop a process you did not start. Put the page's URL in the last message of the turn, after every tool call.
+Stop the server when no undecided item is left on the page.
 
 The page groups items by topic and keeps index order within a group. Each item says, in this order, what goes in a
 conversation under "Asking for a decision" in this file: its number, bucket and feedback filename; a short
