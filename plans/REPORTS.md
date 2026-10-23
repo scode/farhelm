@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`refused-retry-rollback-fence`](reports/refused-retry-rollback-fence.report.md) landed 2026-10-22 in #2570: A refused create retry no longer deletes a session that was restarted meanwhile.
 - [`gui-saves-last-write-wins`](reports/gui-saves-last-write-wins.report.md) landed 2026-10-22 in #2562, #2583: Accept last-write-wins for GUI template and number-key saves in SPEC.md, and stop a failed number-key save from later writing its stale map over newer agent changes.
 - [`bind-gui-answers`](reports/bind-gui-answers.report.md) landed 2026-10-23 in #2576, #2578, #2579, #2581, #2582, #2584, #2585, #2586, #2590, #2591, #2592, #2593, #2595, #2596, #2597, #2598, #2599, #2600: Bind every GUI answer to what the user saw: one shared prompt mechanism with opening tokens, click-time preconditions, declarative link covers and retired held input, plus the six GUI outcomes folded in at the 2026-10-21 triage
 - [`test-hygiene-oct21`](reports/test-hygiene-oct21.report.md) landed 2026-10-23 in #2603, #2606, #2607, #2608, #2611, #2613, #2615, #2618: Eight test-only fixes from the 2026-10-21 auto-triage: cleanup armed as soon as a fixture exists, tests that prove the acceptance they claim, and a deadline that bounds each approval poll.
