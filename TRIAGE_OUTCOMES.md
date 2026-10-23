@@ -17794,7 +17794,11 @@
 - Completion criteria: the session is owned by cleanup as soon as it exists (the `try` starts right after creation).
   Test-only, confined to this test. Size gate: about 100 lines as above; over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
+- Execution: complete in jj change `qxyzoykwsrpoyplnkovwvlkopwuyyyvk`, bookmark
+  `plan/test-hygiene-oct21/03-held-reveal-cleanup`. The held-reveal test now enters the `try` whose `finally` deletes
+  its session right after creating it, so a failed auto-select write or init script no longer leaves the session
+  running. The test change totals 12 added/deleted lines, below the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2607/changes.
 
 ## model-effort-test-never-proves-model-accepted.md
 
