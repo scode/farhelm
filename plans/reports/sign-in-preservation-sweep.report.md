@@ -106,3 +106,96 @@ was reordered so "exception" attaches to the part that departs from the rule. PR
 rebuild was fixed, one more piece of code that only served that rebuild was removed, and the browser test now waits for
 the reload reliably. PR 3: a stale SPEC_impl.md sentence and comments were fixed, a redundant piece of bookkeeping in
 the settings-saving code was removed, and the review-queue item this work fixes was deleted.
+
+### Landing
+
+Landed as #2604, #2614 and #2623, merged bottom-up, with the content the report describes and two small documentation
+fixes described below. It was the only plan in this landing round.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained only a documentation commit and queue bookkeeping. The plan builds on several recent
+UI plans already in its base, so a fresh-context reviewer and I checked it against them:
+
+- gui-saves-last-write-wins, which made a failed number-key save be discarded, is now covered by this plan's general
+  rule: its special case in the shared preference-saving code is gone with nothing left referring to it, number keys
+  behave as before, and the Templates dialog still locks during a key save and puts the helm's keys back on failure.
+- bind-gui-answers (the plan that ties GUI answers to what the user saw) clears queued quick-launch sequences when the
+  sidebar list goes away; that is kept. The prompt it changed for leaving the template editor with unsaved edits, which
+  lets the user save the same draft again after a failed save, falls under the dialogs this plan deliberately left alone
+  (those that keep what was typed after a refused save), per your choice on the planning page.
+- The page reload after signing in again runs right after the new credential is stored, and nothing in the app asks the
+  browser to confirm leaving the page, so no "leave site?" prompt appears. Modal dialogs, agent approval cards, queued
+  quick-launch sequences and the welcome card start fresh after the reload, as SPEC.md now requires. The desktop app's
+  own authentication is untouched; it never shows the token prompt, so it never reloads.
+- The SPEC.md wording agrees with the 2026-10-22 rules on signing in again and failed saves.
+
+#### Fixes made during the landing
+
+- SPEC_impl.md said that "a failed shortcut save" is reported and discarded. "Shortcut" there covers both number keys
+  and the ⚡ quick-launch mark, but toggling the mark in the Templates dialog still fails silently (the gap the report
+  lists as a follow-up); moving the mark during a rename is reported. The landing reworded the sentence to say that a
+  failed number-key save or a failed move of either shortcut is reported and discarded, and that a failed mark toggle in
+  the dialog is discarded without a report. This is in #2623.
+- A review-queue item, `welcome-recovery-counts-unfinished-selection-read.md`, concerned a welcome-card test about
+  recovering from sign-in inside the same page. #2614 deletes that test and the in-page recovery it exercised, so the
+  landing removed the item and its index entry in #2614.
+
+#### Things you should know
+
+- The report says a queued review finding about a failed confirmation opt-out being resent over a later restore is
+  removed by this work. That item had already been removed on main by the 2026-10-22 triage, so this plan's PRs no
+  longer remove it; the behavior it described is still fixed by #2623.
+- In the one case that still rebuilds the interface inside the same page (a build-mismatch notice appearing while the
+  token form shows), besides the welcome card's state and the count of operations in progress that the report names, two
+  more things are no longer reset: rows being deleted can stay shown as deleting, and activity times can be stale until
+  their next refresh about 30 seconds later. Only a browser whose credential was already refused can reach this case,
+  every request fails there anyway, and the notice already says to reload.
+
+#### Possible follow-ups
+
+- Found at landing, minor: two test comments still describe the old in-page recovery: the `authenticate()` helper's
+  comment in `e2e/tests/auth.spec.ts`, and the first line of `e2e/tests/ntfy-settings.spec.ts` ("replayed preferences").
+- For changelog curation: the `browser-sign-in-reload.md` entry presents losing open dialogs and drafts as new, but the
+  old recovery already lost them; what is newly lost on reload is the rest of the page's state.
+
+#### Checks
+
+The plan adds about 330 lines and removes about 790 (counting tests and comments), in the UI, an asset script, three
+browser specs, SPEC.md, SPEC_impl.md and two changelog fragments. Browser sign-in recovery now reloads the page and
+every preference save goes through the changed code, so this round ran the full browser suite. No helm or supervisor
+code changed, so the rest of the Rust workspace did not run. All of the following ran on the stack before the landing's
+two documentation fixes, which change only SPEC_impl.md and the review queue:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on the changed Markdown files, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py` (one warning, about a citation main already had), the workspace debug build, the
+  UI's release web build and `scripts/check-desktop-assets.sh` (which also builds the desktop app): all passed. After
+  the documentation fixes, `dprint check` on the changed files and the instructions check passed again.
+- `cargo nextest run -p farhelm-ui` through the test recorder with pinned nextest and tmux, four slots, no retries, run
+  `bf6f6c48-2829-462a-85b9-49bc97795e8c`: 752 passed. `cargo nextest run -p farhelm-ui --features desktop`, run
+  `6f3e09f5-5383-42c6-b522-df2f7c8d9dfd`: 917 passed. `node --test` in `crates/farhelm-ui/js-tests`, run
+  `171dd59a-31e6-4197-bc8e-271c65700811`: 333 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `aeb02db0-f5f1-4f00-a74f-9c81df1c2294`: 2479 passed, 14 skipped by design (WebKit
+  clipboard cases and tests that need a real signed-in agent or run on one engine only), 3 failed, all on WebKit and
+  none in code this plan changes:
+  - "a template shortcut preserves editor focus when clearing a quick-launch YOLO question", the flake found at the
+    previous-but-one landing (failing about 3 in 10 on WebKit on main), whose record is in draft PR #2621;
+  - "a wrong-host UPDATE acceptance warns on its source row and claims nothing", which failed in the test's own network
+    interception ("Response has been disposed"), as it did once on Chromium three landing rounds earlier; ten WebKit
+    repeats here (run `d0f245cd-37fc-4b13-bfd1-a296993fef07`) failed once more. It is a pre-existing flake I am
+    recording separately;
+  - "a file dropped on a tab inserts its path in that tab", which did not repeat: ten WebKit repeats (same run) and five
+    Chromium repeats (run `c27091ce-0ae2-4ec7-b747-2b3837205e40`) all passed. I treat it as a single observation. The
+    test exercises the browser's drop handling and the live terminal, and the plan's only change to the browser's
+    event-feed script, which carries that terminal's updates, is a comment.
+- Reused: none. Skipped: the rest of the Rust workspace (no helm or supervisor code changed), the website build (no docs
+  page changed), the doctests (no documentation example changed), the desktop smoke test (the desktop app's own
+  authentication is untouched and covered by the desktop-feature unit tests above), the native Mac app (not runnable
+  here) and the installer (unchanged).
+
+The report's checks were its own selections; this round ran the UI unit tests, the JavaScript harness and the full
+browser suite on the plan as it landed. Nothing else in the executor's report became untrue at landing.
