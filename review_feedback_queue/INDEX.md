@@ -70,9 +70,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`commands-setting-help-omits-delete.md`](commands-setting-help-omits-delete.md) — The help for running farhelm
   commands without asking omits that agents may delete sessions and templates; bucket is unsettled.
 
-- [`replace-with-recent-row-says-launch.md`](replace-with-recent-row-says-launch.md) — In Replace with, Enter on a
-  recent setup replaces while the row says only launch; whether it misleads in practice is unverified.
-
 - [`devbuild-update-strands-host-on-newer-schema.md`](devbuild-update-strands-host-on-newer-schema.md) — Updating back
   from a devbuild that migrated a shared remote host's database leaves the host unreachable; not reproduced, and the
   bucket is unsettled.

@@ -1121,7 +1121,9 @@ async function waitForListedState(request: APIRequestContext, id: string, state:
  * source the launcher shows Replace's kill warning, ending with the launched
  * session rather than "the same settings"; launching sends neither
  * precondition flag, since the warning covered the running agent, and the
- * source is replaced.
+ * source is replaced. A recent setup's row, whose Enter submits the same
+ * replace, says "⏎ replace", leads its accessible name with "replace: ", and
+ * names the warning as its description, as the replace button does.
  */
 test("replace with on a running source warns that its agent is killed, then replaces it", async ({
   page,
@@ -1132,6 +1134,20 @@ test("replace with on a running source warns that its agent is killed, then repl
   let replacedId: string | undefined;
   try {
     await waitForListedState(request, source.id, "live");
+    // One recent setup in the source's folder: Enter on it submits this
+    // replace too, so the row must say so as the button does.
+    const listing = await request.get("/api/sessions");
+    const build = listing.headers()["x-farhelm-build"];
+    expect(build, "recent history must use the live helm identity").toBeTruthy();
+    const listed = (await listing.json()).sessions.find((one: { id: string }) => one.id === source.id);
+    const launch = {
+      host: listed.host, canonical_cwd: listed.cwd, cwd: listed.cwd, selection: { harness: "codex" },
+      created_at: 1, creation_seq: 1,
+    };
+    await page.route("**/api/launch-history**", (route) => route.fulfill({
+      headers: { "content-type": "application/json", "x-farhelm-build": build },
+      body: JSON.stringify({ launches: [launch], folders: [] }),
+    }));
     await page.goto("/");
     const form = await openReplaceWith(page, source.id, LIVE_BADGE);
     const warning = form.locator(".launch-composer-replace-warning");
@@ -1141,6 +1157,11 @@ test("replace with on a running source warns that its agent is killed, then repl
     );
     // The button that is the confirmation names the warning as its description.
     await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-describedby", "launch-composer-replace-warning");
+    const recent = form.locator(".launch-composer-recent-slots").getByRole("button").first();
+    await expect(recent, "premise: the seeded recent setup is offered").toBeVisible();
+    await expect(recent.locator(".launch-composer-recent-hint")).toHaveText("⏎ replace");
+    await expect(recent).toHaveAttribute("aria-label", /^replace: /);
+    await expect(recent).toHaveAttribute("aria-describedby", "launch-composer-replace-warning");
 
     const { body, response } = await pressReplace(page, form, source.id);
     expect(response.ok(), `replace with: ${await response.text()}`).toBe(true);
