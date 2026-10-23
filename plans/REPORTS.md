@@ -3,7 +3,6 @@
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
 - [`app-dialog-focus`](reports/app-dialog-focus.report.md) landed 2026-10-20 in #2405, #2407, #2408: Fix focus handoffs for the update and SSH help controls, and keep a delayed host confirmation from freezing another dialog (3 triage outcomes).
-- [`replace-yolo-shared-question`](reports/replace-yolo-shared-question.report.md) landed 2026-10-20 in #2410: Make the header and sidebar Replace controls share one YOLO question per session (1 triage outcome).
 - [`tab-attach-no-wait`](reports/tab-attach-no-wait.report.md) landed 2026-10-20 in #2409: Stop a tab attach during Stop from stalling every session on that host (1 triage outcome).
 - [`planning-probe-bound`](reports/planning-probe-bound.report.md) landed 2026-10-20 in #2415: Bound a host planning probe's output wait so a lingering ssh helper cannot hold a planning slot forever, if super cheap (1 triage outcome).
 - [`repository-discovery-git-config`](reports/repository-discovery-git-config.report.md) landed 2026-10-20 in #2412: Make repository suggestions ignore an inherited GIT_CONFIG, as the test fixture already does (1 triage outcome).
