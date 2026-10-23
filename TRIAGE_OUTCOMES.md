@@ -18376,3 +18376,217 @@
   the wildcard collision cannot happen, and the kernel-chosen bind is made without address reuse. Remove the feedback
   file and its index entry.
 - Execution: `pending`.
+
+## stale-confirmation-optout-replayed-after-sign-in.md
+
+- Outcome: `other`.
+- Assessment: confirmed by code reading on main b97bcfe4 (not run): a failed save of a confirmation opt-out stays dirty
+  in the browser's preference write queue, and the reseed after browser sign-in (`seed_with_local_changes`) lays it over
+  the fresh row and resends it, overwriting a later restore made elsewhere. This contradicts SPEC.md "One GUI at a time"
+  as decided 2026-10-22: a failed GUI save "is reported to the user and then discarded ... does not retry or replay it
+  later".
+- Decision: skipped as already planned work. `plans/queue/sign-in-preservation-sweep.md` (in flight when triaged)
+  removes `seed_with_local_changes` and its call, and says the best-effort preferences, "the host setup and removal
+  confirmation choices, turning the session-confirmation opt-out on" among them, "are no longer kept or resent".
+  Planned, not implemented.
+- Completion criteria: remove the feedback file and its index entry immediately; the fix lands with that plan.
+- Execution: `complete` for the queue cleanup; removed during the 2026-10-22 triage of the high bucket.
+
+## duplicate-pane-facts-can-unprotect-spare-claim.md
+
+- Outcome: `fix code`.
+- Assessment: code path confirmed by reading on main b97bcfe4 (not run): the tmux control codec drops duplicated pane
+  rows, status then treats the missing pane as absent, startup leaves the claim unprotected, and spare cleanup removes a
+  checkout still being prepared. The trigger needs a duplicate row forged through Farhelm's private tmux server (session
+  names are `fh-<uuid>`; whether tmux accepts a newline in a session name is unverified), which SPEC.md "Ownership
+  during cleanup and provisioning" places outside every guarantee. An earlier reviewer found that coverage ambiguous
+  against SPEC_impl.md's "failed or uncertain liveness observations retain possible claims".
+- Decision: the user chose the cheap fix over closing it as covered (2026-10-22 high-bucket triage page, question 2:
+  "Cheap fix for both"), in line with their earlier "covered by the rule, but if it's cheap lets fix".
+- Completion criteria: a duplicated pane row is treated as an uncertain observation, so the claims it could concern stay
+  protected, as an ordinary query error already does; a unit test covers it. Size gate: about 100 lines of diff (code,
+  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and bring it
+  back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## shell-inspection-drains-exhaust-planning-pool.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main b97bcfe4 (not run): the provisioning backend's child-output capture
+  waits for its output readers without a deadline after the child exits or is killed, and Set up, Update and Remove
+  planning each hold one of the helm's four planning slots across that shell inspection. A local ssh helper that keeps
+  ssh's output open (the BUGS.md entry "A host install or update can hang until the helm restarts if a local ssh helper
+  keeps its output open") could therefore block planning for every host. BUGS.md accepts the install and update hang,
+  not the blocked planning. No real helper setup was shown.
+- Decision: the user chose the cheap fix (2026-10-22 high-bucket triage page, question 2: "Cheap fix for both").
+- Completion criteria: the post-exit output reads in the shared capture path get a short bound, as the probe's already
+  has, so a lingering helper cannot hold a planning slot; the BUGS.md entry is narrowed or removed to match what
+  remains, and the unreleased `releasing/changelog.d/planning-probe-bound.md` fragment is corrected if it still
+  overstates. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## replace-with-recent-row-says-launch.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main b97bcfe4 (not run): in Replace with, Enter on a recent setup submits the
+  replace (deleting the source), while the row's hint is always "⏎ launch" and only the replace button points screen
+  readers at the replace warning. SPEC.md makes the launch button the delete's confirmation; under the 2026-10-22 bucket
+  rule a destructive confirmation's wording limits consent, so the row's wording matters.
+- Decision: the user accepted the recommendation (2026-10-22 high-bucket triage page).
+- Completion criteria: in Replace with, a recent row's hint uses the launcher's replace wording ("⏎ replace") and the
+  rows point screen readers at the replace warning as the replace button does; a browser assertion covers it. Size gate:
+  about 100 lines as above. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## commands-setting-help-omits-delete.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code reading on main b97bcfe4 (not run): with "Run farhelm commands without asking" on, the
+  helm skips the approval card for session and template deletes, but the setting's help (on and off) and its tooltip
+  name only starting, stopping, restarting, renaming and cloning sessions and editing templates. SPEC.md "Agent-spawned
+  sessions" lists `delete`; the summary in "Local authority and trust between hosts" does not. Agent prompting is off in
+  this version, so leaving `prompt` out is correct.
+- Decision: the user accepted the recommendation (2026-10-22 high-bucket triage page).
+- Completion criteria: both help texts and the tooltip name deleting sessions and templates, and the SPEC.md summary
+  list names delete. Size gate: about 100 lines as above. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## spare-checkout-rewind-keeps-removed-history.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code reading on main b97bcfe4 (not run): taking a prepared checkout moves its contents and
+  runs `git merge --ff-only` against the fetched tip, which succeeds without moving when upstream rewound the default
+  branch to an ancestor, so the session starts on removed history; a diverged branch fails visibly instead. SPEC.md
+  "Managed checkouts" says the checkout is fetched, moved and fast-forwarded, not that it must match the upstream tip.
+- Decision: the user accepted the recommendation (2026-10-22 high-bucket triage page).
+- Completion criteria: before moving, the take checks that the prepared commit is an ancestor of the fetched tip and
+  otherwise falls back to a normal clone into the still-empty folder, covering rewind and divergence; a test covers the
+  rewind; SPEC.md "Managed checkouts" and SPEC_impl.md say so. Size gate: about 100 lines as above. Remove the feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## untouched-checkout-folder-save-undoes-cli-edit.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main b97bcfe4 (not run): Settings' all-hosts checkout folder field fills its
+  draft once while Settings is open, and Save sends that draft even when untouched, overwriting or clearing a newer
+  command-line setting; the post-clone command field does the same and can turn a disabled command into unset. SPEC.md
+  "One GUI at a time": "A GUI write must not undo a change an agent or the command line made while that view was open";
+  the 2026-10-21 last-write-wins exception names templates and number keys only.
+- Decision: the user accepted the recommendation (2026-10-22 high-bucket triage page).
+- Completion criteria: an unedited Save writes nothing for the checkout folder and post-clone command fields, and the
+  regression test that expects an unedited Save to write is updated. Size gate: about 100 lines as above. Remove the
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## short-window-outage-blocks-pointer-recovery.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed from CSS and markup on main b97bcfe4 (not rendered): below 80px of terminal height the outage
+  card's fallback is fixed across the viewport above the sidebar and catches pointer events, so the sidebar's sessions
+  and host controls cannot be clicked; the keyboard and enlarging the window still work.
+- Decision: the user accepted the recommendation (2026-10-22 high-bucket triage page).
+- Completion criteria: while the fallback shows, the sidebar stays clickable and the explanation stays readable; a
+  browser check clicks a sidebar control in that state. Size gate: about 100 lines as above. Remove the feedback file
+  and its index entry.
+- Execution: `pending`.
+
+## guarded-instead-can-duplicate-uncertain-launch.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed as a code sequence on main b97bcfe4 (not run): a YOLO launch that started without asking loses
+  its reply; the host is then switched to ask before YOLO launches; the retry is refused with "Nothing has been started"
+  and the guarded answer mints a new request, starting a second session. A launch the user confirmed keeps its consent
+  for the retry, so the ordinary lost-reply case is safe. SPEC.md says one intended create yields one session or a clear
+  error, never two silently.
+- Decision: the user accepted the recommendation (2026-10-22 high-bucket triage page).
+- Completion criteria: when the refused request retries an attempt whose outcome is unknown, the question says the
+  launch may have started and does not offer the guarded answer; a test covers it. Size gate: about 100 lines as above.
+  Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## terminal-reveal-takes-focus-from-plain-button.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main b97bcfe4 (not run): when a terminal finishes catching up it takes focus
+  unless a text field or a listed keyboard owner holds it, and deliberately takes it from any other button, so an Enter
+  meant for a header button the user tabbed to can reach the agent. Selecting a session from the sidebar (a button) and
+  typing relies on that surrender, so a blanket rule for buttons would break it.
+- Decision: the user accepted the recommendation (2026-10-22 high-bucket triage page).
+- Completion criteria: the terminal takes focus only if focus has not moved since the selection that asked for it, so
+  sidebar select-then-type still works; a browser test covers a button focused during catch-up. Size gate: about 100
+  lines as above. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## power-loss-version-folder-never-repaired.md
+
+- Outcome: `fix code`.
+- Assessment: the installer side is confirmed by reading on main b97bcfe4 (not run): a rerun keeps an existing version
+  folder whenever its `farhelm` exists, so a damaged one is never replaced and the rerun reports success; the updater
+  also sees nothing to do. That APFS can leave such a file empty after a power loss is unverified. SPEC.md requires that
+  rerunning the installer finishes the job or restores the previous installation.
+- Decision: the user accepted the recommendation (2026-10-22 high-bucket triage page) rather than folding it into the
+  race-free installer TODO.
+- Completion criteria: the installer keeps an existing version folder only when its `farhelm` matches the verified
+  staged download byte for byte, and otherwise replaces it as it does an incomplete folder; `scripts/test-install-sh.sh`
+  covers a truncated version file. Size gate: about 100 lines as above. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## cancelled-startup-sweep-outlives-directory-ownership.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main b97bcfe4 (not run): the supervisor's startup cleanup runs as blocking
+  work that does not hold the state-folder ownership, and a stopped supervisor releases its lock while that work goes
+  on, so a successor can claim a fresh checkout that the old cleanup then removes (a delayed failed-create unlink has
+  the same gap). Under systemd the successor waits for the old process; the overlap is reachable for the desktop app's
+  supervisor (quit and reopen during a long startup) and hand-started supervisors. One launch fails visibly; no work is
+  lost.
+- Decision: the user chose the structural fix (2026-10-22 high-bucket triage page): the supervisor keeps its lock until
+  all its background work has ended, as the helm already does (#2383).
+- Completion criteria: the supervisor's state-folder claim outlives its runtime and every blocking job it started, so no
+  successor can claim the folder while old work runs; SPEC_impl.md's ownership paragraph covers the supervisor as well
+  as the helm; a test shows a successor cannot claim while old blocking work runs. Size gate: about 200 lines (raised
+  for this outcome, which the recommendation estimated at 100-200); over it, block and bring it back. Remove the
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## devbuild-update-strands-host-on-newer-schema.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main b97bcfe4 (not run): a devbuild's Update can install a branch whose
+  supervisor migrates the host's database forward; the helm's downgrade guard ranks a development-build host as older,
+  so a later Update from a release helm installs a supervisor that refuses the newer database and crash-loops, leaving
+  the host unreachable from the installed app until the dev build is reinstalled. The helm cannot see a host's
+  supervisor database version today. The variant where two branches reuse one migration number and a later supervisor
+  misreads the database is unverified.
+- Decision: the user rejected refusing at the devbuild end. In their words: "the devbuild behavior is intended, its the
+  whole point, its up to me to not install on remote hosts where i also use the release build", and what they want
+  instead: "We still allow the devbuil[d]. We're just saying if I accidentally try to then install an 'older' release
+  build we'll refuse cleanly rather than bork in undefined ways." (2026-10-22 high-bucket triage page, question 1, with
+  the clarification given in conversation.)
+- Completion criteria: devbuild's push to remote hosts is unchanged. An Update (from any helm) refuses before changing
+  anything, with a message that names the cause and the way out (update from a build at least that new), when the host's
+  supervisor database is at a newer schema version than the supervisor it would install. The supervisor reports its
+  database schema version to the helm for this; a host whose supervisor does not report one keeps today's behaviour.
+  `.agents/devbuild.md` stops presenting the installed app's Update as the way back without that caveat. The same-number
+  misread variant is not part of this outcome. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file
+  and its index entry.
+- Execution: `pending`.
+
+## devbuild-tmux-skips-release-signature.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main b97bcfe4 (not run): `scripts/devbuild-mac.sh` checks the release tmux it
+  pushes to remote hosts only against `SHA256SUMS` fetched over TLS, never `SHA256SUMS.minisig`, and reuses the cached
+  copy without rechecking. The script header's "same trust a first `curl | sh` install has" is a code comment, not a
+  spec acceptance, and the installer's reason (a fresh machine has no key) does not apply to a checkout carrying the
+  release keys.
+- Decision: the user chose to verify the signature (2026-10-22 high-bucket triage page, question 1).
+- Completion criteria: devbuild fetches `SHA256SUMS.minisig` and verifies `SHA256SUMS` against the release key ring
+  before trusting the tmux, reusing the helm's existing verifier (for example through a hidden `farhelm` subcommand the
+  script calls with the binary it has just built), and refuses on a bad or missing signature; a cached tmux is
+  re-checked or re-fetched. The header comment is corrected. Size gate: about 100 lines as above; over it, block and
+  bring it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
