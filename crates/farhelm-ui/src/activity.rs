@@ -97,19 +97,6 @@ pub(crate) static ACTIVITY_NOW: GlobalSignal<Option<i64>> = Signal::global(clien
 /// and keeps it running across every right-pane remount.
 #[component]
 pub(crate) fn ActivityClock() -> Element {
-    // Publish once, synchronously, before the loop below has even been
-    // spawned — because [`ACTIVITY_NOW`] outlives THIS component. The
-    // global is initialized once per page and keeps whatever value it last
-    // held, while this clock is unmounted and remounted whenever the
-    // authenticated tree is rebuilt (the browser's credential exchange
-    // remounts it; a desktop re-authentication does not). Without this
-    // line the page would spend its first tick's worth of time — thirty
-    // seconds, and after a long-idle reauthentication a value that could be
-    // hours stale — showing ages measured against the clock reading from
-    // before the unmount.
-    use_hook(|| {
-        *ACTIVITY_NOW.write() = client_now_secs();
-    });
     use_future(|| async {
         loop {
             sleep_ms(TICK_MS).await;
@@ -440,44 +427,6 @@ mod tests {
             .expect("a positive stamp always renders");
         assert_eq!(stamp.age, "2h");
         assert_eq!(stamp.absolute, "last activity 2023-11-14 20:13:20 UTC");
-    }
-
-    /// A clock that is MOUNTED must publish immediately, not one tick later.
-    ///
-    /// [`ACTIVITY_NOW`] is page-global and outlives [`ActivityClock`], which
-    /// is unmounted and remounted whenever the authenticated tree is rebuilt
-    /// (`auth`). A clock that only wrote after its first sleep would leave
-    /// the whole page rendering ages against the reading from BEFORE that
-    /// gap — thirty seconds at best, and after a reauthentication that
-    /// followed a long idle, a value wrong by hours with nothing on screen
-    /// admitting it.
-    ///
-    /// The stale sentinel below stands in for exactly that leftover value,
-    /// which is what makes this a remount test rather than a first-mount
-    /// one: it is written into the global BEFORE the clock mounts, the way
-    /// a previous mount would have left it.
-    #[farhelm_testtrace::test]
-    fn a_mounted_clock_publishes_now_before_its_first_sleep() {
-        /// Far enough in the past that no real reading could be mistaken
-        /// for it: 2001-09-09, the nine-digit-epoch second.
-        const LEFTOVER: i64 = 1_000_000_000;
-
-        let mut dom = VirtualDom::new(|| rsx! { ActivityClock {} });
-        dom.in_runtime(|| {
-            *ACTIVITY_NOW.write() = Some(LEFTOVER);
-        });
-
-        let before_mount = client_now_secs().expect("this machine's clock answers");
-        dom.rebuild_in_place();
-
-        let published = dom
-            .in_runtime(|| *ACTIVITY_NOW.read())
-            .expect("a mounted clock publishes a reading, not None");
-        assert!(
-            published >= before_mount,
-            "the mount must republish the CURRENT second, not keep the {LEFTOVER} \
-             a previous mount left behind (got {published})"
-        );
     }
 
     /// A tick advances what is on screen with nothing else happening on the

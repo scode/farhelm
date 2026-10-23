@@ -225,9 +225,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Permanent timing history can retain recorder success after required evidence publication fails; failure injection is
   unexecuted.
 
-- [`welcome-recovery-counts-unfinished-selection-read.md`](welcome-recovery-counts-unfinished-selection-read.md) — The
-  welcome-recovery test may reject an extra legitimate preference read; adverse scheduling is unverified.
-
 - [`removed-deflake-items-leave-exclusions.md`](removed-deflake-items-leave-exclusions.md) — Removing two tracked flake
   items leaves their machine-readable sweep exclusions orphaned.
 

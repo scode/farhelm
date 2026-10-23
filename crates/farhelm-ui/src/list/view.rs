@@ -784,29 +784,7 @@ pub(crate) fn ListView(
     // the row snapshots they act on. A skipped question still carries consent.
     let skip_session_confirmations = preferences.0.read().skip_session_confirmations == Some(true);
     let mut row_ops = row_ops;
-    // `row_ops` outlives this component (it lives in `AppBody`), but the row
-    // tasks that would decrement it do not: unmounting the list, as the
-    // browser build does behind its token prompt on any 401, drops them
-    // mid-flight. A fresh mount has no row operation of its own yet, so the
-    // count is brought back to that here; left stale, the session view's
-    // `PaneGate` refused every claim and auto-select never ran until a page
-    // reload. Row operations start only from click handlers, so none can
-    // have begun before this runs. Written only when stale, so an ordinary
-    // mount does not touch the parent's signal during render.
-    use_hook(move || {
-        if *row_ops.peek() != 0 {
-            row_ops.set(0);
-        }
-    });
-    // The deleting set outlives this component for the same reason and goes
-    // stale the same way: the task that would clear an entry dies with the
-    // unmount. A fresh mount has no delete of its own in flight yet.
     let mut deleting = deleting;
-    use_hook(move || {
-        if !deleting.peek().is_empty() {
-            deleting.write().clear();
-        }
-    });
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
     // A confirmed local archive and an observed managed row disappearing both
     // invalidate the count. The trash reads only on these edges, never a timer.
@@ -1060,9 +1038,11 @@ pub(crate) fn ListView(
     // The page's press snapshots pair with this queue's keyboard entries
     // purely by order, but the page's listener outlives this component. When
     // the list unmounts (the token prompt), the queue and its worker task die
-    // with this scope while the page could still hold snapshots they owed;
-    // left there, each would be taken by the next mount's first keyboard
-    // press, shifting every later pair. Clearing the page here empties both
+    // with this scope while the page could still hold snapshots they owed.
+    // Signing in reloads the page, but a build-mismatch notice over the token
+    // prompt remounts the list in place; left there, each snapshot would be
+    // taken by that mount's first keyboard press, shifting every later pair
+    // and launching the wrong template. Clearing the page here empties both
     // sides at the same boundary: the remount starts a fresh queue, and no
     // snapshot owed to the next mount can exist before this clear. The page
     // captures only when it finds a relay, and on the web renderer this eval
@@ -5274,8 +5254,8 @@ mod tests {
 
     /// A read/unread toggle's report must not panic when the list that
     /// queued it has unmounted. Its writer deliberately outlives the list,
-    /// and the browser's token prompt (or a failed desktop sign-in) can
-    /// unmount the list while a save is in flight; a panicking report
+    /// and the browser's token prompt replaces the list, before the page
+    /// reloads, while a save may be in flight; a panicking report
     /// crashed the window (SPEC.md "Signing in again"). Spec: while the list
     /// is mounted, a failure lands on the row's error line and a success
     /// clears it and increments the refresh counter. Failure never requests

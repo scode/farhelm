@@ -61,8 +61,8 @@
    * Protocols for an authenticated browser upgrade.
    *
    * The secret is read at each attempt rather than captured at subscription:
-   * token rotation keeps the same retrying feed object alive while the auth
-   * surface replaces its credential. Desktop auth keeps the launch secret in
+   * a credential stored after this feed subscribed must be the one it
+   * presents. Desktop auth keeps the launch secret in
    * this page global so WebKit does not persist it; browser pages use their
    * origin-scoped localStorage fallback.
    */

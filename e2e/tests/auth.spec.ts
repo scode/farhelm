@@ -361,13 +361,12 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
     .toEqual(expect.arrayContaining([expect.stringMatching(/\/api\/sessions\/.*\/term$/)]));
   await expect(page.locator(".auth-page")).toBeVisible({ timeout: 20_000 });
 
-  // Authentication removes the prompt but does not throw away the
-  // selection. Recovery therefore owes this open session a fresh detail
-  // read and a new terminal attachment — not a silent switch to whatever
-  // auto-select would have picked on a cold load.
-  const detailRead = page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return url.pathname === `/api/sessions/${encodeURIComponent(sessionId)}` && response.status() === 200;
+  // Signing in again reloads the page (SPEC.md, "Signing in again"): nothing
+  // this window held survives. A marker on the window object is the
+  // observable that tells a reload from the old in-place remount, which
+  // kept the window and its state.
+  await page.evaluate(() => {
+    (window as any).__beforeSignIn = true;
   });
   let replacementSecret: string | undefined;
   const advanceContextHeader = async (route: Route) => {
@@ -390,6 +389,11 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
   };
   await page.route("**/api/auth/token", advanceContextHeader);
   await authenticate(page, replacement);
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__beforeSignIn), {
+      message: "signing in again must reload the page rather than remount it in place",
+    })
+    .toBeUndefined();
   await page.unroute("**/api/auth/token", advanceContextHeader);
   // Leave the shared suite authenticated under the replacement HERE, not
   // after the recovery assertions below: rotation already revoked the old
@@ -421,24 +425,7 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
   }
   const { cookies } = await page.context().storageState();
   await persistCredential(baseURL!, replacementSecret, cookies);
-  await detailRead;
-  // The EXACT session, not whichever one auto-select would pick: the
-  // titlebar shows its title and the live socket carries its full reference
-  // percent-encoded as one URL segment, rather than as raw DOM identity text.
-  const expectedTitle = await page
-    .locator(`[data-session-id="${sessionId}"] .session-title`)
-    .textContent();
-  await expect(page.locator(".session-details .title")).toHaveText(expectedTitle ?? "", {
-    timeout: 20_000,
-  });
-  await expect
-    .poll(() => page.evaluate(() => (window as any).__farhelmWs?.readyState))
-    .toBe(1);
-  const socketUrl = await page.evaluate(() => (window as any).__farhelmWs?.url ?? "");
-  expect(
-    new URL(socketUrl).pathname,
-    "recovery must reattach the session that was open, not a fallback",
-  ).toBe(`/api/sessions/${encodeURIComponent(sessionId)}/term`);
+  await expect(page.locator(".session-list")).toBeVisible();
   const storedSecret = await page.evaluate(
     (key) => localStorage.getItem(key),
     DEVICE_SECRET_KEY,

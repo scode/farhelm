@@ -17,12 +17,6 @@ use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog};
 #[derive(Clone, Copy)]
 pub(crate) struct WelcomeOnLoad(pub(crate) Signal<bool>);
 
-/// The page retains its startup decision across authentication remounts.
-/// A failed authenticated read consumes it as suppressed; a request that asks
-/// for sign-in does not, because startup has not finished authentication yet.
-#[derive(Clone, Copy)]
-pub(crate) struct WelcomeDecided(pub(crate) Signal<bool>);
-
 const DIALOG_SELECTOR: &str = r#".welcome-dialog[role="dialog"]"#;
 /// AppBar chooses the destination from first-open, Help and Feedback ownership.
 pub(crate) const DIALOG: DialogHandle = DialogHandle::new(DIALOG_SELECTOR);

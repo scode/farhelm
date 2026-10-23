@@ -1,8 +1,8 @@
 //! Device authentication surfaces for the browser and native desktop app.
 //!
 //! The browser raises an ordinary in-page token prompt after a recognized
-//! 401, and every successful exchange remounts the active surface and feed so
-//! no reader retains revoked state. The desktop app never signs in: its
+//! 401, and every successful exchange reloads the page so no reader retains
+//! revoked state (SPEC.md, "Signing in again"). The desktop app never signs in: its
 //! embedded helm mints two in-memory credentials at startup, one that native
 //! REST holds as process state and one the webview receives over IPC for its
 //! page-memory credential and WebSocket subprotocols (see
@@ -432,8 +432,7 @@ pub(crate) fn require_token() {
     }
 }
 
-/// Exchange the user's pasted bootstrap token and remount the authenticated
-/// application on success.
+/// Exchange the user's pasted bootstrap token and reload the page on success.
 #[component]
 pub(crate) fn TokenPrompt() -> Element {
     let base = use_context::<ApiBase>();
@@ -466,12 +465,21 @@ pub(crate) fn TokenPrompt() -> Element {
                                     busy.set(false);
                                     return;
                                 }
-                                // The active surface and feed were unmounted
-                                // while this form occupied the page. Clearing
-                                // the gate mounts them from scratch, preserving
-                                // list or open-session navigation while forcing
-                                // the authenticated re-read the exchange owes.
-                                *TOKEN_REQUIRED.write() = false;
+                                // Signing in again is a page reload (SPEC.md,
+                                // "Signing in again"): the new page starts from
+                                // what the helm reports, read with the stored
+                                // credential, and nothing from before is kept.
+                                // Reloading at the refusal instead would come
+                                // back to the same refused credential.
+                                #[cfg(target_arch = "wasm32")]
+                                let reloading = web_sys::window()
+                                    .is_some_and(|window| window.location().reload().is_ok());
+                                #[cfg(not(target_arch = "wasm32"))]
+                                let reloading = false;
+                                if !reloading {
+                                    error.set(Some("signed in; reload the page to continue".to_string()));
+                                    busy.set(false);
+                                }
                             }
                             Err(detail) => {
                                 error.set(Some(detail));
