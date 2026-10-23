@@ -63,10 +63,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`untouched-checkout-folder-save-undoes-cli-edit.md`](untouched-checkout-folder-save-undoes-cli-edit.md) — Saving an
   untouched checkout-folder field can overwrite a newer CLI setting.
 
-- [`cancelled-startup-sweep-outlives-directory-ownership.md`](cancelled-startup-sweep-outlives-directory-ownership.md) —
-  Blocking cleanup can outlive supervisor ownership and delete a successor's claimed checkout or retry input; resulting
-  failures are unmeasured.
-
 - [`power-loss-version-folder-never-repaired.md`](power-loss-version-folder-never-repaired.md) — A Mac version folder
   damaged by power loss after an update is kept by every rerun and update; APFS exposing the damage is unverified.
 

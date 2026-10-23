@@ -1437,7 +1437,7 @@ fn main() -> anyhow::Result<()> {
                 agent_instructions,
                 boot_id_file,
             };
-            runtime()?.block_on(run_supervisor(&dir, startup, exit_on_stdin_close))
+            run_supervisor(&dir, startup, exit_on_stdin_close)
         }
         Cmd::Internal { command } => match command {
             // Fresh synchronous processes: the guard starts its own OS watches
@@ -1631,7 +1631,10 @@ fn hook_budget_from(value: Option<&str>) -> std::time::Duration {
 /// Resolving any of them here instead would put the decision on both sides
 /// of the tether branch, which is one place too many for values that must
 /// be identical on every launch path.
-async fn run_supervisor(
+///
+/// Synchronous because `service::run` owns its runtime, so that the state
+/// folder stays claimed until that runtime's blocking work has finished.
+fn run_supervisor(
     state_dir: &std::path::Path,
     startup: farhelm_supervisor::service::SupervisorStartup,
     exit_on_stdin_close: bool,
@@ -1639,7 +1642,7 @@ async fn run_supervisor(
     use anyhow::Context as _;
 
     if !exit_on_stdin_close {
-        return farhelm_supervisor::service::run(state_dir, startup, std::future::pending()).await;
+        return farhelm_supervisor::service::run(state_dir, startup, std::future::pending());
     }
     let (stdin_closed_tx, stdin_closed) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
@@ -1658,7 +1661,7 @@ async fn run_supervisor(
             .context("desktop supervisor stdin watcher stopped without reporting EOF")?
             .context("reading the desktop supervisor stdin tether")
     };
-    farhelm_supervisor::service::run(state_dir, startup, tether).await
+    farhelm_supervisor::service::run(state_dir, startup, tether)
 }
 
 /// `farhelm agent template create|edit|delete`: one relayed request, which

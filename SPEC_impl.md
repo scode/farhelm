@@ -52,8 +52,10 @@ covered by each operation's own recovery rules. Nor does it prevent an accepted 
 an explicit cancel, such as a Delete interrupting an upload, is part of the action's own logic, not a side effect of a
 connection closing.
 
-The helm owns its runtime and retains its state-directory claim until that runtime has dropped, including on unwind, so
-a successor cannot share its state with blocking work still finishing during teardown.
+The helm and the supervisor each own their runtime and retain their state-directory claim until that runtime has
+dropped, including on unwind, so a successor cannot share their state with blocking work still finishing during
+teardown. For the supervisor that work includes the startup sweep of cached state and prepared checkouts, and a failed
+create's file cleanup.
 
 ## Transactional database representations
 

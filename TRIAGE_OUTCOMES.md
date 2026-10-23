@@ -18654,7 +18654,9 @@
   as the helm; a test shows a successor cannot claim while old blocking work runs. Size gate: about 200 lines (raised
   for this outcome, which the recommendation estimated at 100-200); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-lock-outlives-work.md`.
+- Execution: `complete` within the size gate of about 200 changed lines (199 measured); draft PR
+  [#2637](https://github.com/scode/farhelm/pull/2637/changes) on bookmark
+  `plan/supervisor-lock-outlives-work/01-claim-outlives-runtime`, jj change `unrxnqvq`.
 
 ## devbuild-update-strands-host-on-newer-schema.md
 
