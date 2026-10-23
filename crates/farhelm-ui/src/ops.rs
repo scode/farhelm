@@ -352,8 +352,9 @@ impl<K> ConfirmToken<K> {
 ///
 /// `Copy` because it is a handle to a signal, like [`OpLock`]. Render code
 /// uses the tracked readers ([`Self::is_open`], [`Self::current`]);
-/// [`Self::peek_key`], [`Self::take`] and [`Self::cancel_for`] inspect the
-/// live slot without subscribing their caller.
+/// [`Self::peek_key`], [`Self::is_current`], [`Self::take`] and
+/// [`Self::cancel_for`] inspect the live slot without subscribing their
+/// caller.
 pub(crate) struct ConfirmSlot<K: 'static, P: 'static = ()> {
     state: Signal<SlotState<K, P>>,
 }
@@ -447,13 +448,7 @@ impl<K: PartialEq + Clone + 'static, P: 'static> ConfirmSlot<K, P> {
         // Checked through `peek` first so a refused answer does not write
         // the signal: a write would rerender every reader of the slot for
         // a click that changed nothing.
-        if !self
-            .state
-            .peek()
-            .open
-            .as_ref()
-            .is_some_and(|(open, _)| open == token)
-        {
+        if !self.is_current(token) {
             return None;
         }
         take_in(&mut self.state.write(), token)
@@ -506,6 +501,20 @@ impl<K: PartialEq + Clone + 'static, P: 'static> ConfirmSlot<K, P> {
             .open
             .as_ref()
             .map(|(token, _)| token.key.clone())
+    }
+
+    /// Whether `token`, the opening a handler's render drew, is still the
+    /// open one, without subscribing. For a handler that must decide before
+    /// it takes some other claim whether its answer can still land; the
+    /// answer itself goes through [`Self::take`], which checks again. Safe to
+    /// expose because the caller already holds the token it asks about: the
+    /// result is a yes or no, never the live opening.
+    pub(crate) fn is_current(&self, token: &ConfirmToken<K>) -> bool {
+        self.state
+            .peek()
+            .open
+            .as_ref()
+            .is_some_and(|(open, _)| open == token)
     }
 
     /// The open prompt's token without subscribing, for tests that need to
@@ -785,7 +794,9 @@ mod tests {
                 openings.windows(2).all(|pair| pair[0] < pair[1]),
                 "openings only increase: {openings:?}"
             );
+            assert!(slot.is_current(&current));
             for stale in [&taken, &cleared, &replaced] {
+                assert!(!slot.is_current(stale), "an earlier opening is not current");
                 slot.cancel_for(stale);
                 assert_eq!(
                     slot.peek_token().as_ref(),

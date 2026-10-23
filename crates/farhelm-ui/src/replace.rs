@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use dioxus::prelude::*;
 
 use crate::api::{self, RefusalOutcome};
+use crate::ops::{ConfirmSlot, ConfirmToken};
 use crate::yolo_confirm::{YoloAsk, YoloReason};
 use crate::{DeleteGuard, HostId, Session};
 
@@ -26,18 +27,19 @@ pub(crate) struct PendingReplace {
     pub(crate) guard: DeleteGuard,
 }
 
-/// One local opening of a Replace question, with its captured operation.
+/// One local opening of a Replace question: the shared prompt mechanism's
+/// token, whose key is the captured operation the question displays.
 ///
-/// Every answer names the opening its render drew, on the sidebar and in the
-/// session header alike, so a queued answer behind Cancel, or behind a
-/// reopen of the question, cannot dispatch. (The header used to answer
-/// whatever question was current instead; that was reversed on 2026-10-21 so
-/// both surfaces answer only what they showed.)
-#[derive(Clone, PartialEq)]
-pub(crate) struct ReplaceYoloQuestion {
-    opening: u64,
-    pub(crate) pending: PendingReplace,
-}
+/// The opening number comes from the controller's [`ConfirmSlot`], like
+/// every other prompt in the app; Replace has no counter of its own. Every
+/// answer names the token its render drew, on the sidebar and in the session
+/// header alike, so a queued answer behind Cancel, or behind a reopen of the
+/// same request, cannot dispatch: the reopen is a new opening even when its
+/// [`PendingReplace`] is equal. (The header used to answer whatever question
+/// was current instead; that was reversed on 2026-10-21 so both surfaces
+/// answer only what they showed.) Read what the question shows with
+/// [`ConfirmToken::key`].
+pub(crate) type ReplaceYoloQuestion = ConfirmToken<PendingReplace>;
 
 /// Approval to continue one captured Replace, optionally after marking its host.
 /// The host comes from the question, never a newly fetched source session.
@@ -80,34 +82,39 @@ enum QuestionPolicy {
 /// Per-surface Replace state over page-owned retry and question-exclusion slots.
 ///
 /// Copying this handle does not create another state owner. Components create
-/// the local signals and release the current question's exclusion on unmount;
-/// neither unmount nor navigation discards the page's unresolved retry identity.
+/// the local question slot and error signal, and release the current
+/// question's exclusion on unmount; neither unmount nor navigation discards
+/// the page's unresolved retry identity.
+///
+/// The question is a [`ConfirmSlot`] keyed by the [`PendingReplace`] it
+/// displays, with no payload: the slot alone mints each opening's identity
+/// and decides whether an answer's token still names the open question. The
+/// exclusion, the error text and the retry key live beside it because they
+/// follow rules the slot does not know (a duplicate source refuses to open,
+/// a permanent answer may keep the question up, a cancel ends one key).
 #[derive(Clone, Copy)]
 pub(crate) struct ReplaceController {
     retry: Signal<Option<(String, Option<String>)>>,
     exclusions: Signal<HashSet<String>>,
-    question: Signal<Option<ReplaceYoloQuestion>>,
+    question: ConfirmSlot<PendingReplace>,
     error: Signal<Option<String>>,
-    openings: Signal<u64>,
     policy: QuestionPolicy,
 }
 
 impl ReplaceController {
     /// Bind a sidebar's local question to the existing page-wide slots.
-    /// Its opening-stamped answers consume before either kind of continuation.
+    /// Its token-bound answers consume before either kind of continuation.
     pub(crate) fn sidebar(
         retry: Signal<Option<(String, Option<String>)>>,
         exclusions: Signal<HashSet<String>>,
-        question: Signal<Option<ReplaceYoloQuestion>>,
+        question: ConfirmSlot<PendingReplace>,
         error: Signal<Option<String>>,
-        openings: Signal<u64>,
     ) -> Self {
         Self {
             retry,
             exclusions,
             question,
             error,
-            openings,
             policy: QuestionPolicy::Sidebar,
         }
     }
@@ -119,34 +126,35 @@ impl ReplaceController {
     pub(crate) fn session(
         retry: Signal<Option<(String, Option<String>)>>,
         exclusions: Signal<HashSet<String>>,
-        question: Signal<Option<ReplaceYoloQuestion>>,
+        question: ConfirmSlot<PendingReplace>,
         error: Signal<Option<String>>,
-        openings: Signal<u64>,
     ) -> Self {
         Self {
             policy: QuestionPolicy::Session,
-            ..Self::sidebar(retry, exclusions, question, error, openings)
+            ..Self::sidebar(retry, exclusions, question, error)
         }
     }
 
-    /// Read the local question reactively while rendering its confirmation.
+    /// The open question's token, read reactively while rendering its
+    /// confirmation. The render moves it into every handler it draws.
     pub(crate) fn question(self) -> Option<ReplaceYoloQuestion> {
-        self.question.read().clone()
+        self.question.current()
     }
 
-    /// Inspect the current question without subscribing a render. Private:
-    /// a handler that could fetch the live question could answer whatever is
-    /// open at click time; handlers test their rendered opening with
-    /// [`Self::is_open`] instead.
+    /// The open question's token without subscribing, for tests that name an
+    /// opening no render drew. Test-only on purpose: a handler that could
+    /// fetch the live token could answer whatever is open at click time;
+    /// handlers test their rendered opening with [`Self::is_open`] instead.
+    #[cfg(test)]
     fn current_question(self) -> Option<ReplaceYoloQuestion> {
-        self.question.peek().clone()
+        self.question.peek_token()
     }
 
     /// Whether `question`, the opening a handler's render drew, is still the
     /// open one, without subscribing. For a handler's early exit before it
     /// takes a lifecycle claim; the answer itself re-checks.
     pub(crate) fn is_open(self, question: &ReplaceYoloQuestion) -> bool {
-        self.question.peek().as_ref() == Some(question)
+        self.question.is_current(question)
     }
 
     /// Read the host-setting failure associated with the local question.
@@ -257,31 +265,33 @@ impl ReplaceController {
             return false;
         }
         self.release_question();
-        let opening = *self.openings.peek() + 1;
-        self.openings.set(opening);
         self.error.set(error);
-        self.question
-            .set(Some(ReplaceYoloQuestion { opening, pending }));
+        // Replaces any open question; its token, and every handler still
+        // carrying it, stops matching even if `pending` is equal.
+        self.question.open(pending, ());
         true
     }
 
     /// Release only this surface's currently open question's source exclusion.
-    /// Used on consumption and unmount; it never retires a retry identity.
+    /// Used when a newer question replaces the open one, when the session
+    /// surface's host save succeeds, and on unmount; it never retires a retry
+    /// identity. Answers release through `take_question` instead.
     pub(crate) fn release_question(mut self) {
-        if let Some(question) = self.current_question() {
-            self.exclusions
-                .write()
-                .remove(question.pending.source.id.raw());
+        if let Some(pending) = self.question.peek_key() {
+            self.exclusions.write().remove(pending.source.id.raw());
         }
     }
 
     /// Consume exactly one opening; stale handlers leave a newer question alone.
     fn take_question(mut self, question: &ReplaceYoloQuestion) -> bool {
-        if !self.is_open(question) {
+        if self.question.take(question).is_none() {
             return false;
         }
-        self.release_question();
-        self.question.set(None);
+        // The token matched, so the question just closed was this one and
+        // its source is the exclusion to give back.
+        self.exclusions
+            .write()
+            .remove(question.key().source.id.raw());
         self.error.set(None);
         true
     }
@@ -289,14 +299,14 @@ impl ReplaceController {
     /// Answer a rendered sidebar opening only after row admission succeeds.
     /// Admission refusal preserves the prompt; admitted-but-stale answers undo
     /// their row admission. A hostless permanent answer is never dispatched.
-    pub(crate) fn answer_stamped(
+    pub(crate) fn answer_sidebar(
         self,
         question: &ReplaceYoloQuestion,
         stop_asking: bool,
         admit: impl FnOnce() -> bool,
         release: impl FnOnce(),
     ) -> Option<ReplaceAnswer> {
-        let pending = question.pending.clone();
+        let pending = question.key().clone();
         let stop_asking = if stop_asking {
             Some((pending.ask.host?, pending.ask.host_name.clone()))
         } else {
@@ -329,7 +339,7 @@ impl ReplaceController {
         if !self.is_open(question) {
             return None;
         }
-        let pending = question.pending.clone();
+        let pending = question.key().clone();
         let stop_asking = if stop_asking {
             pending
                 .ask
@@ -348,9 +358,10 @@ impl ReplaceController {
 
     /// Cancel the rendered question and only its exact retry key. Both
     /// surfaces' Cancel buttons use it; a stale Cancel changes nothing.
-    pub(crate) fn cancel_stamped(self, question: &ReplaceYoloQuestion) {
+    pub(crate) fn cancel_question(self, question: &ReplaceYoloQuestion) {
         if self.take_question(question) {
-            self.end_key(question.pending.source.id.raw(), &question.pending.key);
+            let pending = question.key();
+            self.end_key(pending.source.id.raw(), &pending.key);
         }
     }
 
@@ -361,14 +372,21 @@ impl ReplaceController {
         match result {
             Ok(()) => {
                 if self.policy == QuestionPolicy::Session {
+                    // Closes whatever is open rather than a token: the save
+                    // carries no opening, and this is the same unconditional
+                    // close the session surface has always done here. Only
+                    // this surface's own Replace run opens its question, and
+                    // the session view starts no second run while this one
+                    // (which is doing the save) is in flight, so what is open
+                    // is the question being answered.
                     self.release_question();
-                    self.question.set(None);
+                    self.question.clear();
                 }
                 true
             }
             Err(reason) => {
                 match self.policy {
-                    QuestionPolicy::Sidebar if self.current_question().is_none() => {
+                    QuestionPolicy::Sidebar if self.question.peek_key().is_none() => {
                         self.open_question(pending, Some(reason));
                     }
                     QuestionPolicy::Sidebar => {}
@@ -464,6 +482,7 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
+    use crate::ops::use_confirm_slot;
 
     std::thread_local! {
         static CONTROLLERS: Cell<Option<(ReplaceController, ReplaceController)>> = const { Cell::new(None) };
@@ -481,16 +500,14 @@ mod tests {
             let sidebar = ReplaceController::sidebar(
                 retry,
                 exclusions,
+                use_confirm_slot(),
                 use_signal(|| None),
-                use_signal(|| None),
-                use_signal(|| 0),
             );
             let session = ReplaceController::session(
                 retry,
                 exclusions,
+                use_confirm_slot(),
                 use_signal(|| None),
-                use_signal(|| None),
-                use_signal(|| 0),
             );
             CONTROLLERS.with(|cell| cell.set(Some((sidebar, session))));
             rsx! {}
@@ -618,7 +635,7 @@ mod tests {
             header.prepare(source("B"), DeleteGuard::NothingAlive, None);
             header.prepare(source("A"), DeleteGuard::NothingAlive, None);
             header.publish_key("A", "a2");
-            sidebar.cancel_stamped(&old);
+            sidebar.cancel_question(&old);
             assert!(!sidebar.exclusions.peek().contains("A"));
             assert_eq!(
                 header.retry.peek().as_ref().unwrap().1.as_deref(),
@@ -663,7 +680,7 @@ mod tests {
             assert!(header.open_question(pending("B", "b1"), Some("header reason".to_owned())));
             assert!(!sidebar.open_question(pending("B", "b2"), None));
             assert_eq!(
-                sidebar.current_question().unwrap().pending.source.id.raw(),
+                sidebar.current_question().unwrap().key().source.id.raw(),
                 "A"
             );
             assert_eq!(sidebar.error().as_deref(), Some("old reason"));
@@ -693,33 +710,36 @@ mod tests {
             for permanent in [false, true] {
                 assert!(sidebar.open_question(pending("A", "a1"), None));
                 let old = sidebar.current_question().unwrap();
-                sidebar.cancel_stamped(&old);
+                sidebar.cancel_question(&old);
                 assert!(
                     sidebar.current_question().is_none(),
                     "premise: Cancel consumed it"
                 );
                 assert!(
                     sidebar
-                        .answer_stamped(&old, permanent, admit, release)
+                        .answer_sidebar(&old, permanent, admit, release)
                         .is_none()
                 );
                 assert_eq!(held.get(), 0);
                 assert!(sidebar.open_question(pending("A", "a1"), Some("reason".to_owned())));
                 assert!(
                     sidebar
-                        .answer_stamped(&old, permanent, admit, release)
+                        .answer_sidebar(&old, permanent, admit, release)
                         .is_none()
                 );
                 let current = sidebar.current_question().unwrap();
-                assert_ne!(old.opening, current.opening);
+                assert!(
+                    old != current && old.key() == current.key(),
+                    "premise: the same request reopened under a new opening"
+                );
                 assert!(
                     sidebar
-                        .answer_stamped(&current, permanent, || false, release)
+                        .answer_sidebar(&current, permanent, || false, release)
                         .is_none()
                 );
                 assert_eq!(sidebar.error().as_deref(), Some("reason"));
                 let answer = sidebar
-                    .answer_stamped(&current, permanent, admit, release)
+                    .answer_sidebar(&current, permanent, admit, release)
                     .expect("current answer dispatches");
                 assert!(sidebar.current_question().is_none());
                 assert!(!sidebar.exclusions.peek().contains("A"));
@@ -737,7 +757,7 @@ mod tests {
             let question = sidebar.current_question().unwrap();
             assert!(
                 sidebar
-                    .answer_stamped(&question, true, admit, release)
+                    .answer_sidebar(&question, true, admit, release)
                     .is_none()
             );
             assert_eq!(held.get(), 0);
@@ -754,7 +774,7 @@ mod tests {
             assert!(sidebar.open_question(pending("A", "a1"), None));
             let question = sidebar.current_question().unwrap();
             let answer = sidebar
-                .answer_stamped(&question, true, || true, || {})
+                .answer_sidebar(&question, true, || true, || {})
                 .unwrap();
             assert!(
                 sidebar.current_question().is_none(),
@@ -764,12 +784,12 @@ mod tests {
             assert_eq!(sidebar.error().as_deref(), Some("save failed"));
             let question = sidebar.current_question().unwrap();
             let answer = sidebar
-                .answer_stamped(&question, true, || true, || {})
+                .answer_sidebar(&question, true, || true, || {})
                 .unwrap();
             assert!(sidebar.open_question(pending("C", "c1"), None));
             assert!(!sidebar.host_saved(answer.pending, Err("late failure".to_owned())));
             assert_eq!(
-                sidebar.current_question().unwrap().pending.source.id.raw(),
+                sidebar.current_question().unwrap().key().source.id.raw(),
                 "C"
             );
             assert!(
@@ -820,7 +840,7 @@ mod tests {
         with_controllers(|_, header| {
             assert!(header.open_question(pending("A", "a1"), None));
             let old = header.current_question().unwrap();
-            header.cancel_stamped(&old);
+            header.cancel_question(&old);
             assert!(
                 header.current_question().is_none(),
                 "premise: Cancel closed it"
@@ -828,7 +848,7 @@ mod tests {
             assert!(header.open_question(pending("A", "a1"), None));
             let later = header.current_question().unwrap();
             assert!(
-                old != later && old.pending == later.pending,
+                old != later && old.key() == later.key(),
                 "premise: the same request reopened under a new opening"
             );
             // Give the reopened question an error a stale click must not clear.
@@ -837,7 +857,7 @@ mod tests {
             assert!(header.is_open(&later) && !header.is_open(&old));
             assert!(header.answer_session(&old, false).is_none());
             assert!(header.answer_session(&old, true).is_none());
-            header.cancel_stamped(&old);
+            header.cancel_question(&old);
             assert!(
                 header.current_question().as_ref() == Some(&later),
                 "a stale header answer or Cancel leaves the reopened question"

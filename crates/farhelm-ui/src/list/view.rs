@@ -22,7 +22,7 @@ use crate::app_bar::AppBar;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostFlow, HostsPanel, HostsRead, host_rows_moved};
 use crate::modal_dialog::FocusTarget;
-use crate::ops::{OpLock, ReadGate};
+use crate::ops::{OpLock, ReadGate, use_confirm_slot};
 use crate::peer::PeerText;
 use crate::provisioning::ProvisioningTraceShape;
 use crate::reader::{SurfaceReader, Trigger, request_read};
@@ -42,7 +42,7 @@ use super::shared::{
     host_options, matching_host_option, session_locality,
 };
 use crate::rename::RenameDialog;
-use crate::replace::{ReplaceAnswer, ReplaceController, ReplaceResult, ReplaceYoloQuestion};
+use crate::replace::{PendingReplace, ReplaceAnswer, ReplaceController, ReplaceResult};
 
 /// Name the shortcut only where the app installs it; browsers keep Cmd+N for windows.
 const NEW_SESSION_TOOLTIP: &str = if crate::HAS_NEW_SESSION_SHORTCUT {
@@ -2435,15 +2435,13 @@ pub(crate) fn ListView(
     let replace_refresh = request_listing.clone();
     // Local question state, over the same page-owned retry and source exclusion
     // used by the header. Admission and successful selection remain list-owned.
-    let yolo_replace = use_signal(|| None::<ReplaceYoloQuestion>);
-    let yolo_openings = use_signal(|| 0u64);
+    let yolo_replace = use_confirm_slot::<PendingReplace, ()>();
     let yolo_replace_error = use_signal(|| None::<String>);
     let replace_controller = ReplaceController::sidebar(
         use_context::<ReplaceIntent>().0,
         use_context::<ReplaceYoloQuestions>().0,
         yolo_replace,
         yolo_replace_error,
-        yolo_openings,
     );
     use_drop(move || replace_controller.release_question());
     // The caller has already begun the source row's operation. Reserve before
@@ -4368,21 +4366,21 @@ pub(crate) fn ListView(
                         // mounts fresh (scrolled into view, cancel focused)
                         // instead of reusing this one's element.
                         crate::yolo_confirm::YoloConfirmation {
-                            key: "{question.pending.source.id.raw()}",
-                            ask: question.pending.ask.clone(),
+                            key: "{question.key().source.id.raw()}",
+                            ask: question.key().ask.clone(),
                             // This flow holds a row operation rather than
                             // the page's token (`begin_row_op`), so its own
                             // in-flight replace shows as the source row's
                             // pending phase, not as `ops.busy()`.
                             busy: ops.busy()
-                                || row_is(&row_phases.read(), question.pending.source.id.raw(), RowPhase::Pending),
+                                || row_is(&row_phases.read(), question.key().source.id.raw(), RowPhase::Pending),
                             error: replace_controller.error(),
                             confirm_submits: false,
                             // Both answers continue the Replace the user
                             // confirmed, with the row snapshot and the
                             // nothing-alive answer that prompt carried, and
                             // only by taking this opening of the question
-                            // (`ReplaceController::answer_stamped`), once row
+                            // (`ReplaceController::answer_sidebar`), once row
                             // admission succeeds. Taking it closes it, so the
                             // permanent answer leaves it down while the host
                             // is marked; the controller reopens it with the
@@ -4391,8 +4389,8 @@ pub(crate) fn ListView(
                                 let mut do_replace = yolo_do_replace.clone();
                                 let question = question.clone();
                                 move |_| {
-                                    let id = question.pending.source.id.raw().to_owned();
-                                    if let Some(answer) = replace_controller.answer_stamped(
+                                    let id = question.key().source.id.raw().to_owned();
+                                    if let Some(answer) = replace_controller.answer_sidebar(
                                         &question,
                                         false,
                                         || begin_row_op(&id),
@@ -4407,8 +4405,8 @@ pub(crate) fn ListView(
                                 let mut do_replace = yolo_do_replace.clone();
                                 let question = question.clone();
                                 move |_| {
-                                    let id = question.pending.source.id.raw().to_owned();
-                                    if let Some(answer) = replace_controller.answer_stamped(
+                                    let id = question.key().source.id.raw().to_owned();
+                                    if let Some(answer) = replace_controller.answer_sidebar(
                                         &question,
                                         true,
                                         || begin_row_op(&id),
@@ -4422,7 +4420,7 @@ pub(crate) fn ListView(
                             on_cancel: {
                                 let question = question.clone();
                                 move |_| {
-                                    replace_controller.cancel_stamped(&question);
+                                    replace_controller.cancel_question(&question);
                                 }
                             },
                         }
