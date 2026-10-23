@@ -108,7 +108,8 @@ that its required systemd or SSH substrate ran.
   non-tmux bootstrap failure (an unusable state directory) exits 1 through the ordinary fallback path with no panic. The
   non-pixel Xvfb integration gate that follows covers the embedded helm, managed supervisor, desktop authentication, the
   tmux override reaching the managed supervisor, hard-exit tether, restart persistence, and that every asset the window
-  requested went through the desktop asset handler. The optional coordinate-driven leg is not part of CI.
+  requested went through the desktop asset handler. API checks retain host-qualified session references; tmux and scope
+  checks use their local session IDs. The optional coordinate-driven leg is not part of CI.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not
