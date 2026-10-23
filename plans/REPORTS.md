@@ -3,7 +3,6 @@
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
 - [`app-dialog-focus`](reports/app-dialog-focus.report.md) landed 2026-10-20 in #2405, #2407, #2408: Fix focus handoffs for the update and SSH help controls, and keep a delayed host confirmation from freezing another dialog (3 triage outcomes).
-- [`repository-discovery-git-config`](reports/repository-discovery-git-config.report.md) landed 2026-10-20 in #2412: Make repository suggestions ignore an inherited GIT_CONFIG, as the test fixture already does (1 triage outcome).
 - [`spec-scope-clarifications`](reports/spec-scope-clarifications.report.md) landed 2026-10-20 in #2413, #2414, #2416, #2418, #2420: Write the introduction-is-a-hook and published-notes principles and three scope statements into the spec, with no code change (8 triage outcomes).
 - [`tooling-checks-oct19`](reports/tooling-checks-oct19.report.md) landed 2026-10-20 in #2417, #2421, #2422: Fix the release-review page's link escaping and two instruction-checker gaps (3 triage outcomes).
 - [`triage-discards-oct19`](reports/triage-discards-oct19.report.md) landed 2026-10-20 in #2423: Close the four findings discarded in the 2026-10-19 triage, in one PR (4 triage outcomes).
