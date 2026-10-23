@@ -130,3 +130,90 @@ found none. Test reviews received the full test-authoring checklist.
 A separate same-model scope review kept the add acceptance acknowledgement within the existing approval exchange, rather
 than adding another request owner or tracking installation outcomes. Commit and PR wording passed fresh cold reads. This
 report passed the required independent cold read before delivery.
+
+### Landing
+
+Landed as built: agents can now ask, through `farhelm agent host add`, `host edit` and `host remove`, to add a host or
+change or remove one, each behind an approval card. It was the first of two plans in this landing round, before Restart
+with moved into the session launcher (restart-with-as-launcher).
+
+- #2674: agents can ask to edit a host's alias, icon or color, or to remove it.
+- #2680: the approval cards for those requests show each old and new value and what removing means.
+- #2681: agents can ask to add a host, through the user's ordinary add host dialog.
+
+#### What landed since the stack was based, and whether it interacted
+
+A fresh-context reviewer and I read this plan against the other plan in the round and against what main gained since its
+base. The reviewer found no blocker and nothing that needs your decision. An agent's add opens the same add host dialog
+you use, so it gets the same refusals (from alias-in-add-host, which landed earlier today) for a destination that is
+already a host and for a bad alias. An agent's remove forgets the host the same way the hosts panel does. The Settings
+help for "run farhelm commands without asking" keeps the wording about deleting sessions and templates that landed last
+round, and adds that host changes always need your approval. Since then main gained only documentation and plan review
+commits, none about hosts.
+
+#### Fix made at landing
+
+- The new `farhelm agent host add <DEST> [--alias <NAME>]` is the widest command that still fits the aligned column in
+  the instructions agents read, so every shorter command's description now starts further right. A test pinned the old
+  spacing of the `stop` line and failed. It now pins the new spacing, and its comment says why the column moves.
+
+#### Possible follow-ups
+
+- Found at landing: with "set up new hosts without asking" on, its Settings help says Farhelm sets up a new host without
+  asking, but a host an agent asked to add still shows the setup question, as SPEC.md requires. The help text is what is
+  wrong; it predates this plan, which made it untrue.
+- For release curation: the changelog fragment calls the setting "run farhelm commands from this host without asking";
+  the switch is labelled **Run farhelm commands without asking**.
+- Not from this plan: two Templates rename tests fail every time on main (see Checks). I suspect last round's check that
+  a template's new name is free before saving (#2658), which adds a read of the template list that the tests do not
+  expect; last round ran only part of the browser suite and missed them. I am confirming and fixing that on main next.
+
+#### Checks
+
+This round landed two plans together: agents asking to add, edit or remove a host (agent-add-host) and Restart with as a
+mode of the session launcher (restart-with-as-launcher). Their executors ran selected tests. This round ran the
+following on both stacked together on this round's main, before the landing fixes:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the check that every
+  test delay states its reason, `dprint check` on the changed Markdown files,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (one warning, about a citation
+  main already had), the website build, the workspace debug build, the UI's release web build and
+  `scripts/check-desktop-assets.sh`: all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` with pinned nextest and tmux, four slots, no retries, run
+  `6b279275-558a-4a9f-890f-914e5fa2f0f2`: 4355 tests ran, 4353 passed and 2 failed; 40 more were skipped by design
+  (helper entries that only run as child processes of other tests, and tests that need a real signed-in Claude or
+  Codex). One failure was the known open flake `api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline`,
+  already in TODO.md's Deflake list. The other, the instructions test pinning how `farhelm agent stop` is laid out,
+  failed because of agent-add-host's new command and was fixed at landing in that plan.
+  `cargo nextest run -p farhelm-ui --features desktop`, same settings without tmux, run
+  `3f9748ba-cb00-4c8e-841d-973cc923863d`: 926 passed. The asset script tests (`node --test` in
+  `crates/farhelm-ui/js-tests`), run `65a89506-7afc-4376-898e-402ba5ad79f2`: 333 passed.
+- `npx playwright test` in `e2e/`, the whole browser suite on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `6721bfe7-e393-42e3-8d1b-5902b30fa1ed`: 2565 passed, 14 skipped by design (WebKit
+  cannot be granted clipboard access), 7 failed. I repeated the failures three times each, on this stack (run
+  `a6eabb40-dd48-47ee-b1ab-4a0065357901`) and on main without either plan (run `512b4ebe-c4c8-4386-8da3-24e8f651adba`):
+  - Restart with's new test "refuses held composer actions and scopes model search" failed on both engines because the
+    launcher offered the same "Use this path" folder twice and Playwright refuses an ambiguous match. Alone on this
+    stack it passed 6 of 6, so the second option depends on what ran before it. The test was changed at landing in
+    restart-with-as-launcher.
+  - WebKit's "a template shortcut preserves editor focus when clearing a quick-launch YOLO question" passed 3 of 3 on
+    this stack and failed 1 of 3 on main: the open flake recorded in draft PR #2621.
+  - The two tests "rename closes a displaced template number popup" and "rename keeps an unchanged template number
+    popup", on both engines, failed all 12 attempts on this stack and all 12 on main. Neither plan touches the Templates
+    dialog. See the follow-ups.
+- After the landing fixes: `cargo fmt --all -- --check`, `cargo clippy -p farhelm --all-targets -- -D warnings`, the
+  website build, the debug build and the release web build passed. `cargo nextest run -p farhelm`, which includes the
+  fixed instructions test, run `ac4d9d8b-cb8c-4493-b759-470a371bcee9`: 655 passed, 6 skipped by design. Restart with's
+  browser spec on both engines, run `cd5eae82-8d62-4777-8b1a-71a18884089c`: 94 passed. That run cannot show the test
+  change working, because the duplicate folder appeared only in the full suite; the change is that the test now takes
+  the first of the matching options, which cannot be ambiguous. I did not rerun the full suite.
+- Rebasing onto today's main brought in only main's own documentation commits, compared line by line, after one SPEC.md
+  conflict was resolved in restart-with-as-launcher.
+- Reused: none. Skipped: the doctests (no documentation example changed), the desktop smoke test, and the native Mac app
+  (not runnable here).
+
+The report's checks were selected agent command, approval card and provisioning tests; this round ran the whole Rust
+workspace and the whole browser suite with both plans together. Apart from the spacing test above, nothing in the
+executor's report became untrue at landing.
