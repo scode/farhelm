@@ -1585,7 +1585,10 @@ pub enum HostStoreError {
 /// trimmed so display and agent resolution never disagree over invisible
 /// surrounding characters. Control characters are refused because an alias
 /// reaches line-oriented agent CLI output.
-fn validate_alias(alias: Option<&str>) -> Result<Option<String>, HostStoreError> {
+///
+/// `pub(crate)` for the agent relay's host edit, whose approval card must
+/// show the alias exactly as this rule will store it.
+pub(crate) fn validate_alias(alias: Option<&str>) -> Result<Option<String>, HostStoreError> {
     let Some(alias) = alias else {
         return Ok(None);
     };

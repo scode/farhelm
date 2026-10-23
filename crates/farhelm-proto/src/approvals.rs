@@ -17,6 +17,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::SessionLaunch;
+use crate::host_appearance::{HostColor, HostIcon};
 use crate::launcher::TemplateFields;
 
 /// How long a request waits for the user's answer before the helm refuses it
@@ -227,15 +228,62 @@ pub enum ApprovalAction {
         /// The display name of the host `fields.host` names, when one does.
         host_name: Option<String>,
     },
+    /// `farhelm agent host edit`: each field the request changes, with its
+    /// value now and the value approval writes. A field the request leaves
+    /// alone, or sets to the value it already has, is `None` and is not
+    /// written. The kind always needs a direct Allow
+    /// ([`Self::requires_direct_allow`]), and its own tag makes a UI from
+    /// before host edits fail to decode the card instead of offering Allow
+    /// on one it cannot show.
+    HostEdit {
+        /// The host's display name now, before any alias change.
+        host_name: String,
+        /// The host's ssh destination; `None` for this machine.
+        destination: Option<String>,
+        /// `None` inside a change means no alias: the host is named by its
+        /// destination (or as this machine).
+        alias: Option<HostFieldChange<Option<String>>>,
+        icon: Option<HostFieldChange<HostIcon>>,
+        color: Option<HostFieldChange<HostColor>>,
+    },
+    /// `farhelm agent host remove`: the host approval forgets, as the GUI's
+    /// remove does. Always needs a direct Allow, under its own tag for the
+    /// reason [`Self::HostEdit`] gives. Only an ssh host is ever carded: the
+    /// helm refuses this machine and the asking session's own host first.
+    HostRemove {
+        /// The host's display name.
+        host_name: String,
+        /// The ssh destination it is reached at, which the GUI's remove
+        /// dialog also shows beside the name.
+        destination: String,
+    },
+}
+
+/// One host setting an approved [`ApprovalAction::HostEdit`] changes: what
+/// the card showed as the value now, and what approval writes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostFieldChange<T> {
+    pub old: T,
+    pub new: T,
 }
 
 impl ApprovalAction {
-    /// These requests need one visible Allow, even when the requesting host
-    /// normally runs Farhelm commands without asking. A wrapper-bearing
-    /// template becomes trusted by later launches only after this card.
+    /// Whether this request needs one visible Allow on its own card, which
+    /// neither the requesting host's "run farhelm commands from this host
+    /// without asking" setting nor an Always allow answer can stand in for.
+    ///
+    /// Two reasons put a kind here. An agent-supplied wrapper prefix: the
+    /// host's ordinary command shortcut cannot vouch for a wrapper the agent
+    /// chose, and a wrapper-bearing template becomes trusted by later
+    /// launches only after this card. And a change to a host itself (edit or
+    /// remove): the maintainer decided that an agent's changes to hosts are
+    /// never approved automatically (SPEC.md, Agent-spawned sessions). A UI
+    /// must offer only Allow and Deny for such a card, and the helm refuses
+    /// an Always allow answer to one.
     pub fn requires_direct_allow(&self) -> bool {
         match self {
             Self::LaunchWithAgentWrapper { .. } => true,
+            Self::HostEdit { .. } | Self::HostRemove { .. } => true,
             Self::TemplateWrite { fields, .. }
             | Self::TemplateWriteWithShortcuts { fields, .. } => {
                 matches!(&fields.wrapper_prefix, Some(Some(_)))
@@ -337,6 +385,54 @@ mod tests {
             }
             .requires_direct_allow()
         );
+    }
+
+    /// Spec: host edit and host remove cards travel under their own kind tags,
+    /// which a UI from before them cannot decode, and both always need a
+    /// direct Allow.
+    ///
+    /// Why: an older UI that decoded one as some card it knows would offer
+    /// Allow (and Always allow) on a card that does not show the host change,
+    /// and a host change must never be approved by the requesting host's
+    /// "without asking" setting.
+    #[test]
+    fn host_cards_fail_an_older_decoder_and_force_allow() {
+        use crate::host_appearance::{HostColor, HostIcon};
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case")]
+        enum OlderAction {
+            TemplateDelete {},
+        }
+        let edit = super::ApprovalAction::HostEdit {
+            host_name: "builder".into(),
+            destination: Some("user@builder".into()),
+            alias: Some(super::HostFieldChange {
+                old: None,
+                new: Some("baz".into()),
+            }),
+            icon: Some(super::HostFieldChange {
+                old: HostIcon::Cloud,
+                new: HostIcon::Rocket,
+            }),
+            color: Some(super::HostFieldChange {
+                old: HostColor::Default,
+                new: HostColor::Teal,
+            }),
+        };
+        let remove = super::ApprovalAction::HostRemove {
+            host_name: "builder".into(),
+            destination: "user@builder".into(),
+        };
+        for (card, kind) in [(edit, "host_edit"), (remove, "host_remove")] {
+            let value = serde_json::to_value(&card).unwrap();
+            assert_eq!(value["kind"], kind);
+            assert_eq!(
+                serde_json::from_value::<super::ApprovalAction>(value.clone()).unwrap(),
+                card
+            );
+            assert!(serde_json::from_value::<OlderAction>(value).is_err());
+            assert!(card.requires_direct_allow(), "{kind}");
+        }
     }
 
     /// Existing-agent messages need a distinct card tag: an older UI must

@@ -1893,8 +1893,10 @@ reaches beyond its own host (another host's sessions, another supervisor, the he
 such as settings and credentials) is allowed only where the spec grants it, and a request's arrival on a supervisor
 connection adds nothing to that grant. The grants are the agent verbs any agent may use, each carried out only once the
 user has approved it or the requesting host's "run farhelm commands from this host without asking" setting is on
-(SPEC.md, Agent-spawned sessions; see "Permission prompts for agent actions"). A supervisor cannot, for example, ask the
-helm to change a host's settings.
+(SPEC.md, Agent-spawned sessions; see "Permission prompts for agent actions"). Changes to hosts themselves (an agent's
+host edit and remove) happen only on the user's Allow of that one request, never on the connection's authority: neither
+the requesting host's "without asking" setting nor an Always allow answer covers them, and even an approved edit reaches
+only a host's alias, icon and color, never its permissions or destination.
 
 ### Errors crossing levels of abstraction
 
@@ -5663,6 +5665,28 @@ lock), so a card raised by a replaced installation cannot grant its successor th
 can race: when the request expires between the setting being stored and the request being taken, the answer gets 410 and
 the setting stays on, and the GUI's notice says the answer did not take effect and, after an "Always allow", that the
 host's setting may still have been turned on.
+
+Protocol 63 adds `AgentVerb::HostEdit` and `HostRemove`, answered by `AgentReply::HostEdited` and `HostRemoved`, with
+the approval kinds `ApprovalAction::HostEdit` and `HostRemove`. Both kinds return true from
+`ApprovalAction::requires_direct_allow`, the mechanism agent-supplied wrappers already used: `approvals::ask` cards them
+even when the host's command setting is on, the GUI offers no Always allow on them, and the answer route refuses one.
+Their own tags make a UI from before them fail to decode the card rather than offer Allow on a change it cannot show.
+The helm resolves the host by display name with the creating verbs' `resolve_host`, refuses this machine with the
+store's own `LocalHostImmutable` refusal and the asking session's own host before any card, and canonicalizes a new
+alias with the store's `validate_alias`, so the card shows the value that will be stored. An edit whose fields already
+have the requested values is refused before any card rather than answered with success, so no edit succeeds without an
+explicit Allow. After the Allow, `hosts::edit_identity_checked` and `hosts::remove_host_checked` read the row again
+under the locks the GUI's writers of the same fields take, refuse if the destination, or a field the card showed,
+changed during the wait, and otherwise write while still holding them, through the cores the settings dialog's and the
+hosts panel's routes share (`write_alias_locked`, `write_appearance_locked`, `forget_host_locked`). An edit holds the
+host's write lock, which the alias, retarget and appearance routes all write under, plus the provisioning lock first
+when it changes the alias, as the alias route does; a remove holds the provisioning lock that every retarget holds,
+taken without waiting so a busy host still gets the GUI remove's prompt refusal. A comparison made before taking the
+locks would leave a window in which a GUI retarget or appearance change lands after the check and is then overwritten or
+acted on. The appearance write takes icon and color together, so an edit of one writes the other back with its value
+from the protected read, and an alias and appearance edit is not split by another writer. A test-only gate in the
+approvals table (`HostWriteGate`) parks an approved change just before it takes the locks, which is how the helm tests
+land a GUI write in that window.
 
 Link requests use the same approval table, presence check, wait and answers, with `ApprovalAction::OpenUrl` carrying the
 full URL, its local-network category and whether the card is preapproved. `browser::permission_for_url` applies the

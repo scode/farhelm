@@ -218,7 +218,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_62` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_63` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -229,7 +229,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 62;
+pub const PROTOCOL_VERSION: u32 = 63;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -1952,6 +1952,54 @@ pub enum AgentVerb {
     /// `farhelm agent template delete`. Answered with
     /// [`AgentReply::TemplateDeleted`].
     TemplateDelete { name: String },
+    /// `farhelm agent host edit`: change a host's alias, icon or color, and
+    /// nothing else. Answered with [`AgentReply::HostEdited`].
+    ///
+    /// The three fields are the whole of what an agent may change about a
+    /// host, by design rather than as a first cut: the host's permissions
+    /// would let an agent grant itself more authority, and its destination
+    /// would move the host's settings, permissions included, to a machine the
+    /// agent chose (SPEC.md, Agent-spawned sessions). A field left `None` is
+    /// left as it is. The helm always shows the change on a card that needs
+    /// the user's own Allow, whatever the requesting host's "without asking"
+    /// setting says ([`approvals::ApprovalAction::HostEdit`]).
+    HostEdit {
+        /// The host's display NAME, resolved exactly as
+        /// [`Self::Create::host`] is.
+        host: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alias: Option<HostAliasEdit>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<host_appearance::HostIcon>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<host_appearance::HostColor>,
+    },
+    /// `farhelm agent host remove`: forget a host exactly as the GUI's remove
+    /// does. Answered with [`AgentReply::HostRemoved`].
+    ///
+    /// The helm refuses, without a card, this machine (which nothing can
+    /// remove) and the asking session's own host (removing it would cut the
+    /// connection the request is waiting on, the reason a session cannot
+    /// delete itself). Every other removal needs the user's own Allow.
+    HostRemove {
+        /// The host's display NAME, resolved exactly as
+        /// [`Self::Create::host`] is.
+        host: String,
+    },
+}
+
+/// Set a host's alias, or clear it so the host is named by its destination.
+///
+/// A separate tri-state rather than `Option<Option<String>>` so the wire
+/// spells the intent: `{"set": "baz"}` or `"clear"`, never a `null` that a
+/// decoder could confuse with "leave it alone". The helm applies the same
+/// canonicalization the host settings dialog's alias route does (trimmed; a
+/// value that trims to nothing clears).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HostAliasEdit {
+    Set(String),
+    Clear,
 }
 
 impl AgentVerb {
@@ -1993,7 +2041,11 @@ impl AgentVerb {
             // outcome, not a free retry.
             | AgentVerb::TemplateCreate { .. }
             | AgentVerb::TemplateEdit { .. }
-            | AgentVerb::TemplateDelete { .. } => true,
+            | AgentVerb::TemplateDelete { .. }
+            // A host edit or removal changes the helm's registry, which
+            // every client and every later agent request reads.
+            | AgentVerb::HostEdit { .. }
+            | AgentVerb::HostRemove { .. } => true,
         }
     }
 
@@ -2023,6 +2075,8 @@ impl AgentVerb {
             | AgentVerb::TemplateCreate { .. }
             | AgentVerb::TemplateEdit { .. }
             | AgentVerb::TemplateDelete { .. }
+            | AgentVerb::HostEdit { .. }
+            | AgentVerb::HostRemove { .. }
             | AgentVerb::OpenUrl { .. } => true,
         }
     }
@@ -2223,6 +2277,11 @@ pub enum AgentReply {
     TemplateWritten { template: Box<AgentTemplate> },
     /// A template delete's confirmation, carrying nothing beyond success.
     TemplateDeleted {},
+    /// Answers `HostEdit` with the host as the listing now shows it, so the
+    /// caller learns the display name an alias change gave it.
+    HostEdited { host: AgentHost },
+    /// A host removal's confirmation, carrying nothing beyond success.
+    HostRemoved {},
 }
 
 /// What a supervisor tells a management request it refuses because every
@@ -5177,8 +5236,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_62() {
-        assert_eq!(PROTOCOL_VERSION, 62);
+    fn protocol_version_is_pinned_at_63() {
+        assert_eq!(PROTOCOL_VERSION, 63);
     }
 
     /// A follow-up is an approved mutation even though its success has no
@@ -5283,6 +5342,75 @@ mod tests {
             serde_json::from_value::<AgentReply>(serde_json::to_value(&reply).unwrap()).unwrap(),
             reply
         );
+    }
+
+    /// Spec: the host verbs travel under their own `verb` tags with the alias
+    /// as an explicit set-or-clear, omit fields they leave alone, and count
+    /// as mutations that may wait for the user; their replies have tags of
+    /// their own.
+    ///
+    /// Why: an omitted alias, icon or color means "leave it as it is", so a
+    /// field that appeared on the wire as `null` when unset would turn into
+    /// a clear at a decoder that read it differently. Counting these verbs as
+    /// mutations is what keeps a lost answer from being reported as a free
+    /// retry, and the wait budget is what lets the user's card be answered.
+    #[farhelm_testtrace::test]
+    fn host_verbs_wire_shapes_and_authority_are_explicit() {
+        use host_appearance::{HostColor, HostIcon};
+        let edit = AgentVerb::HostEdit {
+            host: "builder".into(),
+            alias: Some(HostAliasEdit::Set("baz".into())),
+            icon: Some(HostIcon::Rocket),
+            color: None,
+        };
+        let wire = serde_json::json!({
+            "verb": "host_edit", "host": "builder", "alias": {"set": "baz"}, "icon": "rocket",
+        });
+        assert_eq!(serde_json::to_value(&edit).unwrap(), wire);
+        assert_eq!(serde_json::from_value::<AgentVerb>(wire).unwrap(), edit);
+        let clear = AgentVerb::HostEdit {
+            host: "builder".into(),
+            alias: Some(HostAliasEdit::Clear),
+            icon: None,
+            color: Some(HostColor::Teal),
+        };
+        let wire = serde_json::json!({
+            "verb": "host_edit", "host": "builder", "alias": "clear", "color": "teal",
+        });
+        assert_eq!(serde_json::to_value(&clear).unwrap(), wire);
+        assert_eq!(serde_json::from_value::<AgentVerb>(wire).unwrap(), clear);
+        let remove = AgentVerb::HostRemove {
+            host: "builder".into(),
+        };
+        let wire = serde_json::json!({"verb": "host_remove", "host": "builder"});
+        assert_eq!(serde_json::to_value(&remove).unwrap(), wire);
+        assert_eq!(serde_json::from_value::<AgentVerb>(wire).unwrap(), remove);
+        for verb in [&edit, &clear, &remove] {
+            assert!(verb.is_mutating(), "{verb:?}");
+            assert!(verb.may_wait_for_user(), "{verb:?}");
+        }
+        for reply in [
+            AgentReply::HostEdited {
+                host: AgentHost {
+                    id: "entry".into(),
+                    name: "baz".into(),
+                    kind: "ssh".into(),
+                    state: "connected".into(),
+                    current: false,
+                },
+            },
+            AgentReply::HostRemoved {},
+        ] {
+            let value = serde_json::to_value(&reply).unwrap();
+            assert!(
+                matches!(
+                    value["reply"].as_str(),
+                    Some("host_edited" | "host_removed")
+                ),
+                "{value}"
+            );
+            assert_eq!(serde_json::from_value::<AgentReply>(value).unwrap(), reply);
+        }
     }
 
     /// Placement setup has its own acknowledgement. Request echoes cannot settle it,

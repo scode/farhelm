@@ -648,6 +648,8 @@ fn action_kind(action: &ApprovalAction) -> &'static str {
         ApprovalAction::TemplateWrite { .. } => "template_write",
         ApprovalAction::TemplateWriteWithShortcuts { .. } => "template_write_with_shortcuts",
         ApprovalAction::TemplateDelete { .. } => "template_delete",
+        ApprovalAction::HostEdit { .. } => "host_edit",
+        ApprovalAction::HostRemove { .. } => "host_remove",
     }
 }
 
@@ -713,6 +715,8 @@ fn action_summary(action: &ApprovalAction) -> &'static str {
             ..
         } => "change a launch template and its shortcuts",
         ApprovalAction::TemplateDelete { .. } => "delete a launch template",
+        ApprovalAction::HostEdit { .. } => "change a host's alias, icon or color",
+        ApprovalAction::HostRemove { .. } => "remove a host",
     }
 }
 
@@ -973,6 +977,45 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
         } => {
             rows.push(CardRow::Value("template", name.clone()));
             template_rows(fields, host_name.as_deref(), &mut rows);
+        }
+        // Each changed field shows its value now and the value approval
+        // writes. Icon and color words are this UI's own fixed vocabulary;
+        // the alias and the host's names are peer data.
+        ApprovalAction::HostEdit {
+            host_name,
+            destination,
+            alias,
+            icon,
+            color,
+        } => {
+            rows.push(CardRow::Value("host", host_name.clone()));
+            match destination {
+                Some(destination) => rows.push(CardRow::Value("destination", destination.clone())),
+                None => rows.push(CardRow::Note("destination", "this machine")),
+            }
+            if let Some(alias) = alias {
+                for (label, value) in [("alias now", &alias.old), ("new alias", &alias.new)] {
+                    match value {
+                        Some(value) => rows.push(CardRow::Value(label, value.clone())),
+                        None => rows.push(CardRow::Note(label, "none")),
+                    }
+                }
+            }
+            if let Some(icon) = icon {
+                rows.push(CardRow::Note("icon now", icon.old.as_str()));
+                rows.push(CardRow::Note("new icon", icon.new.as_str()));
+            }
+            if let Some(color) = color {
+                rows.push(CardRow::Note("color now", color.old.as_str()));
+                rows.push(CardRow::Note("new color", color.new.as_str()));
+            }
+        }
+        ApprovalAction::HostRemove {
+            host_name,
+            destination,
+        } => {
+            rows.push(CardRow::Value("host", host_name.clone()));
+            rows.push(CardRow::Value("destination", destination.clone()));
         }
     }
     rows

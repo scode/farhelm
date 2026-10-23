@@ -417,6 +417,9 @@ enum AgentCmd {
     /// Write launch templates; each waits for the user's approval.
     #[command(subcommand)]
     Template(TemplateCmd),
+    /// Change or remove hosts; each always waits for the user's explicit Allow.
+    #[command(subcommand)]
+    Host(HostCmd),
     /// Print how to use these verbs, for an agent that was told to.
     Instructions,
     /// The same as instructions; both spellings print it.
@@ -478,6 +481,72 @@ enum TemplateCmd {
         #[arg(allow_hyphen_values = true)]
         name: String,
     },
+}
+
+/// `farhelm agent host`'s verbs: an agent's changes to the hosts themselves,
+/// each shown to the user on a card that only the user's own Allow approves,
+/// whatever the host's "run farhelm commands from this host without asking"
+/// setting says (SPEC.md, Agent-spawned sessions).
+///
+/// `<HOST>` is the display name `farhelm agent hosts` shows, resolved by the
+/// helm exactly as `farhelm agent create --host` is: exact, and refused when
+/// ambiguous. An edit reaches only the alias, icon and color; nothing here
+/// can change a host's destination or its permissions.
+#[derive(Subcommand)]
+enum HostCmd {
+    /// Change a host's alias, icon or color; the card shows each old and new value.
+    Edit {
+        /// Host to change, by the name `farhelm agent hosts` shows.
+        #[arg(value_name = "HOST", allow_hyphen_values = true)]
+        host: String,
+        /// New alias, which becomes the host's name in listings and --host.
+        #[arg(
+            long,
+            value_name = "NAME",
+            allow_hyphen_values = true,
+            conflicts_with = "no_alias"
+        )]
+        alias: Option<String>,
+        /// Remove the alias, so the host is named by its destination again.
+        #[arg(long, conflicts_with = "alias")]
+        no_alias: bool,
+        /// New icon, one of the words the host settings dialog offers.
+        #[arg(long, value_name = "ICON", value_parser = host_icon_parser())]
+        icon: Option<farhelm_proto::host_appearance::HostIcon>,
+        /// New color, one of the words the host settings dialog offers.
+        #[arg(long, value_name = "COLOR", value_parser = host_color_parser())]
+        color: Option<farhelm_proto::host_appearance::HostColor>,
+    },
+    /// Remove a host as the Farhelm UI does; never this machine or this session's host.
+    Remove {
+        /// Host to remove, by the name `farhelm agent hosts` shows.
+        #[arg(value_name = "HOST", allow_hyphen_values = true)]
+        host: String,
+    },
+}
+
+/// Parse `--icon` against the host icon vocabulary, offered to clap as its
+/// possible values so `--help` and a refusal both list every word, generated
+/// from the vocabulary itself so neither can drift from it.
+fn host_icon_parser()
+-> impl clap::builder::TypedValueParser<Value = farhelm_proto::host_appearance::HostIcon> {
+    use clap::builder::TypedValueParser as _;
+    use farhelm_proto::host_appearance::HostIcon;
+    clap::builder::PossibleValuesParser::new(HostIcon::ALL.map(HostIcon::as_str)).map(|word| {
+        word.parse::<HostIcon>()
+            .expect("clap admitted only the vocabulary's words")
+    })
+}
+
+/// Parse `--color` against the host color vocabulary; see [`host_icon_parser`].
+fn host_color_parser()
+-> impl clap::builder::TypedValueParser<Value = farhelm_proto::host_appearance::HostColor> {
+    use clap::builder::TypedValueParser as _;
+    use farhelm_proto::host_appearance::HostColor;
+    clap::builder::PossibleValuesParser::new(HostColor::ALL.map(HostColor::as_str)).map(|word| {
+        word.parse::<HostColor>()
+            .expect("clap admitted only the vocabulary's words")
+    })
 }
 
 /// The fields a template write sets: a create's folder, title and host, and
@@ -627,6 +696,9 @@ impl AgentCmd {
             // Built in `run_agent`, where a `--template` can be refused
             // with a message; see `TemplateFieldFlags::fields`.
             AgentCmd::Template(_) => None,
+            // Built and printed by `run_host_change`, which `run_agent`
+            // hands it to before asking this.
+            AgentCmd::Host(_) => None,
             AgentCmd::Instructions | AgentCmd::Help => None,
         }
     }
@@ -1756,6 +1828,57 @@ fn run_template_write(command: &TemplateCmd) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `farhelm agent host edit|remove`: one relayed request, which waits for the
+/// user's explicit Allow, and one confirmation line on stdout naming the host,
+/// as the template writes confirm on stdout.
+///
+/// An edit that names nothing to change is refused here, before anything is
+/// sent (the helm refuses it too). An edit's line names the host by the
+/// display name the helm reports after the edit, since an alias change gives
+/// the host a new one; a removal's names it as the caller did.
+fn run_host_change(command: &HostCmd) -> anyhow::Result<()> {
+    let verb = match command {
+        HostCmd::Edit {
+            host,
+            alias,
+            no_alias,
+            icon,
+            color,
+        } => {
+            let alias = match (alias, no_alias) {
+                (Some(alias), _) => Some(farhelm_proto::HostAliasEdit::Set(alias.clone())),
+                (None, true) => Some(farhelm_proto::HostAliasEdit::Clear),
+                (None, false) => None,
+            };
+            if alias.is_none() && icon.is_none() && color.is_none() {
+                anyhow::bail!(
+                    "farhelm agent host edit needs at least one of --alias, --no-alias, --icon \
+                     or --color"
+                );
+            }
+            farhelm_proto::AgentVerb::HostEdit {
+                host: host.clone(),
+                alias,
+                icon: *icon,
+                color: *color,
+            }
+        }
+        HostCmd::Remove { host } => farhelm_proto::AgentVerb::HostRemove { host: host.clone() },
+    };
+    let (_asking, reply) = runtime()?.block_on(agent_request(&SessionEnv::from_env(), verb))?;
+    match (reply, command) {
+        (AgentReply::HostEdited { host }, HostCmd::Edit { .. }) => {
+            println!("changed host {}", quoted(&host.name));
+        }
+        (AgentReply::HostRemoved {}, HostCmd::Remove { host }) => {
+            println!("removed host {}", quoted(host));
+        }
+        // `agent_request` already checked the reply's tag against the verb.
+        _ => anyhow::bail!("the helm answered a host change with something unexpected"),
+    }
+    Ok(())
+}
+
 /// Run one `farhelm agent` subcommand and print its answer.
 ///
 /// `AgentCmd::verb` answers "what goes on the wire, if anything" —
@@ -1768,6 +1891,9 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
     }
     if let AgentCmd::Template(template) = &command {
         return run_template_write(template);
+    }
+    if let AgentCmd::Host(host) = &command {
+        return run_host_change(host);
     }
     let Some(verb) = command.verb() else {
         print!("{}", agent_instructions::text());
@@ -1928,6 +2054,7 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
         | AgentCmd::Templates { .. }
         | AgentCmd::Profiles { .. }
         | AgentCmd::Template(_)
+        | AgentCmd::Host(_)
         | AgentCmd::Instructions
         | AgentCmd::Help => {
             unreachable!("handled above before this match is reached")

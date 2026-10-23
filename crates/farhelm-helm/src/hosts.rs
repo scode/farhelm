@@ -33,6 +33,7 @@ use crate::aggregate::host_display_name;
 use crate::manager::{ConnectionStage, HostState, RefreshHealth, UnreachableCause};
 use crate::store::{HostId, HostKind, HostRow, HostStoreError};
 use crate::{AppState, http_error};
+use anyhow::Context as _;
 use axum::extract::{Path as AxPath, State};
 use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
@@ -573,23 +574,54 @@ pub(crate) async fn set_appearance(
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<AppearanceSpec>,
 ) -> impl IntoResponse {
-    let serialized = state.manager.host_write_lock(host).await;
-    match state
-        .store
-        .set_appearance(host, spec.icon, spec.color)
-        .await
-    {
-        Ok(true) => {
-            state.manager.events().bump();
-        }
-        Ok(false) => {}
-        Err(error) => return http_error(error),
+    if let Err(error) = set_appearance_for(&state, host, spec.icon, spec.color).await {
+        return http_error(error);
     }
-    drop(serialized);
     match host_view(&state, host).await {
         Ok(view) => axum::Json(view).into_response(),
         Err(error) => http_error(error),
     }
+}
+
+/// Store a host's icon and color under the host write lock: the settings
+/// dialog's appearance write, as [`set_appearance`] makes it. The write
+/// itself is [`write_appearance_locked`], which an agent's approved edit
+/// shares through [`edit_identity_checked`].
+///
+/// The caller must own the operation through the feed bump (see
+/// [`set_commands_without_asking_for`]); the HTTP handler inherits that from
+/// the router.
+async fn set_appearance_for(
+    state: &AppState,
+    host: HostId,
+    icon: farhelm_proto::host_appearance::HostIcon,
+    color: farhelm_proto::host_appearance::HostColor,
+) -> anyhow::Result<()> {
+    let serialized = state.manager.host_write_lock(host).await;
+    write_appearance_locked(state, host, icon, color).await?;
+    drop(serialized);
+    Ok(())
+}
+
+/// The one appearance write, shared by the settings dialog and an agent's
+/// approved `farhelm agent host edit` so the two cannot drift: store both
+/// words and announce a real change on the event feed.
+///
+/// The caller holds the host's write lock, which every writer of the row's
+/// alias, destination, icon and color holds while it writes. Both words are
+/// written together, as the settings dialog sends them; a caller changing
+/// only one passes the other's value from a read made under that same lock,
+/// or it would write back a value another writer has since replaced.
+async fn write_appearance_locked(
+    state: &AppState,
+    host: HostId,
+    icon: farhelm_proto::host_appearance::HostIcon,
+    color: farhelm_proto::host_appearance::HostColor,
+) -> anyhow::Result<()> {
+    if state.store.set_appearance(host, icon, color).await? {
+        state.manager.events().bump();
+    }
+    Ok(())
 }
 
 /// The body of `POST /api/hosts/{id}/commands-without-asking`: the new setting, required.
@@ -931,29 +963,148 @@ pub(crate) async fn set_alias(
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<AliasSpec>,
 ) -> impl IntoResponse {
-    // The HTTP router owns the commit through reconciliation. The
-    // hosts list reads names from the actors' snapshots, which only the
-    // reconcile updates (and announces), so a client that disconnected
-    // between the two would otherwise leave the alias saved while every
-    // client, its own after a reload included, kept showing the old name.
-    let provisioning = state.manager.host_provision_lock(host).await;
-    let serialized = state.manager.host_write_lock(host).await;
-    if let Err(error) = state.store.update_alias(host, spec.alias.as_deref()).await {
+    if let Err(error) = set_alias_for(&state, host, spec.alias.as_deref()).await {
         return http_error(error);
     }
-    // The reconcile that applies the new alias announces it (whether it is
-    // this one or an unrelated one that ran first); see `sync_registry`.
-    if let Err(error) = state.manager.sync_registry().await {
-        return http_error(error.context(format!(
-            "host {host}'s alias was changed but could not be synchronized"
-        )));
-    }
-    drop(serialized);
-    drop(provisioning);
     match host_view(&state, host).await {
         Ok(view) => axum::Json(view).into_response(),
         Err(error) => http_error(error),
     }
+}
+
+/// Store a host's alias under the host's provisioning and write locks: the
+/// settings dialog's alias write, as [`set_alias`] makes it. The write
+/// itself is [`write_alias_locked`], which an agent's approved edit shares
+/// through [`edit_identity_checked`].
+///
+/// The caller must own the operation through the reconcile (see
+/// [`write_alias_locked`]); the HTTP handler inherits that from the router.
+async fn set_alias_for(state: &AppState, host: HostId, alias: Option<&str>) -> anyhow::Result<()> {
+    let provisioning = state.manager.host_provision_lock(host).await;
+    let serialized = state.manager.host_write_lock(host).await;
+    write_alias_locked(state, host, alias).await?;
+    drop(serialized);
+    drop(provisioning);
+    Ok(())
+}
+
+/// The one alias write, shared by the settings dialog and an agent's
+/// approved `farhelm agent host edit` so the two cannot drift: store the
+/// alias and synchronize the registry so the new name reaches the actors'
+/// snapshots.
+///
+/// The caller holds the host's provisioning lock and then its write lock,
+/// the order every registry edit takes them in, so the alias cannot change
+/// under a frozen provisioning plan or straddle a cache write. The caller
+/// must also own the operation through the reconcile. The hosts list reads
+/// names from the actors' snapshots, which only the reconcile updates (and
+/// announces), so a caller dropped between the two would leave the alias
+/// saved while every client, its own after a reload included, kept showing
+/// the old name.
+async fn write_alias_locked(
+    state: &AppState,
+    host: HostId,
+    alias: Option<&str>,
+) -> anyhow::Result<()> {
+    state.store.update_alias(host, alias).await?;
+    // The reconcile that applies the new alias announces it (whether it is
+    // this one or an unrelated one that ran first); see `sync_registry`.
+    state.manager.sync_registry().await.with_context(|| {
+        format!("host {host}'s alias was changed but could not be synchronized")
+    })?;
+    Ok(())
+}
+
+/// The settings dialog fields an agent's approved `farhelm agent host edit`
+/// writes, each `None` when the edit leaves that field alone. For the alias,
+/// `Some(None)` clears it.
+pub(crate) struct IdentityEdit {
+    pub(crate) alias: Option<Option<String>>,
+    pub(crate) icon: Option<farhelm_proto::host_appearance::HostIcon>,
+    pub(crate) color: Option<farhelm_proto::host_appearance::HostColor>,
+}
+
+/// Apply an agent's approved [`IdentityEdit`] only while the host still is
+/// what the user approved: `expected` judges the row as read under the
+/// locks the settings dialog's writers take, and those locks stay held
+/// until every part of the edit is written.
+///
+/// This is what keeps an approval bound to its card. A comparison made
+/// before taking the locks could pass and then be overtaken by a retarget,
+/// an alias change or an appearance change from the GUI, and the edit would
+/// land on a host the user never approved it for, or write back a value the
+/// user had just replaced. Here no writer of the row's destination, alias,
+/// icon or color can run between `expected`'s read and the last write, so:
+///
+/// - when `expected` refuses (it returns the caller's own error), nothing
+///   is written;
+/// - a field the edit leaves alone keeps whatever the GUI wrote last,
+///   because the appearance write takes icon and color together and the
+///   untouched one comes from that protected read;
+/// - an edit of both the alias and the appearance is never split by
+///   another writer, since the locks are not released between the two.
+///
+/// The locks are the ones the GUI's routes take for the same fields: the
+/// write lock always (the appearance route takes only that, and the alias
+/// and retarget routes write under it too), and before it the provisioning
+/// lock only when the alias changes, as the alias route does. An
+/// appearance-only edit therefore does not wait out an install or update,
+/// as the settings dialog's appearance change does not. The writes are
+/// [`write_alias_locked`] and [`write_appearance_locked`], the GUI's own.
+///
+/// The caller must own the operation through the alias reconcile and the
+/// feed bump, as the GUI's routes do; the agent relay's answer task for a
+/// mutating verb is never aborted once started.
+pub(crate) async fn edit_identity_checked(
+    state: &AppState,
+    host: HostId,
+    edit: IdentityEdit,
+    expected: impl FnOnce(&HostRow) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    #[cfg(test)]
+    state.approvals.hold_at_host_write_gate(host).await;
+    let provisioning = match edit.alias {
+        Some(_) => Some(state.manager.host_provision_lock(host).await),
+        None => None,
+    };
+    let serialized = state.manager.host_write_lock(host).await;
+    let row = registry_row(state, host).await?;
+    expected(&row)?;
+    // The alias first: its write is the one with refusals of its own
+    // (another host's name), so a refused alias leaves the appearance alone.
+    // An appearance write failing after it leaves the alias changed, and the
+    // error says the edit failed.
+    if let Some(alias) = &edit.alias {
+        write_alias_locked(state, host, alias.as_deref()).await?;
+    }
+    if edit.icon.is_some() || edit.color.is_some() {
+        write_appearance_locked(
+            state,
+            host,
+            edit.icon.unwrap_or(row.icon),
+            edit.color.unwrap_or(row.color),
+        )
+        .await?;
+    }
+    drop(serialized);
+    drop(provisioning);
+    Ok(())
+}
+
+/// The registry's row for `host`, or the store's own not-found refusal
+/// ([`HostStoreError::HostNotFound`]) for a host that is not registered.
+///
+/// `pub(crate)` for the agent relay, which shows a host edit's or remove's
+/// card from this row before taking any lock; the checked writes here read
+/// it again under their locks.
+pub(crate) async fn registry_row(state: &AppState, host: HostId) -> anyhow::Result<HostRow> {
+    state
+        .store
+        .list_hosts()
+        .await?
+        .into_iter()
+        .find(|row| row.id == host)
+        .ok_or_else(|| anyhow::Error::new(HostStoreError::HostNotFound(host)))
 }
 
 /// `DELETE /api/hosts/{id}` — forget a registered host.
@@ -987,32 +1138,91 @@ pub(crate) async fn remove_host(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
 ) -> impl IntoResponse {
-    // The HTTP router owns row deletion through actor teardown, so a dropped
-    // request cannot leave an actor running for a host no longer registered.
-    let Some(provisioning) = state.manager.try_host_provision_lock(host) else {
-        return (
-            axum::http::StatusCode::CONFLICT,
+    match remove_host_for(&state, host).await {
+        Ok(()) => axum::Json(serde_json::json!({})).into_response(),
+        Err(e) => http_error(e),
+    }
+}
+
+/// Forget `host` the way [`remove_host`] does, with its refusals: the
+/// reserved local row ([`HostStoreError::LocalHostImmutable`]), an unknown
+/// id, and a host busy with a setup, update or uninstall (a `Conflict`
+/// answered at once, see [`remove_host`]).
+///
+/// The caller must own the operation through actor teardown, so a dropped
+/// caller cannot leave an actor running for a host no longer registered.
+/// The HTTP handler inherits that from the router.
+async fn remove_host_for(state: &AppState, host: HostId) -> anyhow::Result<()> {
+    let provisioning = provision_lock_or_busy(state, host)?;
+    forget_host_locked(state, host, provisioning).await
+}
+
+/// [`remove_host_for`] for an agent's approved `farhelm agent host remove`,
+/// carried out only while the host still is what the user approved:
+/// `expected` judges the row as read under the host's provisioning lock,
+/// held until the row is gone, and its refusal (the caller's own error)
+/// removes nothing.
+///
+/// The provisioning lock is what every destination change holds while it
+/// writes, so a retarget cannot land between that read and the removal and
+/// have the agent forget the new destination on an approval of the old one.
+/// It is taken without waiting, exactly as the GUI's remove takes it, so a
+/// host busy with a setup, update or uninstall gets the same prompt refusal.
+/// Past the check, the removal is the GUI's own ([`forget_host_locked`]),
+/// so an approved remove does exactly what the GUI's remove does.
+///
+/// The caller must own the operation through actor teardown, as for
+/// [`remove_host_for`]; the agent relay's answer task for a mutating verb
+/// is never aborted once started.
+pub(crate) async fn remove_host_checked(
+    state: &AppState,
+    host: HostId,
+    expected: impl FnOnce(&HostRow) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    #[cfg(test)]
+    state.approvals.hold_at_host_write_gate(host).await;
+    let provisioning = provision_lock_or_busy(state, host)?;
+    expected(&registry_row(state, host).await?)?;
+    forget_host_locked(state, host, provisioning).await
+}
+
+/// The host's provisioning lock, taken without waiting, or removal's
+/// "busy" refusal while a setup, update or uninstall holds it; see
+/// [`remove_host`] for why removal never waits.
+fn provision_lock_or_busy(
+    state: &AppState,
+    host: HostId,
+) -> anyhow::Result<crate::manager::ProvisionLockGuard> {
+    state.manager.try_host_provision_lock(host).ok_or_else(|| {
+        anyhow::Error::new(crate::SupervisorError::helm(
+            farhelm_proto::ErrorKind::Conflict,
             format!(
                 "host {host} is busy with a setup, update or uninstall; remove it after that finishes"
             ),
-        )
-            .into_response();
-    };
-    let stopped = match state
+        ))
+    })
+}
+
+/// The one removal, shared by the GUI's remove and an agent's approved one:
+/// delete the row and its cached sessions, purge the host's provisioning
+/// memory, and stop its actor, with the provisioning lock the caller took
+/// held throughout and released only once the actor is gone.
+async fn forget_host_locked(
+    state: &AppState,
+    host: HostId,
+    provisioning: crate::manager::ProvisionLockGuard,
+) -> anyhow::Result<()> {
+    let stopped = state
         .provisioning
         .delete_registered_host(host, crate::provisioning::RunTask::Abort)
-        .await
-    {
-        Ok(stopped) => stopped,
-        Err(e) => return http_error(e),
-    };
+        .await?;
     drop(provisioning);
     tracing::info!(
         host,
         stopped,
         "host removed from the registry and its connection actor stopped"
     );
-    axum::Json(serde_json::json!({})).into_response()
+    Ok(())
 }
 
 /// The body of `POST /api/hosts/{id}/adopt`: the identity the user was
@@ -3228,5 +3438,232 @@ mod tests {
             .unwrap();
         assert_eq!(saved["icon"], "rocket");
         assert_eq!(saved["color"], "teal");
+    }
+
+    // -----------------------------------------------------------------
+    // The agent's checked host writes and the GUI writers' locks
+    // -----------------------------------------------------------------
+
+    /// Which of a host's two registry locks another writer would find taken
+    /// at one instant.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct HeldLocks {
+        /// The provisioning lock: what the alias and retarget routes, and
+        /// every install, update and uninstall, hold while they write.
+        provisioning: bool,
+        /// The cache-write lock: what every writer of the row's destination,
+        /// alias, icon and color holds while it writes.
+        write: bool,
+    }
+
+    /// Probe both of `host`'s registry locks without waiting on either: a
+    /// lock that is free is taken and released at once, and one that is
+    /// taken is reported as held.
+    ///
+    /// Non-blocking on purpose, so a probe can run inside a checked write's
+    /// `expected` closure or a bump observer, where waiting on a lock the
+    /// caller holds would deadlock. The cache-write lock has no `try_`
+    /// method, so its acquisition is polled once; `unconstrained` keeps
+    /// tokio's cooperative budget from turning a free lock into a spurious
+    /// "held".
+    fn held_locks(
+        manager: &crate::manager::ConnectionManager,
+        host: crate::store::HostId,
+    ) -> HeldLocks {
+        use futures_util::FutureExt as _;
+        let write = match tokio::task::unconstrained(manager.host_write_lock(host)).now_or_never() {
+            None => true,
+            Some(Some(_free)) => false,
+            Some(None) => panic!("premise: host {host} has a cache-write lock (a live actor)"),
+        };
+        HeldLocks {
+            provisioning: manager.try_host_provision_lock(host).is_none(),
+            write,
+        }
+    }
+
+    /// Spec: an agent's checked host edit compares the row against its card
+    /// while holding the locks the GUI writers of the same fields take: the
+    /// cache-write lock always, and the provisioning lock too exactly when
+    /// the alias changes. A combined alias and appearance edit keeps both
+    /// held through each write it makes. An appearance-only edit does not
+    /// take the provisioning lock.
+    ///
+    /// Why: the comparison is what binds a user's Allow to what the card
+    /// showed. Made before the locks, it can pass and then be overtaken by a
+    /// GUI retarget or appearance change before the write, which then lands
+    /// on a host or overwrites a value the user never approved. The racing
+    /// tests in `agent_requests` finish their GUI write before the edit
+    /// reaches its comparison, so they cannot see where the comparison sits
+    /// relative to the locks; these probes can. The appearance-only case
+    /// pins that an approved restyle does not wait out an install, as the
+    /// settings dialog's own appearance change does not.
+    #[farhelm_testtrace::test]
+    async fn a_checked_host_edit_compares_and_writes_under_the_gui_writers_locks() {
+        use farhelm_proto::host_appearance::{HostColor, HostIcon};
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@checked-edit" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+        let state = &harness.state;
+        assert_eq!(
+            held_locks(&state.manager, host),
+            HeldLocks {
+                provisioning: false,
+                write: false,
+            },
+            "premise: nothing holds the host's locks before the edit"
+        );
+
+        let cases = [
+            (
+                "alias only",
+                super::IdentityEdit {
+                    alias: Some(Some("Alias Only".to_string())),
+                    icon: None,
+                    color: None,
+                },
+                HeldLocks {
+                    provisioning: true,
+                    write: true,
+                },
+            ),
+            (
+                "appearance only",
+                super::IdentityEdit {
+                    alias: None,
+                    icon: Some(HostIcon::Rocket),
+                    color: None,
+                },
+                HeldLocks {
+                    provisioning: false,
+                    write: true,
+                },
+            ),
+        ];
+        for (case, edit, expected_locks) in cases {
+            let mut at_check = None;
+            super::edit_identity_checked(state, host, edit, |_| {
+                at_check = Some(held_locks(&state.manager, host));
+                Ok(())
+            })
+            .await
+            .unwrap_or_else(|error| panic!("{case}: {error:#}"));
+            assert_eq!(at_check, Some(expected_locks), "{case}: locks at the check");
+        }
+
+        // The combined edit: the locks at the check, and at every feed bump
+        // from the check until the edit returns, which includes the alias
+        // reconcile's announcement and the appearance write's. The runtime
+        // is single-threaded and nothing awaits between the edit's release
+        // of its locks and `armed` being cleared, so no bump can be observed
+        // after the release.
+        let armed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let at_bumps: Arc<std::sync::Mutex<Vec<HeldLocks>>> = Default::default();
+        harness.manager.events().observe_bumps({
+            // A `Weak`: the observer is stored in the manager's own events.
+            let manager = Arc::downgrade(&harness.manager);
+            let armed = Arc::clone(&armed);
+            let at_bumps = Arc::clone(&at_bumps);
+            move || {
+                if armed.load(std::sync::atomic::Ordering::SeqCst)
+                    && let Some(manager) = manager.upgrade()
+                {
+                    at_bumps
+                        .lock()
+                        .expect("lock probe log poisoned")
+                        .push(held_locks(&manager, host));
+                }
+            }
+        });
+        let mut at_check = None;
+        super::edit_identity_checked(
+            state,
+            host,
+            super::IdentityEdit {
+                alias: Some(Some("Both Parts".to_string())),
+                icon: Some(HostIcon::House),
+                color: Some(HostColor::Teal),
+            },
+            |_| {
+                at_check = Some(held_locks(&state.manager, host));
+                armed.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .await
+        .expect("the combined edit");
+        armed.store(false, std::sync::atomic::Ordering::SeqCst);
+        let both = HeldLocks {
+            provisioning: true,
+            write: true,
+        };
+        assert_eq!(at_check, Some(both), "combined: locks at the check");
+        let at_bumps = at_bumps.lock().expect("lock probe log poisoned").clone();
+        assert!(
+            at_bumps.len() >= 2,
+            "the alias reconcile and the appearance write each announce: {at_bumps:?}"
+        );
+        assert!(
+            at_bumps.iter().all(|held| *held == both),
+            "both locks stay held through both parts of the edit: {at_bumps:?}"
+        );
+        let row = super::registry_row(state, host).await.unwrap();
+        assert_eq!(row.alias.as_deref(), Some("Both Parts"));
+        assert_eq!((row.icon, row.color), (HostIcon::House, HostColor::Teal));
+        assert_eq!(
+            held_locks(&state.manager, host),
+            HeldLocks {
+                provisioning: false,
+                write: false,
+            },
+            "the edit releases both locks"
+        );
+    }
+
+    /// Spec: an agent's checked host remove compares the row against its
+    /// card while holding the host's provisioning lock, the one every
+    /// retarget holds while it writes.
+    ///
+    /// Why: a comparison made before taking that lock can pass and then be
+    /// overtaken by a GUI retarget, and the agent would forget the machine
+    /// the user had just pointed the host at on an approval given for the
+    /// old one. The racing test in `agent_requests` cannot see where the
+    /// comparison sits relative to the lock; this probe can.
+    #[farhelm_testtrace::test]
+    async fn a_checked_host_remove_compares_under_the_provisioning_lock() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@checked-remove" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+        let state = &harness.state;
+        assert!(
+            !held_locks(&state.manager, host).provisioning,
+            "premise: nothing holds the provisioning lock before the remove"
+        );
+        let mut at_check = None;
+        super::remove_host_checked(state, host, |_| {
+            at_check = Some(held_locks(&state.manager, host).provisioning);
+            Ok(())
+        })
+        .await
+        .expect("the remove");
+        assert_eq!(at_check, Some(true), "the provisioning lock at the check");
+        assert!(
+            super::registry_row(state, host).await.is_err(),
+            "the host was removed"
+        );
     }
 }
