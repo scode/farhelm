@@ -18149,7 +18149,8 @@
 - Completion criteria: SPEC.md "Durability and resume" states that a child Pi that loads Farhelm's reporter can replace
   the session's Resume target, and that this is accepted, alongside the Goose sentence from
   `nested-goose-report-replaces-resume-target.md`. No code change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-docs-oct22.md`.
+- Execution: `complete`; draft PR [#2629](https://github.com/scode/farhelm/pull/2629/changes) on bookmark
+  `plan/triage-docs-oct22/04-pi-child-reports`, jj change `llwyouvw`.
 
 ## shared-checkout-root-archives-other-host-work.md
 
