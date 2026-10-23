@@ -27,9 +27,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`power-loss-version-folder-never-repaired.md`](power-loss-version-folder-never-repaired.md) — A Mac version folder
   damaged by power loss after an update is kept by every rerun and update; APFS exposing the damage is unverified.
 
-- [`commands-setting-help-omits-delete.md`](commands-setting-help-omits-delete.md) — The help for running farhelm
-  commands without asking omits that agents may delete sessions and templates; bucket is unsettled.
-
 - [`devbuild-tmux-skips-release-signature.md`](devbuild-tmux-skips-release-signature.md) — A devbuild pushes a tmux to
   remote hosts checked only against an unsigned checksum list from the release site; spec coverage is ambiguous.
 

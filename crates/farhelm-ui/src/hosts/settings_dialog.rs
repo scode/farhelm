@@ -267,11 +267,11 @@ fn yolo_help(yolo_without_asking: bool) -> &'static str {
 /// turning it on gives away.
 fn commands_help(commands_without_asking: bool) -> &'static str {
     if commands_without_asking {
-        "Agents in this host's sessions start, stop, restart, rename and clone sessions on any host, \
-         and edit launch templates, without asking you."
+        "Agents in this host's sessions start, stop, restart, rename, clone and delete sessions on any \
+         host, and edit and delete launch templates, without asking you."
     } else {
-        "When an agent in one of this host's sessions asks Farhelm to start, stop, restart, rename or \
-         clone a session, or to edit a launch template, Farhelm asks you first."
+        "When an agent in one of this host's sessions asks Farhelm to start, stop, restart, rename, \
+         clone or delete a session, or to edit or delete a launch template, Farhelm asks you first."
     }
 }
 
@@ -620,7 +620,7 @@ pub(super) fn HostSettingsDialog(
                 }
                 div { class: "host-settings-commands",
                     label { class: "host-commands-without-asking",
-                        "data-tooltip": "let agents in this host's sessions start, stop and change sessions and templates without asking first",
+                        "data-tooltip": "let agents in this host's sessions start, stop, change and delete sessions and templates without asking first",
                         span { "Run farhelm commands without asking" }
                         input {
                             r#type: "checkbox",

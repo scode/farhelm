@@ -3293,15 +3293,15 @@ control is not a current requirement.
 An agent's acting `farhelm` commands other than opening links, whichever host they reach, are carried out only with the
 user's approval or under the requesting host's own "run farhelm commands from this host without asking" setting (see
 Agent-spawned sessions). That is what keeps a session on one host from gaining execution on another through Farhelm:
-creating, cloning, renaming, stopping and restarting sessions across hosts, sending prompts to running agents, and
-writing the templates any host may launch from, are authorized by the user, not by the request. A user who turns that
-setting on for a host grants that host's sessions exactly that authority over the fleet, including changing what later
-launches from those templates run anywhere. A retried create is a new request and is asked about like one, so how long
-agent-originated retry records are kept is not a security question. The one exception is a create into a managed
-checkout: while its created session still exists, a retry with the same idempotency key returns, or finishes, the
-attempt the user already approved, without asking again. The replay can only complete that exact approved request, and
-only for the session, on the host, that asked. Delete removes that approval's retry record, so reusing the key then
-needs the approval any new request needs. None of this waives correctness of user-initiated GUI requests.
+creating, cloning, renaming, stopping, restarting and deleting sessions across hosts, sending prompts to running agents,
+and writing and deleting the templates any host may launch from, are authorized by the user, not by the request. A user
+who turns that setting on for a host grants that host's sessions exactly that authority over the fleet, including
+changing what later launches from those templates run anywhere. A retried create is a new request and is asked about
+like one, so how long agent-originated retry records are kept is not a security question. The one exception is a create
+into a managed checkout: while its created session still exists, a retry with the same idempotency key returns, or
+finishes, the attempt the user already approved, without asking again. The replay can only complete that exact approved
+request, and only for the session, on the host, that asked. Delete removes that approval's retry record, so reusing the
+key then needs the approval any new request needs. None of this waives correctness of user-initiated GUI requests.
 
 Reading is separate from acting, and stays open for now. Any attached host may obtain any template's full contents,
 including a command line and resume command it carries: an approved spawn that applies a template, or any spawn from a
