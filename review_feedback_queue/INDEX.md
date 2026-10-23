@@ -72,10 +72,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`recovery-retains-displaced-session-menu.md`](recovery-retains-displaced-session-menu.md) — Fast desktop recovery can
   leave a session menu displaced after header wrapping; consequential mistaken Stop/Delete use remains unverified.
 
-- [`loading-cancel-may-discard-admitted-launch.md`](loading-cancel-may-discard-admitted-launch.md) — Loading Cancel may
-  discard an admitted launch and recovery identity; its post-admission delivery and harmful duplication remain
-  source-incomplete.
-
 ## High priority: material UX degradation
 
 - [`shell-inspection-drains-exhaust-planning-pool.md`](shell-inspection-drains-exhaust-planning-pool.md) — Pipe-draining
