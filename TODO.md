@@ -35,13 +35,21 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - Allow aliasing hosts in add host flow
 
+  Plan: `plans/queue/alias-in-add-host.md`.
+
 - If not already fixed, make the launcher tell the user when they try to create a session whose directory does not
   exist.
+
+  Plan: `plans/queue/launch-refusal-visibility.md`.
 
 - Remember the launcher's most recently selected folder separately for each host; for a new host, initially default to
   that host's home directory.
 
+  Plan: `plans/queue/per-host-last-folder.md`.
+
 - Allow agents to add a host for the user.
+
+  Plan: `plans/queue/agent-add-host.md`.
 
 - Initial version of agent2agent comms.
 
@@ -200,6 +208,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   with behavior explicitly, plus shared helpers for the pieces that diverged (catalog compatibility, YOLO
   answer-taking). Decide whether plain Restart and plain Replace stay outside any of these, as SPEC.md's "relaunch the
   stored launch" suggests.
+
+  Plan: `plans/queue/restart-with-as-launcher.md`.
 
 - **Move the trash into a hidden folder.** Deleting a managed checkout's last session moves the checkout into
   `farhelm-archived-working-copies` inside the checkout folder (`ARCHIVE_DIR_NAME` in
