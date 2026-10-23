@@ -33,11 +33,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- If not already fixed, make the launcher tell the user when they try to create a session whose directory does not
-  exist.
-
-  Plan: `plans/queue/launch-refusal-visibility.md`.
-
 - Allow agents to add a host for the user.
 
   Plan: `plans/queue/agent-add-host.md`.

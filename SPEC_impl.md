@@ -3399,6 +3399,14 @@ This provides a target-side existence check without enumerating children; ordina
 refinement behavior. Both modes check the supplied connection incarnation before dispatch and carry the supervisor's
 refusal words back through the ordinary HTTP error path.
 
+The launcher's automatic folder check debounces for 150 ms in a resource and has its own `BrowseAuthority` generation,
+separate from explicit Browse. An admitted check runs in a component-owned task, so restarting the resource for an edit
+does not cancel it and admit a second outstanding check. Completion releases the pending flag and lets the latest
+destination run; an unchanged generation is checked once. Both completion and display use `browse_reply_is_current`,
+including the raw path, installation and connection, and managed mode or a disconnected host withdraws the authority.
+Only missing-folder and non-directory refusals warn; other failures remain inconclusive. Automatic checks share the
+supervisor's two browse workers with manual Browse, so a hung mount can stall Browse on that host until it answers.
+
 Composer history is one 100-record, per-host-installation unique-create window. Each accepted supervisor session id
 enters it once, whether it was an agent launch or a command launch. Agent-launch suggestions are projections of the
 surviving admission rows, so 100 later command launches evict an earlier agent-launch setup and remove its frequency

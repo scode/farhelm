@@ -3981,13 +3981,42 @@ pub(crate) async fn browse_directory(
     cwd: &str,
     incarnation: Option<u64>,
 ) -> Result<DirectoryBrowse, String> {
+    inspect_directory(base, host, cwd, incarnation, false).await
+}
+
+/// Check a launch destination without listing children or refining history.
+/// A success is advisory only: create still validates the path when launched.
+pub(crate) async fn check_directory(
+    base: &str,
+    host: HostId,
+    cwd: &str,
+    incarnation: Option<u64>,
+) -> Result<(), String> {
+    inspect_directory(base, host, cwd, incarnation, true)
+        .await
+        .map(|_| ())
+}
+
+/// Keep manual Browse and automatic checks on the same authenticated read
+/// path, timeout and error decoding; only the target-side inspection differs.
+async fn inspect_directory(
+    base: &str,
+    host: HostId,
+    cwd: &str,
+    incarnation: Option<u64>,
+    membership_only: bool,
+) -> Result<DirectoryBrowse, String> {
     let url = format!("{base}/api/browse-directory");
-    let resp = send(client().post(&url).json(&serde_json::json!({
+    let mut body = serde_json::json!({
         "host": host,
         "cwd": cwd,
         "expected_incarnation": incarnation,
-    })))
-    .await?;
+    });
+    // Keep explicit Browse's body unchanged; only the automatic read opts in.
+    if membership_only {
+        body["membership_only"] = serde_json::Value::Bool(true);
+    }
+    let resp = send(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("POST", &url, resp).await);
     }

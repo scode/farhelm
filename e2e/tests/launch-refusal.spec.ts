@@ -10,10 +10,33 @@
  * folder without noticing the message (2026-10-22).
  */
 import { expect, test } from "./helpers/evidence";
-import { type Page } from "@playwright/test";
+import { type Page, type Route } from "@playwright/test";
 import { chooseLauncherHost } from "./helpers/host-picker";
 import { localHostId } from "./helpers/fleet";
 import { fillCreateForm } from "./helpers/term";
+import { routeGate } from "./helpers/route-gate";
+import { drainedRoute } from "./helpers/drained-route";
+
+const builds = new WeakMap<Page, string>();
+
+/** Routed observations retain the real build stamp, so fixtures cannot latch
+ * build skew and accidentally withdraw the reads they intend to exercise. */
+test.beforeEach(async ({ page, request }) => {
+  const response = await request.get("/api/hosts");
+  expect(response.ok()).toBe(true);
+  const build = response.headers()["x-farhelm-build"];
+  expect(build).toBeTruthy();
+  builds.set(page, build);
+});
+
+/** Answer only an automatic check, preserving its normal HTTP response shape. */
+async function checkReply(route: Route, error?: string) {
+  const build = builds.get(route.request().frame().page());
+  expect(build).toBeTruthy();
+  await route.fulfill({ status: error ? 400 : 200, headers: { "x-farhelm-build": build! }, json: error
+    ? { error }
+    : { cwd: "/tmp", parent: null, children: [], truncated: false } });
+}
 
 /** Open New and return its form, waiting until it is on screen. */
 async function openNew(page: Page) {
@@ -32,7 +55,13 @@ async function openNew(page: Page) {
  * same folder on the same host, and goes away when the host changes. Nothing
  * is created.
  */
-test("a missing folder is refused as an alert and marks the folder until the destination changes", async ({ page, request }) => {
+test("a missing folder is refused as an alert and marks the folder until the destination changes", async ({ page, request }, testInfo) => {
+  // Isolate the launch refusal from advisory observations. Separate tests
+  // below exercise real and delayed pre-launch answers.
+  await page.route("**/api/browse-directory", async route => {
+    if (route.request().postDataJSON().membership_only) await checkReply(route);
+    else await route.continue();
+  });
   const local = await localHostId(request);
   // The remote row only matters for the host switch, but it must be live
   // there, or the launcher would not offer it as a destination.
@@ -67,6 +96,19 @@ test("a missing folder is refused as an alert and marks the folder until the des
   await expect(notice).toContainText("This folder does not exist on");
   await expect(folder).toHaveAttribute("aria-describedby", "launcher-folder-problem");
 
+  // Farhelm currently has one dark palette. Check both OS preferences at
+  // phone width and retain the actual rendering for visual inspection.
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expect(alert).toBeVisible();
+    const bounds = await alert.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+    await testInfo.attach(`launcher-refusal-phone-${colorScheme}`, { body: await form.screenshot(), contentType: "image/png" });
+  }
+
   await folder.fill("/tmp");
   await expect(folder, "another folder is not the one refused").not.toHaveAttribute("aria-invalid", "true");
   await expect(notice).toHaveCount(0);
@@ -89,6 +131,108 @@ test("a missing folder is refused as an alert and marks the folder until the des
 
   const listing = await (await request.get("/api/sessions")).json();
   expect(listing.sessions.some((session: { title: string }) => session.title === title)).toBe(false);
+});
+
+/** A known missing folder warns before any launch without blocking the
+ * command. A valid folder clears the advice; the host still decides when
+ * Launch is pressed, so a refused create remains an announced alert. */
+test("folder checks warn before Launch and never prevent an attempt", async ({ page }) => {
+  await page.goto("/");
+  const checked = page.waitForResponse(response => {
+    if (!response.url().endsWith("/api/browse-directory")) return false;
+    const input = response.request().postDataJSON();
+    return input.membership_only && input.cwd === "/tmp";
+  });
+  const form = await fillCreateForm(page, { cwd: "/tmp", invocation: "true", title: "advisory-refusal" });
+  expect((await checked).ok(), "the real existing folder must pass the host's check").toBe(true);
+  await expect(form).toHaveAttribute("data-folder-check-pending", "false");
+  const folder = form.getByLabel("folder", { exact: true });
+  const notice = form.locator(".launch-composer-folder-problem");
+  await expect(notice).toHaveCount(0);
+  await folder.fill(`/nonexistent/advisory-${Date.now()}`);
+  await expect(notice).toContainText("This folder does not exist on");
+  await expect(folder).toHaveAttribute("aria-invalid", "true");
+  const launch = form.locator(".create-session-submit");
+  await expect(launch).toBeEnabled();
+  await launch.click();
+  await expect(form.getByRole("alert")).toContainText("Not launched.");
+  await expect(form.getByRole("alert")).toContainText("working directory does not exist:");
+  await folder.fill("/tmp");
+  await expect(notice).toHaveCount(0);
+});
+
+/** Hold the first response past a path edit. Its stale missing-folder answer
+ * must be dropped, and the next check must wait for that response rather than
+ * starting an overlapping read every time the debounce restarts. */
+test("a stale check is dropped and checks remain serial while a reply is held", async ({ page }) => {
+  const old = `/nonexistent/old-check-${Date.now()}`;
+  const first = routeGate();
+  const second = routeGate();
+  const paths: string[] = [];
+  const stop = await drainedRoute(page, "**/api/browse-directory", async route => {
+    const input = route.request().postDataJSON();
+    if (!input.membership_only) return route.continue();
+    if (paths.length === 0 && input.cwd !== old) return checkReply(route);
+    paths.push(input.cwd);
+    if (input.cwd === old) {
+      await first.wait();
+      await checkReply(route, `working directory does not exist: ${old}`);
+    } else {
+      await second.wait();
+      await checkReply(route);
+    }
+  });
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, { cwd: old, invocation: "true", title: "serial-check" });
+    await expect.poll(() => paths).toEqual([old]);
+    const completedBefore = Number(await form.getAttribute("data-folder-check-completions"));
+    await form.getByLabel("folder", { exact: true }).fill("/tmp");
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
+    // sleep-ok: hold the first reply past the 150ms debounce to expose an overlapping second read.
+    await page.waitForTimeout(300);
+    expect(paths, "a debounce restart must not overlap the held request").toEqual([old]);
+    first.release();
+    await expect.poll(() => paths).toEqual([old, "/tmp"]);
+    await expect.poll(async () => Number(await form.getAttribute("data-folder-check-completions"))).toBe(completedBefore + 1);
+    await expect(form.locator(".launch-composer-folder-problem"), "the stale missing-folder response must not mark /tmp").toHaveCount(0);
+    second.release();
+    await expect.poll(async () => Number(await form.getAttribute("data-folder-check-completions"))).toBe(completedBefore + 2);
+    await expect(form.getByLabel("folder", { exact: true })).not.toHaveAttribute("aria-invalid", "true");
+  } finally {
+    first.release();
+    second.release();
+    await stop();
+  }
+});
+
+/** Permission and busy errors are inconclusive, even though the request
+ * failed. Calling a folder missing in those cases would invent a host fact. */
+test("an inconclusive folder check shows no warning", async ({ page }) => {
+  const answer = routeGate();
+  let admitted = false;
+  const stop = await drainedRoute(page, "**/api/browse-directory", async route => {
+    const input = route.request().postDataJSON();
+    if (!input.membership_only) return route.continue();
+    if (input.cwd === "/tmp") {
+      admitted = true;
+      await answer.wait();
+      await checkReply(route, "working directory is not usable: /tmp (permission denied)");
+    } else await checkReply(route);
+  });
+  try {
+    await page.goto("/");
+    const form = await fillCreateForm(page, { cwd: "/tmp", invocation: "true", title: "inconclusive-check" });
+    await expect.poll(() => admitted, { message: "hold the check for the actual /tmp draft" }).toBe(true);
+    const before = Number(await form.getAttribute("data-folder-check-completions"));
+    answer.release();
+    await expect(form).toHaveAttribute("data-folder-check-completions", String(before + 1));
+    await expect(form.locator(".launch-composer-folder-problem")).toHaveCount(0);
+    await expect(form.getByLabel("folder", { exact: true })).not.toHaveAttribute("aria-invalid", "true");
+  } finally {
+    answer.release();
+    await stop();
+  }
 });
 
 /**

@@ -2774,6 +2774,95 @@ pub(super) fn CreateSessionForm(
     ));
     // The last launch refusal that was about the folder; see `FolderRefusal`.
     let mut folder_refusal = use_signal(|| None::<FolderRefusal>);
+    // Automatic inspection has its own authority and generation, independent
+    // of explicit Browse. Keep an admitted request alive across resource
+    // restarts: cancellation of a debounce must not admit overlapping reads.
+    let mut folder_check_generation = use_signal(|| 0_u64);
+    let mut folder_check_live = use_signal(|| None::<(BrowseAuthority, String)>);
+    let mut folder_check_requested = use_signal(|| None::<BrowseAuthority>);
+    let mut folder_check_pending = use_signal(|| false);
+    let mut folder_check_result = use_signal(|| None::<(BrowseAuthority, FolderProblem, String)>);
+    let mut folder_check_completions = use_signal(|| 0_u64);
+    let mut proposed_check = selected
+        .and_then(|id| {
+            hosts
+                .iter()
+                .find(|host| host.id == id && host.phase.is_none())
+        })
+        .filter(|_| !destination_draft().is_managed())
+        .and_then(|host| {
+            let _ = (cwd(), cwd_edited());
+            Some((
+                BrowseAuthority {
+                    target: destination_now.clone()?,
+                    connection: connection_claim(&hosts, host.id),
+                    cwd: draft.snapshot().submitted_cwd(),
+                    generation: *folder_check_generation.peek(),
+                },
+                host.label(),
+            ))
+        });
+    if *folder_check_live.peek() != proposed_check {
+        let generation = folder_check_generation.peek().wrapping_add(1);
+        folder_check_generation.set(generation);
+        if let Some((authority, _)) = &mut proposed_check {
+            authority.generation = generation;
+        }
+        folder_check_live.set(proposed_check);
+    }
+    let folder_check_base = base.clone();
+    let _folder_check = use_resource(move || {
+        let wanted = folder_check_live();
+        let pending = folder_check_pending();
+        let base = folder_check_base.clone();
+        async move {
+            let Some((authority, host_label)) = wanted.filter(|_| !pending) else {
+                return;
+            };
+            if folder_check_requested.peek().as_ref() == Some(&authority) {
+                return;
+            }
+            crate::reader::sleep_ms(150).await;
+            if folder_check_pending()
+                || folder_check_live.peek().as_ref().map(|(claim, _)| claim) != Some(&authority)
+            {
+                return;
+            }
+            folder_check_pending.set(true);
+            folder_check_requested.set(Some(authority.clone()));
+            spawn(async move {
+                let response = api::check_directory(
+                    &base,
+                    authority.target.host,
+                    &authority.cwd,
+                    authority.connection,
+                )
+                .await;
+                let current = folder_check_live
+                    .peek()
+                    .as_ref()
+                    .map(|(claim, _)| claim.clone());
+                if browse_reply_is_current(
+                    &current,
+                    &authority,
+                    live_destination(),
+                    live_browse_connection(),
+                    &draft.snapshot().submitted_cwd(),
+                ) {
+                    // Only definitive missing/non-directory answers warn before
+                    // Launch. Permissions, busy workers and timeouts say nothing.
+                    let problem = response
+                        .err()
+                        .and_then(|message| FolderProblem::recognize(&message))
+                        .filter(|problem| *problem != FolderProblem::Unusable);
+                    folder_check_result
+                        .set(problem.map(|problem| (authority, problem, host_label)));
+                }
+                folder_check_completions.with_mut(|count| *count = count.wrapping_add(1));
+                folder_check_pending.set(false);
+            });
+        }
+    });
     let folder_notice = use_memo(move || {
         // Managed mode displays its preview, while the ordinary folder editor
         // remains dormant in the draft. Its old refusal cannot describe that
@@ -2781,14 +2870,27 @@ pub(super) fn CreateSessionForm(
         if destination_draft().is_managed() {
             return None;
         }
-        let refusal = folder_refusal()?;
         // `snapshot()` deliberately subscribes to nothing; these field memos
         // are what make an edit of the folder re-check the marking.
         let _ = (cwd(), cwd_edited());
-        let current = create_target().as_ref() == Some(&refusal.target)
+        let path = draft.snapshot().submitted_cwd();
+        if let Some(refusal) = folder_refusal()
+            && live_destination().as_ref() == Some(&refusal.target)
             && live_browse_connection() == refusal.connection
-            && draft.snapshot().submitted_cwd() == refusal.cwd;
-        current.then(|| refusal.problem.notice(&refusal.host))
+            && path == refusal.cwd
+        {
+            return Some(refusal.problem.notice(&refusal.host));
+        }
+        let (authority, problem, host) = folder_check_result()?;
+        let current = folder_check_live().map(|(claim, _)| claim);
+        browse_reply_is_current(
+            &current,
+            &authority,
+            live_destination(),
+            live_browse_connection(),
+            &path,
+        )
+        .then(|| problem.notice(&host))
     });
     // History is shared helm state. Its revision may change because another
     // browser launched a session, so its resource must react both to the
@@ -5356,6 +5458,8 @@ pub(super) fn CreateSessionForm(
             "data-browse-live-connection": "{live_browse_connection().unwrap_or_default()}",
             "data-browse-activation-attempts": "{browse_activation_attempts}",
             "data-browse-reply-completions": "{browse_reply_completions}",
+            "data-folder-check-completions": "{folder_check_completions}",
+            "data-folder-check-pending": "{folder_check_pending}",
             "data-history-activation-attempts": "{history_activation_attempts}",
             "data-remembered-destination-valid": "{remembered_destination_valid}",
             role: "dialog",
