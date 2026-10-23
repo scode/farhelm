@@ -84,3 +84,69 @@ off for a kernel-chosen port, the rebind that makes "never the remote number" ho
 uses the bound port, and a changelog entry that states what was exposed and the caveat above. Not followed: folding one
 existing IPv6 check into the new helper (the standard library's version reads clearer), and the socket-option test above
 (size gate).
+
+### Landing
+
+Landed as #2630 and #2635, merged bottom-up, with the content the report describes and one documentation fix described
+below. It was the first of three plans in this landing round, before triage-docs-oct22 and resume-target-fixes-oct22.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained sign-in-preservation-sweep (a browser that signs in again reloads the page, and a
+failed GUI preference save is reported and discarded) and two TODO.md commits. A fresh-context reviewer and I read this
+plan against them and against the other two plans in the round:
+
+- The sweep changes only the GUI's preference saves, sign-in and activity times. The reason this plan gives for never
+  taking the remote port (a browser's sign-in to a browser helm lives at that helm's own address, `127.0.0.1:7433`)
+  still holds after it: the sweep changed how a browser recovers from a refused sign-in, not where the sign-in is kept.
+- No text anywhere still describes the old behavior of preferring the remote port number: SPEC.md, SPEC_impl.md, the
+  warning dialog and the docs pages are updated, and no browser test ever described it.
+- The tunnel offer's own check of a link only refuses malformed links, so the wider local-network classification does
+  not change which links offer a tunnel. The web client has no link classification of its own that would need the same
+  change.
+- The plan edits the existing changelog entry for the tunnel warning rather than adding one, which is right: that entry
+  has not shipped yet. The link classification entry is new and fixes behavior that shipped in earlier releases.
+- The other two plans in the round touch neither tunnels nor links.
+
+#### Fixes made during the landing
+
+- The "Open a remote localhost link" section of the "Work in a session" docs page gained one sentence, in #2635: the
+  port on the Mac is one the Mac picks, never the host's port number, so an app that puts its own `localhost` address
+  and port into links or redirects does not reach the tunnel that way, and should be opened through the tunnel's link.
+  The changelog entry already gave this caveat; the page, which never promised the same port, did not, so a user who
+  hits it had nowhere to look it up.
+
+#### Checks
+
+The round's three plans change the helm's link classification and localhost tunnel port, the supervisor's Restart with
+and its checks of which Grok or OMP process reports a conversation, and specification text. This round ran the helm's
+and the supervisor's own tests, the browser test for clicking links in a terminal, and the source checks, on all three
+plans stacked together on this round's main (which already held sign-in-preservation-sweep). Everything below except the
+last item ran before the round's documentation fixes (in tunnel-port-and-link-ranges and resume-target-fixes-oct22),
+which change only three docs pages and one changelog fragment:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`
+  (tunnel-port-and-link-ranges removes a sentence from the desktop-only tunnel warning), the isolated test-sleep check,
+  `dprint check` on the changed Markdown files, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py` (one warning, about a citation main already had), the docs website build, the
+  workspace debug build and the UI's release web build: all passed.
+- `cargo nextest run -p farhelm-helm` through the test recorder with pinned nextest and tmux, four slots, no retries,
+  run `57e5a94a-29d0-4261-b9a5-697446134c41`: 1291 passed. This covers the link classification and tunnel tests
+  tunnel-port-and-link-ranges added or changed, and the rest of the helm.
+- `cargo nextest run -p farhelm-supervisor --lib`, same recorder settings, run `8604dc02-2297-49e6-a824-76be3cebf57d`:
+  1258 passed, 4 skipped by design (helper entries that only run as child processes of other tests). This includes the
+  Restart with tests that drive a real restart and every Grok and OMP process check.
+- `npx playwright test tests/terminal-link-clicks.spec.ts` in `e2e/` on Chromium and WebKit, three workers each with its
+  own helm and supervisors, no retries, run `6f350fd5-b9c0-42d3-a88a-f098d376cce2`: 30 passed.
+- After the documentation fixes: the docs website build, `dprint check` on the changed Markdown files, the changelog
+  format check and the instructions check passed again.
+- Reused: none. Skipped: the rest of the Rust workspace (the farhelm binary's end-to-end tests and the UI tests; no code
+  outside the helm and supervisor changed apart from removing one sentence from a dialog), the rest of the browser suite
+  (only link classification reaches the browser), the doctests (no documentation example changed), the desktop smoke
+  test, the native Mac app (not runnable here) and the installer (unchanged).
+
+The report's checks ran the helm's link and tunnel tests and the website build; this round ran the whole helm crate, the
+terminal link-click browser test on both engines and the website build on the plan as it landed. Nothing in the
+executor's report became untrue at landing.
