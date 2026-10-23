@@ -84,6 +84,11 @@ pub(crate) fn ApprovalCards() -> Element {
     let mut armed = use_signal(|| true);
     let mut shown = use_signal(|| (Vec::<String>::new(), None::<String>));
     let mut expanded = use_signal(|| None::<String>);
+    // The generation only times the 700 ms pause SPEC.md names; what an
+    // answer acts on is the request id captured with its card, which the
+    // helm binds. It is not a prompt opening, so it deliberately stays
+    // outside `ops::ConfirmSlot` (SPEC_impl.md, "GUI: Dioxus", the
+    // paragraph "Answers bind to what was drawn").
     let mut arm_generation = use_signal(|| 0_u64);
 
     let read_base = base.clone();

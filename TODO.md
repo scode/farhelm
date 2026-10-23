@@ -60,51 +60,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
   Plan: `plans/queue/sign-in-preservation-sweep.md`.
 
-- **Bind GUI answers to what the user saw.** Review keeps finding the same class of GUI bug: a button, key or gesture
-  handler acts on whatever state is current when it runs, not on what was on screen when the user acted. Each instance
-  is a narrow timing window that nobody has reproduced, but the guards involved are safety ones (YOLO questions,
-  destructive confirmations, link destination disclosure), and each surface has had to be fixed by hand. Some surfaces
-  already bind correctly (the sidebar answers the question it rendered through `answer_stamped` in
-  `crates/farhelm-ui/src/replace.rs`; launcher openings carry an `opening_generation`; the Guarded launcher answer has a
-  `GuardedSubmitStamp`; the trash dialog's confirmation bands were bound in #2171), but each one invented its own stamp,
-  and the act-on-current variant stays the easiest thing to write, so new surfaces keep missing it. The goal is to make
-  binding structural, so that the obvious way to write a handler is the correct one. Here's the TLDR of the parts:
-
-  - A shared primitive in `farhelm-ui` for "answer exactly what was shown". Showing a question, confirmation or
-    destructive prompt mints a token that captures what it displays: which question opening, which target (source
-    session, hosts, selection), and any precondition the wording promises. Buttons capture the token at render, and the
-    answer API takes it and refuses (does nothing, or asks again) when the live state no longer matches. The
-    act-on-current entry points (such as `answer_current` and `cancel_current` in `replace.rs`) go away, so they cannot
-    be reached for. Migrate the existing ad hoc stamps onto it.
-  - Destructive preconditions travel from the click to the request. Where the launcher answers before it can submit (a
-    Guarded answer waiting on a checkout preview), the precondition the user saw is captured with the pending submit and
-    sent as captured, never recomputed from the live listing at send time, as SPEC.md's Replace with section already
-    requires.
-  - Link-cover registration is declarative. Today the link disclosure's cover check in
-    `crates/farhelm-ui/assets/terminal.js` (`linkCoveringRects`) measures a hand-kept selector list, which is how the
-    quick-launch sequence pill was missed. Floating surfaces instead mark themselves as covers (a class or data
-    attribute), and the check measures every marked surface.
-  - Transient input state is retired when its owner stops observing. A held link press is cleared when the terminal
-    tears down for reconnect, and a captured key snapshot (quick-launch sequence Enter bindings) is consumed or
-    discarded by exactly the dispatch it was captured for, including when that dispatch is refused.
-  - A rule, written down: SPEC_impl.md states the principle that a confirmation or answer binds to what it displayed,
-    and the review instructions (`review_feedback_queue/.agents/recording.md` and the reviewer prompt it carries) tell
-    reviewers to flag a handler that reads live state for a user-confirmed action.
-
-  Scope is the GUI. Helm and supervisor races (a stale create retry deleting a restarted session, say) are a different
-  shape and stay out. SPEC.md's 2026-10-10 acceptance of sub-second races does not change; this makes the explicit
-  guards it preserves hold by construction instead of surface by surface.
-
-  This entry owns six review findings triaged on 2026-10-21, which left the review queue when they were folded in here.
-  Their `TRIAGE_OUTCOMES.md` entries hold the evidence and the fix each needs, and the work is not done until every one
-  is fixed, each with the regression test its entry names: `header-yolo-answer-may-cross-question-opening.md`,
-  `superseding-launcher-may-retain-old-replace-source.md`, `guarded-preview-widens-source-deletion-consent.md` (a
-  confirmed spec violation that can delete a running session, so build it early rather than last),
-  `launch-pill-can-cover-link-disclosure.md`, `restored-link-press-misses-intervening-drag.md` and
-  `refused-sequence-displaces-later-binding-snapshots.md`.
-
-  Plan: `plans/queue/bind-gui-answers.md`.
-
 - **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
   indicates that one of those models is being used anyway.
 
