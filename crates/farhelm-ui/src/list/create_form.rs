@@ -2922,6 +2922,9 @@ pub(super) fn CreateSessionForm(
     // earlier. `launch-composer-launch-context` beside it is unchanged
     // either way — the host/folder summary is equally true of both verbs.
     let submit_verb = if is_replace_with { "replace" } else { "launch" };
+    // A recent setup's accessible name replaces its visible content, hint
+    // included, so in Replace with the name carries the verb itself.
+    let recent_name_prefix = if is_replace_with { "replace: " } else { "" };
     // What pressing "replace" stops, drawn from one render: the warning under
     // the button, and the precondition a press or answer drawn by this render
     // passes to the submit (see `replace_with_warning`).
@@ -5641,7 +5644,14 @@ pub(super) fn CreateSessionForm(
                                     // truncate. The punctuated string also keeps
                                     // adjacent spans from running together for
                                     // assistive technology.
-                                    aria_label: "{display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label} · {display_peer(&summary)}",
+                                    // In Replace with, Enter here submits the
+                                    // replace, and this name stands in for the
+                                    // row's visible "⏎ replace" hint, so it
+                                    // leads with the verb as the button's own
+                                    // name does; the row also points at the
+                                    // same warning the replace button does.
+                                    aria_label: "{recent_name_prefix}{display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label} · {display_peer(&summary)}",
+                                    aria_describedby: replace_warning.as_ref().map(|_| REPLACE_WARNING_ID),
                                     onclick: {
                                         let entry = entry.clone();
                                         move |_| {
@@ -5729,7 +5739,7 @@ pub(super) fn CreateSessionForm(
                                             }
                                         }
                                     }
-                                    span { class: "launch-composer-recent-hint", "⏎ launch" }
+                                    span { class: "launch-composer-recent-hint", "⏎ {submit_verb}" }
                                 }
                             }
                             }

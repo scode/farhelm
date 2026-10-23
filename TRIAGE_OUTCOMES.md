@@ -18539,7 +18539,8 @@
 - Completion criteria: in Replace with, a recent row's hint uses the launcher's replace wording ("⏎ replace") and the
   rows point screen readers at the replace warning as the replace button does; a browser assertion covers it. Size gate:
   about 100 lines as above. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/session-view-fixes-oct22.md`.
+- Execution: `complete` within the size gate; bookmark `plan/session-view-fixes-oct22/02-recent-row-replace-wording`, jj
+  change `wlnwplkt`; PR https://github.com/scode/farhelm/pull/2653/changes.
 
 ## commands-setting-help-omits-delete.md
 
