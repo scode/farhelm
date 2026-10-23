@@ -190,6 +190,21 @@ fn git(cwd: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap().trim().to_owned()
 }
 
+/// Wait for the owner fixture to announce its unrelated `sleep 300` child,
+/// and return that pid.
+///
+/// The owner-death tests arm cleanup of this child before waiting for their
+/// other readiness files: if a later wait times out, the owner is SIGKILLed
+/// without running its own cleanup, and only the caller's guard reaps it.
+async fn await_unrelated_child(fixture: &Fixture) -> i32 {
+    let path = fixture.root.join("unrelated");
+    until("owner announces the unrelated child", || {
+        fs::read_to_string(&path).is_ok_and(|text| text.parse::<i32>().is_ok())
+    })
+    .await;
+    fs::read_to_string(&path).unwrap().parse().unwrap()
+}
+
 /// All process/file polling names a positive oracle and has one shared budget.
 /// Diagnostics remain inside the owning temporary fixture's lifetime.
 async fn until(label: &str, mut ready: impl FnMut() -> bool) {
@@ -601,11 +616,14 @@ async fn spare_builder_owner_sigkill_retires_guard_without_writer_inheritance() 
         .stderr(Stdio::null())
         .stdin(Stdio::null());
     let mut owner = Owned(owner_command.spawn().unwrap());
+    // Own the unrelated `sleep 300` before waiting for anything else: a later
+    // readiness timeout drops `owner` with SIGKILL, which skips the owner's own
+    // cleanup of that child, so only this guard would still reap it.
+    let unrelated = await_unrelated_child(&fixture).await;
+    let _unrelated = Indirect(Some(unrelated));
     until("owner and guarded rc announce exact child ids", || {
-        fs::read_to_string(fixture.root.join("unrelated"))
-            .is_ok_and(|text| text.parse::<i32>().is_ok())
-            && fs::read_to_string(fixture.root.join("pids"))
-                .is_ok_and(|text| text.split_whitespace().count() == 3)
+        fs::read_to_string(fixture.root.join("pids"))
+            .is_ok_and(|text| text.split_whitespace().count() == 3)
     })
     .await;
     let pids: Vec<i32> = fs::read_to_string(fixture.root.join("pids"))
@@ -613,11 +631,6 @@ async fn spare_builder_owner_sigkill_retires_guard_without_writer_inheritance() 
         .split_whitespace()
         .map(|p| p.parse().unwrap())
         .collect();
-    let unrelated: i32 = fs::read_to_string(fixture.root.join("unrelated"))
-        .unwrap()
-        .parse()
-        .unwrap();
-    let _unrelated = Indirect(Some(unrelated));
     let mut descendant = Indirect(Some(pids[2]));
     assert!(!terminated(pids[1]) && !terminated(pids[2]) && !terminated(unrelated));
     assert!(
@@ -675,13 +688,14 @@ async fn spare_builder_owner_sigkill_after_rc_retires_cache_fetch() {
         .stderr(Stdio::null())
         .stdin(Stdio::null());
     let mut owner = Owned(owner_command.spawn().unwrap());
+    // As in the previous test: own the unrelated child before the other waits.
+    let unrelated = await_unrelated_child(&fixture).await;
+    let _unrelated = Indirect(Some(unrelated));
     until("actual helper reaches held cache fetch after rc", || {
         fs::read_to_string(fixture.root.join("fetch-pids"))
             .is_ok_and(|text| text.split_whitespace().count() == 2)
             && fs::read_to_string(fixture.root.join("guard"))
                 .is_ok_and(|text| text.trim().parse::<i32>().is_ok())
-            && fs::read_to_string(fixture.root.join("unrelated"))
-                .is_ok_and(|text| text.parse::<i32>().is_ok())
     })
     .await;
     let pids: Vec<i32> = fs::read_to_string(fixture.root.join("fetch-pids"))
@@ -694,11 +708,6 @@ async fn spare_builder_owner_sigkill_after_rc_retires_cache_fetch() {
         .trim()
         .parse::<i32>()
         .unwrap();
-    let unrelated = fs::read_to_string(fixture.root.join("unrelated"))
-        .unwrap()
-        .parse::<i32>()
-        .unwrap();
-    let _unrelated = Indirect(Some(unrelated));
     let mut fetch = Indirect(Some(pids[0]));
     let mut helper = Indirect(Some(pids[1]));
     assert!(
