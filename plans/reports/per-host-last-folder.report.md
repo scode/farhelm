@@ -99,3 +99,57 @@ a host round trip, a stale installation check left behind by a re-seed, and an o
 later rounds were narrower interactions with permission Undo and Clone's host binding, ending in a design where a
 permission Undo restores the folder default as it stood when its warning appeared. After the third corrective round, the
 scope reassessment the plan requires (a fresh review on Opus 5.5, the executing model) found no unnecessary mechanism.
+
+### Landing
+
+Landed as #2669, with the content the report describes and no changes. It was the second of two plans in this landing
+round, after uninstall-guards-oct22.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained alias-in-add-host (adding a host that is already listed is refused, and the add host
+dialog takes an alias), and uninstall-guards-oct22 (the helm's uninstall and setup safeguards) landed just before it in
+this round. A fresh-context reviewer and I read this plan against both: they change how hosts are added, set up and
+uninstalled, and this plan changes only which directory the session launcher offers for each host, so they do not
+interact. Nobody had built the GUI with both this plan and the add host dialog's new alias field before; this round's
+web-target lint, release web build and browser specs did.
+
+#### Checks
+
+This round landed two plans: the helm's uninstall and setup safeguards (uninstall-guards-oct22), and the session
+launcher's per-host directory (per-host-last-folder). The first touches the same setup code as alias-in-add-host, which
+landed on main just before this round, and neither executor's checks ran with alias-in-add-host on main. So this round
+ran the whole Rust workspace, the launcher's browser specs and the provisioning browser spec on both plans stacked
+together on this round's main. The first three items below ran before the landing's docs fixes to uninstall-guards-oct22
+(three paragraphs on two docs pages); the website build ran again after them:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on the changed Markdown files, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py` (one warning, about a citation main already had), the docs website build, the
+  workspace debug build, the UI's release web build and `scripts/check-desktop-assets.sh`: all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  slots, no retries, run `0ac84ed9-860d-47ec-ba61-0c1a1a4f516c`: 4325 passed, 40 skipped by design (helper entries that
+  only run as child processes of other tests, and tests that need a real signed-in Claude or Codex). This includes the
+  helm's setup and uninstall tests, and the tests that set up, update and uninstall Farhelm on this machine over ssh,
+  which the uninstall-guards-oct22 report lists as skipped; they ran and passed here.
+- `npx playwright test` in `e2e/` on Chromium and WebKit for the nine launcher spec files the per-host-last-folder
+  executor ran (`yolo-guard`, `replace`, `terminal`, `destination-authority`, `quick-launch`, `sidebar`,
+  `terminal-create-idempotency`, `clone`, `permission-switch`) and `provisioning`, three workers each with its own helm
+  and supervisors, no retries, run `0c90ae2b-16a2-4053-95db-b34184859aed`: 779 passed, 1 failed. The failure was
+  WebKit's "offer retirement releases only its owner: waiting behind another host" in `provisioning.spec.ts`: clicking a
+  host menu's uninstall item kept finding it detached from the page until the test timed out. The test answers the
+  uninstall requests itself, so the helm's uninstall planning these plans change never runs in it. Ten WebKit repeats on
+  this stack (run `a50fb0eb-6a64-46bb-9850-427d9c965492`) failed once, and thirty on main without the plans, with main's
+  own binaries and web build (run `0964225d-00ee-4deb-9daa-5c0227ae3bdf`), failed 7 times: six the same way, and one a
+  step earlier, while the host menu was still opening. It is a failure main already has; it is recorded in FLAKES.md,
+  with a Deflake entry in TODO.md, in draft PR #2673.
+- Reused: none. Skipped: the rest of the browser suite (the launcher change is covered by its specs above, and the
+  uninstall changes have no browser-side code), the doctests (no documentation example changed), the desktop smoke test,
+  the native Mac app (not runnable here), the installer (unchanged) and the macOS-only installed uninstall suite (not
+  runnable here; these changes are in the helm's uninstall from the hosts panel, not the installed uninstaller).
+
+The report's checks ran the launcher's unit tests and the launcher's browser specs, some before its final rebase; this
+round ran the whole Rust workspace and the same nine browser spec files on both engines on the plan as it landed.
+Nothing in the executor's report became untrue at landing.
