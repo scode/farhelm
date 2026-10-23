@@ -90,10 +90,9 @@
 //!   failing in ways nothing explains.
 //! - `auth`: the browser's full-page bootstrap-token exchange and the desktop
 //!   webview's IPC exchange (PLAN_M7.md items 3 and 8). The browser exchange
-//!   remounts the authenticated component tree after a credential change so
-//!   every reader starts again from a clean state; a desktop re-sign-in runs
-//!   underneath the live tree instead, so an action in flight can still
-//!   report its outcome.
+//!   reloads the page once a new token is accepted, so every reader starts
+//!   again from what the helm reports. The desktop app never signs in again,
+//!   so its tree stays mounted.
 //! - `webview_watchdog`: the desktop eval-bridge heartbeat (PLAN_desktop_
 //!   web_bug_triage.md) — a pure three-state health machine plus one
 //!   desktop-only probe loop that turns a dead bridge (MT-5 class) into a
@@ -1686,9 +1685,6 @@ fn AppBody() -> Element {
     use_context_provider(|| {
         workspace_trust::OccurrenceDismissals(Signal::new(std::collections::HashSet::new()))
     });
-    // Authentication recovery remounts PreferencesGate, but must not decide
-    // whether to introduce the app a second time in the same page load.
-    use_context_provider(|| welcome::WelcomeDecided(Signal::new(false)));
     // A single one-shot bridge lets the keyed session view request the list's
     // existing clone composer without introducing a registry or context.
     let prefill_request = use_signal(|| None::<HeaderPrefillRequest>);
@@ -1781,9 +1777,9 @@ fn AppBody() -> Element {
             // The whole authenticated tree sits behind the one read of the
             // helm's shared preference (see `PreferencesGate`): the list
             // must not mount before the remembered order and selection
-            // are in hand. Inside the token branch, deliberately, so a
-            // token exchange remounts the gate and re-reads with the new
-            // credential — the read is protected like every other.
+            // are in hand. Inside the token branch, deliberately, so the
+            // token form replaces the gate while a credential is refused —
+            // the read is protected like every other.
             PreferencesGate {
                     // Inside the gate but outside the match below, for a related
                 // reason: the invalidation feed is the whole page's channel,
@@ -1791,10 +1787,9 @@ fn AppBody() -> Element {
                 // down and re-handshaked on every selection switch — a window
                 // with no live updates and a fallback poll spinning back up
                 // to cover it, several times a working hour. The gate above
-                // it remounts only when the token branch does (a browser
-                // credential exchange), which is when the feed had to
-                // re-handshake anyway; a desktop re-sign-in leaves it mounted
-                // and the feed re-handshakes through its own retry ladder.
+                // it unmounts only for the browser's token form, after which
+                // the page reloads; on the desktop it stays mounted, and the
+                // feed re-handshakes through its own retry ladder.
                 // It renders nothing (PLAN_M6_75.md item 6); what it
                 // produces is the revision counter each page re-reads on.
                 feed::FleetFeed {}
@@ -2015,8 +2010,8 @@ fn AppBody() -> Element {
 /// stalled preference endpoint costs the remembered values, never a
 /// minute of blank page. A recognized 401 takes an engine-specific path:
 /// in the browser `api::send` raises the token prompt and `AppBody`
-/// unmounts this gate in favor of it, and the gate remounts after recovery
-/// and re-reads — and `api::seed_with_local_changes` overlays any choice
+/// unmounts this gate in favor of it until a new token reloads the page —
+/// and on each mount `api::seed_with_local_changes` overlays any choice
 /// made in THIS client whose write never got through, so recovery cannot
 /// roll the current client back to the helm's older row. The desktop app
 /// never signs in again (its own credentials cannot be revoked; see
@@ -2035,7 +2030,6 @@ fn PreferencesGate(children: Element) -> Element {
     tunnels::use_controller();
     let mut loaded = use_signal(|| false);
     let mut welcome_on_load = use_context_provider(|| welcome::WelcomeOnLoad(Signal::new(false)));
-    let mut welcome_decided = use_context::<welcome::WelcomeDecided>();
     // Retained JS terminal islands outlive tab renders. Publish one page-wide
     // choice from the authenticated shared snapshot; every gesture reads it
     // afresh, so changing settings never remounts or reattaches a terminal.
@@ -2074,12 +2068,9 @@ fn PreferencesGate(children: Element) -> Element {
             let seed = api::seed_with_local_changes(&base, seed);
             // A failed read also yields defaults, but those defaults are not
             // evidence that this helm's welcome has never been dismissed.
-            if !*welcome_decided.0.peek() && !*auth::TOKEN_REQUIRED.peek() {
-                welcome_decided.0.set(true);
-                welcome_on_load
-                    .0
-                    .set(read_succeeded && seed.welcome_seen != Some(true));
-            }
+            welcome_on_load
+                .0
+                .set(read_succeeded && seed.welcome_seen != Some(true));
             preferences.0.set(seed);
             loaded.set(true);
         }

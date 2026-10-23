@@ -15,9 +15,8 @@ import { currentStackSlot } from "../stack-slots";
 const GET_STARTED_URL = "https://farhelm.io/docs/get-started/first-session/";
 let helmBuild: string;
 
-// Reset every shared preference, not only the welcome: the sign-in recovery
-// case writes a list order through the real helm, which would otherwise leak
-// into every later spec sharing this helm, and it assumes the default order.
+// Reset every shared preference, not only the welcome, so a case's writes
+// through the real helm cannot leak into later specs sharing this helm.
 test.beforeEach(async ({ page, request }) => {
   await resetPreferences(request);
   await patchPreferences(request, { welcome_seen: false });
@@ -102,60 +101,6 @@ for (const failure of ["refused", "timed out"] as const) {
   });
 }
 
-/** Authentication recovery reseeds preferences but cannot reconsider a load
- * whose authenticated read already failed. Only the targeted list response
- * and token exchange are fabricated; the helm row remains genuinely unseen.
- */
-test("welcome suppression survives sign-in recovery in the same page", async ({ page }) => {
-  const secret = await page.context().storageState().then(state => state.origins
-    .flatMap(origin => origin.localStorage).find(item => item.name === DEVICE_SECRET_KEY)?.value);
-  expect(secret, "premise: the harness supplies a device identity").toBeTruthy();
-  let reads = 0;
-  await page.route("**/api/preferences", async route => {
-    if (route.request().method() === "GET" && ++reads === 1) {
-      await route.fulfill({ status: 500, headers: { "x-farhelm-build": helmBuild }, body: "read unavailable" });
-    } else await route.continue();
-  });
-  let refuse = false;
-  await page.route("**/api/sessions?**", async route => {
-    if (refuse) {
-      refuse = false;
-      await route.fulfill({ status: 401, headers: { "x-farhelm-build": helmBuild }, contentType: "application/json",
-        body: JSON.stringify({ code: "device_auth_required", error: "sign in again" }) });
-    } else await route.continue();
-  });
-  await page.route("**/api/auth/token", route => route.fulfill({ status: 200,
-    headers: { "x-farhelm-build": helmBuild }, contentType: "application/json",
-    body: JSON.stringify({ device_secret: secret }) }));
-  await page.goto("/");
-  await expect(page.locator(".new-session-button")).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toHaveCount(0);
-  // The failed seed, then automatic selection's own reread before it picks a
-  // session; that later successful read must not reconsider this load's welcome.
-  await expect.poll(() => reads).toBe(2);
-  const sort = page.locator(".sort-select");
-  await expect(sort).toBeVisible();
-  await expect(sort).toBeEnabled();
-  await expect(sort).toHaveValue("activity");
-  refuse = true;
-  // The 401 intentionally unmounts this control during its change event.
-  // WebKit's selectOption can retry after that expected detachment, waiting
-  // forever for a control now replaced by sign-in. Dispatch once, then use
-  // the auth surface as the completion oracle rather than selection stability.
-  await sort.evaluate(node => {
-    (node as HTMLSelectElement).value = "title";
-    node.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-  await expect(page.locator(".auth-page")).toBeVisible();
-  await page.locator(".auth-token-input").fill("AAAAAAAAAAAAAAAAAAAAAA");
-  await page.locator(".auth-submit").click();
-  await expect(page.locator(".new-session-button")).toBeVisible();
-  // Exactly one reseed after recovery.
-  await expect.poll(() => reads).toBe(3);
-  await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toHaveCount(0);
-  await expect(page.locator(".build-skew")).toHaveCount(0);
-});
-
 /** A recognized startup auth refusal is not an authenticated welcome decision.
  * Once sign-in completes, the first successful seed still offers the card.
  */
@@ -178,7 +123,7 @@ test("welcome waits for initial sign-in before deciding", async ({ page }) => {
   await page.locator(".auth-token-input").fill("AAAAAAAAAAAAAAAAAAAAAA");
   await page.locator(".auth-submit").click();
   await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toBeVisible();
-  // The refused read, the one reseed after sign-in, and automatic selection's
+  // The refused read, the reloaded page's read after sign-in, and automatic selection's
   // own reread before it picks a session.
   await expect.poll(() => reads).toBe(3);
 });

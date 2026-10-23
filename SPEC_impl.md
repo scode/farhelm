@@ -187,13 +187,11 @@ client's next load. This migration prevents older helms from opening the databas
 
 The preferences gate exposes its successful-read, unseen decision before mounting the authenticated UI. AppBar seeds the
 welcome's open state once from it, separately from later preference changes; defaults after a failed or timed-out read
-never count as unseen evidence. A page-owned consumed-decision flag survives authentication remounts; an initial
-authentication refusal does not consume it before sign-in finishes. First-open dismissal explicitly restores the
-selected, revealed terminal's focus, because its reveal behind a modal deliberately withholds that handoff. The card
-uses the existing framed modal and isolation helper, with every close path available regardless of persistence.
-First-open dismissal writes through the normal per-field preference queue; help-menu reopening writes nothing. AppBar
-owns both welcome and feedback so their handoff releases isolation and replaces one modal with the other without a
-competing focus-return task.
+never count as unseen evidence. First-open dismissal explicitly restores the selected, revealed terminal's focus,
+because its reveal behind a modal deliberately withholds that handoff. The card uses the existing framed modal and
+isolation helper, with every close path available regardless of persistence. First-open dismissal writes through the
+normal per-field preference queue; help-menu reopening writes nothing. AppBar owns both welcome and feedback so their
+handoff releases isolation and replaces one modal with the other without a competing focus-return task.
 
 Helm schema 56 adds nullable `preferences.name_session_on_quick_launch`. Unset and true enable quick-launch naming; only
 false disables it, so upgraded helms have the same default as fresh ones. The Settings switch under sessions, beside
@@ -406,13 +404,9 @@ one.
 
 Ages advance on a dedicated 30-second tick — one page-wide signal, written by a component mounted beside the
 invalidation feed and read by the list and the open session's header. The listing's fallback poll was the obvious thing
-to reuse and is the wrong one: it runs only while the feed is DOWN, so on a healthy page it never fires at all. The
-signal outlives the component that writes it, so the component republishes the current time at MOUNT before starting its
-loop: it is unmounted and remounted whenever the authenticated tree is rebuilt, and without that first write the page
-would spend a full tick — or, after a reauthentication that followed a long idle, much longer — rendering ages against a
-reading from before the gap. The list formats each row's age itself and hands the row a finished string, which is what
-keeps the tick from re-rendering rows whose displayed age has not moved — an `8h` row survives sixty ticks comparing
-equal.
+to reuse and is the wrong one: it runs only while the feed is DOWN, so on a healthy page it never fires at all. The list
+formats each row's age itself and hands the row a finished string, which is what keeps the tick from re-rendering rows
+whose displayed age has not moved — an `8h` row survives sixty ticks comparing equal.
 
 Styling is the single hand-written application stylesheet, `crates/farhelm-ui/assets/app.css`: plain CSS, with no
 preprocessing and no framework transformation, though Dioxus still registers it as a packaged asset and decides its
