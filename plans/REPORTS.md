@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`codex-trust-prompts`](reports/codex-trust-prompts.report.md) landed 2026-10-18 in #2255, #2256: Codex, Muse and Pi workspace trust move from the launcher to per-agent Settings switches for managed checkouts
 - [`launcher-enter-focus`](reports/launcher-enter-focus.report.md) landed 2026-10-18 in #2267: dialogs keep focus on empty-space clicks, and Enter on the dialog itself presses its main button
 - [`host-terminal-colors`](reports/host-terminal-colors.report.md) landed 2026-10-18 in #2266, #2269: local host picks its icon and color, red for every host, optional host-colored terminal frame
 - [`agent-wrappers`](reports/agent-wrappers.report.md) landed 2026-10-18 in #2271, #2272: optional command prefix for agent launches, treated exactly like the real agent
