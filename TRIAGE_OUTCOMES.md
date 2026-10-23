@@ -18612,7 +18612,10 @@
 - Completion criteria: when the refused request retries an attempt whose outcome is unknown, the question says the
   launch may have started and does not offer the guarded answer; a test covers it. Size gate: about 100 lines as above.
   Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/session-view-fixes-oct22.md`.
+- Execution: `complete` at about 130 changed lines against the size gate of about 100 (the excess is the
+  review-requested browser test and the SPEC.md exception, not a larger fix); bookmark
+  `plan/session-view-fixes-oct22/04-uncertain-retry-no-guarded`, jj change `oxwqlzns`; PR
+  https://github.com/scode/farhelm/pull/2655/changes.
 
 ## terminal-reveal-takes-focus-from-plain-button.md
 
