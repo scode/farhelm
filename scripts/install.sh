@@ -1256,16 +1256,19 @@ EOF
       if [ -f "$contents/Versions/installed" ]; then
         IFS= read -r previous_installed <"$contents/Versions/installed" || :
       fi
-      # A version folder that already holds its farhelm is kept as it is:
-      # a running Farhelm may be using it, and a release's bytes do not
-      # change. Only a folder without one is replaced, and it is put back
-      # if the replacement fails, so a failure never loses a version.
+      # A version folder whose farhelm is byte for byte the verified
+      # download is kept as it is: a running Farhelm may be using it. Any
+      # other folder is replaced: one without a farhelm, and one whose
+      # farhelm differs, as a file left empty or cut short by a power loss
+      # does, which would otherwise pass every rerun as installed. The old
+      # folder is put back if the replacement fails, so a failure never
+      # loses a version.
       new_version_dir="$contents/Versions/$VERSION_NUM"
       # (A linked version folder never gets here: the run refused it above.)
-      if [ ! -f "$new_version_dir/farhelm" ] || [ -L "$new_version_dir/farhelm" ]; then
+      if [ -L "$new_version_dir/farhelm" ] || ! same_bytes "$STAGING_DIR/farhelm" "$new_version_dir/farhelm"; then
         stage_version_dir
         if [ -e "$new_version_dir" ] || [ -L "$new_version_dir" ]; then
-          mv "$new_version_dir" "$UPDATE_WORK/replaced-version" || bundle_fail "moving the incomplete $VERSION_NUM folder aside"
+          mv "$new_version_dir" "$UPDATE_WORK/replaced-version" || bundle_fail "moving the damaged $VERSION_NUM folder aside"
         fi
         if ! mv "$UPDATE_WORK/version" "$new_version_dir"; then
           if [ -e "$UPDATE_WORK/replaced-version" ] || [ -L "$UPDATE_WORK/replaced-version" ]; then
