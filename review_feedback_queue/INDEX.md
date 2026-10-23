@@ -8,16 +8,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`tunnel-can-take-standalone-helm-port.md`](tunnel-can-take-standalone-helm-port.md) — A localhost tunnel can serve a
-  remote page at the standalone helm's address and read the browser's helm credential; how often one is stored is
-  unverified.
-
 - [`offline-uninstall-retry-skips-session-check.md`](offline-uninstall-retry-skips-session-check.md) — An uninstall
   retry can stop unchecked live sessions when a custom command disappears after a failed removal; the conditional
   still-active-supervisor route is source-established.
-
-- [`tunnel-shadows-busy-wildcard-port.md`](tunnel-shadows-busy-wildcard-port.md) — A Mac tunnel may take a port a local
-  service serves on all addresses and divert its clients to the remote host; macOS bind behavior is unverified.
 
 - [`agent-stop-kills-shared-personal-tmux.md`](agent-stop-kills-shared-personal-tmux.md) — Stop or Restart kills the
   user's own tmux server or ssh master, with outside work in it, when the agent started it first; spec coverage is

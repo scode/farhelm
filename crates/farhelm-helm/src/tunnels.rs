@@ -14,7 +14,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use farhelm_proto::ErrorKind;
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpSocket};
 use tokio::sync::oneshot;
 use tokio::task::{JoinHandle, JoinSet};
 
@@ -226,12 +226,35 @@ fn same_owner(expected: &SessionClaim, current: &SessionClaim) -> bool {
             .is_none_or(|identity| current.identity.as_ref() == Some(identity))
 }
 
-/// Bind once to the requested IPv4 port, then ask the kernel for a free alternative.
-async fn bind_listener(port: u16) -> std::io::Result<TcpListener> {
-    match TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await {
-        Ok(listener) => Ok(listener),
-        Err(_) => TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await,
+/// Listen on a port the kernel picks on IPv4 loopback, never the remote
+/// service's port number, and without address reuse.
+///
+/// Reusing the remote number let a remote service on 7433 sit at
+/// `127.0.0.1:7433`, the standalone helm's default origin, where a browser
+/// that ever signed in to it keeps its helm credential; SPEC.md forbids a
+/// remote host reaching secrets on the helm's machine. And tokio's plain bind
+/// sets `SO_REUSEADDR` outside Windows, which macOS may honor for a
+/// `127.0.0.1` bind beside another program's wildcard listener on the same
+/// port, shadowing it. Reuse stays off for the kernel-chosen bind too: on
+/// BSD-derived kernels the search for a free port checks only for an exact
+/// address clash when reuse is on, so it could hand out a port another
+/// program serves on all addresses.
+///
+/// The kernel can hand back the remote number by chance. Binding again while
+/// still holding that socket gets a different port, so the promise holds.
+fn bind_listener(remote_port: u16) -> std::io::Result<TcpListener> {
+    let bind = || -> std::io::Result<TcpListener> {
+        let socket = TcpSocket::new_v4()?;
+        socket.set_reuseaddr(false)?;
+        socket.bind((Ipv4Addr::LOCALHOST, 0).into())?;
+        socket.listen(1024)
+    };
+    let listener = bind()?;
+    if listener.local_addr()?.port() != remote_port {
+        return Ok(listener);
     }
+    // `listener` stays bound until this returns, so the kernel cannot pick it again.
+    bind()
 }
 
 /// Re-resolve each socket, retaining no application Arc while relay bytes are idle.
@@ -367,7 +390,7 @@ async fn open_from(
         match reused {
             Some(info) => info,
             None => {
-                let listener = bind_listener(target.port).await?;
+                let listener = bind_listener(target.port)?;
                 let info = TunnelInfo {
                     id: uuid::Uuid::new_v4().to_string(),
                     local_port: listener.local_addr()?.port(),
@@ -640,7 +663,7 @@ mod tests {
         }
     }
 
-    /// Port fallback must not discard credentials, paths, queries, fragments or HTTPS.
+    /// Moving to the tunnel's own port must not discard credentials, paths, queries, fragments or HTTPS.
     #[farhelm_testtrace::test]
     fn rewrite_changes_only_the_endpoint() {
         assert_eq!(
@@ -1020,10 +1043,10 @@ mod tests {
         assert!(openings.lock().unwrap().is_empty());
     }
 
-    /// Reuse is target based, and a busy preferred port must fall back to a live IPv4 listener.
-    /// Closing another session's id must leave that listener alone.
+    /// Reuse is target based, and a tunnel to a port the Mac already serves still gets a
+    /// live IPv4 listener of its own. Closing another session's id must leave that listener alone.
     #[farhelm_testtrace::test]
-    async fn fallback_reuse_scoped_close_and_shutdown_release_ports() {
+    async fn busy_port_reuse_scoped_close_and_shutdown_release_ports() {
         let (harness, _) = remote(Arc::new(|_| Ok(())), Some("installation".into())).await;
         consent(&harness, json!(true)).await;
         let occupied = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -1037,7 +1060,7 @@ mod tests {
         .unwrap();
         assert_ne!(
             first.tunnel.local_port, remote_port,
-            "premise: owned listener reserves the preferred port"
+            "the tunnel listens on its own port, not the occupied remote one"
         );
         let second = open_url(
             &harness.state,
@@ -1547,22 +1570,31 @@ mod tests {
         );
     }
 
-    /// The preferred local port is used when free; manager destruction has no strong-state cycle.
+    /// A tunnel never listens on the remote port number, even when it is free
+    /// on the Mac (triage outcomes `tunnel-can-take-standalone-helm-port.md`
+    /// and `tunnel-shadows-busy-wildcard-port.md`); manager destruction has no
+    /// strong-state cycle and releases the listener.
+    ///
+    /// The remote port is freed right before the tunnel opens, which is the
+    /// case where the old preference took it.
     #[farhelm_testtrace::test]
-    async fn free_preferred_port_and_drop_fallback() {
+    async fn tunnel_takes_a_kernel_chosen_port_never_the_remote_one() {
         let (harness, _) = remote(Arc::new(|_| Ok(())), Some("installation".into())).await;
         consent(&harness, json!(true)).await;
         let reservation = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
-        let port = reservation.local_addr().unwrap().port();
+        let remote_port = reservation.local_addr().unwrap().port();
         drop(reservation);
         let opened = open_url(
             &harness.state,
             &remote_key(&harness),
-            &format!("http://localhost:{port}/"),
+            &format!("http://localhost:{remote_port}/"),
         )
         .await
         .unwrap();
-        assert_eq!(opened.tunnel.local_port, port);
+        assert_eq!(opened.tunnel.remote_port, remote_port);
+        assert_ne!(opened.tunnel.local_port, remote_port);
+        let port = opened.tunnel.local_port;
+        assert_eq!(opened.url, format!("http://127.0.0.1:{port}/"));
         let weak = Arc::downgrade(&harness.state);
         drop(harness);
         assert!(

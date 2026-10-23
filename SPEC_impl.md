@@ -1845,12 +1845,16 @@ idle WebSocket is healthy, and task ownership plus transport teardown supply can
 limits still apply to actual transport writes. Session-authenticated peers cannot open, acknowledge or close these
 channels; the restricted operation allowlist does not admit them.
 
-The embedded helm owns IPv4 loopback listeners by session, canonical target and remote port, preferring that port and
-falling back to a kernel-selected one. Listeners live in memory through agent stop/restart and host disconnect. Every
-accepted socket resolves the current coherent session route again; the original host and any known installation identity
-must still match. Successful deletion or replacement closes the old session's listeners and admitted relays; failed
-deletion preserves them. Shutdown closes them before host connections, and weak application references keep an idle
-listener from retaining the helm.
+The embedded helm owns IPv4 loopback listeners by session, canonical target and remote port. Each listens on a
+kernel-selected port bound without `SO_REUSEADDR` and never on the remote port number: that number could be the
+standalone helm's 7433, whose origin holds a browser's helm credential, and on macOS a reusable `127.0.0.1` bind may
+shadow another program's wildcard listener. Reuse stays off for the kernel-chosen bind as well, since BSD-derived
+kernels check only exact-address clashes when picking a port for a reusable socket. If the kernel hands back the remote
+number by chance, the helm binds again while holding it. Listeners live in memory through agent stop/restart and host
+disconnect. Every accepted socket resolves the current coherent session route again; the original host and any known
+installation identity must still match. Successful deletion or replacement closes the old session's listeners and
+admitted relays; failed deletion preserves them. Shutdown closes them before host connections, and weak application
+references keep an idle listener from retaining the helm.
 
 Helm schema 55 adds nullable `preferences.tunnel_consent`. Only true authorizes publication. The mutation gate orders
 listener creation, consent persistence and successful deletion cleanup; it never covers relay traffic or the native
