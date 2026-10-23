@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`launcher-template-keys`](reports/launcher-template-keys.report.md) landed 2026-10-18 in #2304, #2306, #2310, #2316: template shortcuts apply templates inside the open launcher, through one shared shortcut definition, and Cmd-J launches a template by name
 - [`host-uninstall-dialogs`](reports/host-uninstall-dialogs.report.md) landed 2026-10-19 in #2298, #2303, #2305, #2307, #2311, #2317: host setup, update and uninstall show their steps as a stepper in the dialog and in the row's progress, refusals open in dialogs, and the post-uninstall notice shrinks to one line
 - [`repeat-quick-launch`](reports/repeat-quick-launch.report.md) landed 2026-10-19 in #2325, #2328, #2330, #2332: templates name sessions with a base name (numbered when taken) or a fixed name, so a named template can be quick-launched repeatedly into managed checkouts
 - [`agent-spawned-session-rules`](reports/agent-spawned-session-rules.report.md) landed 2026-10-19 in #2346, #2347, #2352: Refuse empty agent-to-agent prompts, call a prompt card's permission shield a snapshot, and say a wrapper is not tied to an agent type (3 triage outcomes).
