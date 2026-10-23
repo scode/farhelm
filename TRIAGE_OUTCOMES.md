@@ -18373,7 +18373,8 @@
 - Completion criteria: open session menus close when the previous listing was an error and a recovered one replaces it;
   a test covers it. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and
   its index entry.
-- Execution: planned in `plans/queue/session-view-fixes-oct22.md`.
+- Execution: `complete` within the size gate; bookmark `plan/session-view-fixes-oct22/01-close-menus-on-recovery`, jj
+  change `mkzmsopw`; PR https://github.com/scode/farhelm/pull/2652/changes.
 
 ## loading-cancel-may-discard-admitted-launch.md
 

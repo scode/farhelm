@@ -2663,10 +2663,12 @@ test("an alive-to-exited status change under an open confirm prompt keeps confir
 // than leaving stale rows on screen — which means a row's `confirming`
 // entry has nothing left to render into for as long as that banner is
 // showing. This pins that the entry itself, held in `ListView`'s own state
-// independent of any particular render, survives that gap intact and
-// reappears the moment the list recovers — a bare "the request count went
-// up" would not prove this, since it says nothing about whether the confirm
-// prompt for THIS id came back correctly afterward.
+// independent of any particular render, survives that gap intact. The
+// recovery closes the row's menu (a menu left open across the error could
+// sit where its row no longer is), so the prompt reappears when the menu is
+// reopened — a bare "the request count went up" would not prove this, since
+// it says nothing about whether the confirm prompt for THIS id came back
+// correctly afterward.
 //
 // The read that fails is a feed-triggered one now rather than a poll, and
 // the failure is a LATCH the test opens and closes rather than the one-shot
@@ -2730,17 +2732,18 @@ test("a failed listing read while confirming does not clear the confirming state
       timeout: 10_000,
     });
 
-    // The next read succeeds; the list — and the SAME confirming prompt,
-    // restored from `ListView`'s own state rather than anything baked
-    // into this particular render — comes back. The reader retries a failed
-    // read on its own, so the notification here is belt and braces rather
-    // than the only way back.
+    // The next read succeeds and the list comes back with the row's menu
+    // closed. The reader retries a failed read on its own, so the
+    // notification here is belt and braces rather than the only way back.
     failing = false;
     feed.notify(3);
-    await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`, {
-      timeout: 10_000,
-    });
-    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE);
+    await expect(row.locator(".status-badge")).toHaveText(LIVE_BADGE, { timeout: 10_000 });
+    await expect(row.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
+    // Reopened, the menu shows the SAME confirming prompt, restored from
+    // `ListView`'s own state rather than anything baked into the render
+    // the error replaced.
+    await openRowMenu(row);
+    await expect(row.locator(".confirm-title")).toHaveText(`"${title}"`);
   } finally {
     await page.unroute(SESSION_LISTING);
     await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});

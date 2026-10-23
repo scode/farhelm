@@ -46,9 +46,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   lost committed-save reply restores an old shortcut indication while the next key resolves the new template; harmful
   reliance and coverage remain unproved.
 
-- [`recovery-retains-displaced-session-menu.md`](recovery-retains-displaced-session-menu.md) — Fast desktop recovery can
-  leave a session menu displaced after header wrapping; consequential mistaken Stop/Delete use remains unverified.
-
 ## High priority: material UX degradation
 
 - [`shell-inspection-drains-exhaust-planning-pool.md`](shell-inspection-drains-exhaust-planning-pool.md) — Pipe-draining

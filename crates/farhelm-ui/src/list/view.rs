@@ -1461,8 +1461,9 @@ pub(crate) fn ListView(
             // Report displayed rows once, independently of popup kinds. The
             // outgoing listing borrow must end before closers or the final
             // listing write can run, preserving the old commit boundary.
-            let (moved, banner_changed) = {
+            let (moved, banner_changed, recovered) = {
                 let previous = listing_signal.peek();
+                let recovered = matches!(previous.as_ref(), Some(Err(_)));
                 let banner_changed = match previous.as_ref() {
                     Some(Ok(previous)) => count_banner(previous) != count_banner(listing),
                     _ => false,
@@ -1514,9 +1515,19 @@ pub(crate) fn ListView(
                         compact: !detail_lines_shown,
                     },
                 ));
-                (moved, banner_changed)
+                (moved, banner_changed, recovered)
             };
             listing_popovers.close_affected(&MovedRows::new(AnchorRegion::Sessions, moved));
+            // A reply replacing a failed read must not bring back a session
+            // menu or notification list left open across the failure. When
+            // the error line rendered, the rows remount and the popup
+            // reopens unasked; when the recovery lands before it rendered,
+            // the popup keeps coordinates measured against the old list. The
+            // reorder check above deliberately reads a recovery as no
+            // movement, so this closes them instead.
+            if recovered {
+                listing_popovers.close_open_in(&[AnchorRegion::Sessions]);
+            }
             // The count sentence and header actions can rewrap above every
             // session anchor. Admission excludes retained Err/remount slots;
             // this report stays synchronous before the original publication.
