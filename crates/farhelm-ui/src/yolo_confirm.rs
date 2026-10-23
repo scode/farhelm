@@ -5,7 +5,9 @@
 //! without asking, and says so with a header only its own code sets
 //! (`api::asks_yolo_confirmation`). Every GUI flow that can hit that refusal
 //! (create, replace, replace with, restart with) shows this block instead of
-//! an ordinary error. Nothing was started when it appears.
+//! an ordinary error. The refused request started nothing, though in the
+//! launcher an earlier attempt under the same request may have (the
+//! `may_have_started` prop says so).
 //!
 //! Deliberately hard to miss: accidental YOLO launches on the wrong machine
 //! are the failure it exists to stop, and a subtle prompt is one people
@@ -159,7 +161,7 @@ pub(crate) async fn stop_asking(base: &str, host: HostId, host_name: &str) -> Re
         // that committed, so the host's state is not known here. Retrying is
         // harmless, the write is idempotent.
         Err(reason) => Err(format!(
-            "could not stop asking for {host_name}: {}. Nothing was started; {host_name} may still ask before YOLO launches.",
+            "could not stop asking for {host_name}: {}. This answer started nothing; {host_name} may still ask before YOLO launches.",
             reason.trim_end_matches('.')
         )),
     }
@@ -220,9 +222,12 @@ fn focus_cancel(instance: u64, only_if_lost: bool) {
 /// launcher, whose resubmit is its surrounding form's own submit; otherwise
 /// they call their handlers. A supplied guarded handler owns its draft change
 /// and resubmission, including rejecting a stale opening before any mutation.
+/// `may_have_started` is for a refused retry of an attempt whose outcome is
+/// unknown: the question then cannot say that nothing has been started.
 #[component]
 pub(crate) fn YoloConfirmation(
     ask: YoloAsk,
+    #[props(default)] may_have_started: bool,
     busy: bool,
     error: Option<String>,
     confirm_submits: bool,
@@ -277,7 +282,11 @@ pub(crate) fn YoloConfirmation(
             p { class: "yolo-confirmation-reason", "{ask.reason.sentence()}" }
             p { class: "yolo-confirmation-asks",
                 span { class: "peer-value", dir: "ltr", "{host}" }
-                " asks before every YOLO launch. Nothing has been started."
+                if may_have_started {
+                    " asks before every YOLO launch. An earlier attempt at this launch may already have started it."
+                } else {
+                    " asks before every YOLO launch. Nothing has been started."
+                }
             }
             if let Some(error) = error {
                 PeerLine {

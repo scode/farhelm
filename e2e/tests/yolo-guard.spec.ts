@@ -263,6 +263,48 @@ test("the YOLO question can launch guarded and remember that permission", async 
   }
 });
 
+/**
+ * A launch whose reply was lost may already have started its session, and
+ * its retry keeps the same request so the helm can match it. If the host has
+ * meanwhile been set to ask before YOLO launches, that retry is refused with
+ * the YOLO question, and a guarded answer there would be a new request that
+ * could start a second session. Spec: after a lost reply, the question says
+ * an earlier attempt may already have started the launch and offers no
+ * guarded answer.
+ */
+test("the YOLO question after a lost launch reply offers no guarded answer", async ({ page, request }) => {
+  const cwd = stackScratchDir("yolo-uncertain-");
+  const keys: string[] = [];
+  const inCwd = async () => (await listSessions(request)).sessions.filter((row) => row.cwd === cwd);
+  try {
+    await setLocalYoloWithoutAsking(request, true);
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      keys.push(route.request().postDataJSON().intent_key);
+      if (keys.length > 1) return route.continue();
+      // The first create reaches the helm and starts; only its reply is lost.
+      await route.fetch();
+      await route.abort("failed");
+    });
+    await page.goto("/");
+    const form = await openYoloLaunch(page, cwd);
+    await form.locator(".create-session-submit").click();
+    await expect(form.locator(".create-session-error"), "premise: the lost reply left the form open").toBeVisible();
+    await expect.poll(async () => (await inCwd()).length, { message: "premise: the first attempt started" }).toBe(1);
+
+    await setLocalYoloWithoutAsking(request, false);
+    await form.locator(".create-session-submit").click();
+    const confirmation = form.locator(".yolo-confirmation");
+    await expect(confirmation).toContainText("An earlier attempt at this launch may already have started it.");
+    await expect(confirmation.locator(".yolo-launch-guarded")).toHaveCount(0);
+    expect(keys, "the refused retry is the same request as the lost attempt").toEqual([keys[0], keys[0]]);
+    expect(await inCwd()).toHaveLength(1);
+  } finally {
+    await setLocalYoloWithoutAsking(request, false);
+    for (const row of await inCwd()) await cleanupSession(request, row.id);
+  }
+});
+
 /** Custom words cannot be silently dropped by a guarded answer, even when
  * the words themselves request a vendor safety mode. The real guard refuses
  * them as custom; the browser must keep only its existing answers. */

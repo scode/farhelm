@@ -671,10 +671,23 @@ fn resubmit_quick_composer(generation: u64) {
 /// burst (both drawn before the render that removes them) finds the slot
 /// empty and records nothing. `ask` is what the question shows; the slot
 /// holds nothing else.
+///
+/// `uncertain` marks a refused request whose key an earlier attempt already
+/// carried with an unknown outcome (a lost reply, say): that attempt may have
+/// started the session, so the question says so and offers no guarded answer,
+/// which would mint a new request and could start a second one.
 #[derive(Clone, PartialEq)]
 struct LauncherYoloQuestion {
     refused_key: String,
     ask: crate::yolo_confirm::YoloAsk,
+    uncertain: bool,
+}
+
+impl LauncherYoloQuestion {
+    /// Whether "start guarded session instead" may be offered and taken.
+    fn offers_guarded(&self, selection: Option<&LaunchSelection>) -> bool {
+        !self.uncertain && self.ask.reason.can_launch_guarded(selection)
+    }
 }
 
 /// Answer the launcher's YOLO question `question` (the opening this answer's
@@ -802,7 +815,7 @@ fn take_launcher_guarded_answer(
         LaunchIntent::Structured(selection) => Some(selection),
         LaunchIntent::Command(_) => None,
     };
-    question.key().ask.reason.can_launch_guarded(selection) && slot.take(question).is_some()
+    question.key().offers_guarded(selection) && slot.take(question).is_some()
 }
 
 /// Reuse the refused checkout's accepted facts when its semantic intent matches.
@@ -2382,11 +2395,25 @@ pub(super) fn CreateSessionForm(
     // One accepted guarded answer, revoked by another draft or opening.
     // This never owns consent, a retained request body or an operation claim.
     let mut guarded_submit_pending = use_signal(|| None::<GuardedSubmitStamp>);
+    // The intent key of the last attempt whose outcome stayed unknown (a
+    // failure that kept the key for a safe retry). See
+    // `LauncherYoloQuestion::uncertain`. It is never cleared: every attempt
+    // key is freshly minted at random, so a mark left on a retired key can
+    // never match a later refusal.
+    let mut uncertain_key = use_signal(|| None::<String>);
     // Open the question for `refused_key`; the slot makes it a new opening,
     // so an answer drawn for an earlier asking about the same refused
     // request cannot take it.
     let mut open_yolo_question = move |refused_key: String, ask: crate::yolo_confirm::YoloAsk| {
-        yolo_refusal.open(LauncherYoloQuestion { refused_key, ask }, ());
+        let uncertain = uncertain_key.peek().as_deref() == Some(refused_key.as_str());
+        yolo_refusal.open(
+            LauncherYoloQuestion {
+                refused_key,
+                ask,
+                uncertain,
+            },
+            (),
+        );
     };
     // Whether an explicit choice has been overtaken by reality. Derived per
     // render rather than written back into `chosen_host`, so it cannot
@@ -4578,7 +4605,9 @@ pub(super) fn CreateSessionForm(
                     // pick another answer.
                     yolo_confirmed_key.set(None);
                     yolo_error.set(Some(reason));
-                    let LauncherYoloQuestion { refused_key, ask } = answered.key().clone();
+                    let LauncherYoloQuestion {
+                        refused_key, ask, ..
+                    } = answered.key().clone();
                     open_yolo_question(refused_key, ask);
                     drop(op_guard);
                     return;
@@ -4734,6 +4763,13 @@ pub(super) fn CreateSessionForm(
                         // preparation, even if its old target no longer owns
                         // the refusal. Keep that refusal fenced below.
                         quick_launch_hidden.set(false);
+                        // Marked whatever the form now shows: the key stays
+                        // bound to this setup even when the refusal text is
+                        // fenced off below, and a return to the setup reuses
+                        // it, so its YOLO question must still know.
+                        if !e.outcome.requires_yolo() && !e.outcome.retires_retry() {
+                            uncertain_key.set(Some(key.clone()));
+                        }
                         // Gated on the target this request was DISPATCHED
                         // for still being the one on screen: a refusal
                         // naming host A must not land under a form that
@@ -5158,6 +5194,7 @@ pub(super) fn CreateSessionForm(
             {
                 crate::yolo_confirm::YoloConfirmation {
                     ask: question.key().ask.clone(),
+                    may_have_started: question.key().uncertain,
                     busy,
                     error: yolo_error(),
                     // Both YOLO answers submit the form themselves, and only
@@ -5180,7 +5217,7 @@ pub(super) fn CreateSessionForm(
                         // question sits in, and the Replace warning above it.
                         // The answer binds to both (`GuardedSubmitStamp`).
                         let rendered_opening = *opening_generation.peek();
-                        question.key().ask.reason.can_launch_guarded(selection).then(|| Callback::new(move |_| {
+                        question.key().offers_guarded(selection).then(|| Callback::new(move |_| {
                             let held = intent_key.peek().clone();
                             let current = held.as_ref()
                                 .filter(|(key, _)| key == &question.key().refused_key)
@@ -6696,6 +6733,7 @@ mod tests {
                             crate::yolo_confirm::YoloReason::Asserted
                         },
                     },
+                    uncertain: false,
                 };
                 let question = fixture.slot.open(asked.clone(), ());
                 let unchanged = if tab == LaunchTab::Agent {
@@ -8510,6 +8548,7 @@ mod tests {
                 host_name: "build box".to_string(),
                 reason: crate::yolo_confirm::YoloReason::Asserted,
             },
+            uncertain: false,
         };
 
         let mut dom = VirtualDom::new(app);
@@ -8703,6 +8742,7 @@ mod tests {
                 host_name: "build box".into(),
                 reason: crate::yolo_confirm::YoloReason::ChosenPermission,
             },
+            uncertain: false,
         };
         let refused = IntentBinding {
             prompt: Some("original prompt".into()),
@@ -8850,6 +8890,28 @@ mod tests {
                 &refused,
                 Some(&refused)
             ));
+            // An earlier attempt under this key may already have started the
+            // session, so the guarded answer, a new request, is refused.
+            let uncertain = slot.open(
+                LauncherYoloQuestion {
+                    uncertain: true,
+                    ..question()
+                },
+                (),
+            );
+            assert!(!take_launcher_guarded_answer(
+                &mut slot,
+                &uncertain,
+                false,
+                1,
+                1,
+                &refused,
+                Some(&refused)
+            ));
+            assert!(
+                slot.peek_token() == Some(uncertain),
+                "an uncertain question keeps its opening"
+            );
         });
     }
 }
