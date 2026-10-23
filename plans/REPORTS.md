@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`supervisor-colon-path-refusal`](reports/supervisor-colon-path-refusal.report.md) landed 2026-10-20 in #2361: The supervisor and the desktop app refuse to start when the folder sessions get on PATH contains ':' (1 triage outcome).
 - [`tunnel-port-consent-warning`](reports/tunnel-port-consent-warning.report.md) landed 2026-10-20 in #2364: The one-time localhost tunnel warning says a tunnel uses the remote service's port number on the Mac when free (1 triage outcome).
 - [`launch-enters-working-dir`](reports/launch-enters-working-dir.report.md) landed 2026-10-20 in #2363: Agent launches, Restart, Replace and terminal tabs enter the session folder themselves and fail with a clear error instead of starting in HOME (1 triage outcome).
 - [`archive-recovery-reproduction`](reports/archive-recovery-reproduction.report.md) landed 2026-10-20 in #2374: Guard a trashed checkout's recorded location so a stale recovery attempt cannot overwrite it, without reproducing the race (1 triage outcome).
