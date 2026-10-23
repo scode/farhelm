@@ -779,7 +779,10 @@ impl PlanLayout {
     /// setups get a clear refusal). The host's state directory must not
     /// be inside it in either the normalized or the unnormalized spelling,
     /// so data is never removed with it. And no mount point may lie at or
-    /// below it, so `rm -rf` cannot reach into another folder.
+    /// below it, so `rm -rf` cannot reach into another folder. The kept
+    /// state path must also pass the remote command-line text check, so a
+    /// path the stop step could not name refuses here, before confirmation,
+    /// instead of failing the run after the unit is gone.
     pub(super) fn plan_uninstall(
         &self,
         target: ProvisioningTarget,
@@ -812,6 +815,20 @@ impl PlanLayout {
                     paths.lib_dir.display()
                 )));
             }
+        }
+        // The stop step names the kept data's tmux socket in its script, and
+        // the kept-data notice shows this path for copying, so it must pass
+        // the same text check every remote command line applies. Checking it
+        // here refuses before confirmation; left to the stop step, the run
+        // would fail after it had already disabled and removed the unit. The
+        // host itself reports its default state path, so nothing earlier
+        // has checked that one.
+        if let Err(error) = crate::units::path_text(&facts.state_dir.named) {
+            return Err(refused(format!(
+                "the host's Farhelm data directory has a path uninstall cannot pass to the host \
+                 unchanged ({error:#}); uninstall keeps that data and names it in its steps and its \
+                 notice, so it does not run on this layout"
+            )));
         }
         // The same home normalization makes an aliased state path inside
         // the lib visible here, so removing the lib cannot remove that

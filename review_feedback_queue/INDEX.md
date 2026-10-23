@@ -11,10 +11,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`trash-entry-delete-hits-shifted-row.md`](trash-entry-delete-hits-shifted-row.md) — A one-click trash delete can
   permanently delete a different checkout when rows shift under the pointer; click timing is unmeasured.
 
-- [`uninstall-notice-copies-raw-remote-path.md`](uninstall-notice-copies-raw-remote-path.md) — The uninstall notice
-  copies a remote path without warning; successful uninstall rejects controls, but concurrent removal can expose an owed
-  notice after failure. Unsafe downstream paste remains unverified.
-
 - [`templates-dialog-new-name-overwrites-outside-template.md`](templates-dialog-new-name-overwrites-outside-template.md)
   — A new or renamed template in an open Templates dialog replaces one an agent or the CLI created meanwhile; coverage
   by the last-write-wins decision is unsettled.
