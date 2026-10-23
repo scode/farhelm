@@ -38,10 +38,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   paths with divergent nested mounts can hide retained data from uninstall; the configured source chain is established,
   but occurrence and support scope are unresolved.
 
-- [`uninstall-home-bind-inside-installation.md`](uninstall-home-bind-inside-installation.md) — A home bind inside the
-  installation can expose retained files to recursive uninstall; traversal is untested and configuration coverage is
-  ambiguous.
-
 - [`lost-shortcut-save-restores-misleading-assignment.md`](lost-shortcut-save-restores-misleading-assignment.md) — A
   lost committed-save reply restores an old shortcut indication while the next key resolves the new template; harmful
   reliance and coverage remain unproved.

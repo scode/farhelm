@@ -1535,6 +1535,7 @@ impl ProvisioningService {
                 lib_dir,
                 farhelm,
                 state_dir,
+                mounts: inspection.mounts.clone(),
             },
         )
     }

@@ -385,6 +385,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
             // The unit loaded from the planned path, which is the first one
             // asked about.
             unit_fragment: paths.first().map(|path| present(path.to_path_buf())),
+            mounts: Vec::new(),
         })
     }
 

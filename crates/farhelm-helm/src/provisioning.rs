@@ -427,6 +427,8 @@ mod tests {
         /// Where an inspection says systemd loaded the unit from, when not
         /// from the planned unit path (the first path asked about).
         unit_fragment: Mutex<Option<PathBuf>>,
+        /// The host's mount points an inspection reports; none by default.
+        mounts: Mutex<Vec<PathBuf>>,
         /// Run the production inspection script for filesystem fixtures while
         /// keeping connection discovery and mutators scripted. This carries
         /// the script's output into the real planning checks without building
@@ -478,6 +480,7 @@ mod tests {
                 default_state_dir: Mutex::new(PathBuf::from("/home/test/.local/state/farhelm")),
                 unit_state: Mutex::new("active".to_string()),
                 unit_fragment: Mutex::new(None),
+                mounts: Mutex::new(Vec::new()),
                 uninstall_script: Mutex::new(None),
             })
         }
@@ -762,6 +765,7 @@ mod tests {
                     Some(path) => Some(host_path(&path)),
                     None => paths.first().map(|path| host_path(path)),
                 },
+                mounts: self.mounts.lock().unwrap().clone(),
             })
         }
 
@@ -4358,7 +4362,9 @@ mod tests {
     /// uninstall` on that host), a supervisor running from outside
     /// Farhelm's lib directory, a state directory that really lies inside
     /// the lib directory that would be removed (through a symlink, so
-    /// spelling alone would not show it), a connected supervisor that its
+    /// spelling alone would not show it), a mount point on or inside the lib
+    /// directory (a home bind there would be deleted through it, while a
+    /// mount beside it is fine), a connected supervisor that its
     /// unit is not running (one started by hand).
     #[farhelm_testtrace::test]
     async fn uninstall_refuses_hosts_whose_removal_farhelm_does_not_own() {
@@ -4411,6 +4417,15 @@ mod tests {
         let data_inside = refusal_text(service.plan_uninstall(host).await.unwrap_err());
         assert!(data_inside.contains("keeps the data"), "{data_inside}");
         backend.canonical.lock().unwrap().clear();
+
+        *backend.mounts.lock().unwrap() = vec![PathBuf::from("/"), root.path().join("lib-cache")];
+        service.plan_uninstall(host).await.unwrap();
+        for mount in ["lib/home", "lib"] {
+            *backend.mounts.lock().unwrap() = vec![root.path().join(mount)];
+            let text = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+            assert!(text.contains(&format!("{mount} is mounted on")), "{text}");
+        }
+        backend.mounts.lock().unwrap().clear();
 
         *backend.unit_state.lock().unwrap() = "inactive".to_string();
         let hand_started = refusal_text(service.plan_uninstall(host).await.unwrap_err());
@@ -6310,8 +6325,8 @@ mod tests {
     /// flag, a canonical path (empty when the host could not resolve it)
     /// and that path before home normalization, NUL-terminated. A dangling
     /// link parses as existing, a symlink, and unresolved; an empty fragment
-    /// parses as no fragment. A flag
-    /// other than `0` or `1`, a missing field, or a field left over is
+    /// parses as no fragment. Mount points follow, ended by an empty field.
+    /// A flag other than `0` or `1`, a missing field, or a field left over is
     /// malformed, which is how output in the older two-field shape is
     /// rejected rather than misread.
     #[test]
@@ -6350,6 +6365,10 @@ mod tests {
             "0",
             "",
             "",
+            // The mount points, then the empty field ending them.
+            "/",
+            "/h/.local/lib/farhelm/home",
+            "",
         ];
         let output = encode(&fields);
 
@@ -6379,6 +6398,10 @@ mod tests {
         );
         assert!(!inspection.default_state_dir.symlink);
         assert_eq!(inspection.unit_fragment, None);
+        assert_eq!(
+            inspection.mounts,
+            [Path::new("/"), Path::new("/h/.local/lib/farhelm/home")]
+        );
 
         // The lib directory's symlink flag.
         fields[5] = "2";
@@ -6706,6 +6729,8 @@ mod tests {
                 Some(fixture.lib.join("farhelm"))
             );
             assert_eq!(inspection.paths[4].canonical.as_ref(), Some(&fixture.lib));
+            // Only mounts under the asked paths are listed; the fixture has none.
+            assert!(inspection.mounts.is_empty(), "{:?}", inspection.mounts);
             assert_eq!(
                 inspection.default_state_dir.canonical.as_ref(),
                 Some(&fixture.state)

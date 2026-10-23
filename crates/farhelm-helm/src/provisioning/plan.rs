@@ -505,6 +505,8 @@ pub(super) struct UninstallFacts {
     pub(super) farhelm: Option<ResolvedPath>,
     /// The state directory the host uses, which uninstall keeps.
     pub(super) state_dir: ResolvedPath,
+    /// Mount points under the asked paths (`UninstallInspection::mounts`).
+    pub(super) mounts: Vec<PathBuf>,
 }
 
 /// A path as named to the user, beside where it really leads on the host.
@@ -769,14 +771,15 @@ impl PlanLayout {
     /// server still reachable at the host's private socket: an inactive unit
     /// can leave tmux behind even after systemd has forgotten the unit.
     ///
-    /// Two refusals guard the `rm -rf` of the lib directory, both on the
+    /// Three refusals guard the `rm -rf` of the lib directory, all on the
     /// host's symlink-resolved paths with verified alternate home prefixes
     /// normalized by the inspection. The binary the
     /// host runs, when known, must be inside it, so the plan removes the
     /// installation actually in use (SPEC.md "Supported host setup": other
-    /// setups get a clear refusal). And the host's state directory must not
+    /// setups get a clear refusal). The host's state directory must not
     /// be inside it in either the normalized or the unnormalized spelling,
-    /// so data is never removed with it.
+    /// so data is never removed with it. And no mount point may lie at or
+    /// below it, so `rm -rf` cannot reach into another folder.
     pub(super) fn plan_uninstall(
         &self,
         target: ProvisioningTarget,
@@ -825,6 +828,23 @@ impl PlanLayout {
                 "the host's Farhelm data directory {} is inside {}, which uninstall would remove; \
                  uninstall keeps the data, so it does not run on this layout",
                 facts.state_dir.named.display(),
+                paths.lib_dir.display()
+            )));
+        }
+        // A home bound inside the lib, or a shared install mounted on it,
+        // would lose its files to `rm -rf`. `rm --one-file-system` cannot
+        // help: a same-filesystem bind keeps its device number, and BusyBox
+        // `rm` lacks it.
+        if let Some(lib) = &facts.lib_dir
+            && let Some(mount) = facts
+                .mounts
+                .iter()
+                .find(|mount| mount.starts_with(&lib.raw) || mount.starts_with(&lib.canonical))
+        {
+            return Err(refused(format!(
+                "{} is mounted on or inside {}, which uninstall would remove; that would also \
+                 delete the files the mount shows, so uninstall does not run while it is mounted",
+                mount.display(),
                 paths.lib_dir.display()
             )));
         }
