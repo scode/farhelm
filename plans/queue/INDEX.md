@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [blocked] `uninstall-guards-oct22.md` — Uninstall refuses aliased and mount-crossing layouts, unchecked offline retries and control characters in kept paths; host planning bounds a stuck output read (2026-10-22 triage)
+- [pending] `uninstall-guards-oct22.md` — Uninstall refuses aliased and mount-crossing layouts, unchecked offline retries and control characters in kept paths; host planning bounds a stuck output read (2026-10-22 triage)
 - [blocked] `update-refuses-newer-host-schema.md` — Update refuses a host whose supervisor database is newer than the supervisor it would install (2026-10-22 triage)
 - [landing 4b6bf3] `session-view-fixes-oct22.md` — Five session-view and launcher fixes: displaced menus close, Replace with rows say replace, sidebar clickable under the outage card, no false "nothing started", terminal keeps off focus moved after selection
 - [blocked] `dialog-saves-oct22.md` — Five dialog fixes: trash delete ignores clicks right after its list moves, Templates rechecks names, unknown shortcut saves say so, the commands help names deleting, unedited Settings Save writes nothing (after `sign-in-preservation-sweep.md`)
