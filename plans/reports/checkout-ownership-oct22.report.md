@@ -135,3 +135,70 @@ One fresh Opus 5.5 reviewer at high effort per PR, as the plan asks.
   only documentation, which was fixed.
 - Fix 5: no correctness problems; its wording and test findings were applied, and the one-second limit was documented
   rather than given its own longer deadline.
+
+### Landing
+
+Landed as #2634, #2638, #2640, #2645 and #2647, merged bottom-up, with the content the report describes and the small
+fixes described below. It was the first of two plans in this landing round, before supervisor-lock-outlives-work.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained tunnel-port-and-link-ranges (the helm's link classification and localhost tunnel
+port), triage-docs-oct22 (specification text, including that a checkout root reachable from more than one host is
+unsupported) and resume-target-fixes-oct22 (Restart with forgets the old conversation when Farhelm's hooks are off, and
+stricter Grok and OMP process checks). A fresh-context reviewer and I read this plan against them and against
+supervisor-lock-outlives-work, the other plan in this round:
+
+- resume-target-fixes-oct22 makes Restart with, when you name a conversation and Farhelm's hooks are off, forget the
+  session's stored conversation. The reviewer found that this makes a restarted session look more like a create that
+  never launched. Fix 2 (#2638), which counts any restarted session as launched, is what keeps a late create retry from
+  taking such a session over, so the two fit.
+- supervisor-lock-outlives-work keeps a stopping supervisor's hold on its state folder until its background work has
+  finished. That covers fix 3's startup work of putting a surviving session's attachments back, so a quickly reopened
+  supervisor cannot start serving while it runs.
+- triage-docs-oct22's new paragraph declaring a shared checkout root unsupported is not contradicted: fix 1 only narrows
+  where Delete archives and where the trash deletes, for folders with no creation time.
+- triage-docs-oct22 left a stale mention of a finding it removed in the review-queue item behind fix 1; #2634 deletes
+  that item, so the mention goes with it.
+- tunnel-port-and-link-ranges touches nothing this plan relies on.
+
+#### Fixes made during the landing
+
+- Fix 1's changelog entry said a new session in a folder without a creation time no longer skips the agent's trust
+  question. That part finishes an unreleased fix, the one that stopped a different folder at an old checkout's path from
+  being trusted automatically, so the landing moved it into that fix's entry as one sentence (on filesystems without
+  creation times too), in #2634. The archive and trash parts change released behavior and stay a separate entry.
+- Two code comments, in #2638, still said a create retry could carry a restarted session's launch generation forward,
+  which fix 2 made impossible; the landing corrected them. Three documentation comments that fixes 2, 3 and 4 had made
+  overlong were rewrapped, in #2638, #2640 and #2645. None of these changes code.
+
+#### Checks
+
+The round's two plans change supervisor lifecycle code: Delete and the checkout trash, create retries, attachments after
+an interrupted Delete, startup's checkout protection, prepared-checkout launches, and when a stopping supervisor
+releases its state folder. The executors tested each change with filtered selections, and both plans meet
+resume-target-fixes-oct22 (landed just before this round) in the same part of the supervisor's code, so this round ran
+the whole Rust workspace suite on the two plans stacked together on this round's main. The first two items below ran
+before the round's landing fixes, which change only code comments and changelog fragments; the third ran after them:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the isolated test-sleep check, `dprint check` on the changed Markdown
+  files, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (one warning, about a
+  citation main already had), the docs website build and the workspace debug build: all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  slots, no retries, run `9a73719e-adf4-41dc-a1ea-ecdf4543b785`: 4312 of 4313 passed, 40 skipped by design (34 helper
+  entries that run only as child processes of other tests, and 6 tests that need a real signed-in Claude or Codex). This
+  includes the real-process end-to-end tests that stop a running supervisor by signal and by the desktop app's
+  connection closing. The one failure, `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay` (a paused
+  terminal view getting a catch-up reset it should not), is a known open flake recorded in FLAKES.md on 2026-09-03,
+  2026-10-09 and 2026-10-17, which failed two of three exact repetitions in its latest record; it tests terminal output
+  flow control, which neither plan touches, so I did not repeat it here.
+- After the landing fixes: `cargo fmt --all -- --check`,
+  `cargo clippy -p farhelm-supervisor --all-targets -- -D warnings` and the changelog format check passed again.
+- Reused: none. Skipped: the doctests (no documentation example changed), the browser suite and the UI, desktop and
+  JavaScript tests (no UI code changed), the desktop smoke test (the desktop app starts the supervisor as a separate
+  process, whose stop paths the end-to-end tests above cover), the native Mac app (not runnable here) and the installer
+  (unchanged).
+
+The report's checks ran each fix's own test selection; this round ran the whole Rust workspace suite on the plan as it
+landed, apart from the comment and changelog fixes. Nothing in the executor's report became untrue at landing.
