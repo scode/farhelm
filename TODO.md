@@ -259,6 +259,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   margin (`ARCHIVE_PATH_GROWTH`, 82 bytes, quoted in SPEC.md, changes with the name); and the text in SPEC.md,
   `docs/github-checkouts.md` and the docs page `website/src/content/docs/docs/using/stop-restart-resume.mdx`. Asked for
   by the maintainer on 2026-10-20 while planning the spare checkouts.
+- **Make forwarded-port links land where the user expects.** A link to `localhost:<port>` from one session can take the
+  user to the wrong page when another Farhelm-forwarded port is already bound to the same number (presumably from
+  another session or host), so `localhost` alone does not identify which session's service it reaches. Audit how port
+  forwarding chooses its port, owns/binds it, and maps a bound local port back to the session and host that opened it,
+  then make the destination a click resolves to match the session that displayed the link, even when the port is already
+  taken by something else.
 
 ## Doc todo
 
