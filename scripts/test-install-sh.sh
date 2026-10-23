@@ -804,6 +804,30 @@ check "same-release update leaves nothing of the run beside the app" \
   [ -z "$(find "$HOME1/Applications" -mindepth 1 -maxdepth 1 -name '.*')" ]
 
 # ===========================================================================
+# Scenario: re-running the same release over a damaged version folder
+# repairs it. Why: a power loss can leave the version's farhelm empty or cut
+# short while the folder looks installed, and a rerun is the documented way
+# to finish or repair an installation; keeping the folder because a farhelm
+# file exists would report success over a Farhelm that cannot start.
+# ===========================================================================
+echo
+echo "== update: the same release over a truncated version file =="
+: >"$APP1/Contents/Versions/1.2.3/farhelm"
+check "truncated version file: the premise holds: the file is there" [ -f "$APP1/Contents/Versions/1.2.3/farhelm" ]
+check "truncated version file: the premise holds: the file is empty" [ ! -s "$APP1/Contents/Versions/1.2.3/farhelm" ]
+VERSION_DIR_INODE=$(stat -c %i "$APP1/Contents/Versions/1.2.3")
+run_install "$MAC_TOOLS" "$HOME1" "$BASE/good" 1.2.3
+check "truncated version file: the update exits 0" [ "$RC" -eq 0 ]
+check "truncated version file: the update reports ready" contains "$OUT" "Farhelm 1.2.3 is ready."
+check "truncated version file: the folder was replaced" \
+  [ "$(stat -c %i "$APP1/Contents/Versions/1.2.3")" != "$VERSION_DIR_INODE" ]
+check "truncated version file: farhelm from the Terminal runs again" \
+  [ "$(forward "$INSTALL1/farhelm" --version)" = "farhelm 1.2.3" ]
+check "truncated version file: still the one version" [ "$(versions_of "$APP1")" = 1.2.3 ]
+check "truncated version file: nothing of the run is left beside the app" \
+  [ -z "$(find "$HOME1/Applications" -mindepth 1 -maxdepth 1 -name '.*')" ]
+
+# ===========================================================================
 # Scenario: updating to a new release while an older Farhelm runs. Why: this
 # is the point of the layout; the running version's folder must survive, the
 # new version must be what starts next, and a session of the running

@@ -18698,7 +18698,13 @@
 - Completion criteria: the installer keeps an existing version folder only when its `farhelm` matches the verified
   staged download byte for byte, and otherwise replaces it as it does an incomplete folder; `scripts/test-install-sh.sh`
   covers a truncated version file. Size gate: about 100 lines as above. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/build-and-tooling-oct22.md`.
+- Execution: complete: change `rwmxmunqywyvxmxpoxzvqnlqrsllzynz`, bookmark
+  `plan/build-and-tooling-oct22/04-installer-repairs-version`. `scripts/install.sh` keeps an existing version folder
+  only when its `farhelm` is byte for byte the verified staged download (and not a link), and otherwise replaces it the
+  way it already replaced a folder without one, putting the old folder back if the replacement fails.
+  `scripts/test-install-sh.sh` truncates the version file after the same-release rerun and checks that a further rerun
+  replaces the folder and the version runs again; with the old installer that scenario fails. 39 changed lines. PR:
+  https://github.com/scode/farhelm/pull/2662/changes.
 
 ## cancelled-startup-sweep-outlives-directory-ownership.md
 
