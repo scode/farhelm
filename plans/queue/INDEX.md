@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight ab8cfe] `sign-in-preservation-sweep.md` — Remove the code that keeps and resends failed GUI preference saves and keeps the browser app mounted across signing in again; signing in again in the browser reloads the page
 - [in-flight 8edfd3] `tunnel-port-and-link-ranges.md` — Localhost tunnels always take an OS-chosen Mac port, and link opening treats IPv6 spellings of local IPv4 addresses as local (three 2026-10-22 triage outcomes, two PRs)
-- [pending] `triage-docs-oct22.md` — Spec text for five accepted behaviours (personal tmux started from a session, Goose and Pi child reports, shared checkout roots) and two discards from the 2026-10-22 triage
+- [in-flight 174d68] `triage-docs-oct22.md` — Spec text for five accepted behaviours (personal tmux started from a session, Goose and Pi child reports, shared checkout roots) and two discards from the 2026-10-22 triage
 - [pending] `resume-target-fixes-oct22.md` — Restart with clears the old conversation when hooks are off, and Grok and OMP attribution refuse nested runs in unrecognised panes (2026-10-22 triage)
 - [pending] `checkout-ownership-oct22.md` — Five supervisor fixes: no-creation-time checkouts are released, restarted sessions survive stale create retries, attachments survive interrupted Delete, duplicate pane rows keep claims, rewound upstreams get a fresh clone
 - [pending] `supervisor-lock-outlives-work.md` — The supervisor keeps its state-folder claim until its background work has ended, as the helm does (2026-10-22 triage)
