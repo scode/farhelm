@@ -23,10 +23,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   that survives an interrupted Delete loses its attachments at the next supervisor start; the partial-deletion allowance
   and a ledger decision conflict.
 
-- [`named-restart-with-keeps-unreported-old-conversation.md`](named-restart-with-keeps-unreported-old-conversation.md) —
-  After a named Restart with that cannot report, Resume reopens the previous conversation indefinitely; the unhooked
-  spawn path is not traced end to end.
-
 - [`no-birth-time-checkout-archives-reclone.md`](no-birth-time-checkout-archives-reclone.md) — On a filesystem without
   creation times, a folder re-cloned over a checkout is trashed as Farhelm's; which supported filesystems lack them is
   unverified.
