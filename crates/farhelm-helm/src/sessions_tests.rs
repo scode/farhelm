@@ -6995,6 +6995,120 @@ async fn browse_directory_routes_to_the_named_host_and_preserves_its_reply() {
     remote_task.await.expect("remote browse peer");
 }
 
+/// Automatic folder checks validate through the target's non-listing mode,
+/// preserve its refusal words, and never refine a stored folder suggestion.
+/// A stale connection must be rejected before reaching the peer, as for
+/// ordinary Browse: a warning about a successor installation is misleading.
+#[farhelm_testtrace::test]
+async fn folder_checks_do_not_list_or_refine_history() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ErrorKind, Frame};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (reader, writer) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(reader);
+        let mut writer = FrameWriter::new(writer);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        for expected in ["~/project", "/missing"] {
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::BrowseDirectory {
+                req_id,
+                cwd,
+                membership_only,
+            } = request
+            else {
+                panic!("expected directory check, got {request:?}");
+            };
+            assert_eq!(cwd, expected, "the stale request must never reach the peer");
+            assert!(
+                membership_only,
+                "checking must not enumerate directory children"
+            );
+            let reply = if cwd == "~/project" {
+                ControlMsg::DirectoryListing {
+                    req_id,
+                    cwd: "/resolved/project".into(),
+                    parent: None,
+                    children: Vec::new(),
+                    truncated: false,
+                    managed_checkout: false,
+                }
+            } else {
+                ControlMsg::Error {
+                    req_id,
+                    kind: ErrorKind::InvalidRequest,
+                    message: "working directory does not exist: /missing".into(),
+                    create_unaccepted: false,
+                }
+            };
+            writer.write_frame(&Frame::control(&reply)).await.unwrap();
+        }
+    });
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let local = rest_harness::local_id(&harness.store).await;
+    let current = harness.manager.status(local).unwrap().incarnation;
+    let recorded = farhelm_proto::SessionInfo {
+        cwd: "~/project".into(),
+        canonical_cwd: None,
+        ..rest_harness::session("folder-check", 1)
+    };
+    assert!(
+        harness
+            .store
+            .record_create_history(local, "local-identity", &recorded)
+            .await
+            .unwrap()
+    );
+    let before = harness
+        .store
+        .folder_history(local, "local-identity")
+        .await
+        .unwrap();
+    assert_eq!(before.len(), 1);
+    assert!(
+        !before[0].canonical_proven,
+        "the fixture must be refinable by ordinary Browse"
+    );
+    let (status, headers, body) = post_text_headers(&harness, "/api/browse-directory", serde_json::json!({
+        "host": local, "cwd": "/stale", "expected_incarnation": current - 1, "membership_only": true
+    })).await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT);
+    assert!(is_stale_precondition(&headers), "{body}");
+
+    let (status, body) = post_text(&harness, "/api/browse-directory", serde_json::json!({
+        "host": local, "cwd": "~/project", "expected_incarnation": current, "membership_only": true
+    })).await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+        serde_json::json!({
+            "cwd": "/resolved/project", "parent": null, "children": [], "truncated": false
+        })
+    );
+    assert_eq!(
+        harness
+            .store
+            .folder_history(local, "local-identity")
+            .await
+            .unwrap(),
+        before,
+        "an advisory check cannot refine a legacy folder spelling"
+    );
+
+    let (status, body) = post_text(&harness, "/api/browse-directory", serde_json::json!({
+        "host": local, "cwd": "/missing", "expected_incarnation": current, "membership_only": true
+    })).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        body.contains("working directory does not exist: /missing"),
+        "{body}"
+    );
+    peer.await.unwrap();
+}
+
 /// A terminal socket for a session on a non-connected host must be
 /// refused the same way every other operation is — and must SAY so, as
 /// the ordinary `detached` notice, rather than closing bare.

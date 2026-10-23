@@ -3393,6 +3393,12 @@ manual repository selection. Browser requests debounce for 150 ms and discard st
 
 ### Composer history
 
+`POST /api/browse-directory` accepts a default-false `membership_only` flag. When set, the helm uses the existing
+supervisor membership check, returns the canonical cwd with empty listing fields, and skips folder-history refinement.
+This provides a target-side existence check without enumerating children; ordinary Browse keeps its existing listing and
+refinement behavior. Both modes check the supplied connection incarnation before dispatch and carry the supervisor's
+refusal words back through the ordinary HTTP error path.
+
 Composer history is one 100-record, per-host-installation unique-create window. Each accepted supervisor session id
 enters it once, whether it was an agent launch or a command launch. Agent-launch suggestions are projections of the
 surviving admission rows, so 100 later command launches evict an earlier agent-launch setup and remove its frequency
