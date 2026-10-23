@@ -2042,7 +2042,11 @@ pub(super) fn SessionRow(
                     // is long gone — so it would stay invisible forever
                     // without this: healing it right here, the instant the
                     // handle FIRST becomes usable, is what a plain "measure
-                    // once on open" scheme misses on this one path.
+                    // once on open" scheme misses on this one path. (A
+                    // recovering listing now closes session menus before
+                    // the rows remount, so a failed read no longer reaches
+                    // this path; the guard stays for any remount that keeps
+                    // the flag.)
                     onmounted: move |element| {
                         toggle_handle.set(Some(element.data()));
                         if should_measure_on_mount(menu_open, *placement.peek()) {

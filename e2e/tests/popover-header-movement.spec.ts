@@ -112,11 +112,17 @@ async function prepare(page: Page, request: APIRequestContext, options: { lowerC
   });
   let gate = Promise.resolve();
   let reads = 0;
+  // A latch rather than a one-shot: the list retries a failed read on its
+  // own, so a single failure would end at a moment the test did not choose.
+  let failing = false;
   await page.route((url) => url.pathname === "/api/sessions", async (route) => {
     if (route.request().method() !== "GET") return route.continue();
     const body = { ...source, sessions: rows.slice(), total: rows.length, matching: rows.length, truncated: false };
     reads++;
     await gate;
+    if (failing) {
+      return route.fulfill({ status: 503, headers: { "x-farhelm-build": build }, body: "listing fixture failure" });
+    }
     await route.fulfill({
       headers: { "x-farhelm-build": build, "content-type": "application/json" }, json: body,
     });
@@ -143,6 +149,9 @@ async function prepare(page: Page, request: APIRequestContext, options: { lowerC
   return {
     target, selected, lower, rows, build, filler, notify,
     reads: () => reads,
+    failListings(on: boolean) {
+      failing = on;
+    },
     holdListings() {
       let release = () => {};
       gate = new Promise<void>((resolve) => { release = resolve; });
@@ -450,6 +459,30 @@ for (const kind of ["menu", "bell"] as const) {
     const shown = await page.locator(".session-row").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-session-id")));
     expect(shown.slice(0, prefix.length)).toEqual(prefix);
     expect(shown.at(-1)).toBe(tenth.id);
+    await expect(panel).toHaveCount(0);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  /** A failed read replaces every row with the error line, and the reply
+   * that recovers redraws them. A popup left open across the failure must
+   * not come back with them, wherever its row now lands. This covers the
+   * ordering where the error line renders; a recovery landing before it
+   * renders is not something this fixture can schedule.
+   */
+  test(`recovering from a failed listing closes an open ${kind}`, async ({ page, request }) => {
+    const fixture = await prepare(page, request);
+    const target = row(page, fixture.target);
+    const { toggle, panel } = await openPopup(page, target, kind);
+    fixture.failListings(true);
+    const failed = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/api/sessions" && response.request().method() === "GET"
+    );
+    fixture.notify();
+    expect((await failed).status()).toBe(503);
+    await expect(page.locator(".status.error")).toContainText("failed to load sessions");
+    await expect(page.locator(".session-row")).toHaveCount(0);
+    fixture.failListings(false);
+    await fixture.refresh();
     await expect(panel).toHaveCount(0);
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
   });
