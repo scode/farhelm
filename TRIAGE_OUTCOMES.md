@@ -17391,7 +17391,9 @@
   conflict. The assessment and completion criteria above stand as the case that plan must cover; the queue item is
   removed now.
 - Execution: complete for the queue removal (feedback file and index entry removed in the change that recorded this
-  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw".
+  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw". Fixed by jj change
+  `otmktwtrnlzuomqlzotnpktxummtmsou`, bookmark `plan/bind-gui-answers/03-header-yolo-opening`;
+  [draft PR #2579](https://github.com/scode/farhelm/pull/2579/changes).
 
 ## spare-take-adopts-replaced-ready-folder.md
 

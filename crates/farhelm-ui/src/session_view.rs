@@ -2701,38 +2701,46 @@ pub(crate) fn SessionView(
             }
             if let Some(question) = replace_controller.question() {
                 crate::yolo_confirm::YoloConfirmation {
-                    ask: question.pending.ask,
+                    ask: question.pending.ask.clone(),
                     busy: replacing(),
                     error: replace_controller.error(),
                     confirm_submits: false,
                     // Both answers continue the Replace the user confirmed,
                     // with the snapshot and nothing-alive answer that prompt
-                    // carried, not a fresh read of the session.
-                    on_confirm: move |_| {
-                        if replace_controller.current_question().is_none() {
-                            return;
-                        }
-                        if let Some(claim) = lifecycle.claim_guard()
-                            && let Some(answer) = replace_controller.answer_current(false)
-                        {
-                            let pending = answer.pending.clone();
-                            yolo_confirm_replace(claim, pending.source, pending.guard, Some(answer));
+                    // carried, not a fresh read of the session, and only
+                    // while the opening this render drew is still the open
+                    // one (`answer_session`).
+                    on_confirm: {
+                        let question = question.clone();
+                        move |_| {
+                            if !replace_controller.is_open(&question) {
+                                return;
+                            }
+                            if let Some(claim) = lifecycle.claim_guard()
+                                && let Some(answer) = replace_controller.answer_session(&question, false)
+                            {
+                                let pending = answer.pending.clone();
+                                yolo_confirm_replace(claim, pending.source, pending.guard, Some(answer));
+                            }
                         }
                     },
                     // Keep the mounted question through the host-setting write;
                     // the controller hides it on success or keeps its reason.
-                    on_confirm_and_stop_asking: move |_| {
-                        if replace_controller.current_question().is_none() {
-                            return;
-                        }
-                        if let Some(claim) = lifecycle.claim_guard()
-                            && let Some(answer) = replace_controller.answer_current(true)
-                        {
-                            let pending = answer.pending.clone();
-                            yolo_stop_asking_replace(claim, pending.source, pending.guard, Some(answer));
+                    on_confirm_and_stop_asking: {
+                        let question = question.clone();
+                        move |_| {
+                            if !replace_controller.is_open(&question) {
+                                return;
+                            }
+                            if let Some(claim) = lifecycle.claim_guard()
+                                && let Some(answer) = replace_controller.answer_session(&question, true)
+                            {
+                                let pending = answer.pending.clone();
+                                yolo_stop_asking_replace(claim, pending.source, pending.guard, Some(answer));
+                            }
                         }
                     },
-                    on_cancel: move |_| replace_controller.cancel_current(),
+                    on_cancel: move |_| replace_controller.cancel_stamped(&question),
                 }
             }
             if let Some(err) = replace_error.read().clone() {

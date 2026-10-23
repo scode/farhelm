@@ -28,9 +28,11 @@ pub(crate) struct PendingReplace {
 
 /// One local opening of a Replace question, with its captured operation.
 ///
-/// Sidebar answers name this opening so a queued answer behind Cancel cannot
-/// dispatch. Header answers intentionally use the current opening instead,
-/// preserving that surface's existing live-question semantics.
+/// Every answer names the opening its render drew, on the sidebar and in the
+/// session header alike, so a queued answer behind Cancel, or behind a
+/// reopen of the question, cannot dispatch. (The header used to answer
+/// whatever question was current instead; that was reversed on 2026-10-21 so
+/// both surfaces answer only what they showed.)
 #[derive(Clone, PartialEq)]
 pub(crate) struct ReplaceYoloQuestion {
     opening: u64,
@@ -111,8 +113,9 @@ impl ReplaceController {
     }
 
     /// Bind a session surface without changing its permanent-answer mount.
-    /// Its handlers answer the live question and keep that question through a
-    /// host-setting write, including a failed write's busy-to-idle recovery.
+    /// Its handlers answer only the opening their render drew, and keep that
+    /// question through a host-setting write, including a failed write's
+    /// busy-to-idle recovery.
     pub(crate) fn session(
         retry: Signal<Option<(String, Option<String>)>>,
         exclusions: Signal<HashSet<String>>,
@@ -131,9 +134,19 @@ impl ReplaceController {
         self.question.read().clone()
     }
 
-    /// Inspect the current question at handler time, without subscribing a render.
-    pub(crate) fn current_question(self) -> Option<ReplaceYoloQuestion> {
+    /// Inspect the current question without subscribing a render. Private:
+    /// a handler that could fetch the live question could answer whatever is
+    /// open at click time; handlers test their rendered opening with
+    /// [`Self::is_open`] instead.
+    fn current_question(self) -> Option<ReplaceYoloQuestion> {
         self.question.peek().clone()
+    }
+
+    /// Whether `question`, the opening a handler's render drew, is still the
+    /// open one, without subscribing. For a handler's early exit before it
+    /// takes a lifecycle claim; the answer itself re-checks.
+    pub(crate) fn is_open(self, question: &ReplaceYoloQuestion) -> bool {
+        self.question.peek().as_ref() == Some(question)
     }
 
     /// Read the host-setting failure associated with the local question.
@@ -264,7 +277,7 @@ impl ReplaceController {
 
     /// Consume exactly one opening; stale handlers leave a newer question alone.
     fn take_question(mut self, question: &ReplaceYoloQuestion) -> bool {
-        if self.question.peek().as_ref() != Some(question) {
+        if !self.is_open(question) {
             return false;
         }
         self.release_question();
@@ -302,12 +315,20 @@ impl ReplaceController {
         })
     }
 
-    /// Answer the live session question after its lifecycle guard was obtained.
-    /// Permanent answers leave it mounted until the host save succeeds. Its
-    /// hostless permanent button is not offered, but retains the old no-save
-    /// continuation if invoked rather than adding a new refusal here.
-    pub(crate) fn answer_current(mut self, stop_asking: bool) -> Option<ReplaceAnswer> {
-        let question = self.current_question()?;
+    /// Answer the session question `question` names, after its lifecycle guard
+    /// was obtained: `None`, changing nothing, unless that exact opening is
+    /// still the open one. Permanent answers leave it mounted until the host
+    /// save succeeds. Its hostless permanent button is not offered, but
+    /// retains the old no-save continuation if invoked rather than adding a
+    /// new refusal here.
+    pub(crate) fn answer_session(
+        mut self,
+        question: &ReplaceYoloQuestion,
+        stop_asking: bool,
+    ) -> Option<ReplaceAnswer> {
+        if !self.is_open(question) {
+            return None;
+        }
         let pending = question.pending.clone();
         let stop_asking = if stop_asking {
             pending
@@ -315,7 +336,7 @@ impl ReplaceController {
                 .host
                 .map(|host| (host, pending.ask.host_name.clone()))
         } else {
-            self.take_question(&question);
+            self.take_question(question);
             None
         };
         self.error.set(None);
@@ -325,19 +346,12 @@ impl ReplaceController {
         })
     }
 
-    /// Cancel the rendered sidebar question and only its exact retry key.
+    /// Cancel the rendered question and only its exact retry key. Both
+    /// surfaces' Cancel buttons use it; a stale Cancel changes nothing.
     pub(crate) fn cancel_stamped(self, question: &ReplaceYoloQuestion) {
         if self.take_question(question) {
             self.end_key(question.pending.source.id.raw(), &question.pending.key);
         }
-    }
-
-    /// Session cancellation follows the currently open question, as its answers do.
-    pub(crate) fn cancel_current(mut self) {
-        if let Some(question) = self.current_question() {
-            self.cancel_stamped(&question);
-        }
-        self.error.set(None);
     }
 
     /// Apply a completed permanent-answer save without moving surface timing.
@@ -765,7 +779,7 @@ mod tests {
 
             assert!(header.open_question(pending("B", "b1"), None));
             let question = header.current_question().unwrap();
-            let answer = header.answer_current(true).unwrap();
+            let answer = header.answer_session(&question, true).unwrap();
             assert!(
                 header.current_question().as_ref() == Some(&question),
                 "header stays mounted while save waits"
@@ -774,14 +788,15 @@ mod tests {
             assert!(!header.host_saved(answer.pending.clone(), Err("save failed".to_owned())));
             assert!(header.current_question().as_ref() == Some(&question));
             assert_eq!(header.error().as_deref(), Some("save failed"));
-            let answer = header.answer_current(true).unwrap();
+            let answer = header.answer_session(&question, true).unwrap();
             assert!(header.error().is_none());
             assert!(header.host_saved(answer.pending, Ok(())));
             assert!(header.current_question().is_none());
             assert!(!header.exclusions.peek().contains("B"));
             assert!(header.exclusions.peek().contains("C"));
             assert!(header.open_question(pending("B", "b2"), None));
-            assert!(header.answer_current(false).is_some());
+            let question = header.current_question().unwrap();
+            assert!(header.answer_session(&question, false).is_some());
             assert!(
                 header.current_question().is_none(),
                 "one-off consumes before dispatch"
@@ -789,24 +804,52 @@ mod tests {
         });
     }
 
-    /// Session handlers answer the live question, rather than a rendered opening.
-    /// Retaining this distinction avoids silently changing a refactor into a
-    /// stale-handler fix. A hostless permanent button is absent in production,
-    /// but the existing handler's no-save continuation is preserved as well.
+    /// Why: the session header's YOLO buttons used to answer whatever Replace
+    /// question was open when the click ran, so a click queued behind a
+    /// Cancel and a reopen could approve a question the user had not seen.
+    /// The maintainer decided on 2026-10-21 that the header answers only what
+    /// it showed, like the sidebar.
+    ///
+    /// Spec: a header answer or Cancel drawn for an earlier opening does
+    /// nothing to a later opening of the same request (same source, same
+    /// retry key), leaving it open with its error; an answer for the open
+    /// opening proceeds, and a hostless permanent answer keeps today's
+    /// no-save continuation.
     #[farhelm_testtrace::test]
-    fn session_answers_follow_the_current_question() {
+    fn session_answers_only_the_rendered_opening() {
         with_controllers(|_, header| {
             assert!(header.open_question(pending("A", "a1"), None));
             let old = header.current_question().unwrap();
-            header.cancel_current();
-            assert!(header.open_question(pending("A", "a2"), None));
-            let answer = header.answer_current(false).unwrap();
-            assert_ne!(answer.pending.key, old.pending.key);
-            assert_eq!(answer.pending.key, "a2");
+            header.cancel_stamped(&old);
+            assert!(
+                header.current_question().is_none(),
+                "premise: Cancel closed it"
+            );
+            assert!(header.open_question(pending("A", "a1"), None));
+            let later = header.current_question().unwrap();
+            assert!(
+                old != later && old.pending == later.pending,
+                "premise: the same request reopened under a new opening"
+            );
+            // Give the reopened question an error a stale click must not clear.
+            let saving = header.answer_session(&later, true).unwrap();
+            assert!(!header.host_saved(saving.pending, Err("save failed".to_owned())));
+            assert!(header.is_open(&later) && !header.is_open(&old));
+            assert!(header.answer_session(&old, false).is_none());
+            assert!(header.answer_session(&old, true).is_none());
+            header.cancel_stamped(&old);
+            assert!(
+                header.current_question().as_ref() == Some(&later),
+                "a stale header answer or Cancel leaves the reopened question"
+            );
+            assert_eq!(header.error().as_deref(), Some("save failed"));
+            let answer = header.answer_session(&later, false).unwrap();
+            assert_eq!(answer.pending.key, "a1");
             let mut hostless = pending("A", "a3");
             hostless.ask.host = None;
             assert!(header.open_question(hostless, None));
-            let answer = header.answer_current(true).unwrap();
+            let question = header.current_question().unwrap();
+            let answer = header.answer_session(&question, true).unwrap();
             assert!(answer.stop_asking.is_none());
             assert!(header.current_question().is_some());
         });
