@@ -2713,3 +2713,39 @@ assertion failed: started.elapsed() >= Duration::from_millis(30)
 Class: product
 
 Cause: hypothesis
+
+## 2026-10-22 — post-clone cleanup waits for a finished save (e2e/tests/settings.spec.ts)
+
+The WebKit project's `post-clone commands with carriage returns refuse edits but can be cleared` failed twice on shared
+Linux x86_64, each time in a full or selected browser run of a landing stack that does not change the test, the
+post-clone command save or its route. Run `dd883f13-632e-4743-b2f1-83f3d27dd15f` (2026-10-21, tested commit `747b69f5`,
+clean tree, the checkout, checkout composer, settings and tooltip-coverage specs on both engines) and run
+`c2a8412b-3534-414f-bd04-a77888f9cb27` (2026-10-21, tested commit `b26d70f1`, clean tree, the full suite on both
+engines). Both: three workers with one stack each, zero retries, Playwright 1.64.0, tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale `C.UTF-8`, child `FARHELM_*` names
+`FARHELM_TEST_TRACE_DIR` and, in the full run only, `FARHELM_PLAYWRIGHT_POLICY_FILE`. In the first run it was the only
+failure; in the second, the other failures were three tests the stack under test had broken (updated at that landing)
+and the open takeover flake in `e2e/tests/terminal-reconnect.spec.ts`. Contemporaneous load was not sampled beyond the
+run's own three workers.
+
+Both traces show the same shape: every step of the test body, both carriage-return variants included, finished in about
+12 to 14 seconds (the Chromium project takes about 5), and the test then spent the rest of its 60-second timeout in its
+`finally` block, at `await reply.finished()` for one of the PUTs its route handler recorded. The body had already seen
+each save's status text and read every saved value back over the API, so the helm had answered every save. Ten exact
+WebKit repetitions and five Chromium repetitions on the first stack all passed (`bb964d0b-b35e-43e3-a2e9-e2c08cb09e0a`,
+`16b8d112-1859-457a-be9c-258475b98947`). The test and its cleanup date from #2053 (2026-10-14) and have not changed
+since.
+
+Hypothesis, not confirmed: for a request the test routes through `route.continue()`, Playwright's WebKit backend
+sometimes never reports the response as finished, so the cleanup's unbounded wait hangs although the product finished
+the request. A bounded wait, or waiting for the save's own effect rather than the network event, would keep the
+cleanup's purpose (no late PUT undoing the restoration). Open; no fix attempted.
+
+```text
+Test timeout of 60000ms exceeded.
+> 642 |       if (reply) await reply.finished();
+```
+
+Class: harness
+
+Cause: hypothesis
