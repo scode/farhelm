@@ -333,23 +333,36 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
   }
 });
 
-/** A failed number-key save is reported and then discarded (SPEC.md, "One GUI
- * at a time"). The dialog goes back to the helm's keys, and the next save starts
- * from a fresh read instead of writing the failed choice back over a key an
- * agent set in the meantime.
+/** A refusal and a lost reply share uncertainty wording. Only a fresh helm read
+ * decides which keys to show: a committed PUT whose reply was lost must appear,
+ * while an unsuccessful re-read discards the optimistic choice and says the
+ * current keys are unknown. A later edit never replays the failed choice over
+ * an agent's new binding (SPEC.md, "One GUI at a time").
  */
-test("a failed number-key save is reported and never saved later", async ({ page, request }) => {
+for (const failure of ["refused", "lost reply", "unreadable keys"] as const) {
+test(`a failed number-key save is reported and never saved later: ${failure}`, async ({ page, request }) => {
   const prefix = `number-failed-${Date.now()}`;
   const [a, b] = ["a", "b"].map(s => `${prefix}-${s}`);
   try {
     await patchPreferences(request, { template_shortcuts: null, quick_launch_template: null });
     await putTemplate(request, a, { kind: "agent", agent: "claude" });
     await putTemplate(request, b, { kind: "agent", agent: "codex" });
-    let refused = 0;
+    let writes = 0;
+    let rereads = 0;
     await page.route("**/api/preferences", async route => {
       const put = route.request();
+      if (put.method() === "GET" && writes > 0) {
+        rereads += 1;
+        if (failure === "unreadable keys") return route.fulfill({ status: 503, body: "read refused by the test" });
+      }
       if (put.method() !== "PUT" || !put.postData()?.includes("template_shortcuts")) return route.fallback();
-      refused += 1;
+      writes += 1;
+      if (failure === "lost reply") {
+        const saved = await route.fetch();
+        expect(saved.ok(), "premise: the real helm accepts the write before its reply is lost").toBe(true);
+        expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": a });
+        return route.abort("failed");
+      }
       await route.fulfill({ status: 503, body: "refused by the test" });
     });
     await page.goto("/");
@@ -361,9 +374,11 @@ test("a failed number-key save is reported and never saved later", async ({ page
     await expect(keyButton).toHaveText("Ctrl+Shift+ –");
     await keyButton.click();
     await menu.getByRole("menuitem", { name: "Ctrl+Shift+1", exact: true }).click();
-    await expect(dialog.locator(".templates-error")).toHaveText("the number key could not be saved");
-    expect(refused).toBe(1);
-    await expect(keyButton).toHaveText("Ctrl+Shift+ –");
+    const detail = failure === "unreadable keys" ? "current keys could not be read" : "showing the keys read from Farhelm";
+    await expect(dialog.locator(".templates-error")).toHaveText(`the number key may not have been saved; ${detail}`);
+    expect(writes).toBe(1);
+    expect(rereads, "a preferences read followed the failed write").toBeGreaterThan(0);
+    await expect(keyButton).toHaveText(failure === "lost reply" ? "Ctrl+Shift+1" : "Ctrl+Shift+ –");
     await page.unroute("**/api/preferences");
     await patchPreferences(request, { template_shortcuts: { "1": b } });
     await keyButton.click();
@@ -374,6 +389,7 @@ test("a failed number-key save is reported and never saved later", async ({ page
     for (const name of [a, b]) await deleteTemplate(request, name);
   }
 });
+}
 
 /** A model-only key is useful for composition even though it cannot launch
  * alone. Hold catalog loading past the notice lifetime to prove that loading

@@ -19,10 +19,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   The CentOS test deletes the user's ssh config after a leftover start marker with no end marker; an accidental trigger
   is unverified, and the bucket is unsettled.
 
-- [`lost-shortcut-save-restores-misleading-assignment.md`](lost-shortcut-save-restores-misleading-assignment.md) — A
-  lost committed-save reply restores an old shortcut indication while the next key resolves the new template; harmful
-  reliance and coverage remain unproved.
-
 ## High priority: material UX degradation
 
 - [`untouched-checkout-folder-save-undoes-cli-edit.md`](untouched-checkout-folder-save-undoes-cli-edit.md) — Saving an

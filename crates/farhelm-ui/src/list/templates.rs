@@ -1662,13 +1662,27 @@ pub(super) fn TemplatesDialog(
                     };
                     drop(current);
                     match value {
-                        // A failed key save is reported and then discarded
-                        // (SPEC.md, "One GUI at a time"), so the dialog goes
-                        // back to the keys the helm reported.
+                        // A false acknowledgment also covers a lost reply after
+                        // the helm committed. Discard the optimistic map, then
+                        // read again; neither the old nor attempted map tells
+                        // us what the helm now holds. Keep the old observation
+                        // only if that read fails too, and say so.
                         Some(value @ PreferenceValue::TemplateShortcuts(_)) => {
                             if !crate::api::write_template_binding(&base, value).await {
                                 preferences.0.write().template_shortcuts = read;
-                                error.set(Some("the number key could not be saved".into()));
+                                let detail = match crate::api::fetch_preferences(&base).await {
+                                    Ok(fresh) => {
+                                        apply_template_bindings(
+                                            &mut preferences.0.write(),
+                                            crate::api::template_bindings_after_read(fresh),
+                                        );
+                                        "showing the keys read from Farhelm"
+                                    }
+                                    Err(_) => "current keys could not be read",
+                                };
+                                error.set(Some(format!(
+                                    "the number key may not have been saved; {detail}"
+                                )));
                             }
                         }
                         Some(value) => crate::api::store_preference(&base, value),

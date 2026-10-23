@@ -18370,7 +18370,12 @@
   refusal), the dialog says it may not have been saved and shows the bindings re-read from the helm rather than the
   pre-save ones. Coordinate with `plans/queue/sign-in-preservation-sweep.md`, which changes the same preferences writer.
   Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/dialog-saves-oct22.md`.
+- Execution: complete in change `ukxqsozxrnlvqvytylwnkwunlmzltstr`, bookmark
+  `plan/dialog-saves-oct22/03-uncertain-number-key`. Per the 2026-10-23 plan Decision, the requirement to distinguish
+  refusal from an unknown outcome is dropped: every failed number-key save reports uncertainty and re-reads the helm's
+  keys, leaving the shared preference queue unchanged. If that read fails, the dialog keeps the previous observation and
+  says the current keys could not be read. Size: 64 lines, within the gate. PR:
+  https://github.com/scode/farhelm/pull/2679/changes.
 
 ## reseeded-launcher-retains-conversation-selector.md
 
