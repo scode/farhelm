@@ -272,8 +272,8 @@ Before reading the monitor's status, read these in full:
 - `plans/.agents/outside-files.md` (the monitor log's Status section)
 - `plans/.agents/landing.md` and `plans/.agents/release-help.md` (what the flags `queue status` raises mean, and their
   remedies)
-- `AGENTS.md`, "Talking to the user" and "TODO.md and FLAKES.md" (root)
-- the `scode-snippets` and `jjstack` skills
+- `AGENTS.md`, "Talking to the user", "Agent scratch space" and "TODO.md and FLAKES.md" (root)
+- the `jjstack` skill
 
 Fence: do its work in a checkout of its own, never in an executor's or the monitor's (any session may run it, the
 monitoring session included); an unticked report without a comment is left for later, never a follow-up or a rejection.

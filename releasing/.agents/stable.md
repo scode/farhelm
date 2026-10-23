@@ -35,8 +35,8 @@ to fix forward, so it starts the moment the pre-tag checks pass.
    release is included unless the user explicitly excludes it, and `MISSING` ones get an entry written now from the
    commit and PR. `kind: none` fragments are left out of the draft and `STALE` ones are not used (see
    `releasing/.agents/changelog.md`, "The checker"); both are listed for the maintainer, the former as proposed
-   exclusions (the fragment author's judgment is not the user's decision), in the message that hands over the first
-   snippet in step 2. Their answers arrive with the wording review and change the draft like any other edit; nothing in
+   exclusions (the fragment author's judgment is not the user's decision), in the message that hands over the review
+   page in step 2. Their answers arrive with the wording review and change the draft like any other edit; nothing in
    this step waits for them. This is the sweep the fragment rule exists to make cheap.
 
    In the same step, ALWAYS check whether the helm–supervisor protocol version changed since the last stable release,
@@ -59,21 +59,33 @@ to fix forward, so it starts the moment the pre-tag checks pass.
    agent agree on in conversation, following that guidance. Sort every fix into Fixes worth highlighting or Misc fixes
    by the criteria in `releasing/.agents/changelog.md`, "Format"; the split is the agent's first call and the
    maintainer's to change. Keep the whole proposed `## vX.Y.Z - YYYY-MM-DD` section in a Markdown file in your scratch
-   directory, written exactly as it will go into `CHANGELOG.md`, and publish it to the maintainer as a snippet with the
-   `scode-snippets` skill, giving them its link. If you do not know what the `scode-snippets` skill is, stop and tell
-   the maintainer; do not substitute another way of showing the draft. The maintainer asked for snippets on 2026-10-13,
-   replacing a local file they edited by hand. The snippet is the interactive review page that
-   `python3 releasing/notes-review-page.py SECTION.md OUT.html` renders from the scratch file, written as the snippet's
-   `index.html` (the script's docstring has the details). The maintainer types feedback under individual entries and
-   pastes back a `notes-feedback vX.Y.Z` block, in which each note names its entry by id and by its opening words; match
-   notes on the words, since ids are positions and shift between rounds. The maintainer asked for this page as the
-   default on 2026-10-16. Apply the feedback to the scratch file, regenerate the page and update the same snippet after
-   each round, until the maintainer approves the text; the regenerated page clears the notes that round applied. The
-   scratch file and the snippet hold the section as it will read once approved, without the draft notice; `CHANGELOG.md`
-   gets the notice added in step 4.
+   directory, written exactly as it will go into `CHANGELOG.md`, and show it to the maintainer on the interactive review
+   page that `python3 releasing/notes-review-page.py SECTION.md OUT.html` renders from the scratch file (the script's
+   docstring has the details); do not substitute another way of showing the draft. The maintainer asked for a
+   `scode-snippets` snippet on 2026-10-13, replacing a local file they edited by hand, made this page the default on
+   2026-10-16, and on 2026-10-23 moved it from a published snippet to a page served from this machine, the way the
+   planning flow asks its up-front questions (`plans/.agents/planning.md`, "Asking the up-front questions on a local
+   page"). Do not publish the page as a snippet or anywhere else unless the maintainer asks.
 
-   Do not wait for approval: go on to step 4 as soon as the first snippet is published, and keep the review going
-   alongside the rest of the procedure. Step 3 says how the approved text lands.
+   Render the page as `index.html` in a directory of its own inside your scratch directory (`AGENTS.md`, "Agent scratch
+   space") and serve that directory with `scripts/serve-page.ts <dir>`, run from the checkout root as a background
+   command, never with another server; if it fails to start, stop and report why. It binds `127.0.0.1` on port 14003,
+   the todo picker's port, and marks every response uncacheable: every flow shares that URL, so a cached copy can be
+   another session's page or an older version of this one. If something else holds the port, it moves to the next free
+   port above and prints the URL it got; give the maintainer that URL without asking, and say plainly that the port
+   changed, since a forward of 14003 does not reach it. Never stop a process you did not start. Give the maintainer the
+   URL as soon as the page is served, and again in the last message of the turn, after every tool call.
+
+   The maintainer types feedback under individual entries and pastes back a `notes-feedback vX.Y.Z` block, in which each
+   note names its entry by id and by its opening words; match notes on the words, since ids are positions and shift
+   between rounds. Apply the feedback to the scratch file and regenerate the page into the same `index.html` after each
+   round, until the maintainer approves the text: the server keeps serving that directory, so regenerating the file
+   updates the page in place, and the regenerated page clears the notes that round applied. Stop the server once the
+   maintainer approves the text. The scratch file and the page hold the section as it will read once approved, without
+   the draft notice; `CHANGELOG.md` gets the notice added in step 4.
+
+   Do not wait for approval: go on to step 4 as soon as the page is served, and keep the review going alongside the rest
+   of the procedure. Step 3 says how the approved text lands.
 
    Treat any wording the maintainer supplies as authoritative. Reproduce it exactly: do not summarize, paraphrase,
    polish, reorder, or silently correct it. When the maintainer gives edits to the agent's proposed wording, apply
@@ -119,7 +131,7 @@ to fix forward, so it starts the moment the pre-tag checks pass.
    on the first line under the heading followed by the scratch file's categories, every fragment under
    `releasing/changelog.d/` deleted (including `kind: none` ones; they were for this sweep), `dprint fmt`, and
    `python3 releasing/check-changelog.py format` passing. If `<today>` differs from the date in the scratch file's
-   heading, update the scratch file's heading to match what this PR lands, and the snippet with it, so that the
+   heading, update the scratch file's heading to match what this PR lands, and regenerate the page with it, so that the
    finalization copy keeps the heading the release is named after. Merge it before going on.
 
    The moment it merges, start a subagent to give the release's notes their screenshots on the docs website, and go on
@@ -228,9 +240,9 @@ Leave out `kind: none` fragments and `STALE` ones rather than stopping to ask ab
 
 The re-cut's section is therefore a draft again, whether or not the previous attempt's notes were finalized: it opens
 with the draft notice in `CHANGELOG.md`, and its review and finalization follow steps 2 and 3. The scratch file and the
-snippet still hold the section without the notice, as step 2 says: update both with the re-cut's entries rather than
-starting new ones, and in the message that hands the maintainer the updated snippet, list every entry added without
-their review and every fragment left out.
+review page still hold the section without the notice, as step 2 says: update both with the re-cut's entries rather than
+starting new ones (serve the page again as step 2 does if its server was stopped), and in the message that hands the
+maintainer the updated page, list every entry added without their review and every fragment left out.
 
 Then continue from step 5 at the new changelog PR's merge commit. A `release-X.Y.Z` branch from an attempt that never
 pushed a tag is replaced, since nothing points at it; one whose tag was pushed is left as it is. A GitHub release from
