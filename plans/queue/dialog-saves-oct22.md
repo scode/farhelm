@@ -308,47 +308,62 @@ bookmark and PR. Open, not merged. If a `## Decisions` section exists, its lates
 close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the
 queue script, write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-10-23 (claim de4a94).
+### 2026-10-23: answer to a blocked question
 
-### Number-key save with a lost reply: build the larger fix, a smaller one, or drop it?
+The question, as the executor put it:
 
-**The problem.** In the Templates dialog you can give a template a number key (Ctrl+Shift+1 and so on), which launches
-that template. When saving a key fails, the dialog says "the number key could not be saved" and puts the keys back as
-they were before. That is right when Farhelm refused the save. But if the save reached Farhelm and only the reply got
-lost or timed out (a dropped connection, or a helm slower than the app's request timeout), the key is in fact saved: the
-dialog then shows the old keys while pressing the key launches the newly chosen template, until the app next reads the
-keys from Farhelm. On the 2026-10-22 triage page you accepted "Unknown-outcome wording plus re-read": when the outcome
-is unknown, as distinct from a refusal, say the key may not have been saved and show the keys Farhelm actually has. Each
-outcome in this plan has a size limit of about 100 changed lines; over it, the plan brings the outcome back to you
-instead of building it.
+> Blocked on 2026-10-23 (claim de4a94).
+>
+> ### Number-key save with a lost reply: build the larger fix, a smaller one, or drop it?
+>
+> **The problem.** In the Templates dialog you can give a template a number key (Ctrl+Shift+1 and so on), which launches
+> that template. When saving a key fails, the dialog says "the number key could not be saved" and puts the keys back as
+> they were before. That is right when Farhelm refused the save. But if the save reached Farhelm and only the reply got
+> lost or timed out (a dropped connection, or a helm slower than the app's request timeout), the key is in fact saved:
+> the dialog then shows the old keys while pressing the key launches the newly chosen template, until the app next reads
+> the keys from Farhelm. On the 2026-10-22 triage page you accepted "Unknown-outcome wording plus re-read": when the
+> outcome is unknown, as distinct from a refusal, say the key may not have been saved and show the keys Farhelm actually
+> has. Each outcome in this plan has a size limit of about 100 changed lines; over it, the plan brings the outcome back
+> to you instead of building it.
+>
+> **What execution found.** The dialog cannot tell a refusal from a lost reply today. Every preference save (number
+> keys, the quick-launch mark, list order and the like) goes through one shared save queue in the app, and that queue
+> reports only "saved" or "not saved". Telling the two apart means the queue has to report a third outcome, "no answer
+> came back", to everything that waits on it, and the queue's own tests change with it. I built that fix and ran its
+> unit tests, which pass; a browser test that simulates a lost reply was written but not run. It measures about 176
+> changed lines, about 105 of them in the shared save queue and its tests; trimming comments and test wording would
+> bring it to about 140, with no change in behavior. Re-reading the keys after a failure and choosing the wording by
+> what comes back does not tell the cases apart either: a save that timed out can still land after that re-read.
+>
+> The plan's other four fixes are in their own PRs; this one is not.
+>
+> **Options.**
+>
+> - **Build the full fix (about 140 to 176 lines).** The dialog says "could not be saved" for a refusal and "may not
+>   have been saved" for a lost reply, and shows the keys Farhelm has. The cost is the change to the shared save queue:
+>   a mistake there could break every preference save in the app, not only number keys.
+> - **Build a smaller fix (estimated 40 to 60 lines).** On any failed key save, say "the number key may not have been
+>   saved" and show the keys Farhelm reports after re-reading them. That message is true in every case and the shared
+>   queue stays as it is. A refusal gets the vaguer wording too, and the triage outcome's "as distinct from a refusal"
+>   would be recorded as dropped. If a timed-out save lands after the re-read, the keys shown are briefly stale, but the
+>   message does not claim otherwise.
+> - **Drop it.** The dialog keeps saying "could not be saved" and showing the old keys after a lost reply. The key then
+>   launches a template you chose a moment earlier, so nothing runs that you did not pick; the cost is a misleading
+>   message and key display until the app next reads the keys. The triage outcome would be recorded as declined.
+>
+> **Recommendation:** the smaller fix. It removes the misleading message, which is the user-visible problem, without
+> touching the save queue every preference goes through. The full fix's one extra benefit, precise wording for a
+> refusal, is not worth that risk for a case that needs a lost reply or a timeout to happen at all.
 
-**What execution found.** The dialog cannot tell a refusal from a lost reply today. Every preference save (number keys,
-the quick-launch mark, list order and the like) goes through one shared save queue in the app, and that queue reports
-only "saved" or "not saved". Telling the two apart means the queue has to report a third outcome, "no answer came back",
-to everything that waits on it, and the queue's own tests change with it. I built that fix and ran its unit tests, which
-pass; a browser test that simulates a lost reply was written but not run. It measures about 176 changed lines, about 105
-of them in the shared save queue and its tests; trimming comments and test wording would bring it to about 140, with no
-change in behavior. Re-reading the keys after a failure and choosing the wording by what comes back does not tell the
-cases apart either: a save that timed out can still land after that re-read.
+The maintainer's answer:
 
-The plan's other four fixes are in their own PRs; this one is not.
+### Answer (2026-10-23): build the smaller fix
 
-**Options.**
+The maintainer's words, verbatim: "2 - unblock with smaller fix"
 
-- **Build the full fix (about 140 to 176 lines).** The dialog says "could not be saved" for a refusal and "may not have
-  been saved" for a lost reply, and shows the keys Farhelm has. The cost is the change to the shared save queue: a
-  mistake there could break every preference save in the app, not only number keys.
-- **Build a smaller fix (estimated 40 to 60 lines).** On any failed key save, say "the number key may not have been
-  saved" and show the keys Farhelm reports after re-reading them. That message is true in every case and the shared
-  queue stays as it is. A refusal gets the vaguer wording too, and the triage outcome's "as distinct from a refusal"
-  would be recorded as dropped. If a timed-out save lands after the re-read, the keys shown are briefly stale, but the
-  message does not claim otherwise.
-- **Drop it.** The dialog keeps saying "could not be saved" and showing the old keys after a lost reply. The key then
-  launches a template you chose a moment earlier, so nothing runs that you did not pick; the cost is a misleading
-  message and key display until the app next reads the keys. The triage outcome would be recorded as declined.
-
-**Recommendation:** the smaller fix. It removes the misleading message, which is the user-visible problem, without
-touching the save queue every preference goes through. The full fix's one extra benefit, precise wording for a refusal,
-is not worth that risk for a case that needs a lost reply or a timeout to happen at all.
+Restatement: build the smaller fix the Blocked section describes (estimated 40 to 60 lines): on any failed number-key
+save, say the number key may not have been saved and show the keys Farhelm reports after re-reading them. Leave the
+shared preference save queue as it is. Record the triage outcome's "as distinct from a refusal" part as dropped. Then
+land it with the plan's other four fixes.
