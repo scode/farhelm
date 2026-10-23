@@ -10,9 +10,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## High priority: material UX degradation
 
-- [`devbuild-tmux-skips-release-signature.md`](devbuild-tmux-skips-release-signature.md) — A devbuild pushes a tmux to
-  remote hosts checked only against an unsigned checksum list from the release site; spec coverage is ambiguous.
-
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`removed-host-strands-tunnel-listeners.md`](removed-host-strands-tunnel-listeners.md) — Removing a host leaves its

@@ -18772,4 +18772,11 @@
   script calls with the binary it has just built), and refuses on a bad or missing signature; a cached tmux is
   re-checked or re-fetched. The header comment is corrected. Size gate: about 100 lines as above; over it, block and
   bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/build-and-tooling-oct22.md`.
+- Execution: complete: change `onslutqooklvnuwzspznplsprxnqpzvx`, bookmark
+  `plan/build-and-tooling-oct22/05-devbuild-tmux-signature`. `scripts/devbuild-mac.sh` now caches the release's
+  `SHA256SUMS` and `SHA256SUMS.minisig` with its tmux and on every run verifies them with a new hidden
+  `farhelm internal verify-release-sums`, which reuses the helm's verifier and release keys, before checking each tmux,
+  cached or fresh, against the verified entries; a bad or missing signature or a mismatched tmux stops the run and drops
+  the cache. The code, test and documentation total 122 changed lines, over the original gate of about 100 (about 27 of
+  them the test and about 20 more comments). The maintainer approved the built fix on 2026-10-23 in the plan's
+  Decisions. PR: https://github.com/scode/farhelm/pull/2665/changes.

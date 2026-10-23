@@ -1273,6 +1273,19 @@ enum InternalCmd {
     },
     /// The credential-free MCP reporter Goose retains in session metadata.
     GooseHook,
+    /// Verify a release's `SHA256SUMS` against its minisign signature with
+    /// the release keys built into this binary, and print the verified
+    /// entries as `sha256sum` lines. `scripts/devbuild-mac.sh` uses it before
+    /// pushing a release's tmux to remote hosts, so a devbuild trusts that
+    /// tmux on the same signature the helm requires of its own downloads.
+    /// Prints nothing and fails on a bad or missing signature.
+    VerifyReleaseSums {
+        /// The release's version without the tag's `v` (`0.22.0`): the
+        /// signature's trusted comment must name exactly this release.
+        version: String,
+        sums: PathBuf,
+        signature: PathBuf,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -1471,6 +1484,18 @@ fn main() -> anyhow::Result<()> {
                 &farhelm_exe,
                 &wrapper,
             )),
+            InternalCmd::VerifyReleaseSums {
+                version,
+                sums,
+                signature,
+            } => {
+                let ring = farhelm_helm::RELEASE_KEY_RING;
+                print!(
+                    "{}",
+                    verified_release_sums(ring, &version, &sums, &signature)?
+                );
+                Ok(())
+            }
             InternalCmd::TabShell { directory, shell } => Err(
                 farhelm_supervisor::launch::exec_tab_shell(&directory, &shell),
             ),
@@ -2208,8 +2233,56 @@ async fn stdio_proxy(state_dir: &std::path::Path) -> anyhow::Result<()> {
     }
 }
 
+/// `internal verify-release-sums` with the key ring as a parameter, so a test
+/// can use a throwaway key. The output is rebuilt from the entries the
+/// signature covered rather than copied from the file, so a caller reading it
+/// can only ever see verified bytes, even if the file changes after the check.
+fn verified_release_sums(
+    ring: &[&str],
+    version: &str,
+    sums: &std::path::Path,
+    signature: &std::path::Path,
+) -> anyhow::Result<String> {
+    use anyhow::Context as _;
+    let read = |path: &std::path::Path| {
+        std::fs::read(path).with_context(|| format!("reading {}", path.display()))
+    };
+    let entries = farhelm_helm::verify_signed_sums(ring, version, &read(sums)?, &read(signature)?)?;
+    Ok(entries
+        .iter()
+        .map(|(name, hash)| format!("{hash}  {name}\n"))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
+    /// Devbuild pushes the tmux this check vouches for onto remote hosts, so
+    /// it must accept only a `SHA256SUMS` signed for the named release.
+    /// Specified: with the updater's signed fixture release and its throwaway
+    /// key, the verified entries are printed; a different version, a missing
+    /// signature, and a tampered file are each refused.
+    #[test]
+    fn verify_release_sums_prints_only_signed_entries() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../farhelm-ui/tests/fixtures/updater-release");
+        let key = std::fs::read_to_string(fixture.join("test-key.pub")).unwrap();
+        let ring = [key.lines().nth(1).unwrap().trim()];
+        let sums = fixture.join("SHA256SUMS");
+        let signature = fixture.join("SHA256SUMS.minisig");
+
+        let verified = super::verified_release_sums(&ring, "1.2.3", &sums, &signature).unwrap();
+        assert_eq!(verified, std::fs::read_to_string(&sums).unwrap());
+        assert!(super::verified_release_sums(&ring, "1.2.2", &sums, &signature).is_err());
+        let missing = fixture.join("no-such.minisig");
+        assert!(super::verified_release_sums(&ring, "1.2.3", &sums, &missing).is_err());
+        let dir = tempfile::tempdir().unwrap();
+        let tampered = dir.path().join("SHA256SUMS");
+        let mut bytes = std::fs::read(&sums).unwrap();
+        bytes.extend_from_slice(format!("{}  extra\n", "0".repeat(64)).as_bytes());
+        std::fs::write(&tampered, bytes).unwrap();
+        assert!(super::verified_release_sums(&ring, "1.2.3", &tampered, &signature).is_err());
+    }
+
     /// Trust is a managed-checkout setting, so every CLI launch-writing
     /// surface must reject the retired flag instead of accepting an inert edit.
     #[test]
