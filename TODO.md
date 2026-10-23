@@ -33,10 +33,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Allow aliasing hosts in add host flow
-
-  Plan: `plans/queue/alias-in-add-host.md`.
-
 - If not already fixed, make the launcher tell the user when they try to create a session whose directory does not
   exist.
 

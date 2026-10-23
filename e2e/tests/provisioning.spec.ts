@@ -1612,14 +1612,130 @@ test("discovery registers an answering supervisor through the real handler", asy
 });
 
 /**
- * The add dialog asks only for the ssh destination, so its probe must carry no
- * remote binary or state directory, and two submits in one browser task must
- * still retain only one setup plan.
+ * Adding a host with an alias: the add dialog's alias is on the host it adds,
+ * and adding the same destination again is refused by that name before
+ * Farhelm contacts the host.
+ *
+ * Why it matters: the alias used to need a second trip to the host's
+ * settings, and a repeated add quietly set the existing host up again. The
+ * maintainer decided a repeated add is almost certainly a mistake.
+ * Specifies: the probe carries `new_entry` with the alias; the discovered host
+ * is listed under the alias; a second add of the same destination shows
+ * "already added as" with the alias, leaves both fields as typed, and reaches
+ * the backend with no second probe.
+ */
+test("the add dialog adds a host under its alias and refuses the same destination again", async ({
+  page,
+}, testInfo) => {
+  const remote = destination(testInfo, "aliased");
+  const alias = `alias-${testInfo.project.name}`;
+  await configureBackend({ targets: { [target(remote)]: { probe: "supervisor", identity: `identity-${alias}` } } });
+  const bodies: Array<Record<string, unknown>> = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/hosts/probe") {
+      bodies.push(request.postDataJSON() as Record<string, unknown>);
+    }
+  });
+  await page.goto("/");
+  await openHostsPanel(page);
+  const addHost = async () => {
+    await page.getByRole("button", { name: "add host" }).click();
+    await page.locator(".add-host-ssh").fill(remote);
+    await page.locator(".add-host-alias").fill(alias);
+    await page.locator(".add-host-submit").click();
+  };
+  await addHost();
+  await expect(page.locator(".add-host-form")).toHaveCount(0);
+  await expect(page.locator(`.host-row:has-text("${alias}")`)).toBeVisible();
+  expect(bodies[0]?.new_entry).toEqual({ alias });
+  expect((await backendEvents()).filter((event) => event.event === "probe")).toHaveLength(1);
+
+  await addHost();
+  const form = page.locator(".add-host-form");
+  await expect(form.locator(".add-host-error")).toContainText(`already added as "${alias}"`);
+  await expect(form.locator(".add-host-ssh")).toHaveValue(remote);
+  await expect(form.locator(".add-host-alias")).toHaveValue(alias);
+  expect(bodies).toHaveLength(2);
+  expect((await backendEvents()).filter((event) => event.event === "probe"), "the duplicate never reached ssh")
+    .toHaveLength(1);
+});
+
+/**
+ * The add dialog's alias is checked before Farhelm contacts the host: one
+ * that is already a host's name is refused by the helm, and a malformed one
+ * never leaves the browser.
+ *
+ * Why it matters: a probe can take seconds and lead into a setup
+ * confirmation; finding out about the alias only at the end wastes all of it.
+ * Specifies: an alias equal to an existing host's destination shows "already
+ * displayed as" with no backend probe; a 65-character alias shows the
+ * settings dialog's length message and sends no probe request at all.
+ */
+test("the add dialog refuses a taken or malformed alias before contacting the host", async ({
+  page,
+  request,
+}, testInfo) => {
+  const existing = destination(testInfo, "alias-owner");
+  const remote = destination(testInfo, "alias-wanted");
+  await configureBackend({ targets: { [target(existing)]: { probe: "supervisor", identity: `identity-${existing}` } } });
+  expect((await probe(request, existing)).result, "premise: the name is taken by a real host").toBe("discovered");
+  await configureBackend({ targets: { [target(remote)]: { probe: "supervisor" } } });
+  let probeRequests = 0;
+  page.on("request", (candidate) => {
+    if (new URL(candidate.url()).pathname === "/api/hosts/probe") probeRequests += 1;
+  });
+  await page.goto("/");
+  await openHostsPanel(page);
+  await page.getByRole("button", { name: "add host" }).click();
+  const form = page.locator(".add-host-form");
+  await form.locator(".add-host-ssh").fill(remote);
+  await form.locator(".add-host-alias").fill(existing);
+  await form.locator(".add-host-submit").click();
+  await expect(form.locator(".add-host-error")).toContainText(`already displayed as "${existing}"`);
+  expect(probeRequests).toBe(1);
+
+  await form.locator(".add-host-alias").fill("x".repeat(65));
+  await form.locator(".add-host-submit").click();
+  await expect(form.locator(".add-host-error")).toHaveText("host alias must be at most 64 characters");
+  expect(probeRequests, "a malformed alias is refused in the browser").toBe(1);
+  expect((await backendEvents()).filter((event) => event.event === "probe")).toHaveLength(0);
+  expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
+});
+
+/**
+ * The alias typed in the add dialog survives the setup question for a host
+ * without Farhelm and is on the host the confirmed setup adds.
+ *
+ * Why it matters: the setup question replaces the form, so the alias lives
+ * only in the helm's retained plan while the person reads it; dropping it
+ * there would leave them renaming the host right after adding it.
+ * Specifies: confirming setup lists the new host under the alias.
+ */
+test("the add dialog's alias survives the setup question", async ({ page }, testInfo) => {
+  const remote = destination(testInfo, "aliased-setup");
+  const alias = `setup-alias-${testInfo.project.name}`;
+  await configureBackend({ targets: { [target(remote)]: { probe: "absent" } } });
+  await page.goto("/");
+  await openHostsPanel(page);
+  await page.getByRole("button", { name: "add host" }).click();
+  await page.locator(".add-host-ssh").fill(remote);
+  await page.locator(".add-host-alias").fill(alias);
+  await page.locator(".add-host-submit").click();
+  await expect(page.locator(".add-host-form .provisioning-plan")).toBeVisible();
+  await page.getByRole("button", { name: "set up", exact: true }).click();
+  await expect(page.locator(`.host-row:has-text("${alias}")`)).toBeVisible();
+});
+
+/**
+ * The add dialog asks only for the ssh destination and an optional alias, so
+ * its probe must carry no remote binary or state directory, and two submits in
+ * one browser task must still retain only one setup plan.
  *
  * Specifies: the probe body's `remote_farhelm` and `remote_state_dir` are null,
- * and the backend sees exactly one probe for a doubled submit. The dialog once
- * had optional fields for both paths; null is what lets discovery and setup
- * choose them instead of a value nobody adding a host knew how to fill in.
+ * its `new_entry` names no alias when none was typed, and the backend sees
+ * exactly one probe for a doubled submit. The dialog once had optional fields
+ * for both paths; null is what lets discovery and setup choose them instead of
+ * a value nobody adding a host knew how to fill in.
  */
 test("the add dialog's probe sends no install paths, and a doubled submit produces one real probe", async ({
   page,
@@ -1644,6 +1760,7 @@ test("the add dialog's probe sends no install paths, and a doubled submit produc
 
   expect(body?.remote_farhelm ?? null).toBeNull();
   expect(body?.remote_state_dir ?? null).toBeNull();
+  expect(body?.new_entry).toEqual({ alias: null });
   expect((await backendEvents()).filter((event) => event.event === "probe")).toHaveLength(1);
 });
 

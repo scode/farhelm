@@ -15,7 +15,7 @@ your Mac, and they keep running on the host while your Mac sleeps or Farhelm is 
 - Linux on an x86_64 or ARM (aarch64) machine, with systemd's services for your user account, which most distributions
   have. Farhelm needs no root or sudo there: everything it installs goes in your home directory.
 - Passwordless ssh from your Mac: `ssh <destination> true` has to work in a terminal without asking for a password.
-  Farhelm uses your own ssh setup, so keys, the agent, and the aliases in `~/.ssh/config` all apply. A host that asks
+  Farhelm uses your own ssh setup, so keys, the agent, and the Host names in `~/.ssh/config` all apply. A host that asks
   for a second factor or another approval on every ssh login works only on a best-effort basis, and only if you start
   Farhelm's ssh connections to it by hand. Choose **? → ssh needs 2FA?** for the two commands, or follow the link in
   **add host** for the destination you are about to add. Run both on your Mac when using the Mac app; in the web UI,
@@ -39,6 +39,9 @@ your Mac, and they keep running on the host while your Mac sleeps or Farhelm is 
   name="add-a-remote-host/add-dialog"
   alt="The add host dialog with dev@new-box typed as the ssh destination, and what that field and the add button do."
 />
+
+The dialog also takes an optional alias: the name Farhelm shows for the host instead of its destination, everywhere
+except the host's details. You can change it later in the host's settings.
 
 If Farhelm is already running on the host (you set it up before, say), the host is added as it is and the dialog
 closes. Otherwise Farhelm shows what it would set up there and asks first:
@@ -70,6 +73,8 @@ settings behind the gear at the top of the sidebar; [Manage hosts](/docs/using/m
   a terminal without a password.
 - A host without systemd's services for your user account cannot be set up automatically, and the dialog says so.
 - When setup fails partway, open the host's `⋯` menu and choose **re-run** to try again.
+- Adding a destination that is already in your host list is refused, and the dialog names that host. To set it up
+  again, use **update** in its `⋯` menu, or **re-run** if its setup failed.
 
 Next: [Start a session](/docs/using/start-a-session/), or, to remove Farhelm later,
 [Uninstall Farhelm](/docs/get-started/uninstall/).
