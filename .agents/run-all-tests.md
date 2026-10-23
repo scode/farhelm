@@ -108,6 +108,7 @@ Generic recorder wrapping is fine but not required for these; record each result
 - `bash scripts/test-plans-watch.sh` and `python3 scripts/test-plans-queue.py`, with `shellcheck` over
   `scripts/plans-watch.sh`, `scripts/test-plans-watch.sh` and `scripts/publish-docs-shots.sh`
 - `python3 scripts/test-todo-picker.py`
+- `deno test -A scripts/serve-page.ts`
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
 
 Deliberately not here: everything the sweep runs (workspace nextest including the tmux e2e suite, the browser suite on

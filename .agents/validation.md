@@ -174,6 +174,9 @@ that its required systemd or SSH substrate ran.
   TODO.md buckets and entries are read, that entries with a plan are left out, that a summaries file written against an
   older TODO.md is refused, and that summaries are escaped into the page. Run it when the script changes; seconds, no
   network.
+- `deno test -A scripts/serve-page.ts` — the server every flow's local questions page goes through: that it answers with
+  `Cache-Control: no-store` and moves past a taken port. Run it, with `deno check` on the same file, when the script
+  changes; seconds. Needs Deno, and fetches `jsr:@std/http` the first time.
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` — the changelog
   layout lint the release gate runs on every tag, and the checker's own fixtures (format variants, a synthetic git
   history for the fragment sweep, synthetic dist manifests for the announcement comparison). Run the lint when
