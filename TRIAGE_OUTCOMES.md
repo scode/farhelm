@@ -17370,7 +17370,9 @@
   conflict. The assessment and completion criteria above stand as the case that plan must cover; the queue item is
   removed now.
 - Execution: complete for the queue removal (feedback file and index entry removed in the change that recorded this
-  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw".
+  triage); the fix itself is owned by the TODO entry "Bind GUI answers to what the user saw". Fixed by jj change
+  `kovoroxmlyupvyvumvvkotvqnlromroy`, bookmark `plan/bind-gui-answers/15-link-press-reset`;
+  [draft PR #2597](https://github.com/scode/farhelm/pull/2597/changes).
 
 ## header-yolo-answer-may-cross-question-opening.md
 

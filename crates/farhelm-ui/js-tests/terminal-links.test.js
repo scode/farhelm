@@ -69,6 +69,39 @@ test("only a primary click within four pixels admits that exact release", () => 
   assert.equal(gesture.isClick(secondary), false);
 });
 
+/** A terminal's reconnect removes the gesture's listeners and may later put
+ * the same object back behind new ones when it restores the old screen.
+ * Movement in between is unobserved, so a press held across that gap could
+ * drag away and back and still release as a click. Teardown resets the
+ * gesture: after `reset()`, a release with no press observed since admits
+ * nothing, an already admitted release is withdrawn, and the same object
+ * (the one link providers captured) still admits a fresh click.
+ */
+test("reset retires a held press and an admitted release in place", () => {
+  const gesture = createLinkGesture();
+  const event = (type, x, y = 10, button = 0) => ({ type, clientX: x, clientY: y, button });
+  // Premise: a still press and release on this object counts as a click.
+  gesture.observe(event('mousedown', 10), true);
+  const admitted = event('mouseup', 10);
+  gesture.observe(admitted, true);
+  assert.equal(gesture.isClick(admitted), true, 'premise: a still press and release is a click');
+  gesture.reset();
+  assert.equal(gesture.isClick(admitted), false, 'a release admitted before the reset is withdrawn');
+
+  // The same release at the press point, with an unobserved drag away and
+  // back in between, must not complete a press from before the reset.
+  gesture.observe(event('mousedown', 10), true);
+  gesture.reset();
+  const release = event('mouseup', 10);
+  gesture.observe(release, true);
+  assert.equal(gesture.isClick(release), false, 'a press from before the reset cannot complete');
+
+  gesture.observe(event('mousedown', 10), true);
+  const fresh = event('mouseup', 10);
+  gesture.observe(fresh, true);
+  assert.equal(gesture.isClick(fresh), true, 'the reset object still serves its providers');
+});
+
 /** Range snapshots must include a wrapped continuation without trimming
  * meaningful spaces. Unreadable or unbounded ranges cannot authorize a file.
  */
