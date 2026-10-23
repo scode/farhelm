@@ -134,10 +134,11 @@ If something else holds the port, it moves to the next free port above and print
 that URL without asking, and say plainly that the port changed, since a forward of 14003 does not reach it. Never stop a
 process you did not start. Put the page's URL in the last message of the turn, after every tool call.
 
-After acting on a pasted block (research, follow-up questions), update the same page in place: the questions still open,
-any new follow-ups, and the settled answers shown read-only, so the maintainer can see what is still needed. A plan
-whose questions are all settled leaves the page entirely, its settled answers included; only plans with something still
-open stay on it.
+After acting on a pasted block (research, follow-up questions), update the same page in place before ending the turn:
+the questions still open, any new follow-ups, and the settled answers shown read-only, so the maintainer can see what is
+still needed. A comment asking a question or for elaboration is answered on the page, beside the question it was asked
+on, not only in conversation (the maintainer set this on 2026-10-22). A plan whose questions are all settled leaves the
+page entirely, its settled answers included; only plans with something still open stay on it.
 
 ## Planning triage outcomes: "use the planning system to schedule these"
 

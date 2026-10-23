@@ -104,13 +104,15 @@ Act on the pasted block item by item:
 - a pick is the maintainer's decision, recorded as "Recording the outcome" in this file describes; a comment alongside
   it is their rationale and scope, preserved in the Decision field in their words, and an instruction in it (a spec
   principle to add, a wider rule to apply) becomes part of the completion criteria;
-- a comment without a pick is a question or a proposal: answer it in conversation, and record nothing for that item
-  until the maintainer decides;
+- a comment without a pick is a question or a proposal: answer it on the page, beside the question it was asked on, so
+  the maintainer reads the answer where they will pick (a request for elaboration asked through the page is answered
+  there, not only in conversation; the maintainer set this on 2026-10-22), and record nothing for that item until the
+  maintainer decides;
 - "leave for later", or neither a pick nor a comment, leaves the item undecided in the queue. It is never a `discard`.
 
 Ask in conversation only where a comment is unclear. The pasted block is the decision, so do not ask the maintainer to
-confirm picks before recording them. Then update the same page in place: items still undecided stay, follow-up questions
-are added, and decided items leave the page.
+confirm picks before recording them. Then update the same page in place before ending the turn: items still undecided
+stay, answers to their comments and follow-up questions are added, and decided items leave the page.
 
 ## Asking for a decision
 
