@@ -731,9 +731,8 @@ pub enum RetryClaim {
     /// the next reload — the user's rename accepted, acknowledged, and then
     /// apparently reverted. Returning it here is what lets the caller adopt
     /// the committed value instead of its own stale one. `generation` is
-    /// returned for the corresponding launch-safety reason: every artifact,
-    /// transition, and in-memory fence must use the value this transaction
-    /// preserved rather than an independently assumed zero.
+    /// returned so every artifact, transition, and in-memory fence uses the
+    /// committed row's value; a takeover only happens at generation zero.
     Acquired {
         /// The full launching row committed by the takeover. Retention
         /// failures publish this rather than reconstructing metadata from
@@ -743,13 +742,10 @@ pub enum RetryClaim {
         creation_seq: u64,
         title: String,
         session_token: String,
-        /// The generation already assigned to the row being retried.
-        ///
-        /// A keyed retry repeats the interrupted create; it is not a
-        /// restart and therefore does not allocate a generation. Returning
-        /// the stored value keeps every generation-scoped side effect in
-        /// agreement with the replacement row, including for defensive
-        /// recovery of a row whose generation is no longer zero.
+        /// The generation already assigned to the row being retried, always
+        /// zero: a keyed retry repeats the interrupted create and allocates
+        /// none, and a row a restart moved past zero is refused before
+        /// takeover (`RetryClaim::Launched`).
         generation: i64,
     },
     /// The reservation was settled or claimed by another session before
@@ -757,8 +753,9 @@ pub enum RetryClaim {
     /// A Delete that removed the reservation instead makes takeover fail.
     Resolved(Box<Reservation>),
     /// The reserved session row moved past `Launching` while the caller was
-    /// deciding: evidence of a launch appeared after all, so the caller
-    /// replays instead of relaunching.
+    /// deciding, or a restart has moved it past generation zero since the
+    /// interrupted attempt: evidence of a launch appeared after all, so the
+    /// caller replays instead of relaunching.
     Launched,
 }
 
@@ -3741,9 +3738,9 @@ impl SessionStore {
     /// reply and its replacement in-memory entry are built from a snapshot
     /// resolved before the race, so preserving the rename in SQLite alone
     /// would leave every list this process serves showing the old label
-    /// until the next reload. Generation survives too, because only
-    /// `begin_relaunch` allocates it and a create retry must not move that
-    /// fence backwards. Fresh-checkout provenance also survives independently
+    /// until the next reload. A row a restart moved past generation zero is
+    /// never taken over: it returns `Launched`, so the retry replays it.
+    /// Fresh-checkout provenance also survives independently
     /// of registry membership: deleting it here would let a later damaged
     /// registry silently change this session's recovery and Restart contract.
     pub async fn restart_pending_launch(
@@ -3855,9 +3852,13 @@ impl SessionStore {
                             generation,
                             conversation_source,
                         )) => {
+                            // A Restart since the crashed attempt (generation past
+                            // zero) owns the row now; replay it rather than take it
+                            // over, as the refused-retry rollback already refuses.
                             if !pane.is_empty()
                                 || !matches!(state.as_str(), "launching" | "interrupted" | "error")
                                 || conversation_source.is_some()
+                                || generation != 0
                             {
                                 return Ok(RetryClaim::Launched);
                             }
@@ -3943,10 +3944,8 @@ impl SessionStore {
                         last_work_started_at: 0,
                         creation_seq: 0,
                         title: preserved_title,
-                        // A retry repeats the launch generation already assigned
-                        // to this create. Only `begin_relaunch` may advance it;
-                        // replacing it with the caller's usual zero would move a
-                        // durable generation fence backwards.
+                        // Always zero here: a restarted row returned `Launched`
+                        // above. Kept from the row rather than re-derived.
                         generation: preserved_generation,
                         ..row
                     };
@@ -11635,6 +11634,42 @@ mod tests {
         assert_eq!(
             row.last_activity_at, ORIGINAL_ACTIVITY_AT,
             "and the activity stamp beside it, which a retry must not re-mint either"
+        );
+    }
+
+    /// A create retry that finds its pending session already restarted must
+    /// not take it over: once a Restart opened a generation past zero, the
+    /// retry settles and replays the existing session (`RetryClaim::Launched`)
+    /// and writes nothing, as the refused-retry rollback fence (#2570) does.
+    /// Why: a takeover would delete and reinsert a row a restart now owns.
+    #[farhelm_testtrace::test]
+    async fn a_restarted_pending_session_is_not_taken_over_by_a_retry() {
+        let (_dir, store) = fresh_store().await;
+        insert_reserved(&store, "s1", "retry", "fp").await;
+        store
+            .begin_relaunch("s1", uncaptured_basis(), false)
+            .await
+            .expect("a restart opens a new generation");
+        let restarted = store.session("s1").await.expect("read").expect("present");
+        assert_ne!(
+            restarted.generation, 0,
+            "premise: the session was restarted"
+        );
+        assert!(
+            restarted.outcome == LastOutcome::Launching
+                && restarted.pane.is_empty()
+                && restarted.conversation_source.is_none(),
+            "premise: nothing but the generation tells this row from an untouched attempt"
+        );
+        let claim = store
+            .restart_pending_launch(launching_row("s1"), "retry")
+            .await
+            .expect("takeover");
+        assert!(matches!(claim, RetryClaim::Launched), "got {claim:?}");
+        let after = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(
+            after.generation, restarted.generation,
+            "the restarted row is untouched"
         );
     }
 
