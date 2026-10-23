@@ -4459,6 +4459,55 @@ mod tests {
         );
     }
 
+    /// Why this matters: only the stop step's script checked the default
+    /// state path the host reports, so such a path with a line break
+    /// planned, was confirmed, and failed the run after the unit was already
+    /// disabled and removed. Registered and overridden state paths never got
+    /// that far: the inspection's command-line encoding rejects them, which
+    /// is why this test must take the host-reported default route.
+    ///
+    /// Spec: with no registered or overridden state path, a host-reported
+    /// default that fails the remote path text check (here a newline)
+    /// refuses planning with a 409 saying the path contains a control
+    /// character, and nothing beyond the inspection runs on the host; the
+    /// same host reporting an ordinary default still plans.
+    #[farhelm_testtrace::test]
+    async fn uninstall_refuses_a_kept_state_path_with_a_control_character() {
+        let (harness, host, root, backend, _) = uninstall_fixture(Vec::new(), false).await;
+        let mut layout = layout(root.path());
+        layout.override_state_dir = None;
+        let service = ProvisioningService::injected(
+            harness.store.clone(),
+            Arc::clone(&harness.manager),
+            backend.clone(),
+            Arc::new(FixedPayloads(root.path().join("payload"))),
+            layout,
+            PathBuf::from("/test/farhelm"),
+        );
+        backend
+            .repeat_probe
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .dial_state_dir = None;
+        let broken = root.path().join("state\nnext");
+        assert!(crate::units::path_text(&broken).is_err());
+        *backend.default_state_dir.lock().unwrap() = broken;
+
+        let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(refusal.contains("data directory"), "{refusal}");
+        assert!(refusal.contains("control character"), "{refusal}");
+        assert_eq!(*backend.operations.lock().unwrap(), ["inspect-uninstall"]);
+
+        // A default distinct from the layout's state path shows the plan
+        // really kept the host-reported one.
+        let ordinary_default = root.path().join("default-state");
+        *backend.default_state_dir.lock().unwrap() = ordinary_default.clone();
+        let ordinary = service.plan_uninstall(host).await.unwrap();
+        assert_eq!(ordinary.plan.state_dir, ordinary_default);
+    }
+
     /// Why this matters: with Farhelm's lib directory replaced by a
     /// symlink, every canonical check passes (the binary resolves inside the
     /// link's target), and `rm -rf` of the link removes only the link:

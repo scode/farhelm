@@ -18327,7 +18327,10 @@
   to the kept state path and refuses before confirmation; a test covers it. The hidden-characters copy warning is not
   part of this outcome. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/uninstall-guards-oct22.md`.
+- Execution: complete in jj change `skwnxpywlovzztwnruwwlsvskuxpryyn`, bookmark
+  `plan/uninstall-guards-oct22/04-kept-path-check`. Uninstall planning runs the stop step's path check (UTF-8, no
+  control characters) on the kept state path and refuses before confirmation. About 68 changed lines of code and tests,
+  within the gate. [Draft PR #2650](https://github.com/scode/farhelm/pull/2650/changes).
 
 ## templates-dialog-new-name-overwrites-outside-template.md
 
