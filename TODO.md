@@ -262,6 +262,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Launcher name field does not take focus on WebKit.** The WebKit test
+  `a template shortcut preserves editor focus when clearing a quick-launch YOLO question` in
+  `e2e/tests/launcher-template-shortcuts.spec.ts` sometimes fails where it focuses the launcher's name field while a
+  quick-launch YOLO question is showing: the field never reports focus within five seconds. It failed in full browser
+  run `4120dcb9-412d-4a76-8ac1-f89e6c8fd37f`, then 3 of 10 repeats on that stack
+  (`527195e7-3cbc-4855-94a0-27b0e207d9e9`) and 3 of 10 on main `4fe949f0` rebuilt on its own
+  (`108dcf3d-bd51-451c-ba63-9a7e222d7b3d`); five Chromium repeats passed. Cause unknown; something may move focus away
+  right after the test focuses the field (FLAKES.md, 2026-10-23).
+
 - **Post-clone settings test hangs waiting for a finished save.** The WebKit test
   `post-clone commands with carriage returns refuse edits but can be cleared` in `e2e/tests/settings.spec.ts` finished
   its steps in about 12 to 14 seconds, then hung in its cleanup until the 60-second test timeout, waiting for Playwright

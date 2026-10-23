@@ -2749,3 +2749,36 @@ Test timeout of 60000ms exceeded.
 Class: harness
 
 Cause: hypothesis
+
+## 2026-10-23 — launcher name field focus on WebKit (e2e/tests/launcher-template-shortcuts.spec.ts)
+
+The WebKit project's `a template shortcut preserves editor focus when clearing a quick-launch YOLO question` failed in
+full browser run `4120dcb9-412d-4a76-8ac1-f89e6c8fd37f` (2026-10-22, tested commit `ae6639ce`, clean tree, a landing
+stack whose browser-facing changes do not touch this test), at the step where it focuses the launcher's name field while
+a quick-launch YOLO question is showing: `expect(name).toBeFocused()` saw the field inactive for its whole five-second
+wait. Repeated alone ten times on WebKit it failed 3 of 10 on that stack (run `527195e7-3cbc-4855-94a0-27b0e207d9e9`)
+and 3 of 10 on main `4fe949f0` with main's own build (run `108dcf3d-bd51-451c-ba63-9a7e222d7b3d`); five Chromium repeats
+on the stack passed (run `8a88b650-5ba1-4686-8937-f5c6eb767d49`). All runs: Playwright 1.64.0, three workers with one
+stack each, zero retries, tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale `C.UTF-8`, child `FARHELM_*` names
+`FARHELM_TEST_TRACE_DIR` and, in the full run only, `FARHELM_PLAYWRIGHT_POLICY_FILE`. In the full run its only other
+failure was the open refused-YOLO Replace flake in `e2e/tests/terminal-restart.spec.ts`. Load was not sampled. The test
+passed on both engines in the three earlier full browser runs that included it (`c731cfe8`, `3e6c5c80`, `b5e88d8c`,
+2026-10-21 and 2026-10-22). At about 3 failures in 10 that is unremarkable, so it may always have been flaky; a
+regression from the dialog focus changes that landed in that window (`modal-dialog-shell`, `bind-gui-answers`) is not
+ruled out. The test came in with #2538 (2026-10-21), and the dialog isolation it runs under in #2534 the same day.
+
+Cause unknown. The failing assertion is the one right after `name.focus()`, so either WebKit does not move focus to the
+field or something moves it away before Playwright reads it; the dialog's focus-recovery and the YOLO question's own
+focus handling are candidates, but no trace was examined. Open; no fix attempted.
+
+```text
+Error: expect(locator).toBeFocused() failed
+Locator: locator('.create-session-form[role="dialog"]').getByLabel('name (optional)', { exact: true })
+Expected: focused
+Received: inactive
+```
+
+Class: unknown
+
+Cause: unknown
