@@ -718,6 +718,13 @@ Host Settings waits while any host prepares or holds an ADD/Uninstall confirmati
 cannot lock both dialogs. Another host's one-click Update or accepted run does not block it; the host's own planning or
 busy state and the page operation lock still do.
 
+Host results wait for whatever modal is open. A setup or uninstall confirmation and a host-action refusal render only
+once no modal dialog (`role="dialog"` with `aria-modal="true"`) and no other admitted host result is in the page.
+`HostModal` claims its slot in the page before it renders, so two waiting results cannot both open, and they appear one
+at a time. The wait is on the dialog being in the document, not on it being visible: a modal that stays mounted while
+hidden would hold every host result back indefinitely, so a modal that hides must leave the document or drop
+`aria-modal`. A result whose wrapper unmounts while it waits never opens.
+
 Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
 contract rather than styling. **Anchor:** the panel opens just beyond the sidebar's right edge, with its top aligned to
 the row and a small pointer toward it. It stays beside the session list instead of covering neighbouring rows and their
