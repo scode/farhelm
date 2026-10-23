@@ -86,6 +86,8 @@ class FakeGitHub:
     """
 
     def __init__(self, files: dict[str, str]):
+        # PR entries in `pulls` and `closed` come from this repository unless they name another head `repo`.
+        self.repo = "owner/name"
         self.commits: dict[str, dict] = {}
         self.trees: dict[str, dict[str, str]] = {}
         self.blobs: dict[str, str] = {}
@@ -203,17 +205,17 @@ class FakeGitHub:
         return False
 
     def open_pulls(self) -> list[dict]:
-        return list(self.pulls)
+        return [{"repo": self.repo, "base": self.repo, **item} for item in self.pulls]
 
     def pull(self, number: int) -> dict:
         for item in self.pulls:
             if item["number"] == number:
-                return {"number": number, "ref": item["ref"], "merged": False}
-        return {"number": number, **self.closed[number]}
+                return {"repo": self.repo, "base": self.repo, **item, "merged": False}
+        return {"repo": self.repo, "base": self.repo, "number": number, **self.closed[number]}
 
     def merged_pulls(self, prefix: str) -> list[dict]:
         return [
-            {"number": n, **info}
+            {"repo": self.repo, "base": self.repo, "number": n, **info}
             for n, info in sorted(self.closed.items())
             if info["merged"] and info["ref"].startswith(prefix)
         ]
@@ -717,6 +719,33 @@ class TransitionTest(QueueTestCase):
         self.assertEqual(h.run("landed", "a", "--claim", "3d4e5f", "--merged", "6", "--notes", notes)[0], 0)
         self.assertEqual(h.run("abandon", "c")[0], 0)
         self.assertNotIn(pq.report_path("c"), h.fake.files())
+
+    def test_prs_from_forks_are_not_plan_work(self):
+        """A fork's PR can name its branch `plan/<slug>/...`, but it is not the plan's work. Counted, it would show
+        executors a stranger's commits as unlanded work to build on, and block `landed` and `abandon` until someone
+        closed it. Specified: status lists and names as merged only PRs whose head branch lives in the repository they
+        target; an open fork PR blocks neither `landed` nor `abandon`; a merged fork PR cannot be named as landed."""
+        h = self.harness(index(line("landing 3d4e5f", "a"), line("complete", "c")), a=plan(), c=plan())
+        h.fake.land("main", {pq.report_path("a"): "# R\n", pq.report_path("c"): "# R\n"})
+        h.fake.closed[5] = {"ref": "plan/a/00-early", "merged": True, "repo": "stranger/name"}
+        h.fake.closed[6] = {"ref": "plan/a/01-thing", "merged": True}
+        h.fake.closed[7] = {"ref": "plan/c/01-x", "merged": True, "repo": "stranger/name"}
+        h.fake.pulls = [
+            {"number": 8, "ref": "plan/a/02-more", "repo": "stranger/name"},
+            {"number": 9, "ref": "plan/c/02-y", "repo": None},
+        ]
+        data = pq.status(h.fake, "main", self.scratch, datetime.datetime(2026, 10, 3, tzinfo=datetime.timezone.utc))
+        by_slug = {p["slug"]: p for p in data["plans"]}
+        self.assertEqual(by_slug["a"]["open_prs"], [])
+        self.assertIn("landing, no open PRs, merged 6: finish with landed --merged", by_slug["a"]["flags"])
+        self.assertTrue(any("none found merged" in f for f in by_slug["c"]["flags"]))
+        notes = h.text_file("n.md", "Landed.\n")
+        base = ("landed", "a", "--claim", "3d4e5f", "--notes", notes, "--merged")
+        code, _, err = h.run(*base, "6,5")
+        self.assertEqual(code, pq.EXIT_USAGE)
+        self.assertIn("#5 is not one of a's PRs", err)
+        self.assertEqual(h.run(*base, "6")[0], 0)
+        self.assertEqual(h.run("abandon", "c")[0], 0)
 
     def test_landed_requires_a_merged_pr_of_this_plan(self):
         """`landed` records the plan's work as on main, so "no open PRs" is not enough: PRs the maintainer closed

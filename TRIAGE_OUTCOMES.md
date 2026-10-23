@@ -18445,7 +18445,11 @@
 - Completion criteria: the queue script's PR listing and merged-PR lookups ignore PRs whose head repository is not this
   repository; `scripts/test-plans-queue.py` covers a cross-repository PR. Size gate: about 100 lines as above; over it,
   block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/build-and-tooling-oct22.md`.
+- Execution: complete: change `kxtxksskomstttlonuzxrlpwqslorpvq`, bookmark
+  `plan/build-and-tooling-oct22/02-queue-ignores-fork-prs`. The queue script now counts a PR as a plan's only when its
+  branch is under `plan/<slug>/` and its head repository is the repository the PR targets (a deleted fork has none and
+  does not count), in `status` (open and merged), `landed` (open and named) and `abandon`. `scripts/test-plans-queue.py`
+  covers fork PRs in all three. 86 changed lines. PR: https://github.com/scode/farhelm/pull/2659/changes.
 
 ## centos-ssh-scrub-drops-config-after-unmatched-marker.md
 
