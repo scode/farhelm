@@ -549,3 +549,96 @@ test("a running prompt card keeps its full message and target facts readable", a
   await expect(card).toHaveCount(0);
   expect(staged.answers).toEqual([{ id: "running-prompt", answer: "allow" }]);
 });
+
+/** Read a labelled fact without confusing the requesting host with the host being changed. */
+function approvalValue(page: Page, label: string) {
+  return page.locator(".approval-card .approval-card-row")
+    .filter({ has: page.locator("dt").filter({ hasText: new RegExp(`^${label}$`) }) }).locator("dd");
+}
+
+/** Host edits need the complete before/after decision, with every peer value kept outside UI prose. */
+test("a host edit card shows changed fields as escaped data and answers only this request", async ({ page }) => {
+  const requester = "<b>requester</b>\u202e";
+  const title = "<b>asking session</b>\t";
+  const target = "<em>builder</em>\u202e";
+  const destination = "operator@<b>builder</b>\u001b";
+  const staged = await stageApprovals(page, [{
+    ...launchRequest("host-edit", requester, title),
+    action: {
+      kind: "host_edit",
+      host_name: target,
+      destination,
+      alias: { old: "<b>old alias</b>\t", new: "<b>new alias</b>\u202e" },
+      icon: { old: "cloud", new: "rocket" },
+      color: { old: "default", new: "teal" },
+    },
+  }]);
+  await openSelected(page);
+  const card = page.locator('.approval-card[data-approval-kind="host_edit"]');
+  await expect(card.getByRole("heading")).toHaveText("change a host's alias, icon or color");
+  for (const [label, text] of [
+    ["from host", "<b>requester</b><U+202E>"],
+    ["from session", "<b>asking session</b><U+0009>"],
+    ["host", "<em>builder</em><U+202E>"],
+    ["destination", "operator@<b>builder</b><U+001B>"],
+    ["alias now", "<b>old alias</b><U+0009>"],
+    ["new alias", "<b>new alias</b><U+202E>"],
+    ["icon now", "cloud"],
+    ["new icon", "rocket"],
+    ["color now", "default"],
+    ["new color", "teal"],
+  ]) {
+    await expect(approvalValue(page, label)).toHaveText(text);
+  }
+  // The session ID has a separate copy button; only its peer span is the identity.
+  await expect(approvalValue(page, "from session id").locator(".peer-value"))
+    .toHaveText("7c1e9a52-4b0d-4f7e-9a3c-2d81f6b0e413");
+  await expect(card.locator("b, em"), "peer markup cannot create elements").toHaveCount(0);
+  expect(await card.locator(".peer-value").evaluateAll((values) =>
+    values.length >= 7 && values.every((value) => value.getAttribute("dir") === "ltr")
+  ), "requester and changed host values retain direction isolation").toBe(true);
+  await expect(card).toContainText(
+    "Each host change needs your approval, even when the requesting host can run Farhelm commands without asking.",
+  );
+  await expect(card.locator(".approval-always-allow")).toHaveCount(0);
+  await expect(card.locator(".approval-card-actions button")).toHaveText(["allow", "deny"]);
+  expect(staged.answers, "showing the decision is not approval").toEqual([]);
+  await card.getByRole("button", { name: "allow", exact: true }).click();
+  await expect(card).toHaveCount(0);
+  expect(staged.answers).toEqual([{ id: "host-edit", answer: "allow" }]);
+});
+
+for (const answer of ["allow", "deny"] as const) {
+  /** Forgetting leaves sessions running; either answer must settle only the request whose consequence was shown. */
+  test(`a host remove card explains the consequence and sends ${answer}`, async ({ page }) => {
+    const staged = await stageApprovals(page, [{
+      ...launchRequest("host-remove", "requesting host", "asking session"),
+      action: {
+        kind: "host_remove",
+        host_name: "<b>target host</b>\u202e",
+        destination: "operator@<em>target</em>\t",
+      },
+    }]);
+    await openSelected(page);
+    const card = page.locator('.approval-card[data-approval-kind="host_remove"]');
+    await expect(card.getByRole("heading")).toHaveText("remove a host");
+    await expect(approvalValue(page, "from host")).toHaveText("requesting host");
+    await expect(approvalValue(page, "from session")).toHaveText("asking session");
+    await expect(approvalValue(page, "host")).toHaveText("<b>target host</b><U+202E>");
+    await expect(approvalValue(page, "destination")).toHaveText("operator@<em>target</em><U+0009>");
+    for (const label of ["host", "destination"]) {
+      await expect(approvalValue(page, label).locator(".peer-value")).toHaveAttribute("dir", "ltr");
+    }
+    await expect(card.locator("b, em"), "peer markup cannot create elements").toHaveCount(0);
+    await expect(card.locator("p.approval-card-note")).toHaveText([
+      "Farhelm will forget this host. Its supervisor and sessions keep running, and adding the destination again finds them.",
+      "Each host change needs your approval, even when the requesting host can run Farhelm commands without asking.",
+    ]);
+    await expect(card.locator(".approval-always-allow")).toHaveCount(0);
+    await expect(card.locator(".approval-card-actions button")).toHaveText(["allow", "deny"]);
+    expect(staged.answers, "showing the consequence is not approval").toEqual([]);
+    await card.getByRole("button", { name: answer, exact: true }).click();
+    await expect(card).toHaveCount(0);
+    expect(staged.answers).toEqual([{ id: "host-remove", answer }]);
+  });
+}

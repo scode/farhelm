@@ -456,6 +456,16 @@ fn ApprovalCard(
                     "The agent supplied this wrapper. Farhelm cannot check what it runs; this request needs your Allow."
                 }
             }
+            if matches!(&card.action, ApprovalAction::HostRemove { .. }) {
+                p { class: "approval-card-note",
+                    "Farhelm will forget this host. Its supervisor and sessions keep running, and adding the destination again finds them."
+                }
+            }
+            if matches!(&card.action, ApprovalAction::HostEdit { .. } | ApprovalAction::HostRemove { .. }) {
+                p { class: "approval-card-note",
+                    "Each host change needs your approval, even when the requesting host can run Farhelm commands without asking."
+                }
+            }
             div { class: "approval-card-actions",
                 if tunnel_available {
                     button { r#type: "button", class: "btn btn-primary approval-tunnel", disabled: busy,
@@ -1281,6 +1291,74 @@ mod tests {
         farhelm_proto::SessionRef::new(ENTRY, bare)
             .unwrap()
             .to_string()
+    }
+
+    /// A host edit is approval for the shown changes, not for every setting on
+    /// the host. Preserve the old/new distinction and keep names as peer data;
+    /// icon and color spellings come from Farhelm's fixed vocabulary.
+    #[test]
+    fn host_edit_rows_show_each_changed_field_without_reclassifying_peer_values() {
+        use farhelm_proto::approvals::HostFieldChange;
+        use farhelm_proto::host_appearance::{HostColor, HostIcon};
+
+        let action = ApprovalAction::HostEdit {
+            host_name: "<b>builder</b>\u{202e}".into(),
+            destination: Some("operator@builder\t".into()),
+            alias: Some(HostFieldChange {
+                old: None,
+                new: Some("<b>new alias</b>\u{202e}".into()),
+            }),
+            icon: Some(HostFieldChange {
+                old: HostIcon::Cloud,
+                new: HostIcon::Rocket,
+            }),
+            color: Some(HostFieldChange {
+                old: HostColor::Default,
+                new: HostColor::Teal,
+            }),
+        };
+        assert_eq!(action_kind(&action), "host_edit");
+        assert_eq!(
+            action_rows(&action),
+            vec![
+                CardRow::Value("host", "<b>builder</b>\u{202e}".into()),
+                CardRow::Value("destination", "operator@builder\t".into()),
+                CardRow::Note("alias now", "none"),
+                CardRow::Value("new alias", "<b>new alias</b>\u{202e}".into()),
+                CardRow::Note("icon now", "cloud"),
+                CardRow::Note("new icon", "rocket"),
+                CardRow::Note("color now", "default"),
+                CardRow::Note("new color", "teal"),
+            ]
+        );
+    }
+
+    /// Clearing a local host's alias must read as a removal, while fields the
+    /// request does not change stay absent. Otherwise a card can imply broader
+    /// approval or disguise an alias clear as an empty agent-supplied name.
+    #[test]
+    fn host_edit_rows_distinguish_alias_removal_and_omit_unchanged_fields() {
+        use farhelm_proto::approvals::HostFieldChange;
+
+        let action = ApprovalAction::HostEdit {
+            host_name: "local alias".into(),
+            destination: None,
+            alias: Some(HostFieldChange {
+                old: Some("local alias".into()),
+                new: None,
+            }),
+            icon: None,
+            color: None,
+        };
+        assert_eq!(
+            action_rows(&action),
+            vec![
+                CardRow::Value("host", "local alias".into()),
+                CardRow::Note("destination", "this machine"),
+                CardRow::Value("alias now", "local alias".into()),
+                CardRow::Note("new alias", "none"),
+            ]
+        );
     }
 
     /// Both roles must use the same identity/copy path: fixing only targets
