@@ -202,9 +202,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`notification-bell-removal-skips-focus-return.md`](notification-bell-removal-skips-focus-return.md) — Removing the
   notification bell may skip keyboard-focus return; browser fallback is unverified.
 
-- [`notification-fixtures-register-ownership-too-late.md`](notification-fixtures-register-ownership-too-late.md) — A
-  failed second fixture creation can leave the first notification-test session outside cleanup.
-
 - [`pinned-host-dialog-chrome-can-hide-content.md`](pinned-host-dialog-chrome-can-hide-content.md) — The deleted dialog
   record still has an unresolved Host Settings footer-clipping case; exact geometry is unverified.
 

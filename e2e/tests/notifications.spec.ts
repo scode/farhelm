@@ -456,8 +456,9 @@ test.describe("session notifications", () => {
   test("the bell appears only with notifications, loud while unread, beside the time", async ({ page, request }) => {
     const stamp = Date.now();
     const belled = await createSession(request, { title: `belled-${stamp}` });
+    created.push(belled.id);
     const quiet = await createSession(request, { title: `quiet-${stamp}` });
-    created.push(belled.id, quiet.id);
+    created.push(quiet.id);
     const stub = new NotificationStub([
       { seq: 1, at: NOW - 600, text: "older problem" },
       { seq: 2, at: NOW - 60, text: "newer problem" },
@@ -513,8 +514,9 @@ test.describe("session notifications", () => {
   test("the list floats, marks new entries, and closing marks them read", async ({ page, request }) => {
     const stamp = Date.now();
     const session = await createSession(request, { title: `list-${stamp}` });
+    created.push(session.id);
     const other = await createSession(request, { title: `elsewhere-${stamp}` });
-    created.push(session.id, other.id);
+    created.push(other.id);
     // Auto-select opens the newest session on load; pin it elsewhere so the
     // bell's row being unselected afterwards says something about the click.
     await pinAutoSelect(page, other.id);
