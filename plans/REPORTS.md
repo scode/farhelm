@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`launcher-enter-feedback`](reports/launcher-enter-feedback.report.md) landed 2026-10-21 in #2444, #2450: Make Enter in the session launcher always launch, pick a visible row, or say why not (1 TODO entry).
 - [`supervisor-request-modes`](reports/supervisor-request-modes.report.md) landed 2026-10-21 in #2446, #2449, #2451, #2456, #2457: Declare how every supervisor request type runs in one exhaustive table with one owner for channel ids, test that each keeps the connection moving, and fix the requests that still stall it (creation and the checkout reconciliation before it).
 - [`helm-owned-by-default`](reports/helm-owned-by-default.report.md) landed 2026-10-21 in #2443, #2445, #2458, #2460: Run every state-changing helm request on a helm-owned task by default, with an explicit exempt list for routes that must stay cancellable (structural refactor; accidental omissions fixed first).
 - [`ui-peer-text-type`](reports/ui-peer-text-type.report.md) landed 2026-10-21 in #2465, #2467, #2468, #2469, #2470, #2471, #2472, #2473, #2474, #2475, #2476, #2477, #2478, #2479, #2480: Carry text from other machines in its own UI type with explicit escaped and raw accessors, so showing it unescaped stops compiling, and fix the unescaped sites it exposes.
