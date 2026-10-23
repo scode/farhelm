@@ -135,3 +135,87 @@ One fresh Opus 5.5 review at high effort per PR, with the test-authoring checkli
 
 No finding was declined. Each review ran once, and no reviewer looked at the fixes it led to; those are checked only by
 the reruns listed under Checks.
+
+### Landing
+
+Landed as #2652, #2653, #2654, #2655 and #2656, merged bottom-up, with the content the report describes and no changes.
+It was the only plan in this landing round.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained checkout-ownership-oct22 and supervisor-lock-outlives-work, both supervisor-only
+(checkout archiving and create retries, and when a stopping supervisor releases its state folder). The base already held
+the recent GUI work: browser sign-in recovery by page reload and discarding failed preference saves
+(sign-in-preservation-sweep and gui-saves-last-write-wins), and GUI confirmations bound to what the user saw
+(bind-gui-answers). A fresh-context reviewer and I read this plan against them:
+
+- The one point of contact with the supervisor plans helps rather than conflicts: checkout-ownership-oct22 made a late
+  retry of a session create answer with the existing session even after that session was restarted, which #2655 relies
+  on when it handles a retry whose first attempt may already have started the session.
+- The SPEC.md and SPEC_impl.md amendments are in different sections from main's and agree with the code. The reviewer
+  noted one imprecision: SPEC_impl.md says the terminal takes focus only from where the selection left it, while the
+  code records that place a moment after the click, when the view first asks for the terminal; the report says so.
+- dialog-saves-oct22 (the in-flight plan for saving dialogs), overlaps this plan only in the triage record and the
+  review queue's index, so its landing will meet only mechanical conflicts.
+
+#### Things you should know
+
+- The reviewer read the new focus rule (#2656) as possibly leaving focus on the header's restart button after a restart
+  that needs no confirmation, so that typing would not reach the restarted agent. A throwaway browser test (see Checks)
+  restarted an idle agent that way, by click and by keyboard, on both engines, and focus reached the restarted terminal
+  every time. The reviewer's own case, an agent that has already exited, takes the same no-confirmation path but was not
+  tried; see the follow-ups.
+- The "remove-and-re-add-host" browser test failed on WebKit in this round's run, and about half the time on main
+  without this plan too (see Checks). This plan does not change what that test checks, so I am confident it is not the
+  cause.
+
+#### Possible follow-ups
+
+- Found at landing: check focus after restarting an agent that has already exited from the header's restart button. If
+  focus stays on the button, the fix is to treat a restart's new terminal like a fresh selection for focus. I recommend
+  a quick browser test before any code change, since the idle case works.
+- Found at landing, minor and older than this plan: when a Replace without changed settings sends its request, gets no
+  reply, and is then asked to confirm a YOLO launch on retry, the question says "Nothing has been started", though the
+  first attempt may already have replaced the session. No second session can result (this Replace offers no guarded
+  alternative), so only the wording is wrong. The code comment #2655 rewrote for that question also says the session
+  launcher is the only place this happens, which is not true. Options: pass "may have started" through to that question
+  as the launcher now does, or only correct the comment. I recommend the first, since it is small and fixes what the
+  user reads.
+
+#### Checks
+
+The plan's five changes are all in the GUI, and main gained only supervisor changes since its base, so the risk is the
+five changes against each other and the GUI around them. This round ran, on the plan as it landed:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, the isolated test-sleep check, `dprint check` on the changed Markdown
+  files, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (one warning, about a
+  citation main already had), the workspace debug build, the UI's release web build and
+  `scripts/check-desktop-assets.sh`: all passed.
+- `cargo nextest run -p farhelm-ui` through the test recorder with pinned nextest and tmux, four slots, no retries, run
+  `813138e4-776a-41d4-8404-56d634ef6973`: 752 passed. `cargo nextest run -p farhelm-ui --features desktop`, same
+  settings but without tmux (the desktop tests do not use it), run `1ead556f-889c-42a5-a731-fe6fcb280063`: 917 passed.
+  `node --test` in `crates/farhelm-ui/js-tests` (the terminal's script changed), run
+  `97b00f8b-9853-4013-876c-69652bd9e09a`: 333 passed.
+- `npx playwright test` in `e2e/` on Chromium and WebKit for the six spec files the plan changes and five more that
+  exercise the same menus, terminal focus and launch confirmations (`quick-switcher`, `quick-launch`, `restart-with`,
+  `terminal-reconnect`, `sidebar`), three workers each with its own helm and supervisors, no retries, run
+  `4e8d25ff-03bd-47c6-8c8b-d90b8b33a3a4`: 851 passed, 1 failed. The failure was WebKit's "remove-and-re-add-host:
+  removal forgets, re-adding rediscovers" in `terminal-multihost.spec.ts`: after a host is removed and added again, its
+  surviving session's status read "idle — new output" where the test expects a plain live status. The plan does not
+  change that status or that test. Ten WebKit repeats of the test on this stack (run
+  `499364cd-ccc2-4ec5-8887-9009ce02ff0b`) failed 7 times, and ten on main without the plan, with main's own web build
+  (run `1dc305b6-8709-4fa4-ab21-1e138709a732`), failed 5 times the same way, so it is a failure main already has. I am
+  recording it in FLAKES.md, with a Deflake entry in TODO.md, in a separate draft PR.
+- A throwaway browser test, not committed, for the reviewer's question in "Things you should know" above: an idle agent
+  restarted from the header's restart button, by click and by keyboard, five times each on both engines, run
+  `89318d2d-5e05-4653-a6a1-0ded84eb4bd6`: 20 passed; focus reached the restarted terminal every time.
+- Reused: none. Skipped: the rest of the browser suite (the plan's changes are confined to the menus, outage notice,
+  launch confirmation and terminal focus the selected files exercise), the rest of the Rust workspace (no helm or
+  supervisor code changed), the doctests (no documentation example changed), the desktop smoke test, the native Mac app
+  (not runnable here) and the installer (unchanged).
+
+The report's checks were browser runs of the changed specs and a filtered set of the GUI's unit tests, before the final
+rebase; this round ran all of the GUI's unit and script tests and eleven browser spec files on both engines on the plan
+as it landed. Nothing in the executor's report became untrue at landing.
