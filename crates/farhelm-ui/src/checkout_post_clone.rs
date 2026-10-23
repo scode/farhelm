@@ -8,6 +8,10 @@ use dioxus::prelude::*;
 use std::{cell::Cell, rc::Rc};
 
 /// Preserve executable text until the user explicitly saves it.
+/// Save writes only an edited draft: the draft is read once, so an untouched
+/// Save would put back that old command over a command-line change made while
+/// the field was open (SPEC.md, "One GUI at a time"), and would turn a disabled
+/// command, shown as an empty box, into an unset one even without such a change.
 /// Only an all-whitespace draft clears the setting; otherwise whitespace and
 /// newlines are part of the command. Reading an explicit disable displays an
 /// empty box without rewriting it. Saves survive dismissal, while completion
@@ -25,6 +29,7 @@ pub(crate) fn CheckoutPostCloneField() -> Element {
     });
     let mut initialized = use_signal(|| false);
     let mut draft = use_signal(String::new);
+    let mut edited = use_signal(|| false);
     let mut saving = use_signal(|| false);
     let mut outcome = use_signal(|| None::<Result<(), String>>);
     let mounted = use_hook(|| Rc::new(Cell::new(true)));
@@ -65,6 +70,7 @@ pub(crate) fn CheckoutPostCloneField() -> Element {
                     oninput: move |event| {
                         if initialized() && !saving() {
                             draft.set(event.value());
+                            edited.set(true);
                             outcome.set(None);
                         }
                     },
@@ -82,10 +88,10 @@ pub(crate) fn CheckoutPostCloneField() -> Element {
                 }
             } else {
                 button {
-                    r#type: "button", aria_disabled: locked,
+                    r#type: "button", aria_disabled: locked || !edited(),
                     "data-tooltip": "save the post-clone command for future managed checkouts",
                     onclick: move |_| {
-                        if !initialized() || saving() { return; }
+                        if !initialized() || saving() || !edited() { return; }
                         let value = draft();
                         // Judge the loaded command, not the browser's normalized
                         // draft; after a successful clear, the refetch lifts this refusal.
@@ -116,7 +122,10 @@ pub(crate) fn CheckoutPostCloneField() -> Element {
                             saving.set(false);
                             let saved = result.is_ok();
                             outcome.set(Some(result));
-                            if saved { command.restart(); }
+                            if saved {
+                                edited.set(false);
+                                command.restart();
+                            }
                         });
                     },
                     if saving() { "saving…" } else { "save" }
