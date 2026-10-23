@@ -106,6 +106,12 @@ enum ProbeRegistration {
         destination: String,
         remote_farhelm: Option<String>,
         remote_state_dir: Option<String>,
+        /// Set only for an add from the add host dialog
+        /// ([`crate::store::NewHostEntry`]); kept through a pending setup
+        /// confirmation so the confirmed add still refuses a duplicate and
+        /// still writes the alias. A registration derived from a stored row
+        /// never carries one.
+        new_entry: Option<crate::store::NewHostEntry>,
     },
 }
 
@@ -355,9 +361,13 @@ impl ProvisioningService {
     fn target(&self, request: &ProbeRequest) -> anyhow::Result<(ProbeTarget, ProbeRegistration)> {
         match &request.target {
             ProbeDestination::Local => {
-                if request.remote_farhelm.is_some() || request.remote_state_dir.is_some() {
+                if request.remote_farhelm.is_some()
+                    || request.remote_state_dir.is_some()
+                    || request.new_entry.is_some()
+                {
                     return Err(anyhow::Error::new(ProvisioningRequestError::InvalidProbe(
-                        "the local probe does not accept remote_farhelm or remote_state_dir"
+                        "the local probe does not accept remote_farhelm, remote_state_dir or \
+                         new_entry"
                             .to_string(),
                     )));
                 }
@@ -376,10 +386,17 @@ impl ProvisioningService {
                         format!("{destination:?} is not a usable ssh destination"),
                     )));
                 }
+                let new_entry = request
+                    .new_entry
+                    .as_ref()
+                    .map(|entry| crate::store::NewHostEntry::new(entry.alias.as_deref()))
+                    .transpose()
+                    .map_err(anyhow::Error::new)?;
                 let registration = ProbeRegistration::Ssh {
                     destination: destination.clone(),
                     remote_farhelm: request.remote_farhelm.clone(),
                     remote_state_dir: request.remote_state_dir.clone(),
+                    new_entry,
                 };
                 Ok((
                     ProbeTarget {
@@ -536,6 +553,18 @@ impl ProvisioningService {
             request.remote_state_dir = request.remote_state_dir.or(row.remote_state_dir);
         }
         let (target, registration) = self.target(&request)?;
+        // An add from the add host dialog is refused before anything
+        // contacts the destination when the destination is already a host
+        // entry or the alias is already a host's name. Registration checks
+        // both again in its own transaction.
+        if let ProbeRegistration::Ssh {
+            destination,
+            new_entry: Some(entry),
+            ..
+        } = &registration
+        {
+            self.store.check_new_entry(destination, entry).await?;
+        }
         // Discovery comes FIRST, on every transport including the local
         // one. Reading a unit file is not what decides whether a
         // supervisor is there — a running one answers the protocol hello
@@ -745,6 +774,7 @@ impl ProvisioningService {
                 destination,
                 remote_farhelm,
                 remote_state_dir,
+                new_entry,
             } => {
                 let discovered_identity = discovered
                     .as_ref()
@@ -771,6 +801,7 @@ impl ProvisioningService {
                         farhelm.as_deref(),
                         state_dir.as_deref(),
                         discovered_identity,
+                        new_entry.as_ref(),
                     )
                     .await?
             }
@@ -883,6 +914,17 @@ impl ProvisioningService {
         // the same destination then finds the host busy instead of racing
         // this one past the lookup.
         let _confirming = Arc::clone(&self.add_confirmations).lock_owned().await;
+        // A duplicate or a taken alias that appeared while the setup
+        // confirmation was open is refused here, before the existing row is
+        // claimed or anything is installed.
+        if let ProbeRegistration::Ssh {
+            destination,
+            new_entry: Some(entry),
+            ..
+        } = registration
+        {
+            self.store.check_new_entry(destination, entry).await?;
+        }
         let existing = match registration {
             ProbeRegistration::Ssh { destination, .. } => self
                 .store
@@ -2445,6 +2487,7 @@ fn registration_for_row(row: &HostRow) -> anyhow::Result<ProbeRegistration> {
                 .context("an ssh host row has no destination")?,
             remote_farhelm: row.remote_farhelm.clone(),
             remote_state_dir: row.remote_state_dir.clone(),
+            new_entry: None,
         }),
     }
 }
