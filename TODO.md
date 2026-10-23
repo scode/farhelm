@@ -204,6 +204,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Fix trash deletion silently blocking the UI.** Deleting a session to trash can silently block everything the user
   does — including closing the window — while it progresses, sometimes slowly, with no progress indication.
 
+- **Search sessions by content or action.** Let the user find a session by what happened in it — which session ran a
+  certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
+  exposed are TBD.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
