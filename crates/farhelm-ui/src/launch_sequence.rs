@@ -471,7 +471,13 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
         // before the first pill render, using the last published bindings.
         span { class: "launch-sequence-bindings", hidden: true, "data-bindings": bindings }
         if let Some(references) = references {
-        div { class: "launch-sequence-indicator", role: "status", "data-in-launcher": if in_launcher() { "true" } else { "false" },
+        // Centered over the terminal above link destination previews
+        // (app.css's z-index ladder) and transparent to the pointer, so a link
+        // can still be clicked beside or under it: a link cover. A sequence
+        // can be armed while a link press is held, so this can appear between
+        // a link's hover and its release.
+        div { class: "launch-sequence-indicator", role: "status", "data-link-cover": "true",
+            "data-in-launcher": if in_launcher() { "true" } else { "false" },
             if references.is_empty() {
                 if in_launcher() {
                     "Apply sequence: press number keys to queue templates, Enter to apply, Esc to cancel."

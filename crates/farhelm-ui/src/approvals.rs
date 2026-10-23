@@ -160,6 +160,12 @@ pub(crate) fn ApprovalCards() -> Element {
             // Left live by `modal_isolation` while a dialog is open: an agent
             // waiting on a card must not wait on the dialog too.
             "data-modal-exempt": "true",
+            // Draws above terminal link destination previews (app.css's
+            // z-index ladder), so a link whose preview it overlaps refuses
+            // the click. Marked on the scrolling region rather than on each
+            // card: an offscreen card's own rectangle reaches past what the
+            // region actually shows.
+            "data-link-cover": "true",
             onmounted: move |_| {
                 // Approval can appear before any terminal was mounted. Install the shared
                 // URL predicate here too, so that first click does not depend on terminal setup.

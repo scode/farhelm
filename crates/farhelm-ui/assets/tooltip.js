@@ -245,6 +245,13 @@
         tip.className = "farhelm-tooltip";
         tip.setAttribute("role", "tooltip");
         tip.setAttribute("aria-hidden", "true");
+        // It draws above terminal link destination previews (app.css's
+        // z-index ladder), so it is a link cover: a link click is refused
+        // only while a showing tooltip actually overlaps that link's preview.
+        // Hidden, it has no box and covers nothing. A terminal link's own
+        // hover never shows this element (the preview is its own element and
+        // no terminal ancestor carries `data-tooltip`).
+        tip.setAttribute("data-link-cover", "true");
         tip.hidden = true;
       }
       // Re-attached on every show rather than once: nothing in the app

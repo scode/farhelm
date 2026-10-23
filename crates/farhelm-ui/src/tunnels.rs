@@ -448,7 +448,10 @@ pub(crate) fn TunnelControls() -> Element {
     let shown = controller.warning.current();
     rsx! {
         if let Some(error) = controller.notice.read().as_ref() {
-            div { class: "tunnel-error-notice", role: "alert",
+            // Persists until dismissed above terminal link destination
+            // previews (app.css's z-index ladder), so it is a link cover: a
+            // link beside it whose preview it overlaps refuses the click.
+            div { class: "tunnel-error-notice", role: "alert", "data-link-cover": "true",
                 span { "{display_peer(error)}" }
                 button { r#type: "button", class: "btn btn-neutral", onclick: move |_| controller.notice.set(None), "dismiss" }
             }

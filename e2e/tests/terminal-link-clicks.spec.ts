@@ -730,8 +730,9 @@ test.describe("covered terminal disclosures", () => {
   }
 
   /** The desktop renders this notice outside browser builds. Inject its real
-   * class and child structure, retaining production CSS while fixing a tall
-   * geometry that crosses both the hover and the terminal's refusal banner.
+   * class, link-cover marker and child structure (tunnels.rs), retaining
+   * production CSS while fixing a tall geometry that crosses both the hover
+   * and the terminal's refusal banner.
    */
   async function stageCoveringTunnelNotice(page: Page) {
     await page.evaluate(() => {
@@ -740,6 +741,7 @@ test.describe("covered terminal disclosures", () => {
       const notice = document.createElement("div");
       notice.className = "tunnel-error-notice";
       notice.setAttribute("role", "alert");
+      notice.setAttribute("data-link-cover", "true");
       notice.style.top = `${screen.top}px`;
       // Keep the cell helper's bottom-right reset inside the terminal. A
       // covered reset leaves xterm's last link-cell cache unchanged, so the
@@ -1088,6 +1090,235 @@ test.describe("covered terminal disclosures", () => {
       })).toBe(true);
       await page.mouse.click(fitting.x, fitting.y);
       expect(await opens()).toEqual([target]);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["session", () => sessionId && cleanupSession(request, sessionId)],
+        ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
+      ]);
+    }
+  });
+
+  /** A viewport rectangle measured in the page, carried across evaluate calls. */
+  type Box = { top: number; left: number; bottom: number; right: number };
+
+  /** The quick-launch pill exists only while a sequence is armed, so measure
+   * it from a real arming that is then cancelled, both from the keyboard. The
+   * entry animation scales the pill, so it must finish before measuring.
+   */
+  async function measureLaunchPill(page: Page): Promise<Box> {
+    await expect(page.locator('.launch-sequence-trigger[data-sequence-action="begin"]')).toBeEnabled();
+    await page.keyboard.press("Control+Shift+KeyX");
+    const pill = page.locator(".launch-sequence-indicator");
+    await expect(pill).toBeVisible();
+    const box = await pill.evaluate(async el => {
+      await Promise.all(el.getAnimations().map(animation => animation.finished.catch(() => undefined)));
+      const rect = el.getBoundingClientRect();
+      return { top: rect.top, left: rect.left, bottom: rect.bottom, right: rect.right };
+    });
+    await page.keyboard.press("Escape");
+    await expect(pill).toHaveCount(0);
+    return box;
+  }
+
+  /** Paint a link up and to the left of where the pill appears, so its
+   * below-right preview starts inside the pill's band while the pointer stays
+   * outside the pill. `besideCover` cannot serve here: it measures a cover
+   * that is already present before the hover, and its row (12px into the
+   * cover) would leave the preview below a pill this short.
+   */
+  async function abovePill(page: Page, label: string, target: string | null, pill: Box) {
+    await page.evaluate(() => document.fonts.ready);
+    const grid = await page.evaluate(({ label, pill }) => {
+      const term = (window as any).__farhelmTerm;
+      const screen = document.querySelector("#terminal .xterm-screen")!.getBoundingClientRect();
+      const width = screen.width / term.cols;
+      const height = screen.height / term.rows;
+      return {
+        row: Math.floor((pill.top - 4 - screen.top) / height) + 1,
+        col: Math.floor((pill.left - 24 - screen.left) / width - label.length / 2) + 1,
+        rows: term.rows,
+        cols: term.cols,
+      };
+    }, { label, pill });
+    expect(grid.row, "the target row must be in this live terminal").toBeGreaterThan(0);
+    expect(grid.row).toBeLessThanOrEqual(grid.rows);
+    expect(grid.col, "the label must start inside the terminal").toBeGreaterThan(0);
+    expect(grid.col + label.length).toBeLessThanOrEqual(grid.cols);
+    return paintDisclosureLink(page, label, target, grid.row, grid.col);
+  }
+
+  /** Regression for the pill going uncounted while the cover check measured a
+   * hand-kept selector list (TRIAGE_OUTCOMES.md,
+   * `launch-pill-can-cover-link-disclosure.md`). The pill is transparent to
+   * the pointer and centered over the terminal, and a sequence can be armed
+   * while a link press is held, so it can appear over a destination between
+   * hover and release. Both file and web activation must then refuse, the
+   * raised explanation must stay on a higher layer than a pill armed again,
+   * and the same link must work once no pill is up, proving the pill was the
+   * cause.
+   */
+  test("the quick-launch pill armed during a press covers file and web destinations", async ({ page, request }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const opens = await probeDisclosureOpens(page);
+    let sessionId: string | undefined;
+    let bodyFailed = false;
+    let transfers = 0;
+    try {
+      await patchPreferences(request, { terminal_link_click: null });
+      const session = await createSession(request, { title: `pill-covered-${Date.now()}`, cwd: "/tmp", invocation });
+      sessionId = session.id;
+      page.on("request", request => {
+        if (new URL(request.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}/files/download`) transfers++;
+      });
+      await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/stat`, route => fulfillAsHelm(route, {
+        json: { status: "ready", host: "fixture", path: "/output/report.txt", size: 8, can_open: true },
+      }));
+      await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/download`, route => fulfillAsHelm(route, {
+        status: 200, contentType: "application/octet-stream", body: "fixture\n",
+      }));
+      await page.goto("/");
+      await attachSession(page, session.id);
+      await waitForTermText(page, "FAKE-AGENT READY");
+      await cue(page, "links");
+      const pillBox = await measureLaunchPill(page);
+      const pill = page.locator(".launch-sequence-indicator");
+      const refusal = page.locator('#terminal .terminal-file-message[data-outcome="disclosure-refusal"]');
+      const webTarget = "https://example.test/pill-covered";
+      const links = [
+        { label: "/output/report.txt", target: null, disclosure: "#terminal .terminal-file-target", shows: "8 B", operation: "download" as const },
+        { label: "PILL-WEB", target: webTarget, disclosure: "#terminal .terminal-link-target:not(.terminal-file-target)", shows: webTarget, operation: "open" as const },
+      ];
+      for (const link of links) {
+        const transfersBefore = transfers;
+        const opensBefore = await opens();
+        const point = await abovePill(page, link.label, link.target, pillBox);
+        await expect(page.locator(link.disclosure)).toContainText(link.shows);
+        await expectLinkUnderPointer(page, point, link.label);
+        // Press first, then arm: the pill goes up between the press and the
+        // release that activates the link. The release's own click event
+        // cancels the sequence afterwards, which is why this order matters.
+        await page.mouse.down();
+        await page.keyboard.press("Control+Shift+KeyX");
+        await expect(pill).toBeVisible();
+        await assertDisclosureGeometry(page, link.disclosure, point, true, ".launch-sequence-indicator");
+        await expect(refusal).toHaveCount(0);
+        await page.mouse.up();
+        await expect(refusal).toContainText(`cannot ${link.operation}:`);
+        await expect(refusal).toContainText("covered by another Farhelm surface");
+        expect(transfers, "refusal is the completed admission boundary").toBe(transfersBefore);
+        expect(await opens()).toEqual(opensBefore);
+
+        // The pointer still rests on the link, so the explanation stays
+        // raised. At this viewport the pill (centered in the main area) and
+        // the refusal (along the terminal's top) do not overlap, so this
+        // re-arm compares only their layers, not what actually paints.
+        await expect(pill).toHaveCount(0);
+        await page.keyboard.press("Control+Shift+KeyX");
+        await expect(pill).toBeVisible();
+        await assertCoveredRefusal(page, link.operation, ".launch-sequence-indicator");
+        await page.keyboard.press("Escape");
+        await expect(pill).toHaveCount(0);
+
+        // A fresh hover of the same link with no pill up is admitted.
+        const again = await cell(page, link.label);
+        await expect(page.locator(link.disclosure)).toContainText(link.shows);
+        if (link.target === null) {
+          const downloaded = page.waitForEvent("download");
+          await page.mouse.click(again.x, again.y);
+          expect((await downloaded).suggestedFilename()).toBe("report.txt");
+          expect(transfers).toBe(transfersBefore + 1);
+        } else {
+          await page.mouse.click(again.x, again.y);
+          expect(await opens()).toEqual([...opensBefore, link.target]);
+        }
+      }
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["session", () => sessionId && cleanupSession(request, sessionId)],
+        ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
+      ]);
+    }
+  });
+
+  /** The refusal explanation must draw above every link cover, because it
+   * says why a covered click did nothing.
+   * The test enumerates whatever carries the marker instead of naming covers,
+   * so a newly marked surface is checked as soon as it is on screen. It
+   * stages every cover a browser build can show at once: the real approval
+   * region, the real tooltip and the real pill, plus the tunnel-error notice,
+   * which only the desktop renders and is injected as the other tunnel tests
+   * do. The trash flight (10000) is the documented exemption (app.css's
+   * ladder). The converse is checked only for this staged screen: nothing
+   * else rendered here at or above the preview's layer (40) is unmarked. A
+   * surface this test does not put on screen escapes that check, which is
+   * how the pill was missed in the first place.
+   */
+  test("the raised refusal explanation draws above every marked link cover", async ({ page, request }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const opens = await probeDisclosureOpens(page);
+    let sessionId: string | undefined;
+    let bodyFailed = false;
+    try {
+      await patchPreferences(request, { terminal_link_click: null });
+      const session = await createSession(request, { title: `cover-layers-${Date.now()}`, cwd: "/tmp", invocation });
+      sessionId = session.id;
+      await stageCoveringApproval(page);
+      await page.goto("/");
+      await attachSession(page, session.id);
+      await waitForTermText(page, "FAKE-AGENT READY");
+      await cue(page, "links");
+      await expect(page.locator(".approval-card .approval-allow")).toBeEnabled();
+
+      // A real raised refusal supplies the layer under test. Read it before
+      // the pointer moves on, since leaving the link lowers it.
+      const target = "https://example.test/cover-layers";
+      const point = await besideCover(page, "LAYER-WEB", target, true);
+      await expect(page.locator("#terminal .terminal-link-target:not(.terminal-file-target)")).toContainText(target);
+      await expectLinkUnderPointer(page, point, "LAYER-WEB");
+      await page.mouse.click(point.x, point.y);
+      const refusal = page.locator('#terminal .terminal-file-message[data-outcome="disclosure-refusal"]');
+      await expect(refusal).toContainText("covered by another Farhelm surface");
+      const refusalLayer = await refusal.evaluate(el => Number(getComputedStyle(el).zIndex));
+      expect(await opens()).toEqual([]);
+
+      await stageCoveringTunnelNotice(page);
+      await page.locator(".app-settings-toggle").hover();
+      await expect(page.locator("body > .farhelm-tooltip")).toBeVisible();
+      // Focus is still in the terminal from the click; arming from the
+      // keyboard leaves the pointer, and so the tooltip, where they are.
+      await expect(page.locator('.launch-sequence-trigger[data-sequence-action="begin"]')).toBeEnabled();
+      await page.keyboard.press("Control+Shift+KeyX");
+      await expect(page.locator(".launch-sequence-indicator")).toBeVisible();
+      await expect(page.locator("body > .farhelm-tooltip"), "arming must not have dismissed the tooltip").toBeVisible();
+
+      const layers = await page.evaluate(() => {
+        const rendered = (el: Element) => el.getClientRects().length > 0;
+        const marked = Array.from(document.querySelectorAll("[data-link-cover]")).filter(rendered)
+          .map(el => ({ name: el.className, layer: Number(getComputedStyle(el).zIndex) }));
+        // `Number("auto")` is NaN, which no comparison admits.
+        const unmarked = Array.from(document.querySelectorAll("body *"))
+          .filter(el => Number(getComputedStyle(el).zIndex) >= 40 && rendered(el) && !el.closest("[data-link-cover]") &&
+            !el.matches(".terminal-link-target, .terminal-file-message"))
+          .map(el => el.className);
+        return { marked, unmarked };
+      });
+      expect(layers.marked.map(cover => cover.name), "every stageable cover is on screen and marked").toEqual(expect.arrayContaining([
+        "approval-cards", "tunnel-error-notice", "launch-sequence-indicator", "farhelm-tooltip",
+      ]));
+      for (const cover of layers.marked) {
+        if (cover.name.split(/\s+/).includes("checkout-trash-flight")) continue;
+        expect(cover.layer, `${cover.name} must draw below the raised refusal`).toBeLessThan(refusalLayer);
+      }
+      expect(layers.unmarked, "every surface at or above the preview's layer is a marked cover").toEqual([]);
+
+      await page.keyboard.press("Escape");
+      await expect(page.locator(".launch-sequence-indicator")).toHaveCount(0);
     } catch (error) {
       bodyFailed = true;
       throw error;

@@ -20,6 +20,29 @@
         rect.left < cover.right && rect.right > cover.left && rect.top < cover.bottom && rect.bottom > cover.top);
   }
 
+  /** The attribute every surface drawing at or above a link's destination
+   * preview carries. app.css's z-index ladder (at `.header-confirm`) states
+   * the rule; this is the one place the cover check reads it from.
+   */
+  const LINK_COVER_SELECTOR = '[data-link-cover]';
+
+  /** Live rectangles of every marked cover that is currently drawn.
+   *
+   * Covers are declared by the surfaces themselves rather than listed here:
+   * a hand-kept selector list is how the quick-launch pill came to draw over
+   * destination previews without ever being counted. A marked element that is
+   * not rendered (`display: none`, such as the idle tooltip) or is
+   * `visibility: hidden` hides nothing and is skipped. Each rectangle is read
+   * at call time, never cached, because covers move and come and go between
+   * hover and click. A cover that scrolls its own content (the approval
+   * cards) contributes only its visible region's bounds.
+   */
+  function markedCoverRects(doc, view = doc.defaultView) {
+    return Array.from(doc.querySelectorAll(LINK_COVER_SELECTOR))
+      .filter(cover => cover.getClientRects().length && view.getComputedStyle(cover).visibility !== 'hidden')
+      .map(cover => cover.getBoundingClientRect());
+  }
+
   /** Decimal units agree with the transfer cap. Rounding never renders a
    * refused file as less than 100 MB; the refusal still names the exact limit.
    */
@@ -193,8 +216,9 @@
       // The terminal owns primary-gesture admission across all link providers.
       // A standalone addon without that evidence cannot authorize a transfer.
       this.isClick = isClick;
-      // The shell supplies its visible approval region at activation time;
-      // this addon knows rectangles, not the shell's DOM or cached geometry.
+      // The shell supplies its marked covers' rectangles at activation time
+      // (`markedCoverRects`); this addon knows rectangles, not the shell's DOM
+      // or cached geometry.
       this.coveringRects = coveringRects;
       this.hovered = null;
       this.transfers = new Set();
@@ -374,8 +398,8 @@
     }
 
     /** Share the click-time disclosure gate and explanation across file and web
-     * activation. Empty/hidden disclosures fail closed; only the shell decides
-     * which visible surfaces supply covering rectangles.
+     * activation, so both always measure the same covers. Empty/hidden
+     * disclosures fail closed; the shell supplies the covering rectangles.
      */
     admitDisclosure(display, web = false) {
       const fits = disclosureFits(display, window);
@@ -534,7 +558,10 @@
     }
   }
 
-  const api = { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, FileLinksAddon, MAX_BYTES, NUMERIC_VERSION };
+  const api = {
+    pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, markedCoverRects,
+    LINK_COVER_SELECTOR, FileLinksAddon, MAX_BYTES, NUMERIC_VERSION,
+  };
   if (typeof window !== 'undefined') window.farhelmTerminalFiles = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

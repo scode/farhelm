@@ -3609,15 +3609,13 @@
         // The addon owns file lookups/transfers for the retained terminal,
         // not for a particular WebSocket attachment or tab render.
         const linkGesture = window.farhelmTerminalLinks.createLinkGesture();
-        // Cards scroll inside one region. An offscreen card's own rectangle
-        // can extend beyond that viewport, so use only the visible region's
-        // live bounds, never individual card rectangles or cached positions.
-        // A tunnel failure persists until dismissed and can cover a destination
-        // while leaving its link clickable beside the notice. Both providers
-        // must recheck that cover at activation, just as they do for cards.
-        const linkCoveringRects = () => Array.from(document.querySelectorAll('.approval-cards, .tunnel-error-notice'))
-          .filter(region => region.getClientRects().length && getComputedStyle(region).visibility !== 'hidden')
-          .map(region => region.getBoundingClientRect());
+        // Every surface that can draw over a destination preview marks itself
+        // as a link cover (app.css's z-index ladder states the rule), and both
+        // providers recheck all of them at activation. A cover can leave its
+        // link clickable beside it (an approval card, a persistent tunnel
+        // failure, the quick-launch pill, a tooltip) while hiding part of the
+        // destination, so hover-time evidence cannot stand in for this check.
+        const linkCoveringRects = () => window.farhelmTerminalFiles.markedCoverRects(document);
         const fileLinks = new window.farhelmTerminalFiles.FileLinksAddon({
           endpoint: baseUrl + spec.path.split('/term')[0] + '/files',
           secret: deviceSecret,
