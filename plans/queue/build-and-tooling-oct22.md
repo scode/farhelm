@@ -319,3 +319,61 @@ above, each PR passed its review gate, and each outcome's `TRIAGE_OUTCOMES.md` E
 bookmark and PR. Open, not merged. If a `## Decisions` section exists, its latest entry must also be satisfied. Then
 close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the
 queue script, write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-10-23 (claim 56e32e).
+
+### What this is about
+
+On the 2026-10-22 triage page you chose five fixes for this plan, each to stay within about 100 changed lines or come
+back to you. Four stayed within it and wait as draft PRs: the Linux tmux that Farhelm installs on hosts now finds
+terminal definitions in the system locations (#2657, 10 lines), the plans queue script ignores pull requests from forks
+(#2659, 86 lines), the CentOS provisioning test no longer wipes an ssh config with an unmatched block marker (#2660, 36
+lines), and rerunning the Mac installer repairs a damaged version (#2662, 39 lines).
+
+The fifth is over the limit. Devbuild is the script that builds a branch on your Mac and runs it as a separate app. When
+you press Update on a remote host in that app, devbuild also gives it the latest stable release's tmux to install there.
+Devbuild checked that tmux only against the release's checksum list, fetched over HTTPS, and never against the release
+signature that the helm requires of its own downloads. It also reused a cached copy on later runs without checking it
+again. So anyone able to change what the download site serves could replace both the tmux and its checksum list, and
+devbuild would install that tmux on every host it updates; a cached tmux changed on disk was installed with no check at
+all. You chose to have devbuild verify the signature, reusing the helm's own verifier through a hidden `farhelm`
+command, and to re-check or re-fetch a cached tmux.
+
+### What was built
+
+The fix is built and reviewed, and waits as draft PR #2665.
+
+- Devbuild now keeps the release's checksum list and its signature next to the cached tmux. On every run, the `farhelm`
+  it has just built checks the signature with the release keys compiled into it, and devbuild then checks each tmux,
+  cached or freshly downloaded, against the signed checksums.
+- A bad or missing signature, or a tmux that does not match, stops the run and drops the cache, so the next run fetches
+  everything again. A cache from before this change is fetched again too.
+- Devbuild needs nothing new installed: no `minisign`, since the check is the helm's own code.
+- The new command's test passes: a correctly signed file is accepted, and a wrong release version, a missing signature
+  and a tampered file are each refused. Run by hand against the real v0.30.0 release, its files verify and a tampered
+  copy is refused. The script itself only runs on a Mac, so it was checked by reading and with the shell linters, not
+  run end to end.
+
+### Why it is over the limit
+
+It is 122 changed lines against the limit of about 100: 46 in the devbuild script, 73 for the hidden command, and 3 in a
+test fixture's README. About 27 of those lines are the command's test, its doc comment included, and about 20 more are
+comments across the script and the command, so roughly 75 are the code itself. The review found no materially smaller
+design that still re-checks a cached tmux and refuses a bad or missing signature.
+
+### The question
+
+Land the devbuild fix as built, or discard it? Nothing in this plan lands until you answer; then the plan finishes with
+either five PRs or four.
+
+- **Land it** (my recommendation). A devbuild then installs a tmux on your hosts only if the release signature vouches
+  for it, the same rule the helm applies to its own downloads. The costs: the hidden command ships in every release from
+  then on and has to keep working for devbuild; devbuild gains a new way to stop, when a release lacks its signature
+  file or is signed with a key that build does not carry; and about 120 lines to maintain.
+- **Discard it.** The plan finishes with the other four, and devbuild keeps trusting the checksum list over HTTPS alone,
+  as before. The fifth PR then only removes the finding from the review queue and records your discard in the triage
+  ledger; a discard means "not worth the time now", so the finding can be raised again later.
+- A smaller version is not on offer: dropping the cached-copy re-check or the test would cut below the fix you chose,
+  and the rest is already as small as the reviewer could find.
