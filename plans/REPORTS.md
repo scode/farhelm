@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`agent-spawned-session-rules`](reports/agent-spawned-session-rules.report.md) landed 2026-10-19 in #2346, #2347, #2352: Refuse empty agent-to-agent prompts, call a prompt card's permission shield a snapshot, and say a wrapper is not tied to an agent type (3 triage outcomes).
 - [`link-hover-covers`](reports/link-hover-covers.report.md) landed 2026-10-19 in #2348, #2350, #2351: The tunnel-error notice counts as covering a link hover, the spec accepts the refusal banner over a card, and a modified click opens only when the hover offered it (3 triage outcomes).
 - [`workspace-trust-destination`](reports/workspace-trust-destination.report.md) landed 2026-10-20 in #2349, #2353, #2354: Inherited spawns recompute workspace trust for their destination; launch cards show trust plainly; a replaced checkout folder loses trust (3 triage outcomes).
 - [`session-header-and-row-fixes`](reports/session-header-and-row-fixes.report.md) landed 2026-10-20 in #2357, #2358, #2359: Automatic terminal recovery leaves an open Restart/Replace/Delete question focused; the copy warning follows the copied value; accessible names escape titles (3 triage outcomes).
