@@ -2538,7 +2538,7 @@ impl LaunchDraftState {
                 let source_repo = prefill
                     .repo
                     .clone()
-                    .filter(|_| prefill.replace_source.is_none());
+                    .filter(|_| !prefill.mode.seeds_source_folder());
                 draft.seed_title(&prefill.title, source_repo.clone());
                 if let Some(repo) = source_repo {
                     draft.select_repository(repo);
@@ -2747,6 +2747,7 @@ fn observe_search_agent_fields(fields: DraftFields) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::LauncherMode;
     use super::*;
 
     /// Give deliberate choices distinguishable offered/fetched installation data.
@@ -4084,7 +4085,10 @@ mod tests {
         dom.in_runtime(|| {
             seed_placement_command(f);
             let mut prefill = source_prefill();
-            prefill.replace_source = Some("source".into());
+            prefill.mode = LauncherMode::Replace {
+                source: "source".into(),
+                opened: (crate::SessionStatus::Unknown, 0),
+            };
             owner.reconcile_source(Some(&prefill), false, &[], f.system.source);
             owner.edit_prompt("keep prompt".into());
             let raw = prefill.cwd.clone();
@@ -4274,7 +4278,10 @@ mod tests {
         dom.in_runtime(|| {
             seed_placement_command(f);
             let mut prefill = source_prefill();
-            prefill.replace_source = Some("source".into());
+            prefill.mode = LauncherMode::Replace {
+                source: "source".into(),
+                opened: (crate::SessionStatus::Unknown, 0),
+            };
             owner.reconcile_source(Some(&prefill), false, &[], f.system.source);
             let authority = BrowseAuthority {
                 target: target.clone(),
@@ -4494,8 +4501,7 @@ mod tests {
             agent: Some(LaunchHarness::Claude),
             resume: Some("source-resume\u{1b}".into()),
         });
-        source.replace_source = None;
-        source.replace_source_opened = None;
+        source.mode = LauncherMode::Create;
         source
     }
 
@@ -4716,7 +4722,10 @@ mod tests {
             prefill.generation = 3;
             prefill.launch = agent.structured_selection();
             prefill.command = None;
-            prefill.replace_source = Some("source".into());
+            prefill.mode = LauncherMode::Replace {
+                source: "source".into(),
+                opened: (crate::SessionStatus::Unknown, 0),
+            };
             key.set(Some((
                 "before-agent-source".into(),
                 request(&owner.snapshot()),

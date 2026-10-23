@@ -175,10 +175,9 @@ enum MenuAction {
     /// a fourth code path is the whole point of this feature.
     /// `CreateSessionForm` (`list::create_form`) has exactly one submit
     /// path; ReplaceWith, Clone, and the plain New dialog share it byte for
-    /// byte, differing only in what pre-fills the form (see
-    /// `create_form::CreatePrefill`'s `replace_source`) and in what a
-    /// successful submit does afterward (create; create then delete the
-    /// source). Any behavior that diverges between them belongs on that
+    /// byte, differing in the prefill and operation
+    /// (`create_form::CreatePrefill::mode`): create, or create then delete the
+    /// source. Any behavior that diverges between them belongs on that
     /// shared path as a bug, never as a special case bolted onto this menu
     /// item.
     ReplaceWith,
@@ -1005,7 +1004,7 @@ pub(super) fn SessionRow(
     /// The "replace with" menu item's click: hands the row's own `Session`
     /// up so `ListView` can seed the SAME create form clone opens, marked
     /// with this row as its replace-with source
-    /// (`create_form::CreatePrefill::replace_source`). Like `on_clone`, and
+    /// (`create_form::CreatePrefill::mode`). Like `on_clone`, and
     /// unlike `on_replace` below, nothing is mutated or restarted by this
     /// click alone — the create form's own submit is the only place either
     /// verb ever reaches the API, and replace-with's submit both creates
@@ -2507,7 +2506,7 @@ pub(super) fn SessionRow(
                                 // editable form, pre-filled the same way,
                                 // but marked with THIS row as its
                                 // replace-with source
-                                // (`create_form::CreatePrefill::replace_source`)
+                                // (`create_form::CreatePrefill::mode`)
                                 // so the form's own submit both creates the
                                 // edited session and deletes this row's own
                                 // — replace's action, reached through
