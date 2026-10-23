@@ -79,7 +79,7 @@ use crate::modal_dialog::{
     DialogFocus, DialogHandle, DialogRoot, FocusTarget, ModalDialog, RecoveryDelay, RecoveryFocus,
     ScrollRegion,
 };
-use crate::ops::{ConfirmSlot, OpGuard, OpLock, use_confirm_slot};
+use crate::ops::{ConfirmSlot, ConfirmToken, OpGuard, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_identity, display_peer};
 use crate::provisioning::{
     ActionRequest, HostBinding, HostUpdateProgress, ProvisioningMenuState, ProvisioningPanel,
@@ -4438,8 +4438,8 @@ enum AddConfirm<G> {
     Accepted(G),
 }
 
-/// Confirm `planned`, the offer the add dialog's answer was drawn for,
-/// against the destination field as it is now (`current`).
+/// Confirm `planned`, the opening of the offer the add dialog's answer was
+/// drawn for, against the destination field as it is now (`current`).
 ///
 /// The offer is taken only after the page lock is claimed (`claim`), so a
 /// confirmation refused for a busy page leaves an open question up; a claim
@@ -4451,11 +4451,11 @@ enum AddConfirm<G> {
 /// [`AddConfirm::Accepted`].
 fn take_add_offer<G>(
     slot: &mut ConfirmSlot<AddOffer>,
-    planned: &AddOffer,
+    planned: &ConfirmToken<AddOffer>,
     current: &AddBinding,
     claim: impl FnOnce() -> Option<G>,
 ) -> AddConfirm<G> {
-    if planned.binding != *current {
+    if planned.key().binding != *current {
         return if slot.take(planned).is_some() {
             AddConfirm::BindingChanged
         } else {
@@ -4590,8 +4590,8 @@ fn AddHostForm(
     let mut probing = use_signal(|| false);
     // The setup question for the plan discovery returned: a `ConfirmSlot`
     // keyed by the offer itself, so a confirmation acts only by taking the
-    // offer its handler was drawn for. Every way of closing the dialog
-    // retires it (and the remembered answer's automatic submit) before
+    // opening of the offer its handler was drawn for. Every way of closing
+    // the dialog retires it (and the remembered answer's automatic submit) before
     // telling the panel, because the panel closing the dialog unmounts this
     // form only at the next render, and an answer queued behind the close in
     // the same event burst still runs before that.
@@ -4610,48 +4610,55 @@ fn AddHostForm(
     };
 
     let preference_base = base.clone();
-    // Confirm `planned`, the offer the answer was drawn for. `skip_future`
+    // Confirm `planned`, the opening the answer was drawn for. `skip_future`
     // is the permanent answer, remembered only once this confirmation has
     // taken the offer: an answer that finds it gone (cancelled, or already
     // confirmed) changes no preference.
-    let confirm = use_callback(move |(planned, skip_future): (AddOffer, bool)| {
-        let current = AddBinding {
-            destination: ssh.peek().clone(),
-        };
-        // Taking the offer also means the helm may consume this id before
-        // any later refusal or transport ambiguity reaches the browser, so
-        // it is never presented for a second use.
-        let claim = match take_add_offer(&mut offer, &planned, &current, || ops.claim_guard()) {
-            AddConfirm::Accepted(claim) => claim,
-            AddConfirm::BindingChanged => {
-                error.set(Some(
-                    "the ssh destination changed after discovery; probe again".to_string(),
-                ));
-                return;
+    let confirm = use_callback(
+        move |(planned, skip_future): (ConfirmToken<AddOffer>, bool)| {
+            let current = AddBinding {
+                destination: ssh.peek().clone(),
+            };
+            // Taking the offer also means the helm may consume this id before
+            // any later refusal or transport ambiguity reaches the browser, so
+            // it is never presented for a second use.
+            let claim = match take_add_offer(&mut offer, &planned, &current, || ops.claim_guard()) {
+                AddConfirm::Accepted(claim) => claim,
+                AddConfirm::BindingChanged => {
+                    error.set(Some(
+                        "the ssh destination changed after discovery; probe again".to_string(),
+                    ));
+                    return;
+                }
+                AddConfirm::Refused | AddConfirm::Stale => return,
+            };
+            if skip_future {
+                preferences.0.write().skip_host_setup_confirmation = Some(true);
+                store_preference(
+                    &preference_base,
+                    PreferenceValue::HostSetupConfirmation(true),
+                );
             }
-            AddConfirm::Refused | AddConfirm::Stale => return,
-        };
-        if skip_future {
-            preferences.0.write().skip_host_setup_confirmation = Some(true);
-            store_preference(
-                &preference_base,
-                PreferenceValue::HostSetupConfirmation(true),
-            );
-        }
-        error.set(None);
-        on_submit.call(AddSubmission {
-            probe_id: planned.probe_id,
-            destination: planned.binding.destination,
-            claim,
-        });
-    });
+            error.set(None);
+            let AddOffer {
+                probe_id, binding, ..
+            } = planned.key().clone();
+            on_submit.call(AddSubmission {
+                probe_id,
+                destination: binding.destination,
+                claim,
+            });
+        },
+    );
 
     // A permanent answer skips only the setup question. The probe still
     // produces the one-use authority, and the same binding check protects
     // against the destination changing while that authority is in flight.
+    // There is no click to bind here: the remembered answer answers the
+    // opening the probe just made, read (tracked) when the effect runs.
     use_effect(move || {
         if auto_submit()
-            && let Some(planned) = offer.current_key()
+            && let Some(planned) = offer.current()
         {
             auto_submit.set(false);
             confirm.call((planned, false));
@@ -4734,10 +4741,10 @@ fn AddHostForm(
                     probing.set(false);
                 });
             },
-            if let Some(planned) = offer.current_key() {
+            if let Some(planned) = offer.current() {
                 SetupPlanConfirmation {
-                    confirmation: planned.confirmation.clone(),
-                    steps: planned.steps.clone(),
+                    confirmation: planned.key().confirmation.clone(),
+                    steps: planned.key().steps.clone(),
                     name: display_peer(&ssh()),
                     local: false,
                     error: error.read().clone().map(|err| rsx! {
@@ -7463,25 +7470,25 @@ mod tests {
 
         dom.in_runtime(|| {
             // Cancel (which clears the offer), then an answer.
-            slot.open(offer("p1"), ());
+            let cancelled = slot.open(offer("p1"), ());
             slot.clear();
             assert_eq!(
-                take_add_offer(&mut slot, &offer("p1"), &binding, claim),
+                take_add_offer(&mut slot, &cancelled, &binding, claim),
                 AddConfirm::Stale
             );
             assert_eq!(held.get(), 0, "a stale answer keeps no claim");
 
             // An answer drawn for an offer since replaced.
-            slot.open(offer("p2"), ());
+            let current = slot.open(offer("p2"), ());
             assert_eq!(
-                take_add_offer(&mut slot, &offer("p1"), &binding, claim),
+                take_add_offer(&mut slot, &cancelled, &binding, claim),
                 AddConfirm::Stale
             );
             assert!(slot.is_open(), "the newer offer is left alone");
 
             // A busy page refuses and keeps the question.
             assert_eq!(
-                take_add_offer(&mut slot, &offer("p2"), &binding, || None::<Claim>),
+                take_add_offer(&mut slot, &current, &binding, || None::<Claim>),
                 AddConfirm::Refused
             );
             assert!(slot.is_open());
@@ -7491,14 +7498,14 @@ mod tests {
                 destination: "builder@elsewhere".to_string(),
             };
             assert_eq!(
-                take_add_offer(&mut slot, &offer("p2"), &edited, claim),
+                take_add_offer(&mut slot, &current, &edited, claim),
                 AddConfirm::BindingChanged
             );
             assert!(!slot.is_open());
 
             // A genuine answer.
-            slot.open(offer("p3"), ());
-            let accepted = take_add_offer(&mut slot, &offer("p3"), &binding, claim);
+            let genuine = slot.open(offer("p3"), ());
+            let accepted = take_add_offer(&mut slot, &genuine, &binding, claim);
             assert!(matches!(accepted, AddConfirm::Accepted(_)));
             assert_eq!(held.get(), 1, "the accepted answer holds its claim");
             assert!(!slot.is_open());
