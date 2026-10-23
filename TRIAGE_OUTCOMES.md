@@ -18597,7 +18597,8 @@
 - Completion criteria: while the fallback shows, the sidebar stays clickable and the explanation stays readable; a
   browser check clicks a sidebar control in that state. Size gate: about 100 lines as above. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/session-view-fixes-oct22.md`.
+- Execution: `complete` within the size gate; bookmark `plan/session-view-fixes-oct22/03-outage-beside-sidebar`, jj
+  change `louwkysp`; PR https://github.com/scode/farhelm/pull/2654/changes.
 
 ## guarded-instead-can-duplicate-uncertain-launch.md
 

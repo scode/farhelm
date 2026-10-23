@@ -1746,7 +1746,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
      4  `.permission-escalation-banner` — local, sticky inside the launcher
      5  `.app-bar` — the sticky app bar, which makes its own stacking context
      6  `.outage-viewport .session-unavailable-overlay` and its reconnecting
-        twin — the outage card when it takes the viewport
+        twin — the outage card when it takes the window's height beside
+        the sidebar
      12 `.terminal-file-message` — a terminal's download status line, above
         xterm's own layers (its scrollbar is 11) and below everything else
      15 `.host-update-popup` — below the menus at 20 (see its rule)
@@ -7211,10 +7212,17 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   overflow-wrap: anywhere;
 }
 /* Measured terminal space, including conditional notices, decides whether
-   the outage needs the viewport to leave a readable scrollport. */
+   the outage needs the full window height to leave a readable scrollport.
+   It starts after the sidebar and its resize handle (the sidebar's 1px
+   border plus the handle's 4px overhang into the main pane), so the
+   sessions and hosts stay clickable and the sidebar can still be narrowed.
+   A window narrower than that plus the main pane's 320px floor gives the
+   card its 320px back over the sidebar's edge instead of squeezing the
+   explanation. */
 .outage-viewport .session-unavailable-overlay,
 .outage-viewport .terminal-connecting.terminal-reconnecting {
   position: fixed;
+  left: min(calc(var(--sidebar-width) + 5px), calc(100vw - 320px));
   z-index: 6;
   padding: 4px;
 }

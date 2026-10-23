@@ -51,9 +51,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`shell-inspection-drains-exhaust-planning-pool.md`](shell-inspection-drains-exhaust-planning-pool.md) — Pipe-draining
   shell inspections can occupy every host-planning slot; an actual helper trigger is unverified.
 
-- [`short-window-outage-blocks-pointer-recovery.md`](short-window-outage-blocks-pointer-recovery.md) — A short-window
-  outage explanation may block pointer recovery and healthy-session navigation; keyboard and resize remain available.
-
 - [`guarded-instead-can-duplicate-uncertain-launch.md`](guarded-instead-can-duplicate-uncertain-launch.md) — Guarded
   “instead” can duplicate an uncertain authorized launch; whether it promises one intent remains ambiguous.
 
