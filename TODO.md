@@ -203,6 +203,37 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
   exposed are TBD.
 
+- **Show changed host identities unambiguously in uninstall refusals.** When Uninstall is refused because a host's
+  identity changed, the message shows the identities without making spaces visible, so two different identities can look
+  the same; the host list and the adopt prompt already spell them unambiguously. Show them the way the host list does,
+  or drop them and point to the host list. Complexity gate: fix it only if the fix is simple; otherwise leave it. From
+  the review of `uninstall-refusal-wording` on 2026-10-23.
+
+- **Escape in the launcher's save-as-template panel.** With the panel open but keyboard focus lost (for example after a
+  refused save), Escape closes the whole launcher and discards its draft instead of closing just the panel. Complexity
+  gate: fix it only if the fix is simple; otherwise leave it. From the review of `modal-dialog-shell` on 2026-10-23.
+
+- **Quote the second suggested start command exactly.** When an SSH channel closes before the supervisor handshake, the
+  helm suggests a start command with the same double-escaping bug `start-remedy-quoting` fixed in the other one: for a
+  path with apostrophes, backslashes and similar characters, it is not exactly the command to paste and can start
+  Farhelm on the wrong folder. The plan's report suggests first checking whether real SSH connections can reach it.
+  Complexity gate: fix it only if the fix is simple; otherwise leave it. From the review of `start-remedy-quoting` on
+  2026-10-23.
+
+- **Cancel racing "don't ask again" on Replace's YOLO question.** Clicking Cancel in the same instant as "don't ask
+  again" on a session's Replace YOLO question hides the question, but the Replace still proceeds with YOLO, and a failed
+  save of that setting is shown nowhere. Complexity gate: fix it only if the fix is simple; otherwise leave it. From the
+  review of `bind-gui-answers` on 2026-10-23.
+
+- **Report every failed settings save.** SPEC.md asks for every failed save to be reported, but several still fail
+  silently: the welcome card seen, trust-hint dismissals, the terminal link-click choice, frame colors, naming sessions
+  on quick launch, and toggling the ⚡ mark. The follow-up the maintainer chose to leave out of
+  `sign-in-preservation-sweep` (review of 2026-10-23).
+
+- **Test that localhost tunnels bind without address reuse.** Mac localhost tunnels bind their listener with address
+  reuse off, so a tunnel cannot steal another program's connections; nothing tests that, and on Linux every test would
+  still pass if it regressed. Add a test. From the review of `tunnel-port-and-link-ranges` on 2026-10-23.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
