@@ -3253,8 +3253,11 @@ file is introduced.
   below; on a host without a usable user manager, a detached tab-started process whose environment is unreadable escapes
   the sweep). The tab shell is itself what closing the tab promises to kill, and a tab has no shim that could run after
   initialization to apply containment later. The agent launch has normally already run the same startup files outside
-  containment, so guarded startup logic usually reuses that instance; a shared service dies with a tab only when the
-  tab's startup files are the first to start it.
+  containment, so guarded startup logic usually reuses that instance, with one routine exception: the launch removes the
+  private server's `TMUX` and `TMUX_PANE` only after those files ran, so a tmux autostart guarded by `TMUX` being unset
+  fires in the first tab instead, and when no tmux server of the user's is running yet, that tab starts and owns it
+  (with `exec tmux`, a detach ends both the tab and the server). A shared service dies with a tab only when the tab's
+  startup files are the first to start it.
 
   **What the cgroup does and does not promise.** It targets ACCIDENTAL daemonization — the dev server, MCP server, or
   build watcher that double-forks and execs away its environment marker, which is exactly the shape the sweep provably
