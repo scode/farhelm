@@ -15,10 +15,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`trash-entry-delete-hits-shifted-row.md`](trash-entry-delete-hits-shifted-row.md) — A one-click trash delete can
   permanently delete a different checkout when rows shift under the pointer; click timing is unmeasured.
 
-- [`shared-checkout-root-archives-other-host-work.md`](shared-checkout-root-archives-other-host-work.md) — A checkout
-  root shared between hosts lets one host trash, then permanently delete, a checkout another host's session works in;
-  whether a shared root is supported is unsettled.
-
 - [`create-retry-takeover-replaces-restarted-session.md`](create-retry-takeover-replaces-restarted-session.md) — A stale
   create retry may take over a session after an ambiguous Restart failure; active Restart is locked, and the complete
   record-loss/survivor chain and fault-pair coverage remain unresolved.

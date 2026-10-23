@@ -3538,12 +3538,12 @@ the escaping rule in [Local authority and trust between hosts](#local-authority-
 Confirmed 2026-10-10: a configuration Farhelm does not support is refused with a clear message rather than left to
 undefined behavior, except where this section says otherwise (other login shells, unsupported tmux programs, filesystem
 aliasing outside the home-folder exception below, out-of-band manipulation of managed checkouts and the trash, including
-uncommon filesystems under them, the proxy case below, and hand-edited Farhelm service units under
-[Supported host setup](#supported-host-setup)). An install whose `farhelm` program path contains `$` is unsupported and
-refused, because systemd does not decode `$$` in a service's program position, so a service written for that path could
-not start. The supervisor also refuses startup when the Farhelm program folder put on session `PATH` contains `:`,
-naming the folder; the desktop app shows the same refusal before starting its supervisor, because a colon would split
-that folder into unintended command-search directories.
+uncommon filesystems under them, a checkout root reachable from more than one host, the proxy case below, and
+hand-edited Farhelm service units under [Supported host setup](#supported-host-setup)). An install whose `farhelm`
+program path contains `$` is unsupported and refused, because systemd does not decode `$$` in a service's program
+position, so a service written for that path could not start. The supervisor also refuses startup when the Farhelm
+program folder put on session `PATH` contains `:`, naming the folder; the desktop app shows the same refusal before
+starting its supervisor, because a colon would split that folder into unintended command-search directories.
 
 Two host aliases that reach the same host, user and port through different `ProxyCommand` routes are unsupported. The
 helm shares SSH connections by OpenSSH's connection hash, which does not include the proxy command, so such aliases may
@@ -3572,6 +3572,10 @@ stated. This acceptance does not extend to the state directory or installation, 
 elsewhere: installer checksum matching, uninstall refusing unknown app-bundle entries, and the symlink and
 canonical-path rules still apply. Ordinary reboots and remounts on supported filesystems such as btrfs, NFS and
 overlayfs remain supported, as the managed-checkout identity rule above specifies.
+
+Confirmed 2026-10-22: a checkout root reachable from more than one host (for example on a network mount two hosts both
+see) is unsupported too. Each host's supervisor knows only its own sessions, so one host can archive, and later
+permanently delete, a checkout a session on another host is working in. Farhelm does not detect a shared checkout root.
 
 ### Supported host setup
 
