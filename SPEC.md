@@ -2291,7 +2291,9 @@ turned into fresh, and historical captures are never rewritten to look proven.
 
 Confirmed 2026-10-22, an accepted exception to restart resuming exactly the session's own conversation (above): Goose's
 reporter does not tell a native Goose sub-agent, or a nested Goose run that inherits the reporter, from the session's
-foreground conversation, so such a run can replace the session's Resume target.
+foreground conversation, so such a run can replace the session's Resume target. Likewise, a child Pi that loads
+Farhelm's reporter (passed on to it by a third-party extension, say) can replace or withdraw the session's Resume
+target.
 
 OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. An OMP agent
 launch gets Farhelm's private extension, and so does a command launch that declares OMP, where its `{farhelm_args}`
@@ -3494,7 +3496,7 @@ consequence. This may change as those integrations mature.
 
 The conversation-tracking limits under Durability and resume apply to every harness, first-class or not; a resume they
 accept is not the lost user work this allowance excludes. They include the session's Resume target being replaced by a
-Goose sub-agent or a nested Goose run.
+Goose sub-agent, a nested Goose run, or a child Pi that loads Farhelm's reporter, or withdrawn by such a Pi.
 
 ### Supported user environments
 

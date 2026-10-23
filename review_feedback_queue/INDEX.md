@@ -61,9 +61,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   The CentOS test deletes the user's ssh config after a leftover start marker with no end marker; an accidental trigger
   is unverified, and the bucket is unsettled.
 
-- [`pi-child-report-replaces-resume-target.md`](pi-child-report-replaces-resume-target.md) — A child Pi carrying
-  Farhelm's reporter can replace its Pi session's Resume target; a forwarding extension is unverified.
-
 - [`uninstall-two-home-aliases-hide-kept-data.md`](uninstall-two-home-aliases-hide-kept-data.md) — Two alternate home
   paths with divergent nested mounts can hide retained data from uninstall; the configured source chain is established,
   but occurrence and support scope are unresolved.
