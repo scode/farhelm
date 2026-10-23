@@ -111,6 +111,7 @@ struct LaunchPrerequisites {
     destination_ready: bool,
     github_search: bool,
     remembered_destination_valid: bool,
+    folder_default_waiting: bool,
     needs_harness: bool,
     invalid_permission_flags: bool,
     incompatible_choice: bool,
@@ -133,6 +134,8 @@ impl LaunchPrerequisites {
             Some("wait for a current checkout preview before launching")
         } else if !self.remembered_destination_valid {
             Some(REMEMBERED_DESTINATION_CHANGED)
+        } else if self.folder_default_waiting {
+            Some("wait for this host's last folder before launching")
         } else if self.needs_harness {
             Some("choose a structured harness before launching")
         } else if self.invalid_permission_flags {
@@ -1059,6 +1062,169 @@ fn history_target(hosts: &[HostOption], selected: Option<HostId>) -> Option<Crea
     })
 }
 
+/// Where a launcher draft stands on its default folder (SPEC.md, "Working
+/// directory"): whether a host's recent setups still have to seed it, which
+/// target and Clone/Replace source the current default belongs to, and
+/// whether the last seed fell back to home because those setups could not be
+/// read (a hidden quick launch must not launch into that guess).
+#[derive(Debug, Clone, Default, PartialEq)]
+struct FolderDefault {
+    pending: bool,
+    target: Option<CreateTarget>,
+    prefill: Option<u64>,
+    unread: bool,
+    /// The folder decided for `target`, kept apart from the recent-setups
+    /// snapshot, which a later promotion can replace.
+    decided: Option<String>,
+}
+
+/// What `folder_default_step` reads besides its own state, all for one render.
+struct FolderDefaultInputs<'a> {
+    target: Option<&'a CreateTarget>,
+    prefill: Option<u64>,
+    /// Whether a target change is the person's (or a template's) choice
+    /// rather than a Clone's automatic binding to its source host.
+    host_is_users: bool,
+    /// The selected session's installation and folder, which outrank history.
+    selected: Option<&'a (CreateTarget, String)>,
+    /// The first recent-setups reply for its target.
+    offered: Option<&'a (CreateTarget, api::LaunchHistory)>,
+    /// A target whose recent-setups read failed.
+    unreadable: Option<&'a CreateTarget>,
+    /// The state captured with a permission-switch snapshot, when that
+    /// snapshot is being restored (permission Undo) in this render.
+    restored: Option<&'a FolderDefault>,
+}
+
+/// A host's remembered folder: the newest recent setup that launched into a
+/// plain folder (fresh managed checkouts do not count), else `~`, which the
+/// host expands to its own home directory.
+fn remembered_folder(history: &api::LaunchHistory) -> &str {
+    history
+        .launches
+        .iter()
+        .find(|launch| launch.github_repo.is_none())
+        .map_or("~", |launch| launch.cwd.raw())
+}
+
+/// Advance the folder default by one render, returning the folder to seed.
+///
+/// A Clone/Replace source owns the folder of the target it was applied on, and
+/// an opening's inherited session folder starts the state not pending. The
+/// first target an opening resolves is not a host change; a later target
+/// change re-arms the default when `host_is_users` says the person, not a
+/// Clone's automatic binding to its source host, chose it (the picker, a
+/// template's host or local home). A pending default then follows SPEC.md's
+/// precedence for the target: the selected session's folder on its own
+/// installation, else the host's remembered folder from `offered`, the first
+/// recent-setups reply for the target (so a feed refresh of the same history
+/// never rewrites an open draft's folder). An unreadable history falls back to
+/// home rather than leaving the previous host's folder in place, and marks the
+/// default `unread`. A permission Undo restores the draft as it was at the
+/// switch, so it also restores this state as captured then: a folder decided
+/// then is applied again (which also retires a restored installation claim),
+/// a settled source or inherited folder is left alone, and a default that was
+/// still pending takes the decision made since for the same target, if any.
+/// Whether the draft's folder is still a default is the draft's own check at
+/// seeding time.
+fn folder_default_step(
+    mut state: FolderDefault,
+    inputs: FolderDefaultInputs<'_>,
+) -> (FolderDefault, Option<String>) {
+    let FolderDefaultInputs {
+        target,
+        prefill,
+        host_is_users,
+        selected,
+        offered,
+        unreadable,
+        restored,
+    } = inputs;
+    let mut restore_seed = None;
+    if let Some(snapshot) = restored {
+        // The decision already made for the restored destination, if any.
+        let live = (state.target.as_ref() == target)
+            .then(|| state.decided.clone().map(|folder| (folder, state.unread)))
+            .flatten();
+        let mut next = snapshot.clone();
+        if snapshot.target.as_ref() == target {
+            // The snapshot describes this destination: its decision stands,
+            // a settled source or inherited folder stays, and a default still
+            // pending then takes the decision made since, if any.
+            if snapshot.pending
+                && let Some((folder, unread)) = live
+            {
+                next.pending = false;
+                next.decided = Some(folder);
+                next.unread = unread;
+            }
+        } else if !host_is_users {
+            // A Clone/Replace source still owns placement (its host binding was
+            // withdrawn automatically): its settled folder stays.
+            next.target = target.cloned();
+            next.pending = false;
+            next.decided = None;
+        } else {
+            // Captured before its own target was decided (a template batch's
+            // host change, or an installation replaced since): what was
+            // already decided for the restored destination stands.
+            next.target = target.cloned();
+            match live {
+                Some((folder, unread)) => {
+                    next.pending = false;
+                    next.decided = Some(folder);
+                    next.unread = unread;
+                }
+                None => {
+                    next.pending = true;
+                    next.decided = None;
+                    next.unread = false;
+                }
+            }
+        }
+        restore_seed = next.decided.clone();
+        state = next;
+    }
+    let target_before = state.target.clone();
+    if state.prefill != prefill {
+        state.prefill = prefill;
+        state.pending = false;
+        state.unread = false;
+        state.decided = None;
+        state.target = target.cloned();
+    } else if state.target.as_ref() != target {
+        // A decision belongs to one target; a source-owned move must not
+        // relabel it as the new target's.
+        state.decided = None;
+        if state.target.is_some() && host_is_users {
+            state.pending = true;
+            state.unread = false;
+        }
+        state.target = target.cloned();
+    }
+    if !state.pending || target.is_none() {
+        // A restore's decision stands only for the target it was made for.
+        let seed = restore_seed.filter(|_| state.target == target_before);
+        return (state, seed);
+    }
+    let seed = match (selected, offered) {
+        (Some((selected_target, cwd)), _) if Some(selected_target) == target => Some(cwd.clone()),
+        (_, Some((offered_target, history))) if Some(offered_target) == target => {
+            Some(remembered_folder(history).to_owned())
+        }
+        _ if unreadable == target => {
+            state.unread = true;
+            Some("~".to_owned())
+        }
+        _ => None,
+    };
+    if seed.is_some() {
+        state.pending = false;
+        state.decided.clone_from(&seed);
+    }
+    (state, seed)
+}
+
 /// A remembered folder remains usable only on the installation it described.
 ///
 /// Explicit host/text overrides carry no earlier remembered authority.
@@ -1134,6 +1300,7 @@ fn request_launch_history(
     target: Signal<Option<CreateTarget>>,
     reader: Signal<SurfaceReader>,
     mut result: Signal<Option<(CreateTarget, api::LaunchHistory)>>,
+    mut unreadable: Signal<Option<CreateTarget>>,
     trigger: Trigger,
 ) {
     request_read(reader, trigger, move || {
@@ -1147,11 +1314,19 @@ fn request_launch_history(
             match api::fetch_launch_history(&base, requested.host).await {
                 Ok(history) => {
                     if target.peek().as_ref() == Some(&requested) {
+                        unreadable.set(None);
                         result.set(Some((requested, history)));
                     }
                     true
                 }
-                Err(_) => false,
+                // The reader still retries, but a launcher waiting on this
+                // target's default folder must learn that it failed.
+                Err(_) => {
+                    if target.peek().as_ref() == Some(&requested) {
+                        unreadable.set(Some(requested));
+                    }
+                    false
+                }
             }
         }
     });
@@ -2106,6 +2281,11 @@ pub(super) fn CreateSessionForm(
     /// carried by `ListView`'s `open_destination` snapshot. This supplies
     /// SPEC.md's first create-default clause independently of sidebar filtering.
     open_host: Option<OpenHost>,
+    /// The selected session's folder, from the same snapshot as `open_host`.
+    /// A host change back to that session's installation seeds it again,
+    /// ahead of the host's remembered folder (SPEC.md, "Working directory").
+    #[props(default)]
+    open_cwd: Option<String>,
     /// Whether the hosts read has EVER succeeded. Distinguishes "there are
     /// no hosts" (impossible for a live helm, which always has its local
     /// row) from "nothing has come back yet", which is what a submit has to
@@ -2464,6 +2644,17 @@ pub(super) fn CreateSessionForm(
         .as_ref()
         .is_some_and(|prefill| prefill.replace_source.is_some());
     let selected = effective_create_host(&hosts, chosen_host(), open_host.as_ref());
+    let selected_folder = open_host
+        .as_ref()
+        .zip(open_cwd.as_ref())
+        .and_then(|(open, cwd)| {
+            matching_host_option(open, &hosts).map(|host| {
+                (
+                    CreateTarget::new(host.id, host.incarnation.clone()),
+                    cwd.clone(),
+                )
+            })
+        });
     let destination_now = history_target(&hosts, selected);
     // Store the latest render's registry claim synchronously. Parent-derived
     // create_target has an intentional effect lag, while an old history
@@ -2473,6 +2664,9 @@ pub(super) fn CreateSessionForm(
         live_destination.set(destination_now.clone());
     }
     let inherited_destination = initial_cwd.as_ref().and(destination_now.clone());
+    // An opening that brings a folder (the selected session's on this install,
+    // or a Clone/Replace source) owns it; see `folder_default_step`.
+    let opened_with_source_folder = initial_cwd.is_some() || prefill.is_some();
     let remembered_destination = use_signal(move || inherited_destination);
     let history_activation_attempts = use_signal(|| 0_u64);
     let remembered_destination_valid = remembered_destination_matches(
@@ -2525,6 +2719,7 @@ pub(super) fn CreateSessionForm(
     // snapshot.
     let history_reader = use_signal(SurfaceReader::default);
     let launch_history = use_signal(|| None::<(CreateTarget, api::LaunchHistory)>);
+    let history_unreadable = use_signal(|| None::<CreateTarget>);
     let history_feed_base = base.clone();
     use_feed_reader(move || {
         request_launch_history(
@@ -2532,6 +2727,7 @@ pub(super) fn CreateSessionForm(
             create_target,
             history_reader,
             launch_history,
+            history_unreadable,
             Trigger::Notice,
         );
     });
@@ -2543,6 +2739,7 @@ pub(super) fn CreateSessionForm(
             create_target,
             history_reader,
             launch_history,
+            history_unreadable,
             Trigger::Explicit,
         );
     }));
@@ -2563,6 +2760,7 @@ pub(super) fn CreateSessionForm(
                         create_target,
                         history_reader,
                         launch_history,
+                        history_unreadable,
                         Trigger::Scheduled,
                     );
                 }
@@ -2622,6 +2820,76 @@ pub(super) fn CreateSessionForm(
     // Initial search acceptance follows this effect, so mount-time host and
     // clone reconciliation cannot overwrite the action it applies.
     let mount_seeded = use_signal(|| false);
+    // The folder default as it stood when the current permission warning
+    // appeared, keyed by its generation, and the copy a permission Undo hands
+    // back; see `FolderDefaultInputs::restored`.
+    let mut default_at_switch = use_signal(|| None::<(u64, FolderDefault)>);
+    let mut restoring_default = use_signal(|| None::<FolderDefault>);
+    let mut folder_default = use_signal(move || FolderDefault {
+        pending: !opened_with_source_folder,
+        ..FolderDefault::default()
+    });
+    // A launch in flight owns the draft it sent (its retry key and body), so
+    // the default waits; launching itself is refused while it is pending.
+    // Capture before this render's step: the switch that raised the warning
+    // happened in an event handler, so the state is still the one it saw.
+    if let Some(generation) = permission_escalation
+        .read()
+        .as_ref()
+        .map(|notice| notice.generation)
+        && default_at_switch
+            .peek()
+            .as_ref()
+            .map(|(captured, _)| *captured)
+            != Some(generation)
+    {
+        default_at_switch.set(Some((generation, folder_default.peek().clone())));
+    }
+    // The parent-derived target lags the form's own host choice by an effect
+    // (see `live_destination`). Judge host changes and restores only once the
+    // two agree, so a transient target is never taken for a host choice and a
+    // permission Undo's handoff waits for the host it restored.
+    let target = create_target();
+    if !busy && target == destination_now {
+        let prefill_generation = *prefill_applied.read();
+        let (next, seed) = folder_default_step(
+            folder_default.peek().clone(),
+            FolderDefaultInputs {
+                target: target.as_ref(),
+                prefill: prefill_generation,
+                // Without a source, every host change is the person's; with
+                // one, only once they took the host over from the clone's binding.
+                host_is_users: prefill_generation.is_none()
+                    || *clone_host_state.read() == CloneHostState::UserTookOver,
+                selected: selected_folder.as_ref(),
+                offered: offered_history.peek().as_ref(),
+                unreadable: history_unreadable.read().as_ref(),
+                restored: restoring_default.peek().as_ref(),
+            },
+        );
+        if restoring_default.peek().is_some() {
+            restoring_default.set(None);
+        }
+        // The seeded folder is this target's own default, so an inherited
+        // folder's installation claim no longer describes it.
+        if let Some(folder) = seed
+            && draft.seed_default_folder(&folder)
+            && remembered_destination.peek().is_some()
+        {
+            let mut remembered_destination = remembered_destination;
+            remembered_destination.set(None);
+        }
+        if *folder_default.peek() != next {
+            folder_default.set(next);
+        }
+    }
+    // Whether Launch must wait for the host's default folder: only while one is
+    // pending for a folder destination nobody chose.
+    let folder_default_waiting = folder_default.read().pending && {
+        let snapshot = draft.snapshot();
+        !snapshot.folder_is_explicit()
+            && matches!(snapshot.destination(), DestinationDraft::Existing { .. })
+    };
     let mut pending_initial_action = use_signal(move || initial_action);
     let mut pending_initial_templates =
         use_signal(move || std::collections::VecDeque::from(initial_templates));
@@ -3061,6 +3329,7 @@ pub(super) fn CreateSessionForm(
             || crate::launch_composer::scoped_query(&composer_search()).0
                 == crate::launch_composer::SearchScope::Github,
         remembered_destination_valid,
+        folder_default_waiting: retry_binding.is_none() && folder_default_waiting,
         needs_harness: retry_binding.is_none()
             && launch_tab() == LaunchTab::Agent
             && structured_harness().is_none(),
@@ -3882,6 +4151,25 @@ pub(super) fn CreateSessionForm(
             if !target_ready {
                 return;
             }
+            // Launch from the host's default folder, not from `~` before the
+            // recent setups that decide it have arrived. If they could not be
+            // read, show the launcher rather than launch into a fallback guess.
+            let default = folder_default();
+            let untouched_folder = {
+                let snapshot = draft.snapshot();
+                !snapshot.folder_is_explicit()
+                    && matches!(snapshot.destination(), DestinationDraft::Existing { .. })
+            };
+            if (default.pending || default.unread) && untouched_folder {
+                if default.unread {
+                    auto_launch_pending.set(false);
+                    quick_launch_hidden.set(false);
+                    preparation_error.set(Some(
+                        "couldn't prepare quick launch: this host's recent setups could not be read, so its last folder is unknown; check the folder and launch".to_string(),
+                    ));
+                }
+                return;
+            }
             let _ = destination_draft();
             let preview_pending = match draft.snapshot().destination() {
                 DestinationDraft::Github { .. } => {
@@ -4171,6 +4459,16 @@ pub(super) fn CreateSessionForm(
                 live_destination.peek().as_ref(),
             ) {
                 return;
+            }
+            // A folder nobody chose must be this host's default before it is
+            // sent, or a host switch would launch the previous host's folder.
+            if folder_default.peek().pending {
+                let snapshot = draft.snapshot();
+                if !snapshot.folder_is_explicit()
+                    && matches!(snapshot.destination(), DestinationDraft::Existing { .. })
+                {
+                    return;
+                }
             }
             // The host target must have caught up with the selector before
             // the request can bind its idempotency and connection claims.
@@ -5032,6 +5330,13 @@ pub(super) fn CreateSessionForm(
                         onclick: move |_| {
                             if draft.undo_permission_switch(notice.generation, recovery_targets,
                                 permission_escalation, opening_generation, placement_targets) {
+                                if let Some((_, captured)) = default_at_switch
+                                    .peek()
+                                    .as_ref()
+                                    .filter(|(captured, _)| *captured == notice.generation)
+                                {
+                                    restoring_default.set(Some(captured.clone()));
+                                }
                                 focus_composer_surface(false);
                             }
                         },
@@ -7030,6 +7335,7 @@ mod tests {
             destination_ready: true,
             github_search: false,
             remembered_destination_valid: true,
+            folder_default_waiting: false,
             needs_harness: false,
             invalid_permission_flags: true,
             incompatible_choice: true,
@@ -7625,6 +7931,299 @@ mod tests {
             "a late history response for the predecessor must not match the successor"
         );
         assert_eq!(history_target(&after, None), None);
+    }
+
+    /// Recent setups for one host, newest first; `true` marks a fresh managed
+    /// checkout, whose folder Farhelm allocated.
+    fn folder_history(rows: &[(&str, bool)]) -> api::LaunchHistory {
+        let launches = rows
+            .iter()
+            .map(|(cwd, fresh)| api::LaunchHistoryEntry {
+                host: 7,
+                github_repo: fresh
+                    .then(|| crate::github_checkout::GithubRepo::parse("acme/repo").unwrap()),
+                canonical_cwd: None,
+                cwd: (*cwd).into(),
+                selection: farhelm_proto::launch::LaunchSelection {
+                    harness: LaunchHarness::Claude,
+                    model: None,
+                    effort: None,
+                    permissions: None,
+                    permission_flags: None,
+                    wrapper_prefix: None,
+                    workspace_trust: None,
+                },
+                created_at: 1,
+                creation_seq: None,
+            })
+            .collect();
+        api::LaunchHistory {
+            launches,
+            ..Default::default()
+        }
+    }
+
+    /// The per-host last folder is the newest plain-folder launch, so a fresh
+    /// managed checkout, whose folder Farhelm allocated, never becomes the
+    /// default; with no such launch the host's own home (`~`) is used.
+    #[farhelm_testtrace::test]
+    fn remembered_folder_is_the_newest_plain_folder_launch() {
+        let history = folder_history(&[
+            ("/work/fresh", true),
+            ("/work/b", false),
+            ("/work/a", false),
+        ]);
+        assert_eq!(remembered_folder(&history), "/work/b");
+        assert_eq!(
+            remembered_folder(&folder_history(&[("/work/fresh", true)])),
+            "~"
+        );
+        assert_eq!(remembered_folder(&api::LaunchHistory::default()), "~");
+    }
+
+    /// One render of `folder_default_step`, spelled positionally for the table
+    /// of cases below.
+    fn step(
+        state: FolderDefault,
+        target: &CreateTarget,
+        prefill: Option<u64>,
+        host_is_users: bool,
+        selected: Option<&(CreateTarget, String)>,
+        offered: Option<&(CreateTarget, api::LaunchHistory)>,
+        unreadable: Option<&CreateTarget>,
+    ) -> (FolderDefault, Option<String>) {
+        folder_default_step(
+            state,
+            FolderDefaultInputs {
+                target: Some(target),
+                prefill,
+                host_is_users,
+                selected,
+                offered,
+                unreadable,
+                restored: None,
+            },
+        )
+    }
+
+    /// The default folder follows SPEC.md's precedence and stays put once a
+    /// draft has it: an opening without a source folder seeds once from the
+    /// first reply for its target, a later reply for the same target (a feed
+    /// refresh) seeds nothing, and a host change re-arms the seed. An opening
+    /// that brings a folder, or a Clone/Replace source, keeps it until the
+    /// person changes the host; a Clone's own binding to its source host is not
+    /// such a change. Returning to the selected session's installation restores
+    /// its folder ahead of history, and an unreadable history falls back to
+    /// home and says so, so a hidden quick launch never launches into a guess.
+    #[farhelm_testtrace::test]
+    fn folder_default_follows_precedence_once_per_opening_or_host_change() {
+        let hosts = [option(7, "laptop", false), option(8, "linux", false)];
+        let (laptop, linux) = (
+            history_target(&hosts, Some(7)).unwrap(),
+            history_target(&hosts, Some(8)).unwrap(),
+        );
+        let laptop_reply = (laptop.clone(), folder_history(&[("/Users/me/src", false)]));
+        let linux_reply = (linux.clone(), folder_history(&[]));
+        let fresh = FolderDefault {
+            pending: true,
+            ..FolderDefault::default()
+        };
+
+        let (state, seed) = step(fresh.clone(), &laptop, None, true, None, None, None);
+        assert_eq!(seed, None, "nothing to seed before the reply arrives");
+        let (state, seed) = step(state, &laptop, None, true, None, Some(&laptop_reply), None);
+        assert_eq!(seed.as_deref(), Some("/Users/me/src"));
+        let (state, seed) = step(state, &laptop, None, true, None, Some(&laptop_reply), None);
+        assert_eq!(
+            seed, None,
+            "a later reply for the same target never reseeds"
+        );
+        let (state, seed) = step(state, &linux, None, true, None, Some(&laptop_reply), None);
+        assert_eq!(seed, None, "another target's reply cannot seed");
+        let (_, seed) = step(state, &linux, None, true, None, Some(&linux_reply), None);
+        assert_eq!(
+            seed.as_deref(),
+            Some("~"),
+            "a host change re-seeds, here to home"
+        );
+
+        // The selected session's folder wins on its own installation, also
+        // when the person comes back to it, and without waiting for history.
+        let selected = (laptop.clone(), "/work/current".to_string());
+        let (state, _) = step(
+            FolderDefault::default(),
+            &laptop,
+            None,
+            true,
+            Some(&selected),
+            None,
+            None,
+        );
+        let (state, seed) = step(
+            state,
+            &linux,
+            None,
+            true,
+            Some(&selected),
+            Some(&linux_reply),
+            None,
+        );
+        assert_eq!(seed.as_deref(), Some("~"));
+        let (_, seed) = step(state, &laptop, None, true, Some(&selected), None, None);
+        assert_eq!(seed.as_deref(), Some("/work/current"));
+
+        // A Clone/Replace source owns the folder until the person moves it.
+        let (state, _) = step(fresh.clone(), &laptop, None, true, None, None, None);
+        let (state, seed) = step(
+            state,
+            &laptop,
+            Some(3),
+            false,
+            None,
+            Some(&laptop_reply),
+            None,
+        );
+        assert_eq!(
+            seed, None,
+            "a Clone/Replace source supersedes the pending seed"
+        );
+        let (bound, seed) = step(
+            state,
+            &linux,
+            Some(3),
+            false,
+            None,
+            Some(&linux_reply),
+            None,
+        );
+        assert_eq!(
+            seed, None,
+            "a Clone binding to its source host keeps the source folder"
+        );
+        let (_, seed) = step(
+            bound,
+            &laptop,
+            Some(3),
+            true,
+            None,
+            Some(&laptop_reply),
+            None,
+        );
+        assert_eq!(
+            seed.as_deref(),
+            Some("/Users/me/src"),
+            "a host the person chose re-seeds a Clone draft too"
+        );
+
+        // A history that cannot be read falls back to home, marked unread.
+        let (state, seed) = step(
+            fresh.clone(),
+            &laptop,
+            None,
+            true,
+            None,
+            None,
+            Some(&laptop),
+        );
+        assert_eq!(seed.as_deref(), Some("~"));
+        assert!(state.unread && !state.pending);
+
+        // A permission Undo restores the folder default captured with its
+        // snapshot; `undo` is one render restoring `snapshot` over `live`.
+        let undo = |live: &FolderDefault,
+                    snapshot: &FolderDefault,
+                    offered: Option<&(CreateTarget, api::LaunchHistory)>| {
+            folder_default_step(
+                live.clone(),
+                FolderDefaultInputs {
+                    target: Some(&laptop),
+                    prefill: None,
+                    host_is_users: true,
+                    selected: None,
+                    offered,
+                    unreadable: None,
+                    restored: Some(snapshot),
+                },
+            )
+        };
+        let (settled, _) = step(
+            fresh.clone(),
+            &laptop,
+            None,
+            true,
+            None,
+            Some(&laptop_reply),
+            None,
+        );
+        let later_reply = (
+            laptop.clone(),
+            folder_history(&[("/Users/me/later", false)]),
+        );
+        let (_, seed) = undo(&settled, &settled, Some(&later_reply));
+        assert_eq!(
+            seed.as_deref(),
+            Some("/Users/me/src"),
+            "a folder decided at the switch is applied again, never a later refresh"
+        );
+        let (pending_at_switch, _) = step(fresh, &laptop, None, true, None, None, None);
+        let (after, seed) = undo(&settled, &pending_at_switch, Some(&later_reply));
+        assert_eq!(
+            seed.as_deref(),
+            Some("/Users/me/src"),
+            "a default pending at the switch takes the decision made since"
+        );
+        assert!(!after.pending);
+        // A Clone's settled source folder at the switch stays, even after a
+        // later host round trip decided another folder for the same target.
+        let source_owned = FolderDefault {
+            target: Some(laptop.clone()),
+            ..FolderDefault::default()
+        };
+        let (after, seed) = undo(&settled, &source_owned, Some(&laptop_reply));
+        assert_eq!(seed, None);
+        assert_eq!(after.decided, None);
+        assert!(!after.pending);
+        // A snapshot naming another target than the restored destination
+        // (captured before that destination was decided) keeps the decision
+        // already made for the destination, not a later refresh.
+        let stale = FolderDefault {
+            target: Some(linux.clone()),
+            decided: Some("~".to_string()),
+            ..FolderDefault::default()
+        };
+        let (after, seed) = undo(&settled, &stale, Some(&later_reply));
+        assert_eq!(seed.as_deref(), Some("/Users/me/src"));
+        assert_eq!(after.target.as_ref(), Some(&laptop));
+        // A Clone source that still owns placement after its host was withdrawn
+        // automatically keeps its settled folder across a mismatched restore.
+        let source_on_linux = FolderDefault {
+            target: Some(linux.clone()),
+            prefill: Some(3),
+            ..FolderDefault::default()
+        };
+        let withdrawn = FolderDefault {
+            target: Some(laptop.clone()),
+            prefill: Some(3),
+            ..FolderDefault::default()
+        };
+        let selected = (laptop.clone(), "/work/selected".to_string());
+        let (after, seed) = folder_default_step(
+            withdrawn,
+            FolderDefaultInputs {
+                target: Some(&laptop),
+                prefill: Some(3),
+                host_is_users: false,
+                selected: Some(&selected),
+                offered: Some(&laptop_reply),
+                unreadable: None,
+                restored: Some(&source_on_linux),
+            },
+        );
+        assert_eq!(seed, None);
+        assert!(!after.pending);
+        // A source-owned move to another target never carries a decision along.
+        let (moved, _) = step(settled, &linux, None, false, None, None, None);
+        assert_eq!(moved.decided, None);
     }
 
     /// Remembered paths survive a connection replacement within one install,

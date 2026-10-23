@@ -17,6 +17,7 @@ import {
   pinAutoSelect,
   readPreferences,
   resetPreferences,
+  SESSION_LISTING,
   setLocalYoloWithoutAsking,
   stubFeed,
   waitForFeedReadersSettled,
@@ -94,6 +95,44 @@ test("quick launch submits the wrapper prefix saved in its agent template", asyn
     await patchPreferences(request, { quick_launch_template: null });
     const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
     expect(removed.ok() || removed.status() === 404, "cleaning up the wrapper template").toBe(true);
+  }
+});
+
+/** A hidden quick launch launches into its host's last folder, so it waits for
+ * the recent setups that decide it. When they cannot be read, it shows New
+ * with an explanation instead of launching into a guess, and creates nothing.
+ * An empty session listing and no remembered selection keep any selected
+ * session's folder, which would win over history, out of this premise. */
+test("quick launch shows New when the host's recent setups cannot be read", async ({ page, request }) => {
+  const name = `quick-history-unread-${Date.now()}`;
+  let creates = 0;
+  await page.route(SESSION_LISTING, async (route) => {
+    if (route.request().method() === "POST") {
+      creates++;
+      return fulfillQuickFixture(route, request, 409, "unexpected quick-launch create");
+    }
+    await fulfillQuickFixture(route, request, 200, JSON.stringify({ sessions: [], total: 0, matching: 0, truncated: false }), "application/json");
+  });
+  await page.route("**/api/launch-history**", (route) => fulfillQuickFixture(route, request, 503, "history fixture failure"));
+  try {
+    const saved = await request.put(`/api/templates/${encodeURIComponent(name)}`, {
+      data: { kind: "agent", agent: "codex", name: `${name}-session` },
+    });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    await patchPreferences(request, { quick_launch_template: name, last_selected: null });
+    await page.goto("/");
+    await expect(page.locator(".session-count")).toHaveText("0 sessions");
+    await chord(page);
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    await expect(form.locator(".create-session-error")).toContainText("this host's recent setups could not be read");
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("~");
+    expect(creates, "nothing is launched into the fallback folder").toBe(0);
+  } finally {
+    await page.unrouteAll({ behavior: "wait" });
+    await patchPreferences(request, { quick_launch_template: null });
+    const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+    expect(removed.ok() || removed.status() === 404, "cleaning up the quick-launch template").toBe(true);
   }
 });
 

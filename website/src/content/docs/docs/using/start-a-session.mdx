@@ -39,6 +39,11 @@ With no session open, the host menu starts on the machine you are using, listed 
 is not connected right now shows its state next to its name, such as "unreachable, retrying", and you cannot launch on
 it until it is back. [Add a remote host](/docs/get-started/add-a-remote-host/) covers adding hosts.
 
+The directory field starts at the directory of your last agent launch on that host, or at the host's home directory if
+you have not launched an agent there yet; a launch into a new managed checkout does not count. With a session open on
+the same host, it starts at that session's directory instead. Changing the host switches to that host's directory,
+unless you typed or picked one yourself.
+
 **browse folders on** the host lists its directories one level at a time, for when you would rather find a directory
 than type it. Clicking the directory field, or pressing ↓ in it, lists recent directories and the two home choices;
 typing filters them, and choosing one fills the field without launching. **local home** also switches the host to

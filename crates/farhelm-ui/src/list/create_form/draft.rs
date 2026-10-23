@@ -1454,6 +1454,29 @@ impl LaunchDraftState {
         .is_some()
     }
 
+    /// Seed a host's default folder (SPEC.md, "Working directory") into a draft
+    /// whose folder is still a default: a folder or repository the person chose
+    /// in this draft is theirs, so it is left alone. Returns whether the draft
+    /// took the default, which is true even when the folder already matched.
+    pub(super) fn seed_default_folder(self, raw: &str) -> bool {
+        self.apply_edit(EditRule::SourceReconciliation, |draft| {
+            let accepted = !draft.folder_is_explicit()
+                && matches!(draft.destination(), DestinationDraft::Existing { .. });
+            let changed = accepted && draft.submitted_cwd() != raw;
+            if changed {
+                draft.seed_folder(raw);
+            }
+            (
+                accepted,
+                EditFacts {
+                    publish: changed,
+                    changed,
+                },
+            )
+        })
+        .unwrap_or(false)
+    }
+
     /// Repository reselection explicitly requests fresh preview/name authority.
     /// History promotion remains tracked and admitted; even the same repository
     /// increments revision, closes its discovery search and retires the pair.

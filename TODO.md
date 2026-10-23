@@ -38,11 +38,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
   Plan: `plans/queue/launch-refusal-visibility.md`.
 
-- Remember the launcher's most recently selected folder separately for each host; for a new host, initially default to
-  that host's home directory.
-
-  Plan: `plans/queue/per-host-last-folder.md`.
-
 - Allow agents to add a host for the user.
 
   Plan: `plans/queue/agent-add-host.md`.

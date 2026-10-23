@@ -3,7 +3,7 @@ import { chooseLauncherHost } from "./helpers/host-picker";
 // letting a remembered path follow a registry row onto another installation.
 import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page, type Route } from "@playwright/test";
-import { cleanupSession, createSession, localHostId, pinAutoSelect, stubFeed } from "./helpers/fleet";
+import { cleanupSession, createSession, localHostId, patchPreferences, pinAutoSelect, SESSION_LISTING, stubFeed } from "./helpers/fleet";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 /** Preserve the real connected registry and build stamp before controlling its
@@ -33,7 +33,9 @@ async function registryFixture(request: APIRequestContext) {
 for (const replace of [false, true]) {
   /** Filtering removes only a sidebar projection. The selected terminal owns
    * the destination snapshot; a replacement identity must instead fall back
-   * as a complete host/home pair, never carry the remote folder to local. */
+   * to the local host and its own default folder, never carry the remote
+   * folder to local. Recent setups are stubbed empty, so that default is home
+   * whatever earlier tests launched on the shared helm. */
   test(`New inherits a filtered selected destination with replacement=${replace}`, async ({ page, request }) => {
     const fixture = await registryFixture(request);
     const active = await createSession(request, {
@@ -42,6 +44,11 @@ for (const replace of [false, true]) {
       host: fixture.remote.id,
     });
     let replacement = false;
+    await page.route("**/api/launch-history**", (route) => route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": fixture.build },
+      body: JSON.stringify({ launches: [], folders: [] }),
+    }));
     const feed = await stubFeed(page);
     // These cases require a healthy feed, not an ungreeted outage. Match the
     // helm's greeting so its silence deadline cannot remove our notification peer.
@@ -638,4 +645,51 @@ test("equal browse and current-directory choices preserve the unresolved create"
     // creates were all refused, so there is no allocated session to delete.
     await page.unrouteAll({ behavior: "wait" });
   }
+});
+
+/** The launcher's folder default is per host (SPEC.md, "Working directory"):
+ * the newest recent setup that launched into a plain folder on that host, so
+ * a newer fresh managed checkout is skipped, else the host's home, `~`.
+ * Switching hosts re-seeds an untouched folder in both directions, and once
+ * the user types a folder a host switch keeps it. Recent setups are stubbed
+ * per host so each host's memory is unambiguous whatever earlier tests ran,
+ * and an empty session listing with no remembered selection keeps a selected
+ * session's folder, which would outrank history, out of the premise. */
+test("the launcher's folder follows each host's last launch until the user types one", async ({ page, request }) => {
+  const fixture = await registryFixture(request);
+  const headers = { "content-type": "application/json", "x-farhelm-build": fixture.build };
+  await page.route("**/api/launch-history**", (route) => {
+    const host = Number(new URL(route.request().url()).searchParams.get("host"));
+    const launch = (cwd: string, repo: { owner: string; name: string } | null, seq: number) => ({
+      host, github_repo: repo, cwd, canonical_cwd: cwd, created_at: seq, creation_seq: seq,
+      selection: { harness: "codex", model: null, effort: null, permissions: null },
+    });
+    const launches = host === fixture.remote.id
+      ? [launch("/srv/fresh-checkout", { owner: "acme", name: "repo" }, 3), launch("/srv/remote-work", null, 2)]
+      : [];
+    return route.fulfill({ status: 200, headers, body: JSON.stringify({ launches, folders: [] }) });
+  });
+  await page.route(SESSION_LISTING, (route) => route.request().method() === "GET"
+    ? route.fulfill({ status: 200, headers, body: JSON.stringify({ sessions: [], total: 0, matching: 0, truncated: false }) })
+    : route.fallback());
+  await patchPreferences(request, { last_selected: null });
+  await page.goto("/");
+  await expect(page.locator(".session-count")).toHaveText("0 sessions");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  const host = form.locator(".create-session-host");
+  const folder = form.getByLabel("folder", { exact: true });
+  await chooseLauncherHost(host, String(fixture.remote.id));
+  await expect(folder).toHaveValue("/srv/remote-work");
+  await chooseLauncherHost(host, String(fixture.local));
+  await expect(folder, "a host without recent setups opens at its home").toHaveValue("~");
+  await chooseLauncherHost(host, String(fixture.remote.id));
+  await expect(folder).toHaveValue("/srv/remote-work");
+  await folder.fill("/srv/typed");
+  const fetched = Number(await form.getAttribute("data-history-fetched-revision"));
+  await chooseLauncherHost(host, String(fixture.local));
+  await expect(host).toHaveAttribute("data-host-id", String(fixture.local));
+  // The local host's reply must have landed, or the folder could merely be unseeded yet.
+  await expect.poll(async () => Number(await form.getAttribute("data-history-fetched-revision"))).toBeGreaterThan(fetched);
+  await expect(folder, "a typed folder survives a host change").toHaveValue("/srv/typed");
 });

@@ -776,6 +776,9 @@ pub(crate) fn ListView(
     let open_host = open_destination
         .as_ref()
         .map(|destination| destination.host.clone());
+    let open_cwd = open_destination
+        .as_ref()
+        .map(|destination| destination.cwd.clone());
     let base = use_context::<ApiBase>().0;
     // The helm's shared preference, already read by `PreferencesGate` —
     // this component never mounts before it has (see `SharedPreferences`).
@@ -4157,6 +4160,7 @@ pub(crate) fn ListView(
                 CreateSessionForm {
                     hosts: host_options.clone(),
                     open_host: open_host.clone(),
+                    open_cwd: open_cwd.clone(),
                     hosts_loaded: hosts.read().hosts().is_some(),
                     host_read_error: hosts.read().refresh_error().map(str::to_owned),
                     chosen_host,
