@@ -2079,7 +2079,7 @@ pub(crate) fn HostsPanel(
     let on_add_submit = move |submission: AddSubmission| {
         let AddSubmission {
             probe_id,
-            destination,
+            binding,
             claim,
         } = submission;
         settings_dialog::ADD_DIALOG
@@ -2098,10 +2098,7 @@ pub(crate) fn HostsPanel(
                 Err(crate::api::SubmissionError::Refused(reason)) => {
                     // A definite answer can return to the form with the
                     // destination intact; the one-use plan itself is gone.
-                    add_reopen.set(Some(AddReopen {
-                        destination,
-                        reason,
-                    }));
+                    add_reopen.set(Some(AddReopen { binding, reason }));
                     adding.set(true);
                 }
                 Err(problem) => add_error.set(Some(problem.into_text())),
@@ -4408,12 +4405,15 @@ fn HostDestinationForm(
 
 /// The form input that one displayed ADD confirmation was planned from.
 ///
-/// Only the ssh destination: the dialog no longer asks for a remote binary or
-/// state directory, so its probe sends neither and discovery or setup supplies
-/// both (the helm's API and stored rows still carry them).
+/// The ssh destination and the alias draft as typed: the dialog no longer
+/// asks for a remote binary or state directory, so its probe sends neither
+/// and discovery or setup supplies both (the helm's API and stored rows still
+/// carry them). The helm keeps the alias with the plan it retained; the
+/// draft rides here so a refused confirmation can reopen the form with it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AddBinding {
     destination: String,
+    alias: String,
 }
 
 /// What confirming the add dialog's setup question may do; see
@@ -4548,16 +4548,16 @@ struct AddOffer {
 /// offer was already spent).
 struct AddSubmission {
     probe_id: String,
-    destination: String,
+    binding: AddBinding,
     claim: OpGuard,
 }
 
-/// Preserve the destination after a definite setup submission refusal so
-/// the add dialog can reopen at its discovery question. The consumed plan
-/// is deliberately omitted: another attempt needs a new probe.
+/// Preserve the destination and alias after a definite setup submission
+/// refusal so the add dialog can reopen at its discovery question. The
+/// consumed plan is deliberately omitted: another attempt needs a new probe.
 #[derive(Clone, PartialEq)]
 struct AddReopen {
-    destination: String,
+    binding: AddBinding,
     reason: String,
 }
 
@@ -4633,12 +4633,20 @@ fn AddHostForm(
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let mut preferences = use_context::<crate::list::SharedPreferences>();
-    let initial_destination = reopen
+    let (initial_destination, initial_alias) = reopen
         .as_ref()
-        .map(|value| value.destination.clone())
+        .map(|value| {
+            (
+                value.binding.destination.clone(),
+                value.binding.alias.clone(),
+            )
+        })
         .unwrap_or_default();
     let initial_error = reopen.map(|value| value.reason);
     let mut ssh = use_signal(|| initial_destination);
+    // The optional alias draft. Its shape is checked here before discovery,
+    // with the settings dialog's wording; the helm owns the collision check.
+    let mut alias = use_signal(|| initial_alias);
     // Keep the add component and its draft mounted while connection help owns
     // the modal. Its extra destination is sampled when that child opens.
     let mut ssh_help_open = use_signal(|| false);
@@ -4674,6 +4682,7 @@ fn AddHostForm(
         move |(planned, skip_future): (ConfirmToken<AddOffer>, bool)| {
             let current = AddBinding {
                 destination: ssh.peek().clone(),
+                alias: alias.peek().clone(),
             };
             // Taking the offer also means the helm may consume this id before
             // any later refusal or transport ambiguity reaches the browser, so
@@ -4701,7 +4710,7 @@ fn AddHostForm(
             } = planned.key().clone();
             on_submit.call(AddSubmission {
                 probe_id,
-                destination: binding.destination,
+                binding,
                 claim,
             });
         },
@@ -4760,15 +4769,24 @@ fn AddHostForm(
                 if *probing.peek() || offer.is_open() || ops.busy_now() {
                     return;
                 }
+                // A malformed alias never leaves the browser; the draft
+                // stays for the user to fix.
+                if let Err(problem) = validate_alias_draft(&alias.peek()) {
+                    error.set(Some(problem));
+                    return;
+                }
                 error.set(None);
                 probing.set(true);
                 let base = base.clone();
-                let binding = AddBinding { destination: ssh() };
+                let binding = AddBinding { destination: ssh(), alias: alias() };
                 let destination = binding.destination.clone();
+                let alias_draft = binding.alias.clone();
                 spawn(async move {
                     // No remote binary or state directory: blank paths go out
                     // as null, and the helm's probe looks where setup installs.
-                    match probe_ssh_host(&base, &destination, "", "").await {
+                    // The new-entry alias makes a destination that is already
+                    // a host a refusal instead of setting that host up again.
+                    match probe_ssh_host(&base, &destination, "", "", Some(&alias_draft)).await {
                         Ok(ProbeResponse::Discovered) => on_added.call(None),
                         Ok(ProbeResponse::Provisionable {
                             probe_id,
@@ -4843,7 +4861,27 @@ fn AddHostForm(
                     }
                 }
                 p { id: "add-host-destination-help", class: "host-dialog-help",
-                    "user@host, or a Host alias from your ssh config. Farhelm checks that it can reach the destination before adding it."
+                    "user@host, or a Host name from your ssh config. Farhelm checks that it can reach the destination before adding it."
+                }
+                label {
+                    "alias (optional)"
+                    input {
+                        r#type: "text",
+                        class: "add-host-alias",
+                        aria_describedby: "add-host-alias-help",
+                        // The alias is shown exactly as typed, so the browser
+                        // must not "correct" it either.
+                        autocomplete: "off",
+                        autocorrect: "off",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        value: "{alias}",
+                        disabled: busy,
+                        oninput: move |evt| alias.set(evt.value()),
+                    }
+                }
+                p { id: "add-host-alias-help", class: "host-dialog-help",
+                    "Shown instead of the destination everywhere except the host's details. You can change it later in the host's settings."
                 }
                 p { class: "host-dialog-help",
                     "Does this host ask for a second factor or other approval on every ssh login? "
@@ -7499,6 +7537,7 @@ mod tests {
 
         let binding = AddBinding {
             destination: "builder@example".to_string(),
+            alias: String::new(),
         };
         let offer = |probe_id: &str| AddOffer {
             probe_id: probe_id.to_string(),
@@ -7552,6 +7591,7 @@ mod tests {
             // An edited destination withdraws the offer.
             let edited = AddBinding {
                 destination: "builder@elsewhere".to_string(),
+                alias: String::new(),
             };
             assert_eq!(
                 take_add_offer(&mut slot, &current, &edited, claim),

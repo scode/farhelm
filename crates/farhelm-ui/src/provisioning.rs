@@ -1594,6 +1594,7 @@ async fn prepare(
                             .as_ref()
                             .map(|value| value.raw())
                             .unwrap_or_default(),
+                        None,
                     )
                     .await?
                 }

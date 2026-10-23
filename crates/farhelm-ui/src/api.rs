@@ -4165,18 +4165,31 @@ async fn commit_of<T: serde::de::DeserializeOwned>(
 /// a host row's set-up action passes the row's stored paths. Discovery itself
 /// decides whether the supervisor is registered as-is, a concrete plan is
 /// retained for confirmation, or the target stays manual-only.
+///
+/// `new_entry_alias` is `Some` only from the add host dialog, holding its
+/// alias draft (blank for none): it asks the helm for a NEW host entry, so a
+/// destination that is already a host is refused rather than set up again,
+/// and the entry gets the alias. A host row's set-up action passes `None`,
+/// which keeps setting up the existing entry.
 pub(crate) async fn probe_ssh_host(
     base: &str,
     ssh: &str,
     remote_farhelm: &str,
     remote_state_dir: &str,
+    new_entry_alias: Option<&str>,
 ) -> Result<ProbeResponse, String> {
     let url = format!("{base}/api/hosts/probe");
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "target": { "kind": "ssh", "destination": ssh },
         "remote_farhelm": install_field(remote_farhelm),
         "remote_state_dir": install_field(remote_state_dir),
     });
+    if let Some(alias) = new_entry_alias {
+        // Blank means no alias; anything else goes as typed and the helm
+        // trims it, as it does for the settings dialog's alias.
+        let alias = (!alias.trim().is_empty()).then_some(alias);
+        body["new_entry"] = serde_json::json!({ "alias": alias });
+    }
     let resp = send(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
