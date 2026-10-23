@@ -6524,6 +6524,7 @@ mod tests {
             return;
         }
         let greeting = ControlMsg::Hello {
+            database_schema: None,
             protocol_version: hello.protocol,
             build_version: hello.build.clone(),
             role: "supervisor".to_string(),

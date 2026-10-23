@@ -18705,7 +18705,15 @@
   misread variant is not part of this outcome. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/update-refuses-newer-host-schema.md`.
+- Execution: complete in change `uyymnzuvspmxoqlqxutkvomxpxykyrwz`, bookmark
+  `plan/update-refuses-newer-host-schema/01-refuse-newer-schema`. The supervisor now reports its database schema version
+  in its handshake (`database_schema`, ignored by older peers), and Update refuses before changing anything when that is
+  above the schema of the supervisor this helm would install, whether or not the host speaks this helm's protocol
+  version; a host that reports none keeps today's behaviour. SPEC.md and `.agents/devbuild.md` say so. The code, test
+  and documentation total 329 added/deleted lines. The maintainer accepted the original 288-line fix on 2026-10-23 in
+  the plan's Decisions, including the different-protocol case and tests, and waived its size gate. Final review added
+  clearer refusal text and compatibility caveats, constructor documentation, and stronger tests within the same design.
+  PR: https://github.com/scode/farhelm/pull/2649/changes.
 
 ## devbuild-tmux-skips-release-signature.md
 

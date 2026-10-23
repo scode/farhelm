@@ -2689,6 +2689,16 @@ pub enum ControlMsg {
         /// Presence, never `role`, selects restricted admission. The
         /// admission logic itself arrives in PLAN_M7.md item 4.
         auth: Option<SessionAuth>,
+        /// The supervisor's database schema version, which is always its own
+        /// compiled one (it migrates anything older and refuses anything
+        /// newer). Update reads it to refuse installing a supervisor that
+        /// would refuse this host's database. `None` from the helm and from
+        /// supervisors built before the field existed. Additive within the
+        /// protocol: a peer that ignores it does exactly what it did before
+        /// the field existed. Omitted rather than `null` when absent, so a
+        /// hello without one is byte-identical to before.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        database_schema: Option<i64>,
     },
     /// Create and launch a session. This is the one true creation path:
     /// the M1 CLI flags and any future UI dialog both land here
@@ -3794,16 +3804,18 @@ pub enum ControlMsg {
 }
 
 impl ControlMsg {
-    /// The identity-less hello: `host_identity: None` regardless of
-    /// `role`. Correct as-is for the helm (which has no identity of its
-    /// own — see the field's own docs) and for every test double playing
+    /// A hello without host identity or database schema, regardless of
+    /// `role`. Correct as-is for the helm (which has no supervisor identity
+    /// or schema to report) and for every test double playing
     /// a supervisor without needing to model minting. The REAL supervisor
     /// connection loop does not call this constructor at all; it builds
     /// its own `Hello` carrying `Supervisor::host_identity` (`io::
     /// handshake_with_host_identity`'s job) precisely because this one
-    /// shared constructor cannot know that value.
+    /// shared constructor cannot know those values. Test doubles using it
+    /// therefore model a supervisor that does not report its schema.
     pub fn hello(role: &str) -> ControlMsg {
         ControlMsg::Hello {
+            database_schema: None,
             protocol_version: PROTOCOL_VERSION,
             build_version: BUILD_VERSION.to_string(),
             role: role.to_string(),
@@ -4541,6 +4553,7 @@ mod tests {
         for (msg, expected) in [
             (
                 ControlMsg::Hello {
+                    database_schema: None,
                     protocol_version: 8,
                     build_version: "1.2.3".to_string(),
                     role: "supervisor".to_string(),
@@ -4558,6 +4571,7 @@ mod tests {
             ),
             (
                 ControlMsg::Hello {
+                    database_schema: None,
                     protocol_version: 8,
                     build_version: "1.2.3".to_string(),
                     role: "supervisor".to_string(),
@@ -4575,6 +4589,7 @@ mod tests {
             ),
             (
                 ControlMsg::Hello {
+                    database_schema: None,
                     protocol_version: 11,
                     build_version: "0.0.3".to_string(),
                     role: "spawn".to_string(),
@@ -4609,6 +4624,7 @@ mod tests {
     fn session_auth_debug_redacts_the_bearer_token() {
         let token = "token-that-must-never-appear";
         let hello = ControlMsg::Hello {
+            database_schema: None,
             protocol_version: PROTOCOL_VERSION,
             build_version: BUILD_VERSION.to_string(),
             role: "spawn".to_string(),
@@ -4689,9 +4705,14 @@ mod tests {
         },
     }
 
+    /// Older peers must still read the greeting that carries a supervisor's
+    /// identity and database schema, including across protocol versions.
+    /// The literal schema key is pinned independently of this crate's own
+    /// decoder so renaming both sides cannot silently break older builds.
     #[farhelm_testtrace::test]
     fn new_hello_json_decodes_under_a_legacy_pre_host_identity_decoder() {
         let new_msg = ControlMsg::Hello {
+            database_schema: Some(31),
             protocol_version: 8,
             build_version: "1.2.3".to_string(),
             role: "supervisor".to_string(),
@@ -4699,6 +4720,7 @@ mod tests {
             auth: None,
         };
         let json = serde_json::to_value(&new_msg).unwrap();
+        assert_eq!(json["database_schema"], 31);
 
         let LegacyHelloControlMsg::Hello {
             protocol_version,
@@ -5402,6 +5424,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn v30_and_v31_peers_refuse_each_other() {
         let stale_hello = |protocol_version: u32| ControlMsg::Hello {
+            database_schema: None,
             protocol_version,
             build_version: "9.9.9-test".to_string(),
             role: "helm".to_string(),

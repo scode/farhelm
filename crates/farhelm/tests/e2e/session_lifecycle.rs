@@ -1362,6 +1362,7 @@ async fn a_peer_one_protocol_version_behind_is_refused_before_it_can_attach() {
     // compatible with the current resolved-bundle wire.
     writer
         .write_control(&ControlMsg::Hello {
+            database_schema: None,
             protocol_version: farhelm_proto::PROTOCOL_VERSION - 1,
             build_version: "0.0.0-before-if-unowned".to_string(),
             role: "helm".to_string(),

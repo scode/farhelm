@@ -235,6 +235,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         match behavior.probe {
             E2eProbeOutcome::Absent => Ok(ProbeObservation::Absent),
             E2eProbeOutcome::Supervisor => Ok(ProbeObservation::Supervisor {
+                database_schema: None,
                 build_version: behavior.build_version,
                 host_identity: behavior.identity,
                 dial_farhelm: PathBuf::from(behavior.dial_farhelm),

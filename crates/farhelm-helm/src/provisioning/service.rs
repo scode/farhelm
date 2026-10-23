@@ -216,6 +216,8 @@ fn attach_refusal(state: &HostState) -> Option<BackendFailure> {
                 peer_build: peer_text(peer_build),
                 our_protocol: *our_protocol,
                 our_build: our_build.clone(),
+                // Built only for its rendering, which never names the schema.
+                peer_database_schema: None,
             };
             format!("{REFUSED}: {skew}; {remediation}")
         }
@@ -259,6 +261,25 @@ fn downgrade_refusal(host_build: &str, helm_build: &str) -> Option<String> {
             "the host runs farhelm {host_build}, which is newer than this helm's {helm_build}; \
              Update never installs an older version over a newer one, so update this helm \
              instead"
+        )
+    })
+}
+
+/// Why Update must not run against a host whose supervisor reports
+/// `host_schema` as its database schema, or `None` when it may.
+///
+/// Version order alone misses this: a development build ranks below every
+/// release, so updating a host back from a devbuild passes the downgrade
+/// check, yet its supervisor may have migrated the database past what the
+/// supervisor this helm installs can open, and that one would refuse it and
+/// restart forever. A host that reports no schema keeps the old behavior.
+fn schema_refusal(host_schema: Option<i64>) -> Option<String> {
+    let ours = farhelm_supervisor::store::SCHEMA_VERSION;
+    host_schema.filter(|&theirs| theirs > ours).map(|theirs| {
+        format!(
+            "the host's supervisor database is at schema {theirs}, but the supervisor this \
+             helm would install opens only up to {ours} and would refuse it; update this host \
+             from a build at least as new as the one that last ran there"
         )
     })
 }
@@ -582,6 +603,7 @@ impl ProvisioningService {
                 host_identity,
                 dial_farhelm,
                 dial_state_dir,
+                ..
             } => {
                 let host_id = self
                     .register_discovered(
@@ -611,6 +633,7 @@ impl ProvisioningService {
                 peer_build,
                 dial_farhelm,
                 dial_state_dir,
+                ..
             } => {
                 let host_id = self
                     .register_discovered(
@@ -1060,8 +1083,11 @@ impl ProvisioningService {
                 host_identity,
                 dial_farhelm,
                 dial_state_dir,
+                database_schema,
             } => {
-                if let Some(refusal) = downgrade_refusal(&build_version, &self.helm_build()) {
+                if let Some(refusal) = downgrade_refusal(&build_version, &self.helm_build())
+                    .or_else(|| schema_refusal(database_schema))
+                {
                     return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
                         refusal,
                     )));
@@ -1102,8 +1128,11 @@ impl ProvisioningService {
                 peer_build,
                 dial_farhelm,
                 dial_state_dir,
+                database_schema,
             } => {
-                if let Some(refusal) = downgrade_refusal(&peer_build, &self.helm_build()) {
+                if let Some(refusal) = downgrade_refusal(&peer_build, &self.helm_build())
+                    .or_else(|| schema_refusal(database_schema))
+                {
                     return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
                         refusal,
                     )));
@@ -1766,6 +1795,7 @@ impl ProvisioningService {
                         host_identity,
                         dial_farhelm,
                         dial_state_dir,
+                        ..
                     } => {
                         self.register(
                             registration,
@@ -1795,6 +1825,7 @@ impl ProvisioningService {
                         peer_build,
                         dial_farhelm,
                         dial_state_dir,
+                        ..
                     } => {
                         self.register(
                             registration,
@@ -1837,15 +1868,21 @@ impl ProvisioningService {
                         host_identity,
                         dial_farhelm,
                         dial_state_dir,
+                        database_schema,
                     } => {
                         // Rechecked here: the host may have been updated
                         // by other means between planning and this
                         // confirmation.
                         if let Some(refusal) = downgrade_refusal(&build_version, &self.helm_build())
+                            .or_else(|| schema_refusal(database_schema))
                         {
+                            // This is the helm's own refusal; the second half
+                            // of BackendFailure is reserved for host stderr.
                             return Err(BackendFailure::new(
-                                "the host now runs a newer farhelm than this helm",
-                                refusal,
+                                format!(
+                                    "the host changed since UPDATE planning and this helm must not update it: {refusal}"
+                                ),
+                                "",
                             ));
                         }
                         if expected_identity.is_some() && &host_identity != expected_identity {
@@ -1877,11 +1914,18 @@ impl ProvisioningService {
                         peer_build,
                         dial_farhelm,
                         dial_state_dir,
+                        database_schema,
                     } => {
-                        if let Some(refusal) = downgrade_refusal(&peer_build, &self.helm_build()) {
+                        if let Some(refusal) = downgrade_refusal(&peer_build, &self.helm_build())
+                            .or_else(|| schema_refusal(database_schema))
+                        {
+                            // Keep the helm's refusal out of the host-stderr
+                            // slot, which would misattribute and quote it.
                             return Err(BackendFailure::new(
-                                "the host now runs a newer farhelm than this helm",
-                                refusal,
+                                format!(
+                                    "the host changed since UPDATE planning and this helm must not update it: {refusal}"
+                                ),
+                                "",
                             ));
                         }
                         (
