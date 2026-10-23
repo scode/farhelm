@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`test-hygiene-oct21`](reports/test-hygiene-oct21.report.md) landed 2026-10-23 in #2603, #2606, #2607, #2608, #2611, #2613, #2615, #2618: Eight test-only fixes from the 2026-10-21 auto-triage: cleanup armed as soon as a fixture exists, tests that prove the acceptance they claim, and a deadline that bounds each approval poll.
 - [`duplicate-uninstall-retry-advice`](reports/duplicate-uninstall-retry-advice.report.md) landed 2026-10-23 in #2605: Once the other entry reaching the same machine is removed, the duplicate's uninstall refusal says to press Retry and uninstall through this entry, instead of naming the removed entry.
 - [`sign-in-preservation-sweep`](reports/sign-in-preservation-sweep.report.md) landed 2026-10-23 in #2604, #2614, #2623: Remove the code that keeps and resends failed GUI preference saves and keeps the browser app mounted across signing in again; signing in again in the browser reloads the page
 - [`tunnel-port-and-link-ranges`](reports/tunnel-port-and-link-ranges.report.md) landed 2026-10-23 in #2630, #2635: Localhost tunnels always take an OS-chosen Mac port, and link opening treats IPv6 spellings of local IPv4 addresses as local (three 2026-10-22 triage outcomes, two PRs)
