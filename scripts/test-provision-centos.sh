@@ -157,6 +157,29 @@ replace_ssh_config() {
   fi
 }
 
+# Write the ssh config, minus the block between the exact marker lines `$1`
+# and `$2`, to the file `$3`. Fails, with a message, when a start marker has
+# no end marker after it; `$3` then holds a truncated copy, and the callers'
+# failure paths are what keep it from being published. The block sits at the
+# top of the file, so dropping everything after an unmatched start (a hand
+# edit or a dotfiles merge can leave one) would replace the user's config with
+# an empty or cut-short one.
+scrub_ssh_config_block() {
+  # Local, so the cleanup trap's global `status` (the run's exit code) survives.
+  local status=0
+  awk -v begin="$1" -v end="$2" '
+    $0 == begin { skip = 1; next }
+    $0 == end   { skip = 0; next }
+    !skip       { print }
+    END         { if (skip) exit 3 }
+  ' "$ssh_config" >"$3" || status=$?
+  if [ "$status" = 3 ]; then
+    echo "$ssh_config has the line '$1' with no '$2' after it;" \
+      "leaving it untouched: remove or close that block by hand" >&2
+  fi
+  return "$status"
+}
+
 # Remove one alias's block: this run's own by default, or the alias named by
 # `$1`. Only exact markers match, so a concurrent run's block (a different
 # alias, hence different markers) is left alone. Callers hold the ssh config
@@ -174,11 +197,7 @@ remove_ssh_config_block() {
   # to remove, so a run that failed before adding one leaves the file as is.
   grep -qxF -- "$begin" "$ssh_config" || return 0
   scrubbed="$run_dir/ssh-config.scrubbed"
-  awk -v begin="$begin" -v end="$end" '
-    $0 == begin { skip = 1; next }
-    $0 == end   { skip = 0; next }
-    !skip       { print }
-  ' "$ssh_config" >"$scrubbed" || return 1
+  scrub_ssh_config_block "$begin" "$end" "$scrubbed" || return 1
   replace_ssh_config "$scrubbed" || return 1
   if [ "$created_ssh_config" = yes ] && [ ! -s "$ssh_config" ]; then
     rm -f "$ssh_config"
@@ -354,11 +373,8 @@ EOF
   if grep -qxF "$config_begin_prefix (scripts/test-provision-centos.sh)" "$ssh_config"; then
     echo "   removing the pre-per-run-alias ssh config block"
     scrubbed="$run_dir/ssh-config.scrubbed"
-    awk -v begin="$config_begin_prefix (scripts/test-provision-centos.sh)" -v end="# END farhelm-centos-ci" '
-      $0 == begin { skip = 1; next }
-      $0 == end   { skip = 0; next }
-      !skip       { print }
-    ' "$ssh_config" >"$scrubbed" || exit 1
+    scrub_ssh_config_block "$config_begin_prefix (scripts/test-provision-centos.sh)" \
+      "# END farhelm-centos-ci" "$scrubbed" || exit 1
     replace_ssh_config "$scrubbed" || exit 1
   fi
 fi

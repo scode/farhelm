@@ -8,10 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`centos-ssh-scrub-drops-config-after-unmatched-marker.md`](centos-ssh-scrub-drops-config-after-unmatched-marker.md) —
-  The CentOS test deletes the user's ssh config after a leftover start marker with no end marker; an accidental trigger
-  is unverified, and the bucket is unsettled.
-
 ## High priority: material UX degradation
 
 - [`power-loss-version-folder-never-repaired.md`](power-loss-version-folder-never-repaired.md) — A Mac version folder

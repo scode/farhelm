@@ -18462,7 +18462,13 @@
 - Completion criteria: both scrubs fail when a start marker has no end marker, and the script leaves the ssh config
   untouched with a message. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/build-and-tooling-oct22.md`.
+- Execution: complete: change `lltzskqrlttmtvsoonpvrlqzuznltuoy`, bookmark
+  `plan/build-and-tooling-oct22/03-centos-unmatched-marker`. Both ssh-config scrubs in
+  `scripts/test-provision-centos.sh` now go through one function that fails, naming the unmatched start marker, when a
+  block has no end marker, so neither publishes a replacement and the config is left untouched. Checked by running that
+  function, cut out of the script, on scratch config files (matched block, unmatched start, no block); the whole script
+  was not run, since it rewrites the real ssh config. 36 changed lines. PR:
+  https://github.com/scode/farhelm/pull/2660/changes.
 
 ## tunnel-can-take-standalone-helm-port.md
 
