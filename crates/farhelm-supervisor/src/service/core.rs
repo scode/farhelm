@@ -1287,7 +1287,9 @@ impl StateDirOwnership {
     /// stopping supervisor stops answering on its socket immediately and
     /// then keeps `supervisor.lock` for up to [`SHUTDOWN_OUTPUT_BUDGET`]
     /// (plus a two-second quiet-down if that budget expires) while it
-    /// closes its terminal-output clients in order. A successor
+    /// closes its terminal-output clients in order, and after that until any
+    /// blocking work it started has finished (see [`on_owned_runtime`]); a
+    /// long startup sweep can outlast the wait, which then gives up. A successor
     /// started in that window used to find the lock held, start read-only,
     /// and have `serve` refuse it, so the desktop app refused to open. The
     /// wait lives here, in the supervisor that needs the lock, rather than
@@ -5370,6 +5372,16 @@ impl Supervisor {
         state_dir: &Path,
         startup: SupervisorStartup,
     ) -> anyhow::Result<Arc<Supervisor>> {
+        Self::new_for_startup_claiming(state_dir, startup, None).await
+    }
+
+    /// [`Self::new_for_startup`] for [`run`], which keeps the claim in
+    /// `claim` (see [`Self::new_claiming`]).
+    async fn new_for_startup_claiming(
+        state_dir: &Path,
+        startup: SupervisorStartup,
+        claim: Option<&ClaimSlot>,
+    ) -> anyhow::Result<Arc<Supervisor>> {
         let SupervisorStartup {
             tmux_program,
             agent_hooks,
@@ -5387,7 +5399,7 @@ impl Supervisor {
             Some(path) => Arc::new(move || read_boot_id_from(&path)),
             None => defaults.boot_id.clone(),
         };
-        Self::new_with_seams(
+        Self::new_claiming(
             state_dir,
             exe,
             SupervisorTimeouts::default(),
@@ -5399,6 +5411,7 @@ impl Supervisor {
                 state_dir_claim_wait: STATE_DIR_CLAIM_WAIT,
                 ..defaults
             },
+            claim,
         )
         .await
     }
@@ -5438,6 +5451,20 @@ impl Supervisor {
         farhelm_exe: PathBuf,
         timeouts: SupervisorTimeouts,
         seams: SupervisorSeams,
+    ) -> anyhow::Result<Arc<Supervisor>> {
+        Self::new_claiming(state_dir, farhelm_exe, timeouts, seams, None).await
+    }
+
+    /// [`Self::new_with_seams`], also putting the state-folder claim into
+    /// `claim` the moment it is taken, so a stop that abandons construction
+    /// part way still keeps the folder claimed until the runtime has drained
+    /// (see [`on_owned_runtime`]).
+    async fn new_claiming(
+        state_dir: &Path,
+        farhelm_exe: PathBuf,
+        timeouts: SupervisorTimeouts,
+        seams: SupervisorSeams,
+        claim: Option<&ClaimSlot>,
     ) -> anyhow::Result<Arc<Supervisor>> {
         // 0700 on both: the socket and the launch specs (which hold full
         // agent command lines) live here. See ensure_private_dir. The
@@ -5536,6 +5563,11 @@ impl Supervisor {
                 Some((ownership, newly_acquired)) => (Some(ownership), newly_acquired),
                 None => (None, false),
             };
+        if let (Some(claim), Some(ownership)) = (claim, &ownership) {
+            claim
+                .set(Arc::clone(ownership))
+                .expect("a claim slot serves one supervisor");
+        }
         // A claim that may have waited must still be starting a Farhelm
         // that exists: `farhelm uninstall` holds this lock while it removes
         // the installation, and a supervisor that waited it out would
@@ -15835,10 +15867,12 @@ pub const SHUTDOWN_OUTPUT_BUDGET: Duration = Duration::from_secs(10);
 /// Longer than [`SHUTDOWN_OUTPUT_BUDGET`] with room to spare, because the
 /// predecessor this exists for is one spending that budget closing its
 /// output clients, and it still has to exit and release the lock after the
-/// budget runs out. The desktop app waits for the supervisor it spawned to
-/// start serving for longer than this, before it starts its embedded helm,
-/// so that a successful wait normally leaves time for the rest of startup
-/// rather than turning into a refused app.
+/// budget runs out. A predecessor still finishing blocking work, such as a
+/// long startup sweep, keeps the lock past this and the wait refuses. The
+/// desktop app waits for the supervisor it spawned to start serving for
+/// longer than this, before it starts its embedded helm, so that a
+/// successful wait normally leaves time for the rest of startup rather than
+/// turning into a refused app.
 pub const STATE_DIR_CLAIM_WAIT: Duration =
     SHUTDOWN_OUTPUT_BUDGET.saturating_add(Duration::from_secs(10));
 
@@ -15878,10 +15912,48 @@ const STATE_DIR_CLAIM_RETRY: Duration = Duration::from_millis(50);
 /// optional: this is the whole supervisor entry point, so a caller that
 /// could omit one is a launch path that silently ignores `--tmux`,
 /// `FARHELM_TMUX`, or `FARHELM_AGENT_HOOKS`.
-pub async fn run(
+///
+/// Synchronous, and it owns its runtime: the state-folder claim is released
+/// only after that runtime, and every blocking job started on it, has ended
+/// (see [`on_owned_runtime`]). Call it from outside a tokio runtime.
+pub fn run(
     state_dir: &Path,
     startup: SupervisorStartup,
     stop: impl std::future::Future<Output = anyhow::Result<()>>,
+) -> anyhow::Result<()> {
+    on_owned_runtime(|claim| serve_until_stopped(state_dir, startup, stop, claim))
+}
+
+/// Where [`on_owned_runtime`] keeps the state-folder claim while its runtime
+/// drains.
+type ClaimSlot = std::sync::OnceLock<Arc<StateDirOwnership>>;
+
+/// Drive `serving` on a runtime this call creates, and release whatever claim
+/// `serving` publishes into the slot only after that runtime has dropped.
+///
+/// Blocking work (the startup cache and prepared-checkout sweep, a failed
+/// create's file unlink) keeps running after serving stops, and a runtime's
+/// drop waits for it. A claim held only by the supervisor would go when the
+/// supervisor drops, before that wait, and a successor could then claim the
+/// folder and accept a launch whose fresh checkout or launch input the old
+/// work deletes. The helm holds its claim the same way (SPEC_impl.md).
+fn on_owned_runtime<F>(serving: impl FnOnce(Arc<ClaimSlot>) -> F) -> anyhow::Result<()>
+where
+    F: std::future::Future<Output = anyhow::Result<()>>,
+{
+    // Reverse declaration order is the release order, on unwind too: the
+    // runtime (and its blocking work) goes first, then the slot's claim.
+    let claim = Arc::new(ClaimSlot::new());
+    let runtime = tokio::runtime::Runtime::new().context("starting the supervisor runtime")?;
+    runtime.block_on(serving(Arc::clone(&claim)))
+}
+
+/// [`run`]'s serving lifetime, inside the runtime [`on_owned_runtime`] owns.
+async fn serve_until_stopped(
+    state_dir: &Path,
+    startup: SupervisorStartup,
+    stop: impl std::future::Future<Output = anyhow::Result<()>>,
+    claim: Arc<ClaimSlot>,
 ) -> anyhow::Result<()> {
     use tokio::signal::unix::{SignalKind, signal};
 
@@ -15892,7 +15964,7 @@ pub async fn run(
     // nothing to close in order.
     tokio::pin!(stop);
     let sup = tokio::select! {
-        built = Supervisor::new_for_startup(state_dir, startup) => built?,
+        built = Supervisor::new_for_startup_claiming(state_dir, startup, Some(&claim)) => built?,
         result = &mut stop => return result,
     };
     // Installed before serving starts, so there is no window in which a
@@ -26107,6 +26179,94 @@ exit 0
         lock.try_lock()
             .expect("fixture: the stand-in predecessor must hold the lock");
         lock
+    }
+
+    /// A stopping supervisor's blocking work (the startup sweep, a failed
+    /// create's unlink) can outlive the supervisor itself. A successor that
+    /// could claim the state folder meanwhile might have its fresh checkout or
+    /// launch input deleted by that work. Pinned: construction stores its claim
+    /// in the slot as soon as it takes it, so even a construction abandoned
+    /// right after the claim (here a missing program, standing in for a stop)
+    /// leaves the slot holding the only reference; and once the runtime has
+    /// begun shutting down, a successor (another process's `flock` on
+    /// `supervisor.lock`) is still refused while the old blocking job runs,
+    /// and can claim the folder once it has finished.
+    #[farhelm_testtrace::test]
+    fn the_state_dir_claim_outlives_blocking_work_after_the_supervisor_ends() {
+        use std::sync::mpsc::RecvTimeoutError;
+        let dir = tempfile::tempdir().expect("state dir");
+        let state_dir = dir.path().to_path_buf();
+        let successor_claims = || {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(state_dir.join("supervisor.lock"))
+                .expect("lock file")
+                .try_lock()
+                .is_ok()
+        };
+        let (shutdown_seen_tx, shutdown_seen) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let old = {
+            let state_dir = state_dir.clone();
+            std::thread::spawn(move || {
+                on_owned_runtime(|claim| async move {
+                    // A waiting claim makes construction re-check its
+                    // program right after claiming, and `dummy_exe` does not
+                    // exist, so construction gives up at that point.
+                    let seams = SupervisorSeams {
+                        state_dir_claim_wait: Duration::from_millis(1),
+                        ..SupervisorSeams::default()
+                    };
+                    let timeouts = SupervisorTimeouts::default();
+                    let built = Supervisor::new_claiming(
+                        &state_dir,
+                        dummy_exe(),
+                        timeouts,
+                        seams,
+                        Some(&claim),
+                    )
+                    .await;
+                    assert!(built.is_err(), "premise: construction gave up");
+                    let held = claim.get().expect("claim stored when taken");
+                    assert_eq!(Arc::strong_count(held), 1, "only the slot holds it");
+                    // Dropped when the runtime shuts down, which the
+                    // blocking job below observes as its sender closing.
+                    let (alive, shutdown) = tokio::sync::oneshot::channel::<()>();
+                    tokio::spawn(async move {
+                        let _alive = alive;
+                        std::future::pending::<()>().await;
+                    });
+                    // Shutdown skips a blocking job that has not started yet,
+                    // so serving ends only once this one is running.
+                    let (started_tx, started) = tokio::sync::oneshot::channel();
+                    tokio::task::spawn_blocking(move || {
+                        started_tx.send(()).unwrap();
+                        let _ = shutdown.blocking_recv();
+                        shutdown_seen_tx.send(()).unwrap();
+                        let _ = released.recv();
+                    });
+                    started.await.expect("the blocking job started");
+                    Ok(())
+                })
+            })
+        };
+
+        match shutdown_seen.recv_timeout(Duration::from_secs(60)) {
+            Err(RecvTimeoutError::Disconnected) => panic!("fixture ended early: {:?}", old.join()),
+            other => other.expect("the old runtime never began shutting down"),
+        }
+        assert!(
+            !successor_claims(),
+            "a successor claimed the folder while the old blocking work still ran"
+        );
+        release.send(()).unwrap();
+        old.join().unwrap().expect("the old fixture ended cleanly");
+        assert!(
+            successor_claims(),
+            "the claim must be released once the blocking work has finished"
+        );
     }
 
     /// Reopening Farhelm right after quitting it must start, not refuse.
