@@ -375,7 +375,11 @@ impl<K> ConfirmToken<K> {
 /// does not consume the opening, two answers queued in one burst can both
 /// pass `is_current`; such a prompt needs something else (for host Remove,
 /// the request's own claim) to keep the second from starting a second
-/// request. Every other prompt answers through `take`.
+/// request. The tunnel security warning is the other such prompt: its
+/// dialog stays up, buttons disabled, while Allow's consent write runs, the
+/// write's outcome retires the opening through `take`, and the controller's
+/// saving flag refuses a second Allow. Every other prompt answers through
+/// `take`.
 ///
 /// `Copy` because it is a handle to a signal, like [`OpLock`]. Render code
 /// uses the tracked readers ([`Self::is_open`], [`Self::current`]);
@@ -537,12 +541,12 @@ impl<K: PartialEq + Clone + 'static, P: 'static> ConfirmSlot<K, P> {
     /// it takes some other claim whether its answer can still land; the
     /// answer itself goes through [`Self::take`], which checks again. The
     /// one exception is a prompt that stays up through the request its
-    /// answer starts (the hosts panel's Remove confirmation): its answer
-    /// checks `is_current` instead of taking, and the request's outcome or
-    /// the prompt's own cancel retires the opening (see the type's docs for
-    /// why and what that caller must supply instead). Safe to
-    /// expose because the caller already holds the token it asks about: the
-    /// result is a yes or no, never the live opening.
+    /// answer starts (the hosts panel's Remove confirmation, the tunnel
+    /// security warning): its answer checks `is_current` instead of taking,
+    /// and the request's outcome or the prompt's own cancel retires the
+    /// opening (see the type's docs for why and what that caller must supply
+    /// instead). Safe to expose because the caller already holds the token
+    /// it asks about: the result is a yes or no, never the live opening.
     pub(crate) fn is_current(&self, token: &ConfirmToken<K>) -> bool {
         self.state
             .peek()
