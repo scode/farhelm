@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`uninstall-refusal-wording`](reports/uninstall-refusal-wording.report.md) landed 2026-10-21 in #2491: Replace the uninstall refusal for hosts Farhelm can't use with one plain sentence per situation and its way out, offer remove there, and reword the two neighbouring refusals (1 TODO entry).
 - [`helm-ingress-types`](reports/helm-ingress-types.report.md) landed 2026-10-21 in #2492, #2494, #2495: Make supervisor-reported session data, parsed agent verbs and the origin of helm errors types that only the checking code can construct (structural refactor, no behavior change).
 - [`create-reservation-retention`](reports/create-reservation-retention.report.md) landed 2026-10-21 in #2497: Make app and agent create retry keys live as long as the session they created, keep every create's refusal records 24 hours, and clean up keys kept forever so far, without a schema bump (1 TODO entry).
 - [`ui-session-actions`](reports/ui-session-actions.report.md) landed 2026-10-21 in #2496, #2498, #2500: Replace the sidebar's and header's copied Replace/YOLO flows with one controller and an outcome enum, and make the operation lock guard-only (structural refactor, no behavior change).
