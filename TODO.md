@@ -225,6 +225,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `docs/github-checkouts.md` and the docs page `website/src/content/docs/docs/using/stop-restart-resume.mdx`. Asked for
   by the maintainer on 2026-10-20 while planning the spare checkouts.
 
+- **Fix trash deletion silently blocking the UI.** Deleting a session to trash can silently block everything the user
+  does — including closing the window — while it progresses, sometimes slowly, with no progress indication.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
