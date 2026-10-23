@@ -2917,3 +2917,49 @@ Error: locator.click: Test timeout of 60000ms exceeded.
 Class: unknown
 
 Cause: hypothesis
+
+## 2026-10-23 — accepted ADD's host menu never opens on Chromium (e2e/tests/provisioning.spec.ts)
+
+The Chromium project's `accepted ADD registers before execution and releases the page lock while running` failed in a
+browser run of six spec files on both engines, run `c386c83f-760d-4531-8085-d400657b6611` (2026-10-23, tested commit
+`cb630e00`, clean tree, a landing stack of a host-update refusal, dialog save fixes and build scripts), where opening
+the newly added host's menu while its setup was still running timed out waiting for the menu to finish measuring against
+its toggle. Repeated alone on Chromium, it failed 4 of 10 on that stack (`506088c3-846a-4e83-8e55-ecf65dee16af`) with a
+second form, the host's menu flyout never appearing, and passed 10 of 10 on main `0586b379` with main's own build
+(`b073dbcc-4dc5-4c11-bd2e-3f1105db0256`). A bisect then looked conclusive and was not: the stack below the build-script
+plan passed 50 repeats while the stack with it failed about one in five (`f87d8744-d106-40cb-9c62-1d84374c71b2`,
+`374b6048-80c6-49a2-8435-28995890b86e`, `92a2af57-ec0c-419d-8063-8253cabbda42`, `05a0cd14-1f76-42a1-9d7e-217d2588002a`,
+`e052ff07-6b64-4af8-86f8-ddb6d2443652`, `97c0613a-fb5f-4895-b8e8-28b0621e818c`), even with identical binaries and web
+bundle; but the lower stack plus one file nothing reads failed 6 of 20 (`ec7b9e27-4ba1-426b-8f66-ab41ffdbd2c7`) and 2 of
+20 (`8a944f37-745e-402d-a252-2bb03668aca5`), the clean lower stack then failed 3 of 20
+(`7a76db98-fce9-4dbf-963b-4b7d9c1434fc`), and main failed 2 of 20 (`2a887633-7de3-45d4-a1a7-98c63c9f3758`). Failing
+batches of twenty took about 40 to 47 seconds against about 31 for clean ones, so failing attempts run long; per-attempt
+durations are unavailable. It passed on both engines in full browser runs `0f56085c-045c-42df-9d2d-93583fd67eb9` and
+`aeb02db0-f5f1-4f00-a74f-9c81df1c2294`, and in the provisioning spec of `0c90ae2b-16a2-4053-95db-b34184859aed`, the same
+day. All runs: Playwright 1.64.0, three workers with one stack each, zero retries, tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale `C.UTF-8`, child `FARHELM_*` names
+`FARHELM_TEST_TRACE_DIR` and, in the first run only, `FARHELM_PLAYWRIGHT_POLICY_FILE`. The machine is shared with other
+agents' builds; load averages during the repeats were between about 2 and 12. Nothing in the checkout's changed files is
+read by the browser stack, so why the early runs split so cleanly by revision is unknown.
+
+Suspected cause: the same host-menu instability as the 2026-10-23 entry for
+`offer retirement releases only its owner: waiting behind another host` in this spec: while a host is being set up, its
+row keeps re-rendering, and the open menu is replaced or closed before the test can use it. Open; no fix attempted.
+
+```text
+Error: waiting for the host actions panel to finish measuring against its own toggle
+Timeout 5000ms exceeded while waiting on the predicate
+    at openMenuPanel (e2e/tests/helpers/fleet.ts)
+    at openHostMenu (e2e/tests/helpers/fleet.ts)
+```
+
+```text
+Error: expect(locator).toBeVisible() failed
+Locator: locator('[data-host-id="4"]').locator('.host-row-menu-flyout')
+Expected: visible
+Error: element(s) not found
+```
+
+Class: unknown
+
+Cause: hypothesis

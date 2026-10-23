@@ -23,3 +23,4 @@ playwright provisioning.spec.ts a wrong-host UPDATE acceptance warns on its sour
 playwright terminal-multihost.spec.ts remove-and-re-add-host: removal forgets, re-adding rediscovers  # re-added-host-session-new-output
 playwright sidebar.spec.ts the sidebar app bar explains the helm and window builds  # sidebar-build-skew-route-already-handled
 playwright provisioning.spec.ts offer retirement releases only its owner: waiting behind another host  # host-menu-uninstall-item-detaches
+playwright provisioning.spec.ts accepted ADD registers before execution and releases the page lock while running  # accepted-add-host-menu-never-opens
