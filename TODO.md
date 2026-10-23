@@ -262,6 +262,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Host menu's uninstall item keeps detaching on WebKit.** The WebKit test
+  `offer retirement releases only its owner: waiting behind another host` in `e2e/tests/provisioning.spec.ts` times out
+  clicking a host menu's uninstall item, which keeps being replaced while the click retries. It failed in run
+  `0c90ae2b-16a2-4053-95db-b34184859aed`, then 1 of 10 WebKit repeats on that stack
+  (`a50fb0eb-6a64-46bb-9850-427d9c965492`) and 7 of 30 on main `b66b982e` (`0964225d-00ee-4deb-9daa-5c0227ae3bdf`).
+  Hypothesis: the second host's row keeps re-rendering while the first host's uninstall plans (FLAKES.md, 2026-10-23).
+
 - **Sidebar build-skew interceptor fulfils an already handled route again.** The Chromium test
   `the sidebar app bar explains the helm and window builds` in `e2e/tests/sidebar.spec.ts` fails in the build-skew
   interceptor (`forceBuildSkew` in `e2e/tests/helpers/fleet.ts`) with "Route is already handled!", the error the

@@ -2884,3 +2884,36 @@ Error: route.fulfill: Route is already handled!
 Class: unknown
 
 Cause: hypothesis
+
+## 2026-10-23 — host menu uninstall item keeps detaching on WebKit (e2e/tests/provisioning.spec.ts)
+
+The WebKit project's `offer retirement releases only its owner: waiting behind another host` failed in a browser run of
+ten spec files on both engines, run `0c90ae2b-16a2-4053-95db-b34184859aed` (2026-10-23, tested commit `0d48a8da`, clean
+tree, a landing stack of uninstall safeguards and a launcher change, neither of which reaches this test: it answers the
+uninstall requests itself), its only failure; Chromium passed. Clicking a host menu's uninstall item kept finding the
+item detached from the page, retrying until the 60-second test timeout; passes take about 6 to 7 seconds. Repeated alone
+on WebKit it failed 1 of 10 on that stack (`a50fb0eb-6a64-46bb-9850-427d9c965492`) and 7 of 30 on main `b66b982e` with
+main's own build (`0964225d-00ee-4deb-9daa-5c0227ae3bdf`): six the same way, and one earlier, where the host actions
+menu never finished measuring against its toggle within five seconds. It passed on both engines in full browser runs
+`aeb02db0-f5f1-4f00-a74f-9c81df1c2294` and `0f56085c-045c-42df-9d2d-93583fd67eb9` the same day. All runs: Playwright
+1.64.0, three workers with one stack each, zero retries, tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale `C.UTF-8`, child `FARHELM_*` names
+`FARHELM_TEST_TRACE_DIR` and, in the first run only, `FARHELM_PLAYWRIGHT_POLICY_FILE`. Load was not sampled. The test
+came in with #2535 (2026-10-21); host menus started closing when their rows move with #2545 the same day.
+
+Suspected cause: while the first host's uninstall is planning, the host list keeps re-rendering the second host's row,
+and each re-render replaces the open menu's items (or closes and reopens the menu), so the click never lands on a stable
+element. No trace was examined. Open; no fix attempted.
+
+```text
+Error: locator.click: Test timeout of 60000ms exceeded.
+  - waiting for locator('[data-host-id="93"]').locator('.provisioning-uninstall')
+    - locator resolved to <button type="button" tabindex="-1" role="menuitem" class="btn session-row-menu-item host-row-menu-item provisioning-uninstall">…</button>
+  - attempting click action
+    - element is visible, enabled and stable
+    - element was detached from the DOM, retrying
+```
+
+Class: unknown
+
+Cause: hypothesis
