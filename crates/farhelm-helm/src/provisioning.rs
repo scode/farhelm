@@ -5501,6 +5501,47 @@ mod tests {
         assert!(timeout.context.contains("timed out"));
     }
 
+    /// Set up, Update and Remove planning each hold one of the helm's few
+    /// planning slots across a captured command, so a process that inherits
+    /// the command's output and outlives it (a local ssh helper, say) must not
+    /// hold the call. Specified: the capture ends shortly after the child
+    /// exits, while the holder is still alive, and fails naming the stream and
+    /// the grace. The 30 s guard sits between the 10 s capture grace and the
+    /// holder's 60 s, so without the bound the capture waits and trips it.
+    #[farhelm_testtrace::test]
+    async fn child_capture_does_not_wait_for_a_lingering_pipe_holder() {
+        // Only stderr is inherited, so the failure must come from the bound on
+        // that stream, not from the stdout the shell itself closed.
+        let mut command = tokio::process::Command::new("sh");
+        command
+            .args(["-c", "sleep 60 >/dev/null & echo done"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        isolate_process_group(&mut command);
+        let child = command.spawn().unwrap();
+        let group = child.id().unwrap() as i32;
+        let capture = tokio::time::timeout(
+            Duration::from_secs(30),
+            capture_child(child, Duration::from_secs(5), "lingering fixture"),
+        )
+        .await;
+        // SAFETY: signals only this test's isolated group; the shell has been
+        // reaped, so a live member can only be the backgrounded holder.
+        let holder_alive = unsafe {
+            let alive = libc::kill(-group, 0) == 0;
+            libc::kill(-group, libc::SIGKILL);
+            alive
+        };
+        assert!(holder_alive, "the holder must outlive the capture");
+        let failure = capture
+            .expect("a lingering pipe holder must not keep the capture waiting")
+            .expect_err("an output stream still open after exit is not a finished result");
+        let grace = "stderr (still open after the command exited";
+        assert!(failure.context.contains(grace), "{failure}");
+    }
+
     /// Remote byte growth keeps a transfer alive beyond one idle interval,
     /// while slow control setup cannot time out before a remote file exists.
     /// The fixture emits its known one-byte write count with shell builtins;
