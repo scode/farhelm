@@ -62,6 +62,16 @@ be surfaced to the user before finalizing the bucket. Keep the index grouped by 
 and preserve index order within each bucket. Explain the chosen bucket when presenting an item for triage, and revisit
 it if the user supplies a different severity judgment.
 
+A consequence counts toward the bucket only once its route is established (maintainer, 2026-10-22). When a finding's
+`highest` consequence depends on a step nobody has shown to happen in shipped code (a missing source premise, an input
+sequence no shipped control produces), or on a person misreading a display that is correct but stale, bucket it by what
+is established, `high` or `other`, and say in the file what would move it to `highest`. Re-bucket it once that route is
+shown. An established route keeps `highest` however rare its trigger. A destructive confirmation or warning is not a
+display the user can be said to misread: what it says is the limit of what the user agreed to, so harm beyond it keeps
+`highest` even when the text was stale. Rarity is still not a reason to lower a bucket; an unestablished route is. This
+rule only places findings in the index: a finding that could be in `highest` is still never dropped on one agent's
+judgment (`review_feedback_queue/.agents/recording.md`, "Before recording a finding").
+
 ## Triage and execution are separate
 
 This is a persistent triage flow, not an execution flow. Once the session is working through review feedback, remain in
