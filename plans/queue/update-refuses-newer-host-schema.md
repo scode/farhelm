@@ -290,62 +290,76 @@ bookmark and PR. Open, not merged. If a `## Decisions` section exists, its lates
 close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the
 queue script, write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-10-23 (claim 9b34ec).
+### 2026-10-23: answer to a blocked question
 
-### What this is about
+The question, as the executor put it:
 
-Trying a development build on a remote host with devbuild installs that build's supervisor there, and a build that
-changes the supervisor's database upgrades the host's database to its newer layout. Updating the host back from your
-normally installed Farhelm app then went ahead: a development build counts as older than every release, so the rule that
-Update never downgrades a host did not stop it. The release supervisor it installed refuses the newer database and
-restarts forever, and the host stays unreachable until the development build is put back by hand.
+> Blocked on 2026-10-23 (claim 9b34ec).
+>
+> ### What this is about
+>
+> Trying a development build on a remote host with devbuild installs that build's supervisor there, and a build that
+> changes the supervisor's database upgrades the host's database to its newer layout. Updating the host back from your
+> normally installed Farhelm app then went ahead: a development build counts as older than every release, so the rule
+> that Update never downgrades a host did not stop it. The release supervisor it installed refuses the newer database
+> and restarts forever, and the host stays unreachable until the development build is put back by hand.
+>
+> On the 2026-10-22 triage page you chose to keep devbuild as it is and to make Update, from any helm, refuse cleanly
+> before changing anything when the host's supervisor database is newer than the supervisor it would install, with a
+> message naming the cause and the way out. The limit was about 100 changed lines; over it, the work was to come back to
+> you.
+>
+> ### What was built
+>
+> The fix is built, reviewed and tested, and waits as draft PR #2649.
+>
+> - A host's supervisor now tells the helm its database version when the helm connects. Older helms ignore it, and a
+>   host whose supervisor is too old to send it keeps today's behavior.
+> - Update compares that number with the database version of the supervisor it would install. When the host's is newer,
+>   Update refuses before touching the host, both when the update is planned and again when it is confirmed. The message
+>   says the host needs a build at least as new as the one that last ran there.
+> - The refusal also works when the host's supervisor speaks a different protocol version than the helm, the case that
+>   makes the hosts panel show the host as needing an update.
+> - SPEC.md's description of Update now lists this refusal, and the devbuild instructions now warn that updating a host
+>   back from the installed app is refused when the development build upgraded its database, and that the host then
+>   needs a build at least that new.
+>
+> The protection needs this change on both sides. The helm doing the Update must include it, so your installed app
+> protects you only once a release with the fix is installed. And the host's supervisor must report its database
+> version, so a development build made from main before this fix lands can still strand a host the old way.
+>
+> ### Why it is over the limit
+>
+> The change is 288 lines against the limit of about 100. About 93 lines are the new test, which covers both protocol
+> cases, an equal or missing version, and the check at confirmation. 35 more are one-line additions to existing tests,
+> which every test that fakes a connection or a host check needs for the new field. 40 are SPEC.md rewrapping a long
+> paragraph around one new sentence. The remaining roughly 120 are the change itself, its code comments and a few small
+> test checks. The reviewer found no materially smaller design: the helm learns about a host's supervisor only through
+> that connection, and checking the database on the host while installing would need a new step run on the host, after
+> the new build has already been copied there, so it would be neither smaller nor before changing anything.
+>
+> ### The question
+>
+> Land the fix as built, discard it, or ask for a smaller version?
+>
+> - **Land it** (my recommendation). Every later Update from a helm with this change refuses instead of stranding the
+>   host, with a message that says what to do. The costs: the connection carries one more field for good, there are
+>   about 290 more lines to maintain (most of them tests), and the protection starts only as described above.
+> - **Discard it.** The triage outcome is closed without a code change, and updating back from a development build that
+>   upgraded the database still strands the host. A devbuild warning could still land on its own, reworded to say the
+>   update back strands the host rather than that it is refused.
+> - **Ask for a smaller version.** Not recommended. The only real saving would be dropping the different-protocol case
+>   and its tests, about 45 lines, which would leave a host whose supervisor speaks a different protocol version
+>   stranded the old way. The field additions and the SPEC.md rewrapping alone are 75 lines, so no version fits
+>   under 100.
 
-On the 2026-10-22 triage page you chose to keep devbuild as it is and to make Update, from any helm, refuse cleanly
-before changing anything when the host's supervisor database is newer than the supervisor it would install, with a
-message naming the cause and the way out. The limit was about 100 changed lines; over it, the work was to come back to
-you.
+The maintainer's answer:
 
-### What was built
+### Answer (2026-10-23): land the fix as built
 
-The fix is built, reviewed and tested, and waits as draft PR #2649.
+The maintainer's words, verbatim: "1 - fine unblock it"
 
-- A host's supervisor now tells the helm its database version when the helm connects. Older helms ignore it, and a host
-  whose supervisor is too old to send it keeps today's behavior.
-- Update compares that number with the database version of the supervisor it would install. When the host's is newer,
-  Update refuses before touching the host, both when the update is planned and again when it is confirmed. The message
-  says the host needs a build at least as new as the one that last ran there.
-- The refusal also works when the host's supervisor speaks a different protocol version than the helm, the case that
-  makes the hosts panel show the host as needing an update.
-- SPEC.md's description of Update now lists this refusal, and the devbuild instructions now warn that updating a host
-  back from the installed app is refused when the development build upgraded its database, and that the host then needs
-  a build at least that new.
-
-The protection needs this change on both sides. The helm doing the Update must include it, so your installed app
-protects you only once a release with the fix is installed. And the host's supervisor must report its database version,
-so a development build made from main before this fix lands can still strand a host the old way.
-
-### Why it is over the limit
-
-The change is 288 lines against the limit of about 100. About 93 lines are the new test, which covers both protocol
-cases, an equal or missing version, and the check at confirmation. 35 more are one-line additions to existing tests,
-which every test that fakes a connection or a host check needs for the new field. 40 are SPEC.md rewrapping a long
-paragraph around one new sentence. The remaining roughly 120 are the change itself, its code comments and a few small
-test checks. The reviewer found no materially smaller design: the helm learns about a host's supervisor only through
-that connection, and checking the database on the host while installing would need a new step run on the host, after the
-new build has already been copied there, so it would be neither smaller nor before changing anything.
-
-### The question
-
-Land the fix as built, discard it, or ask for a smaller version?
-
-- **Land it** (my recommendation). Every later Update from a helm with this change refuses instead of stranding the
-  host, with a message that says what to do. The costs: the connection carries one more field for good, there are about
-  290 more lines to maintain (most of them tests), and the protection starts only as described above.
-- **Discard it.** The triage outcome is closed without a code change, and updating back from a development build that
-  upgraded the database still strands the host. A devbuild warning could still land on its own, reworded to say the
-  update back strands the host rather than that it is refused.
-- **Ask for a smaller version.** Not recommended. The only real saving would be dropping the different-protocol case and
-  its tests, about 45 lines, which would leave a host whose supervisor speaks a different protocol version stranded the
-  old way. The field additions and the SPEC.md rewrapping alone are 75 lines, so no version fits under 100.
+Restatement: land the fix in draft #2649 as built (about 288 changed lines), including the different-protocol case and
+its tests. The size gate does not apply to it.
