@@ -14,7 +14,7 @@
 //! The checkout folder and post-clone command are helm configuration, not
 //! preferences: each explicitly saves validated text and shows its outcome.
 //! Ntfy alerts follow that explicit-save contract too, with a secret that is
-//! never part of the shared client snapshot or replayed preference writes.
+//! never part of the shared client snapshot or the queued preference writes.
 //! Terminal frame coloring is a helm preference too: an open session sees the
 //! new choice through the shared signal, while other clients reload to get it.
 //! Native tunnel consent also requires an acknowledged save; its controller

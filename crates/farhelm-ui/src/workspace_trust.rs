@@ -37,7 +37,7 @@ impl TrustAgent {
         }
     }
 
-    /// Keep sparse preference writes agent-specific, including credential replay.
+    /// Keep sparse preference writes agent-specific.
     pub(crate) fn dismissal(self, value: bool) -> PreferenceValue {
         match self {
             Self::Codex => PreferenceValue::CodexTrustHintDismissed(value),

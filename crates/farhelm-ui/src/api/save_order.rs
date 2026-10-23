@@ -1,7 +1,7 @@
 //! Configuration saves fence later requests from this GUI, without serializing them.
 //!
-//! A ticket means queued or in-flight work, not a dirty value awaiting credential
-//! recovery. A dependent request snapshots tickets once: newer saves cannot extend
+//! A ticket means queued or in-flight work, never a value kept after its write
+//! settled. A dependent request snapshots tickets once: newer saves cannot extend
 //! its wait. Dropping a ticket releases readers even on cancellation or failure.
 
 use std::collections::BTreeMap;

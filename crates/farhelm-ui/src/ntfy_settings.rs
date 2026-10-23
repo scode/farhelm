@@ -1,5 +1,5 @@
-//! ntfy configuration has an explicit-save lifecycle, unlike replayed shared
-//! preferences. The form never receives the saved token and never sends alerts.
+//! ntfy configuration has an explicit-save lifecycle, unlike the fire-and-forget
+//! shared preferences. The form never receives the saved token and never sends alerts.
 
 use crate::{
     ApiBase,

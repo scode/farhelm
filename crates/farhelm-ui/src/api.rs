@@ -51,8 +51,8 @@
 //! Configuration saves register synchronously and fence later reads and actions
 //! through `save_order`. Their wait consumes the request's existing deadline;
 //! unrelated saves and reads remain concurrent. The shortcut preference queue
-//! attaches tickets to batches, not dirty values, so credential recovery can
-//! read its seed before restarting failed writes.
+//! attaches tickets to batches, not values, so a dependent read waits only for
+//! the writes queued before it.
 //!
 //! The cross-module entry points are `pub(crate)`: they exist to be
 //! called from the view components in `list`, `session_view`, and
@@ -549,8 +549,7 @@ pub(crate) async fn fetch_ntfy_settings(
         .map_err(|_| "could not read ntfy alert settings".to_string())
 }
 
-/// Explicit saves carry only a replacement token, never a fetched secret or a
-/// preference replay. The response's presence bit confirms replace/clear succeeded.
+/// Explicit saves carry only a replacement token, never a fetched secret. The response's presence bit confirms replace/clear succeeded.
 /// Declaring the future registers the save before the caller can spawn it.
 pub(crate) fn save_ntfy_settings(
     base: &str,
@@ -695,7 +694,8 @@ pub(crate) fn save_checkout_spare(
     }
 }
 
-/// Current shared trust setting and hint opt-out, including local dirty intent.
+/// Current shared trust setting and hint opt-out, including a dismissal whose
+/// write is still pending.
 #[derive(Clone, Deserialize)]
 pub(crate) struct CheckoutTrustState {
     pub enabled: bool,
@@ -715,7 +715,7 @@ pub(crate) async fn fetch_claude_trust(base: &str) -> Result<CheckoutTrustState,
         .await
         .map_err(|error| error.to_string())?;
     if let Some(PreferenceValue::ClaudeTrustHintDismissed(value)) =
-        preference_writes().dirty(PreferenceField::ClaudeTrustHintDismissed)
+        preference_writes().pending(PreferenceField::ClaudeTrustHintDismissed)
     {
         state.hint_dismissed = value;
     }
@@ -762,7 +762,7 @@ pub(crate) async fn fetch_agent_trust(
         PreferenceValue::CodexTrustHintDismissed(value)
         | PreferenceValue::MuseTrustHintDismissed(value)
         | PreferenceValue::PiTrustHintDismissed(value),
-    ) = preference_writes().dirty(agent.dismissal(false).field())
+    ) = preference_writes().pending(agent.dismissal(false).field())
     {
         state.hint_dismissed = value;
     }
@@ -826,15 +826,6 @@ impl PreferenceField {
         matches!(self, Self::QuickLaunchTemplate | Self::TemplateShortcuts)
     }
 
-    /// Whether a write that fails or is cancelled drops its value instead of
-    /// keeping it dirty for a later read overlay and sign-in replay. Only
-    /// number-key bindings do so far (SPEC.md, "One GUI at a time"): replaying
-    /// a whole stale map undoes agent changes made since. The other fields
-    /// still keep a failed value until the TODO sweep removes that.
-    fn discards_failed_writes(self) -> bool {
-        matches!(self, Self::TemplateShortcuts)
-    }
-
     /// The field's wire key in a `PUT /api/preferences` patch.
     fn key(self) -> &'static str {
         match self {
@@ -862,7 +853,7 @@ impl PreferenceField {
 /// One concrete preference choice queued by this client.
 ///
 /// The variant binds a wire field to its value type. Keeping that pairing in
-/// one value means replay cannot silently discard a text value queued for the
+/// one value means the writer cannot send a text value queued for the
 /// boolean compact field, or the reverse; malformed wire input remains the
 /// helm route's typed-validation concern.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -936,49 +927,18 @@ impl PreferenceValue {
             | Self::HostSetupConfirmation(value) => serde_json::json!(value),
         }
     }
-
-    /// Place a dirty local choice over a freshly fetched helm seed.
-    fn overlay(&self, seed: &mut Preferences) {
-        match self {
-            Self::WelcomeSeen(value) => seed.welcome_seen = Some(*value),
-            Self::ClaudeTrustHintDismissed(value) => {
-                seed.claude_trust_hint_dismissed = Some(*value)
-            }
-            Self::CodexTrustHintDismissed(value) => seed.codex_trust_hint_dismissed = Some(*value),
-            Self::MuseTrustHintDismissed(value) => seed.muse_trust_hint_dismissed = Some(*value),
-            Self::PiTrustHintDismissed(value) => seed.pi_trust_hint_dismissed = Some(*value),
-            Self::Sort(value) => seed.list_sort = Some(value.clone()),
-            Self::Selected(value) => seed.record_selection(value),
-            Self::Compact(value) => seed.compact = Some(*value),
-            Self::HostRemoveConfirmation(value) => {
-                seed.skip_host_remove_confirmation = Some(*value)
-            }
-            Self::HostSetupConfirmation(value) => seed.skip_host_setup_confirmation = Some(*value),
-            Self::SessionConfirmations(value) => seed.skip_session_confirmations = Some(*value),
-            Self::NameSessionOnQuickLaunch(value) => {
-                seed.name_session_on_quick_launch = Some(*value)
-            }
-            Self::ColorTerminalFrames(value) => seed.color_terminal_frames = Some(*value),
-            Self::QuickLaunchTemplate(value) => seed.quick_launch_template = value.clone(),
-            Self::TemplateShortcuts(value) => seed.template_shortcuts = value.clone(),
-            Self::FeedbackContact(value) => seed.feedback_contact = value.clone(),
-            Self::TerminalLinkClick(value) => seed.terminal_link_click = Some(value.key().into()),
-        }
-    }
 }
 
 /// One field's slice of the write queue.
 ///
-/// `latest` is the newest locally chosen value this session, `acked`
-/// whether a PUT carrying exactly that value has succeeded, `in_flight`
-/// whether a writer task currently owns the field. "Dirty" — chosen but
-/// not acked — is the state [`PreferenceWrites::dirty`] reports and the
-/// reauthentication replay exists for.
+/// `latest` is the newest locally chosen value while a write for it is still
+/// pending; a pending value also means a writer task owns the field. A write
+/// that settles, succeeded or failed, or whose writer is lost, forgets its
+/// value: a failed save is never kept or resent (SPEC.md, "One GUI at a time"
+/// and "Errors and diagnostics").
 #[derive(Default)]
 struct FieldWrite {
     latest: Option<PreferenceValue>,
-    acked: bool,
-    in_flight: bool,
     /// A fresh choice needs its own write even if it returns to the value
     /// already being sent: another client may have committed in between.
     recorded_since_send: bool,
@@ -989,26 +949,15 @@ struct FieldWrite {
     sending_saves: Vec<save_order::Ticket>,
 }
 
-/// Retire a dirty ⚡ mark that names the deleted template. Retiring it before
-/// DELETE prevents credential replay from restoring a mark the helm just
-/// cleared. Number-key maps need nothing here: one that fails or is cancelled
-/// is discarded outright.
-fn retire_template_choice(slot: &mut FieldWrite, name: &str) {
-    if matches!(&slot.latest, Some(PreferenceValue::QuickLaunchTemplate(Some(value))) if value.raw() == name)
-    {
-        slot.latest = None;
-    }
-}
-
 /// One optional caller waiting for the field's newest choice to settle.
 ///
-/// Restoring confirmations and renaming a template need a successful persistence
-/// acknowledgment. Delete instead needs
-/// the old request to end and its matching dirty intent retired before DELETE;
-/// the helm then clears only a matching mark, preserving another client's choice.
+/// Restoring confirmations and renaming a template need a successful
+/// persistence acknowledgment. A template delete (`deleting`) only needs the
+/// old request to end, whatever its outcome; the helm then clears only a
+/// matching binding, preserving another client's choice.
 struct PreferenceCompletion {
     sender: futures_channel::oneshot::Sender<bool>,
-    retire_template: Option<String>,
+    deleting: bool,
 }
 
 /// The write queue's whole state: a latest-wins slot per field.
@@ -1022,16 +971,6 @@ struct PreferenceCompletion {
 /// finishing last would silently win the row (the page would show the new
 /// choice while every other client — and the next launch — read the old
 /// one).
-///
-/// It also carries this client's unpersisted choices across an
-/// authentication remount: `PreferencesGate` re-reads the helm's row after
-/// a browser credential exchange (or a desktop sign-in that failed and was
-/// then retried), and without [`Self::dirty`] overlaying the
-/// still-unacked local values, that re-read would roll the current client
-/// back to whatever the helm last stored — a silent persistence failure
-/// becoming a visible reversal, which SPEC.md's best-effort clause does
-/// not license. The state is a process-wide static precisely so it lives
-/// OUTSIDE every remounted subtree.
 #[derive(Default)]
 struct PreferenceWrites {
     claude_trust_hint_dismissed: FieldWrite,
@@ -1098,13 +1037,10 @@ impl PreferenceWrites {
             let _ = previous.sender.send(false);
         }
         slot.completion = completion;
-        slot.latest = Some(value);
-        slot.acked = false;
-        if slot.in_flight {
+        if slot.latest.replace(value).is_some() {
             slot.recorded_since_send = true;
             return false;
         }
-        slot.in_flight = true;
         true
     }
 
@@ -1118,51 +1054,35 @@ impl PreferenceWrites {
 
     /// A PUT for `sent` settled. Returns whether the writer must go again
     /// because a newer value arrived while it was out; otherwise the field
-    /// is released (and marked acked on success).
+    /// is released and its value forgotten, whatever the outcome.
     /// Returning to `sent` still counts as a newer choice: another client
     /// could have overwritten its earlier commit before this response arrived.
     ///
-    /// A FAILED write is not retried on its own: the value stays dirty for
-    /// the next reauthentication replay or the next user change, per the
-    /// fire-and-forget policy — persistence failures cost the next launch,
-    /// never a retry loop against a helm that is refusing. Number-key
-    /// bindings are the exception: their caller reports the failure, and the
-    /// attempted map is discarded (SPEC.md, "One GUI at a time"). Kept, the
-    /// whole map would overlay every later read and replay after sign-in,
-    /// writing itself back over agent changes made since.
+    /// A FAILED write is neither retried nor kept: the choice stays on screen
+    /// only until the next read from the helm, and callers that report
+    /// failures do so through the completion (SPEC.md, "One GUI at a time"
+    /// and "Errors and diagnostics").
     fn finished(&mut self, field: PreferenceField, sent: &PreferenceValue, success: bool) -> bool {
         let slot = self.field(field);
         slot.sending_saves.clear();
         if slot.recorded_since_send || slot.latest.as_ref() != Some(sent) {
             return true;
         }
-        slot.acked = success;
-        slot.in_flight = false;
-        if !success && field.discards_failed_writes() {
-            slot.latest = None;
-        }
+        slot.latest = None;
         if let Some(completion) = slot.completion.take() {
-            let deleting = completion.retire_template.is_some();
-            if let Some(name) = completion.retire_template {
-                retire_template_choice(slot, &name);
-            }
-            let _ = completion.sender.send(deleting || success);
+            let _ = completion.sender.send(completion.deleting || success);
         }
         false
     }
 
     /// The writer was cancelled mid-request (its task dropped): release the
-    /// field so a later write can start a replacement, keeping the value
-    /// dirty so nothing pretends it was persisted, except for a field that
-    /// [`PreferenceField::discards_failed_writes`].
+    /// field so a later write can start a replacement, and forget the value
+    /// like a failed write.
     fn writer_lost(&mut self, field: PreferenceField) {
         let slot = self.field(field);
         slot.sending_saves.clear();
         slot.queued_saves.clear();
-        slot.in_flight = false;
-        if field.discards_failed_writes() {
-            slot.latest = None;
-        }
+        slot.latest = None;
         if let Some(completion) = slot.completion.take() {
             let _ = completion.sender.send(false);
         }
@@ -1170,58 +1090,53 @@ impl PreferenceWrites {
 
     /// Drain one shortcut field's owned request without recording another PUT.
     ///
-    /// Retirement happens before releasing the waiter, so a reauthentication
-    /// between settlement and DELETE cannot replay the obsolete name. A dirty
-    /// idle choice can be retired immediately. Writer loss refuses deletion:
-    /// a cancelled request's remote outcome is unknown.
+    /// The delete waits for that request to end, so the helm sees the write
+    /// before the delete that clears its binding. Writer loss refuses
+    /// deletion: a cancelled request's remote outcome is unknown.
     fn before_template_delete(
         &mut self,
         field: PreferenceField,
-        name: &str,
     ) -> Option<futures_channel::oneshot::Receiver<bool>> {
         let slot = self.field(field);
-        if !slot.in_flight {
-            retire_template_choice(slot, name);
-            return None;
-        }
+        slot.latest.as_ref()?;
         let (sender, receiver) = futures_channel::oneshot::channel();
         if let Some(previous) = slot.completion.replace(PreferenceCompletion {
             sender,
-            retire_template: Some(name.into()),
+            deleting: true,
         }) {
             let _ = previous.sender.send(false);
         }
         Some(receiver)
     }
 
-    /// An unconfirmed explicit mark still owns this client's display. Once
-    /// acknowledged, only the newly fetched helm mark decides rename or launch.
+    /// A mark still being written owns this client's display. Once it
+    /// settles, only the newly fetched helm mark decides rename or launch.
     #[cfg(test)]
     fn quick_launch_mark_after_read(&self, mut fetched: Preferences) -> Option<PeerText> {
         fetched = self.template_bindings_after_read(fetched);
         fetched.quick_launch_template
     }
 
-    /// Refresh both shortcut fields without rolling back unacknowledged edits.
-    /// Other preferences are left alone: this read is not credential recovery.
+    /// Refresh both shortcut fields without rolling back a write still
+    /// pending: a read that crossed it may predate it.
     fn template_bindings_after_read(&self, mut fetched: Preferences) -> Preferences {
-        for field in [
-            PreferenceField::QuickLaunchTemplate,
-            PreferenceField::TemplateShortcuts,
-        ] {
-            if let Some(value) = self.dirty(field) {
-                value.overlay(&mut fetched);
-            }
+        if let Some(PreferenceValue::QuickLaunchTemplate(mark)) =
+            self.pending(PreferenceField::QuickLaunchTemplate)
+        {
+            fetched.quick_launch_template = mark;
+        }
+        if let Some(PreferenceValue::TemplateShortcuts(bindings)) =
+            self.pending(PreferenceField::TemplateShortcuts)
+        {
+            fetched.template_shortcuts = bindings;
         }
         fetched
     }
 
-    /// This session's newest choice for `field` when no PUT has confirmed
-    /// it — what a post-reauthentication seed must overlay and replay.
-    /// `None` both when nothing was chosen and when the choice is safely on
-    /// the helm (where the fetched row is the better answer: another client
-    /// may have written since).
-    fn dirty(&self, field: PreferenceField) -> Option<PreferenceValue> {
+    /// This client's newest choice for `field` while its write is still
+    /// pending. `None` when nothing is pending: the helm's row is then the
+    /// only answer, since a settled write is forgotten either way.
+    fn pending(&self, field: PreferenceField) -> Option<PreferenceValue> {
         let slot = match field {
             PreferenceField::WelcomeSeen => &self.welcome_seen,
             PreferenceField::ClaudeTrustHintDismissed => &self.claude_trust_hint_dismissed,
@@ -1241,33 +1156,13 @@ impl PreferenceWrites {
             PreferenceField::FeedbackContact => &self.feedback_contact,
             PreferenceField::TerminalLinkClick => &self.terminal_link_click,
         };
-        if slot.acked {
-            return None;
-        }
         slot.latest.clone()
-    }
-
-    /// Claim a dirty field for a replay writer. Returns the value to send,
-    /// or `None` when there is nothing dirty or a writer already owns it.
-    fn begin_replay(&mut self, field: PreferenceField) -> Option<PreferenceValue> {
-        let value = self.dirty(field)?;
-        let saves = self.saves.clone();
-        let slot = self.field(field);
-        if slot.in_flight {
-            return None;
-        }
-        slot.in_flight = true;
-        if field.orders_requests() {
-            slot.queued_saves.push(saves.register());
-        }
-        Some(value)
     }
 }
 
 /// The process-wide write queue. A static, not component state, on
-/// purpose: it must survive `PreferencesGate` being unmounted and
-/// remounted by credential recovery (the browser's, or on desktop a failed
-/// sign-in replacing the whole `AppBody`) — see [`PreferenceWrites`].
+/// purpose: writes outlive the component that recorded them (see
+/// [`spawn_preference_writer`]).
 static PREFERENCE_WRITES: std::sync::LazyLock<std::sync::Mutex<PreferenceWrites>> =
     std::sync::LazyLock::new(|| {
         std::sync::Mutex::new(PreferenceWrites {
@@ -1286,7 +1181,7 @@ fn preference_writes() -> std::sync::MutexGuard<'static, PreferenceWrites> {
 ///
 /// `spawn_forever` outlives any one component, but the app can still tear
 /// the task down mid-await; without this, a cancelled writer would strand
-/// `in_flight = true` and every later write to that field would enqueue
+/// its pending value and every later write to that field would enqueue
 /// forever behind a writer that no longer exists.
 struct WriterGuard {
     field: PreferenceField,
@@ -1321,52 +1216,6 @@ pub(crate) fn store_preference(base: &str, value: PreferenceValue) {
     if preference_writes().record(value) {
         spawn_preference_writer(base.to_string(), field);
     }
-}
-
-/// Overlay this session's unpersisted choices onto a freshly fetched row,
-/// restarting their writes.
-///
-/// Called by `PreferencesGate` every time it (re)seeds — most importantly
-/// after credential recovery, where the fetched row predates a choice
-/// whose PUT died with the old credential. Fields whose last write was
-/// acknowledged are NOT overlaid: the helm's answer is newer authority for
-/// those (another client may have written since this one did).
-pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Preferences {
-    for field in [
-        PreferenceField::WelcomeSeen,
-        PreferenceField::ClaudeTrustHintDismissed,
-        PreferenceField::CodexTrustHintDismissed,
-        PreferenceField::MuseTrustHintDismissed,
-        PreferenceField::PiTrustHintDismissed,
-        PreferenceField::Sort,
-        PreferenceField::Selected,
-        PreferenceField::Compact,
-        PreferenceField::HostRemoveConfirmation,
-        PreferenceField::HostSetupConfirmation,
-        PreferenceField::SessionConfirmations,
-        PreferenceField::NameSessionOnQuickLaunch,
-        PreferenceField::ColorTerminalFrames,
-        PreferenceField::QuickLaunchTemplate,
-        PreferenceField::TemplateShortcuts,
-        PreferenceField::FeedbackContact,
-        PreferenceField::TerminalLinkClick,
-    ] {
-        let claimed = {
-            let mut queue = preference_writes();
-            match queue.dirty(field) {
-                Some(value) => {
-                    let claimed = queue.begin_replay(field).is_some();
-                    value.overlay(&mut seed);
-                    claimed
-                }
-                None => false,
-            }
-        };
-        if claimed {
-            spawn_preference_writer(base.to_string(), field);
-        }
-    }
-    seed
 }
 
 /// Start the one writer task a claimed field gets.
@@ -1422,10 +1271,8 @@ async fn send_preference_patch(base: &str, value: &PreferenceValue) -> bool {
 /// Templates dialog's number-key edits, and rename's repoints before it
 /// deletes the old name.
 ///
-/// The optional acknowledgment belongs to the existing latest-wins queue.
-/// A failed or cancelled ⚡ mark stays dirty for credential recovery, while a
-/// failed or cancelled number-key map is discarded (see
-/// [`PreferenceField::discards_failed_writes`]).
+/// The optional acknowledgment belongs to the existing latest-wins queue; a
+/// failed or cancelled write is discarded like any other.
 /// Receiver cancellation never cancels that process-wide writer. A rename
 /// retains both names if its particular choice is not acknowledged.
 pub(crate) fn write_template_binding(
@@ -1463,7 +1310,7 @@ fn preference_write_completion(
         value,
         Some(PreferenceCompletion {
             sender,
-            retire_template: None,
+            deleting: false,
         }),
     );
     if start {
@@ -1472,25 +1319,24 @@ fn preference_write_completion(
     async move { receiver.await.unwrap_or(false) }
 }
 
-/// Refresh shortcut bindings without discarding unconfirmed local choices.
-/// Only these fields are overlaid; a bindings read is not credential recovery and
-/// must not replay unrelated dirty preferences. Rename and direct launch both
-/// honor this ownership; an acknowledged choice yields to the fresh shared read.
+/// Refresh shortcut bindings without rolling back a write still pending. Only
+/// these two fields are overlaid. Rename and direct launch both use it; once a
+/// write settles, the fresh shared read decides.
 pub(crate) fn template_bindings_after_read(fetched: Preferences) -> Preferences {
     preference_writes().template_bindings_after_read(fetched)
 }
 
-/// Order template deletion after shortcut writes and retire matching local intent.
+/// Order template deletion after shortcut writes still in flight.
 /// No null preference PUT is sent: only the helm's matching-name delete has
 /// authority to clear shared bindings. A lost writer requires a deliberate retry.
-pub(crate) async fn prepare_template_delete(name: &str) -> bool {
+pub(crate) async fn prepare_template_delete() -> bool {
     let waiting = {
         let mut queue = preference_writes();
         [
             PreferenceField::QuickLaunchTemplate,
             PreferenceField::TemplateShortcuts,
         ]
-        .map(|field| queue.before_template_delete(field, name))
+        .map(|field| queue.before_template_delete(field))
     };
     for receiver in waiting.into_iter().flatten() {
         if !receiver.await.unwrap_or(false) {
@@ -4737,7 +4583,8 @@ pub(crate) async fn close_tunnel(base: &str, session: &str, id: &str) -> Result<
 
 /// Persist the security choice before changing its UI mirror or acting on it.
 /// A disabling write also closes every listener server-side. This field never
-/// enters the ordinary best-effort queue, whose replay could restore revoked consent.
+/// enters the ordinary queue, whose fire-and-forget writes cannot hold the
+/// caller until the helm has accepted revoked consent.
 #[cfg(native_desktop)]
 pub(crate) async fn write_tunnel_consent(base: &str, allowed: bool) -> Result<(), String> {
     let url = format!("{base}/api/preferences");
@@ -4756,7 +4603,7 @@ pub(crate) async fn write_tunnel_consent(base: &str, allowed: bool) -> Result<()
 /// Save the desktop opener's list only after the helm accepts its validation.
 ///
 /// The ordinary preference queue cannot report a rejected security choice to
-/// the field, and replaying a stale queued write could undo a later save.
+/// the field.
 #[cfg(native_desktop)]
 pub(crate) async fn write_open_extensions(base: &str, value: &str) -> Result<(), String> {
     let url = format!("{base}/api/preferences");
@@ -5188,11 +5035,9 @@ mod tests {
         );
     }
 
-    /// Dirty does not mean active: a refused or cancelled shortcut save must
-    /// free the reauthentication seed that will eventually restart its writer.
-    /// It uses the ⚡ mark, which keeps a failed value for that replay; a failed
-    /// number-key map is discarded instead (see
-    /// `failed_number_key_save_is_discarded_not_replayed`).
+    /// A refused or cancelled shortcut save must release the reads ordered
+    /// behind it, and leaves nothing pending: the value is discarded, not
+    /// kept for a later writer (SPEC.md, "One GUI at a time").
     #[farhelm_testtrace::test]
     fn failed_and_cancelled_shortcut_writes_release_reads() {
         use std::task::{Context, Waker};
@@ -5205,18 +5050,17 @@ mod tests {
             let mut read = std::pin::pin!(queue.saves.preceding());
             let mut cx = Context::from_waker(Waker::noop());
             assert!(read.as_mut().poll(&mut cx).is_pending());
+            assert!(
+                queue.pending(field).is_some(),
+                "premise: the write is pending"
+            );
             if cancelled {
                 queue.writer_lost(field);
             } else {
                 assert!(!queue.finished(field, &value, false));
             }
-            assert!(queue.dirty(field).is_some());
+            assert!(queue.pending(field).is_none());
             assert!(read.as_mut().poll(&mut cx).is_ready());
-            assert!(queue.begin_replay(field).is_some());
-            let mut replay_read = std::pin::pin!(queue.saves.preceding());
-            assert!(replay_read.as_mut().poll(&mut cx).is_pending());
-            queue.writer_lost(field);
-            assert!(replay_read.as_mut().poll(&mut cx).is_ready());
         }
     }
 
@@ -6387,7 +6231,7 @@ mod tests {
     }
 }
 
-/// The preference write queue's ordering and replay contract, pinned on the
+/// The preference write queue's ordering and discard contract, pinned on the
 /// pure state machine so no runtime or network is involved.
 #[cfg(test)]
 mod preference_write_tests {
@@ -6441,10 +6285,12 @@ mod preference_write_tests {
         );
     }
 
-    /// Independent dismissals must survive failed writes and credential replay
-    /// without borrowing an acknowledgment from another agent's queue slot.
+    /// Each agent's trust-hint dismissal owns its queue slot: one settling
+    /// never settles another. A dismissal is visible to reads only while its
+    /// own write is pending, and a failed one is forgotten rather than kept
+    /// for a resend (SPEC.md, "One GUI at a time").
     #[farhelm_testtrace::test]
-    fn agent_trust_dismissals_keep_independent_dirty_intent() {
+    fn agent_trust_dismissals_use_independent_slots() {
         let mut queue = PreferenceWrites::default();
         let values = [
             PreferenceValue::ClaudeTrustHintDismissed(true),
@@ -6465,54 +6311,29 @@ mod preference_write_tests {
         }
         let codex = &values[1];
         assert!(!queue.finished(codex.field(), codex, true));
-        let mut seed = Preferences::default();
+        assert_eq!(queue.pending(codex.field()), None);
         for value in [&values[0], &values[2], &values[3]] {
+            assert_eq!(
+                queue.pending(value.field()),
+                Some(value.clone()),
+                "another slot settling leaves this write pending"
+            );
             assert!(!queue.finished(value.field(), value, false));
-            let dirty = queue
-                .dirty(value.field())
-                .expect("failed dismissal stays dirty");
-            dirty.overlay(&mut seed);
-            assert_eq!(queue.begin_replay(value.field()), Some(value.clone()));
-            assert!(!queue.finished(value.field(), value, true));
-            assert_eq!(queue.dirty(value.field()), None);
+            assert_eq!(
+                queue.pending(value.field()),
+                None,
+                "a failed dismissal is forgotten"
+            );
         }
-        assert_eq!(seed.claude_trust_hint_dismissed, Some(true));
-        assert_eq!(seed.codex_trust_hint_dismissed, None);
-        assert_eq!(seed.muse_trust_hint_dismissed, Some(true));
-        assert_eq!(seed.pi_trust_hint_dismissed, Some(true));
-        assert_eq!(queue.dirty(codex.field()), None);
-        assert_eq!(queue.begin_replay(codex.field()), None);
     }
 
-    /// Dismissal uses the ordinary independent queue slot. A failed write
-    /// remains local intent across credential recovery, rather than reopening
-    /// the first-open card because the server still says unseen.
-    #[farhelm_testtrace::test]
-    fn welcome_seen_failure_keeps_replay_intent() {
-        let mut queue = PreferenceWrites::default();
-        let field = PreferenceField::WelcomeSeen;
-        let seen = PreferenceValue::WelcomeSeen(true);
-        assert!(queue.record(seen.clone()));
-        assert_eq!(queue.next_to_send(field), Some(seen.clone()));
-        assert!(!queue.finished(field, &seen, false));
-        assert_eq!(queue.dirty(field), Some(seen.clone()));
-        let mut seed = Preferences::default();
-        queue.dirty(field).unwrap().overlay(&mut seed);
-        assert_eq!(seed.welcome_seen, Some(true));
-        assert_eq!(seen.wire_value(), serde_json::json!(true));
-        assert_eq!(field.key(), "welcome_seen");
-        assert_eq!(queue.begin_replay(field), Some(seen.clone()));
-        assert!(!queue.finished(field, &seen, true));
-        assert_eq!(queue.dirty(field), None);
-    }
-
-    /// A failed number-key save is discarded rather than kept for replay
-    /// (SPEC.md, "One GUI at a time"): neither the next fresh read nor the
-    /// sign-in replay may bring back the map it tried to save, or it would
-    /// undo an agent's later binding. Deleting a template still waits for the
-    /// owned PUT. A cancelled writer, whose outcome is unknown, discards its map
-    /// too and still refuses deletion. A failure only discards the map it sent:
-    /// a newer choice recorded meanwhile still goes out.
+    /// A failed number-key save is discarded, like every failed save (SPEC.md,
+    /// "One GUI at a time"): the next fresh read must not bring back the map it
+    /// tried to save, or it would undo an agent's later binding. Deleting a
+    /// template still waits for the owned PUT. A cancelled writer, whose
+    /// outcome is unknown, discards its map too and refuses deletion. A failure
+    /// only discards the map it sent: a newer choice recorded meanwhile still
+    /// goes out.
     #[farhelm_testtrace::test]
     fn failed_number_key_save_is_discarded_not_replayed() {
         use std::collections::BTreeMap;
@@ -6530,14 +6351,14 @@ mod preference_write_tests {
             read.as_mut().poll(&mut cx).is_pending(),
             "premise: reads wait for the save"
         );
-        let mut deleting = queue.before_template_delete(field, "deleted").unwrap();
+        let mut deleting = queue.before_template_delete(field).unwrap();
         assert_eq!(
             deleting.try_recv(),
             Ok(None),
             "premise: deletion waits for the owned PUT"
         );
         assert_eq!(
-            queue.dirty(field),
+            queue.pending(field),
             Some(value.clone()),
             "premise: a pending save still overlays reads"
         );
@@ -6547,8 +6368,7 @@ mod preference_write_tests {
             read.as_mut().poll(&mut cx).is_ready(),
             "the failure releases reads"
         );
-        assert_eq!(queue.dirty(field), None, "the failed map is discarded");
-        assert_eq!(queue.begin_replay(field), None, "sign-in replays nothing");
+        assert_eq!(queue.pending(field), None, "the failed map is discarded");
         let helm = Preferences {
             template_shortcuts: BTreeMap::from([("1".into(), "agent".into())]),
             ..Default::default()
@@ -6563,14 +6383,18 @@ mod preference_write_tests {
             PreferenceValue::TemplateShortcuts(BTreeMap::from([("0".into(), "kept".into())]));
         assert!(queue.record(pending.clone()));
         assert_eq!(queue.next_to_send(field), Some(pending));
-        let mut deleting = queue.before_template_delete(field, "kept").unwrap();
+        let mut deleting = queue.before_template_delete(field).unwrap();
         queue.writer_lost(field);
         assert_eq!(
             deleting.try_recv(),
             Ok(Some(false)),
             "lost ownership refuses deletion"
         );
-        assert_eq!(queue.dirty(field), None, "a cancelled map is discarded too");
+        assert_eq!(
+            queue.pending(field),
+            None,
+            "a cancelled map is discarded too"
+        );
 
         let newer =
             PreferenceValue::TemplateShortcuts(BTreeMap::from([("2".into(), "newer".into())]));
@@ -6584,8 +6408,8 @@ mod preference_write_tests {
         assert_eq!(queue.next_to_send(field), Some(newer));
     }
 
-    /// A bindings refresh honors both unconfirmed local shortcut fields, then
-    /// yields to another window after acknowledgment. The wire still replaces
+    /// A bindings refresh honors both shortcut fields' pending writes, then
+    /// yields to another window once they settle. The wire still replaces
     /// the map as a single independent preference, including an empty map.
     #[farhelm_testtrace::test]
     fn number_bindings_refresh_and_clear_through_the_shared_queue() {
@@ -6635,17 +6459,17 @@ mod preference_write_tests {
             value,
             Some(PreferenceCompletion {
                 sender,
-                retire_template: None,
+                deleting: false,
             }),
         );
         receiver
     }
 
-    /// Refreshing rename must distinguish a dirty explicit choice from an old
-    /// sign-in seed. Dirty clears are real choices too; once acknowledged, a
-    /// later other-client mark is authoritative without rewriting that field.
+    /// Rename's refresh keeps a mark of ours only while its write is
+    /// pending, clears included. Once that write settles, failed or not, the
+    /// helm's mark (perhaps another client's) is the answer.
     #[farhelm_testtrace::test]
-    fn rename_mark_refresh_preserves_only_unconfirmed_local_intent() {
+    fn rename_mark_refresh_keeps_only_a_pending_local_mark() {
         let mut queue = PreferenceWrites::default();
         let field = PreferenceField::QuickLaunchTemplate;
         let seed = Preferences {
@@ -6665,13 +6489,8 @@ mod preference_write_tests {
         assert!(!queue.finished(field, &choice, false));
         assert_eq!(
             queue.quick_launch_mark_after_read(seed.clone()),
-            Some("local".into())
-        );
-        assert_eq!(queue.begin_replay(field), Some(choice.clone()));
-        assert!(!queue.finished(field, &choice, true));
-        assert_eq!(
-            queue.quick_launch_mark_after_read(seed.clone()),
-            Some("other-client".into())
+            Some("other-client".into()),
+            "a failed mark is forgotten"
         );
         assert!(queue.record(PreferenceValue::QuickLaunchTemplate(None)));
         assert_eq!(queue.quick_launch_mark_after_read(seed), None);
@@ -6699,15 +6518,17 @@ mod preference_write_tests {
         assert_eq!(queue.next_to_send(field), Some(a.clone()));
         assert!(!queue.finished(field, &a, true));
         assert_eq!(newest.try_recv(), Ok(Some(true)));
-        assert_eq!(queue.dirty(field), None);
+        assert_eq!(queue.pending(field), None);
     }
 
-    /// Failure and writer loss must unblock rename while retaining recovery.
-    /// Losing only the receiver cannot cancel persistence or erase the choice.
+    /// Failure and writer loss unblock rename and discard the choice: a failed
+    /// save is reported through the waiter and never kept for a resend
+    /// (SPEC.md, "One GUI at a time"). Losing only the receiver cannot cancel
+    /// the write itself.
     #[farhelm_testtrace::test]
-    fn acknowledgment_failure_and_cancellation_preserve_dirty_recovery() {
+    fn acknowledgment_failure_and_cancellation_discard_the_value() {
         let field = PreferenceField::QuickLaunchTemplate;
-        let value = PreferenceValue::QuickLaunchTemplate(Some("kept".into()));
+        let value = PreferenceValue::QuickLaunchTemplate(Some("chosen".into()));
         for lost in [false, true] {
             let mut queue = PreferenceWrites::default();
             let mut waiting = record_waiting(&mut queue, value.clone());
@@ -6718,137 +6539,87 @@ mod preference_write_tests {
                 assert!(!queue.finished(field, &value, false));
             }
             assert_eq!(waiting.try_recv(), Ok(Some(false)));
-            assert_eq!(queue.dirty(field), Some(value.clone()));
-            assert_eq!(queue.begin_replay(field), Some(value.clone()));
-            assert_eq!(queue.next_to_send(field), Some(value.clone()));
-            assert!(!queue.finished(field, &value, true));
-            assert_eq!(queue.dirty(field), None);
+            assert_eq!(queue.pending(field), None, "the failed choice is discarded");
         }
         let mut queue = PreferenceWrites::default();
         drop(record_waiting(&mut queue, value.clone()));
-        assert_eq!(queue.dirty(field), Some(value.clone()));
-        assert_eq!(queue.begin_replay(field), None);
+        assert_eq!(
+            queue.pending(field),
+            Some(value.clone()),
+            "dropping the waiter does not cancel the write"
+        );
         assert_eq!(queue.next_to_send(field), Some(value.clone()));
         assert!(!queue.finished(field, &value, true));
-        assert_eq!(queue.dirty(field), None);
+        assert_eq!(queue.pending(field), None);
     }
 
-    /// A settled old-name PUT must precede DELETE, even on failure. Retirement
-    /// is synchronous with settlement so credential recovery and Undo cannot
-    /// revive the deleted mark. No replacement null write is needed.
+    /// A template delete waits for the mark's PUT already in flight, so the
+    /// helm sees that write before the delete that clears it, and proceeds
+    /// whether the write succeeded or failed. With nothing in flight there is
+    /// nothing to wait for. A lost writer's outcome is unknown, so the delete
+    /// refuses rather than let a late PUT restore a mark after the helm's clear.
     #[farhelm_testtrace::test]
-    fn deleting_a_template_retires_its_dirty_mark_before_replay() {
+    fn deleting_a_template_waits_for_a_pending_mark_write() {
         let field = PreferenceField::QuickLaunchTemplate;
         let value = PreferenceValue::QuickLaunchTemplate(Some("deleted".into()));
         for success in [false, true] {
             let mut queue = PreferenceWrites::default();
             assert!(queue.record(value.clone()));
             assert_eq!(queue.next_to_send(field), Some(value.clone()));
-            let mut deleting = queue
-                .before_template_delete(PreferenceField::QuickLaunchTemplate, "deleted")
-                .unwrap();
+            let mut deleting = queue.before_template_delete(field).unwrap();
             assert_eq!(deleting.try_recv(), Ok(None));
             assert!(!queue.finished(field, &value, success));
-            assert_eq!(queue.dirty(field), None);
-            assert_eq!(queue.begin_replay(field), None);
+            assert_eq!(queue.pending(field), None);
             assert_eq!(deleting.try_recv(), Ok(Some(true)));
+            assert!(queue.before_template_delete(field).is_none());
         }
         let mut queue = PreferenceWrites::default();
         assert!(queue.record(value.clone()));
-        assert!(!queue.finished(field, &value, false));
-        assert_eq!(queue.dirty(field), Some(value));
-        assert!(
-            queue
-                .before_template_delete(PreferenceField::QuickLaunchTemplate, "deleted")
-                .is_none()
-        );
-        assert_eq!(queue.begin_replay(field), None);
-    }
-
-    /// Deleting one name has no authority over another local mark. An unknown
-    /// request outcome refuses the delete rather than allowing a late PUT to
-    /// restore its mark after the helm's transactional clear.
-    #[farhelm_testtrace::test]
-    fn deletion_preserves_different_marks_and_refuses_writer_loss() {
-        let field = PreferenceField::QuickLaunchTemplate;
-        let value = PreferenceValue::QuickLaunchTemplate(Some("other".into()));
-        let mut queue = PreferenceWrites::default();
-        assert!(queue.record(value.clone()));
-        assert_eq!(queue.next_to_send(field), Some(value.clone()));
-        let mut deleting = queue
-            .before_template_delete(PreferenceField::QuickLaunchTemplate, "deleted")
-            .unwrap();
-        assert!(!queue.finished(field, &value, false));
-        assert_eq!(deleting.try_recv(), Ok(Some(true)));
-        assert_eq!(queue.dirty(field), Some(value.clone()));
-        assert!(
-            queue
-                .before_template_delete(PreferenceField::QuickLaunchTemplate, "deleted")
-                .is_none()
-        );
-        assert_eq!(queue.dirty(field), Some(value.clone()));
-        assert_eq!(queue.begin_replay(field), Some(value.clone()));
-        let mut deleting = queue
-            .before_template_delete(PreferenceField::QuickLaunchTemplate, "other")
-            .unwrap();
+        assert_eq!(queue.next_to_send(field), Some(value));
+        let mut deleting = queue.before_template_delete(field).unwrap();
         queue.writer_lost(field);
         assert_eq!(deleting.try_recv(), Ok(Some(false)));
-        assert_eq!(queue.dirty(field), Some(value));
     }
 
-    /// Session opt-out writes own their queue slot and replay after a failed
-    /// save without replacing independent host choices. False is a real choice.
+    /// Session opt-out writes own their queue slot: settling one leaves an
+    /// independent host choice pending. False is a real choice on the wire.
     #[farhelm_testtrace::test]
-    fn session_confirmations_have_an_independent_replay_slot() {
+    fn session_confirmations_have_an_independent_slot() {
         let mut queue = PreferenceWrites::default();
         let skip = PreferenceValue::SessionConfirmations(true);
+        let host = PreferenceValue::HostRemoveConfirmation(true);
         assert_eq!(skip.field().key(), "skip_session_confirmations");
         assert_eq!(skip.wire_value(), serde_json::json!(true));
         assert!(queue.record(skip.clone()));
-        assert!(queue.record(PreferenceValue::HostRemoveConfirmation(true)));
+        assert!(queue.record(host.clone()));
         assert!(!queue.finished(skip.field(), &skip, false));
-        let mut seed = Preferences::default();
-        queue.dirty(skip.field()).unwrap().overlay(&mut seed);
-        assert_eq!(seed.skip_session_confirmations, Some(true));
-        assert_eq!(seed.skip_host_remove_confirmation, None);
-        assert_eq!(queue.begin_replay(skip.field()), Some(skip.clone()));
+        assert_eq!(queue.pending(skip.field()), None);
+        assert_eq!(queue.pending(host.field()), Some(host));
         let ask = PreferenceValue::SessionConfirmations(false);
-        assert!(!queue.record(ask.clone()));
-        assert!(queue.finished(skip.field(), &skip, true));
-        assert_eq!(queue.next_to_send(skip.field()), Some(ask.clone()));
+        assert!(queue.record(ask.clone()));
         assert_eq!(ask.wire_value(), serde_json::json!(false));
-        assert!(!queue.finished(ask.field(), &ask, true));
-        assert_eq!(queue.dirty(ask.field()), None);
-        ask.overlay(&mut seed);
-        assert_eq!(seed.skip_session_confirmations, Some(false));
     }
 
-    /// Naming's explicit opt-out must survive credential recovery independently
-    /// of confirmation choices; false must never disappear as an absent value.
+    /// Naming's explicit opt-out owns its queue slot, independent of
+    /// confirmation choices; false must never disappear as an absent value.
     #[farhelm_testtrace::test]
-    fn quick_launch_naming_has_an_independent_replay_slot() {
+    fn quick_launch_naming_has_an_independent_slot() {
         let mut queue = PreferenceWrites::default();
         let naming = PreferenceValue::NameSessionOnQuickLaunch(false);
+        let confirmations = PreferenceValue::SessionConfirmations(true);
         assert_eq!(naming.field().key(), "name_session_on_quick_launch");
         assert_eq!(naming.wire_value(), serde_json::json!(false));
         assert!(queue.record(naming.clone()));
-        assert!(queue.record(PreferenceValue::SessionConfirmations(true)));
+        assert!(queue.record(confirmations.clone()));
         assert!(!queue.finished(naming.field(), &naming, false));
-        let mut seed = Preferences::default();
-        queue.dirty(naming.field()).unwrap().overlay(&mut seed);
-        assert_eq!(seed.name_session_on_quick_launch, Some(false));
-        assert_eq!(seed.skip_session_confirmations, None);
-        assert_eq!(queue.begin_replay(naming.field()), Some(naming.clone()));
-        assert!(!queue.finished(naming.field(), &naming, true));
-        assert_eq!(queue.dirty(naming.field()), None);
+        assert_eq!(queue.pending(naming.field()), None);
+        assert_eq!(queue.pending(confirmations.field()), Some(confirmations));
         let enabled = PreferenceValue::NameSessionOnQuickLaunch(true);
         assert_eq!(enabled.wire_value(), serde_json::json!(true));
-        enabled.overlay(&mut seed);
-        assert_eq!(seed.name_session_on_quick_launch, Some(true));
     }
 
-    /// A failed link choice survives reauthentication and serializes as its
-    /// own sparse field. Unknown persisted values retain default interception.
+    /// A link choice serializes as its own sparse field, and a failed one is
+    /// forgotten. Unknown persisted values retain default interception.
     #[farhelm_testtrace::test]
     fn terminal_link_click_uses_the_shared_queue_and_default() {
         assert_eq!(
@@ -6873,16 +6644,7 @@ mod preference_write_tests {
                 Some(value.clone())
             );
             assert!(!queue.finished(PreferenceField::TerminalLinkClick, &value, false));
-            let mut seed = Preferences {
-                compact: Some(true),
-                ..Preferences::default()
-            };
-            queue
-                .dirty(PreferenceField::TerminalLinkClick)
-                .unwrap()
-                .overlay(&mut seed);
-            assert_eq!(seed.terminal_link_click.as_deref(), Some(mode.key()));
-            assert_eq!(seed.compact, Some(true));
+            assert_eq!(queue.pending(PreferenceField::TerminalLinkClick), None);
             assert_eq!(value.wire_value(), serde_json::json!(mode.key()));
         }
     }
@@ -6904,43 +6666,11 @@ mod preference_write_tests {
             assert!(!queue.record(PreferenceValue::Compact(false)));
             assert!(!queue.record(value.clone()));
             assert!(queue.finished(field, &value, first_succeeded));
-            assert_eq!(queue.dirty(field), Some(value.clone()));
+            assert_eq!(queue.pending(field), Some(value.clone()));
             assert_eq!(queue.next_to_send(field), Some(value.clone()));
             assert!(!queue.finished(field, &value, false));
-            assert_eq!(queue.dirty(field), Some(value));
+            assert_eq!(queue.pending(field), None);
         }
-    }
-
-    /// A failed contact clear must survive reauthentication as an explicit
-    /// null. Overlaying an old helm seed must not resurrect forgotten contact,
-    /// and a later successful replay returns authority to the helm.
-    #[farhelm_testtrace::test]
-    fn failed_feedback_contact_clear_overlays_and_replays_as_null() {
-        let mut queue = PreferenceWrites::default();
-        let clear = PreferenceValue::FeedbackContact(None);
-        let field = PreferenceField::FeedbackContact;
-        assert!(queue.record(clear.clone()));
-        assert_eq!(queue.next_to_send(field), Some(clear.clone()));
-        assert!(!queue.finished(field, &clear, false));
-        let mut seed = Preferences {
-            feedback_contact: Some("old@example.test".to_string()),
-            compact: Some(true),
-            ..Preferences::default()
-        };
-        let dirty = queue.dirty(field).expect("failed clear remains dirty");
-        dirty.overlay(&mut seed);
-        assert_eq!(seed.feedback_contact, None);
-        assert_eq!(seed.compact, Some(true));
-        let replay = queue
-            .begin_replay(field)
-            .expect("clear gets a replay writer");
-        assert_eq!(
-            serde_json::json!({ replay.field().key(): replay.wire_value() }),
-            serde_json::json!({"feedback_contact": null})
-        );
-        assert_eq!(queue.begin_replay(field), None);
-        assert!(!queue.finished(field, &replay, true));
-        assert_eq!(queue.dirty(field), None);
     }
 
     /// Same-field writes are serialized latest-wins: a value recorded while
@@ -6986,17 +6716,17 @@ mod preference_write_tests {
             true
         ));
         assert_eq!(
-            queue.dirty(PreferenceField::Sort),
+            queue.pending(PreferenceField::Sort),
             None,
-            "an acknowledged newest value is clean — the helm's row is authority again"
+            "a settled newest value is forgotten — the helm's row is authority again"
         );
     }
 
-    /// The failed-read fallback and credential-recovery overlay must retain
-    /// the same bounded visit order as local selection, without touching sort
-    /// or adding a client-authored history field to the selection request.
+    /// The failed-read fallback mirror must retain the same bounded visit
+    /// order as local selection, without touching sort or adding a
+    /// client-authored history field to the selection request.
     #[farhelm_testtrace::test]
-    fn selection_mirror_and_recovery_overlay_keep_bounded_visits() {
+    fn selection_mirror_keeps_bounded_visits() {
         let mut preferences = Preferences {
             list_sort: Some("title".into()),
             ..Preferences::default()
@@ -7009,8 +6739,7 @@ mod preference_write_tests {
             preferences.visit_history.last().map(PeerText::raw),
             Some("session-3")
         );
-        let selected = PreferenceValue::Selected("session-20".into());
-        selected.overlay(&mut preferences);
+        preferences.record_selection("session-20");
         assert_eq!(
             preferences.last_selected.as_ref().map(PeerText::raw),
             Some("session-20")
@@ -7029,7 +6758,10 @@ mod preference_write_tests {
         );
         assert_eq!(preferences.visit_history.len(), 32);
         assert_eq!(preferences.list_sort.as_deref(), Some("title"));
-        assert_eq!(selected.wire_value(), serde_json::json!("session-20"));
+        assert_eq!(
+            PreferenceValue::Selected("session-20".into()).wire_value(),
+            serde_json::json!("session-20")
+        );
         assert!(
             serde_json::from_str::<Preferences>("{}")
                 .unwrap()
@@ -7062,72 +6794,23 @@ mod preference_write_tests {
         );
     }
 
-    /// A failed write leaves the value DIRTY and the field free: no retry
-    /// loop (fire-and-forget), but the choice is not forgotten — it is what
-    /// the post-reauthentication seed overlays and replays (review F2).
+    /// A cancelled writer releases the field and forgets the value like a
+    /// failed write, so a later write starts a fresh writer instead of
+    /// queueing forever behind a task that no longer exists.
     #[farhelm_testtrace::test]
-    fn a_failed_write_stays_dirty_and_is_claimed_exactly_once_for_replay() {
-        let mut queue = PreferenceWrites::default();
-        assert!(queue.record(PreferenceValue::Selected("session-9".to_string())));
-        assert!(!queue.finished(
-            PreferenceField::Selected,
-            &PreferenceValue::Selected("session-9".to_string()),
-            false
-        ));
-
-        assert_eq!(
-            queue.dirty(PreferenceField::Selected),
-            Some(PreferenceValue::Selected("session-9".to_string())),
-            "the unpersisted choice must survive for the replay"
-        );
-        assert_eq!(
-            queue.begin_replay(PreferenceField::Selected),
-            Some(PreferenceValue::Selected("session-9".to_string()))
-        );
-        assert_eq!(
-            queue.begin_replay(PreferenceField::Selected),
-            None,
-            "a second gate mount must not start a rival writer for the same field"
-        );
-        assert!(!queue.finished(
-            PreferenceField::Selected,
-            &PreferenceValue::Selected("session-9".to_string()),
-            true
-        ));
-        assert_eq!(queue.dirty(PreferenceField::Selected), None);
-    }
-
-    /// A cancelled writer releases the field but keeps the value dirty, so
-    /// a later write starts a fresh writer instead of queueing forever
-    /// behind a task that no longer exists.
-    #[farhelm_testtrace::test]
-    fn a_lost_writer_releases_the_field_without_forgetting_the_value() {
+    fn a_lost_writer_releases_the_field_and_forgets_the_value() {
         let mut queue = PreferenceWrites::default();
         assert!(queue.record(PreferenceValue::Sort("title".to_string())));
-        queue.writer_lost(PreferenceField::Sort);
-        assert_eq!(
-            queue.dirty(PreferenceField::Sort),
-            Some(PreferenceValue::Sort("title".to_string()))
+        assert!(
+            queue.pending(PreferenceField::Sort).is_some(),
+            "premise: the write is pending"
         );
+        queue.writer_lost(PreferenceField::Sort);
+        assert_eq!(queue.pending(PreferenceField::Sort), None);
         assert!(
             queue.record(PreferenceValue::Sort("created".to_string())),
             "the next write must be able to start a replacement writer"
         );
-    }
-
-    /// A clean field yields nothing to replay: after an acknowledged write,
-    /// the fetched row (possibly another client's newer choice) wins.
-    #[farhelm_testtrace::test]
-    fn an_acknowledged_field_is_not_overlaid_onto_a_fetched_seed() {
-        let mut queue = PreferenceWrites::default();
-        assert!(queue.record(PreferenceValue::Sort("title".to_string())));
-        assert!(!queue.finished(
-            PreferenceField::Sort,
-            &PreferenceValue::Sort("title".to_string()),
-            true
-        ));
-        assert_eq!(queue.dirty(PreferenceField::Sort), None);
-        assert_eq!(queue.begin_replay(PreferenceField::Sort), None);
     }
 }
 
