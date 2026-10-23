@@ -653,7 +653,12 @@ class NotFastForward(Exception):
 
 
 class GitHub(Protocol):
-    """The handful of GitHub operations the script needs. The real one shells out to `gh api`; tests inject a fake."""
+    """The handful of GitHub operations the script needs. The real one shells out to `gh api`; tests inject a fake.
+
+    PRs come back as dicts with `number`, `ref` (the head branch), `repo` (the head branch's repository as
+    `owner/name`, or None when that repository is gone) and `base` (the repository the PR targets), so `plan_pulls`
+    can tell this repository's PRs from a fork's.
+    """
 
     def head(self, branch: str) -> str: ...
 
@@ -760,7 +765,12 @@ class GhApi:
     def open_pulls(self) -> list[dict]:
         out = self._call(
             "pulls?state=open&per_page=100",
-            extra=["--paginate", "--jq", ".[] | {number, ref: .head.ref, draft, url: .html_url}"],
+            extra=[
+                "--paginate",
+                "--jq",
+                ".[] | {number, ref: .head.ref, repo: .head.repo.full_name, base: .base.repo.full_name, draft,"
+                " url: .html_url}",
+            ],
         )
         return [json.loads(line) for line in out.splitlines() if line.strip()]
 
@@ -769,7 +779,13 @@ class GhApi:
 
     def pull(self, number: int) -> dict:
         data = self._json(f"pulls/{number}")
-        return {"number": data["number"], "ref": data["head"]["ref"], "merged": bool(data.get("merged_at"))}
+        return {
+            "number": data["number"],
+            "ref": data["head"]["ref"],
+            "repo": (data["head"].get("repo") or {}).get("full_name"),
+            "base": data["base"]["repo"]["full_name"],
+            "merged": bool(data.get("merged_at")),
+        }
 
     def merged_pulls(self, prefix: str) -> list[dict]:
         # Search matches head branches by prefix but is approximate and can lag a fresh merge by a minute or so, so
@@ -868,6 +884,19 @@ def _entry(index: Index, slug: str) -> Entry:
     return entry
 
 
+def plan_pulls(pulls: list[dict], slug: str) -> list[dict]:
+    """The PRs among `pulls` that are `slug`'s own work: head branch under `plan/<slug>/` in the PR's own repository.
+
+    The branch name alone is not enough, because a PR from a fork can name its branch anything. Counted, a fork's PR
+    would show a stranger's commits to executors as the plan's unlanded work, and would make `landed` and `abandon`
+    refuse until someone closed it. The head repository is compared with the PR's base repository, both from the same
+    GitHub response, rather than with `--repo`, so the comparison still holds after a rename or a transfer, when GitHub
+    reports the new name for both. A PR whose head repository was deleted has none and does not count.
+    """
+    prefix = f"plan/{slug}/"
+    return [p for p in pulls if p["ref"].startswith(prefix) and p["repo"] is not None and p["repo"] == p["base"]]
+
+
 def _require(entry: Entry, states: tuple[str, ...], claim: str | None = None) -> None:
     if entry.state not in states:
         raise Precondition(f"lost: {entry.slug} is [{entry.state_text()}], not {' or '.join(states)}")
@@ -882,7 +911,7 @@ def _require_merged(req: Request, gh: GitHub) -> None:
     tell its dependents and the maintainer that work is on main which never reached it. So the caller names the PRs
     that landed, and each is checked.
     """
-    open_prs = [p for p in gh.open_pulls() if p["ref"].startswith(f"plan/{req.slug}/")]
+    open_prs = plan_pulls(gh.open_pulls(), req.slug)
     if open_prs:
         numbers = ", ".join(f"#{p['number']}" for p in open_prs)
         raise Precondition(f"{req.slug} still has open PRs ({numbers}); land or close them first")
@@ -890,8 +919,8 @@ def _require_merged(req: Request, gh: GitHub) -> None:
         raise Usage(f"{req.verb} needs --merged with the numbers of the plan's PRs that landed")
     for number in req.merged:
         pull = gh.pull(number)
-        if not pull["ref"].startswith(f"plan/{req.slug}/"):
-            raise Usage(f"#{number} is not one of {req.slug}'s PRs (head {pull['ref']})")
+        if not plan_pulls([pull], req.slug):
+            raise Usage(f"#{number} is not one of {req.slug}'s PRs (head {pull['repo']}:{pull['ref']})")
         if not pull["merged"]:
             raise Precondition(f"#{number} has not merged")
 
@@ -1007,7 +1036,7 @@ def plan_transition(req: Request, snap: Snapshot, gh: GitHub) -> Change:
     elif req.verb == "abandon":
         # A claimed plan has a holder who would keep working on it; that claim is released first, on purpose.
         _require(entry, ("pending", "blocked", "complete"))
-        open_prs = [p for p in gh.open_pulls() if p["ref"].startswith(f"plan/{req.slug}/")]
+        open_prs = plan_pulls(gh.open_pulls(), req.slug)
         if open_prs:
             numbers = ", ".join(f"#{p['number']}" for p in open_prs)
             raise Precondition(f"{req.slug} still has open PRs ({numbers}); close them first")
@@ -1281,7 +1310,7 @@ def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.dateti
     plans = []
     for entry in index.entries:
         prs = sorted(
-            ({"number": p["number"], "ref": p["ref"]} for p in pulls if p["ref"].startswith(f"plan/{entry.slug}/")),
+            ({"number": p["number"], "ref": p["ref"]} for p in plan_pulls(pulls, entry.slug)),
             key=lambda p: p["ref"],
         )
         # A landing claim is the monitor's; the plan's working log belongs to executors and says nothing about it.
@@ -1312,7 +1341,7 @@ def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.dateti
                 if hours > 24 and (quiet is None or quiet > 6):
                     item["flags"].append("possibly abandoned: claimed over 24 h ago and its log is quiet")
         if entry.state == "landing" and not prs:
-            merged = gh.merged_pulls(f"plan/{entry.slug}/")
+            merged = plan_pulls(gh.merged_pulls(f"plan/{entry.slug}/"), entry.slug)
             if merged:
                 numbers = ",".join(str(p["number"]) for p in merged)
                 item["flags"].append(f"landing, no open PRs, merged {numbers}: finish with landed --merged")
@@ -1323,7 +1352,7 @@ def status(gh: GitHub, branch: str, logs_dir: pathlib.Path, now: datetime.dateti
         if entry.state == "complete" and not prs:
             # Either a landing merged everything and died before `landed` (and was released), or the PRs were closed.
             # Only the first can be finished without the maintainer.
-            merged = gh.merged_pulls(f"plan/{entry.slug}/")
+            merged = plan_pulls(gh.merged_pulls(f"plan/{entry.slug}/"), entry.slug)
             if merged:
                 numbers = ",".join(str(p["number"]) for p in merged)
                 item["flags"].append(
