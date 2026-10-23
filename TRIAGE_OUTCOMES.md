@@ -18018,7 +18018,10 @@
   the link-request paragraph in SPEC_impl.md to match, with unit tests for each range. Size gate: about 100 lines of
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and
   bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/tunnel-port-and-link-ranges.md`.
+- Execution: complete in jj change `zmkwtwtwwmwsvpsqzrozxntwvnzzxoxr`, bookmark
+  `plan/tunnel-port-and-link-ranges/01-embedded-ipv4-links`. IPv6 literals in ::/96, 64:ff9b::/96 and 2002::/16 are
+  local when their embedded IPv4 address is, and 64:ff9b:1::/48 and fec0::/10 are local whole; about 93 changed lines of
+  code, tests and spec text, within the gate. [Draft PR #2630](https://github.com/scode/farhelm/pull/2630/changes).
 
 ## agent-stop-kills-shared-personal-tmux.md
 

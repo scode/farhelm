@@ -5597,11 +5597,13 @@ host's setting may still have been turned on.
 Link requests use the same approval table, presence check, wait and answers, with `ApprovalAction::OpenUrl` carrying the
 full URL, its local-network category and whether the card is preapproved. `browser::permission_for_url` applies the
 terminal link predicate's raw-string exclusions before WHATWG parsing, with a 4096-byte cap. It keeps the original
-string; the parsed host is used only for classification. No DNS lookup is performed. The two default-off schema-45
-columns, `hosts.links_without_asking` and `hosts.local_links_without_asking`, are independent of command authority and
-each other. Their settings routes accept an explicit `allowed` boolean. Always allow selects only the card's category
-through `allow_browser_for_identity`, using the live connection and identity preconditions of command grants; adoption
-clears both columns.
+string; the parsed host is used only for classification. No DNS lookup is performed. An IPv6 literal in `::/96`,
+`64:ff9b::/96` or `2002::/16` is classified by the IPv4 address it embeds, so a public NAT64 or 6to4 address stays
+public; `64:ff9b:1::/48` (local-use NAT64, whose embedding position varies) and site-local `fec0::/10` are local
+whatever follows the prefix. The two default-off schema-45 columns, `hosts.links_without_asking` and
+`hosts.local_links_without_asking`, are independent of command authority and each other. Their settings routes accept an
+explicit `allowed` boolean. Always allow selects only the card's category through `allow_browser_for_identity`, using
+the live connection and identity preconditions of command grants; adoption clears both columns.
 
 Only `run_embedded` receives `LinkOpener`, registered by the desktop shell through `webbrowser::open`; no HTTP route
 exposes that callback. The helm validates and approves before calling it on a blocking worker, then returns the native

@@ -2544,11 +2544,13 @@ forwarding remains outside the localhost-tunnel feature.
 
 **Open links without asking** covers public addresses. **Open local-network links without asking** covers literal
 loopback, private and link-local IPv4/IPv6, IPv4 0/8, CGNAT and multicast/reserved high ranges, unspecified and
-multicast IPv6, mapped local IPv4, single-label names, and localhost, .localhost, .local, .internal, .lan, .home and
-.home.arpa names (including a trailing dot). Classification uses the parsed host without resolving DNS: a public-looking
-name may still resolve to a private address on the user's network. A local-network link always asks unless its own
-permission is on, regardless of the public permission, and its card explains that boundary. Always allow on a link card
-grants only its category, and only while the host still has the installation identity that asked.
+multicast IPv6, mapped local IPv4, IPv6 that embeds a local IPv4 address (IPv4-compatible, the NAT64 well-known prefix
+and 6to4), the local-use NAT64 prefix and site-local IPv6, single-label names, and localhost, .localhost, .local,
+.internal, .lan, .home and .home.arpa names (including a trailing dot). Classification uses the parsed host without
+resolving DNS: a public-looking name may still resolve to a private address on the user's network. A local-network link
+always asks unless its own permission is on, regardless of the public permission, and its card explains that boundary.
+Always allow on a link card grants only its category, and only while the host still has the installation identity that
+asked.
 
 Without the matching permission, Allow and Always allow open the link after the card's ordinary pause. A web client
 rechecks the URL and opens synchronously in the click, before sending the approval; an expired or rejected answer can

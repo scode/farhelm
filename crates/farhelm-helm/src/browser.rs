@@ -5,7 +5,7 @@
 //! A native opener exists only when the desktop shell embeds the helm; server helms leave
 //! opening to the user's browser click and must never open on their own server machine.
 
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 
 use farhelm_proto::approvals::ApprovalAction;
@@ -59,6 +59,8 @@ pub(crate) fn permission_for_url(raw: &str) -> Result<BrowserPermission, &'stati
         url::Host::Ipv4(ip) => local_ipv4(ip),
         url::Host::Ipv6(ip) => {
             ip.to_ipv4_mapped().is_some_and(local_ipv4)
+                || embedded_ipv4(ip).is_some_and(local_ipv4)
+                || local_only_ipv6(ip)
                 || ip.is_loopback()
                 || ip.is_unspecified()
                 || ip.is_multicast()
@@ -78,6 +80,38 @@ pub(crate) fn permission_for_url(raw: &str) -> Result<BrowserPermission, &'stati
     } else {
         BrowserPermission::Public
     })
+}
+
+/// The IPv4 address an IPv6 literal carries in a fixed position: the last
+/// 32 bits of IPv4-compatible `::/96` and NAT64's well-known `64:ff9b::/96`,
+/// and the 32 bits after the prefix of 6to4 `2002::/16`.
+///
+/// Traffic to such an address goes by way of the embedded IPv4 address (the
+/// host itself, a NAT64 translation of it, or the 6to4 router there), so the
+/// link is local exactly when that IPv4 address is. Judging the embedded address
+/// rather than the whole range keeps a public NAT64 or 6to4 address public.
+/// `::` and `::1` also match `::/96`; they are unspecified and loopback either
+/// way. Purely lexical, like the rest of the classification: nothing resolves.
+fn embedded_ipv4(ip: Ipv6Addr) -> Option<Ipv4Addr> {
+    let v4 = |hi: u16, lo: u16| Ipv4Addr::from((u32::from(hi) << 16) | u32::from(lo));
+    match ip.segments() {
+        [0, 0, 0, 0, 0, 0, hi, lo] | [0x64, 0xff9b, 0, 0, 0, 0, hi, lo] | [0x2002, hi, lo, ..] => {
+            Some(v4(hi, lo))
+        }
+        _ => None,
+    }
+}
+
+/// IPv6 ranges treated as local whatever follows the prefix. The deprecated
+/// site-local `fec0::/10` is scoped to one site. The local-use NAT64 prefix
+/// `64:ff9b:1::/48` (RFC 8215) can carry a public IPv4 destination, but its
+/// translator is on the local network and the embedded address's position
+/// varies with the deployment, so the destination cannot be judged from the
+/// text; the link counts as local rather than risk opening a local one as
+/// public.
+fn local_only_ipv6(ip: Ipv6Addr) -> bool {
+    let s = ip.segments();
+    (s[0] == 0x64 && s[1] == 0xff9b && s[2] == 1) || (s[0] & 0xffc0) == 0xfec0
 }
 
 /// Non-public IPv4 literals, including short/hex forms after WHATWG normalization.
@@ -234,6 +268,39 @@ mod tests {
             assert_eq!(
                 permission_for_url(&format!("https://{host}/")),
                 Ok(BrowserPermission::Public),
+                "{host}"
+            );
+        }
+    }
+
+    /// IPv6 spellings that carry an IPv4 address reach what that address
+    /// reaches, so a local one must not ride on the public grant (triage
+    /// outcome `link-classifier-misses-embedded-ipv4.md`). Each embedding range
+    /// is checked with a local and a public embedded address placed where only
+    /// that range's embedding position reads it, so the test fails if the range
+    /// is missed, read at the wrong position or marked local wholesale. The two
+    /// whole ranges are checked at their edges.
+    #[farhelm_testtrace::test]
+    fn ipv6_literals_embedding_a_local_ipv4_address_are_local() {
+        for (host, expected) in [
+            // IPv4-compatible ::/96.
+            ("[::192.168.1.2]", BrowserPermission::LocalNetwork),
+            ("[::8.8.8.8]", BrowserPermission::Public),
+            // NAT64 well-known prefix.
+            ("[64:ff9b::10.0.0.1]", BrowserPermission::LocalNetwork),
+            ("[64:ff9b::8.8.8.8]", BrowserPermission::Public),
+            // 6to4: the IPv4 address follows the 2002 prefix.
+            ("[2002:c0a8:101::808:808]", BrowserPermission::LocalNetwork),
+            ("[2002:808:808::1]", BrowserPermission::Public),
+            // Local-use NAT64 and site-local are local whatever follows.
+            ("[64:ff9b:1::808:808]", BrowserPermission::LocalNetwork),
+            ("[fec0::1]", BrowserPermission::LocalNetwork),
+            ("[feff::1]", BrowserPermission::LocalNetwork),
+            ("[64:ff9b:2::1]", BrowserPermission::Public),
+        ] {
+            assert_eq!(
+                permission_for_url(&format!("https://{host}/")),
+                Ok(expected),
                 "{host}"
             );
         }
