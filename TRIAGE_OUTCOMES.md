@@ -18302,7 +18302,11 @@
   only those whose session no longer exists; the attachments module docs and the teardown comment are corrected; a test
   covers a surviving session. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/checkout-ownership-oct22.md`.
+- Execution: complete in change `wsxzznswkwvoxxrpulluslqxwyqupusw`, bookmark
+  `plan/checkout-ownership-oct22/03-restore-surviving-attachments`. Startup moves a parked directory back when its
+  session exists and has no attachments directory, keeps it parked when it cannot, and discards it only when the session
+  is gone. Size: 117 lines (fix about 40; the rest review-required tests and docs). PR:
+  https://github.com/scode/farhelm/pull/2640/changes.
 
 ## uninstall-notice-copies-raw-remote-path.md
 

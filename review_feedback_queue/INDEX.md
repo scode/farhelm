@@ -15,10 +15,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`trash-entry-delete-hits-shifted-row.md`](trash-entry-delete-hits-shifted-row.md) — A one-click trash delete can
   permanently delete a different checkout when rows shift under the pointer; click timing is unmeasured.
 
-- [`interrupted-delete-loses-attachments-at-startup.md`](interrupted-delete-loses-attachments-at-startup.md) — A session
-  that survives an interrupted Delete loses its attachments at the next supervisor start; the partial-deletion allowance
-  and a ledger decision conflict.
-
 - [`uninstall-notice-copies-raw-remote-path.md`](uninstall-notice-copies-raw-remote-path.md) — The uninstall notice
   copies a remote path without warning; successful uninstall rejects controls, but concurrent removal can expose an owed
   notice after failure. Unsafe downstream paste remains unverified.
