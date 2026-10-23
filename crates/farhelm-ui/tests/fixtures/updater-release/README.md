@@ -5,7 +5,8 @@ A miniature release as get.farhelm.io serves it, for the desktop updater's insta
 file has more entries than the updater needs, as the real one does), its minisign signature with trusted comment
 `farhelm v1.2.3`, and the `install.sh` it lists. The tests serve these bytes through the install step's fetch seam, so
 the real verification (`farhelm_helm::verify_signed_sums` with this directory's key as the ring, then the installer's
-SHA-256) runs on real signed bytes.
+SHA-256) runs on real signed bytes. `crates/farhelm/src/main.rs` also uses the top-level files to test
+`farhelm internal verify-release-sums`.
 
 `variants/` holds what a test cannot make by changing served bytes alone, because the signature check would fail first
 and report the wrong refusal:

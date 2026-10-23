@@ -45,8 +45,9 @@
 # verified (SPEC_impl.md, the provisioning payload paragraphs under D2/D3). The
 # tmux payloads come from the latest stable release, as long as it pins the
 # same tmux version as the working copy (see "tmux payloads" below), fetched
-# once and checked against its SHA256SUMS over TLS (the same trust a first
-# `curl | sh` install has, not the signature).
+# once and checked on every run against that release's SHA256SUMS, whose
+# signature the `farhelm` built here verifies with the release keys it
+# carries, as the helm does for its own downloads.
 #
 # ## Requirements
 #
@@ -548,8 +549,11 @@ done
 # .github/release/source-pins.env) and refuses on a mismatch rather than
 # stage a tmux this build may reject.
 #
-# Downloads are cached under target/devbuild/tmux/<tmux version>/, so after
-# the first run this needs no network until the working copy's pin changes.
+# Downloads are cached under target/devbuild/tmux/<tmux version>/ with the
+# release's signed SHA256SUMS, so after the first run this needs no network
+# until the working copy's pin changes. Every run checks the cache again; one
+# without a `release` file (written once the signed sums are in place) is
+# incomplete or predates the check, and a missing tmux is fetched again.
 
 tmux_version=$(sed -n 's/^TMUX_VERSION=//p' "$repo/.github/release/source-pins.env")
 case "$tmux_version" in
@@ -559,7 +563,8 @@ case "$tmux_version" in
     ;;
 esac
 tmux_cache="$devbuild/tmux/$tmux_version"
-release_tag=""
+[ -f "$tmux_cache/release" ] || rm -rf "$tmux_cache"
+release_tag=$(cat "$tmux_cache/release" 2>/dev/null || true)
 for arch in "${arches[@]}"; do
   name="tmux-$arch-unknown-linux-musl"
   if ! [ -f "$tmux_cache/$name" ]; then
@@ -585,20 +590,31 @@ for arch in "${arches[@]}"; do
         echo "staging that tmux could leave updated hosts with a tmux their new supervisor refuses, so stopping here" >&2
         exit 1
       fi
+      mkdir -p "$tmux_cache"
+      for file in SHA256SUMS SHA256SUMS.minisig; do
+        curl -fsSL --proto '=https' -o "$tmux_cache/$file" "https://get.farhelm.io/$release_tag/$file"
+      done
+      printf '%s\n' "$release_tag" >"$tmux_cache/release"
     fi
     echo "== downloading $name (tmux $tmux_version) from release $release_tag"
-    mkdir -p "$tmux_cache"
-    curl -fsSL --proto '=https' -o "$tmux_cache/SHA256SUMS.tmp" "https://get.farhelm.io/$release_tag/SHA256SUMS"
     curl -fsSL --proto '=https' -o "$tmux_cache/$name.tmp" "https://get.farhelm.io/$release_tag/$name"
-    expected=$(awk -v n="$name" '$2 == n { print $1 }' "$tmux_cache/SHA256SUMS.tmp")
-    actual=$(sha256 "$tmux_cache/$name.tmp")
-    rm -f "$tmux_cache/SHA256SUMS.tmp"
-    if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
-      echo "$name from $release_tag does not match its SHA256SUMS entry (expected '$expected', got '$actual')" >&2
-      rm -f "$tmux_cache/$name.tmp"
-      exit 1
-    fi
     mv -f "$tmux_cache/$name.tmp" "$tmux_cache/$name"
+  fi
+done
+if ! verified=$("$devbuild/farhelm" internal verify-release-sums "${release_tag#v}" \
+  "$tmux_cache/SHA256SUMS" "$tmux_cache/SHA256SUMS.minisig"); then
+  echo "the SHA256SUMS of release $release_tag does not carry a valid release signature; refusing its tmux" >&2
+  rm -rf "$tmux_cache"
+  exit 1
+fi
+for arch in "${arches[@]}"; do
+  name="tmux-$arch-unknown-linux-musl"
+  expected=$(awk -v n="$name" '$2 == n { print $1 }' <<<"$verified")
+  actual=$(sha256 "$tmux_cache/$name")
+  if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+    echo "$name from $release_tag does not match its signed SHA256SUMS entry (expected '$expected', got '$actual')" >&2
+    rm -rf "$tmux_cache"
+    exit 1
   fi
   cp "$tmux_cache/$name" "$payloads/$name"
   chmod 0755 "$payloads/$name"
