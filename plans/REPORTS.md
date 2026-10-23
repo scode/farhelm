@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`trash-unknown-totals`](reports/trash-unknown-totals.report.md) landed 2026-10-20 in #2402, #2404: Stop trash summaries calling unchecked archives empty or an over-limit total complete (2 triage outcomes).
 - [`reachable-at-small-sizes`](reports/reachable-at-small-sizes.report.md) landed 2026-10-20 in #2406, #2411, #2419: Keep approval cards, the outage card and host dialogs reachable in very small windows (3 triage outcomes).
 - [`app-dialog-focus`](reports/app-dialog-focus.report.md) landed 2026-10-20 in #2405, #2407, #2408: Fix focus handoffs for the update and SSH help controls, and keep a delayed host confirmation from freezing another dialog (3 triage outcomes).
 - [`replace-yolo-shared-question`](reports/replace-yolo-shared-question.report.md) landed 2026-10-20 in #2410: Make the header and sidebar Replace controls share one YOLO question per session (1 triage outcome).
