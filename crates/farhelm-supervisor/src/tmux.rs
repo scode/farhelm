@@ -34,7 +34,7 @@ use anyhow::{Context, bail};
 use control_codec::tmux_ordinal;
 use control_codec::{
     PANE_FACT_FORMAT, PANE_MARKER_FORMAT, any_session_has_several_windows, join_pane_markers,
-    parse_pane_facts,
+    parse_pane_facts_flagged,
 };
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -327,7 +327,7 @@ fn launch_excerpt_stamp(target: &str, token: &str) -> String {
 ///
 /// Split out from [`TmuxDriver::capture_pane_text`] so the trimming and
 /// tail-truncation rules are unit-testable against constructed strings —
-/// the same reasoning [`parse_pane_facts`] and [`PaneModes::parse`] were
+/// the same reasoning `parse_pane_facts_flagged` and [`PaneModes::parse`] were
 /// split out for.
 ///
 /// Trailing blank rows go first, because a pane is padded to its full
@@ -4129,6 +4129,9 @@ impl TmuxDriver {
     /// `Exited { exit_code: None }` is the same "do not guess a liveness
     /// claim" rule the restart-gap case already applies — that handling
     /// is unaffected by this method's own, narrower, error tolerance.
+    /// A pane tmux listed twice is dropped too (see
+    /// `parse_pane_facts_flagged`); a caller that releases what an absent
+    /// pane held uses [`Self::pane_states_without_duplicates`] instead.
     /// Renaming a session's tmux name, notably, does NOT land in either
     /// bucket: pane id survives a rename (verified empirically), so a
     /// renamed session's pane is still found under its ORIGINAL pane id
@@ -4149,6 +4152,24 @@ impl TmuxDriver {
     /// the one consumer of the AGENT marker (reload's pane-less recovery)
     /// falls back to the single window it would have chosen anyway.
     pub async fn pane_states(&self) -> anyhow::Result<HashMap<String, PaneState>> {
+        self.pane_states_checked(false).await
+    }
+
+    /// [`Self::pane_states`] for a caller that releases what absent panes
+    /// held: a pane dropped as duplicated (see `parse_pane_facts_flagged`) is
+    /// an error here, the same uncertain observation as a failed query.
+    pub async fn pane_states_without_duplicates(
+        &self,
+    ) -> anyhow::Result<HashMap<String, PaneState>> {
+        self.pane_states_checked(true).await
+    }
+
+    /// The shared body of both listings. The duplicate refusal comes before
+    /// the marker query, so a refused listing costs one subprocess.
+    async fn pane_states_checked(
+        &self,
+        refuse_duplicates: bool,
+    ) -> anyhow::Result<HashMap<String, PaneState>> {
         let facts = match self
             .run(&["list-panes", "-a", "-F", PANE_FACT_FORMAT])
             .await
@@ -4168,7 +4189,10 @@ impl TmuxDriver {
                 return Err(e).context("querying pane states");
             }
         };
-        let mut states = parse_pane_facts(&facts);
+        let (mut states, duplicated) = parse_pane_facts_flagged(&facts);
+        if refuse_duplicates && duplicated {
+            anyhow::bail!("querying pane states: tmux listed a pane twice");
+        }
         if !any_session_has_several_windows(&states) {
             return Ok(states);
         }

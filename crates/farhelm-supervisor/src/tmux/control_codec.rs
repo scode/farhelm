@@ -91,7 +91,8 @@ fn parse_marker(value: &str) -> Option<String> {
 }
 
 /// Parse [`PANE_FACT_FORMAT`]'s `list-panes -a` output into a per-pane
-/// map. Split out from [`super::TmuxDriver::pane_states`] purely so this parsing
+/// map, plus whether a duplicated pane was dropped. Split out from
+/// [`super::TmuxDriver::pane_states`] purely so this parsing
 /// is unit-testable against constructed strings, without a real tmux
 /// server behind it — the same reasoning `PaneModes::parse` and
 /// `parse_stat` split their own parsing out for elsewhere in this
@@ -113,7 +114,14 @@ fn parse_marker(value: &str) -> Option<String> {
 /// affected session reports `Exited { exit_code: None }` through the
 /// ordinary absent-pane path, which is a nuisance a same-server pane can
 /// inflict and never a liveness claim it can forge.
-pub(super) fn parse_pane_facts(out: &str) -> HashMap<String, PaneState> {
+///
+/// The returned flag says whether any pane was dropped that way. For a
+/// caller that releases what an absent pane held (startup's checkout
+/// claims), a dropped pane is not evidence the pane died, so the flag lets
+/// it treat the whole listing as uncertain. tmux at Farhelm's floor refuses
+/// a newline in a session name, so the flag is defence in depth rather than
+/// a guard against a known attack.
+pub(super) fn parse_pane_facts_flagged(out: &str) -> (HashMap<String, PaneState>, bool) {
     let mut states: HashMap<String, PaneState> = HashMap::new();
     let mut seen_twice: HashSet<String> = HashSet::new();
     for line in out.lines() {
@@ -172,10 +180,17 @@ pub(super) fn parse_pane_facts(out: &str) -> HashMap<String, PaneState> {
             },
         );
     }
+    let duplicated = !seen_twice.is_empty();
     for pane in seen_twice {
         states.remove(&pane);
     }
-    states
+    (states, duplicated)
+}
+
+/// The map alone, for tests that do not care about the duplicate flag.
+#[cfg(test)]
+pub(super) fn parse_pane_facts(out: &str) -> HashMap<String, PaneState> {
+    parse_pane_facts_flagged(out).0
 }
 
 /// Whether any tmux session in `states` holds panes from more than one
@@ -196,7 +211,7 @@ pub(super) fn any_session_has_several_windows(states: &HashMap<String, PaneState
 /// DECORATES panes already in it, which is what makes a fabricated marker
 /// row unable to invent a pane. A pane id appearing twice among the
 /// syntactically valid marker rows leaves that pane unmarked, for
-/// [`parse_pane_facts`]'s reason applied to the fields most likely to be
+/// [`parse_pane_facts_flagged`]'s reason applied to the fields most likely to be
 /// hostile — and unmarked is the safe degradation here, since it costs a
 /// tab its listing rather than pointing an operation at the wrong pane.
 ///
@@ -624,7 +639,7 @@ pub(super) fn strip_command_output_terminator(output: &[u8]) -> &[u8] {
 /// Split out from the read loop as a pure function over one line
 /// specifically so the notification GRAMMAR is unit-testable without a
 /// tmux server or a live process behind it — the same reasoning
-/// [`parse_pane_facts`] and [`super::PaneModes::parse`] were split out for.
+/// [`parse_pane_facts_flagged`] and [`super::PaneModes::parse`] were split out for.
 /// Shapes worth testing here are otherwise awkward or impossible to
 /// provoke on demand from a real server: a `%pause` requires stalling a
 /// client for seconds, and a future tmux's extra `%extended-output`
@@ -1279,7 +1294,10 @@ mod tests {
     /// left in this query, the session name. Dropping is the safe
     /// direction: the pane reports through the ordinary absent-pane path
     /// as `Exited { exit_code: None }`, which is a nuisance a same-server
-    /// pane can inflict and never a liveness claim it can forge.
+    /// pane can inflict and never a liveness claim it can forge. The drop is
+    /// also flagged, so startup's checkout-claim protection can treat the
+    /// listing as uncertain instead of reading the dropped pane as dead and
+    /// releasing a checkout still in use.
     #[farhelm_testtrace::test]
     fn parse_pane_facts_drops_a_pane_that_appears_twice() {
         let states =
@@ -1292,6 +1310,14 @@ mod tests {
             states.contains_key("%1"),
             "an unaffected pane must survive its neighbour's forgery"
         );
+        let (_, duplicated) = parse_pane_facts_flagged("%0 @0 0 0 s fh-real\n");
+        assert!(
+            !duplicated,
+            "a listing with one row per pane is not flagged"
+        );
+        let (_, duplicated) =
+            parse_pane_facts_flagged("%0 @0 0 0 s fh-real\n%0 @9 9 0 s fh-forged\n");
+        assert!(duplicated, "the dropped duplicate is flagged");
     }
 
     /// The markers are the fields a pane can WRITE, so the join is where
