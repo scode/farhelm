@@ -101,3 +101,68 @@ substantive catches, all fixed: #2603's misleading failure message described abo
 had opened before Enter, without which a field that never opened could still pass; #2613's failure message, which now
 says what the stand-in's process actually looked like; and wording and bookkeeping corrections elsewhere. All eight PRs
 cleared the review gate.
+
+### Landing
+
+Landed as #2603, #2606, #2607, #2608, #2611, #2613, #2615 and #2618, merged bottom-up, with the same content the report
+describes. It was the first of two plans in this landing round, which stacked both and checked them together before
+either merged; duplicate-uninstall-retry-advice followed it.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained bind-gui-answers (GUI confirmations, YOLO questions, quick-launch sequences and
+other prompts now act on what the user saw when answering), and documentation and planning files. This plan's browser
+test changes were written before bind-gui-answers, so a fresh-context reviewer and I checked that their premises still
+hold on the landed UI:
+
+- bind-gui-answers' only edit to the quick-launch spec is a separate new test; this plan's edit to another test in that
+  file composes with it, and pressing the quick-launch shortcut again while the New form is open is still accepted under
+  the new rules. The create request still carries a freshly made retry key when the template changes.
+- The custom-permissions, clone, notifications and Settings specs use controls and settings that bind-gui-answers did
+  not change, and the cleanup orders this plan introduces are sound.
+- The Rust test changes (the approval poll's deadline now bounds the whole request; a background child is owned before
+  readiness waits) touch files nothing else changed.
+
+#### Fixes made during the landing
+
+None to the plan's changes. The review-queue and triage records conflicted with main's new entries; the landing kept
+main's entries and this plan's completed Execution lines.
+
+#### Possible follow-ups
+
+- Found at landing, low severity: the start-stack cleanup script's new check that the stand-in supervisor is alive can
+  pass during the brief moment the stand-in is still a shell about to replace itself with `sleep`, since that shell's
+  command line already matches (as the stack's own cleanup's search would). It would only matter if that last step
+  failed (for example, `sleep` missing), which does not happen in practice; the cost would be the test passing without
+  proving cleanup, the gap #2613 set out to close. Possible follow-up: also require the matched command to start with
+  `farhelm`.
+
+#### Checks
+
+The two plans change about 200 lines: tests and fixtures in Rust, five browser specs and the start-stack cleanup script,
+plus the helm's uninstall refusal text. This round ran every test they change, and the rest of the helm crate, on both
+plans stacked together on this round's main (which already held bind-gui-answers), including the triage-record conflict
+resolution:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the isolated test-sleep check (tests changed), `dprint check` on the
+  changed Markdown files, `python3 releasing/check-changelog.py format`, `shellcheck --severity=warning` on the changed
+  script, the workspace debug build and the UI's release web build the browser tests drive: all passed. Shellcheck's
+  informational notes on that script predate these plans.
+- `cargo nextest run -p farhelm-helm -p farhelm` with the filter
+  `package(farhelm-helm) | binary(spare_builder) | test(agent_listing_real_stack::)`, through the test recorder with
+  pinned nextest and tmux, four slots, no retries, run `e468ec4f-d6fb-428f-8478-cec9a9249547`: 1307 passed, none failed,
+  with no runtime `SKIPPED` message in the retained output, so the end-to-end tests ran for real. This covers the whole
+  helm crate (the uninstall refusal), the spare-builder tests and the agent-listing end-to-end tests this round changed.
+- `bash scripts/test-start-stack-cleanup.sh` through the recorder, run `f458427a-72d1-4cd8-b7dd-a867843b5e41`: every
+  case reported ok.
+- `npx playwright test` in `e2e/` for `clone`, `custom-permissions`, `notifications`, `quick-launch` and `settings` on
+  Chromium and WebKit, three workers each with its own helm and supervisors, no retries, run
+  `44d59b3c-d844-46f4-8645-cdcdcf3a7ae6`: 192 passed, none failed. The "owned fixture cleanup failed" errors in its
+  output come from a notification test that injects cleanup failures on purpose and passed.
+- Reused: none. Skipped: the rest of the Rust workspace and browser suite (only the tests above and the helm's refusal
+  text changed), the UI, desktop and JavaScript tests (no UI or asset code changed), the website build, the doctests and
+  the installer (unchanged).
+
+The report's checks ran each changed test on its base; this round ran them again on both plans stacked on the landed UI.
+Nothing in the executor's report became untrue at landing.
