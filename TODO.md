@@ -262,6 +262,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Accepted ADD's host menu never opens on Chromium.** The Chromium test
+  `accepted ADD registers before execution and releases the page lock while running` in `e2e/tests/provisioning.spec.ts`
+  times out opening the new host's menu while its setup runs (the menu never finishes measuring, or its flyout never
+  appears). It failed in run `c386c83f-760d-4531-8085-d400657b6611`, then 4 of 10 repeats on that stack
+  (`506088c3-846a-4e83-8e55-ecf65dee16af`) and 2 of 20 on main `0586b379` (`2a887633-7de3-45d4-a1a7-98c63c9f3758`), with
+  rates that swung between 0 and 6 in 20 across a bisect that could not tie it to any change. Hypothesis: the same
+  host-row re-rendering during setup as the host menu entry for the offer-retirement test (FLAKES.md, 2026-10-23).
+
 - **Host menu's uninstall item keeps detaching on WebKit.** The WebKit test
   `offer retirement releases only its owner: waiting behind another host` in `e2e/tests/provisioning.spec.ts` times out
   clicking a host menu's uninstall item, which keeps being replaced while the click retries. It failed in run
