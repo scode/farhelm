@@ -138,11 +138,16 @@ pub(crate) struct LaunchHistoryBody {
 }
 
 /// A browser request to inspect one directory on the selected host.
+///
+/// Automatic folder checks opt out of listing and history refinement; an
+/// ordinary Browse request keeps both by omitting `membership_only`.
 #[derive(Deserialize)]
 pub(crate) struct BrowseDirectoryReq {
     host: store::HostId,
     cwd: String,
     expected_incarnation: Option<u64>,
+    #[serde(default)]
+    membership_only: bool,
 }
 
 /// The bounded host-side result returned to the composer.
@@ -443,7 +448,11 @@ pub(crate) async fn preview_github_checkout(
 }
 
 /// POST /api/browse-directory asks the selected supervisor, never the helm,
-/// to list an immediate directory level.
+/// to list an immediate directory level, or only check the destination.
+///
+/// A check uses the supervisor's existing membership observation, which
+/// expands and validates the path without enumerating children. It must not
+/// refine history: an automatic advisory read is not a deliberate Browse.
 pub(crate) async fn browse_directory(
     State(state): State<Arc<AppState>>,
     axum::Json(req): axum::Json<BrowseDirectoryReq>,
@@ -454,6 +463,18 @@ pub(crate) async fn browse_directory(
     };
     if let Err(error) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
         return http_error(error);
+    }
+    if req.membership_only {
+        return match client.managed_checkout_for_cwd(&req.cwd).await {
+            Ok((cwd, _managed)) => axum::Json(BrowseDirectoryBody {
+                cwd,
+                parent: None,
+                children: Vec::new(),
+                truncated: false,
+            })
+            .into_response(),
+            Err(error) => http_error(error),
+        };
     }
     match client.browse_directory(&req.cwd).await {
         Ok((cwd, parent, children, truncated, _managed_checkout)) => {
