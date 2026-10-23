@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [in-flight 8c8227] `update-refuses-newer-host-schema.md` — Update refuses a host whose supervisor database is newer than the supervisor it would install (2026-10-22 triage)
+- [complete] `update-refuses-newer-host-schema.md` — Update refuses a host whose supervisor database is newer than the supervisor it would install (2026-10-22 triage)
 - [in-flight 9ca480] `dialog-saves-oct22.md` — Five dialog fixes: trash delete ignores clicks right after its list moves, Templates rechecks names, unknown shortcut saves say so, the commands help names deleting, unedited Settings Save writes nothing (after `sign-in-preservation-sweep.md`)
 - [in-flight f8891b] `build-and-tooling-oct22.md` — Linux tmux terminfo path, plans queue ignores fork PRs, CentOS test keeps the ssh config, rerun installer repairs a damaged version folder, devbuild verifies the tmux signature (2026-10-22 triage)
 - [complete] `launch-refusal-visibility.md` — A refused launch shows as a prominent alert by the launch button, a folder refusal marks the folder field, and the launcher warns before Launch when the folder does not exist on the host
