@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`queued-launch-snapshot`](reports/queued-launch-snapshot.report.md) landed 2026-10-20 in #2355: At Enter, an armed quick-launch sequence launches the templates its pill showed, not whatever the keys are bound to by then (1 triage outcome).
 - [`payload-lock-reproduction`](reports/payload-lock-reproduction.report.md) landed 2026-10-20 in #2356: Reproduce whether old payload work overlapping a successor helm can leave a bad cached program copy, and record the evidence for a later decision (1 triage outcome).
 - [`triage-discards-oct18`](reports/triage-discards-oct18.report.md) landed 2026-10-20 in #2360: Remove the five feedback items the 2026-10-18 triage discarded, with their ledger updates, in one PR (5 triage outcomes).
 - [`supervisor-colon-path-refusal`](reports/supervisor-colon-path-refusal.report.md) landed 2026-10-20 in #2361: The supervisor and the desktop app refuse to start when the folder sessions get on PATH contains ':' (1 triage outcome).
