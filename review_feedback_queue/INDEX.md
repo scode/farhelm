@@ -8,9 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`private-tmux-terminfo-path-under-tmp.md`](private-tmux-terminfo-path-under-tmp.md) — The shipped Linux tmux searches
-  a deleted /tmp build path for terminal definitions another account could plant; only hand-run use reads it.
-
 - [`plans-queue-counts-fork-prs-as-plan-work.md`](plans-queue-counts-fork-prs-as-plan-work.md) — The planning system
   treats an outsider's fork PR named like a plan branch as the plan's own work; an executor building on it is
   unverified, and the bucket is unsettled.

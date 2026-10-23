@@ -94,6 +94,16 @@ case "$target" in
     configure_host=(--host="$configure_triple")
     static_link=(-static)
     tmux_configure=(--enable-static)
+    # Without these, ncurses compiles in only its install prefix, which is
+    # inside this build's work folder: the shipped tmux would look for
+    # terminal definitions under a deleted /tmp path that any account on the
+    # host could recreate. Compile in the usual system locations instead, as
+    # the macOS branch below does, and skip the database nobody reads.
+    ncurses_configure=(
+      --disable-db-install
+      --with-default-terminfo-dir=/usr/share/terminfo
+      --with-terminfo-dirs=/etc/terminfo:/lib/terminfo:/usr/share/terminfo
+    )
     ;;
   aarch64-apple-darwin)
     test "$(uname -s)" = Darwin
