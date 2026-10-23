@@ -2782,3 +2782,37 @@ Received: inactive
 Class: unknown
 
 Cause: unknown
+
+## 2026-10-23 — wrong-host UPDATE acceptance route handler (e2e/tests/provisioning.spec.ts)
+
+`a wrong-host UPDATE acceptance warns on its source row and claims nothing` failed three times in two days, each time
+inside the test's own route handler for the hosts listing rather than on an assertion: `response.json()` on the reply
+`route.fetch()` returned threw "Response has been disposed". First on Chromium, in a provisioning-spec run of a landing
+stack on both engines, run `75df8763-718c-4845-997e-ce6026460bde` (2026-10-22, tested commit `591fe21c`, clean tree),
+its only failure; ten Chromium repeats (`183651b1-1d26-4ef9-8989-99b84a719e32`) and five WebKit repeats
+(`f5b2a78a-542e-4481-9194-b034723be90c`) on that commit all passed. Then on WebKit, in full browser run
+`aeb02db0-f5f1-4f00-a74f-9c81df1c2294` (2026-10-23, tested commit `6bea0847`, clean tree, a landing stack that did not
+touch provisioning), beside two unrelated WebKit failures (the open template-shortcut editor-focus flake and a file-drop
+case that did not repeat); ten WebKit repeats on that commit (`d0f245cd-37fc-4b13-bfd1-a296993fef07`) failed once more,
+the same way, in 4.3 seconds against passes of 4.6 to 5.7 seconds, so it fails fast. All runs: Playwright 1.64.0, three
+workers with one stack each, zero retries, tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale `C.UTF-8`, child `FARHELM_*` names
+`FARHELM_TEST_TRACE_DIR` and, in the full run only, `FARHELM_PLAYWRIGHT_POLICY_FILE`. Load was not sampled; the machine
+is shared with other agents' builds and tests. The test is from #700 (2026-09-17); the spec changed on 2026-10-21 and
+2026-10-23 in other tests. No trace was examined.
+
+Suspected cause: the handler is still awaiting the fetched reply when the request it intercepts is finished some other
+way (the page navigating or the test ending), and Playwright disposes the reply under it, as in the 2026-09-05
+build-skew interceptor race in `e2e/tests/sidebar.spec.ts`. Open; no fix attempted.
+
+```text
+Error: apiResponse.json: Response has been disposed
+
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+>   const body = await response.json();
+```
+
+Class: unknown
+
+Cause: hypothesis
