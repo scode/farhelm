@@ -3382,6 +3382,33 @@ mod tests {
         assert_eq!(emitter.pid, 12);
     }
 
+    /// Under a direct `bun <entry>` launch the pane is the session's own
+    /// runtime, so a readable Bun pane whose entry Farhelm cannot match must
+    /// not let a recognised nested OMP below it report for the session. The
+    /// same chain under a `bun x` launch keeps the pane's positional exemption.
+    #[farhelm_testtrace::test]
+    fn a_direct_bun_launch_refuses_an_unmatched_bun_pane_above_a_nested_omp() {
+        use crate::agent_kind::omp::OmpLaunchProgram;
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(11, "/opt/bun/bin/bun", &["bun", "./vendor/omp/cli.js"]),
+        ];
+        let refusal = omp_corridor(&chain, &OmpLaunchProgram::BunEntry)
+            .expect_err("a direct Bun launch's unmatched pane must refuse");
+        assert!(
+            refusal.contains("not the reporting OMP runtime"),
+            "{refusal}"
+        );
+        let emitter =
+            omp_corridor(&chain, &OmpLaunchProgram::Bun).expect("bun x keeps its exemption");
+        assert_eq!(emitter.pid, 12);
+        // A supported direct launch, whose pane is the recognised runtime, still admits.
+        let direct = [chain[0].clone(), omp_runtime_link(11, &[])];
+        let emitter = omp_corridor(&direct, &OmpLaunchProgram::BunEntry).expect("direct launch");
+        assert_eq!(emitter.pid, 11);
+    }
+
     /// A launcher selecting another package refuses: the exact package
     /// selection is what makes a launcher this launch's, and an unrelated
     /// package above the runtime contradicts it.
@@ -3461,6 +3488,7 @@ mod tests {
         for program in [
             OmpLaunchProgram::Omp,
             OmpLaunchProgram::Bun,
+            OmpLaunchProgram::BunEntry,
             OmpLaunchProgram::Npm,
         ] {
             for image in ["/opt/bun/bin/bun", "/opt/node/bin/node"] {
@@ -3482,15 +3510,16 @@ mod tests {
     /// npm rewrites its command line into a process title, so under a Bun
     /// or npm launch a readable pane need not retain an exact launcher
     /// shape; the emitter must still be the recognized OMP below that pane.
-    /// An installed `omp` launch is the exception: no launcher sits at its
-    /// pane, so a readable Bun or Node pane that is not the emitter still
-    /// refuses there, as it did before this rule covered other launches.
+    /// An installed `omp` launch and a direct `bun <entry>` launch are the
+    /// exceptions: no launcher sits at their pane, so a readable Bun or Node
+    /// pane that is not the emitter still refuses there.
     #[farhelm_testtrace::test]
     fn package_launches_admit_a_readable_non_emitter_pane() {
         use crate::agent_kind::omp::OmpLaunchProgram;
         for program in [
             OmpLaunchProgram::Omp,
             OmpLaunchProgram::Bun,
+            OmpLaunchProgram::BunEntry,
             OmpLaunchProgram::Npm,
         ] {
             for pane in [
@@ -3504,7 +3533,7 @@ mod tests {
                     pane,
                 ];
                 let result = omp_corridor(&chain, &program);
-                if matches!(program, OmpLaunchProgram::Omp) {
+                if matches!(program, OmpLaunchProgram::Omp | OmpLaunchProgram::BunEntry) {
                     let refusal =
                         result.expect_err("installed omp refuses a non-emitter runtime pane");
                     assert!(

@@ -37,6 +37,11 @@ pub(crate) enum OmpLaunchProgram {
     Omp,
     /// A Bun package launch (`bun x` / `bunx`): launcher above the runtime.
     Bun,
+    /// A direct `bun <entry>` launch: Bun runs OMP's entry file itself, so the
+    /// pane is the runtime and no launcher sits above it. Kept apart from
+    /// [`OmpLaunchProgram::Bun`] because only a launcher pane earns the
+    /// positional exemption (SPEC_impl.md, "The OMP ownership proof").
+    BunEntry,
     /// An npm/npx launch: launcher above the runtime, Bun-resulting only.
     Npm,
     /// A directly Node-executed entry point: never a supported runtime.
@@ -61,7 +66,19 @@ pub(crate) fn classify_omp_launch(argv: &[String]) -> OmpLaunchProgram {
         .unwrap_or_default();
     match name {
         "omp" => OmpLaunchProgram::Omp,
-        "bun" | "bunx" => OmpLaunchProgram::Bun,
+        "bunx" => OmpLaunchProgram::Bun,
+        // Bun skips leading flags when it finds its subcommand, so the first
+        // non-flag word decides: `x` is a package launch, anything else an entry.
+        "bun"
+            if argv[program + 1..]
+                .iter()
+                .find(|word| !word.starts_with('-'))
+                .map(String::as_str)
+                == Some("x") =>
+        {
+            OmpLaunchProgram::Bun
+        }
+        "bun" => OmpLaunchProgram::BunEntry,
         "npm" | "npx" => OmpLaunchProgram::Npm,
         "node" | "nodejs" => OmpLaunchProgram::Node,
         "sh" | "bash" | "dash" => OmpLaunchProgram::Shell,
@@ -77,6 +94,7 @@ impl OmpLaunchProgram {
         match self {
             OmpLaunchProgram::Omp => "omp",
             OmpLaunchProgram::Bun => "bun",
+            OmpLaunchProgram::BunEntry => "bun-entry",
             OmpLaunchProgram::Npm => "npm",
             OmpLaunchProgram::Node => "node",
             OmpLaunchProgram::Shell => "shell",
@@ -92,6 +110,7 @@ impl OmpLaunchProgram {
         match value {
             Some("omp") => OmpLaunchProgram::Omp,
             Some("bun") => OmpLaunchProgram::Bun,
+            Some("bun-entry") => OmpLaunchProgram::BunEntry,
             Some("npm") => OmpLaunchProgram::Npm,
             Some("node") => OmpLaunchProgram::Node,
             Some("shell") => OmpLaunchProgram::Shell,
@@ -476,6 +495,14 @@ mod tests {
             OmpLaunchProgram::Bun
         ));
         assert!(matches!(
+            program(&["bun", "./vendor/omp/cli.js"]),
+            OmpLaunchProgram::BunEntry
+        ));
+        assert!(matches!(
+            program(&["bun", "--silent", "x", "@oh-my-pi/pi-coding-agent"]),
+            OmpLaunchProgram::Bun
+        ));
+        assert!(matches!(
             program(&["npm", "exec", "--package=X"]),
             OmpLaunchProgram::Npm
         ));
@@ -503,6 +530,7 @@ mod tests {
         for program in [
             OmpLaunchProgram::Omp,
             OmpLaunchProgram::Bun,
+            OmpLaunchProgram::BunEntry,
             OmpLaunchProgram::Npm,
             OmpLaunchProgram::Node,
             OmpLaunchProgram::Shell,

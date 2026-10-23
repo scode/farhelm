@@ -3161,7 +3161,9 @@ file is introduced.
   18.2.4 and 18.2.6 with equal gate-semantic pins verified at the pinned sources (static claim, no runtime probe).
   Compiled and package-launcher forms have chain-level shape coverage; live lifecycle evidence covers the Bun-executed
   entry. Node execution and unknown wrapper shapes remain refused, as described in
-  `website/src/content/docs/docs/agents/omp.md`.
+  `website/src/content/docs/docs/agents/omp.md`. A direct `bun <entry>` launch is classified apart from `bun x` and,
+  like an installed `omp` launch, has no launcher at its pane, so a Bun or Node pane that is not the reporting runtime
+  refuses there.
 
   **The instructions pointer.** The same hook carries a second job, added because it costs nothing extra: with
   `--announce` on its injected command line it prints one line on stdout after writing its report, telling the agent
