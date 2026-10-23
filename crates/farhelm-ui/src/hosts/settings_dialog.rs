@@ -264,14 +264,17 @@ fn yolo_help(yolo_without_asking: bool) -> &'static str {
 ///
 /// Says what the commands do (an agent in one of this host's sessions acting on
 /// the fleet) because the label alone does not, and the "on" text names what
-/// turning it on gives away.
+/// turning it on gives away. Host changes remain a per-request decision in
+/// either state; this setting cannot grant an agent control over hosts.
 fn commands_help(commands_without_asking: bool) -> &'static str {
     if commands_without_asking {
         "Agents in this host's sessions start, stop, restart, rename, clone and delete sessions on any \
-         host, and edit and delete launch templates, without asking you."
+         host, and edit and delete launch templates, without asking you. Changes to hosts always need \
+         your approval for each request."
     } else {
         "When an agent in one of this host's sessions asks Farhelm to start, stop, restart, rename, \
-         clone or delete a session, or to edit or delete a launch template, Farhelm asks you first."
+         clone or delete a session, or to edit or delete a launch template, Farhelm asks you first. \
+         Changes to hosts always need your approval for each request."
     }
 }
 
