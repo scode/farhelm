@@ -18283,7 +18283,10 @@
 - Completion criteria: the takeover refuses once the session has been restarted (generation not zero), so the retry
   settles and replays the existing session as it does for a launched one; a store test covers it. Size gate: about 100
   lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/checkout-ownership-oct22.md`.
+- Execution: complete in change `mlosywynnuxvykxyuxptsnvrwunorloz`, bookmark
+  `plan/checkout-ownership-oct22/02-retry-skips-restarted-session`. The takeover now settles and replays a session whose
+  generation is past zero, and launch evidence counts that restart too. Size: 108 lines (about the gate; 48 are
+  deletions of now-wrong test and doc lines). PR: https://github.com/scode/farhelm/pull/2638/changes.
 
 ## interrupted-delete-loses-attachments-at-startup.md
 

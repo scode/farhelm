@@ -15,10 +15,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`trash-entry-delete-hits-shifted-row.md`](trash-entry-delete-hits-shifted-row.md) — A one-click trash delete can
   permanently delete a different checkout when rows shift under the pointer; click timing is unmeasured.
 
-- [`create-retry-takeover-replaces-restarted-session.md`](create-retry-takeover-replaces-restarted-session.md) — A stale
-  create retry may take over a session after an ambiguous Restart failure; active Restart is locked, and the complete
-  record-loss/survivor chain and fault-pair coverage remain unresolved.
-
 - [`interrupted-delete-loses-attachments-at-startup.md`](interrupted-delete-loses-attachments-at-startup.md) — A session
   that survives an interrupted Delete loses its attachments at the next supervisor start; the partial-deletion allowance
   and a ledger decision conflict.

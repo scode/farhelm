@@ -8971,8 +8971,10 @@ impl Supervisor {
                 // real launch from a refusal the refusal transaction
                 // wrote: a separately written Error must never imply
                 // Created, and every genuine launch leaves one of the
-                // physical traces behind.
-                if !row.pane.is_empty() || row.conversation_source.is_some() {
+                // physical traces behind. A restart since the interrupted
+                // attempt (generation past zero) launched it too.
+                if !row.pane.is_empty() || row.conversation_source.is_some() || row.generation != 0
+                {
                     return LaunchEvidence::Present;
                 }
             }
@@ -9531,8 +9533,8 @@ impl Supervisor {
 
         // Decided ONCE, here, and carried into every durable write below —
         // never re-decided per write. An ordinary create's launch is
-        // generation 0 by construction (only a restart allocates one), while
-        // a defensive keyed retry adopts the generation already in its row.
+        // generation 0 by construction (only a restart allocates one), and a
+        // keyed retry takes over only a row still at generation 0.
         // The unit name is derived after that takeover decides which value
         // applies. Committing this selection with the launching row is what
         // makes it survive a crash straddling the launch (PLAN_M3.md items 2
@@ -10639,9 +10641,9 @@ impl Supervisor {
                 },
                 snapshot,
                 canonical_cwd: canonical_cwd.clone(),
-                // Normally zero because create is the first launch. A keyed
-                // retry defensively preserves any generation already stored
-                // rather than moving the durable fence backwards.
+                // Always zero: create is the first launch, and a keyed retry
+                // takes over only a row still at generation zero (a restarted
+                // one returns `RetryClaim::Launched` instead).
                 generation,
                 // Derived from the same selection the launching row
                 // committed above, not from a fresh probe: the entry must
@@ -30386,8 +30388,8 @@ exit 0
         );
     }
 
-    /// A retry adopts the title and generation its TAKEOVER preserved, not
-    /// the values its snapshot supplied — in the reply, in SQLite, and in
+    /// A retry adopts the title its TAKEOVER preserved, not the value its
+    /// snapshot supplied — in the reply, in SQLite, and in
     /// the entry the very next list is served from.
     ///
     /// A rename is the one field a user can change after creation, and a
@@ -30408,11 +30410,6 @@ exit 0
     /// deterministic; the serialization that keeps a rename from landing
     /// LATER (between the takeover and the map removal) is the lifecycle
     /// claim `launch_reserved` holds across both.
-    ///
-    /// Generation is the durable fence for one launch. Although an ordinary
-    /// interrupted create uses zero, preserving a nonzero stored value here
-    /// prevents defensive recovery from moving that fence backwards and
-    /// makes the test distinguish preservation from another hard-coded zero.
     #[farhelm_testtrace::test]
     async fn a_retry_publishes_the_title_its_takeover_preserved() {
         let state = StateDir::new();
@@ -30445,7 +30442,7 @@ exit 0
             outcome: LastOutcome::Launching,
             canonical_cwd: Some(cwd.clone()),
             captured_conversation: None,
-            generation: 7,
+            generation: 0,
             launch_scoped: false,
         };
         sup.store
@@ -30527,26 +30524,6 @@ exit 0
             "as renamed",
             "and the entry the next list is served from must agree with the row, or the rename \
              looks reverted until the supervisor restarts"
-        );
-        let row = sup
-            .store
-            .session("stranded")
-            .await
-            .expect("read")
-            .expect("the takeover leaves a row");
-        assert_eq!(
-            row.generation, 7,
-            "the takeover must not move the durable generation fence backwards"
-        );
-        assert_eq!(
-            sup.sessions
-                .lock()
-                .await
-                .get("stranded")
-                .expect("the retry publishes an entry")
-                .generation,
-            7,
-            "the published entry must describe the generation the row and launch use"
         );
     }
 
