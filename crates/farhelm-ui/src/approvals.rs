@@ -1638,9 +1638,11 @@ mod tests {
     fn answering_a_card_sends_its_approval_id_instead_of_either_session_reference() {
         use std::{cell::RefCell, rc::Rc};
 
-        fn render(
-            (card, answers): (PendingApproval, Rc<RefCell<Vec<(String, ApprovalAnswer)>>>),
-        ) -> Element {
+        /// Shared answer capture lets the test inspect the rendered card's callback.
+        type Answers = Rc<RefCell<Vec<(String, ApprovalAnswer)>>>;
+
+        /// Render the production card with a test-owned observer for answer dispatch.
+        fn render((card, answers): (PendingApproval, Answers)) -> Element {
             // Render the production card in the app scope so its own answer
             // listeners can be inspected independently of child copy buttons.
             ApprovalCard(ApprovalCardProps {
