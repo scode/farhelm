@@ -19,7 +19,7 @@
 //!
 //! ```text
 //! attachments/
-//!   .quarantine/            <- directories a delete detached, awaiting removal
+//!   .quarantine/            <- directories a delete detached, awaiting removal or return
 //!   <session-id>/           <- published attachments, USER-CHOSEN names
 //!     .staging/             <- in-flight uploads, never anything else
 //! ```
@@ -309,9 +309,9 @@ fn split_extension(name: &str) -> (&str, &str) {
 /// files with no row on a crash. A rename splits the difference — it is
 /// atomic and fast, it happens BEFORE the row delete (so it can still
 /// fail the delete closed, with the row retained for a retry), and what
-/// it leaves in the crash window is debris in a reserved directory that
-/// the startup reconciliation removes, not a user's file and not a
-/// surviving session missing its attachments.
+/// it leaves in the crash window is a parked directory that the startup
+/// reconciliation either removes (the session is gone) or moves back (the
+/// session survived), never a lost user file.
 ///
 /// Fail-closed for the reason the launch artifacts and the alt-screen
 /// snapshot are: these are the user's own files, delete is the last
@@ -378,12 +378,12 @@ pub async fn discard_quarantined(parked: &Path) {
 /// Quarantine is normally a one-way handoff: after the row commits, the
 /// caller discards the parked directory. A returned error before that commit
 /// has the opposite ownership result, though — the session is still live and
-/// its files must become reachable at the session path again. The caller
-/// holds the session lifecycle claim while making this best-effort rename, so
-/// no upload can recreate the destination between the quarantine and this
-/// recovery step. An unexpected destination is refused rather than merged or
-/// overwritten; leaving the parked bytes intact is safer than risking another
-/// session's files.
+/// its files must become reachable at the session path again. No upload may
+/// recreate the destination between the check and the rename: the failed
+/// delete holds the session lifecycle claim, and startup reconciliation runs
+/// before the supervisor serves any request. An unexpected destination is
+/// refused rather than merged or overwritten; leaving the parked bytes
+/// intact is safer than risking another session's files.
 pub async fn restore_quarantined(
     state_dir: &Path,
     session_id: &str,
@@ -426,7 +426,8 @@ pub async fn restore_quarantined(
 ///   removal genuinely failed. Everything under a `.staging/` directory
 ///   is one of these by construction, so no name has to be interpreted.
 /// - **Quarantined directories** from a delete that crashed between the
-///   rename and the removal (see [`quarantine_session_dir`]).
+///   rename and the removal (see [`quarantine_session_dir`]). One whose
+///   session still exists goes back to it instead.
 /// - **Whole session directories** whose session no longer exists —
 ///   either a delete that crashed after committing the row removal, or a
 ///   database restored from under this tree. `known_sessions` is the
@@ -459,7 +460,7 @@ pub async fn reconcile_at_startup(
             Ok(Some(entry)) => {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if name == QUARANTINE_DIR {
-                    discard_quarantine_root(&entry.path()).await;
+                    reconcile_quarantine(state_dir, &entry.path(), known_sessions).await;
                 } else if known_sessions.contains(&name) {
                     sweep_staging(&entry.path().join(STAGING_DIR)).await;
                 } else {
@@ -484,9 +485,14 @@ pub async fn reconcile_at_startup(
     }
 }
 
-/// Remove everything a delete parked in the quarantine directory but
-/// never got to discard.
-async fn discard_quarantine_root(quarantine: &Path) {
+/// Settle everything a delete parked in the quarantine directory but never
+/// got to discard: removed when its session is gone, moved back when the
+/// session survived the delete, and kept parked when it cannot move back.
+async fn reconcile_quarantine(
+    state_dir: &Path,
+    quarantine: &Path,
+    known_sessions: &std::collections::HashSet<String>,
+) {
     let mut entries = match tokio::fs::read_dir(quarantine).await {
         Ok(entries) => entries,
         Err(e) => {
@@ -501,7 +507,21 @@ async fn discard_quarantine_root(quarantine: &Path) {
     loop {
         match entries.next_entry().await {
             Ok(None) => break,
-            Ok(Some(entry)) => discard_quarantined(&entry.path()).await,
+            Ok(Some(entry)) => {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                match parked_session(&name).filter(|id| known_sessions.contains(*id)) {
+                    // A session that survived its Delete gets its files back;
+                    // one that cannot (it has an attachments directory again,
+                    // or the rename failed) keeps them parked, never merged.
+                    Some(id) => match restore_quarantined(state_dir, id, &entry.path()).await {
+                        // The root listing may already have passed it.
+                        Ok(()) => sweep_staging(&staging_dir(state_dir, id)).await,
+                        Err(e) => warn!(session = %id, path = %entry.path().display(), error = %e,
+                            "kept the parked attachments of a session that still exists"),
+                    },
+                    None => discard_quarantined(&entry.path()).await,
+                }
+            }
             Err(e) => {
                 warn!(path = %quarantine.display(), error = %e,
                     "attachment quarantine sweep aborted early; debris may remain");
@@ -509,6 +529,16 @@ async fn discard_quarantine_root(quarantine: &Path) {
             }
         }
     }
+}
+
+/// The session id a parked directory belongs to: [`quarantine_session_dir`]
+/// names it `<session-id>-<uuid>`. `None` for any other name.
+fn parked_session(name: &str) -> Option<&str> {
+    let cut = name.len().checked_sub(uuid::fmt::Hyphenated::LENGTH + 1)?;
+    let (id, suffix) = (name.get(..cut)?, name.get(cut..)?);
+    uuid::Uuid::parse_str(suffix.strip_prefix('-')?)
+        .ok()
+        .map(|_| id)
 }
 
 /// Empty one session's staging directory. Everything in it is an
@@ -721,7 +751,7 @@ mod tests {
 
     /// Reconciliation removes what belongs to nothing: a session
     /// directory with no session (a delete that crashed after committing
-    /// its row removal) and anything a delete parked in quarantine.
+    /// its row removal) and what a delete parked for a session now gone.
     ///
     /// Both are cases where the alternative — leaving them — means a
     /// deleted session's files living on indefinitely, which is exactly
@@ -754,6 +784,58 @@ mod tests {
             "quarantined attachments must be discarded"
         );
         assert_eq!(tokio::fs::read(&kept).await.unwrap(), b"keep");
+    }
+
+    /// A session that survived an interrupted Delete gets its parked
+    /// attachments back at startup; one whose session has a directory again
+    /// stays parked, never merged or discarded. Why: the session is still the
+    /// user's, and the 2026-10-22 triage chose restoring over losing them.
+    #[farhelm_testtrace::test]
+    async fn reconciliation_restores_quarantined_attachments_of_surviving_sessions() {
+        let state = tempfile::tempdir().unwrap();
+        let survivor = "9f8e7d6c-1111-4000-8000-000000000000";
+        for session in [survivor, "recreated"] {
+            ensure_session_dirs(state.path(), session).await.unwrap();
+            tokio::fs::write(session_dir(state.path(), session).join("a.png"), b"mine")
+                .await
+                .unwrap();
+        }
+        let parked = |id| quarantine_session_dir(state.path(), id);
+        let restored = parked(survivor).await.unwrap().unwrap();
+        let kept = parked("recreated").await.unwrap().unwrap();
+        ensure_session_dirs(state.path(), "recreated")
+            .await
+            .unwrap();
+        assert!(
+            !session_dir(state.path(), survivor).exists()
+                && session_dir(state.path(), "recreated").exists(),
+            "premise: one session's files are only parked, the other has a directory again"
+        );
+
+        let known = HashSet::from([survivor.to_string(), "recreated".to_string()]);
+        reconcile_at_startup(state.path(), &known).await;
+
+        assert_eq!(
+            tokio::fs::read(session_dir(state.path(), survivor).join("a.png"))
+                .await
+                .unwrap(),
+            b"mine"
+        );
+        assert!(
+            !restored.exists(),
+            "the restored directory left the quarantine"
+        );
+        assert_eq!(
+            tokio::fs::read(kept.join("a.png")).await.unwrap(),
+            b"mine",
+            "a parked directory that cannot go back stays parked"
+        );
+        assert!(
+            !session_dir(state.path(), "recreated")
+                .join("a.png")
+                .exists(),
+            "nothing is merged into the recreated directory"
+        );
     }
 
     /// Quarantining is a rename, not a removal: the files still exist

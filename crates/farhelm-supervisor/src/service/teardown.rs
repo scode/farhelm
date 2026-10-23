@@ -650,9 +650,8 @@ impl Supervisor {
             // what makes the crash window safe in the right
             // direction: this step still fails the delete closed
             // — with the row retained for a retry — while a crash
-            // between it and the commit leaves debris the next
-            // startup reconciles rather than a live session whose
-            // attachments have silently vanished.
+            // between it and the commit leaves a parked directory
+            // the next startup moves back to the surviving session.
             //
             // Nothing recreates the directory afterwards: every
             // in-flight transfer was cancelled and joined above,
