@@ -756,7 +756,8 @@ agent choice is independent of that destination:
   readable but is ignored when applied and omitted on every save, including duplicate and delete undo. Delete takes
   effect immediately and offers undo inside the dialog for about ten seconds; undo refuses if its old name has been
   taken. For a stored template that fails current save rules, the control says "delete permanently" before deletion and
-  no undo is offered. Closing the dialog ends its undo notice.
+  no undo is offered. The label the user saw decides: a click on "delete permanently" never offers undo, and a click on
+  plain "delete" always does, even if the template list changed in between. Closing the dialog ends its undo notice.
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Cmd+P on macOS or Ctrl+Shift+P elsewhere
   starts it directly in the browser and desktop app when no dialog is open, without showing the launcher on success.
   While New, Clone or Replace with is the only visible dialog, the same chord applies its template to that draft and
@@ -3481,7 +3482,9 @@ Replace, Delete); one a terminal tab started first ends with that tab (closing i
 [Session view](#session-view) describes. Either way it ends along with everything later run in it or through it,
 including windows and work the user started in it from outside Farhelm, for example over an SSH login, within the
 cleanup guarantee's limits on hosts without a usable systemd user manager. Farhelm cannot tell its own sessions' work in
-such a server from the user's, and does not try; this is intended, not a defect.
+such a server from the user's, and does not try; this is intended, not a defect. Confirmed 2026-10-23: the buttons named
+here are examples; whatever tears down the agent or the tab as the user sees it, whichever button or flow does it, ends
+the programs that agent or tab started first.
 
 After a failed Delete disconnects a viewer, either automatically reconnecting to a surviving terminal or remaining
 detached until the user reconnects is explicitly acceptable. Choose the simpler implementation. Reviewers must not treat
