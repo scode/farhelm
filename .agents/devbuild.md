@@ -31,7 +31,11 @@ list, databases and local supervisor, never the installed app's. It can run besi
 have to be added to it once. Remote hosts are still shared: Update from the devbuild puts the target's build on that
 host for the installed app too, which then shows the host as an older version and offers to update it back. This holds
 for a target whose own `devbuild-mac.sh` predates the devbuild state, too: `devbuild-github.sh` is always fetched from
-main and names that directory for the target's script.
+main and names that directory for the target's script. That way back is refused when the target migrated the host's
+supervisor database past what the installed app's supervisor opens, provided the updating helm contains the refusal
+check and the host's supervisor reports its database version; the host then needs a build at least that new. An older
+installed app, or a target built before schema reporting was added, still lets that Update strand the host until the
+newer build is put back.
 
 NOTE: Every devbuild shares that one devbuild state, and its supervisor and helm apply any database migration the target
 adds. A later devbuild of a target without the migration (main, say) then refuses that database, and another unlanded

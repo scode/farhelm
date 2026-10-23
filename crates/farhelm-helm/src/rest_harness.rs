@@ -446,6 +446,7 @@ struct PeerBehavior {
 impl PeerBehavior {
     fn hello(&self) -> ControlMsg {
         ControlMsg::Hello {
+            database_schema: None,
             protocol_version: self.protocol,
             build_version: self.build.clone(),
             role: "supervisor".to_string(),
@@ -679,7 +680,9 @@ fn identified_hello(frame: farhelm_proto::Frame, behavior: &PeerBehavior) -> far
             role,
             host_identity: None,
             auth: None,
+            database_schema,
         }) => farhelm_proto::Frame::control(&ControlMsg::Hello {
+            database_schema,
             protocol_version,
             build_version,
             role,

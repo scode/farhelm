@@ -488,6 +488,7 @@ mod tests {
         fn supervisor(home: PathBuf) -> Arc<Self> {
             let backend = Self::absent(home.clone());
             *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::Supervisor {
+                database_schema: None,
                 build_version: "test-build".to_string(),
                 host_identity: Some("test-identity".to_string()),
                 dial_farhelm: home.join("farhelm"),
@@ -502,6 +503,7 @@ mod tests {
         fn skewed(home: PathBuf) -> Arc<Self> {
             let backend = Self::absent(home.clone());
             *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+                database_schema: None,
                 peer_build: "0.1.1-old".to_string(),
                 dial_farhelm: home.join("farhelm"),
                 dial_state_dir: Some(home.join("state")),
@@ -558,6 +560,7 @@ mod tests {
             }
             Ok(match self.repeat_probe.lock().unwrap().clone() {
                 Some(repeat) => ProbeObservation::Supervisor {
+                    database_schema: None,
                     build_version: "test-build".to_string(),
                     host_identity: repeat.identity,
                     dial_farhelm: repeat.dial_farhelm,
@@ -2200,6 +2203,105 @@ mod tests {
         assert!(backend.operations.lock().unwrap().is_empty());
     }
 
+    /// Update refuses a host whose supervisor database schema is newer than
+    /// the one this helm's supervisor opens, at planning and at confirmation.
+    ///
+    /// Why it matters: a development build ranks below every release, so a
+    /// release helm updating a host back from one passes the version check.
+    /// If that build migrated the host's database forward, the supervisor
+    /// Update installs refuses it and restarts forever, and the host stays
+    /// unreachable until the development build is put back. Specified: a
+    /// release helm planning against a development-build host, on the
+    /// current protocol or a skewed one, refuses when the reported schema is
+    /// higher than its own, naming the schema and the way out, and plans when
+    /// it is equal or unreported; a plan made while the schema was equal is
+    /// refused at confirmation on either protocol path once it is higher,
+    /// before anything is installed. That refusal is the helm's own message,
+    /// not quoted or attributed to the host's stderr.
+    #[farhelm_testtrace::test]
+    async fn update_refuses_a_host_whose_database_schema_is_newer() {
+        let (builder, host) = FleetBuilder::new()
+            .await
+            .ssh("schema.example", HostScript::default())
+            .await;
+        let harness = builder.start().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        *service.helm_build_override.lock().unwrap() = Some("1.0.0".to_string());
+        let ours = farhelm_supervisor::store::SCHEMA_VERSION;
+        let observe = |skewed: bool, database_schema: Option<i64>| {
+            let (dial_farhelm, dial_state_dir) =
+                (root.path().join("farhelm"), Some(root.path().join("state")));
+            let build = "0.0.0-unreleased".to_string();
+            Some(Ok(if skewed {
+                ProbeObservation::SkewedSupervisor {
+                    peer_build: build,
+                    dial_farhelm,
+                    dial_state_dir,
+                    database_schema,
+                }
+            } else {
+                ProbeObservation::Supervisor {
+                    build_version: build,
+                    host_identity: None,
+                    dial_farhelm,
+                    dial_state_dir,
+                    database_schema,
+                }
+            }))
+        };
+
+        for skewed in [false, true] {
+            for (schema, refused) in [(Some(ours + 1), true), (Some(ours), false), (None, false)] {
+                *backend.probe.lock().unwrap() = observe(skewed, schema);
+                let planned = service.plan_update(host).await;
+                if refused {
+                    let text = format!("{:#}", planned.expect_err("a newer schema must refuse"));
+                    assert!(text.contains(&format!("schema {}", ours + 1)), "{text}");
+                    assert!(
+                        text.contains("at least as new"),
+                        "names the way out: {text}"
+                    );
+                } else {
+                    planned.unwrap_or_else(|error| panic!("{schema:?} must plan: {error:#}"));
+                }
+            }
+        }
+
+        // Planning cannot vouch for a later confirmation: the host can move
+        // past this build's schema while the prepared update waits.
+        for skewed in [false, true] {
+            *backend.probe.lock().unwrap() = observe(skewed, Some(ours));
+            let preview = service
+                .plan_update(host)
+                .await
+                .expect("an equal schema plans");
+            *backend.probe.lock().unwrap() = observe(skewed, Some(ours + 1));
+            let accepted = service
+                .start_update(
+                    host,
+                    ProvisionRequest {
+                        probe_id: preview.probe_id,
+                    },
+                )
+                .await
+                .expect("the confirmation is accepted and revalidated in the run");
+            let view = wait_finished(&service, accepted.host_id).await;
+            assert_eq!(view.status, RunStatus::Failed);
+            let message = view.message.unwrap_or_default();
+            assert!(
+                message.contains(&format!("schema {}", ours + 1)),
+                "{message}"
+            );
+            assert!(!message.contains("host stderr"), "{message}");
+            assert!(
+                backend.operations.lock().unwrap().is_empty(),
+                "nothing was installed"
+            );
+        }
+    }
+
     /// Update refuses a host whose supervisor runs a newer farhelm than this
     /// helm, at planning and again at confirmation, naming both versions.
     ///
@@ -2237,12 +2339,14 @@ mod tests {
 
         for observation in [
             ProbeObservation::Supervisor {
+                database_schema: None,
                 build_version: newer.clone(),
                 host_identity: Some("recorded-identity".to_string()),
                 dial_farhelm: root.path().join("farhelm"),
                 dial_state_dir: Some(root.path().join("state")),
             },
             ProbeObservation::SkewedSupervisor {
+                database_schema: None,
                 peer_build: newer.clone(),
                 dial_farhelm: root.path().join("farhelm"),
                 dial_state_dir: Some(root.path().join("state")),
@@ -2263,6 +2367,7 @@ mod tests {
 
         // Planned while the host was older, confirmed after it became newer.
         *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+            database_schema: None,
             peer_build: "0.9.0".to_string(),
             dial_farhelm: root.path().join("farhelm"),
             dial_state_dir: Some(root.path().join("state")),
@@ -2272,6 +2377,7 @@ mod tests {
             .await
             .expect("an older host plans");
         *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+            database_schema: None,
             peer_build: newer.clone(),
             dial_farhelm: root.path().join("farhelm"),
             dial_state_dir: Some(root.path().join("state")),
@@ -2334,6 +2440,7 @@ mod tests {
         let service = service(&harness, backend.clone(), root.path());
         let preview = service.plan_update(host).await.unwrap();
         *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+            database_schema: None,
             peer_build: "0.1.1-old".to_string(),
             dial_farhelm: root.path().join("farhelm"),
             dial_state_dir: Some(root.path().join("state")),
@@ -2418,6 +2525,7 @@ mod tests {
         // Confirmation reprobes; the host is still skewed — the expected
         // state for an update that has not run yet.
         *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+            database_schema: None,
             peer_build: "0.1.1-old".to_string(),
             dial_farhelm: root.path().join("farhelm"),
             dial_state_dir: Some(root.path().join("state")),
@@ -2470,6 +2578,7 @@ mod tests {
         let service = service(harness, backend.clone(), root);
         let preview = service.plan_update(host).await.unwrap();
         *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+            database_schema: None,
             peer_build: "0.1.1-old".to_string(),
             dial_farhelm: root.join("farhelm"),
             dial_state_dir: Some(root.join("state")),
@@ -2787,6 +2896,7 @@ mod tests {
             panic!("an absent host must yield an install plan")
         };
         *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::SkewedSupervisor {
+            database_schema: None,
             peer_build: "0.1.1-old".to_string(),
             dial_farhelm: root.path().join("farhelm"),
             dial_state_dir: Some(root.path().join("state")),
@@ -3076,6 +3186,7 @@ mod tests {
         harness.manager.sync_registry().await.unwrap();
         let backend = FakeBackend::supervisor(root.path().to_path_buf());
         *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::Supervisor {
+            database_schema: None,
             build_version: "planned".to_string(),
             host_identity: Some("expected-identity".to_string()),
             dial_farhelm: root.path().join("lib/farhelm"),
@@ -3084,6 +3195,7 @@ mod tests {
         let service = service(&harness, backend.clone(), root.path());
         let plan = service.plan_update(host).await.unwrap();
         *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::Supervisor {
+            database_schema: None,
             build_version: "changed".to_string(),
             host_identity: Some("other-identity".to_string()),
             dial_farhelm: root.path().join("lib/farhelm"),
@@ -3127,6 +3239,7 @@ mod tests {
             panic!("initial absence must return a plan")
         };
         *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::Supervisor {
+            database_schema: None,
             build_version: "late-build".to_string(),
             host_identity: Some("late-identity".to_string()),
             dial_farhelm: root.path().join("late/farhelm"),
@@ -3234,6 +3347,7 @@ mod tests {
         );
 
         *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::Supervisor {
+            database_schema: None,
             build_version: "test-build".to_string(),
             host_identity: Some("test-identity".to_string()),
             dial_farhelm: root.path().join("farhelm"),
@@ -5296,6 +5410,7 @@ mod tests {
             body: br#"{"not":"hello"}"#.to_vec(),
         };
         let skew = farhelm_proto::Frame::control(&ControlMsg::Hello {
+            database_schema: None,
             protocol_version: farhelm_proto::PROTOCOL_VERSION + 1,
             build_version: "future".to_string(),
             role: "supervisor".to_string(),
@@ -5371,6 +5486,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let old_hello = || {
             farhelm_proto::Frame::control(&ControlMsg::Hello {
+                database_schema: None,
                 protocol_version: farhelm_proto::PROTOCOL_VERSION - 1,
                 build_version: "0.1.1-old".to_string(),
                 role: "supervisor".to_string(),
@@ -5398,6 +5514,7 @@ mod tests {
                 peer_build,
                 dial_farhelm,
                 dial_state_dir,
+                ..
             }) => {
                 assert_eq!(peer_build, "0.1.1-old");
                 assert_eq!(dial_farhelm, PathBuf::from("scripted-local"));
@@ -5433,6 +5550,7 @@ mod tests {
                 peer_build,
                 dial_farhelm,
                 dial_state_dir,
+                ..
             }) => {
                 assert_eq!(peer_build, "0.1.1-old");
                 assert_eq!(dial_farhelm, PathBuf::from("/resolved/lib/farhelm"));
@@ -5454,6 +5572,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let hello = farhelm_proto::Frame::control(&ControlMsg::Hello {
+            database_schema: None,
             protocol_version: farhelm_proto::PROTOCOL_VERSION + 1,
             build_version: "9.9.9-future".to_string(),
             role: "supervisor".to_string(),
@@ -8653,6 +8772,7 @@ mod tests {
         harness.manager.sync_registry().await.unwrap();
         let backend = FakeBackend::supervisor(root.path().to_path_buf());
         *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::Supervisor {
+            database_schema: None,
             build_version: "planned".to_string(),
             host_identity: Some("reported-identity".to_string()),
             dial_farhelm: root.path().join("lib/farhelm"),

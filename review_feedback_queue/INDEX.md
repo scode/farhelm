@@ -41,10 +41,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`commands-setting-help-omits-delete.md`](commands-setting-help-omits-delete.md) — The help for running farhelm
   commands without asking omits that agents may delete sessions and templates; bucket is unsettled.
 
-- [`devbuild-update-strands-host-on-newer-schema.md`](devbuild-update-strands-host-on-newer-schema.md) — Updating back
-  from a devbuild that migrated a shared remote host's database leaves the host unreachable; not reproduced, and the
-  bucket is unsettled.
-
 - [`devbuild-tmux-skips-release-signature.md`](devbuild-tmux-skips-release-signature.md) — A devbuild pushes a tmux to
   remote hosts checked only against an unsigned checksum list from the release site; spec coverage is ambiguous.
 

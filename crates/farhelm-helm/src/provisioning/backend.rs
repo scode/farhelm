@@ -51,6 +51,10 @@ pub(super) enum ProbeObservation {
         host_identity: Option<String>,
         dial_farhelm: PathBuf,
         dial_state_dir: Option<PathBuf>,
+        /// The host supervisor's database schema version, when it reports one.
+        /// Update refuses a host whose schema is above the one this helm's
+        /// supervisor opens; `None` (an older supervisor) is never refused.
+        database_schema: Option<i64>,
     },
     /// A supervisor answered the hello but speaks a DIFFERENT protocol
     /// version, so the exchange stopped at the version refusal. Presence is
@@ -74,6 +78,9 @@ pub(super) enum ProbeObservation {
         peer_build: String,
         dial_farhelm: PathBuf,
         dial_state_dir: Option<PathBuf>,
+        /// The database schema the skewed supervisor reported, if any, for
+        /// the same Update refusal as [`ProbeObservation::Supervisor`]'s.
+        database_schema: Option<i64>,
     },
     Absent,
 }
@@ -1948,6 +1955,7 @@ impl ProvisioningBackend for SystemBackend {
             Ok(Ok(ControlMsg::Hello {
                 build_version,
                 host_identity,
+                database_schema,
                 ..
             })) => {
                 let stderr = stop_probe(&mut child, stderr_task).await;
@@ -1987,6 +1995,7 @@ impl ProvisioningBackend for SystemBackend {
                     host_identity,
                     dial_farhelm,
                     dial_state_dir: target.probe_state_dir.clone(),
+                    database_schema,
                 })
             }
             // A version-skew refusal must be recognized BEFORE the
@@ -1999,10 +2008,10 @@ impl ProvisioningBackend for SystemBackend {
             // peer was refused for speaking another protocol, which is a
             // positive presence observation, not a failure.
             Ok(Err(error)) if VersionSkew::cause_of(&error).is_some() => {
-                let peer_build = VersionSkew::cause_of(&error)
-                    .expect("guard established the skew payload")
-                    .peer_build
-                    .clone();
+                let skew =
+                    VersionSkew::cause_of(&error).expect("guard established the skew payload");
+                let (peer_build, database_schema) =
+                    (skew.peer_build.clone(), skew.peer_database_schema);
                 let stderr = stop_probe(&mut child, stderr_task).await;
                 // Same post-stop drain-failure check as the completed-hello
                 // arm above, for the same reason: a stderr READ failure is a
@@ -2047,6 +2056,7 @@ impl ProvisioningBackend for SystemBackend {
                     peer_build,
                     dial_farhelm,
                     dial_state_dir: target.probe_state_dir.clone(),
+                    database_schema,
                 })
             }
             Ok(Err(error)) if handshake_io_failure(&error) => {

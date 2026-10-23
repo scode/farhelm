@@ -118,25 +118,27 @@ what it is about to do in concrete terms — the files it will place and where, 
 the supervisor will run persistently and start at boot — and proceeds only on confirmation. Remote updates use the same
 one-use plan mechanism behind the same authority, but the user's Update click is the authorization: no plan is shown for
 confirmation. Update never downgrades a host: it installs the helm's own build, so a host whose supervisor reports a
-newer build is refused with both versions named, and the user updates the helm instead. While an update is running, its
-host row stays folded and shows `updating…` until a progress snapshot is available, then shows the current step,
-completed-step count, and client-measured elapsed time inline in the status spot; hovering that status shows the count,
-the elapsed time, and every step of the run with its status and the current one highlighted (in a window too short for
-the whole list, the list keeps the current step in view), since the sidebar is too narrow to show a long step name, let
-alone the rest of the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary
-upload appears as a separate step before installation, so the user can tell when network transfer is still underway. The
-row and its hover use the helm's readable names for the same steps in the plan, with completed work checked green, the
-running step pulsing amber (static under reduced motion), pending work grey, unchanged work grey, degraded work as an
-amber warning, and failure red with the helm's reason. Success returns the status spot to its normal label and leaves
-the row folded unless global details are on. Failure or an uncertain outcome still expands the row so its step list and
-diagnostic remain visible. The Hosts header's `update all` action makes the same authorized Update request for each
-remote host whose individual Update action is available at the click. A host already busy with setup or another run is
-skipped rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation,
-progress, and result, so one failure does not hide or delay the others. V1 provisioning targets any Linux host with a
-usable systemd user manager, on the two architectures cross-compiled supervisor binaries exist for. The distribution is
-not a requirement — nothing provisioning does is distribution-specific — so the plan names whichever one it found rather
-than refusing; CI exercises Ubuntu. Hosts whose basic command-line tools come from BusyBox rather than GNU coreutils or
-its usual replacements are not a supported target: Farhelm accommodates them only where that takes a trivial change, and
+newer build is refused with both versions named, and the user updates the helm instead. It also refuses a host whose
+supervisor reports a database schema newer than the helm's build can open, which happens after a development build ran
+there; that host needs a build at least that new. While an update is running, its host row stays folded and shows
+`updating…` until a progress snapshot is available, then shows the current step, completed-step count, and
+client-measured elapsed time inline in the status spot; hovering that status shows the count, the elapsed time, and
+every step of the run with its status and the current one highlighted (in a window too short for the whole list, the
+list keeps the current step in view), since the sidebar is too narrow to show a long step name, let alone the rest of
+the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary upload appears as a
+separate step before installation, so the user can tell when network transfer is still underway. The row and its hover
+use the helm's readable names for the same steps in the plan, with completed work checked green, the running step
+pulsing amber (static under reduced motion), pending work grey, unchanged work grey, degraded work as an amber warning,
+and failure red with the helm's reason. Success returns the status spot to its normal label and leaves the row folded
+unless global details are on. Failure or an uncertain outcome still expands the row so its step list and diagnostic
+remain visible. The Hosts header's `update all` action makes the same authorized Update request for each remote host
+whose individual Update action is available at the click. A host already busy with setup or another run is skipped
+rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation, progress,
+and result, so one failure does not hide or delay the others. V1 provisioning targets any Linux host with a usable
+systemd user manager, on the two architectures cross-compiled supervisor binaries exist for. The distribution is not a
+requirement — nothing provisioning does is distribution-specific — so the plan names whichever one it found rather than
+refusing; CI exercises Ubuntu. Hosts whose basic command-line tools come from BusyBox rather than GNU coreutils or its
+usual replacements are not a supported target: Farhelm accommodates them only where that takes a trivial change, and
 spends no further complexity on them. Everything else — no usable systemd user manager, or an architecture with no
 payload — falls back to the manual path (run the binary yourself), which always remains available, on the best-effort
 basis described in [Supported host setup](#supported-host-setup).

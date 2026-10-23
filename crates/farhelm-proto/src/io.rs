@@ -332,6 +332,11 @@ pub struct VersionSkew {
     pub our_protocol: u32,
     /// [`crate::BUILD_VERSION`] as compiled into this binary.
     pub our_build: String,
+    /// The database schema the peer's hello reported, if any. The field is
+    /// optional on every protocol that has it, so a peer on another
+    /// protocol can still send it, and Update reads it here because a
+    /// skewed host is the one Update most often replaces.
+    pub peer_database_schema: Option<i64>,
 }
 
 impl std::fmt::Display for VersionSkew {
@@ -370,9 +375,10 @@ impl VersionSkew {
 /// than being request/response — so neither end can deadlock waiting for
 /// the other to speak first.
 ///
-/// Sends `ControlMsg::hello(role)` — always `host_identity: None` — which
-/// is correct for the helm (no identity of its own to report) and for
-/// every test double standing in for a supervisor. The one caller that
+/// Sends `ControlMsg::hello(role)` — always `host_identity: None` and
+/// `database_schema: None` — which is correct for the helm (neither value
+/// of its own to report) and for a test double that models an older
+/// supervisor without schema reporting. The one caller that
 /// needs a REAL identity on the wire is the production supervisor
 /// connection loop, which calls [`handshake_with_host_identity`] instead;
 /// see that function's docs for why a separate entry point, rather than a
@@ -402,6 +408,10 @@ pub async fn handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 /// it is — on the wire honestly, not to paper over that case with a
 /// fabricated one.
 ///
+/// It also sends the supervisor's database schema version, as a plain
+/// parameter because `farhelm-proto` does not depend on the supervisor
+/// crate, and not an `Option` because a running supervisor always knows it.
+///
 /// `role` is not a parameter: this function has exactly one production
 /// caller, and that caller is always the supervisor's own connection loop
 /// (see above) — hardcoding `"supervisor"` here removes a value every call
@@ -423,6 +433,7 @@ pub async fn handshake_with_host_identity<R: AsyncRead + Unpin, W: AsyncWrite + 
     reader: &mut FrameReader<R>,
     writer: &mut FrameWriter<W>,
     host_identity: Option<String>,
+    database_schema: i64,
 ) -> std::io::Result<ControlMsg> {
     handshake_with_hello(
         reader,
@@ -433,6 +444,7 @@ pub async fn handshake_with_host_identity<R: AsyncRead + Unpin, W: AsyncWrite + 
             role: "supervisor".to_string(),
             host_identity,
             auth: None,
+            database_schema: Some(database_schema),
         },
     )
     .await
@@ -454,6 +466,7 @@ pub async fn handshake_with_session_auth<R: AsyncRead + Unpin, W: AsyncWrite + U
         reader,
         writer,
         ControlMsg::Hello {
+            database_schema: None,
             protocol_version: PROTOCOL_VERSION,
             build_version: crate::BUILD_VERSION.to_string(),
             role: "spawn".to_string(),
@@ -550,6 +563,7 @@ async fn handshake_with_hello<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         build_version,
         host_identity,
         auth,
+        database_schema,
         ..
     } = &msg
     else {
@@ -582,6 +596,7 @@ async fn handshake_with_hello<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         peer_build: build_version.clone(),
         our_protocol: PROTOCOL_VERSION,
         our_build: crate::BUILD_VERSION.to_string(),
+        peer_database_schema: *database_schema,
     };
     // Best effort: tell the peer why before hanging up. Both the helm and
     // the supervisor call `handshake` and refuse a mismatch the same way —
@@ -643,6 +658,7 @@ mod tests {
             let mut r = FrameReader::new(br);
             let mut w = FrameWriter::new(bw);
             w.write_control(&ControlMsg::Hello {
+                database_schema: Some(42),
                 protocol_version: wrong_version,
                 build_version: "9.9.9".into(),
                 role: "supervisor".into(),
@@ -682,6 +698,7 @@ mod tests {
                     peer_build: "9.9.9".to_string(),
                     our_protocol: PROTOCOL_VERSION,
                     our_build: crate::BUILD_VERSION.to_string(),
+                    peer_database_schema: Some(42),
                 }
             );
             assert_eq!(
@@ -761,6 +778,7 @@ mod tests {
             let mut r = FrameReader::new(br);
             let mut w = FrameWriter::new(bw);
             w.write_control(&ControlMsg::Hello {
+                database_schema: None,
                 // A CURRENT protocol version on purpose: the length check
                 // must bind on a peer this side would otherwise accept, not
                 // ride along with a skew refusal.
@@ -802,6 +820,7 @@ mod tests {
         let mut r = FrameReader::new(br);
         let mut w = FrameWriter::new(bw);
         w.write_control(&ControlMsg::Hello {
+            database_schema: None,
             protocol_version: PROTOCOL_VERSION,
             build_version: crate::BUILD_VERSION.to_string(),
             role: "supervisor".into(),

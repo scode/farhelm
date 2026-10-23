@@ -187,8 +187,13 @@ where
     // this process minted or read back a durable one — never a fresh read
     // per connection; the value is immutable for the process lifetime, so
     // cloning it here is cheap and there is nothing to race.
-    let peer_hello =
-        handshake_with_host_identity(&mut reader, &mut writer, sup.host_identity.clone()).await?;
+    let peer_hello = handshake_with_host_identity(
+        &mut reader,
+        &mut writer,
+        sup.host_identity.clone(),
+        crate::store::SCHEMA_VERSION,
+    )
+    .await?;
     let restricted_auth = match peer_hello {
         ControlMsg::Hello {
             auth: Some(auth), ..
@@ -2426,6 +2431,7 @@ mod tests {
         let mut writer = FrameWriter::new(w);
         writer
             .write_control(&ControlMsg::Hello {
+                database_schema: None,
                 protocol_version: farhelm_proto::PROTOCOL_VERSION,
                 build_version: farhelm_proto::BUILD_VERSION.to_string(),
                 role: "spawn".to_string(),
@@ -2495,6 +2501,7 @@ mod tests {
         let mut writer = FrameWriter::new(w);
         writer
             .write_control(&ControlMsg::Hello {
+                database_schema: None,
                 protocol_version: farhelm_proto::PROTOCOL_VERSION,
                 build_version: farhelm_proto::BUILD_VERSION.to_string(),
                 role: "spawn".to_string(),
@@ -2622,6 +2629,7 @@ mod tests {
         let mut writer = FrameWriter::new(w);
         writer
             .write_control(&ControlMsg::Hello {
+                database_schema: None,
                 protocol_version: farhelm_proto::PROTOCOL_VERSION,
                 build_version: farhelm_proto::BUILD_VERSION.to_string(),
                 role: "spawn".to_string(),
@@ -2694,10 +2702,17 @@ mod tests {
         let hello = farhelm_proto::io::handshake(&mut reader, &mut writer, "helm")
             .await
             .expect("handshake");
-        let ControlMsg::Hello { host_identity, .. } = hello else {
+        let ControlMsg::Hello {
+            host_identity,
+            database_schema,
+            ..
+        } = hello
+        else {
             panic!("expected a Hello, got {hello:?}");
         };
         let identity = host_identity.expect("a supervisor's hello must carry an identity");
+        // Update's newer-schema refusal reads this; nothing else pins the producer.
+        assert_eq!(database_schema, Some(crate::store::SCHEMA_VERSION));
         drop(reader);
         drop(writer);
         server

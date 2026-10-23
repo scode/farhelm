@@ -85,7 +85,9 @@ use subtle::ConstantTimeEq;
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 31;
+/// Public because the supervisor's hello reports it and the helm's Update
+/// refuses a host whose reported schema is above this build's.
+pub const SCHEMA_VERSION: i64 = 31;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
