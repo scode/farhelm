@@ -17753,7 +17753,12 @@
   test that holds a response open is not required. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
+- Execution: complete in jj change `mkykwywuxlptzlnvrynlppprstpsynkk`, bookmark
+  `plan/test-hygiene-oct21/01-approval-poll-deadline`. Each poll in `await_cli_approval` is now bounded by the helper's
+  deadline with `timeout_at`, and the deadline is checked at the top of the loop with the last answer kept for the
+  messages, as `await_local_host` already does, so a stalled helm and a card that never appears each fail with their own
+  diagnostic. The test change totals 25 added/deleted lines, below the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2603/changes.
 
 ## changed-template-test-allows-missing-retry-key.md
 

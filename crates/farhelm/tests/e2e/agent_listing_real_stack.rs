@@ -201,15 +201,31 @@ fn agent_command_builder(
 ///
 /// A command that exits without a card is a fixture failure, not a successful
 /// wait. Keep the command and GUI alive through the caller's card assertions
-/// so those assertions describe an approval that can still be answered.
+/// so those assertions describe an approval that can still be answered. The
+/// deadline bounds each HTTP response and its body too, as in
+/// `await_local_host`: a helm that stalls mid-reply fails here with this
+/// helper's diagnostic instead of hanging until the outer runner kills the test.
 async fn await_cli_approval(
     client: &reqwest::Client,
     base: &str,
     child: &mut tokio::process::Child,
     deadline: tokio::time::Instant,
 ) -> serde_json::Value {
+    let mut last_cards = None;
     loop {
-        let cards = get_json(client, &format!("{base}/api/approvals")).await;
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "live CLI never produced a card; last approvals (None means no response): {last_cards:?}"
+        );
+        let cards =
+            tokio::time::timeout_at(deadline, get_json(client, &format!("{base}/api/approvals")))
+                .await
+                .unwrap_or_else(|_| {
+                    let waiting = child.try_wait().expect("inspect the owned CLI").is_none();
+                    panic!(
+                        "approval poll exceeded the deadline before the helm answered; CLI still waiting: {waiting}; last approvals (None means no response): {last_cards:?}"
+                    )
+                });
         assert!(
             child.try_wait().expect("inspect the owned CLI").is_none(),
             "CLI ended before its approval appeared: {cards}"
@@ -217,10 +233,7 @@ async fn await_cli_approval(
         if let Some(card) = cards["approvals"].as_array().unwrap().first() {
             return card.clone();
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "live CLI never produced a card: {cards}"
-        );
+        last_cards = Some(cards);
         // sleep-ok: poll the named approval-table oracle while checking the owned CLI's liveness.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

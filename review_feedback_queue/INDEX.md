@@ -247,9 +247,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`welcome-recovery-counts-unfinished-selection-read.md`](welcome-recovery-counts-unfinished-selection-read.md) — The
   welcome-recovery test may reject an extra legitimate preference read; adverse scheduling is unverified.
 
-- [`approval-poll-http-await-exceeds-deadline.md`](approval-poll-http-await-exceeds-deadline.md) — A stalled HTTP
-  response can outlive the approval test's deadline until the outer runner stops it.
-
 - [`removed-deflake-items-leave-exclusions.md`](removed-deflake-items-leave-exclusions.md) — Removing two tracked flake
   items leaves their machine-readable sweep exclusions orphaned.
 
