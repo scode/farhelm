@@ -1085,7 +1085,9 @@ persistence has the same webview-localStorage assumptions as terminal text size 
 
 Terminal reveal also yields keyboard focus to an open menu, including its expanded toggle while the menu is mounting.
 Those controls remain the destination for menu keys even if the selected terminal finishes its initial replay at the
-same time; tab-strip buttons still allow reveal to move focus into the terminal after selection.
+same time; tab-strip buttons still allow reveal to move focus into the terminal after selection. Reveal takes focus only
+from where the selection that asked for the terminal left it, or from a sidebar row or tab clicked since, so a plain
+button the user moved to during the catch-up keeps focus.
 
 Device sounds live in `sounds.js`, which generates the three approved note sequences with Web Audio at master gain 0.3.
 Its `farhelm.sound.waiting`, `farhelm.sound.approval` and `farhelm.sound.finished` localStorage keys accept only `true`

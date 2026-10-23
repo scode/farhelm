@@ -57,10 +57,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`power-loss-version-folder-never-repaired.md`](power-loss-version-folder-never-repaired.md) — A Mac version folder
   damaged by power loss after an update is kept by every rerun and update; APFS exposing the damage is unverified.
 
-- [`terminal-reveal-takes-focus-from-plain-button.md`](terminal-reveal-takes-focus-from-plain-button.md) — A terminal
-  finishing its load takes focus from a keyboard-focused button, so Enter may answer an agent prompt; timing and bucket
-  are unsettled.
-
 - [`commands-setting-help-omits-delete.md`](commands-setting-help-omits-delete.md) — The help for running farhelm
   commands without asking omits that agents may delete sessions and templates; bucket is unsettled.
 

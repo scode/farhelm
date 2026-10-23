@@ -1163,6 +1163,24 @@
   // client opened, say — must not yank focus back into the terminal from
   // wherever the user just put it.
   let focusedEl = null;
+  // Where keyboard focus was when the selection last named `focusedEl`, or
+  // when a sidebar row or tab was last clicked. A reveal may take focus only
+  // from there (see `takesFocus`). It is recorded when the first `sync()`
+  // names the terminal, which is after the session view's lease arrives, not
+  // at the click itself; a new launch relies on that, since the launcher
+  // hands focus to the "new" button before the new view first syncs.
+  let focusOrigin = null;
+  // A click on a sidebar row or a tab is a selection even when it selects
+  // what is already showing: a reload auto-selects a session before the
+  // user clicks its row, and no `sync()` follows that click. Enter and Space
+  // on those buttons dispatch the same click. Focus has already moved by the
+  // time a click fires, so this records the clicked button (or the body,
+  // where a click does not focus buttons).
+  document.addEventListener('click', (event) => {
+    if (event.target instanceof Element && event.target.closest('.session-row-open, .tab-strip .tab')) {
+      focusOrigin = document.activeElement;
+    }
+  }, true);
 
   // The `code` field of a detached notice (farhelm_proto's `DetachCode`,
   // relayed by the helm beside the human-readable `reason`). This view
@@ -3070,9 +3088,10 @@
       // agent beneath the scrim. That is the same theft `takesFocus()`
       // vetoes for reveals, and like that veto it is not replayed when the
       // dialog closes. Other focused keyboard owners, including inline
-      // session questions, share that veto. The rest of
-      // `takesFocus()`'s rules would break select-then-type, because
-      // selecting a tab leaves focus on its strip button.
+      // session questions, share that veto. `takesFocus()`'s other rules
+      // do not apply here: its editable and other-terminal rules would
+      // break switching tabs from the keyboard, and the selection that
+      // calls this is the origin its origin rule records.
       //
       // For the restart-with dialog this veto is the second layer: it marks
       // the rest of the page `inert` while mounted (restart_with.rs,
@@ -3082,6 +3101,7 @@
       const focusEl = specs.find((spec) => spec.focus)?.el ?? null;
       if (focusEl !== focusedEl) {
         focusedEl = focusEl;
+        focusOrigin = document.activeElement;
         const island = focusEl === null ? null : islands.get(focusEl);
         if (island && !keyboardHeldElsewhere()) island.term.focus();
       }
@@ -4524,10 +4544,11 @@
          * this guard exists to prevent.
          *
          * A mounted restart-with dialog is a structural veto: the dialog is
-         * modal, focus usually sits on
-         * one of its buttons (which the button rule below would otherwise
-         * surrender), and a refused restart remounts this very terminal
-         * behind the still-open dialog. Without the veto, that reattach
+         * modal, focus usually sits on one of its buttons (which can be the
+         * recorded selection origin, when the selected tab falls back to the
+         * agent under the open dialog), and a refused restart remounts this
+         * very terminal behind the still-open dialog. Without the veto, that
+         * reattach
          * would focus the pty under the scrim, and the next keystroke
          * aimed at the dialog would go to the agent instead. Closing the
          * dialog does not replay the vetoed reveal: a cancel hands focus back
@@ -4541,14 +4562,15 @@
          * second layer behind its `inert` marking (restart_with.rs,
          * modal_isolation.rs).
          *
-         * Other focused buttons do not hold the reveal back. The tab-strip
-         * selector is the concrete case: selecting a tab leaves focus on its
-         * button, and the point of that selection is to type into the tab once
-         * it is ready. Open menus are different: their toggle and items are
-         * active keyboard destinations, as are inline confirmation answers;
-         * both are covered by `keyboardHeldElsewhere()`.
-         * Treating every button like a typing target would strand the
-         * select-then-type flow.
+         * Otherwise focus is taken only from where the selection that asked
+         * for this terminal left it (`focusOrigin`, which a click on a row or
+         * tab also sets). Selecting a sidebar row or a tab leaves focus on
+         * that button, and the point of the selection is to type into the
+         * terminal once it is ready, so that button gives way. A button the
+         * user moved to afterwards, a header action tabbed to during the
+         * catch-up say, keeps focus, so an Enter meant for it cannot reach
+         * the agent. Open menus and inline confirmation answers are covered
+         * by `keyboardHeldElsewhere()` as well.
          */
         function takesFocus() {
           if (!focusOnReveal || focusedEl !== spec.el) return false;
@@ -4556,6 +4578,7 @@
           const active = document.activeElement;
           if (!active || active === document.body) return true;
           if (el && el.contains(active)) return true;
+          if (active !== focusOrigin) return false;
           const editable =
             active.matches("input, textarea, select, [contenteditable]") ||
             active.isContentEditable;

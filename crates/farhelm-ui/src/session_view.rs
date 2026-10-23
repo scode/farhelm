@@ -67,8 +67,12 @@ const RESTART_WITH_DESCRIPTION_ID: &str = "restart-with-description";
 const COPY_DIRECTORY_DESCRIPTION_ID: &str = "header-copy-directory-description";
 const COPY_COMMAND_DESCRIPTION_ID: &str = "header-copy-command-description";
 
-/// Both cancellation and successful restart return to the same header action.
-/// Isolation release and frame timing belong to the shared dialog handle.
+/// Cancellation returns to the header action that opened the dialog. A
+/// successful restart does not: the terminal it remounts takes focus when it
+/// reveals, and only from where focus was when the session was selected, so
+/// focus parked on this trigger would keep the keyboard out of the restarted
+/// agent. Isolation release and frame timing belong to the shared dialog
+/// handle.
 const RESTART_WITH_RETURN_FOCUS: &str =
     "document.querySelector('.restart-with-trigger')?.focus({ preventScroll: true });";
 
@@ -1526,7 +1530,8 @@ pub(crate) fn SessionView(
                         relaunched.set(true);
                         if with.is_some() {
                             restart_with_open.set(None);
-                            restart_dialog.close(RESTART_WITH_RETURN_FOCUS);
+                            // No focus return: see `RESTART_WITH_RETURN_FOCUS`.
+                            restart_dialog.close("");
                         }
                     }
                 }
