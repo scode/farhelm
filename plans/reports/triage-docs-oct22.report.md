@@ -96,3 +96,72 @@ paragraphs and the usual "Confirmed" label for the Goose, Pi and shared-folder t
 Not applied, as outside these outcomes: the environment wording mismatch and the TODO.md Pi note above, a
 cross-reference from "Managed checkouts", and a nearby sentence about sub-agent reports that could be read as covering
 Goose. The two discards had no findings.
+
+### Landing
+
+Landed as #2626, #2627, #2628, #2629, #2631, #2632 and #2633, merged bottom-up, with the content the report describes
+and one review-queue index conflict resolved. It was the second of three plans in this landing round, after
+tunnel-port-and-link-ranges and before resume-target-fixes-oct22.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained sign-in-preservation-sweep (a browser that signs in again reloads the page, and a
+failed GUI preference save is reported and discarded) and two TODO.md commits. A fresh-context reviewer and I read this
+plan's specification text against them and against the other two plans in the round:
+
+- None of the sweep's specification changes is in a section this plan edits, and TODO.md keeps both main's new near-term
+  entries and this plan's widened "Doc todo" item.
+- resume-target-fixes-oct22, the next plan in this round, adds text to the same "Durability and resume" section of
+  SPEC.md. The two sit side by side without contradicting each other: this plan accepts that a Goose sub-agent, a nested
+  Goose run or a child Pi can replace the session's Resume target, and that plan changes what Restart with forgets when
+  Farhelm's hooks are off and which Grok or OMP process may report a conversation.
+- The corrected premise about tmux (an agent's launch runs the startup files while `TMUX` still names Farhelm's own tmux
+  server, so a tmux autostart guarded by `TMUX` fires in the first tab instead) matches how the supervisor starts an
+  agent and a tab today.
+
+#### Fixes made during the landing
+
+None to the plan's text. Its first PR conflicted with main in the review queue's index, because main had removed an
+entry next to one this plan removes; the landing kept main's entries and this plan's removals.
+
+#### Possible follow-ups
+
+- Found at landing, nothing to do: the review finding about checkouts on filesystems without creation times still
+  mentions, in its triage notes, the finding about checkout roots shared between hosts, which this plan removed. That
+  finding is already triaged and planned (checkout-ownership-oct22), whose landing removes the file and the stale
+  mention with it.
+
+#### Checks
+
+The round's three plans change the helm's link classification and localhost tunnel port, the supervisor's Restart with
+and its checks of which Grok or OMP process reports a conversation, and specification text. This round ran the helm's
+and the supervisor's own tests, the browser test for clicking links in a terminal, and the source checks, on all three
+plans stacked together on this round's main (which already held sign-in-preservation-sweep). Everything below except the
+last item ran before the round's documentation fixes (in tunnel-port-and-link-ranges and resume-target-fixes-oct22),
+which change only three docs pages and one changelog fragment:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`
+  (tunnel-port-and-link-ranges removes a sentence from the desktop-only tunnel warning), the isolated test-sleep check,
+  `dprint check` on the changed Markdown files, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py` (one warning, about a citation main already had), the docs website build, the
+  workspace debug build and the UI's release web build: all passed.
+- `cargo nextest run -p farhelm-helm` through the test recorder with pinned nextest and tmux, four slots, no retries,
+  run `57e5a94a-29d0-4261-b9a5-697446134c41`: 1291 passed. This covers the link classification and tunnel tests
+  tunnel-port-and-link-ranges added or changed, and the rest of the helm.
+- `cargo nextest run -p farhelm-supervisor --lib`, same recorder settings, run `8604dc02-2297-49e6-a824-76be3cebf57d`:
+  1258 passed, 4 skipped by design (helper entries that only run as child processes of other tests). This includes the
+  Restart with tests that drive a real restart and every Grok and OMP process check.
+- `npx playwright test tests/terminal-link-clicks.spec.ts` in `e2e/` on Chromium and WebKit, three workers each with its
+  own helm and supervisors, no retries, run `6f350fd5-b9c0-42d3-a88a-f098d376cce2`: 30 passed.
+- After the documentation fixes: the docs website build, `dprint check` on the changed Markdown files, the changelog
+  format check and the instructions check passed again.
+- Reused: none. Skipped: the rest of the Rust workspace (the farhelm binary's end-to-end tests and the UI tests; no code
+  outside the helm and supervisor changed apart from removing one sentence from a dialog), the rest of the browser suite
+  (only link classification reaches the browser), the doctests (no documentation example changed), the desktop smoke
+  test, the native Mac app (not runnable here) and the installer (unchanged).
+
+The report's checks were the formatter and the instructions check; those ran again here on the plan as it landed. The
+runtime tests above cover the other two plans in the round, not this one, which changes no code. Nothing in the
+executor's report became untrue at landing.
