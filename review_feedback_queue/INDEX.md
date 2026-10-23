@@ -19,9 +19,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`tunnel-shadows-busy-wildcard-port.md`](tunnel-shadows-busy-wildcard-port.md) — A Mac tunnel may take a port a local
   service serves on all addresses and divert its clients to the remote host; macOS bind behavior is unverified.
 
-- [`link-classifier-misses-embedded-ipv4.md`](link-classifier-misses-embedded-ipv4.md) — Some IPv6 forms of local IPv4
-  addresses open as public links without a card; whether they reach the user's network is unverified.
-
 - [`agent-stop-kills-shared-personal-tmux.md`](agent-stop-kills-shared-personal-tmux.md) — Stop or Restart kills the
   user's own tmux server or ssh master, with outside work in it, when the agent started it first; spec coverage is
   ambiguous.
