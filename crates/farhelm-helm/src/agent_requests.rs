@@ -26,6 +26,9 @@
 //! `hosts::edit_identity_checked`/`remove_host_checked` (the GUI routes'
 //! own writes, with the card's expectations checked under their locks) for
 //! the host edit and remove.
+//! Host add approves the edited destination, then the answering GUI runs its
+//! own ordinary discovery/setup flow. Its receipt binds that continuation to
+//! this handler's final successful origin check, not to installation success.
 //! Prompt delivery has no REST counterpart: [`agent_prompt`] routes the
 //! approved message to the owning supervisor's confirmed input operation.
 //! That path is dormant in this build: while [`AGENT_PROMPTS_ENABLED`] is
@@ -83,11 +86,11 @@
 //! # Acting verbs wait for the user first
 //!
 //! Every verb that changes something (rename, stop, restart, delete, prompt, create, clone,
-//! `farhelm spawn` through create, the template writes, and the host edit and
+//! `farhelm spawn` through create, the template writes, and the host add, edit and
 //! remove) is carried out only once the user has
 //! approved it on a card in the GUI, or the requesting host's "run farhelm
 //! commands from this host without asking" setting is on (SPEC.md,
-//! Agent-spawned sessions). The setting never covers a host edit or remove,
+//! Agent-spawned sessions). The setting never covers a host add, edit or remove,
 //! nor an agent-supplied wrapper: those always wait for the user's own Allow
 //! (`ApprovalAction::requires_direct_allow`). [`approved`] is that gate: it asks
 //! (`approvals::ask`) after the verb has resolved exactly what it would do,
@@ -688,6 +691,9 @@ impl AgentRequestHandler for HelmAgentRequests {
             ParsedAgentVerb::TemplateDelete { name } => {
                 delete_template_for_agent(&state, origin, session_id, name.into_string()).await
             }
+            ParsedAgentVerb::HostAdd { destination, alias } => {
+                host_add_for_agent(&state, origin, session_id, destination, alias).await
+            }
             ParsedAgentVerb::HostEdit {
                 host,
                 alias,
@@ -989,6 +995,10 @@ impl NonEmptyString {
 /// URL, launch and target semantics still belong to the existing policy helpers.
 #[derive(Debug)]
 enum ParsedAgentVerb {
+    HostAdd {
+        destination: String,
+        alias: Option<String>,
+    },
     Hosts,
     Sessions,
     Templates,
@@ -1069,6 +1079,12 @@ impl ParsedAgentVerb {
                 .transpose()
         };
         Ok(match verb {
+            AgentVerb::HostAdd { destination, alias } => {
+                farhelm_proto::approvals::validate_host_add_destination(&destination)?;
+                let alias = crate::store::validate_alias(alias.as_deref())
+                    .map_err(|error| error.to_string())?;
+                Self::HostAdd { destination, alias }
+            }
             AgentVerb::Hosts {} => Self::Hosts,
             AgentVerb::Sessions {} => Self::Sessions,
             AgentVerb::Templates {} => Self::Templates,
@@ -2950,20 +2966,56 @@ async fn delete_template_for_agent(
 }
 
 // ---------------------------------------------------------------------------
-// Host edit and remove
+// Host add, edit and remove
 //
-// Both verbs change the helm's registry, so each is carried out only on the
-// user's Allow of its one card: the card kinds always need a direct Allow
-// (`ApprovalAction::requires_direct_allow`), which the requesting host's
-// "without asking" setting and Always allow cannot stand in for. Once
-// allowed, each goes through the code the GUI uses for the same change (the
-// settings dialog's alias and appearance writes, the hosts panel's remove),
-// so an agent's change and the user's cannot drift. The approval covers what
-// the card showed: a host that changed under the card is refused rather than
-// changed on the strength of an answer about something else, and that check
-// is made under the same locks as the write, so no GUI write can land between
-// the two.
+// All three verbs affect the helm's registry, so each needs the user's Allow
+// (`ApprovalAction::requires_direct_allow`); the requesting host's command
+// shortcut and Always allow cannot stand in for it. Add continues through
+// the ordinary GUI discovery/setup flow. Edit and remove use the settings
+// dialog's and hosts panel's own writes, so those paths cannot drift.
+// Their card expectations are compared under the write locks: a host that
+// changed while approval waited is refused, without a gap in which a GUI
+// write could change the values after that comparison.
 // ---------------------------------------------------------------------------
+
+/// Accept only the edited destination whose answer passed the final origin
+/// check. The receipt is the last fallible approval step, with no await or
+/// origin veto after it: a successful answer POST permits the GUI to probe.
+/// Discovery and setup still belong to the ordinary GUI flow, not this relay.
+async fn host_add_for_agent(
+    state: &AppState,
+    origin: AgentOrigin,
+    asking_session: &str,
+    destination: String,
+    alias: Option<String>,
+) -> anyhow::Result<AgentReply> {
+    let answer = crate::approvals::ask_with_answer(
+        state,
+        origin,
+        asking_session,
+        ApprovalAction::HostAdd { destination, alias },
+    )
+    .await?;
+    let crate::approvals::Allowed::HostAdd {
+        destination,
+        receipt,
+    } = answer
+    else {
+        anyhow::bail!("host add requires its edited destination answer");
+    };
+    #[cfg(test)]
+    state.approvals.hold_at_host_write_gate(origin.host).await;
+    if !origin_is_live(state, origin) {
+        return Err(anyhow::Error::new(crate::SupervisorError::helm(
+            ErrorKind::Unavailable,
+            crate::approvals::ORIGIN_GONE_REFUSAL.to_string(),
+        )));
+    }
+    receipt
+        .send(())
+        .map_err(|_| anyhow::anyhow!("the host add answer was withdrawn"))?;
+    Ok(AgentReply::HostAddAccepted { destination })
+}
 
 /// One `host edit` verb's fields, moved out of [`AgentVerb`] so the handler
 /// arm stays a dispatch.
@@ -12904,6 +12956,167 @@ mod tests {
         );
     }
 
+    /// Send a complete add answer through the real router. Owning the router
+    /// lets tests park the HTTP task independently of the requesting handler.
+    async fn host_add_answer(
+        router: axum::Router,
+        id: String,
+        body: serde_json::Value,
+    ) -> axum::http::StatusCode {
+        use tower::ServiceExt;
+        router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/approvals/{id}"))
+                    .header("host", "127.0.0.1:7433")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    /// An add always waits despite command permission, rejects malformed
+    /// edits without spending the card, and elects exactly one continuation.
+    /// The approved edited destination is the reply; approval itself registers
+    /// nothing, because discovery remains the answering GUI's next action.
+    #[farhelm_testtrace::test]
+    async fn host_add_validates_edits_and_has_one_receipted_winner() {
+        let (h, local, _) = host_fleet().await;
+        assert!(host_row(&h, local).await.unwrap().commands_without_asking);
+        let before = h.store.list_hosts().await.unwrap().len();
+        let _gui = h.state.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::HostAdd {
+                        destination: "user@original".into(),
+                        alias: Some("  build  ".into()),
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        assert_eq!(
+            card.action,
+            ApprovalAction::HostAdd {
+                destination: "user@original".into(),
+                alias: Some("build".into())
+            }
+        );
+        assert!(card.action.requires_direct_allow());
+        for body in [
+            serde_json::json!({"answer":"allow"}),
+            serde_json::json!({"answer":"allow", "host_add":{"destination":" "}}),
+            serde_json::json!({"answer":"allow", "host_add":{"destination":"x\ny"}}),
+            serde_json::json!({"answer":"deny", "host_add":{"destination":"user@edited"}}),
+            serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited", "alias":"foreign"}}),
+        ] {
+            assert!(
+                !host_add_answer(h.router(), card.id.clone(), body)
+                    .await
+                    .is_success()
+            );
+            assert_eq!(
+                h.state.approvals.list()[0].id,
+                card.id,
+                "invalid answers preserve the card"
+            );
+            assert!(!task.is_finished(), "invalid payload did not approve");
+        }
+        let (one, two) = tokio::join!(
+            host_add_answer(
+                h.router(),
+                card.id.clone(),
+                serde_json::json!({"answer":"allow", "host_add":{"destination":"user@one"}})
+            ),
+            host_add_answer(
+                h.router(),
+                card.id.clone(),
+                serde_json::json!({"answer":"allow", "host_add":{"destination":"user@two"}})
+            )
+        );
+        assert!(
+            one == axum::http::StatusCode::NO_CONTENT || two == axum::http::StatusCode::NO_CONTENT
+        );
+        // The receipt is the acceptance boundary. Retiring the origin now
+        // cannot turn that already accepted continuation into a refusal.
+        h.fleet.take_down(local);
+        h.await_state(local, |state| state.phase() != "connected")
+            .await;
+        let accepted = match task.await.unwrap() {
+            AgentOutcome::Ok {
+                reply: AgentReply::HostAddAccepted { destination },
+            } => destination,
+            other => panic!("expected accepted add, got {other:?}"),
+        };
+        if one == axum::http::StatusCode::NO_CONTENT {
+            assert_eq!(two, axum::http::StatusCode::GONE);
+            assert_eq!(accepted, "user@one");
+        } else {
+            assert_eq!(one, axum::http::StatusCode::GONE);
+            assert_eq!(two, axum::http::StatusCode::NO_CONTENT);
+            assert_eq!(accepted, "user@two");
+        }
+        assert_eq!(h.store.list_hosts().await.unwrap().len(), before);
+    }
+
+    /// A delivered verdict still cannot authorize browser discovery when
+    /// the origin is retired before the handler's final acceptance point.
+    /// This gate distinguishes receipt semantics from send-success semantics.
+    #[farhelm_testtrace::test]
+    async fn host_add_origin_loss_before_receipt_refuses_both_sides() {
+        let (h, local, _) = host_fleet().await;
+        let _gui = h.state.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let gate = h.state.approvals.install_host_write_gate(local);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::HostAdd {
+                        destination: "user@new".into(),
+                        alias: None,
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        let answer = tokio::spawn(host_add_answer(
+            h.router(),
+            card.id,
+            serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited"}}),
+        ));
+        tokio::time::timeout(std::time::Duration::from_secs(20), gate.reached.notified())
+            .await
+            .unwrap();
+        assert!(
+            !answer.is_finished(),
+            "POST waits for acceptance, not delivery"
+        );
+        h.fleet.take_down(local);
+        h.await_state(local, |state| state.phase() != "connected")
+            .await;
+        assert!(
+            !origin_is_live(&h.state, origin),
+            "premise: original connection retired"
+        );
+        gate.release.notify_one();
+        assert_eq!(answer.await.unwrap(), axum::http::StatusCode::GONE);
+        let (kind, message) = refused(task.await.unwrap());
+        assert_eq!(kind, ErrorKind::Unavailable);
+        assert_eq!(message, crate::approvals::ORIGIN_GONE_REFUSAL);
+    }
+
     /// A refusal's kind and message, or a panic naming what came instead.
     fn refused(outcome: AgentOutcome) -> (ErrorKind, String) {
         match outcome {
@@ -13020,6 +13233,10 @@ mod tests {
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         for verb in [
+            AgentVerb::HostAdd {
+                destination: "user@new".into(),
+                alias: Some("new".into()),
+            },
             AgentVerb::HostEdit {
                 host: "user@builder".to_string(),
                 alias: None,
@@ -13088,6 +13305,10 @@ mod tests {
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         for verb in [
+            AgentVerb::HostAdd {
+                destination: "user@new".into(),
+                alias: None,
+            },
             AgentVerb::HostEdit {
                 host: "user@builder".to_string(),
                 alias: Some(HostAliasEdit::Set("baz".to_string())),

@@ -110,6 +110,12 @@ pub enum TemplateKeyCard {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ApprovalAction {
+    /// An agent asks to open the ordinary add dialog. Only its edited Allow
+    /// starts discovery; this tag makes older clients fail closed.
+    HostAdd {
+        destination: String,
+        alias: Option<String>,
+    },
     /// A browser request, shown as exact peer-controlled URL data. A preapproved request
     /// still needs an Open click in a web client; desktop opens through the helm's native sink.
     OpenUrl {
@@ -275,15 +281,15 @@ impl ApprovalAction {
     /// Two reasons put a kind here. An agent-supplied wrapper prefix: the
     /// host's ordinary command shortcut cannot vouch for a wrapper the agent
     /// chose, and a wrapper-bearing template becomes trusted by later
-    /// launches only after this card. And a change to a host itself (edit or
-    /// remove): the maintainer decided that an agent's changes to hosts are
+    /// launches only after this card. And a change to a host itself (add,
+    /// edit or remove): the maintainer decided that an agent's changes to hosts are
     /// never approved automatically (SPEC.md, Agent-spawned sessions). A UI
     /// must offer only Allow and Deny for such a card, and the helm refuses
     /// an Always allow answer to one.
     pub fn requires_direct_allow(&self) -> bool {
         match self {
             Self::LaunchWithAgentWrapper { .. } => true,
-            Self::HostEdit { .. } | Self::HostRemove { .. } => true,
+            Self::HostAdd { .. } | Self::HostEdit { .. } | Self::HostRemove { .. } => true,
             Self::TemplateWrite { fields, .. }
             | Self::TemplateWriteWithShortcuts { fields, .. } => {
                 matches!(&fields.wrapper_prefix, Some(Some(_)))
@@ -317,10 +323,35 @@ pub enum LaunchVerb {
 }
 
 /// The body of `POST /api/approvals/{id}`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApprovalAnswerRequest {
     pub answer: ApprovalAnswer,
+    /// Required only for HostAdd Allow: the destination actually approved in
+    /// the editable dialog. Alias stays with the ordinary add flow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_add: Option<HostAddAnswer>,
+}
+
+/// Approved destination text, not authority to provision a host. Discovery
+/// and setup keep their ordinary validation and confirmation routes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostAddAnswer {
+    pub destination: String,
+}
+
+/// Bound destination text before displaying it or carrying an edited answer.
+/// SSH syntax, duplicates and reachability remain the ordinary probe's job.
+pub fn validate_host_add_destination(destination: &str) -> Result<(), String> {
+    if destination.trim().is_empty()
+        || destination.len() > 4096
+        || destination.chars().any(char::is_control)
+    {
+        Err("the ssh destination must be nonempty, at most 4096 bytes and contain no control characters".into())
+    } else {
+        Ok(())
+    }
 }
 
 /// The user's answer to one card.
@@ -387,8 +418,8 @@ mod tests {
         );
     }
 
-    /// Spec: host edit and host remove cards travel under their own kind tags,
-    /// which a UI from before them cannot decode, and both always need a
+    /// Spec: host add, edit and remove cards travel under their own kind tags,
+    /// which a UI from before them cannot decode, and all always need a
     /// direct Allow.
     ///
     /// Why: an older UI that decoded one as some card it knows would offer
@@ -423,7 +454,15 @@ mod tests {
             host_name: "builder".into(),
             destination: "user@builder".into(),
         };
-        for (card, kind) in [(edit, "host_edit"), (remove, "host_remove")] {
+        let add = super::ApprovalAction::HostAdd {
+            destination: "user@new".into(),
+            alias: Some("new".into()),
+        };
+        for (card, kind) in [
+            (add, "host_add"),
+            (edit, "host_edit"),
+            (remove, "host_remove"),
+        ] {
             let value = serde_json::to_value(&card).unwrap();
             assert_eq!(value["kind"], kind);
             assert_eq!(

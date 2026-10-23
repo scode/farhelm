@@ -1,6 +1,6 @@
 ---
 title: Approve what agents do
-description: How Farhelm asks before an agent changes sessions or opens links, and how to stop it asking for a host.
+description: How Farhelm asks before agents change sessions, templates or hosts, or open links.
 sidebar:
   order: 9
 ---
@@ -9,11 +9,11 @@ An agent running in a Farhelm session can do more than work in its own terminal.
 uses when you ask it to (with `$farhelm` in your message) but can also run on its own, it can look at your hosts and
 sessions, start new sessions on any host, in an existing directory or a new
 [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), copy a session to the same host or
-another, rename, stop, restart, or delete sessions, and change your [launch templates](/docs/using/launch-templates/).
-It can also ask to open a web link in your browser
-([Open links from a remote session](#open-links-from-a-remote-session)). Farhelm asks you before any of those changes
-happens, whoever typed the command; a command you type yourself in a session's terminal is asked about the same way.
-Looking never asks.
+another, rename, stop, restart, or delete sessions, change your [launch templates](/docs/using/launch-templates/), and
+[add, edit or remove hosts](/docs/using/approve-agent-requests/#host-changes). It can also ask to open a web link in
+your browser ([Open links from a remote session](#open-links-from-a-remote-session)). Farhelm asks you before any of
+those changes happens, whoever typed the command; a command you type yourself in a session's terminal is asked about the
+same way. Looking never asks.
 
 An agent starting another session can supply its first message with `--prompt` or `--prompt-file` (`-` reads stdin). The
 approval card shows the full message. It is sent once when the new agent starts; restarting, copying or replacing that
@@ -42,7 +42,7 @@ that matter:
 Most of what a card shows was written by the agent: session titles, directories, commands. Read those as the agent's
 words, not Farhelm's; each one sits under its own label.
 
-The card has three buttons:
+Most cards offer three buttons:
 
 - **allow** lets this one request go ahead.
 - **always allow from** the host lets this request go ahead and turns on that host's **Run farhelm commands without
@@ -66,6 +66,31 @@ are waiting, that host's agents are turned away until you answer one. Cards stay
 When the waiting requests change or you switch to another request, the answer buttons pause for a moment, so a
 double-click cannot answer a request you have not read.
 
+## Host changes
+
+An agent can ask to add, edit or remove a host. Each request needs your approval, every time. **Run farhelm commands
+without asking** never covers host changes, and they never offer **always allow from**.
+
+- `farhelm agent host add build-box --alias build` asks to add an ssh destination, with an optional display alias.
+- `farhelm agent host edit build --icon flask --color teal` asks to change a host's appearance. It can also set an alias
+  with `--alias` or clear it with `--no-alias`. Edits cover only the alias, icon and color; an agent cannot change a
+  host's destination or permissions. The card shows each changed field's old and new value.
+- `farhelm agent host remove build` asks Farhelm to [forget that host](/docs/using/manage-hosts/#remove-a-host). An
+  agent cannot remove the host its own session runs on or **local (this machine)**.
+
+For edit and remove, use the host's name from `farhelm agent hosts`. Both offer **allow** and **deny**.
+
+An add request opens the ordinary **add host** dialog in your focused Farhelm window, with the destination and alias
+filled in and the asking session and host shown. You can change either field before choosing **add** to approve, or
+**cancel** to decline. Other windows show a card that opens the dialog there. Approval starts the ordinary
+[add host flow](/docs/get-started/add-a-remote-host/) with the values you chose. If Farhelm needs to be installed on the
+host, it still asks you to confirm setup, even with **set up new hosts without asking** turned on. The settings that
+skip setup or removal questions apply to actions you start in the UI; they do not approve an agent's request.
+
+The agent gets `accepted` when you approve and Farhelm starts adding the host. That does not mean Farhelm is installed
+or that the host is ready: adding can still fail, need setup, or be cancelled at the setup question. The agent must run
+`farhelm agent hosts` and check the host's state before relying on it.
+
 ## When nobody answers
 
 The agent waits up to nine minutes for your answer. If nobody answers by then, the card disappears and the agent is told
@@ -86,8 +111,9 @@ agent and leave the session listed.
 Each host has a **Run farhelm commands without asking** setting, in its settings next to the YOLO one
 ([Manage hosts](/docs/using/manage-hosts/#host-settings)). Every host starts with it off. Turning it on means agents in
 that host's sessions start, stop, restart, delete, rename, and copy sessions on any of your hosts, and change templates,
-without asking you, except for the [wrapper prefixes](#the-card) described above. Turn it on only for a host whose
-agents you would let do that unsupervised.
+without asking you, except for the [wrapper prefixes](#the-card) described above. It never covers
+[host changes](/docs/using/approve-agent-requests/#host-changes). Turn it on only for a host whose agents you would let
+do that unsupervised.
 
 If you **adopt** a host that was reinstalled or replaced at the same address, the setting goes back to off, like the
 YOLO setting and both link settings: you have not decided about the new installation yet.

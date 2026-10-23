@@ -218,7 +218,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_63` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_64` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -229,7 +229,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 63;
+pub const PROTOCOL_VERSION: u32 = 64;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -1952,6 +1952,14 @@ pub enum AgentVerb {
     /// `farhelm agent template delete`. Answered with
     /// [`AgentReply::TemplateDeleted`].
     TemplateDelete { name: String },
+    /// Ask the user to add an SSH host through the ordinary GUI dialog.
+    /// HostAddAccepted means approved, not installed: discovery/setup may
+    /// fail or be cancelled, and callers must check the hosts listing.
+    HostAdd {
+        destination: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alias: Option<String>,
+    },
     /// `farhelm agent host edit`: change a host's alias, icon or color, and
     /// nothing else. Answered with [`AgentReply::HostEdited`].
     ///
@@ -2042,8 +2050,10 @@ impl AgentVerb {
             | AgentVerb::TemplateCreate { .. }
             | AgentVerb::TemplateEdit { .. }
             | AgentVerb::TemplateDelete { .. }
-            // A host edit or removal changes the helm's registry, which
-            // every client and every later agent request reads.
+            // Host changes affect the helm's registry, which every client
+            // and every later agent request reads. Add accepts a browser
+            // continuation, so a lost answer is not proof that it never began.
+            | AgentVerb::HostAdd { .. }
             | AgentVerb::HostEdit { .. }
             | AgentVerb::HostRemove { .. } => true,
         }
@@ -2075,6 +2085,7 @@ impl AgentVerb {
             | AgentVerb::TemplateCreate { .. }
             | AgentVerb::TemplateEdit { .. }
             | AgentVerb::TemplateDelete { .. }
+            | AgentVerb::HostAdd { .. }
             | AgentVerb::HostEdit { .. }
             | AgentVerb::HostRemove { .. }
             | AgentVerb::OpenUrl { .. } => true,
@@ -2277,6 +2288,9 @@ pub enum AgentReply {
     TemplateWritten { template: Box<AgentTemplate> },
     /// A template delete's confirmation, carrying nothing beyond success.
     TemplateDeleted {},
+    /// The user approved this edited destination. Installation is not
+    /// promised; the answering GUI continues the ordinary add flow.
+    HostAddAccepted { destination: String },
     /// Answers `HostEdit` with the host as the listing now shows it, so the
     /// caller learns the display name an alias change gave it.
     HostEdited { host: AgentHost },
@@ -5236,8 +5250,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_63() {
-        assert_eq!(PROTOCOL_VERSION, 63);
+    fn protocol_version_is_pinned_at_64() {
+        assert_eq!(PROTOCOL_VERSION, 64);
     }
 
     /// A follow-up is an approved mutation even though its success has no
@@ -5385,11 +5399,21 @@ mod tests {
         let wire = serde_json::json!({"verb": "host_remove", "host": "builder"});
         assert_eq!(serde_json::to_value(&remove).unwrap(), wire);
         assert_eq!(serde_json::from_value::<AgentVerb>(wire).unwrap(), remove);
-        for verb in [&edit, &clear, &remove] {
+        let add = AgentVerb::HostAdd {
+            destination: "user@new".into(),
+            alias: Some("new".into()),
+        };
+        let wire = serde_json::json!({"verb":"host_add", "destination":"user@new", "alias":"new"});
+        assert_eq!(serde_json::to_value(&add).unwrap(), wire);
+        assert_eq!(serde_json::from_value::<AgentVerb>(wire).unwrap(), add);
+        for verb in [&add, &edit, &clear, &remove] {
             assert!(verb.is_mutating(), "{verb:?}");
             assert!(verb.may_wait_for_user(), "{verb:?}");
         }
         for reply in [
+            AgentReply::HostAddAccepted {
+                destination: "user@approved".into(),
+            },
             AgentReply::HostEdited {
                 host: AgentHost {
                     id: "entry".into(),
@@ -5405,7 +5429,7 @@ mod tests {
             assert!(
                 matches!(
                     value["reply"].as_str(),
-                    Some("host_edited" | "host_removed")
+                    Some("host_add_accepted" | "host_edited" | "host_removed")
                 ),
                 "{value}"
             );

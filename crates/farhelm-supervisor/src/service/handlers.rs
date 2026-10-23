@@ -3602,6 +3602,15 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
         // the same bounds; so does a new alias, which the helm's audit and
         // the card carry. The alias's own rules (trimmed, at most 64
         // characters) are the helm's, applied where it is stored.
+        AgentVerb::HostAdd { destination, alias } => {
+            farhelm_proto::approvals::validate_host_add_destination(destination)?;
+            if let Some(alias) = alias
+                && (alias.len() > AGENT_HOST_NAME_CAP || alias.chars().any(char::is_control))
+            {
+                return Err("--alias is too long or contains control characters".into());
+            }
+            Ok(())
+        }
         AgentVerb::HostEdit { host, alias, .. } => {
             validate_host_name(host)?;
             match alias {

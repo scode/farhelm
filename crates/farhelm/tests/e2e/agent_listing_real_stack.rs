@@ -239,6 +239,108 @@ async fn await_cli_approval(
     }
 }
 
+/// The real host-add CLI waits through both relay hops and reports the
+/// user's edited destination as accepted, never installed. Deny is a
+/// nonzero declined result. Approval itself does not contact/install a host;
+/// the ordinary GUI continuation is covered by the browser provisioning test.
+#[farhelm_testtrace::test]
+async fn host_add_cli_reports_accepted_edited_destination_and_declined() {
+    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let supervisor = supervisor_process().await;
+    let helm = helm_process(supervisor.state.path(), None).await;
+    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let client = client_with_secret(&secret);
+    await_local_host(&client, &helm.base).await;
+    let work = farhelm_teststate::tempdir().unwrap();
+    let (status, body) = post(&client, &format!("{}/api/sessions", helm.base),
+        serde_json::json!({"cwd":work.path(), "command":{"command":fixture_cmd("fake-agent --script basic"), "yolo":false}, "title":"host add requester"})).await;
+    assert!(status.is_success(), "create requester: {body}");
+    let session: SessionInfo = serde_json::from_str(&body).unwrap();
+    let _terminal = attach_terminal(&helm, &secret, &session.id).await;
+    let _events = hold_gui_socket(&helm, &secret, "/api/events").await;
+    let token = session_token(supervisor.state.path(), &session.id).await;
+    let socket = supervisor.state.path().join("supervisor.sock");
+    hosts_until_attached(&session.id, &token, &socket).await;
+    allow_agents_without_asking(&client, &helm.base).await;
+    let before = get_json(&client, &format!("{}/api/hosts", helm.base)).await;
+    for answer in ["allow", "deny"] {
+        let mut command = tokio::process::Command::from(agent_command_builder(
+            &["host", "add", "user@original.invalid", "--alias", "builder"],
+            &session.id,
+            &token,
+            &socket,
+        ));
+        command
+            .kill_on_drop(true)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = command.spawn().unwrap();
+        let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
+        let card = await_cli_approval(&client, &helm.base, &mut child, deadline).await;
+        assert_eq!(card["action"]["kind"], "host_add");
+        assert_eq!(card["action"]["alias"], "builder");
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "premise: CLI still held"
+        );
+        let body = if answer == "allow" {
+            serde_json::json!({"answer":"allow", "host_add":{"destination":"user@approved.invalid"}})
+        } else {
+            serde_json::json!({"answer":"deny"})
+        };
+        let (status, body) = post(
+            &client,
+            &format!(
+                "{}/api/approvals/{}",
+                helm.base,
+                card["id"].as_str().unwrap()
+            ),
+            body,
+        )
+        .await;
+        assert!(status.is_success(), "answer add: {body}");
+        let output = tokio::time::timeout_at(deadline, child.wait_with_output())
+            .await
+            .unwrap()
+            .unwrap();
+        if answer == "allow" {
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let text = String::from_utf8(output.stdout).unwrap();
+            assert!(
+                text.contains("accepted; Farhelm is adding \"user@approved.invalid\""),
+                "{text}"
+            );
+            assert!(
+                text.contains("not installed")
+                    && text.contains("cancelled")
+                    && text.contains("farhelm agent hosts"),
+                "{text}"
+            );
+        } else {
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("declined"));
+        }
+        let after = get_json(&client, &format!("{}/api/hosts", helm.base)).await;
+        assert_eq!(
+            after["hosts"].as_array().unwrap().len(),
+            before["hosts"].as_array().unwrap().len(),
+            "approval alone performs no host installation or registration"
+        );
+        assert!(
+            !after["hosts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["destination"] == "user@approved.invalid"
+                    || row["destination"] == "user@original.invalid")
+        );
+    }
+}
+
 /// The link CLI must wait for approval without fencing other commands from its session.
 /// Exercise both relay hops and the shipped CLI's exit status: Allow succeeds; Deny,
 /// the preapproved card's Dismiss (the same wire answer), and absence of a GUI fail.

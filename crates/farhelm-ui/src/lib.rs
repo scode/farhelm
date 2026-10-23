@@ -1633,6 +1633,7 @@ fn install_composition_guard() {
 /// has completed. Browser builds mount it immediately.
 #[component]
 fn AppBody() -> Element {
+    use_context_provider(approvals::AgentAddBridge::new);
     // Movement registration is nonreactive; opening a popup must not schedule
     // an old layout effect or change its existing focus/measurement owner.
     use_context_provider(anchored_popovers::MovementOwner::default);

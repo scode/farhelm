@@ -563,6 +563,14 @@ pub(crate) async fn relay_request(
                         mutating,
                     ));
                 }
+                if let AgentReply::HostAddAccepted { destination } = &reply
+                    && farhelm_proto::approvals::validate_host_add_destination(destination).is_err()
+                {
+                    return Err(lost_reply(
+                        "the helm returned an invalid approved destination",
+                        mutating,
+                    ));
+                }
                 Ok((session_id, reply))
             }
             // The TEXT is rendered verbatim whoever wrote it — the
@@ -648,6 +656,7 @@ enum ReplyKind {
     TemplateWritten,
     TemplateDeleted,
     HostEdited,
+    HostAddAccepted,
     HostRemoved,
 }
 
@@ -675,6 +684,7 @@ impl ReplyKind {
             farhelm_proto::AgentVerb::TemplateCreate { .. }
             | farhelm_proto::AgentVerb::TemplateEdit { .. } => ReplyKind::TemplateWritten,
             farhelm_proto::AgentVerb::TemplateDelete { .. } => ReplyKind::TemplateDeleted,
+            farhelm_proto::AgentVerb::HostAdd { .. } => ReplyKind::HostAddAccepted,
             farhelm_proto::AgentVerb::HostEdit { .. } => ReplyKind::HostEdited,
             farhelm_proto::AgentVerb::HostRemove { .. } => ReplyKind::HostRemoved,
         }
@@ -694,6 +704,7 @@ impl ReplyKind {
             AgentReply::Created { .. } => ReplyKind::Created,
             AgentReply::TemplateWritten { .. } => ReplyKind::TemplateWritten,
             AgentReply::TemplateDeleted {} => ReplyKind::TemplateDeleted,
+            AgentReply::HostAddAccepted { .. } => ReplyKind::HostAddAccepted,
             AgentReply::HostEdited { .. } => ReplyKind::HostEdited,
             AgentReply::HostRemoved {} => ReplyKind::HostRemoved,
         }
@@ -723,6 +734,7 @@ impl ReplyKind {
             ReplyKind::Created => "created session row",
             ReplyKind::TemplateWritten => "written template",
             ReplyKind::TemplateDeleted => "template delete confirmation",
+            ReplyKind::HostAddAccepted => "accepted host addition",
             ReplyKind::HostEdited => "edited host",
             ReplyKind::HostRemoved => "host remove confirmation",
         }

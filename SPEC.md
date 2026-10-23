@@ -228,10 +228,11 @@ a user who wants a different host replaces the entry instead. Approvals, setting
 therefore follow the entry. One still in flight when the destination changes or a new identity is adopted (an approved
 stop, restart, rename, create or clone, an "Always allow" answer, a change to the setting for running `farhelm` commands
 without asking, a confirmed uninstall) may be carried out against the entry's new machine, and Farhelm adds no check of
-the installation identity to prevent that. A destination change that does not adopt a new identity keeps the host's
-settings, including on a host that was never contacted. The identity rules above still hold: adopting a new identity
-resets all four permissions to asking, and the New dialog's default host and recent setups stay tied to the install the
-user saw.
+the installation identity to prevent that. Agent host edits and removals are narrower: their cards explicitly show the
+destination, so a destination changed during that wait is refused, as specified under Agent-spawned sessions. A
+destination change that does not adopt a new identity keeps the host's settings, including on a host that was never
+contacted. The identity rules above still hold: adopting a new identity resets all four permissions to asking, and the
+New dialog's default host and recent setups stay tied to the install the user saw.
 
 Exactly one helm runs at a time. Running several concurrently is unsupported in v1. The invariant supervisors enforce is
 at most one attachment per session, last attach wins — so a second helm cannot corrupt a session, but it can seize one,
@@ -2778,13 +2779,29 @@ JSON. Discovery also has `--json` forms with a versioned envelope, exact names, 
 completeness fields. The templates listing includes a prefix's words when one is set. Prefixes belong to the launch argv
 and are also visible in process listings, so templates must not hold secrets in them.
 
-Agents can also change and remove hosts.
+Agents can also add, change and remove hosts. `farhelm agent host add <destination> [--alias <name>]` asks to add an SSH
+host. The focused visible window opens the ordinary add host dialog, prefilled with destination and alias and labelled
+with the asking host and session. Other windows show a card whose action opens that dialog there. Opening is not
+approval. An existing draft or another modal is kept; automatic admission rechecks focus when that modal leaves. Listing
+refreshes preserve edits. Add answers Allow with the destination then in the dialog, and Cancel, header close and Escape
+answer Deny through the ordinary approval route. Only the window whose Allow is accepted starts the ordinary
+discovery-first add flow, with the edited destination and alias, the same duplicate and alias refusals, and the same SSH
+second-factor help. A late or refused answer starts nothing. The command reports the actual approved destination as
+accepted as soon as the user answers, without waiting for discovery or setup. **Accepted is not installed:** adding may
+still fail, need setup, or be cancelled at the setup question. The agent checks `farhelm agent hosts` and the host's
+state before relying on it.
+
+The user's confirmation-skipping settings spare confirmation clicks on actions the user started in the UI: they avoid
+accidental clicks, not grant permissions. An agent's request is inherently different. An agent add always shows the
+setup confirmation when installation is needed, whatever the setup preference says, including after a refused setup
+submission is reopened. Cancel after acceptance is ordinary add cancellation and does not send another approval answer.
+
 `farhelm agent host edit <host> [--alias <name>|--no-alias] [--icon <icon>] [--color <color>]` changes only a host's
 alias, icon and color: never its permissions, which would let an agent grant itself more, and never its destination,
 since retargeting keeps a host's settings and permissions and would move that trust to a machine the agent chose.
 `farhelm agent host remove <host>` forgets a host exactly as the GUI's remove does. `<host>` is the display name the
-hosts listing reports, resolved as `--host` is for `farhelm agent create`. Both are acting verbs, and unlike the others
-they always need the user's own Allow: the requesting host's "run farhelm commands from this host without asking"
+hosts listing reports, resolved as `--host` is for `farhelm agent create`. All three are acting verbs, and unlike the
+others they always need the user's own Allow: the requesting host's "run farhelm commands from this host without asking"
 setting never covers them, and their cards offer only Allow and Deny, never Always allow. An edit's card shows each
 field it changes with its old and new value; an edit whose fields already have the requested values is refused as having
 nothing to change, without a card, so no edit ever succeeds without an explicit Allow. A remove's card repeats the GUI
@@ -3322,10 +3339,10 @@ finishes, the attempt the user already approved, without asking again. The repla
 request, and only for the session, on the host, that asked. Delete removes that approval's retry record, so reusing the
 key then needs the approval any new request needs. None of this waives correctness of user-initiated GUI requests.
 
-That setting never covers changes to the hosts themselves. An agent's `farhelm agent host edit` or `host remove` always
-needs the user's own Allow on its card (see Agent-spawned sessions), so turning the setting on for a host does not let
-its sessions rename, restyle or remove any host, and even an approved edit reaches only a host's alias, icon and color,
-never its permissions or destination.
+That setting never covers changes to the hosts themselves. An agent's `farhelm agent host add`, `host edit` or
+`host remove` always needs the user's own Allow on its card (see Agent-spawned sessions), so turning the setting on for
+a host does not let its sessions add, rename, restyle or remove any host, and even an approved edit reaches only a
+host's alias, icon and color, never its permissions or destination.
 
 Reading is separate from acting, and stays open for now. Any attached host may obtain any template's full contents,
 including a command line and resume command it carries: an approved spawn that applies a template, or any spawn from a

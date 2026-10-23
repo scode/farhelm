@@ -1894,9 +1894,9 @@ such as settings and credentials) is allowed only where the spec grants it, and 
 connection adds nothing to that grant. The grants are the agent verbs any agent may use, each carried out only once the
 user has approved it or the requesting host's "run farhelm commands from this host without asking" setting is on
 (SPEC.md, Agent-spawned sessions; see "Permission prompts for agent actions"). Changes to hosts themselves (an agent's
-host edit and remove) happen only on the user's Allow of that one request, never on the connection's authority: neither
-the requesting host's "without asking" setting nor an Always allow answer covers them, and even an approved edit reaches
-only a host's alias, icon and color, never its permissions or destination.
+host add, edit and remove) happen only on the user's Allow of that one request, never on the connection's authority:
+neither the requesting host's "without asking" setting nor an Always allow answer covers them, and even an approved edit
+reaches only a host's alias, icon and color, never its permissions or destination.
 
 ### Errors crossing levels of abstraction
 
@@ -5665,6 +5665,29 @@ lock), so a card raised by a replaced installation cannot grant its successor th
 can race: when the request expires between the setting being stored and the request being taken, the answer gets 410 and
 the setting stays on, and the GUI's notice says the answer did not take effect and, after an "Always allow", that the
 host's setting may still have been turned on.
+
+Protocol 64 adds `AgentVerb::HostAdd` and `AgentReply::HostAddAccepted`, plus the distinct `host_add` approval tag,
+which requires direct Allow. Its answer carries only the edited destination; that payload is required on HostAdd Allow
+and refused on every other action or answer, with bounded nonempty text checked before the entry is taken. Alias stays
+in the dialog's ordinary add binding. The existing approval table's take elects the sole answering window. A HostAdd
+Allow carries a oneshot receipt with its destination: the answer POST returns 204 only after the waiting host-add
+handler selected that answer and passed its final origin check. A failed send, expiry, or dropped receipt returns Gone
+and permits no browser probe. Sending the positive receipt is the last fallible approval step, with no intervening await
+or later origin veto. Other actions keep their existing answer semantics.
+
+The UI keeps a page-local opening between approval cards and the hosts panel, without another pending registry or
+installer. Newly observed requests automatically open only in the live focused visible window; `HostModal` admission
+waits for existing dialogs and samples that predicate again before opening. Inactive windows keep an explicit open
+action. Several focused arrivals are presented in order after the current form closes; successful reads drop queued ids
+that no longer wait. Admission also preserves a setup submission's draft until its POST has resolved and any definite
+refusal has reopened it. One shared synchronous answer guard and the existing 700ms arm pause cover the card and dialog.
+Successful listing absence can retire a pending dialog, but failed reads prove nothing and an answering dialog waits for
+its own reply. Only the successful receipt continues the same form's ordinary probe with captured edited fields. An
+immutable agent-origin bit travels through setup submission and definite refusal/reopen; the provisionable branch skips
+setup only for a user-originated add whose preference is true. The receipt attests to approval, not discovery or
+installation: browser or reply loss can interrupt the continuation before a probe reaches the helm. There is no
+correlation, persistence, or automatic replay across that gap; once a probe or setup request itself accepts work, its
+ordinary server-owned lifetime applies.
 
 Protocol 63 adds `AgentVerb::HostEdit` and `HostRemove`, answered by `AgentReply::HostEdited` and `HostRemoved`, with
 the approval kinds `ApprovalAction::HostEdit` and `HostRemove`. Both kinds return true from
