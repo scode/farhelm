@@ -14,7 +14,7 @@ use crate::icons::{BranchIcon, TrashIcon};
 use crate::modal_dialog::{
     DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
 };
-use crate::ops::{OpGuard, PaneGate};
+use crate::ops::{ConfirmSlot, ConfirmToken, OpGuard, PaneGate, use_confirm_slot};
 use crate::peer::display_peer;
 use crate::{ApiBase, Host, HostId, HostPhase};
 use dioxus::prelude::*;
@@ -83,18 +83,69 @@ struct Target {
     partial: bool,
 }
 
-/// One in-place confirmation, bound to a host band or the top of the host list.
+/// What one in-place confirmation band shows and what confirming it deletes:
+/// the band it is drawn in (a host's, or `None` for "delete all" at the top
+/// of the host list) and the targets frozen when it opened.
+///
+/// It is the key of the dialog's [`ConfirmSlot`], so every opening's
+/// [`ConfirmToken`] carries exactly the targets its band displayed. The band
+/// draws its counts, sizes and host names from the token, and a confirmed
+/// answer deletes the token's targets, never a selection recomputed from the
+/// listing when the click runs.
 #[derive(Clone, PartialEq)]
 struct Confirmation {
     host: Option<HostId>,
     targets: Vec<Target>,
 }
 
-/// Accept only an answer to the confirmation that is still displayed.
-/// A queued answer from a replaced band must not authorize the new selection,
-/// even if both bands refer to the same host with different archive IDs.
-fn answered_targets(current: Option<&Confirmation>, answered: Confirmation) -> Option<Vec<Target>> {
-    (current == Some(&answered)).then_some(answered.targets)
+/// Where a deletion run's targets come from, which decides how starting the
+/// run treats the confirmation band.
+enum Selection {
+    /// One displayed checkout, deleted without a confirmation (an entry's
+    /// own Delete). Its targets come from the click-time host by design, and
+    /// starting it closes whatever band is open.
+    Entry(Target),
+    /// The band opening the user confirmed, as the render that drew its
+    /// "delete permanently" button saw it. The run deletes exactly the
+    /// targets that opening froze, and starting it consumes the opening.
+    Band(ConfirmToken<Confirmation>),
+}
+
+impl Selection {
+    /// The targets this run would delete, or `None` for an answer to a band
+    /// opening that is no longer on screen.
+    ///
+    /// A band opening is gone once it was cancelled, confirmed, or replaced,
+    /// including by a band with identical content opened after a cancel: an
+    /// answer queued in the same event burst was drawn for the earlier
+    /// showing, which the user is no longer looking at. Such an answer must
+    /// change nothing, the band now on screen included, so callers check this
+    /// before any step that could close the band or refresh the listing.
+    fn targets(&self, slot: &ConfirmSlot<Confirmation>) -> Option<Vec<Target>> {
+        match self {
+            Self::Entry(target) => Some(vec![target.clone()]),
+            Self::Band(answered) => slot
+                .is_current(answered)
+                .then(|| answered.key().targets.clone()),
+        }
+    }
+
+    /// Close the band as the run starts: consume the confirmed opening, or,
+    /// for an entry delete, clear whatever band is open. Returns `false` only
+    /// when a confirmed opening is no longer the open one, in which case the
+    /// run must not start.
+    ///
+    /// Called after the run has claimed the page, so a confirmation refused
+    /// for a busy page leaves its band up to be answered again.
+    fn commit(&self, slot: &mut ConfirmSlot<Confirmation>) -> bool {
+        match self {
+            Self::Entry(_) => {
+                slot.clear();
+                true
+            }
+            Self::Band(answered) => slot.take(answered).is_some(),
+        }
+    }
 }
 
 /// A run keeps its original denominator until every host has answered.
@@ -262,22 +313,64 @@ fn archived_when(seconds: Option<i64>) -> String {
     )
 }
 
+/// Dismiss the band opening `shown`, the one the cancelling render drew
+/// (its Cancel button, or the dialog's Close and Escape while it was shown).
+/// A stale cancel, drawn for a band since answered or replaced, does nothing,
+/// focus included.
+///
 /// Cancelling a global choice returns to its pinned trigger, including Escape.
 /// The band lives in the scrolling body, so clearing it alone would discard the
 /// focused Cancel button and leave keyboard users without a useful next action.
-fn cancel_confirmation(mut confirmation: Signal<Option<Confirmation>>) {
-    let global = confirmation
-        .peek()
-        .as_ref()
-        .is_some_and(|confirm| confirm.host.is_none());
-    confirmation.set(None);
-    if global {
+fn cancel_confirmation(
+    mut confirmation: ConfirmSlot<Confirmation>,
+    shown: &ConfirmToken<Confirmation>,
+) {
+    // One test-and-clear decides both whether the band closes and whether
+    // focus moves, so a refused cancel cannot move focus either.
+    if confirmation.take(shown).is_none() {
+        return;
+    }
+    if shown.key().host.is_none() {
         document::eval(
             // A re-list can disable "delete all" while the confirmation is
             // open; focusing a disabled button does nothing and would drop
             // focus out of the dialog, so fall back to Close.
             "requestAnimationFrame(() => (document.querySelector('.trash-delete-all:enabled') ?? document.querySelector('.trash-close'))?.focus({preventScroll:true}))",
         );
+    }
+}
+
+/// What the dialog's Close button or Escape does, decided from what the
+/// render that drew it showed.
+enum CloseAction<'a> {
+    /// Dismiss the band opening that render showed. Goes through
+    /// [`cancel_confirmation`], so it does nothing if that opening has since
+    /// been answered or replaced.
+    Dismiss(&'a ConfirmToken<Confirmation>),
+    /// Close the whole dialog: no band was shown, and none is open now.
+    CloseDialog,
+    /// Do nothing: no band was shown, but one has opened since. The Close or
+    /// Escape was not drawn for that band, and closing the dialog would hide
+    /// a question the user has not read yet.
+    Nothing,
+}
+
+/// Decide what a Close or Escape does. `shown` is the band opening its
+/// render read from the slot (shown even if its host's section was not
+/// drawn), and `band_open_now` is whether any band is open when the event
+/// runs.
+///
+/// A Close or Escape never acts on a band opened after its render: with a
+/// band shown it can only dismiss that one, and with none shown it closes
+/// the dialog only if the slot is still empty.
+fn close_action(
+    shown: Option<&ConfirmToken<Confirmation>>,
+    band_open_now: bool,
+) -> CloseAction<'_> {
+    match shown {
+        Some(shown) => CloseAction::Dismiss(shown),
+        None if band_open_now => CloseAction::Nothing,
+        None => CloseAction::CloseDialog,
     }
 }
 
@@ -294,14 +387,20 @@ fn Issue(issue: CheckoutTrashIssue) -> Element {
 /// Confirm the frozen visible set in place, including unverified entries.
 /// An unchecked entry can become verifiable after listing, so the same warning
 /// must cover permanent deletion as well as record-only cleanup.
+///
+/// `shown` is the opening the parent's render read from the slot. The text
+/// comes from its frozen targets, and both buttons hand that same token back,
+/// so the parent can refuse an answer for an opening no longer on screen and
+/// otherwise delete exactly what this band said.
 #[component]
 fn ConfirmBand(
-    confirm: Confirmation,
+    shown: ConfirmToken<Confirmation>,
     busy: bool,
     submit_disabled: bool,
-    oncancel: EventHandler<()>,
-    onsubmit: EventHandler<Confirmation>,
+    oncancel: EventHandler<ConfirmToken<Confirmation>>,
+    onsubmit: EventHandler<ConfirmToken<Confirmation>>,
 ) -> Element {
+    let confirm = shown.key();
     let count: usize = confirm.targets.iter().map(|target| target.count).sum();
     let unchecked: usize = confirm.targets.iter().map(|target| target.unchecked).sum();
     let names = confirm
@@ -333,8 +432,8 @@ fn ConfirmBand(
         if count > 0 { p { "Delete {count} archived {checkouts(count)} ({space(bytes, partial)}) on " span { class: "peer-value", dir: "ltr", "{names}" } "? Work in them that was never committed or pushed is lost permanently." } }
         if unchecked > 0 { p { "Attempt cleanup of {unchecked} unchecked {unchecked_noun} on {unchecked_names}. Farhelm deletes any of these it can verify when cleanup runs; work in them that was never committed or pushed is lost permanently. The rest stay in place and may be forgotten from the trash." } }
         div { class: "checkout-trash-actions",
-            button { class: "btn btn-neutral trash-confirm-cancel", disabled: busy, onclick: move |_| oncancel.call(()), "cancel" }
-            button { class: "btn btn-danger trash-confirm-submit", disabled: submit_disabled, onkeydown: crate::guard_confirmation_enter, onclick: move |_| onsubmit.call(confirm.clone()), "delete permanently" }
+            button { class: "btn btn-neutral trash-confirm-cancel", disabled: busy, onclick: { let shown = shown.clone(); move |_| oncancel.call(shown.clone()) }, "cancel" }
+            button { class: "btn btn-danger trash-confirm-submit", disabled: submit_disabled, onkeydown: crate::guard_confirmation_enter, onclick: move |_| onsubmit.call(shown.clone()), "delete permanently" }
         }
     } }
 }
@@ -353,7 +452,9 @@ pub(super) fn TrashControl(
     let mut state = use_signal(HashMap::<HostId, HostTrash>::new);
     let mut generation = use_signal(|| 0_u64);
     let mut refresh = use_signal(|| 0_u64);
-    let mut confirmation = use_signal(|| None::<Confirmation>);
+    // The one confirmation band, keyed by what it shows. Answers name the
+    // opening their render drew; see `Selection` and `cancel_confirmation`.
+    let mut confirmation = use_confirm_slot::<Confirmation, ()>();
     let mut notices = use_signal(HashMap::<HostId, Vec<CheckoutTrashIssue>>::new);
     let mut deletion = use_signal(|| None::<DeletionRun>);
     // The claim outlives all host tasks and drops with this component on cancel.
@@ -467,10 +568,15 @@ pub(super) fn TrashControl(
     let delete_base = base;
     // Both entry clicks and confirmed bulk choices cross the same authority,
     // operation-guard and completion boundary. Only selection/confirmation differ.
-    let dispatch = use_callback(move |targets: Vec<Target>| {
+    let dispatch = use_callback(move |selection: Selection| {
         if deletion.peek().is_some() {
             return;
         }
+        // A stale band answer stops here, before the host check below can
+        // close the band now on screen or refresh the listing under it.
+        let Some(targets) = selection.targets(&confirmation) else {
+            return;
+        };
         // An empty selection has no reply that could retire a run or its gate.
         if targets.is_empty() {
             return;
@@ -489,20 +595,25 @@ pub(super) fn TrashControl(
                 })
         };
         if !valid {
-            confirmation.set(None);
+            confirmation.clear();
             refresh += 1;
             return;
         }
         let Some(guard) = gate.claim_guard() else {
             return;
         };
+        // Nothing between the check above and here can reopen the band (this
+        // handler is synchronous), so a band answer's take succeeds; the
+        // guard is dropped, releasing the page, if it somehow did not.
+        if !selection.commit(&mut confirmation) {
+            return;
+        }
         claim.set(Some(guard));
         deletion.set(Some(DeletionRun {
             pending: targets.iter().map(|target| target.host).collect(),
             total: targets.len(),
         }));
         generation += 1; // supersede every pre-delete count and size reply
-        confirmation.set(None);
         notices.write().clear();
         for target in targets {
             let base = delete_base.clone();
@@ -567,23 +678,36 @@ pub(super) fn TrashControl(
             });
         }
     });
-    let submit = use_callback(move |answered: Confirmation| {
-        let targets = answered_targets(confirmation.peek().as_ref(), answered);
-        if let Some(targets) = targets {
-            dispatch.call(targets);
+    // The band opening this render reads from the slot. Its buttons, and
+    // the dialog's Close and Escape, answer only this opening. A host band
+    // stays the shown opening even when its host's section is not drawn
+    // (the host left the list, or a re-list left its section nothing to
+    // show), so Close and Escape then
+    // cancels that unseen band rather than closing the dialog.
+    let shown = confirmation.current();
+    // Close and Escape act on what their render read; see `close_action`.
+    let close = {
+        let shown = shown.clone();
+        move || {
+            if deletion.peek().is_some() {
+                return;
+            }
+            match close_action(shown.as_ref(), confirmation.peek_key().is_some()) {
+                CloseAction::Dismiss(shown) => cancel_confirmation(confirmation, shown),
+                CloseAction::Nothing => {}
+                CloseAction::CloseDialog => {
+                    DialogHandle::new(DIALOG).close(RETURN_FOCUS);
+                    open.set(false);
+                }
+            }
         }
-    });
-    let mut close = move |_| {
-        if deletion.peek().is_some() {
-            return;
-        }
-        if confirmation.peek().is_some() {
-            cancel_confirmation(confirmation);
-            return;
-        }
-        DialogHandle::new(DIALOG).close(RETURN_FOCUS);
-        open.set(false);
     };
+    // Both bands (global and per-host) answer through these, each handing
+    // back the token its render drew.
+    let band_cancel =
+        move |shown: ConfirmToken<Confirmation>| cancel_confirmation(confirmation, &shown);
+    let band_submit =
+        move |answered: ConfirmToken<Confirmation>| dispatch.call(Selection::Band(answered));
     let (full, summary) = sidebar_summary(count, has_unchecked, all_ready);
     let tooltip = if !all_ready || has_unchecked {
         format!("trash: {summary}. Click to see what is known.")
@@ -631,7 +755,7 @@ pub(super) fn TrashControl(
             class: if full { "btn btn-neutral checkout-trash-button full" } else { "btn btn-neutral checkout-trash-button" },
             r#type: "button", aria_label: accessible_name, aria_haspopup: "dialog", "data-count": "{count}",
             "data-tooltip": tooltip, disabled: gate.busy(),
-            onclick: move |_| { if !gate.busy_now() { notices.write().clear(); confirmation.set(None); open.set(true); } },
+            onclick: move |_| { if !gate.busy_now() { notices.write().clear(); confirmation.clear(); open.set(true); } },
             TrashIcon { full }
             if let Some(text) = count_text { span { class: "checkout-trash-count", "{text}" } }
         }
@@ -640,13 +764,13 @@ pub(super) fn TrashControl(
                 ModalDialog { class: "checkout-trash-dialog", role: "dialog", aria_modal: "true", aria_labelledby: "checkout-trash-title", tabindex: "-1",
                     handle: DialogHandle::new(DIALOG),
                     focus: DialogFocus::remembered(".trash-close", Some(".trash-confirm-cancel, .trash-close"), false, Some(".trash-confirm-submit")),
-                    on_escape: move |event: KeyboardEvent| { if !event.is_composing() { event.prevent_default(); event.stop_propagation(); close(()); } },
+                    on_escape: { let mut close = close.clone(); move |event: KeyboardEvent| { if !event.is_composing() { event.prevent_default(); event.stop_propagation(); close(); } } },
                     div { class: "checkout-trash-header",
                         h2 { id: "checkout-trash-title", TrashIcon { full } "trash" }
                         span { class: "checkout-trash-total", "{count} {checkouts(count)} · {space(total_bytes, total_partial)} on reachable hosts" }
                         div { class: "checkout-trash-header-actions",
-                            button { class: "btn btn-danger trash-delete-all", disabled: busy || !all_ready || targets.is_empty(), onclick: move |_| { if deletion.peek().is_none() { confirmation.set(Some(Confirmation { host: None, targets: targets.clone() })); } }, "delete all" }
-                            button { class: "btn btn-neutral trash-close", disabled: busy, onclick: move |_| close(()), "close" }
+                            button { class: "btn btn-danger trash-delete-all", disabled: busy || !all_ready || targets.is_empty(), onclick: move |_| { if deletion.peek().is_none() { confirmation.open(Confirmation { host: None, targets: targets.clone() }, ()); } }, "delete all" }
+                            button { class: "btn btn-neutral trash-close", disabled: busy, onclick: { let mut close = close.clone(); move |_| close() }, "close" }
                         }
                         // The status region stays mounted while idle so that a
                         // starting delete is a text change screen readers
@@ -662,8 +786,8 @@ pub(super) fn TrashControl(
                     ScrollRegion { class: "checkout-trash-body",
                     handle: DialogHandle::new(DIALOG), selector: ".checkout-trash-body", name: "archived checkouts",
                     recovery: RecoveryFocus::new(".trash-close", None, true, RecoveryDelay::OneFrame),
-                    if let Some(confirm) = confirmation().filter(|confirm| confirm.host.is_none()) {
-                        ConfirmBand { confirm, busy, submit_disabled: busy || gate.busy(), oncancel: move |_| cancel_confirmation(confirmation), onsubmit: submit }
+                    if let Some(shown) = shown.as_ref().filter(|shown| shown.key().host.is_none()).cloned() {
+                        ConfirmBand { shown, busy, submit_disabled: busy || gate.busy(), oncancel: band_cancel, onsubmit: band_submit }
                     }
                     p { "Folders of managed checkouts whose last session was deleted. They stay here, untouched, until you delete them. To get something back, copy it out of the folder shown under its host." }
                     if let Some(error) = &host_error { p { class: "checkout-trash-issue", "Host reachability could not be refreshed. Cleanup is disabled until it can be checked: " span { class: "peer-value", dir: "ltr", "{display_peer(error)}" } } }
@@ -698,18 +822,21 @@ pub(super) fn TrashControl(
                                             }
                                             button { class: "btn btn-danger btn-outline trash-host-delete", disabled: busy || host_target.is_none(),
                                                 onclick: move |_| {
+                                                    // Reads the click-time listing only to
+                                                    // open the band. The band then shows,
+                                                    // and its answer deletes, what this froze.
                                                     if deletion.peek().is_none()
                                                         && hosts.peek().refresh_error().is_none()
                                                         && let Some(target) = target(&action_host, state.peek().get(&action_host.id))
                                                     {
-                                                        confirmation.set(Some(Confirmation { host: Some(action_host.id), targets: vec![target] }));
+                                                        confirmation.open(Confirmation { host: Some(action_host.id), targets: vec![target] }, ());
                                                     }
                                                 },
                                                 "delete all on " span { class: "peer-value", dir: "ltr", "{name}" }
                                             }
                                         }
-                                        if let Some(confirm) = confirmation().filter(|confirm| confirm.host == Some(host.id)) {
-                                            ConfirmBand { confirm, busy, submit_disabled: busy || gate.busy(), oncancel: move |_| { confirmation.set(None); }, onsubmit: submit }
+                                        if let Some(shown) = shown.as_ref().filter(|shown| shown.key().host == Some(host.id)).cloned() {
+                                            ConfirmBand { shown, busy, submit_disabled: busy || gate.busy(), oncancel: band_cancel, onsubmit: band_submit }
                                         }
                                         if !connected(host) { p { "not reachable, so they can't be checked or deleted" } }
                                         if let Some(Err(error)) = entry.and_then(|entry| entry.reply.as_ref()) { div { class: "checkout-trash-issue peer-value", dir: "ltr", "{display_peer(error)}" } }
@@ -736,7 +863,7 @@ pub(super) fn TrashControl(
                                                                         .find(|host| host.id == entry_host)
                                                                         .and_then(|host| entry_target(host, state.peek().get(&entry_host), &entry_id)) }
                                                                 };
-                                                                if let Some(selected) = selected { dispatch.call(vec![selected]); }
+                                                                if let Some(selected) = selected { dispatch.call(Selection::Entry(selected)); }
                                                             }, "delete"
                                                         }
                                                     }
@@ -843,12 +970,23 @@ mod tests {
         .expect("connected host fixture")
     }
 
-    /// A stale affirmative answer must never borrow a replacement band's
-    /// authority. Only an unchanged host/global choice and its frozen targets
-    /// authorize deletion; cancellation and changed IDs or incarnations refuse it.
-    #[farhelm_testtrace::test]
-    fn confirmation_answer_deletes_only_its_unchanged_selection() {
-        let selected = Target {
+    std::thread_local! {
+        /// The band slot [`band_app`] mounted, handed out to the test body.
+        static BAND: std::cell::Cell<Option<ConfirmSlot<Confirmation>>> =
+            const { std::cell::Cell::new(None) };
+    }
+
+    /// Mount the dialog's confirmation slot the way `TrashControl` creates
+    /// it, so a test can open, answer and cancel band openings directly.
+    fn band_app() -> Element {
+        let slot = use_confirm_slot::<Confirmation, ()>();
+        BAND.with(|cell| cell.set(Some(slot)));
+        rsx! {}
+    }
+
+    /// A one-archive host selection, the shape a per-host band freezes.
+    fn selected() -> Target {
+        Target {
             host: 1,
             incarnation: 7,
             name: "first host".into(),
@@ -857,32 +995,197 @@ mod tests {
             unchecked: 0,
             bytes: 4096,
             partial: false,
-        };
+        }
+    }
+
+    /// Spec (`Selection::targets`, `Selection::commit`): a band answer
+    /// deletes the targets of the opening its render drew, and only while
+    /// that opening is the one on screen. Once the band is cancelled or
+    /// replaced (by another host's band, the global band, the same host with
+    /// other IDs or a new connection, or a band with identical content opened
+    /// again) the answer yields nothing and leaves the band now on screen
+    /// open. Starting the run consumes the confirmed opening, so a second
+    /// answer finds nothing.
+    ///
+    /// Why: confirming deletes archived checkouts permanently. A stale
+    /// affirmative answer queued in the same event burst as a cancel and a
+    /// reopen must never borrow the authority of a band the user has not
+    /// read yet, even one whose text happens to match.
+    #[farhelm_testtrace::test]
+    fn confirmation_answer_deletes_only_its_unchanged_selection() {
+        let mut dom = VirtualDom::new(band_app);
+        dom.rebuild_in_place();
+        let mut slot = BAND.with(std::cell::Cell::get).expect("the slot mounted");
+
+        let selected = selected();
         let answered = Confirmation {
             host: Some(selected.host),
             targets: vec![selected.clone()],
         };
-        assert!(answered_targets(None, answered.clone()).is_none());
-        assert!(
-            answered_targets(Some(&answered), answered.clone()) == Some(vec![selected.clone()])
-        );
-
         let mut other_host = answered.clone();
         other_host.host = Some(2);
         other_host.targets[0].host = 2;
         other_host.targets[0].name = "second host".into();
         let global = Confirmation {
             host: None,
-            targets: vec![selected, other_host.targets[0].clone()],
+            targets: vec![selected.clone(), other_host.targets[0].clone()],
         };
         let mut other_ids = answered.clone();
         other_ids.targets[0].ids = vec!["archive-b".into()];
         let mut reconnected = answered.clone();
         reconnected.targets[0].incarnation += 1;
-        for replacement in [other_host, global.clone(), other_ids, reconnected] {
-            assert!(answered_targets(Some(&replacement), answered.clone()).is_none());
-        }
-        assert!(answered_targets(Some(&global), global.clone()) == Some(global.targets.clone()));
+
+        dom.in_runtime(|| {
+            let shown = slot.open(answered.clone(), ());
+            let answer = Selection::Band(shown.clone());
+            assert!(answer.targets(&slot) == Some(vec![selected.clone()]));
+
+            // Cancelled, then answered.
+            slot.cancel_for(&shown);
+            assert!(answer.targets(&slot).is_none());
+
+            // Replaced by every kind of other band, the identical one included.
+            for replacement in [other_host, global.clone(), other_ids, reconnected, answered] {
+                let current = slot.open(replacement.clone(), ());
+                assert!(
+                    answer.targets(&slot).is_none(),
+                    "a stale answer selects nothing"
+                );
+                assert!(!answer.commit(&mut slot), "and cannot consume the band");
+                assert!(slot.is_current(&current), "the band on screen stays open");
+                let fresh = Selection::Band(current);
+                assert!(fresh.targets(&slot) == Some(replacement.targets));
+            }
+
+            let current = slot.open(global.clone(), ());
+            let answer = Selection::Band(current);
+            assert!(answer.targets(&slot) == Some(global.targets.clone()));
+            assert!(answer.commit(&mut slot), "the run consumes its band");
+            assert!(!slot.is_open());
+            assert!(
+                answer.targets(&slot).is_none(),
+                "a second answer finds nothing"
+            );
+            assert!(!answer.commit(&mut slot));
+        });
+    }
+
+    /// Spec (`Selection::targets`, `cancel_confirmation`): the answer deletes
+    /// the band's frozen targets even after the host's listing gains an
+    /// archive; an entry delete deletes its one checkout regardless of the
+    /// band and closes whatever band is open as its run starts; a stale
+    /// Cancel leaves the band now on screen open, and a current one closes it.
+    ///
+    /// Why: the band's text is what the user agreed to. Recomputing the
+    /// selection when the click runs would delete an archive the band never
+    /// mentioned, and a Cancel drawn for an earlier band must not dismiss a
+    /// question the user has not yet seen.
+    #[farhelm_testtrace::test]
+    fn band_answers_act_on_what_the_band_showed() {
+        let mut dom = VirtualDom::new(band_app);
+        dom.rebuild_in_place();
+        let mut slot = BAND.with(std::cell::Cell::get).expect("the slot mounted");
+
+        let host = host();
+        let archive = |id: &str| ArchivedCheckout {
+            id: id.into(),
+            name: id.into(),
+            repository: "fixture/repo".into(),
+            path: format!("/work/trash/{id}"),
+            archived_at: None,
+            bytes: Some(4096),
+        };
+        let mut state = HostTrash {
+            incarnation: host.incarnation,
+            loading: false,
+            reply: Some(Ok(CheckoutTrashListing {
+                checkouts: vec![archive("shown")],
+                issues: vec![],
+            })),
+        };
+
+        dom.in_runtime(|| {
+            let frozen = target(&host, Some(&state)).expect("ready selection");
+            let shown = slot.open(
+                Confirmation {
+                    host: Some(host.id),
+                    targets: vec![frozen],
+                },
+                (),
+            );
+            state
+                .reply
+                .as_mut()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .checkouts
+                .push(archive("later"));
+            assert_eq!(target(&host, Some(&state)).unwrap().ids, ["shown", "later"]);
+            let answered = Selection::Band(shown.clone())
+                .targets(&slot)
+                .expect("the band is still on screen");
+            assert_eq!(
+                answered[0].ids,
+                ["shown"],
+                "the band's targets, not the live listing's"
+            );
+
+            let entry = Selection::Entry(
+                entry_target(&host, Some(&state), "later").expect("eligible checkout"),
+            );
+            assert_eq!(entry.targets(&slot).unwrap()[0].ids, ["later"]);
+            assert!(entry.commit(&mut slot), "an entry run always starts");
+            assert!(!slot.is_open(), "and closes the open band");
+
+            // `cancel_confirmation` with a host band moves no focus, so it
+            // runs here without a document.
+            let reopened = slot.open(shown.key().clone(), ());
+            cancel_confirmation(slot, &shown);
+            assert!(slot.is_current(&reopened), "a stale Cancel leaves the band");
+            cancel_confirmation(slot, &reopened);
+            assert!(!slot.is_open(), "the current Cancel closes it");
+        });
+    }
+
+    /// Spec (`close_action`): a Close or Escape whose render showed a band
+    /// dismisses that band, whatever is open now; one whose render showed no
+    /// band closes the dialog while no band is open, and does nothing once a
+    /// band has opened since.
+    ///
+    /// Why: Close and Escape are drawn for one state of the dialog and can
+    /// arrive in the same event burst as a click that opens a band. Closing
+    /// the dialog then would hide a question the user has not read, and
+    /// dismissing it would answer a band the Close was never drawn for.
+    #[farhelm_testtrace::test]
+    fn close_and_escape_act_on_what_their_render_showed() {
+        let mut dom = VirtualDom::new(band_app);
+        dom.rebuild_in_place();
+        let mut slot = BAND.with(std::cell::Cell::get).expect("the slot mounted");
+
+        dom.in_runtime(|| {
+            let shown = slot.open(
+                Confirmation {
+                    host: Some(1),
+                    targets: vec![selected()],
+                },
+                (),
+            );
+            for band_open_now in [true, false] {
+                assert!(
+                    matches!(close_action(Some(&shown), band_open_now), CloseAction::Dismiss(token) if *token == shown),
+                    "a shown band is the one dismissed"
+                );
+            }
+            assert!(
+                matches!(close_action(None, false), CloseAction::CloseDialog),
+                "with no band shown or open, the dialog closes"
+            );
+            assert!(
+                matches!(close_action(None, true), CloseAction::Nothing),
+                "a band opened since the render stays, and so does the dialog"
+            );
+        });
     }
 
     /// Host summaries must not present uninspectable archives as an exact zero.
