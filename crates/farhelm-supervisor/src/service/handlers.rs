@@ -3597,7 +3597,40 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             validate_create_fields(HostSelector::Optional(host.as_deref()), "", 0, None, None)
         }
         AgentVerb::TemplateDelete { name } => validate_template_name(name),
+        // A host verb's name is quoted back in the helm's unknown-host
+        // refusal and logged, as a creating verb's `--host` is, so it gets
+        // the same bounds; so does a new alias, which the helm's audit and
+        // the card carry. The alias's own rules (trimmed, at most 64
+        // characters) are the helm's, applied where it is stored.
+        AgentVerb::HostEdit { host, alias, .. } => {
+            validate_host_name(host)?;
+            match alias {
+                Some(farhelm_proto::HostAliasEdit::Set(alias)) => {
+                    if alias.len() > AGENT_HOST_NAME_CAP || alias.chars().any(char::is_control) {
+                        return Err(
+                            "--alias is too long or contains control characters".to_string()
+                        );
+                    }
+                    Ok(())
+                }
+                Some(farhelm_proto::HostAliasEdit::Clear) | None => Ok(()),
+            }
+        }
+        AgentVerb::HostRemove { host } => validate_host_name(host),
     }
+}
+
+/// Bound the host a `farhelm agent host` verb names, with the rules
+/// [`validate_create_fields`] holds a creating verb's `--host` to, worded for
+/// the positional argument these verbs take it as.
+fn validate_host_name(host: &str) -> Result<(), String> {
+    if host.is_empty() {
+        return Err("the host name must not be empty; list hosts and pass one exact name".into());
+    }
+    if host.len() > AGENT_HOST_NAME_CAP || host.chars().any(char::is_control) {
+        return Err("the host name is too long or contains control characters".to_string());
+    }
+    Ok(())
 }
 
 /// Bound a template name an agent verb carries, as a `--template` name is
@@ -6821,6 +6854,55 @@ mod tests {
         let oversized = validate_agent_verb(&create("t", Some("c".repeat(TEMPLATE_FIELDS_CAP))))
             .expect_err("oversized fields are refused");
         assert!(oversized.contains("byte limit"), "{oversized}");
+    }
+
+    /// Spec: the host verbs hold the host they name to a creating verb's
+    /// `--host` bounds (non-empty, at most `AGENT_HOST_NAME_CAP` bytes, no
+    /// control characters), and a host edit's new alias to the same length
+    /// and control-character bounds; clearing the alias passes.
+    ///
+    /// Why: the helm quotes the host name back in its unknown-host refusal
+    /// and logs it, and puts the alias on the user's card, so both are the
+    /// caller-supplied text this doorway stops before it crosses the
+    /// connection. The alias's own rules stay the helm's.
+    #[farhelm_testtrace::test]
+    fn validate_agent_verb_bounds_the_host_verbs() {
+        use farhelm_proto::HostAliasEdit;
+        let edit = |host: &str, alias: Option<HostAliasEdit>| AgentVerb::HostEdit {
+            host: host.to_string(),
+            alias,
+            icon: None,
+            color: None,
+        };
+        let longest = "h".repeat(AGENT_HOST_NAME_CAP);
+        assert!(validate_agent_verb(&edit(&longest, Some(HostAliasEdit::Clear))).is_ok());
+        assert!(
+            validate_agent_verb(&AgentVerb::HostRemove {
+                host: longest.clone()
+            })
+            .is_ok()
+        );
+        for host in ["", "bad\u{1b}host", &format!("{longest}h")] {
+            assert!(
+                validate_agent_verb(&edit(host, None)).is_err(),
+                "an edit of {host:?} is refused"
+            );
+            assert!(
+                validate_agent_verb(&AgentVerb::HostRemove {
+                    host: host.to_string()
+                })
+                .is_err(),
+                "a remove of {host:?} is refused"
+            );
+        }
+        for alias in ["bad\nalias", &format!("{longest}a")] {
+            assert!(
+                validate_agent_verb(&edit("h", Some(HostAliasEdit::Set(alias.to_string()))))
+                    .is_err(),
+                "the alias {alias:?} is refused"
+            );
+        }
+        assert!(validate_agent_verb(&edit("h", Some(HostAliasEdit::Set("baz".into())))).is_ok());
     }
 
     /// Spec: the two CREATING verbs refuse an empty, control-laced or

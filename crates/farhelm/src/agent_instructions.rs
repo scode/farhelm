@@ -212,7 +212,8 @@ fn render(agent: &Command) -> String {
          The user approves every acting verb. spawn, create, clone, rename, stop,\n\
          restart, delete and the template writes each wait while Farhelm shows the user\n\
          a card, for up to 9 minutes, unless the user told Farhelm not to ask for this host.\n\
-         A template write containing a wrapper still needs one explicit Allow.\n\
+         A template write containing a wrapper still needs one explicit Allow, and host edit\n\
+         and host remove always do, whatever the user set for this host.\n\
          Listings and instructions never wait. Run acting verbs with a tool timeout of at least\n\
          10 minutes, and give create, clone and spawn an --idempotency-key, so a retry after your tool\n\
          gave up returns the session the user approved instead of starting another. A create\n\

@@ -647,6 +647,8 @@ enum ReplyKind {
     Created,
     TemplateWritten,
     TemplateDeleted,
+    HostEdited,
+    HostRemoved,
 }
 
 impl ReplyKind {
@@ -673,6 +675,8 @@ impl ReplyKind {
             farhelm_proto::AgentVerb::TemplateCreate { .. }
             | farhelm_proto::AgentVerb::TemplateEdit { .. } => ReplyKind::TemplateWritten,
             farhelm_proto::AgentVerb::TemplateDelete { .. } => ReplyKind::TemplateDeleted,
+            farhelm_proto::AgentVerb::HostEdit { .. } => ReplyKind::HostEdited,
+            farhelm_proto::AgentVerb::HostRemove { .. } => ReplyKind::HostRemoved,
         }
     }
 
@@ -690,6 +694,8 @@ impl ReplyKind {
             AgentReply::Created { .. } => ReplyKind::Created,
             AgentReply::TemplateWritten { .. } => ReplyKind::TemplateWritten,
             AgentReply::TemplateDeleted {} => ReplyKind::TemplateDeleted,
+            AgentReply::HostEdited { .. } => ReplyKind::HostEdited,
+            AgentReply::HostRemoved {} => ReplyKind::HostRemoved,
         }
     }
 
@@ -717,6 +723,8 @@ impl ReplyKind {
             ReplyKind::Created => "created session row",
             ReplyKind::TemplateWritten => "written template",
             ReplyKind::TemplateDeleted => "template delete confirmation",
+            ReplyKind::HostEdited => "edited host",
+            ReplyKind::HostRemoved => "host remove confirmation",
         }
     }
 }

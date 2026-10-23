@@ -21,8 +21,11 @@
 //! `aggregate::session_list` for
 //! sessions, `sessions::do_rename_session`/`do_stop_session`/
 //! `do_restart_session`/`do_delete_session` for the lifecycle verbs,
-//! `sessions::do_create_session` for `create` and `clone`, and
-//! `templates::store_template`/`remove_template` for the template writes.
+//! `sessions::do_create_session` for `create` and `clone`,
+//! `templates::store_template`/`remove_template` for the template writes, and
+//! `hosts::edit_identity_checked`/`remove_host_checked` (the GUI routes'
+//! own writes, with the card's expectations checked under their locks) for
+//! the host edit and remove.
 //! Prompt delivery has no REST counterpart: [`agent_prompt`] routes the
 //! approved message to the owning supervisor's confirmed input operation.
 //! That path is dormant in this build: while [`AGENT_PROMPTS_ENABLED`] is
@@ -80,11 +83,13 @@
 //! # Acting verbs wait for the user first
 //!
 //! Every verb that changes something (rename, stop, restart, delete, prompt, create, clone,
-//! `farhelm spawn` through create, and the template writes) is carried out
-//! only once the user has
+//! `farhelm spawn` through create, the template writes, and the host edit and
+//! remove) is carried out only once the user has
 //! approved it on a card in the GUI, or the requesting host's "run farhelm
 //! commands from this host without asking" setting is on (SPEC.md,
-//! Agent-spawned sessions). [`approved`] is that gate: it asks
+//! Agent-spawned sessions). The setting never covers a host edit or remove,
+//! nor an agent-supplied wrapper: those always wait for the user's own Allow
+//! (`ApprovalAction::requires_direct_allow`). [`approved`] is that gate: it asks
 //! (`approvals::ask`) after the verb has resolved exactly what it would do,
 //! so the card shows that, and before any of it happens; it then rechecks
 //! that the request's connection is still the one serving its host, so an
@@ -111,23 +116,33 @@
 //! the connection, about anything that reaches past its own host: another
 //! host's sessions, another supervisor, the helm's machine, or helm-owned
 //! state. Each verb below answers only what the spec grants any agent, and
-//! the connection adds nothing to that grant; a supervisor cannot, for
-//! example, change a host's settings through this relay. The template
-//! writes do change helm-owned state, but on the user's authority, not the
-//! connection's: each one is the write the user approved on its card (or
-//! that the user's "without asking" setting for the requesting host lets
-//! through), and it lands only on the template that card showed.
+//! the connection adds nothing to that grant. The template writes do change
+//! helm-owned state, but on the user's authority, not the connection's: each
+//! one is the write the user approved on its card (or that the user's
+//! "without asking" setting for the requesting host lets through), and it
+//! lands only on the template that card showed.
+//!
+//! The host verbs change a host's registry entry, and do so ONLY on the
+//! user's approval of that one request, never on the connection's authority:
+//! their cards always need the user's own Allow, which neither the
+//! requesting host's "without asking" setting nor an Always allow can stand
+//! in for, so no supervisor, however trusted its host, changes a host
+//! through this relay by itself. Even approved, an edit reaches only a host's
+//! alias, icon and color, never its permissions or destination, and a remove
+//! never reaches the asking session's own host or this machine.
 
 use std::sync::{Arc, Weak};
 
 use anyhow::Context as _;
 use async_trait::async_trait;
 use farhelm_proto::approvals::{
-    ApprovalAction, LaunchVerb, QuickLaunchCard, TemplateKeyCard, TemplateShortcutCard,
+    ApprovalAction, HostFieldChange, LaunchVerb, QuickLaunchCard, TemplateKeyCard,
+    TemplateShortcutCard,
 };
+use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::{
-    AgentHost, AgentOutcome, AgentReply, AgentSession, AgentVerb, ErrorKind, SessionStatus,
-    TemplateKeyEdit, TemplateShortcutEdit,
+    AgentHost, AgentOutcome, AgentReply, AgentSession, AgentVerb, ErrorKind, HostAliasEdit,
+    SessionStatus, TemplateKeyEdit, TemplateShortcutEdit,
 };
 use tracing::info;
 
@@ -673,6 +688,28 @@ impl AgentRequestHandler for HelmAgentRequests {
             ParsedAgentVerb::TemplateDelete { name } => {
                 delete_template_for_agent(&state, origin, session_id, name.into_string()).await
             }
+            ParsedAgentVerb::HostEdit {
+                host,
+                alias,
+                icon,
+                color,
+            } => {
+                edit_host_for_agent(
+                    &state,
+                    origin,
+                    session_id,
+                    HostEditRequest {
+                        host: host.into_string(),
+                        alias,
+                        icon,
+                        color,
+                    },
+                )
+                .await
+            }
+            ParsedAgentVerb::HostRemove { host } => {
+                remove_host_for_agent(&state, origin, session_id, host.into_string()).await
+            }
             // `confirm_yolo` is ignored on both creating verbs: an agent has
             // no YOLO override (SPEC.md, Agent-spawned sessions), whatever a
             // modified CLI sends; `yolo_guard::check_agent_wrapper` decides instead.
@@ -1007,6 +1044,17 @@ enum ParsedAgentVerb {
     TemplateDelete {
         name: NonEmptyString,
     },
+    /// At least one of the three fields is present: an edit naming none is
+    /// refused here, before the host is even resolved.
+    HostEdit {
+        host: NonEmptyString,
+        alias: Option<HostAliasEdit>,
+        icon: Option<HostIcon>,
+        color: Option<HostColor>,
+    },
+    HostRemove {
+        host: NonEmptyString,
+    },
 }
 
 impl ParsedAgentVerb {
@@ -1139,6 +1187,30 @@ impl ParsedAgentVerb {
             }
             AgentVerb::TemplateDelete { name } => Self::TemplateDelete {
                 name: NonEmptyString::required(Some(name), "the template name")?,
+            },
+            AgentVerb::HostEdit {
+                host,
+                alias,
+                icon,
+                color,
+            } => {
+                let host = NonEmptyString::required(Some(host), "the host name")?;
+                if alias.is_none() && icon.is_none() && color.is_none() {
+                    return Err(
+                        "a host edit needs at least one of --alias, --no-alias, --icon \
+                         or --color; nothing else about a host can be changed this way"
+                            .to_string(),
+                    );
+                }
+                Self::HostEdit {
+                    host,
+                    alias,
+                    icon,
+                    color,
+                }
+            }
+            AgentVerb::HostRemove { host } => Self::HostRemove {
+                host: NonEmptyString::required(Some(host), "the host name")?,
             },
         })
     }
@@ -2875,6 +2947,220 @@ async fn delete_template_for_agent(
         return Err(template_changed());
     }
     Ok(AgentReply::TemplateDeleted {})
+}
+
+// ---------------------------------------------------------------------------
+// Host edit and remove
+//
+// Both verbs change the helm's registry, so each is carried out only on the
+// user's Allow of its one card: the card kinds always need a direct Allow
+// (`ApprovalAction::requires_direct_allow`), which the requesting host's
+// "without asking" setting and Always allow cannot stand in for. Once
+// allowed, each goes through the code the GUI uses for the same change (the
+// settings dialog's alias and appearance writes, the hosts panel's remove),
+// so an agent's change and the user's cannot drift. The approval covers what
+// the card showed: a host that changed under the card is refused rather than
+// changed on the strength of an answer about something else, and that check
+// is made under the same locks as the write, so no GUI write can land between
+// the two.
+// ---------------------------------------------------------------------------
+
+/// One `host edit` verb's fields, moved out of [`AgentVerb`] so the handler
+/// arm stays a dispatch.
+struct HostEditRequest {
+    /// The display name, resolved as `--host` is for `create`.
+    host: String,
+    alias: Option<HostAliasEdit>,
+    icon: Option<HostIcon>,
+    color: Option<HostColor>,
+}
+
+/// `host edit`: show each field the request would change, old and new, on a
+/// card that needs the user's own Allow, then write the approved fields
+/// through the settings dialog's own writes and nothing else.
+///
+/// The alias is canonicalized before the card by the rule its route stores
+/// it with, so the card shows the value that will be stored and an alias
+/// that route would refuse is refused without a card. A request whose
+/// fields all already have the asked values is refused as having nothing
+/// to change, without a card: no edit ever succeeds without an explicit
+/// Allow, so an agent cannot take a success for an approval.
+///
+/// After the Allow, the write is [`crate::hosts::edit_identity_checked`]:
+/// under the locks the settings dialog's writers take, it refuses the edit
+/// with nothing changed if the host's destination, or a field the card
+/// showed, is no longer what the card showed, and otherwise writes the
+/// approved fields while still holding them. A field the request leaves
+/// alone keeps whatever the GUI wrote last, even a change made after the
+/// Allow.
+async fn edit_host_for_agent(
+    state: &AppState,
+    origin: AgentOrigin,
+    asking_session: &str,
+    request: HostEditRequest,
+) -> anyhow::Result<AgentReply> {
+    let (host, host_name) = resolve_host(state, origin, request.host).await?;
+    let row = crate::hosts::registry_row(state, host).await?;
+    let alias = match request.alias {
+        None => None,
+        Some(HostAliasEdit::Clear) => Some(None),
+        Some(HostAliasEdit::Set(alias)) => {
+            Some(crate::store::validate_alias(Some(&alias)).map_err(anyhow::Error::new)?)
+        }
+    };
+    let alias = alias
+        .filter(|new| *new != row.alias)
+        .map(|new| HostFieldChange {
+            old: row.alias.clone(),
+            new,
+        });
+    let icon = request
+        .icon
+        .filter(|new| *new != row.icon)
+        .map(|new| HostFieldChange { old: row.icon, new });
+    let color = request
+        .color
+        .filter(|new| *new != row.color)
+        .map(|new| HostFieldChange {
+            old: row.color,
+            new,
+        });
+    if alias.is_none() && icon.is_none() && color.is_none() {
+        return Err(crate::sessions::invalid_request(format!(
+            "{host_name} already has the requested alias, icon and color, so there is nothing \
+             to change"
+        )));
+    }
+    approved(
+        state,
+        origin,
+        asking_session,
+        ApprovalAction::HostEdit {
+            host_name,
+            destination: row.destination.clone(),
+            alias: alias.clone(),
+            icon: icon.clone(),
+            color: color.clone(),
+        },
+    )
+    .await?;
+    info!(
+        asking = escape_for_log(asking_session).as_str(),
+        host, "an agent is changing a host's alias, icon or color"
+    );
+    let edit = crate::hosts::IdentityEdit {
+        alias: alias.as_ref().map(|change| change.new.clone()),
+        icon: icon.as_ref().map(|change| change.new),
+        color: color.as_ref().map(|change| change.new),
+    };
+    crate::hosts::edit_identity_checked(state, host, edit, |now| {
+        let unchanged = now.destination == row.destination
+            && alias.as_ref().is_none_or(|change| now.alias == change.old)
+            && icon.as_ref().is_none_or(|change| now.icon == change.old)
+            && color.as_ref().is_none_or(|change| now.color == change.old);
+        if unchanged {
+            Ok(())
+        } else {
+            Err(host_changed("nothing was changed"))
+        }
+    })
+    .await?;
+    edited_host_reply(state, host, origin.host).await
+}
+
+/// `host remove`: forget a host exactly as the GUI's remove does, once the
+/// user allows it on a card that needs their own Allow.
+///
+/// Two hosts are refused without a card. This machine gets the remove
+/// route's own refusal for the local row ([`HostStoreError::LocalHostImmutable`]),
+/// raised here before the card rather than by the route after it, so the
+/// user is never asked to approve what cannot happen. The asking session's
+/// own host is refused for the reason a session cannot delete itself:
+/// removing it stops the connection this request is waiting on, mid-request.
+///
+/// After the Allow, the removal is [`crate::hosts::remove_host_checked`]:
+/// with the GUI's refusal of a host busy with a setup, update or uninstall,
+/// and refused with nothing removed if the host was retargeted since the
+/// card, which named the old destination. That comparison is made under the
+/// lock every retarget holds, so a retarget cannot slip in after it.
+///
+/// [`HostStoreError::LocalHostImmutable`]: crate::store::HostStoreError::LocalHostImmutable
+async fn remove_host_for_agent(
+    state: &AppState,
+    origin: AgentOrigin,
+    asking_session: &str,
+    name: String,
+) -> anyhow::Result<AgentReply> {
+    let (host, host_name) = resolve_host(state, origin, name).await?;
+    let row = crate::hosts::registry_row(state, host).await?;
+    if row.kind == crate::store::HostKind::Local {
+        return Err(anyhow::Error::new(
+            crate::store::HostStoreError::LocalHostImmutable,
+        ));
+    }
+    if host == origin.host {
+        return Err(crate::sessions::invalid_request(
+            "a session cannot remove its own host: that would cut the connection this request \
+             is waiting on; ask the user to remove it in Farhelm"
+                .to_string(),
+        ));
+    }
+    let destination = row
+        .destination
+        .clone()
+        .context("an ssh host row has no destination")?;
+    approved(
+        state,
+        origin,
+        asking_session,
+        ApprovalAction::HostRemove {
+            host_name,
+            destination: destination.clone(),
+        },
+    )
+    .await?;
+    info!(
+        asking = escape_for_log(asking_session).as_str(),
+        host, "an agent is removing a host"
+    );
+    crate::hosts::remove_host_checked(state, host, |now| {
+        if now.destination.as_deref() == Some(destination.as_str()) {
+            Ok(())
+        } else {
+            Err(host_changed("it was not removed"))
+        }
+    })
+    .await?;
+    Ok(AgentReply::HostRemoved {})
+}
+
+/// A host edit's answer: the host as the agent listing now shows it, so the
+/// caller sees the display name an alias change gave it.
+async fn edited_host_reply(
+    state: &AppState,
+    host: HostId,
+    asking: HostId,
+) -> anyhow::Result<AgentReply> {
+    let view = crate::hosts::host_views(state)
+        .await?
+        .into_iter()
+        .find(|view| view.id == host)
+        .ok_or_else(|| anyhow::Error::new(crate::store::HostStoreError::HostNotFound(host)))?;
+    Ok(AgentReply::HostEdited {
+        host: agent_host(&view, asking),
+    })
+}
+
+/// The refusal for a host that changed while its card waited. `outcome`
+/// says what did not happen, in the verb's own words.
+fn host_changed(outcome: &str) -> anyhow::Error {
+    anyhow::Error::new(crate::SupervisorError::helm(
+        ErrorKind::Conflict,
+        format!(
+            "the host changed while this request waited for approval, so {outcome}; retry to \
+             see it as it is now on a new card"
+        ),
+    ))
 }
 
 /// Give a new template the launch kind its choices require, leaving placement-only
@@ -12541,6 +12827,616 @@ mod tests {
             stored[0].fields,
             template_fields("gui-again"),
             "the GUI's version survives an approved delete of the old one"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Host edit and remove (SPEC.md, Agent-spawned sessions)
+    // -----------------------------------------------------------------
+
+    /// This machine plus a CONNECTED ssh host, each with a session that can
+    /// ask, and both hosts set to run farhelm commands without asking.
+    ///
+    /// Connected rather than taken down (unlike [`two_host_fleet`]) because
+    /// the own-host refusal needs a request arriving on the ssh host's live
+    /// connection, and removal is only interesting for a host that has an
+    /// actor to stop. The setting is on so that every test built on this
+    /// fixture also shows it never lets a host change through.
+    async fn host_fleet() -> (Harness, HostId, HostId) {
+        let (builder, remote) = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                identity: Some("identity-local".to_string()),
+                sessions: vec![scripted("local-live", 30, farhelm_proto::AgentKind::Claude)],
+                ..HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@builder",
+                HostScript {
+                    identity: Some("identity-builder".to_string()),
+                    sessions: vec![scripted("remote-a", 40, farhelm_proto::AgentKind::Claude)],
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let h = builder.start().await;
+        let local = local_id(&h.store).await;
+        h.await_refreshed(local).await;
+        h.await_refreshed(remote).await;
+        trust_without_asking(&h).await;
+        (h, local, remote)
+    }
+
+    /// The registry row for `host`, which these tests read to see what a
+    /// host verb wrote (or did not).
+    async fn host_row(h: &Harness, host: HostId) -> Option<crate::store::HostRow> {
+        h.store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+    }
+
+    /// Send one host settings write the way the GUI's settings dialog does,
+    /// over the real REST route, and require it to succeed.
+    async fn gui_host_write(h: &Harness, host: HostId, route: &str, body: serde_json::Value) {
+        use tower::ServiceExt;
+        let status = h
+            .router()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/hosts/{host}/{route}"))
+                    .header("host", "127.0.0.1:7433")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status();
+        assert_eq!(
+            status,
+            axum::http::StatusCode::OK,
+            "the GUI's {route} write"
+        );
+    }
+
+    /// A refusal's kind and message, or a panic naming what came instead.
+    fn refused(outcome: AgentOutcome) -> (ErrorKind, String) {
+        match outcome {
+            AgentOutcome::Err { kind, message } => (kind, message),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    /// Spec: a host edit waits for a card even though the requesting host
+    /// runs farhelm commands without asking. The card shows each field the
+    /// edit changes, old and new, with the alias as it will be stored and
+    /// a field that already has the asked value left off. On Allow only
+    /// the card's fields are written: a color the GUI changed while the
+    /// card waited stays, and the reply names the host by its new alias.
+    ///
+    /// Why: SPEC.md never lets an agent's host change through on the
+    /// host's setting, and an approval covers only what its card showed.
+    /// The appearance write takes icon and color together, so an edit that
+    /// wrote back the color it read before the card would silently undo the
+    /// user's own change.
+    #[farhelm_testtrace::test]
+    async fn host_edit_always_asks_and_writes_only_the_cards_fields() {
+        use farhelm_proto::host_appearance::{HostColor, HostIcon};
+        let (h, local, remote) = host_fleet().await;
+        let before = host_row(&h, remote).await.expect("premise: the ssh host");
+        assert!(
+            before.commands_without_asking,
+            "premise: the host's setting would let an ordinary command through"
+        );
+        assert_eq!(before.alias, None, "premise: no alias yet");
+        assert_eq!(before.icon, HostIcon::Cloud, "premise: the default icon");
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::HostEdit {
+                        host: "user@builder".to_string(),
+                        alias: Some(HostAliasEdit::Set("  baz  ".to_string())),
+                        icon: Some(HostIcon::Rocket),
+                        color: Some(before.color),
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        assert!(card.action.requires_direct_allow());
+        assert_eq!(
+            card.action,
+            ApprovalAction::HostEdit {
+                host_name: "user@builder".to_string(),
+                destination: Some("user@builder".to_string()),
+                alias: Some(HostFieldChange {
+                    old: None,
+                    new: Some("baz".to_string()),
+                }),
+                icon: Some(HostFieldChange {
+                    old: HostIcon::Cloud,
+                    new: HostIcon::Rocket,
+                }),
+                color: None,
+            }
+        );
+        // The user restyles the host in the settings dialog meanwhile.
+        gui_host_write(
+            &h,
+            remote,
+            "appearance",
+            serde_json::json!({ "icon": "cloud", "color": "teal" }),
+        )
+        .await;
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        match task.await.unwrap() {
+            AgentOutcome::Ok {
+                reply: AgentReply::HostEdited { host },
+            } => {
+                assert_eq!(host.name, "baz");
+                assert!(!host.current, "the edited host is not the asking one");
+            }
+            other => panic!("an edited host, got {other:?}"),
+        }
+        let after = host_row(&h, remote).await.expect("the host stays");
+        assert_eq!(after.alias.as_deref(), Some("baz"));
+        assert_eq!(after.icon, HostIcon::Rocket);
+        assert_eq!(after.color, HostColor::Teal, "the GUI's change survives");
+        assert_eq!(after.destination, before.destination);
+        assert_eq!(
+            after.commands_without_asking, before.commands_without_asking,
+            "an edit never touches a permission"
+        );
+    }
+
+    /// Spec: a host edit or remove card refuses Always allow (409) and stays
+    /// answerable, without turning the host's setting on; a Deny then
+    /// refuses the request and changes nothing.
+    ///
+    /// Why: Always allow would turn on the very setting SPEC.md says never
+    /// covers host changes, and approve this one change with it.
+    #[farhelm_testtrace::test]
+    async fn host_cards_refuse_always_allow_and_a_denial_changes_nothing() {
+        use farhelm_proto::host_appearance::HostIcon;
+        let (h, local, remote) = host_fleet().await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        for verb in [
+            AgentVerb::HostEdit {
+                host: "user@builder".to_string(),
+                alias: None,
+                icon: Some(HostIcon::Rocket),
+                color: None,
+            },
+            AgentVerb::HostRemove {
+                host: "user@builder".to_string(),
+            },
+        ] {
+            let asking = Arc::clone(&handler);
+            let task = tokio::spawn(async move { asking.handle(origin, "local-live", verb).await });
+            let card = await_card(&h, &task).await;
+            assert_eq!(
+                answer_card(&h, "always_allow").await,
+                axum::http::StatusCode::CONFLICT
+            );
+            assert_eq!(
+                h.state.approvals.list().first().map(|waiting| &waiting.id),
+                Some(&card.id),
+                "the card stays answerable"
+            );
+            assert!(
+                !host_row(&h, local).await.unwrap().commands_without_asking,
+                "Always allow did not turn the setting on"
+            );
+            assert_eq!(
+                answer_card(&h, "deny").await,
+                axum::http::StatusCode::NO_CONTENT
+            );
+            let (kind, message) = refused(task.await.unwrap());
+            assert_eq!(kind, ErrorKind::Unauthorized);
+            assert!(message.contains("declined"), "{message}");
+            let row = host_row(&h, remote)
+                .await
+                .expect("a denied remove keeps the host");
+            assert_eq!(row.icon, HostIcon::Cloud, "a denied edit writes nothing");
+        }
+    }
+
+    /// Spec: with no Farhelm window open, a host edit or remove is refused
+    /// at once as having no window to ask in, even from a host that runs
+    /// farhelm commands without asking. An edit that names nothing to change
+    /// is refused before anything else, and so is one whose fields already
+    /// have the asked values: refused as having nothing to change, with no
+    /// card and no success reply.
+    ///
+    /// Why: the no-window refusal is the observable proof that the host's
+    /// setting did not let the change through on its own (it would have
+    /// succeeded). An edit with nothing to approve has nothing a card could
+    /// show, and answering it with success would be the one host edit that
+    /// succeeds without the user's explicit Allow.
+    #[farhelm_testtrace::test]
+    async fn host_verbs_are_refused_without_a_gui_whatever_the_host_setting() {
+        use farhelm_proto::host_appearance::HostIcon;
+        let (h, local, remote) = host_fleet().await;
+        assert!(
+            host_row(&h, local).await.unwrap().commands_without_asking,
+            "premise: the asking host runs commands without asking"
+        );
+        assert_eq!(
+            h.state.manager.events().subscriber_count(),
+            0,
+            "premise: no GUI is connected"
+        );
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        for verb in [
+            AgentVerb::HostEdit {
+                host: "user@builder".to_string(),
+                alias: Some(HostAliasEdit::Set("baz".to_string())),
+                icon: None,
+                color: None,
+            },
+            AgentVerb::HostRemove {
+                host: "user@builder".to_string(),
+            },
+        ] {
+            let (kind, message) = refused(handler.handle(origin, "local-live", verb).await);
+            assert_eq!(kind, ErrorKind::Unavailable);
+            assert_eq!(message, crate::approvals::NO_GUI_REFUSAL);
+        }
+        let row = host_row(&h, remote).await.expect("the host stays");
+        assert_eq!(row.alias, None, "nothing was written");
+
+        let (kind, message) = refused(
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::HostEdit {
+                        host: "user@builder".to_string(),
+                        alias: None,
+                        icon: None,
+                        color: None,
+                    },
+                )
+                .await,
+        );
+        assert_eq!(kind, ErrorKind::InvalidRequest);
+        assert!(message.contains("--alias"), "{message}");
+
+        assert_eq!(row.icon, HostIcon::Cloud, "premise: the icon asked below");
+        let (kind, message) = refused(
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::HostEdit {
+                        host: "user@builder".to_string(),
+                        alias: Some(HostAliasEdit::Clear),
+                        icon: Some(HostIcon::Cloud),
+                        color: None,
+                    },
+                )
+                .await,
+        );
+        assert_eq!(kind, ErrorKind::InvalidRequest);
+        assert!(message.contains("nothing to change"), "{message}");
+        assert!(h.state.approvals.list().is_empty(), "no card was shown");
+    }
+
+    /// Spec: an agent cannot remove this machine (the remove route's own
+    /// refusal for the local row) or the host its own session runs on, and
+    /// both are refused without a card, even with a window open to ask in.
+    ///
+    /// Why: removing the asking host would stop the connection the request
+    /// is waiting on, and a card for this machine would ask the user to
+    /// approve something that cannot happen.
+    #[farhelm_testtrace::test]
+    async fn host_remove_refuses_this_machine_and_the_asking_host_without_a_card() {
+        let (h, local, remote) = host_fleet().await;
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let bounded = |outcome| async move {
+            tokio::time::timeout(std::time::Duration::from_secs(20), outcome)
+                .await
+                .expect("refused at once rather than waiting on a card")
+        };
+        let (kind, message) = refused(
+            bounded(handler.handle(
+                origin_of(&h, remote),
+                "remote-a",
+                AgentVerb::HostRemove {
+                    host: "this machine".to_string(),
+                },
+            ))
+            .await,
+        );
+        assert_eq!(kind, ErrorKind::Conflict);
+        assert_eq!(
+            message,
+            crate::store::HostStoreError::LocalHostImmutable.to_string()
+        );
+        let (kind, message) = refused(
+            bounded(handler.handle(
+                origin_of(&h, remote),
+                "remote-a",
+                AgentVerb::HostRemove {
+                    host: "user@builder".to_string(),
+                },
+            ))
+            .await,
+        );
+        assert_eq!(kind, ErrorKind::InvalidRequest);
+        assert!(message.contains("its own host"), "{message}");
+        assert!(h.state.approvals.list().is_empty(), "no card was shown");
+        assert!(host_row(&h, local).await.is_some());
+        assert!(host_row(&h, remote).await.is_some());
+    }
+
+    /// Spec: an allowed host remove does what the GUI's remove does: the
+    /// registry row and its cached sessions go and the connection actor
+    /// stops. The card names the host and its destination.
+    ///
+    /// Why: SPEC.md has the agent's remove be the GUI's remove, with its
+    /// remove-merely-forgets contract, rather than a second implementation
+    /// that could leave an actor dialing a host the registry has forgotten.
+    #[farhelm_testtrace::test]
+    async fn an_allowed_host_remove_forgets_the_host_as_the_gui_does() {
+        let (h, local, remote) = host_fleet().await;
+        assert!(
+            !h.store.cached_sessions(remote).await.unwrap().is_empty(),
+            "premise: the host has cached sessions to forget"
+        );
+        assert!(h.manager.status(remote).is_some(), "premise: an actor runs");
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::HostRemove {
+                        host: "user@builder".to_string(),
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        assert_eq!(
+            card.action,
+            ApprovalAction::HostRemove {
+                host_name: "user@builder".to_string(),
+                destination: "user@builder".to_string(),
+            }
+        );
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            task.await.unwrap(),
+            AgentOutcome::Ok {
+                reply: AgentReply::HostRemoved {}
+            }
+        );
+        assert!(host_row(&h, remote).await.is_none(), "the row is gone");
+        assert!(h.store.cached_sessions(remote).await.unwrap().is_empty());
+        assert!(h.manager.status(remote).is_none(), "the actor stopped");
+    }
+
+    /// Allow the waiting card, then land `competing` (a GUI write) while the
+    /// approved change is parked after the Allow and before it takes the
+    /// host's locks, and let it go on.
+    ///
+    /// That window is where the change's comparison against its card used
+    /// to sit, unprotected: a GUI write landing there passed the comparison
+    /// and was then overwritten or acted on. Only the test-only gate
+    /// ([`crate::approvals::HostWriteGate`]) can put a write there reliably.
+    /// The competing write's own success is asserted by `competing`; each
+    /// caller also reads back that it landed.
+    async fn allow_with_a_gui_write_at_the_gate(
+        h: &Harness,
+        host: HostId,
+        task: &tokio::task::JoinHandle<AgentOutcome>,
+        competing: impl std::future::Future<Output = ()>,
+    ) {
+        let gate = h.state.approvals.install_host_write_gate(host);
+        assert_eq!(
+            answer_card(h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let reached =
+            tokio::time::timeout(std::time::Duration::from_secs(20), gate.reached.notified()).await;
+        assert!(
+            reached.is_ok(),
+            "the approved change never reached its gate (request finished: {})",
+            task.is_finished()
+        );
+        competing.await;
+        gate.release.notify_one();
+    }
+
+    /// Spec: an allowed host remove whose host the GUI retargeted after the
+    /// Allow, before the removal took the host's locks, is refused as
+    /// changed, and the host stays registered at its new destination.
+    ///
+    /// Why: the card named the old destination, and the approval covers
+    /// only that. Without the comparison under the lock every destination
+    /// change holds, the agent would forget the machine the user had just
+    /// pointed the host at, on an approval given for another one.
+    #[farhelm_testtrace::test]
+    async fn a_host_remove_racing_a_gui_retarget_is_refused() {
+        let (h, local, remote) = host_fleet().await;
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::HostRemove {
+                        host: "user@builder".to_string(),
+                    },
+                )
+                .await
+        });
+        await_card(&h, &task).await;
+        let competing = async {
+            gui_host_write(
+                &h,
+                remote,
+                "destination",
+                serde_json::json!({ "ssh": "user@elsewhere" }),
+            )
+            .await;
+            assert_eq!(
+                host_row(&h, remote).await.unwrap().destination.as_deref(),
+                Some("user@elsewhere"),
+                "the GUI's retarget landed"
+            );
+        };
+        allow_with_a_gui_write_at_the_gate(&h, remote, &task, competing).await;
+        let (kind, message) = refused(task.await.unwrap());
+        assert_eq!(kind, ErrorKind::Conflict);
+        assert!(
+            message.contains("changed while this request waited"),
+            "{message}"
+        );
+        let row = host_row(&h, remote)
+            .await
+            .expect("the retargeted host is not removed");
+        assert_eq!(row.destination.as_deref(), Some("user@elsewhere"));
+    }
+
+    /// Spec: an allowed icon-only host edit racing a GUI color change after
+    /// the Allow writes the icon and keeps the GUI's color.
+    ///
+    /// Why: the appearance write takes icon and color together, so an edit
+    /// that took the color it writes back from a read made before the
+    /// host's lock would silently undo the user's change to a field the
+    /// card never mentioned.
+    #[farhelm_testtrace::test]
+    async fn an_icon_edit_racing_a_gui_color_change_keeps_the_color() {
+        use farhelm_proto::host_appearance::{HostColor, HostIcon};
+        let (h, local, remote) = host_fleet().await;
+        let before = host_row(&h, remote).await.expect("premise: the ssh host");
+        assert_eq!(before.icon, HostIcon::Cloud, "premise: the default icon");
+        assert_ne!(before.color, HostColor::Teal, "premise: not yet teal");
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::HostEdit {
+                        host: "user@builder".to_string(),
+                        alias: None,
+                        icon: Some(HostIcon::Rocket),
+                        color: None,
+                    },
+                )
+                .await
+        });
+        await_card(&h, &task).await;
+        let competing = async {
+            gui_host_write(
+                &h,
+                remote,
+                "appearance",
+                serde_json::json!({ "icon": "cloud", "color": "teal" }),
+            )
+            .await;
+            assert_eq!(
+                host_row(&h, remote).await.unwrap().color,
+                HostColor::Teal,
+                "the GUI's color landed"
+            );
+        };
+        allow_with_a_gui_write_at_the_gate(&h, remote, &task, competing).await;
+        assert!(
+            matches!(
+                task.await.unwrap(),
+                AgentOutcome::Ok {
+                    reply: AgentReply::HostEdited { .. }
+                }
+            ),
+            "the icon edit succeeds"
+        );
+        let after = host_row(&h, remote).await.expect("the host stays");
+        assert_eq!(after.icon, HostIcon::Rocket, "the approved icon");
+        assert_eq!(after.color, HostColor::Teal, "the GUI's color survives");
+    }
+
+    /// Spec: an allowed host edit whose card showed a field the GUI changed
+    /// after the Allow, before the edit took the host's locks, is refused as
+    /// changed, and the GUI's value stays.
+    ///
+    /// Why: the user approved "this alias, from that one"; writing the
+    /// agent's alias over a newer one the user chose would apply an answer
+    /// to a question nobody asked. The comparison must be made under the
+    /// locks the GUI's alias write takes, or a change landing just after it
+    /// is overwritten anyway.
+    #[farhelm_testtrace::test]
+    async fn a_host_edit_whose_shown_field_changed_while_waiting_is_refused() {
+        let (h, local, remote) = host_fleet().await;
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::HostEdit {
+                        host: "user@builder".to_string(),
+                        alias: Some(HostAliasEdit::Set("baz".to_string())),
+                        icon: None,
+                        color: None,
+                    },
+                )
+                .await
+        });
+        await_card(&h, &task).await;
+        let competing = async {
+            gui_host_write(&h, remote, "alias", serde_json::json!({ "alias": "gui" })).await;
+            assert_eq!(
+                host_row(&h, remote).await.unwrap().alias.as_deref(),
+                Some("gui"),
+                "the GUI's alias landed"
+            );
+        };
+        allow_with_a_gui_write_at_the_gate(&h, remote, &task, competing).await;
+        let (kind, message) = refused(task.await.unwrap());
+        assert_eq!(kind, ErrorKind::Conflict);
+        assert!(
+            message.contains("changed while this request waited"),
+            "{message}"
+        );
+        assert_eq!(
+            host_row(&h, remote).await.unwrap().alias.as_deref(),
+            Some("gui")
         );
     }
 }

@@ -124,6 +124,9 @@ pub(crate) struct Approvals {
     /// tests that observe the expiry (`rest_harness::FleetBuilder::approval_wait`).
     wait: Duration,
     inner: Mutex<Inner>,
+    /// Where a test parks an approved host change; see [`HostWriteGate`].
+    #[cfg(test)]
+    host_write_gate: Mutex<Option<std::sync::Arc<HostWriteGate>>>,
 }
 
 #[derive(Default)]
@@ -144,7 +147,45 @@ impl Approvals {
         Approvals {
             wait,
             inner: Mutex::new(Inner::default()),
+            #[cfg(test)]
+            host_write_gate: Mutex::new(None),
         }
+    }
+
+    /// Park the next approved host change for `host` at its gate: see
+    /// [`HostWriteGate`]. One-shot, so the competing write the test then
+    /// sends through the GUI's route does not stop at it too.
+    #[cfg(test)]
+    pub(crate) fn install_host_write_gate(
+        &self,
+        host: crate::store::HostId,
+    ) -> std::sync::Arc<HostWriteGate> {
+        let gate = std::sync::Arc::new(HostWriteGate {
+            host,
+            reached: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        *self
+            .host_write_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(std::sync::Arc::clone(&gate));
+        gate
+    }
+
+    /// Stop at the installed [`HostWriteGate`], if it is for `host`, until
+    /// the test releases it. Called by the agent's checked host writes
+    /// before they take the host's locks; a no-op when no gate is set.
+    #[cfg(test)]
+    pub(crate) async fn hold_at_host_write_gate(&self, host: crate::store::HostId) {
+        let gate = self
+            .host_write_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take_if(|gate| gate.host == host);
+        let Some(gate) = gate else { return };
+        gate.reached.notify_one();
+        gate.release.notified().await;
     }
 
     /// Every waiting request, oldest first.
@@ -233,6 +274,26 @@ impl Approvals {
     }
 }
 
+/// Test-only gate that parks an agent's approved host edit or remove after
+/// the user's Allow and before it takes the host's locks, so a test can land
+/// a competing GUI write in exactly that window.
+///
+/// The window is where an unprotected comparison of the host against its
+/// card used to sit: a check made there passed, and a GUI retarget or
+/// appearance change could still land before the write. Timing alone cannot
+/// place a write there reliably, and production has no reason to pause, so
+/// the gate exists only in tests, per helm rather than process-wide so
+/// concurrently running fixtures cannot see each other's gate (the same
+/// shape as the manager's publication gates).
+#[cfg(test)]
+pub(crate) struct HostWriteGate {
+    host: crate::store::HostId,
+    /// Notified when the change reaches the gate.
+    pub(crate) reached: tokio::sync::Notify,
+    /// Notified by the test to let the change go on.
+    pub(crate) release: tokio::sync::Notify,
+}
+
 /// A delete of one session in flight; see [`Approvals::deny_session`].
 #[must_use = "the mark refuses the session's new requests only while it is held"]
 pub(crate) struct DeleteMark<'a> {
@@ -304,9 +365,10 @@ fn gui_connected(state: &AppState) -> bool {
 ///
 /// The caller must still recheck that `origin` is live after an `Ok`, before
 /// acting: the connection can go between the answer and the action.
-/// Wrapper-bearing agent launches and template writes always wait for one
-/// visible answer; the host's ordinary command shortcut cannot vouch for a
-/// wrapper the agent chose.
+/// An action whose [`ApprovalAction::requires_direct_allow`] is true
+/// (wrapper-bearing agent launches and template writes, host edits and
+/// removals) always waits for one visible answer, whatever the host's
+/// ordinary command setting says; that method's docs give each reason.
 pub(crate) async fn ask(
     state: &AppState,
     origin: AgentOrigin,
@@ -648,12 +710,16 @@ pub(crate) async fn answer_approval(
             let Some((origin, identity, action, _)) = state.approvals.origin_of(&id) else {
                 return gone(&id);
             };
+            // Worded for every kind that needs a direct Allow (an agent's
+            // wrapper, a host change), so no card is answered with a reason
+            // that belongs to another kind.
             if action.requires_direct_allow() {
                 return http_error(refusal(
-                        ErrorKind::Conflict,
-                        "this wrapper needs an Allow answer for this request; Always allow cannot approve it"
-                            .into(),
-                    ));
+                    ErrorKind::Conflict,
+                    "this request can only be approved with Allow, each time; Always allow \
+                     cannot approve it"
+                        .into(),
+                ));
             }
             if !crate::agent_requests::origin_is_live(&state, origin) {
                 return http_error(refusal(

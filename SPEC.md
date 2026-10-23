@@ -2778,6 +2778,24 @@ JSON. Discovery also has `--json` forms with a versioned envelope, exact names, 
 completeness fields. The templates listing includes a prefix's words when one is set. Prefixes belong to the launch argv
 and are also visible in process listings, so templates must not hold secrets in them.
 
+Agents can also change and remove hosts.
+`farhelm agent host edit <host> [--alias <name>|--no-alias] [--icon <icon>] [--color <color>]` changes only a host's
+alias, icon and color: never its permissions, which would let an agent grant itself more, and never its destination,
+since retargeting keeps a host's settings and permissions and would move that trust to a machine the agent chose.
+`farhelm agent host remove <host>` forgets a host exactly as the GUI's remove does. `<host>` is the display name the
+hosts listing reports, resolved as `--host` is for `farhelm agent create`. Both are acting verbs, and unlike the others
+they always need the user's own Allow: the requesting host's "run farhelm commands from this host without asking"
+setting never covers them, and their cards offer only Allow and Deny, never Always allow. An edit's card shows each
+field it changes with its old and new value; an edit whose fields already have the requested values is refused as having
+nothing to change, without a card, so no edit ever succeeds without an explicit Allow. A remove's card repeats the GUI
+remove dialog's own words. Removing this machine is refused as the GUI refuses it, and removing the asking session's own
+host is refused because it would cut the connection the request is waiting on, the same reason a session cannot delete
+itself; both are refused without a card. On Allow, an edit writes through the same routes as the host settings dialog
+and a remove through the same route as the GUI's remove, with their refusals. An edit or remove whose host was
+retargeted while its card waited, or an edit whose card showed a field the GUI has since changed, is refused with
+nothing changed, even when that change lands just after the Allow; a change the GUI makes to a field an edit's card
+leaves alone is kept, and a remove still goes ahead after a rename.
+
 `farhelm agent instructions` (also spelled `farhelm agent help`) prints the agent-facing account of all of the above:
 the verbs, the `*` marker, that a session's own credential is what authorizes the question, what to do about "no helm is
 attached", that acting verbs may wait up to nine minutes for the user (so run them with a long enough timeout, and give
@@ -3303,6 +3321,11 @@ into a managed checkout: while its created session still exists, a retry with th
 finishes, the attempt the user already approved, without asking again. The replay can only complete that exact approved
 request, and only for the session, on the host, that asked. Delete removes that approval's retry record, so reusing the
 key then needs the approval any new request needs. None of this waives correctness of user-initiated GUI requests.
+
+That setting never covers changes to the hosts themselves. An agent's `farhelm agent host edit` or `host remove` always
+needs the user's own Allow on its card (see Agent-spawned sessions), so turning the setting on for a host does not let
+its sessions rename, restyle or remove any host, and even an approved edit reaches only a host's alias, icon and color,
+never its permissions or destination.
 
 Reading is separate from acting, and stays open for now. Any attached host may obtain any template's full contents,
 including a command line and resume command it carries: an approved spawn that applies a template, or any spawn from a

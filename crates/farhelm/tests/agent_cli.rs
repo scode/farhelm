@@ -3151,6 +3151,137 @@ fn template_edit_and_delete_send_their_verbs() {
     );
 }
 
+/// Spec: `farhelm agent host edit HOST` sends one `HostEdit` carrying only
+/// the fields its flags give (`--no-alias` as an explicit clear), and
+/// `host remove HOST` one `HostRemove`; each prints one confirmation line,
+/// an edit's naming the host by the name the helm reports after it. An edit
+/// with nothing to change, or an icon outside the vocabulary, is refused
+/// before anything is sent.
+///
+/// Why: a field the CLI filled in on its own would ask the user to approve
+/// a change the agent never meant, and the reply's name is the one the
+/// agent must use for the host from now on when it set an alias.
+#[farhelm_testtrace::test]
+fn host_edit_and_remove_send_their_verbs() {
+    use farhelm_proto::HostAliasEdit;
+    use farhelm_proto::host_appearance::HostIcon;
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor-edit.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(
+            request,
+            AgentVerb::HostEdit {
+                host: "user@builder".to_string(),
+                alias: Some(HostAliasEdit::Clear),
+                icon: Some(HostIcon::Rocket),
+                color: None,
+            }
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::HostEdited {
+                    host: AgentHost {
+                        id: "entry".to_string(),
+                        name: "user@builder".to_string(),
+                        kind: "ssh".to_string(),
+                        state: "connected".to_string(),
+                        current: false,
+                    },
+                },
+            },
+        })
+    });
+    let edited = output_with_timeout(agent_command_with_args(
+        &socket,
+        &[
+            "host",
+            "edit",
+            "user@builder",
+            "--no-alias",
+            "--icon",
+            "rocket",
+        ],
+    ));
+    finish_server(done, thread);
+    assert_eq!(
+        edited.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&edited.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(edited.stdout).unwrap(),
+        "changed host \"user@builder\"\n"
+    );
+
+    let socket = temp.path().join("supervisor-remove.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(
+            request,
+            AgentVerb::HostRemove {
+                host: "user@builder".to_string(),
+            }
+        );
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::HostRemoved {},
+            },
+        })
+    });
+    let removed = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["host", "remove", "user@builder"],
+    ));
+    finish_server(done, thread);
+    assert_eq!(
+        removed.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&removed.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(removed.stdout).unwrap(),
+        "removed host \"user@builder\"\n"
+    );
+
+    // Neither refusal dials: the socket does not exist.
+    let unused = temp.path().join("unused.sock");
+    let nothing = output_with_timeout(agent_command_with_args(
+        &unused,
+        &["host", "edit", "user@builder"],
+    ));
+    assert_eq!(nothing.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&nothing.stderr).contains("needs at least one of"),
+        "{}",
+        String::from_utf8_lossy(&nothing.stderr)
+    );
+    let bad_icon = output_with_timeout(agent_command_with_args(
+        &unused,
+        &["host", "edit", "user@builder", "--icon", "spaceship"],
+    ));
+    assert_ne!(bad_icon.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&bad_icon.stderr).contains("rocket"),
+        "the refusal lists the icon words: {}",
+        String::from_utf8_lossy(&bad_icon.stderr)
+    );
+}
+
 /// Shortcut-only edits must reach the helm with no template field, whether
 /// assigning or clearing. The CLI rejects keys outside the ten physical
 /// digits before it can send an approval request.
