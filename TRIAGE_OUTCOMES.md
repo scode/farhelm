@@ -18045,7 +18045,8 @@
   provisioning", next to the background-servers sentence), naming the agent case and ssh masters. The user-documentation
   Doc todo in TODO.md about tab-started services is widened to cover the agent case and ssh masters. No code change.
   Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-docs-oct22.md`.
+- Execution: `complete`; draft PR [#2626](https://github.com/scode/farhelm/pull/2626/changes) on bookmark
+  `plan/triage-docs-oct22/01-shared-program-ownership`, jj change `uqntplyr`.
 
 ## tab-owns-first-personal-tmux.md
 

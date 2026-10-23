@@ -12,10 +12,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   retry can stop unchecked live sessions when a custom command disappears after a failed removal; the conditional
   still-active-supervisor route is source-established.
 
-- [`agent-stop-kills-shared-personal-tmux.md`](agent-stop-kills-shared-personal-tmux.md) — Stop or Restart kills the
-  user's own tmux server or ssh master, with outside work in it, when the agent started it first; spec coverage is
-  ambiguous.
-
 - [`trash-entry-delete-hits-shifted-row.md`](trash-entry-delete-hits-shifted-row.md) — A one-click trash delete can
   permanently delete a different checkout when rows shift under the pointer; click timing is unmeasured.
 

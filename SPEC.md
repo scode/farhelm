@@ -3432,6 +3432,15 @@ initialization before the agent launches are outside that guarantee, and so, on 
 manager, are detached descendants whose environment cannot be read or has been overwritten; see
 [Lifecycle operations](#lifecycle-operations).
 
+Confirmed 2026-10-22: a per-user shared program, such as the user's own tmux server or an ssh ControlMaster, belongs to
+whichever started it first. Agents and tabs run without `TMUX` (above), so a plain `tmux` there reaches the user's own
+server, or starts it when none runs. One the agent started first ends with the agent's processes (Stop, Restart,
+Replace, Delete); one a terminal tab started first ends with that tab (closing it, or Delete), as
+[Session view](#session-view) describes. Either way it ends along with everything later run in it or through it,
+including windows and work the user started in it from outside Farhelm, for example over an SSH login, within the
+cleanup guarantee's limits on hosts without a usable systemd user manager. Farhelm cannot tell its own sessions' work in
+such a server from the user's, and does not try; this is intended, not a defect.
+
 After a failed Delete disconnects a viewer, either automatically reconnecting to a surviving terminal or remaining
 detached until the user reconnects is explicitly acceptable. Choose the simpler implementation. Reviewers must not treat
 either outcome alone as a bug or require additional recovery machinery to choose between them. The cleanup failure must
