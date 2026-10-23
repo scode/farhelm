@@ -27,13 +27,18 @@ served from this machine, the way the planning flow asks its up-front questions 
 the up-front questions on a local page"). Do not publish the page as a snippet or anywhere else unless the maintainer
 asks.
 
-The page holds every report in `REPORTS.md`, oldest first. Each report gets, in this order: its PRs and summary line; a
-TLDR written by the session preparing the page, at most three sentences saying what the plan was about, in product
-terms; then only what the maintainer should know (risks, caveats, release impact, checks that could not be run,
-follow-ups), stated as concisely as possible; then the full report; then an "approve" checkbox and a free-text comment
-field. The TLDR and the highlights are the session's own reading of the report and its Landing section, never new
-claims. A button at the bottom copies every choice as one block of text that the maintainer pastes back into the
-session.
+The page holds every report in `REPORTS.md`, oldest first, cut down to what the maintainer can act on; they made this
+concise form the default on 2026-10-23. Each report gets, in this order: its PRs and summary line; one or two sentences
+on what was done, in product terms; then only the plausible leftover bugs and follow-ups that matter: real gaps, known
+wrong behavior, risky untested paths with a concrete consequence, and decisions the report or its Landing section says
+are still needed, each of those marked "Decision needed:". One short sentence per item, and a plan with nothing left
+says so. Leave out checks that ran, changelog and release bookkeeping, documentation polish, stale comments, test
+hygiene, screenshot refreshes, what the landing already fixed, flakes already recorded, caveats that are design choices
+the maintainer already made, and notes that something was not tried on a real Mac or in the real desktop app, unless the
+untried case is particular or risky. A leftover that a later commit verifiably resolved may say so beside it. Then the
+full report, collapsed; then an "approve" checkbox and a free-text comment field. The summary and the leftovers are the
+session's own reading of the report and its Landing section, never new claims. A button at the bottom copies every
+choice as one block of text that the maintainer pastes back into the session.
 
 Write the page as `index.html` in a directory of its own inside your scratch directory (`AGENTS.md`, "Agent scratch
 space"), with its styles inline: a stylesheet linked by relative path from the snippets repository does not load from a
