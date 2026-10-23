@@ -2651,7 +2651,7 @@ pub(crate) fn ListView(
         let Some(source) = clone_prefill
             .read()
             .as_ref()
-            .and_then(|prefill| prefill.replace_source.clone())
+            .and_then(|prefill| prefill.mode.replace_source().map(str::to_owned))
         else {
             return;
         };
@@ -2667,11 +2667,9 @@ pub(crate) fn ListView(
     // (same guard, same shared `clone_prefill` signal, same
     // generation-minting scheme, same reasons for both) except that the
     // prefill it builds is marked with THIS row as its replace-with source
-    // (`CreatePrefill::replace_source`). That one field is the whole
-    // difference between clone and replace-with from here on: it is what
-    // makes `create_form.rs`'s shared submit path call
+    // (`CreatePrefill::mode`). Replace mode makes the shared submit path call
     // `api::replace_session_with` instead of `api::create_session`, and
-    // what makes this closing form's `on_created` request an explicit
+    // makes this closing form's `on_created` request an explicit
     // listing refresh so the source row leaves the list promptly (see that
     // handler's own doc). See `on_clone`'s doc above for why the guard runs
     // before any signal is touched and why the generation is minted here
@@ -4185,7 +4183,7 @@ pub(crate) fn ListView(
                     // and before any listing has shown it, the snapshot
                     // taken when the launcher opened.
                     replace_source_state: clone_prefill.read().as_ref().and_then(|prefill| {
-                        let source = prefill.replace_source.as_deref()?;
+                        let source = prefill.mode.replace_source()?;
                         listed_state(&listing.read(), source)
                             .or_else(|| {
                                 replace_source_seen
@@ -4194,7 +4192,7 @@ pub(crate) fn ListView(
                                     .filter(|(id, _)| id == source)
                                     .map(|(_, state)| state.clone())
                             })
-                            .or_else(|| prefill.replace_source_opened.clone())
+                            .or_else(|| prefill.mode.source_opened().cloned())
                     }),
                     on_cancel: move |_| {
                         COMPOSER_DIALOG.release();

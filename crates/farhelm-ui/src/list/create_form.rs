@@ -966,7 +966,7 @@ struct IntentBinding {
     /// names remain exact because accepted preview authority binds their bytes.
     title: String,
     /// `Some(source id)` when this binding is a "replace with", carried
-    /// straight from the mounted [`CreatePrefill::replace_source`] — `None`
+    /// projected from the mounted [`CreatePrefill::mode`] — `None`
     /// for every ordinary create or clone. Part of the binding, not a
     /// side channel next to it, for the same idempotency reason every other
     /// field here is: a retried replace-with must reuse its own key
@@ -1614,6 +1614,64 @@ fn scroll_repository_result(index: usize) {
     ));
 }
 
+/// What the launcher carries from its source and which operation it submits.
+///
+/// Clone uses `Create`, since its source only seeds a new session. Replace
+/// seeds the source folder, holds its host and addresses the replace endpoint.
+/// Its source and opening state describe the operation, not editable fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum LauncherMode {
+    Create,
+    Replace {
+        source: String,
+        opened: (SessionStatus, usize),
+    },
+}
+
+impl LauncherMode {
+    /// The session the replace endpoint addresses, absent for a create.
+    ///
+    /// Retry bindings carry this value, so a create and a replace with
+    /// identical launch settings still mint different retry keys.
+    pub(super) fn replace_source(&self) -> Option<&str> {
+        match self {
+            Self::Create => None,
+            Self::Replace { source, .. } => Some(source),
+        }
+    }
+
+    /// Whether templates must preserve the source host instead of setting one.
+    /// Clone can choose another host; Replace always addresses its own source.
+    pub(super) fn holds_host(&self) -> bool {
+        match self {
+            Self::Create => false,
+            Self::Replace { .. } => true,
+        }
+    }
+
+    /// Whether seeding starts in the source folder rather than a fresh checkout.
+    /// This is a seeding rule: Replace can still edit its destination afterward.
+    fn seeds_source_folder(&self) -> bool {
+        match self {
+            Self::Create => false,
+            Self::Replace { .. } => true,
+        }
+    }
+
+    /// Opening state used only until a listing has observed this source.
+    ///
+    /// The live listing wins, then its last observation, then this snapshot
+    /// for a source hidden by a filter or awaiting its first listing. The
+    /// warning and destructive precondition share that one fallback; a failed
+    /// read must not quietly return them to an older opening state.
+    pub(super) fn source_opened(&self) -> Option<&(SessionStatus, usize)> {
+        match self {
+            Self::Create => None,
+            Self::Replace { opened, .. } => Some(opened),
+        }
+    }
+}
+
 /// What one "clone" click seeds a fresh create form with: everything about
 /// the clicked row that a NEW session can reuse.
 ///
@@ -1672,25 +1730,12 @@ pub(super) struct CreatePrefill {
     /// Absent for a legacy session, whose command alone (in `invocation`)
     /// is filled in (SPEC.md, the launch-kinds upgrade).
     pub(super) command: Option<CommandLaunch>,
-    /// `Some(source id)` makes this a Replace-with prefill. Its initial
-    /// destination stays the source folder instead of Clone's fresh checkout.
-    /// Host reconciliation and launch settings still seed identically; submit
-    /// uses the replace endpoint and refuses a drift from the source host.
-    /// The launch button reads "replace"; [`IntentBinding::replace_source`]
-    /// carries the source through asynchronous submission. Prefill generations
-    /// and remembered permissions still follow the same reconciliation rules.
-    pub(super) replace_source: Option<String>,
-    /// The "replace with" source's status and terminal tab count when the
-    /// launcher opened, `None` for a plain clone.
-    ///
-    /// Only the last fallback: `ListView` hands the form the source's row
-    /// from the live listing whenever the listing has it, then the last state
-    /// a listing showed, and this snapshot only before any listing has shown
-    /// the row (a header "replace with" on a session the sidebar's filter
-    /// hides, say). Either way the launcher's warning and the
-    /// precondition its replace sends come from the same value; see
-    /// `CreateSessionForm`'s `replace_source_state`.
-    pub(super) replace_source_opened: Option<(SessionStatus, usize)>,
+    /// The operation this prefill opens. Replace seeds the source folder
+    /// instead of Clone's fresh checkout and holds the source host. Launch
+    /// choices, generations and remembered permissions use the same seeding
+    /// rules; [`IntentBinding::replace_source`] carries the endpoint projection
+    /// through asynchronous submission.
+    pub(super) mode: LauncherMode,
 }
 
 /// Build the prefill a clone click seeds the create form with, from the
@@ -1700,11 +1745,9 @@ pub(super) struct CreatePrefill {
 /// mints `generation` (`list::view::ListView`, once per clone click) — so
 /// what a clone carries is checkable without mounting a component.
 ///
-/// Always leaves [`CreatePrefill::replace_source`] `None`: this function
-/// builds a CLONE's prefill specifically, and `list::view::ListView`'s own
-/// "replace with" handler is what sets that field afterward on the value
-/// this returns, since only the caller knows which row is being
-/// replaced-with rather than merely cloned.
+/// Always starts in [`LauncherMode::Create`]: a clone's source seeds the
+/// draft but does not change the operation. The caller marks Replace with
+/// afterward, since only it knows which action opened the launcher.
 pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill {
     CreatePrefill {
         generation,
@@ -1732,8 +1775,7 @@ pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill 
             | Some(crate::SessionLaunch::Legacy { .. })
             | None => None,
         },
-        replace_source: None,
-        replace_source_opened: None,
+        mode: LauncherMode::Create,
     }
 }
 
@@ -1775,12 +1817,14 @@ fn replace_with_warning(
 /// Mark a clone's prefill as a "replace with" of `session`, the row it was
 /// built from: the source id that routes the submit to the replace endpoint,
 /// plus the status snapshot the launcher falls back to while the live listing
-/// lacks the row (see [`CreatePrefill::replace_source_opened`]).
+/// lacks the row (see [`LauncherMode::source_opened`]).
 /// The source reference remains raw operation data, even when its suffix needs
 /// escaping for presentation; the submit must address the original session.
 pub(super) fn mark_replace_with(prefill: &mut CreatePrefill, session: &Session) {
-    prefill.replace_source = Some(session.id.raw().to_owned());
-    prefill.replace_source_opened = Some((session.status.clone(), session.tabs.len()));
+    prefill.mode = LauncherMode::Replace {
+        source: session.id.raw().to_owned(),
+        opened: (session.status.clone(), session.tabs.len()),
+    };
 }
 
 // ---------------------------------------------------------------------
@@ -2297,12 +2341,11 @@ fn effective_title(
 /// `prefill` set instead of building a second, immediate-create path — see
 /// `CreatePrefill`'s own doc for what it carries and why. A "replace with"
 /// click (`ListView`'s `on_replace_with`) takes the identical path with the
-/// identical prefill shape, marked only by `CreatePrefill::replace_source`;
-/// nothing in this section, or in the reseed effect below, branches on that
-/// field — the two verbs differ only past submit (see `IntentBinding::
-/// replace_source`), which is the whole point of routing both through one
-/// prefill mechanism instead of a second one. The reseed effect replaces the
-/// whole agent draft for each source generation. The launch is independent of
+/// identical prefill shape, with `CreatePrefill::mode` selecting Replace.
+/// Both modes share launch seeding and host reconciliation; Replace seeds
+/// the source folder and holds the host, then projects its source into
+/// `IntentBinding::replace_source` for submission. The reseed effect replaces
+/// the whole agent draft for each source generation. The launch is independent of
 /// host reconciliation, so a delayed or unconfirmable host cannot suppress
 /// it, and a later host answer cannot overwrite a person's edits.
 ///
@@ -2408,7 +2451,7 @@ pub(super) fn CreateSessionForm(
     /// For "replace with", the source session's status and terminal tab
     /// count as the page currently knows them: its row in the live listing,
     /// else the last state a listing showed for it, else
-    /// [`CreatePrefill::replace_source_opened`].
+    /// [`LauncherMode::source_opened`].
     /// `None` for a create or a plain clone.
     ///
     /// SPEC.md "Replace with": the launcher's replace button is the
@@ -2693,7 +2736,7 @@ pub(super) fn CreateSessionForm(
             CloneHostState::Waiting | CloneHostState::Bound | CloneHostState::UserTookOver => None,
         });
     // Taken before the reseed effect below moves the prop into its own
-    // `move` closure: the submit handler needs `replace_source` and `host`
+    // `move` closure: the submit handler needs the mode's source and `host`
     // long after that effect has run (one owned copy, consumed by its
     // closure), and the launch button's verb only needs to know whether
     // this is a replace-with at all — a `bool`, derived here rather than
@@ -2701,7 +2744,10 @@ pub(super) fn CreateSessionForm(
     let prefill_for_submit = prefill.clone();
     let is_replace_with = prefill
         .as_ref()
-        .is_some_and(|prefill| prefill.replace_source.is_some());
+        .is_some_and(|prefill| prefill.mode.replace_source().is_some());
+    let host_fixed = prefill
+        .as_ref()
+        .is_some_and(|prefill| prefill.mode.holds_host());
     let selected = effective_create_host(&hosts, chosen_host(), open_host.as_ref());
     let selected_folder = open_host
         .as_ref()
@@ -3434,7 +3480,7 @@ pub(super) fn CreateSessionForm(
             launch,
             replace_source: prefill_for_submit
                 .as_ref()
-                .and_then(|prefill| prefill.replace_source.as_deref()),
+                .and_then(|prefill| prefill.mode.replace_source()),
             checkout: None,
         })?;
         let destination = destination_draft();
@@ -4026,7 +4072,7 @@ pub(super) fn CreateSessionForm(
                     templates: &templates_now,
                     hosts: &action_hosts,
                     catalog: action_catalog.as_deref(),
-                    host_fixed: is_replace_with,
+                    host_fixed,
                     history_target: action_history_target.clone(),
                     preferences,
                 },
@@ -4056,7 +4102,7 @@ pub(super) fn CreateSessionForm(
                         create_target.peek().as_ref(),
                         question_prefill
                             .as_ref()
-                            .and_then(|prefill| prefill.replace_source.as_deref()),
+                            .and_then(|prefill| prefill.mode.replace_source()),
                         refused,
                     )
                 });
@@ -4214,7 +4260,7 @@ pub(super) fn CreateSessionForm(
                     &templates,
                     &shortcut_hosts,
                     shortcut_catalog.as_deref().unwrap_or_default(),
-                    is_replace_with,
+                    host_fixed,
                     &draft.snapshot(),
                     *chosen_host.peek(),
                 ) {
@@ -4473,7 +4519,7 @@ pub(super) fn CreateSessionForm(
                 launch: LaunchIntent::Structured(selection),
                 replace_source: prefill
                     .as_ref()
-                    .and_then(|prefill| prefill.replace_source.as_deref()),
+                    .and_then(|prefill| prefill.mode.replace_source()),
                 checkout: None,
             })?;
             match current.destination() {
@@ -4680,7 +4726,8 @@ pub(super) fn CreateSessionForm(
             // them.
             let replace_source = prefill_for_submit
                 .as_ref()
-                .and_then(|prefill| prefill.replace_source.clone());
+                .and_then(|prefill| prefill.mode.replace_source())
+                .map(str::to_owned);
             if replace_source.is_some()
                 && prefill_for_submit
                     .as_ref()
@@ -8765,11 +8812,9 @@ mod tests {
     /// suffix on the title, no rewriting of the directory, the row's own
     /// host and install identity together — and the generation is exactly
     /// what the caller passed in (`ListView` is the one that decides what
-    /// counts as a new clone). `replace_source` is the one field
-    /// `prefill_from` never sets: it builds a CLONE's prefill, and only
-    /// `list::view::ListView`'s "replace with" handler turns that same
-    /// value into a replace-with prefill afterward (see `prefill_from`'s
-    /// own doc).
+    /// counts as a new clone). The mode starts as Create: only the
+    /// "replace with" handler changes the operation afterward, so a clone
+    /// cannot accidentally replace its source (see `prefill_from`'s own doc).
     #[farhelm_testtrace::test]
     fn prefill_from_carries_title_cwd_host_and_identity_verbatim() {
         let session = Session {
@@ -8785,8 +8830,7 @@ mod tests {
         assert_eq!(prefill.host_identity, Some(Some("install-7".to_string())));
         assert_eq!(prefill.cwd, "/work/api");
         assert_eq!(prefill.title, "my session");
-        assert_eq!(prefill.replace_source, None);
-        assert_eq!(prefill.replace_source_opened, None);
+        assert_eq!(prefill.mode, LauncherMode::Create);
     }
 
     /// Why this matters: Clone and Replace with copy the source's title, and a fresh checkout names
@@ -9062,15 +9106,14 @@ mod tests {
         let clone = prefill_from(&session, 4);
         let mut prefill = clone.clone();
         mark_replace_with(&mut prefill, &session);
-        assert_eq!(prefill.replace_source.as_deref(), Some("s1"));
+        assert_eq!(prefill.mode.replace_source(), Some("s1"));
         assert_eq!(
-            prefill.replace_source_opened,
-            Some((SessionStatus::Exited { exit_code: Some(1) }, 1))
+            prefill.mode.source_opened(),
+            Some(&(SessionStatus::Exited { exit_code: Some(1) }, 1))
         );
         assert_eq!(
             CreatePrefill {
-                replace_source: None,
-                replace_source_opened: None,
+                mode: LauncherMode::Create,
                 ..prefill
             },
             clone
