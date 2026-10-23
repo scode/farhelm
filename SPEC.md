@@ -565,9 +565,12 @@ agent choice is independent of that destination:
   concretely, the supervisor's own `HOME` environment, resolved once at supervisor start; a supervisor with no usable
   `HOME` refuses `~` with an error naming that, rather than guessing at an account database. The expansion happens once,
   at creation, and the session stores the expanded absolute path, so the anti-drift property above is preserved; `~user`
-  forms are refused. The create form prefills the field with `~`, so the common home-directory create needs no typing;
-  because expansion is host-side, the same default is correct for every target host. A directory picker/completer
-  against the target host's filesystem is provided.
+  forms are refused. The create form prefills the field for the target host: the selected session's directory when that
+  session is on the target host's installation, else the directory of the newest recent setup on that installation that
+  launched into a plain folder (a fresh managed checkout does not count), else `~`, which each host expands to its own
+  home. Changing the host re-seeds a folder the user has not typed or picked in that draft; a refresh of the recent
+  setups never rewrites an open draft's folder. A remembered folder that no longer exists is used anyway, and the create
+  is refused as for any missing folder. A directory picker/completer against the target host's filesystem is provided.
 - Title: optional; auto-generated when omitted. Renameable later. A title is a single-line label, so a title you supply
   is refused if it contains control characters (escape sequences, newlines, tabs); an auto-generated one has any such
   character replaced with U+FFFD rather than being refused, since the directory it comes from is legitimate and you did
@@ -760,31 +763,31 @@ agent choice is independent of that destination:
   During a launch or while saving a template, the chord is consumed without changing the draft. Applying by shortcut
   leaves focus and search text alone, unless its edits remove the focused control, when focus returns to the launcher's
   search. Other visible dialogs keep the keyboard. A hidden quick-launch launcher still consumes the chord without
-  applying it. Applying it on the page uses exactly New's defaults and ordinary launch path: the open session's host and
-  directory, else this machine's home, with the template overriding only its own fields. Success selects the created
-  session. When New was never shown, the rename dialog opens over it while its agent is already starting, unless
-  Settings' on-by-default **name sessions on quick launch** choice is off. This applies to the bolt shortcut, number
-  shortcuts, composed sequences, the quick-switcher row and the Cmd+J template list, even when a template supplied the
-  name. The actual created name is focused and fully selected. Enter with the name unchanged or Escape keeps it without
-  sending a rename; a changed name uses ordinary rename. Closing returns to the new terminal, which takes no input while
-  the dialog is open. A launch that revealed New gets no naming dialog, even if a later submission succeeds. A held
-  chord starts only once; the chord never reaches the terminal and visible modals other than the launcher keep the
-  keyboard. With no usable mark on the page it opens Templates with an explanation. An edited marked template that no
-  longer supplies what its active launch kind needs opens New with it applied and a prominent banner saying it needs
-  more choices before it can launch. The same banner accompanies an incomplete Cmd+J or quick-switcher pick, without
-  recommending the sequence prefix. A launch refusal or YOLO question reveals New with the same draft, error or
-  confirmation; nothing bypasses host admission, and the shortcut never retries itself. The mark is a nullable template
-  name on the helm's shared preferences, independent of the template fields. Clicking another bolt moves it; clicking
-  the lit bolt clears it. An agent-launch template needs an agent to be marked; a command-launch template needs a
-  nonblank command. With no launch kind, it is judged as an agent launch. The same rule decides whether a template or
-  combined sequence can launch directly. A marked template that no longer qualifies can still be unmarked. Renaming
-  repoints the mark before deleting the old name; deleting that name clears its mark through the shared delete path, and
-  Undo never restores the mark. The editor says whether its saved template is marked. The shortcut reads the mark and
-  templates fresh on each use, so another window's change takes effect without reloading. Templates' hover and a
-  separate quick-switcher row advertise the chord and marked name. A browser that reserves the chord keeps its behavior;
-  the quick-switcher row remains available. An agent may set or clear the mark through `farhelm agent template create`
-  or `edit`, behind a template approval card. The helm applies the same eligibility rule to an agent's write as the
-  Templates editor does.
+  applying it. Applying it on the page uses exactly New's defaults and ordinary launch path: the open session's host,
+  else this machine, and New's default folder for that host (Working directory above), with the template overriding only
+  its own fields. Success selects the created session. When New was never shown, the rename dialog opens over it while
+  its agent is already starting, unless Settings' on-by-default **name sessions on quick launch** choice is off. This
+  applies to the bolt shortcut, number shortcuts, composed sequences, the quick-switcher row and the Cmd+J template
+  list, even when a template supplied the name. The actual created name is focused and fully selected. Enter with the
+  name unchanged or Escape keeps it without sending a rename; a changed name uses ordinary rename. Closing returns to
+  the new terminal, which takes no input while the dialog is open. A launch that revealed New gets no naming dialog,
+  even if a later submission succeeds. A held chord starts only once; the chord never reaches the terminal and visible
+  modals other than the launcher keep the keyboard. With no usable mark on the page it opens Templates with an
+  explanation. An edited marked template that no longer supplies what its active launch kind needs opens New with it
+  applied and a prominent banner saying it needs more choices before it can launch. The same banner accompanies an
+  incomplete Cmd+J or quick-switcher pick, without recommending the sequence prefix. A launch refusal or YOLO question
+  reveals New with the same draft, error or confirmation; nothing bypasses host admission, and the shortcut never
+  retries itself. The mark is a nullable template name on the helm's shared preferences, independent of the template
+  fields. Clicking another bolt moves it; clicking the lit bolt clears it. An agent-launch template needs an agent to be
+  marked; a command-launch template needs a nonblank command. With no launch kind, it is judged as an agent launch. The
+  same rule decides whether a template or combined sequence can launch directly. A marked template that no longer
+  qualifies can still be unmarked. Renaming repoints the mark before deleting the old name; deleting that name clears
+  its mark through the shared delete path, and Undo never restores the mark. The editor says whether its saved template
+  is marked. The shortcut reads the mark and templates fresh on each use, so another window's change takes effect
+  without reloading. Templates' hover and a separate quick-switcher row advertise the chord and marked name. A browser
+  that reserves the chord keeps its behavior; the quick-switcher row remains available. An agent may set or clear the
+  mark through `farhelm agent template create` or `edit`, behind a template approval card. The helm applies the same
+  eligibility rule to an agent's write as the Templates editor does.
 - Template number shortcuts: a template may hold one of ten shared keys, 1–9 then 0, independently of ⚡. Cmd+digit in
   the Mac desktop app, or Ctrl+Shift+digit everywhere else (including a Mac browser), starts its template through the
   same direct launch path as quick launch on the page, and applies it to an open New, Clone or Replace with draft under

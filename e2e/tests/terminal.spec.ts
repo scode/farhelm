@@ -316,9 +316,10 @@ test("list renders the session row with title, cwd, invocation, and the status t
   await expect(row.locator(".status-badge")).toHaveText(expected.status.state);
 });
 
-// Home is the New fallback when no session supplies a destination. An empty
-// listing and cleared selection establish that premise explicitly: the real
-// stack's shared session would otherwise seed its working directory. Assert
+// Home is the New fallback when no session supplies a destination and the host
+// has no recent launch into a plain folder. An empty listing, cleared selection
+// and empty recent setups establish that premise explicitly: the real stack's
+// shared session, or an earlier test's launch, would otherwise seed it. Assert
 // the actual field value, since an empty input with a home placeholder does
 // not establish what Launch would send to the target supervisor.
 test("the create form prefills the working directory with ~ when no session is selected", async ({ page }) => {
@@ -327,6 +328,11 @@ test("the create form prefills the working directory with ~ when no session is s
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({ sessions: [], total: 0, matching: 0, truncated: false }),
+  }));
+  await page.route("**/api/launch-history**", (route) => fulfillAsHelm(route, {
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ launches: [], folders: [] }),
   }));
   await page.goto("/");
   await expect(page.locator(".session-count")).toHaveText("0 sessions");
