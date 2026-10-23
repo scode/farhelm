@@ -169,7 +169,8 @@ host from the list, cached sessions included, as removing it does, and the windo
 removal notice. Its hover text names the kept data directory, a copy control copies that path, and × dismisses the
 notice. A run that fails partway keeps the host listed with its steps showing what is left, and choosing uninstall again
 continues from there. Such a retry may go ahead without a connection only once the unit file is gone, since nothing can
-start the supervisor again after that. Linger is left as it is. The helm's own machine has no uninstall in the panel:
+start the supervisor again after that, and only while the supervisor unit is not running, since a running supervisor may
+have sessions the retry cannot check. Linger is left as it is. The helm's own machine has no uninstall in the panel:
 Farhelm there is removed with `farhelm uninstall` (see
 [Uninstall scope and interaction](#uninstall-scope-and-interaction)).
 

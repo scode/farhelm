@@ -1279,11 +1279,14 @@ impl ProvisioningService {
     /// one exception, for continuing a run that failed after it removed the
     /// unit file: with no unit file left nothing can start the supervisor
     /// again, so the remaining steps may go ahead without a connection, but
-    /// only on positive evidence that no supervisor answers. A host whose
-    /// supervisor answers but cannot be used (another protocol, an identity
-    /// problem) is refused outright, because something is running there
-    /// and, for an identity problem, the destination may now reach a
-    /// different machine.
+    /// only on positive evidence that no supervisor answers and that systemd
+    /// no longer runs its unit. A supervisor that exited while its tmux
+    /// server survived still passes, with that server's sessions unchecked;
+    /// nothing here covers that route.
+    /// A host whose supervisor answers but cannot be used (another protocol,
+    /// an identity problem) is refused outright, because something is
+    /// running there and, for an identity problem, the destination may now
+    /// reach a different machine.
     async fn uninstall_plan(
         &self,
         host: HostId,
@@ -1463,6 +1466,21 @@ impl ProvisioningService {
         let unit = &self.layout.unit_name;
         if client.is_none() && unit_file.exists {
             return Err(not_connected());
+        }
+        // A gone unit file stops anything from starting the supervisor again,
+        // but not one that is still running: a failed run can remove the file
+        // and fail before stopping the supervisor, and sessions started after
+        // that run ended were never checked. An absent probe does not prove
+        // the supervisor gone either, since a registered custom command name
+        // (such as `fh`) that no longer resolves reads as absent too. Without
+        // a connection to list those sessions, a running unit refuses.
+        if client.is_none() && inspection.unit_running() {
+            return Err(refused(format!(
+                "Farhelm can't uninstall from this host while it isn't connected: its supervisor \
+                 ({unit}) is still running there, so it may have sessions Farhelm can't check. \
+                 Once the host is connected, or after you stop it there (systemctl --user stop {unit}, \
+                 which ends its sessions), choose uninstall again"
+            )));
         }
         if client.is_some() && !inspection.unit_running() {
             return Err(refused(format!(

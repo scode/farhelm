@@ -4702,7 +4702,10 @@ removal ensures the same stop behavior on every retry, including one whose prece
 still outstanding are planned (the unit file's two steps when it exists, the lib directory's when it exists), and each
 host command treats work already done as a skip, so a failed run continues from wherever it stopped with no
 process-local memory of how far it got, which would not survive a helm restart. Every path comes from the plan, frozen
-from the same layout and overrides an install uses, never re-derived at run time.
+from the same layout and overrides an install uses, never re-derived at run time. A retry without a connection also
+needs the unit no longer running (`inactive` or `failed` in the uninstall inspection): the probe reads a custom command
+name that stopped resolving as no supervisor answering, so its evidence alone would let a retry stop a supervisor whose
+sessions were never checked.
 
 The checks run at planning and again under the run's lock at confirmation, by planning again and requiring the same
 plan, so one piece of code decides every fact the plan rests on. A connected host needs a fresh session list (a live

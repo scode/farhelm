@@ -35,4 +35,5 @@ Farhelm needs to reach the host to do this, so it can check that no session is s
 unreachable or with a problem in the list, fix that first, then choose **uninstall** again. Farhelm also refuses in a
 few less common cases, such as a host where Farhelm was set up by running `farhelm helm setup` on the host itself, and
 says why when it does. The one exception is finishing an uninstall that stopped partway: once it has removed Farhelm's
-service, the host is expected to look unreachable, and choosing **uninstall** again still finishes the job.
+service and Farhelm's supervisor there has stopped, the host is expected to look unreachable, and choosing **uninstall**
+again still finishes the job.
