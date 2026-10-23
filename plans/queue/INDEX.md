@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing dc70f4] `resume-target-fixes-oct22.md` — Restart with clears the old conversation when hooks are off, and Grok and OMP attribution refuse nested runs in unrecognised panes (2026-10-22 triage)
 - [complete] `checkout-ownership-oct22.md` — Five supervisor fixes: no-creation-time checkouts are released, restarted sessions survive stale create retries, attachments survive interrupted Delete, duplicate pane rows keep claims, rewound upstreams get a fresh clone
 - [complete] `supervisor-lock-outlives-work.md` — The supervisor keeps its state-folder claim until its background work has ended, as the helm does (2026-10-22 triage)
 - [in-flight 8c534c] `uninstall-guards-oct22.md` — Uninstall refuses aliased and mount-crossing layouts, unchecked offline retries and control characters in kept paths; host planning bounds a stuck output read (2026-10-22 triage)
