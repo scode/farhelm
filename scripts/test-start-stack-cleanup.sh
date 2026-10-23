@@ -204,6 +204,22 @@ await_gone() {
   return 1
 }
 
+# Wait (bounded) until a pid runs with the command line start-stack.sh takes
+# for a supervisor of this remote state dir. A stand-in that died early would
+# otherwise let await_gone pass on absence without proving any cleanup. The
+# pattern copies start-stack.sh's own supervisor lookup; change both together.
+await_replacement_running() {
+  local pid="$1" remote="$2"
+  local _
+  for _ in $(seq 1 20); do
+    case "$(ps -p "$pid" -o args= 2>/dev/null)" in
+      *" supervisor run --state-dir $remote "*) return 0 ;;
+    esac
+    sleep 0.25
+  done
+  return 1
+}
+
 report_leftovers() {
   local phase="$1" state="$2"
   curl -s -m 2 -o /dev/null "$port" && fail "$phase: port still answers"
@@ -380,6 +396,9 @@ replacement_phase() {
     bash -c 'exec -a "$0" sleep 300' "farhelm supervisor run --state-dir $remote --boot-id-file $remote/boot-id" &
     replacement_pid=$!
     echo "$replacement_pid" >"$pidfile" || exit 1
+    # Still signal the stack on failure, so it is torn down either way.
+    await_replacement_running "$replacement_pid" "$remote" \
+      || fail "$phase: stand-in supervisor never ran as one, so the phase proves no cleanup (its command line: $(ps -p "$replacement_pid" -o args= 2>/dev/null || echo 'not running'))"
   else
     echo "$decoy_pid" >"$pidfile" || exit 1
   fi

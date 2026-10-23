@@ -215,10 +215,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Removal/refusal destinations and manual startup paths collapse distinguishing spaces; live SSH examples, clipboard
   serialization and harmful startup reliance remain unverified.
 
-- [`replacement-cleanup-test-never-proves-child-lived.md`](replacement-cleanup-test-never-proves-child-lived.md) — The
-  replacement cleanup test never proves its stand-in was alive before checking absence; an actual false pass is
-  unverified.
-
 - [`secondary-press-suppresses-primary-selection-copy.md`](secondary-press-suppresses-primary-selection-copy.md) — A
   second mouse button may suppress primary-selection copying; physical browser behavior is unverified.
 

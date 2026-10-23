@@ -17858,7 +17858,11 @@
 - Completion criteria: before signalling, the test waits (bounded) until the stand-in is running with the command line
   `start-stack.sh` matches, and fails if it never is. Confined to this test script. Size gate: about 100 lines as above;
   over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
+- Execution: complete in jj change `wuxurmwsrssuvupsvorqxusynonypxmo`, bookmark
+  `plan/test-hygiene-oct21/06-stand-in-alive-check`. After writing the pidfile, the stand-in phase now waits up to five
+  seconds for the stand-in to run with the command line `start-stack.sh` matches for a supervisor, and fails the phase
+  otherwise; the stack is still signalled either way so it is torn down. The test change totals 19 added/deleted lines,
+  below the 100-line gate. PR: https://github.com/scode/farhelm/pull/2613/changes.
 
 ## settings-test-restores-before-final-spare-save.md
 
