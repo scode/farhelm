@@ -18427,7 +18427,12 @@
   example `/etc/terminfo`, `/lib/terminfo` and `/usr/share/terminfo`), checked with `strings` on a built binary that no
   `/tmp` path remains. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/build-and-tooling-oct22.md`.
+- Execution: complete: change `mzltpxvrplovurzrmkkpvqmupsunxozw`, bookmark
+  `plan/build-and-tooling-oct22/01-tmux-terminfo-path`. The Linux ncurses build now compiles in the search list
+  `/etc/terminfo:/lib/terminfo:/usr/share/terminfo` (default `/usr/share/terminfo`) and installs no terminfo database,
+  as the macOS branch already did. `strings` on a fresh x86_64 build shows that list and no build-folder terminfo path;
+  the `/tmp` strings left are tmux's own socket and temporary-file defaults and debug-info source paths, which nothing
+  looks up at runtime. 10 changed lines. PR: https://github.com/scode/farhelm/pull/2657/changes.
 
 ## plans-queue-counts-fork-prs-as-plan-work.md
 
