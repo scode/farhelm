@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`helm-owned-by-default`](reports/helm-owned-by-default.report.md) landed 2026-10-21 in #2443, #2445, #2458, #2460: Run every state-changing helm request on a helm-owned task by default, with an explicit exempt list for routes that must stay cancellable (structural refactor; accidental omissions fixed first).
 - [`ui-peer-text-type`](reports/ui-peer-text-type.report.md) landed 2026-10-21 in #2465, #2467, #2468, #2469, #2470, #2471, #2472, #2473, #2474, #2475, #2476, #2477, #2478, #2479, #2480: Carry text from other machines in its own UI type with explicit escaped and raw accessors, so showing it unescaped stops compiling, and fix the unescaped sites it exposes.
 - [`uninstall-refusal-wording`](reports/uninstall-refusal-wording.report.md) landed 2026-10-21 in #2491: Replace the uninstall refusal for hosts Farhelm can't use with one plain sentence per situation and its way out, offer remove there, and reword the two neighbouring refusals (1 TODO entry).
 - [`helm-ingress-types`](reports/helm-ingress-types.report.md) landed 2026-10-21 in #2492, #2494, #2495: Make supervisor-reported session data, parsed agent verbs and the origin of helm errors types that only the checking code can construct (structural refactor, no behavior change).
