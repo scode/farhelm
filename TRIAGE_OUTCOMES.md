@@ -18150,7 +18150,15 @@
   while `bun x`, `bunx` and npm launcher panes keep the positional acceptance `omp-bun-pane-proof.md` chose. A unit test
   covers the chain in the feedback file. Size gate: about 100 lines as above; over it, block and bring it back. Remove
   the feedback file and its index entry.
-- Execution: planned in `plans/queue/resume-target-fixes-oct22.md`.
+- Execution: complete in jj change `ulwpplqrwnmtozyxqkqqoqxqvrrulnsz`, bookmark
+  `plan/resume-target-fixes-oct22/03-omp-direct-bun-pane`. `classify_omp_launch` now tells a direct `bun <entry>` launch
+  (`OmpLaunchProgram::BunEntry`, stored as `bun-entry`) apart from `bun x` and `bunx` by whether the first non-flag word
+  after `bun` is the `x` subcommand, and the corridor's exhaustive per-program rules give it the installed-`omp` pane
+  rule: any Bun or Node pane that is not the emitter refuses. `bun x`, `bunx` and npm launcher panes keep their
+  positional acceptance. A launch recorded as `bun` before this change keeps the old classification until it is launched
+  again. Unit tests cover the feedback chain under both launch programs, a supported direct launch, and flags before
+  `x`; SPEC_impl.md records the rule. The code, test and documentation total 96 added/deleted lines, below the 100-line
+  gate. PR: https://github.com/scode/farhelm/pull/2641/changes.
 
 ## pi-child-report-replaces-resume-target.md
 

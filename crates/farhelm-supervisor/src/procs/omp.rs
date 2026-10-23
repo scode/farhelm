@@ -244,8 +244,9 @@ pub(super) fn is_omp_shell_trampoline(exe: &[u8], argv: &[Vec<u8>], expected: &[
 }
 
 /// The launcher predicate plus the trampoline target spellings one OMP
-/// launch program admits above its runtime.
-pub(super) type OmpLauncherRules<'a> = (fn(&[Vec<u8>]) -> bool, &'a [&'a [u8]]);
+/// launch program admits above its runtime, and whether a launcher sits at
+/// its pane (which earns a readable pane its positional exemption).
+pub(super) type OmpLauncherRules<'a> = (fn(&[Vec<u8>]) -> bool, &'a [&'a [u8]], bool);
 
 /// OMP's instance of the restrictive corridor, over an already-walked
 /// chain: the reporter (first link, never itself a runtime candidate) must
@@ -253,8 +254,9 @@ pub(super) type OmpLauncherRules<'a> = (fn(&[Vec<u8>]) -> bool, &'a [&'a [u8]]);
 /// runtime's descriptor (Bun plus the selected entry, or the compiled
 /// target with TUI grammar); the pane anchor (last link) is accepted by
 /// position, except that a Bun or Node pane above the emitter needs readable
-/// arguments, and refuses outright under an installed `omp` launch. Readable
-/// panes need no launcher match.
+/// arguments, and refuses outright under an installed `omp` or a direct
+/// `bun <entry>` launch, which have no launcher at the pane. Readable panes
+/// need no launcher match.
 ///
 /// Links below the runtime must be narrow hook trampolines, and links above
 /// it must be recognized launchers or transparent shell trampolines for the
@@ -285,15 +287,18 @@ pub(crate) fn omp_corridor(
     // Which launcher spellings and trampoline targets this launch program
     // admits above its runtime. Direct Node execution and unknown programs
     // refuse before any link is examined.
-    let (launchers, trampoline_targets): OmpLauncherRules<'_> = match program {
-        OmpLaunchProgram::Omp => (no_omp_launcher, &[b"omp".as_slice()]),
+    let (launchers, trampoline_targets, launcher_at_pane): OmpLauncherRules<'_> = match program {
+        OmpLaunchProgram::Omp => (no_omp_launcher, &[b"omp".as_slice()], false),
         OmpLaunchProgram::Bun => (
             is_omp_bun_launcher,
             &[b"bun".as_slice(), b"bunx".as_slice()],
+            true,
         ),
+        OmpLaunchProgram::BunEntry => (no_omp_launcher, &[b"bun".as_slice()], false),
         OmpLaunchProgram::Npm => (
             is_omp_npm_launcher,
             &[b"npm".as_slice(), b"npx".as_slice(), b"node".as_slice()],
+            true,
         ),
         OmpLaunchProgram::Node => {
             return Err("Node-executed OMP is not a supported runtime".to_string());
@@ -333,14 +338,14 @@ pub(crate) fn omp_corridor(
     // a nested conversation stand for the session's own. For Bun and npm
     // launches a readable pane keeps its positional exemption, because npm
     // rewrites its argv and a launcher match would refuse legitimate package
-    // launches. An installed `omp` launch has no launcher at the pane at
-    // all, so any Bun or Node pane that is not the emitter still refuses
-    // there, as it did before (`omp-corridor-uncounted-pane-runtime`).
+    // launches. An installed `omp` launch or a direct `bun <entry>` launch
+    // has no launcher at the pane at all, so any Bun or Node pane that is
+    // not the emitter still refuses there (`omp-corridor-uncounted-pane-runtime`).
     let pane_index = chain.len() - 1;
     let pane = &chain[pane_index];
     if pane_index != emitter_index
         && (is_bun_image(&pane.exe) || is_node_image(&pane.exe))
-        && (pane.argv.is_none() || matches!(program, OmpLaunchProgram::Omp))
+        && (pane.argv.is_none() || !launcher_at_pane)
     {
         return Err(
             "the pane runs a Bun or Node process that is not the reporting OMP runtime".to_string(),
