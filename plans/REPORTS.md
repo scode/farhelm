@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`start-remedy-quoting`](reports/start-remedy-quoting.report.md) landed 2026-10-22 in #2567: Offer the copyable supervisor-start command only when it survives the diagnostic's escaping unchanged.
 - [`uninstall-mixed-spelling`](reports/uninstall-mixed-spelling.report.md) landed 2026-10-22 in #2574: Host uninstall refuses when a home alias hides that kept data lies inside the folder it removes.
 - [`refused-retry-rollback-fence`](reports/refused-retry-rollback-fence.report.md) landed 2026-10-22 in #2570: A refused create retry no longer deletes a session that was restarted meanwhile.
 - [`gui-saves-last-write-wins`](reports/gui-saves-last-write-wins.report.md) landed 2026-10-22 in #2562, #2583: Accept last-write-wins for GUI template and number-key saves in SPEC.md, and stop a failed number-key save from later writing its stale map over newer agent changes.
