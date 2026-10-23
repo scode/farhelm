@@ -1214,7 +1214,9 @@ test("a refusal after target change reveals the spent quick-launch draft", async
     await expect(form).not.toHaveAttribute("data-create-target-fingerprint", "");
     gate.release();
     await expect(form).toBeVisible();
-    await expect(form.locator(".launch-composer-refusal")).toHaveText("a launch for an earlier setup was refused");
+    await expect(form.locator(".launch-composer-refusal-text")).toHaveText(
+      "Not launched. a launch for an earlier setup was refused",
+    );
     await expect(form).not.toContainText("old-target fixture refusal");
     await expect(form.getByLabel("agent command", { exact: true })).toHaveValue(FAKE_AGENT);
     expect(creates).toBe(1);

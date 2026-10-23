@@ -911,7 +911,12 @@ before launches resume; older releases cannot read launches stored as guarded.
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
 the session itself — **error** when the agent process could not be started at all (exec failure, command not found),
-**exited** when it started and then ended, however quickly, with its exit code visible.
+**exited** when it started and then ended, however quickly, with its exit code visible. In the session launcher every
+refused launch (New, Clone, Replace with, quick launch) shows as a bordered alert with a warning icon beside Launch,
+starting "Not launched." before the refusal's own words, and announced to assistive technology; errors that are not a
+refused launch, such as "save as template" refusing a wrapper, keep the plain line. When the refusal says the folder
+does not exist, is not a directory or is not usable, the folder field is also marked and says so under it, naming the
+host, for as long as the form still names that host, its connection and that folder.
 
 ### Managed checkouts
 

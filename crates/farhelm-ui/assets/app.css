@@ -6907,6 +6907,37 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   margin: 8px 0;
 }
 
+/* A refused launch is a bordered alert with an icon, not a bare red line:
+   the maintainer missed the line under the launch row (2026-10-22). */
+.launch-composer-refusal-alert {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  background: var(--danger-bg-dim);
+  font-size: 13px;
+  color: var(--danger);
+}
+
+.launch-composer-refusal-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The folder a refusal or the pre-launch check is about. */
+.launch-composer-folder-picker input[aria-invalid="true"] {
+  outline: 1px solid var(--danger);
+  outline-offset: -1px;
+}
+
+.launch-composer-folder-problem {
+  padding-top: 4px;
+  font-size: 12px;
+  color: var(--danger);
+}
+
 /* The context is what the button will do, in a lighter weight than the verb;
    capped and ellipsized so a deep folder path cannot grow the button past
    the row (see `.launch-composer-actions`). The phone-width media query

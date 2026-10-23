@@ -1272,6 +1272,65 @@ struct BrowseAuthority {
     generation: u64,
 }
 
+/// What a host's answer says is wrong with a launcher's folder, when it says so.
+///
+/// Recognized from the supervisor's fixed refusal words (`ensure_cwd_usable`
+/// and its siblings in `farhelm-supervisor`'s `service/core.rs`) by
+/// "contains", because helm paths can wrap the supervisor's sentence in
+/// their own. Matching text is acceptable here, unlike for consent or retry
+/// decisions, which read structured headers only: the marking it drives
+/// authorizes nothing and only points at the field the refusal is about. If
+/// the words ever change, the launcher degrades to the refusal alert alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FolderProblem {
+    Missing,
+    NotADirectory,
+    Unusable,
+}
+
+impl FolderProblem {
+    fn recognize(message: &str) -> Option<FolderProblem> {
+        [
+            ("working directory does not exist: ", FolderProblem::Missing),
+            (
+                "working directory is not a directory: ",
+                FolderProblem::NotADirectory,
+            ),
+            ("working directory is not usable: ", FolderProblem::Unusable),
+        ]
+        .into_iter()
+        .find(|(words, _)| message.contains(words))
+        .map(|(_, problem)| problem)
+    }
+
+    /// The line under the folder field, around the host's peer-supplied name.
+    fn notice(self, host: &str) -> Vec<DetailPart> {
+        let lead = match self {
+            FolderProblem::Missing => "⚠ This folder does not exist on ",
+            FolderProblem::NotADirectory => "⚠ This path is not a folder on ",
+            FolderProblem::Unusable => "⚠ This folder cannot be used on ",
+        };
+        vec![
+            DetailPart::text(lead),
+            DetailPart::peer(host.to_owned()),
+            DetailPart::text("."),
+        ]
+    }
+}
+
+/// A folder refusal and the destination it was about. The field marking is
+/// derived from it on every render and shows only while the form still names
+/// the same installation, connection and raw folder, so any change of host,
+/// reconnect or edit hides it without each handler having to clear it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FolderRefusal {
+    target: CreateTarget,
+    connection: Option<u64>,
+    cwd: String,
+    host: String,
+    problem: FolderProblem,
+}
+
 /// Clear every trace of a directory observation before changing destination.
 ///
 /// Every host or folder transition takes this route. Incrementing generation
@@ -2713,6 +2772,24 @@ pub(super) fn CreateSessionForm(
             live_browse_connection.set(selected.and_then(|host| connection_claim(&hosts, host)));
         },
     ));
+    // The last launch refusal that was about the folder; see `FolderRefusal`.
+    let mut folder_refusal = use_signal(|| None::<FolderRefusal>);
+    let folder_notice = use_memo(move || {
+        // Managed mode displays its preview, while the ordinary folder editor
+        // remains dormant in the draft. Its old refusal cannot describe that
+        // preview, and this subscription retires the marking on a mode switch.
+        if destination_draft().is_managed() {
+            return None;
+        }
+        let refusal = folder_refusal()?;
+        // `snapshot()` deliberately subscribes to nothing; these field memos
+        // are what make an edit of the folder re-check the marking.
+        let _ = (cwd(), cwd_edited());
+        let current = create_target().as_ref() == Some(&refusal.target)
+            && live_browse_connection() == refusal.connection
+            && draft.snapshot().submitted_cwd() == refusal.cwd;
+        current.then(|| refusal.problem.notice(&refusal.host))
+    });
     // History is shared helm state. Its revision may change because another
     // browser launched a session, so its resource must react both to the
     // live destination and to the feed rather than to this render's host
@@ -4730,6 +4807,7 @@ pub(super) fn CreateSessionForm(
             // the busy prerequisite merely because its request is running.
             launch_attempted.set(false);
             error.set(None);
+            folder_refusal.set(None);
             let catalog_for_recheck = catalog_for_submit.clone();
             spawn(async move {
                 // This future owns op_guard through every await. Explicit
@@ -4763,6 +4841,7 @@ pub(super) fn CreateSessionForm(
                         break (key, held_binding);
                     }
                     if attempts >= MINT_ATTEMPTS {
+                        launch_attempted.set(true);
                         error.set(Some(
                             "the form kept changing while an idempotency key was being \
                              generated, so this create was not sent; try again"
@@ -4781,6 +4860,7 @@ pub(super) fn CreateSessionForm(
                             // what failed rather than blaming the
                             // request, since nothing the user typed
                             // caused it.
+                            launch_attempted.set(true);
                             error.set(Some(format!(
                                 "could not generate an idempotency key for this create, so \
                                  it was not sent (a retry could otherwise create a second \
@@ -4805,6 +4885,7 @@ pub(super) fn CreateSessionForm(
                     let launch = if matches!(binding.agent, LaunchIntent::Structured(_)) {
                         let current = draft.snapshot();
                         if current.harness().is_none() {
+                            launch_attempted.set(true);
                             error.set(Some(
                                 "the structured launch choice changed while its idempotency key was being generated; choose a harness and press launch again".to_string(),
                             ));
@@ -4814,6 +4895,7 @@ pub(super) fn CreateSessionForm(
                         match wrapper_words(&structured_wrapper()) {
                             Ok(_) => {}
                             Err(reason) => {
+                                launch_attempted.set(true);
                                 error.set(Some(reason));
                                 drop(op_guard);
                                 return;
@@ -4829,6 +4911,7 @@ pub(super) fn CreateSessionForm(
                                 catalog_for_recheck.as_deref(),
                             )
                         {
+                            launch_attempted.set(true);
                             error.set(Some(
                                 "the structured launch choice changed while its idempotency key was being generated; review it and press launch again".to_string(),
                             ));
@@ -4873,6 +4956,7 @@ pub(super) fn CreateSessionForm(
                     remembered_destination.peek().as_ref(),
                     live_destination.peek().as_ref(),
                 ) {
+                    launch_attempted.set(true);
                     error.set(Some(REMEMBERED_DESTINATION_CHANGED.to_string()));
                     intent_key.set(None);
                     return;
@@ -4882,6 +4966,7 @@ pub(super) fn CreateSessionForm(
                         || live_destination.peek().as_ref() != target_now.as_ref()
                         || (!replaying_fresh && *live_preview_authority.peek() != fresh_authority))
                 {
+                    launch_attempted.set(true);
                     error.set(Some("the checkout draft changed while preparing the request; review the preview and press launch again".into()));
                     return;
                 }
@@ -5120,11 +5205,28 @@ pub(super) fn CreateSessionForm(
                             // session rather than launch a second agent.
                             // A user who instead fixes the form gets a new
                             // key, because the binding no longer matches.
+                            if let (Some(target), Some(problem)) =
+                                (target_now.clone(), FolderProblem::recognize(&prose))
+                            {
+                                folder_refusal.set(Some(FolderRefusal {
+                                    target,
+                                    connection: expected_incarnation,
+                                    cwd: bound.cwd.clone(),
+                                    host: yolo_host_name.clone(),
+                                    problem,
+                                }));
+                            }
+                            // Dispatch cleared the attempt mark so the busy
+                            // prerequisite would not show while the request
+                            // ran; a refusal is a finished attempt again, and
+                            // the mark is what labels it "Not launched.".
+                            launch_attempted.set(true);
                             error.set(Some(prose));
                         } else {
                             // The old request still ended unsuccessfully.
                             // Say so without leaking its host-specific prose
                             // or retiring the new target's retry identity.
+                            launch_attempted.set(true);
                             error.set(Some("a launch for an earlier setup was refused".into()));
                         }
                         drop(op_guard);
@@ -5436,6 +5538,10 @@ pub(super) fn CreateSessionForm(
                             // later switch, but does not save any of it.
                             if draft.snapshot().tab() == LaunchTab::Agent
                                 && let Err(reason) = wrapper_words(&structured_wrapper()) {
+                                // Not a launch refusal, so it must not read
+                                // "Not launched."; the next launch press
+                                // marks the line as one again.
+                                launch_attempted.set(false);
                                 error.set(Some(reason));
                                 return;
                             }
@@ -5457,10 +5563,24 @@ pub(super) fn CreateSessionForm(
             }) {
                 // Refusals are visible beside the action they explain, even
                 // when the rest of the dialog needs scrolling. Helm-owned words
-                // still get the same escaping and directional isolation.
-                PeerLine {
-                    class: "create-session-error launch-composer-refusal".to_string(),
-                    parts: vec![DetailPart::peer(err)],
+                // still get the same escaping and directional isolation. A
+                // refused launch is a bordered, announced alert: the plain red
+                // line it used to be was easy to miss (TODO.md, 2026-10-22).
+                // Only a launch press sets `launch_attempted`, which keeps
+                // other errors in this slot from reading "Not launched.".
+                if launch_attempted() {
+                    div { class: "create-session-error launch-composer-refusal launch-composer-refusal-alert", role: "alert",
+                        span { class: "launch-composer-refusal-icon", aria_hidden: "true", "⚠" }
+                        PeerLine {
+                            class: "launch-composer-refusal-text".to_string(),
+                            parts: vec![DetailPart::text("Not launched. "), DetailPart::peer(err)],
+                        }
+                    }
+                } else {
+                    PeerLine {
+                        class: "create-session-error launch-composer-refusal".to_string(),
+                        parts: vec![DetailPart::peer(err)],
+                    }
                 }
             }
             if let Some((candidate, host_label)) = template_panel() {
@@ -6331,6 +6451,8 @@ pub(super) fn CreateSessionForm(
                                 placeholder: "{folder_placeholder}",
                                 disabled: busy,
                                 aria_label: "folder",
+                                aria_invalid: folder_notice().is_some().then_some("true"),
+                                aria_describedby: folder_notice().is_some().then_some("launcher-folder-problem"),
                                 onfocus: move |_| {
                                     if !draft.snapshot().destination().is_managed() {
                                         folder_active.set(None);
@@ -6419,6 +6541,11 @@ pub(super) fn CreateSessionForm(
                                     }
                                 }
                             }
+                            }
+                            if let Some(notice) = folder_notice() {
+                                div { id: "launcher-folder-problem",
+                                    PeerLine { class: "launch-composer-folder-problem".to_string(), parts: notice }
+                                }
                             }
                             // The optional name belongs to the shared destination
                             // block. Keeping one mounted input gives assistive
@@ -7890,8 +8017,45 @@ mod tests {
         assert!(!target_matches_selection(None, &hosts, Some(&current)));
     }
 
-    /// A never-connected host yields NO connection claim, and a connected
-    /// one yields exactly its token.
+    /// A refusal about the folder marks the folder field, so the launcher
+    /// must recognize the supervisor's three folder refusals however the helm
+    /// wraps them, and nothing else. Specified: each fixed phrase is
+    /// recognized inside a longer helm sentence and maps to its own problem;
+    /// an unrelated refusal, and the words without their trailing ": ", are
+    /// not folder refusals.
+    #[farhelm_testtrace::test]
+    fn folder_refusals_are_recognized_by_the_supervisor_words() {
+        for (message, problem) in [
+            (
+                "working directory does not exist: /nope",
+                FolderProblem::Missing,
+            ),
+            (
+                "create refused: working directory is not a directory: /etc/hosts",
+                FolderProblem::NotADirectory,
+            ),
+            (
+                "working directory is not usable: /srv (permission denied); fix it and retry",
+                FolderProblem::Unusable,
+            ),
+        ] {
+            assert_eq!(
+                FolderProblem::recognize(message),
+                Some(problem),
+                "{message}"
+            );
+        }
+        for message in [
+            "host is not connected",
+            "the working directory does not exist yet",
+            "working directory does not exist",
+        ] {
+            assert_eq!(FolderProblem::recognize(message), None, "{message}");
+        }
+    }
+
+    /// A never-connected host yields no connection claim; a connected one
+    /// yields exactly its token.
     ///
     /// `Host::incarnation == 0` is the never-connected sentinel, and sending
     /// it as `expected_incarnation: 0` would turn "I observed nothing" into
