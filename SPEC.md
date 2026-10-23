@@ -1048,11 +1048,12 @@ in another directory. At launch they run only for the update in the final direct
 `post-checkout`. The checkout retains the GitHub origin and no dependency on the cache.
 
 An empty, unexpected or structurally unusable spare falls back to the ordinary cache-and-clone path before any content
-moves. A deleted upstream branch falls back too. Git 2.48 and later detects a changed default branch; older take-capable
-Git accepts its clone-time default branch if it still exists upstream. Git below the take's required capabilities uses
-ordinary clone. A failed spare fetch fails the clone stage visibly, without another clone or credential prompt. A
-failure after any entry has moved retains partial content and refuses automatic repetition. The shim never recursively
-deletes a claimed tree; supervisor cleanup owns leftovers.
+moves. A deleted upstream branch falls back too, and so does one rewound or rewritten so that the spare's commit is no
+longer in its history. Git 2.48 and later detects a changed default branch; older take-capable Git accepts its
+clone-time default branch if it still exists upstream. Git below the take's required capabilities uses ordinary clone. A
+failed spare fetch fails the clone stage visibly, without another clone or credential prompt. A failure after any entry
+has moved retains partial content and refuses automatic repetition. The shim never recursively deletes a claimed tree;
+supervisor cleanup owns leftovers.
 
 After a new managed-checkout launch's clone stage has ended, including a recorded clone failure, the supervisor may make
 one attempt to build the next spare. It runs the ordinary cache refresh and clone through the user's login shell,

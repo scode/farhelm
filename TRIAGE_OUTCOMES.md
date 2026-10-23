@@ -18565,7 +18565,11 @@
   otherwise falls back to a normal clone into the still-empty folder, covering rewind and divergence; a test covers the
   rewind; SPEC.md "Managed checkouts" and SPEC_impl.md say so. Size gate: about 100 lines as above. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/checkout-ownership-oct22.md`.
+- Execution: complete in change `wvprpkpnqlwwqopmnynrlwrqsoxvpppo`, bookmark
+  `plan/checkout-ownership-oct22/05-spare-rewind-clones`. Before moving, the take checks that the prepared commit is an
+  ancestor of the fetched tracking branch and otherwise declines to an ordinary clone into the still-empty folder,
+  covering rewind and divergence; a launch test covers the rewind. Size: 101 lines, about the gate. PR:
+  https://github.com/scode/farhelm/pull/2647/changes.
 
 ## untouched-checkout-folder-save-undoes-cli-edit.md
 

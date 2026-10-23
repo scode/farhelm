@@ -63,9 +63,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`untouched-checkout-folder-save-undoes-cli-edit.md`](untouched-checkout-folder-save-undoes-cli-edit.md) — Saving an
   untouched checkout-folder field can overwrite a newer CLI setting.
 
-- [`spare-checkout-rewind-keeps-removed-history.md`](spare-checkout-rewind-keeps-removed-history.md) — After an upstream
-  rewind, a prepared checkout can successfully retain removed commits instead of the current upstream worktree.
-
 - [`cancelled-startup-sweep-outlives-directory-ownership.md`](cancelled-startup-sweep-outlives-directory-ownership.md) —
   Blocking cleanup can outlive supervisor ownership and delete a successor's claimed checkout or retry input; resulting
   failures are unmeasured.

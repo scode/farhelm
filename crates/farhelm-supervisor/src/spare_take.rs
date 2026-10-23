@@ -23,7 +23,9 @@ use std::time::Duration;
 
 /// Local inspection is an optimization, unlike visible credential-bearing
 /// fetch/merge. Refuse slow or verbose wrappers using discovery's existing
-/// one-second/4 KiB boundary; never accept truncated metadata.
+/// one-second/4 KiB boundary; never accept truncated metadata. The ancestry
+/// check shares it although it walks the fetched history: a very large fetch
+/// can then time out and decline to ordinary clone, which is slower, not wrong.
 const QUERY_CAPS: OutputCaps = OutputCaps {
     stdout: 4096,
     stderr: None,
@@ -115,6 +117,20 @@ pub(super) fn take_with_rename(
             )
             .as_deref()
             != Some(tracking.as_str())
+    {
+        return Ok(false);
+    }
+    // A rewound or rewritten upstream branch leaves the spare's commit off the
+    // fetched history. The fast-forward after the move would then keep the
+    // removed commits (rewind) or fail on a moved tree (divergence), so decline
+    // while the destination is still empty. Any answer other than a clean
+    // "is an ancestor", a timeout included, declines the same way.
+    if !query
+        .run(
+            Some(&candidate.path),
+            &["merge-base", "--is-ancestor", "HEAD", &tracking],
+        )
+        .is_some_and(|output| output.status.success())
     {
         return Ok(false);
     }

@@ -268,9 +268,10 @@ the earlier clone and update. `FETCH_HEAD` and `ORIG_HEAD` exist, and objects fr
 cleans them up. Git hooks and checkout filters, including Git LFS, run when the extra checkout is prepared in another
 directory, then only for the update in the final directory. That update runs `post-merge` rather than `post-checkout`.
 
-If the branch was deleted upstream, Farhelm clones normally. Git 2.48 and later also notices a changed default branch;
-older capable Git may use the original default branch until the next spare is prepared. A failed update stops the
-launch and shows its error instead of starting another clone and asking for credentials again.
+If the branch was deleted upstream, or rewound or rewritten so that it no longer contains the prepared checkout's
+commit, Farhelm clones normally. Git 2.48 and later also notices a changed default branch; older capable Git may use the
+original default branch until the next spare is prepared. Any other failed update stops the launch and shows its error
+instead of starting another clone and asking for credentials again.
 
 Turning the switch off affects future creates. Each repository's prepared checkout is discarded at its next create on
 that host. Choosing a different checkout directory likewise discards the old spare when you next create a checkout of that
