@@ -18281,7 +18281,11 @@
   rows or host sections change, the dialog's own deletes included, and disables them while a confirmation band is open;
   a browser test covers a click landing just after a row moved. Size gate: about 100 lines as above; over it, block and
   bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/dialog-saves-oct22.md`.
+- Execution: complete in change `xowppkuokvrulmxrlyonnqqolxoxlymq`, bookmark
+  `plan/dialog-saves-oct22/01-trash-delete-settle`. Entry deletes in the trash dialog stay disabled for 700 ms (the
+  approval cards' pause) after the drawn rows, host sections, band or notices change, the dialog's own deletes included,
+  and while a confirmation band is open; a browser test clicks a row that just moved. Size: 123 lines, about the gate
+  (the fix is about 40; the rest is the required test and docs). PR: https://github.com/scode/farhelm/pull/2651/changes.
 
 ## create-retry-takeover-replaces-restarted-session.md
 

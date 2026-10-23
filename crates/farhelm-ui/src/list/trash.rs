@@ -20,6 +20,7 @@ use crate::{ApiBase, Host, HostId, HostPhase};
 use dioxus::prelude::*;
 use farhelm_proto::{CheckoutTrashIssue, CheckoutTrashListing};
 use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 const DIALOG: &str = ".checkout-trash-dialog";
 /// Only whole-dialog dismissal returns here; cancelling a confirmation stays inside.
@@ -28,6 +29,14 @@ const RETURN_FOCUS: &str =
 // The host rejects larger batches; disclose this rather than silently omitting
 // a host from a global destructive confirmation.
 const MAX_SELECTION: usize = 10_000;
+/// How long per-entry deletes stay disabled after the dialog's rows move.
+///
+/// An entry delete has no confirmation, and a re-read, a host change or the
+/// dialog's own delete can move rows under a resting pointer; a click already
+/// on its way, or a double-click's second click, would then permanently delete
+/// the checkout that moved there. 700 ms matches the approval cards' answer
+/// pause for the same hazard (SPEC.md, "Agent-spawned sessions").
+const SETTLE_MS: u64 = 700;
 
 /// Count wording stays grammatical at the destructive confirmation boundary.
 fn checkouts(count: usize) -> &'static str {
@@ -459,6 +468,12 @@ pub(super) fn TrashControl(
     let mut deletion = use_signal(|| None::<DeletionRun>);
     // The claim outlives all host tasks and drops with this component on cancel.
     let mut claim = use_signal(|| None::<OpGuard>);
+    // The layout the dialog last drew and whether entry deletes have settled
+    // since it changed (see `SETTLE_MS`). The generation keeps an older timer
+    // from settling a newer layout.
+    let mut drawn = use_signal(|| None::<u64>);
+    let mut settled = use_signal(|| true);
+    let mut settle_generation = use_signal(|| 0_u64);
     let signature = use_memo(move || {
         let read = hosts.read();
         (
@@ -685,6 +700,46 @@ pub(super) fn TrashControl(
     // show), so Close and Escape then
     // cancels that unseen band rather than closing the dialog.
     let shown = confirmation.current();
+    // Fingerprint everything that decides where entry deletes are drawn (the
+    // open band, the reachability error, deletion progress, and per host its
+    // state, entries, issues and notices), and re-arm the pause in the same
+    // render that moves rows, so no render shows a moved row with its delete
+    // enabled.
+    let mut layout = DefaultHasher::new();
+    let band = shown.as_ref().map(|shown| shown.key().host);
+    (band, host_error.is_some(), busy).hash(&mut layout);
+    for host in &current_hosts {
+        let states = state.read();
+        let entry = states
+            .get(&host.id)
+            .filter(|entry| entry.incarnation == host.incarnation);
+        let rows = match entry.and_then(|entry| entry.reply.as_ref()) {
+            Some(Ok(listing)) => Some((
+                listing.checkouts.iter().map(|c| &c.id).collect::<Vec<_>>(),
+                listing.issues.len(),
+            )),
+            _ => None,
+        };
+        let pending = entry.is_none_or(|entry| entry.loading);
+        let notices = notices.read().get(&host.id).map(Vec::len);
+        let deleting = progress
+            .as_ref()
+            .is_some_and(|run| run.pending.contains(&host.id));
+        (host.id, connected(host), pending, rows, notices, deleting).hash(&mut layout);
+    }
+    let layout = layout.finish();
+    if *drawn.peek() != Some(layout) {
+        drawn.set(Some(layout));
+        let generation = settle_generation.peek().wrapping_add(1);
+        settle_generation.set(generation);
+        settled.set(false);
+        spawn(async move {
+            crate::reader::sleep_ms(SETTLE_MS).await;
+            if *settle_generation.peek() == generation {
+                settled.set(true);
+            }
+        });
+    }
     // Close and Escape act on what their render read; see `close_action`.
     let close = {
         let shown = shown.clone();
@@ -852,8 +907,12 @@ pub(super) fn TrashControl(
                                                     div { class: "checkout-trash-entry-heading", strong { class: "peer-value", dir: "ltr", "{display_peer(&checkout.name)}" }
                                                         if !pending { if let Some(bytes) = checkout.bytes { span { "{space(bytes, false)}" } } }
                                                         button { class: "btn btn-danger btn-outline trash-entry-delete", aria_label: delete_label,
-                                                            disabled: busy || gate.busy() || host_target.is_none(),
+                                                            // An entry delete has no band of its own: keep it
+                                                            // out of reach while a band asks about something
+                                                            // else, and while moved rows settle (`SETTLE_MS`).
+                                                            disabled: busy || gate.busy() || host_target.is_none() || shown.is_some() || !settled(),
                                                             onclick: move |_| {
+                                                                if !*settled.peek() || confirmation.peek_key().is_some() { return; }
                                                                 // Read the click-time host instead of granting a stale
                                                                 // rendered row authority after a reconnect or refresh error.
                                                                 let selected = {
