@@ -5438,6 +5438,54 @@ printf 'AGENT-RAN\n'
         );
     }
 
+    /// An upstream branch rewound behind the spare's commit must not leave the
+    /// session on history upstream removed: `merge --ff-only` succeeds there
+    /// without moving, so only the ancestry check before the move catches it,
+    /// and the launch clones the current upstream into the still-empty folder.
+    #[farhelm_testtrace::test]
+    fn spare_take_rewound_branch_falls_back_to_real_clone() {
+        let fixture = SpareFixture::new();
+        fixture.advance();
+        fixture.command(&fixture.slot, &["fetch", "-q", "upstream"]);
+        fixture.command(
+            &fixture.slot,
+            &["merge", "-q", "--ff-only", "upstream/trunk"],
+        );
+        fixture.command(
+            &fixture.seed,
+            &[
+                "push",
+                "-q",
+                "--force",
+                fixture.upstream.to_str().unwrap(),
+                "HEAD~1:refs/heads/trunk",
+            ],
+        );
+        let rewound = fixture.command(&fixture.upstream, &["rev-parse", "refs/heads/trunk"]);
+        assert_ne!(
+            fixture.command(&fixture.slot, &["rev-parse", "HEAD"]),
+            rewound,
+            "premise: the spare sits on the commit upstream removed"
+        );
+        // A strict rewind, not a divergence: the old fast-forward was a no-op.
+        fixture.command(
+            &fixture.slot,
+            &["merge-base", "--is-ancestor", rewound.trim(), "HEAD"],
+        );
+        let (report, terminal, status) = fixture.prep.run_shim_in_child();
+        assert!(status.success() && report.is_empty(), "{report} {terminal}");
+        let cwd = Path::new(&fixture.prep.preparation.cwd);
+        assert_eq!(fixture.command(cwd, &["rev-parse", "HEAD"]), rewound);
+        assert_eq!(
+            std::fs::read_to_string(cwd.join("changed.txt")).unwrap(),
+            "before\n"
+        );
+        let calls = fixture.calls();
+        assert!(calls.contains("merge-base --is-ancestor"), "{calls}");
+        assert!(calls.contains("--dissociate"), "{calls}");
+        assert!(!calls.contains("merge --ff-only"), "{calls}");
+    }
+
     /// Renaming HEAD without deleting the old branch is detected only on new
     /// Git; older versions intentionally accept the clone-time HEAD value.
     #[farhelm_testtrace::test]

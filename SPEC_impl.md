@@ -2485,7 +2485,9 @@ inside the existing durable `CloneStarted` stage and preparation lock. It never 
 the repository cache lock. Git below 2.17 or unrecognized version output keeps the ordinary clone path: 2.17 is the
 floor for the take's `--prune-tags`, not a minimum for Farhelm. Local metadata queries are silent, limited to 4096
 stdout bytes and one second, with stdin closed, stderr discarded and the existing bounded process-group runner owning
-kill and reap. Actual fetch and merge inherit the terminal and have no timeout.
+kill and reap. The ancestry check below shares that bound although it walks the newly fetched history, so on a very
+large fetch it can time out and decline to an ordinary clone after the fetch. Actual fetch and merge inherit the
+terminal and have no timeout.
 
 The shim derives the strict claim's session and generation from its actual launch-status filename, checks the session
 against the launch spec, and makes one no-replace rename from the ready slot to that claim. It opens both the reserved
@@ -2498,11 +2500,14 @@ dirty.
 
 A usable claim prints `Farhelm: updating a checkout prepared earlier from GitHub.` and runs
 `git -c remote.<remote>.followRemoteHEAD=always fetch --prune --prune-tags <remote>`. That key is unconditional on every
-take-capable Git. The saved tracking branch must survive pruning and match the remote HEAD symref afterwards. Git 2.48+
-refreshes that symref; older Git intentionally keeps its clone-time default-branch observation. Structural refusal
-before moving content leaves the claim for supervisor cleanup and uses ordinary clone into the still-empty allocation. A
-failed fetch instead fails the clone stage, with no second clone or credential prompt. A successful take makes one
-fetch; a successful fetch followed by structural refusal may subsequently use the explicitly required normal clone.
+take-capable Git. The saved tracking branch must survive pruning and match the remote HEAD symref afterwards, and the
+spare's `HEAD` must be an ancestor of it (`git merge-base --is-ancestor`, any other answer or a timeout refusing), so a
+take whose upstream branch was rewound or diverged is refused, rather than keeping removed commits through a no-op
+fast-forward or failing after the move. Git 2.48+ refreshes that symref; older Git intentionally keeps its clone-time
+default-branch observation. Structural refusal before moving content leaves the claim for supervisor cleanup and uses
+ordinary clone into the still-empty allocation. A failed fetch instead fails the clone stage, with no second clone or
+credential prompt. A successful take makes one fetch; a successful fetch followed by structural refusal may subsequently
+use the explicitly required normal clone.
 
 Before moving, the shim rechecks destination identity and emptiness and preflights all raw top-level entries for mount
 or filesystem crossings. It moves `.git` first and then each remaining entry with fd-relative no-replace renames,
