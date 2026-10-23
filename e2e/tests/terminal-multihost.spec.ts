@@ -3289,6 +3289,24 @@ test.describe("multi-host", () => {
       await page.mouse.wheel(0, 10_000);
       await expect.poll(async () => (await edges()).remaining).toBeLessThanOrEqual(1);
       expect((await edges()).last).toBeLessThanOrEqual(1);
+      // The card takes the window's height beside the sidebar, not over it,
+      // so the sidebar's controls still answer a click while it shows. By
+      // now the focus moves above have scrolled the app shell (never the
+      // document, which does not scroll) in this 240px window, with the
+      // button above the viewport, so it is brought back into view first;
+      // the hit test is what the old full-window card failed.
+      const scrolled = await page.evaluate(() => ({
+        document: document.scrollingElement!.scrollTop,
+        shell: document.querySelector(".app-shell")!.scrollTop,
+      }));
+      expect(scrolled.document, "the document itself never scrolls").toBe(0);
+      expect(scrolled.shell, "premise: the shell is what scrolled").toBeGreaterThan(0);
+      const newSession = page.locator(".new-session-button");
+      await newSession.scrollIntoViewIfNeeded();
+      await expect(notice, "premise: the card still takes the window's height").toHaveCSS("position", "fixed");
+      await assertFullyPaintedAndHitTestable(page, newSession);
+      await newSession.click();
+      await expect(page.locator(".create-session-form")).toBeVisible();
     });
 
     // SPEC.md: operations against a session on an unreachable host "are

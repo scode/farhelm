@@ -557,7 +557,9 @@ retry counts and escaped peer diagnostics stay in smaller print. The remedy is p
 read says checking, a failed read names that failure, and a connected host under a stale session says refreshing. The
 browser's reconnect card uses the same CSS with its own counter and neutral retry button. Recoverable detach notices
 never paint the red banner; takeover, stall and terminal refusals still do. A session-owned resize observer gives the
-card the viewport when less than 80px of terminal height remains, so conditional chrome cannot hide its explanation.
+card the window's full height beside the sidebar when less than 80px of terminal height remains, so conditional chrome
+cannot hide its explanation and the sidebar stays usable (a window too narrow for the sidebar and the main pane's 320px
+lets the card take those 320px over the sidebar's edge).
 
 The session view remembers whether it has offered terminals. Staleness retains those islands and makes their panes and
 tab strip inert; a freshly opened stale view offers no terminals. The existing recovery snapshot's xterm element moves
