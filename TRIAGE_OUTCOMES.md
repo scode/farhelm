@@ -18326,7 +18326,9 @@
   selector across reseeding is deliberate and tested, and the selector stays visible and editable.
 - Decision: the user accepted the recommendation to drop it (2026-10-22 triage page).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-docs-oct22.md`.
+- Execution: `complete`; discarded as agreed, with no spec or code change. Draft PR
+  [#2632](https://github.com/scode/farhelm/pull/2632/changes) on bookmark
+  `plan/triage-docs-oct22/06-discard-reseeded-selector`, jj change `pupzssxo`.
 
 ## recovery-retains-displaced-session-menu.md
 
