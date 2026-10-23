@@ -17,7 +17,7 @@
 //!
 //! ## Why everything is injected
 //!
-//! [`SetupContext`] carries the whole process environment this command
+//! `SetupContext` carries the whole process environment this command
 //! depends on — the executable, `HOME`, `PATH`, `XDG_CONFIG_HOME`,
 //! `FARHELM_TMUX`, and the temporary directory — captured ONCE in `main`.
 //! [`UnitManager`] is the seam for `systemctl --user`, and output goes
@@ -29,17 +29,29 @@
 //! The one thing that is NOT injected is the filesystem: setup reads and
 //! writes real unit files, and the tests point it at temporary
 //! directories.
+//!
+//! The setup command runs only on Linux. Its installation helpers also
+//! compile in tests so their filesystem and injected-manager contracts stay
+//! covered on macOS. Service-removal helpers remain available on every
+//! platform because standalone uninstall shares them.
 
 use anyhow::{Context as _, bail};
 use farhelm_helm::units::{
-    HELM_UNIT_NAME, HelmUnitInputs, SUPERVISOR_UNIT_NAME, SupervisorUnitInputs, exec_start_program,
-    is_managed, is_simple_service, managed, render_helm_unit, render_supervisor_unit,
-    user_unit_dir, user_unit_dir_for,
+    HELM_UNIT_NAME, SUPERVISOR_UNIT_NAME, exec_start_program, is_managed, user_unit_dir_for,
 };
+#[cfg(any(target_os = "linux", test))]
+use farhelm_helm::units::{
+    HelmUnitInputs, SupervisorUnitInputs, is_simple_service, managed, render_helm_unit,
+    render_supervisor_unit, user_unit_dir,
+};
+#[cfg(any(target_os = "linux", test))]
 use farhelm_supervisor::tmux::{
     TMUX_FLOOR, TmuxProbeError, TmuxSupport, candidates_on_path, probe_tmux,
 };
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
+#[cfg(any(target_os = "linux", test))]
+use std::ffi::OsString;
+#[cfg(any(target_os = "linux", test))]
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -67,6 +79,7 @@ use std::path::{Path, PathBuf};
 /// relative path copied verbatim into a unit means a different directory
 /// at start time than it did on the command line. Everything setup pins
 /// is made absolute against this before it reaches a unit file.
+#[cfg(any(target_os = "linux", test))]
 pub struct SetupContext {
     pub exe: PathBuf,
     pub home: PathBuf,
@@ -78,6 +91,7 @@ pub struct SetupContext {
     pub temp_dir: PathBuf,
 }
 
+#[cfg(any(target_os = "linux", test))]
 impl SetupContext {
     /// Resolve one operator-supplied path the way the operator meant it:
     /// relative to where they ran the command.
@@ -98,7 +112,7 @@ impl SetupContext {
 /// What the operator asked for on the command line.
 ///
 /// This IS the CLI surface — `main.rs` hands the parsed value straight to
-/// [`run_setup`]. Keeping one type means a new flag is declared, helped,
+/// `run_setup`. Keeping one type means a new flag is declared, helped,
 /// and consumed in one place instead of copied between a clap struct and
 /// a mirror of it. Tests build it with `..Default::default()`.
 #[derive(clap::Args, Default)]
@@ -218,6 +232,7 @@ impl UnitManager for SystemctlUnitManager {
 }
 
 /// One unit file setup intends to have on disk, fully rendered.
+#[cfg(any(target_os = "linux", test))]
 struct PlannedUnit {
     name: &'static str,
     path: PathBuf,
@@ -536,6 +551,7 @@ fn selected_service_file(
 /// through must not be able to abandon that work half done. Writing the
 /// buffer is the last thing that happens, on the failure path too, so a
 /// refusal still explains itself.
+#[cfg(any(target_os = "linux", test))]
 pub fn run_setup(
     ctx: &SetupContext,
     opts: &SetupOptions,
@@ -595,6 +611,7 @@ macro_rules! line {
 ///
 /// Neither is a configuration file and neither needs cleaning up by hand;
 /// an uninstall takes the markers with the units.
+#[cfg(any(target_os = "linux", test))]
 fn install(
     ctx: &SetupContext,
     opts: &SetupOptions,
@@ -836,6 +853,7 @@ fn install(
 /// caller whose `XDG_CONFIG_HOME` differs from the manager's would
 /// otherwise be told both units are absent while the real ones stayed
 /// enabled — a clean bill of health for a machine that was never touched.
+#[cfg(any(target_os = "linux", test))]
 fn uninstall(
     unit_dir: &Path,
     opts: &SetupOptions,
@@ -1078,6 +1096,7 @@ fn restart_marker(unit_dir: &Path, unit: &str) -> PathBuf {
 }
 
 /// Record that `unit` is running bytes that are about to be replaced.
+#[cfg(any(target_os = "linux", test))]
 fn owe_a_restart(unit_dir: &Path, unit: &str) -> anyhow::Result<()> {
     let path = restart_marker(unit_dir, unit);
     std::fs::write(&path, b"")
@@ -1114,6 +1133,7 @@ fn settle_the_restart(unit_dir: &Path, unit: &str) -> anyhow::Result<()> {
 ///   may belong to several installations, so neither setup nor its legacy
 ///   uninstall may overwrite or remove it merely because the marker remains.
 ///   Other command spellings retain the existing marker-based contract.
+#[cfg(any(target_os = "linux", test))]
 fn existing_managed_text(path: &Path) -> anyhow::Result<Option<String>> {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -1157,6 +1177,7 @@ fn existing_managed_text(path: &Path) -> anyhow::Result<Option<String>> {
 /// not exist before is removed again rather than left half-installed. The
 /// restore is best effort; if it fails too, the error says which file is
 /// left in the new form, and rerunning setup converges the pair.
+#[cfg(any(target_os = "linux", test))]
 fn write_units_together(
     planned: &[PlannedUnit],
     existing: &[Option<String>],
@@ -1209,6 +1230,7 @@ fn write_units_together(
 /// creation mode, which the process umask filters down — a unit published
 /// 0600 under a restrictive umask is readable by this user's manager, but
 /// the function would be claiming something it had not done.
+#[cfg(any(target_os = "linux", test))]
 fn write_unit(path: &Path, text: &str) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -1260,6 +1282,7 @@ fn write_unit(path: &Path, text: &str) -> anyhow::Result<()> {
 /// that changes nothing at all, and its answer is the whole point of the
 /// check: a preview that stayed silent about a mismatch would be
 /// answering a different question than the one the operator asked.
+#[cfg(any(target_os = "linux", test))]
 fn require_the_managers_unit_directory(
     opts: &SetupOptions,
     units: &mut dyn UnitManager,
@@ -1321,7 +1344,7 @@ fn manager_environment(
 /// setup` compute the same directory on both sides of a comparison whose
 /// entire job is to notice that they differ. An absolute
 /// `XDG_CONFIG_HOME` answers outright; otherwise the manager's own `HOME`
-/// does, exactly as [`user_unit_dir`] resolves it everywhere else.
+/// does, exactly as [`farhelm_helm::units::user_unit_dir`] resolves it everywhere else.
 ///
 /// A manager that reports neither is a FAILURE, not a default. Guessing
 /// there would produce a confident wrong answer about the one thing this
@@ -1367,6 +1390,7 @@ fn manager_unit_dir(
 /// those as "inactive" is how a unit that WAS running gets its file
 /// replaced and then never restarted, leaving the old process on the old
 /// configuration with setup reporting success.
+#[cfg(any(target_os = "linux", test))]
 fn unit_is_active(
     units: &mut dyn UnitManager,
     report: &mut Report,
@@ -1414,7 +1438,7 @@ fn would_run(report: &mut Report, args: &[&str]) {
 
 /// Run one `systemctl` command and echo it, without judging its exit
 /// status. For the commands whose failure matters, use
-/// [`require_command`].
+/// [`require_service_command`].
 fn run_command(
     units: &mut dyn UnitManager,
     report: &mut Report,
@@ -1431,6 +1455,7 @@ fn run_command(
 /// Failure stops the run rather than pressing on: the commands are
 /// ordered, and there is nothing useful to do after a `daemon-reload` or
 /// an `enable` that systemd refused.
+#[cfg(any(target_os = "linux", test))]
 fn require_command(
     units: &mut dyn UnitManager,
     opts: &SetupOptions,
@@ -1456,6 +1481,7 @@ fn require_command(
 /// `temp_dir` is canonicalized alongside the executable because `/tmp` is
 /// a symlink on some systems, and a prefix comparison between a resolved
 /// path and an unresolved one silently never matches.
+#[cfg(any(target_os = "linux", test))]
 fn looks_like_a_build_tree(exe: &Path, temp_dir: &Path) -> bool {
     let parts: Vec<&OsStr> = exe.components().map(|part| part.as_os_str()).collect();
     let target = |part: &OsStr| part == OsStr::new("target");
@@ -1477,6 +1503,7 @@ fn looks_like_a_build_tree(exe: &Path, temp_dir: &Path) -> bool {
 
 /// Which tmux the supervisor unit should pin, or why none of the
 /// candidates will do.
+#[cfg(any(target_os = "linux", test))]
 enum TmuxDecision {
     Accepted {
         program: PathBuf,
@@ -1495,6 +1522,7 @@ enum TmuxDecision {
 /// that quietly fetched a terminal multiplexer would be doing something
 /// the operator did not ask for. Remote provisioning is the place that
 /// installs a tmux, and only onto hosts it also owns the layout of.
+#[cfg(any(target_os = "linux", test))]
 fn choose_tmux(ctx: &SetupContext, opts: &SetupOptions) -> TmuxDecision {
     // An explicitly named tmux is the operator's choice, so its failure is
     // the answer — searching on past it would silently pin something they
@@ -1548,6 +1576,7 @@ fn choose_tmux(ctx: &SetupContext, opts: &SetupOptions) -> TmuxDecision {
 ///
 /// `candidates_on_path` never offers these (see its docs for why), so this is
 /// purely diagnostic: it never feeds a pin.
+#[cfg(any(target_os = "linux", test))]
 fn skipped_relative_tmux(ctx: &SetupContext) -> Option<PathBuf> {
     std::env::split_paths(&ctx.path)
         .filter(|dir| !dir.is_absolute())
@@ -1556,11 +1585,16 @@ fn skipped_relative_tmux(ctx: &SetupContext) -> Option<PathBuf> {
 }
 
 /// Probe one named candidate and turn the outcome into a decision.
+#[cfg(any(target_os = "linux", test))]
 fn decide_tmux(candidate: PathBuf) -> TmuxDecision {
     let probed = probe_tmux(&candidate);
     finish_tmux(candidate, probed)
 }
 
+/// Apply the shared version policy to a completed probe without spawning again.
+/// PATH discovery has already probed each candidate, while explicit overrides
+/// reach this policy through `decide_tmux`.
+#[cfg(any(target_os = "linux", test))]
 fn finish_tmux(
     candidate: PathBuf,
     probed: Result<farhelm_supervisor::tmux::TmuxProbe, TmuxProbeError>,
@@ -1595,6 +1629,7 @@ fn finish_tmux(
 
 /// How one rejected candidate is named in the refusal, with the detail the
 /// probe collected — the errno, or what the program actually printed.
+#[cfg(any(target_os = "linux", test))]
 fn found_phrase(candidate: &Path, error: &TmuxProbeError) -> String {
     let named = candidate.display();
     match error {
@@ -1606,6 +1641,8 @@ fn found_phrase(candidate: &Path, error: &TmuxProbeError) -> String {
     }
 }
 
+/// Keep every rejected tmux candidate's remediation and setup boundary consistent.
+#[cfg(any(target_os = "linux", test))]
 fn refuse_tmux(found: &str) -> TmuxDecision {
     TmuxDecision::Refused(format!(
         "farhelm needs tmux {TMUX_FLOOR} or newer on this machine and found {found}. Install one \
