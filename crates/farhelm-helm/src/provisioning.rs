@@ -718,6 +718,7 @@ mod tests {
             target: &ProvisioningTarget,
             unit: &str,
             paths: &[&Path],
+            removed: &Path,
         ) -> Result<UninstallInspection, BackendFailure> {
             self.operations
                 .lock()
@@ -725,7 +726,7 @@ mod tests {
                 .push("inspect-uninstall".to_string());
             let script = self.uninstall_script.lock().unwrap().clone();
             if let Some(script) = script {
-                return script.inspect_uninstall(target, unit, paths).await;
+                return script.inspect_uninstall(target, unit, paths, removed).await;
             }
             let present = self.present.lock().unwrap().clone();
             let symlinks = self.symlinks.lock().unwrap().clone();
@@ -749,9 +750,17 @@ mod tests {
                         ),
                     },
                     raw: None,
+                    under_removed: false,
                 };
                 // The fake models no home alias, so nothing is respelled.
                 host.raw = host.canonical.clone();
+                // As the real script and the e2e fake answer: a path whose
+                // resolution lies in the removed folder, that folder
+                // included, is inside it by identity too.
+                host.under_removed = host
+                    .canonical
+                    .as_ref()
+                    .is_some_and(|canonical| canonical.starts_with(removed));
                 host
             };
             let unit_active_state = self.unit_state.lock().unwrap().clone();
@@ -6429,8 +6438,9 @@ mod tests {
     ///
     /// Spec: per asked path, then for the default state directory and the
     /// unit's fragment, the output carries an existence flag, a symlink
-    /// flag, a canonical path (empty when the host could not resolve it)
-    /// and that path before home normalization, NUL-terminated. A dangling
+    /// flag, a canonical path (empty when the host could not resolve it),
+    /// that path before home normalization, and an inside-the-removed-folder
+    /// flag, NUL-terminated. A dangling
     /// link parses as existing, a symlink, and unresolved; an empty fragment
     /// parses as no fragment. Mount points follow, ended by an empty field.
     /// A flag other than `0` or `1`, a missing field, or a field left over is
@@ -6453,17 +6463,22 @@ mod tests {
             "0",
             "/h/.config/systemd/user/farhelm-supervisor.service",
             "/a/.config/systemd/user/farhelm-supervisor.service",
+            // Not inside the folder uninstall would remove.
+            "0",
             // The lib directory: a dangling link the host cannot resolve.
             "1",
             "1",
             "",
             "",
-            // The default state directory's name, then its four fields.
+            "0",
+            // The default state directory's name, then its five fields,
+            // the last saying the host found it inside the removed folder.
             "/h/.local/state/farhelm",
             "1",
             "0",
             "/h/.local/state/farhelm",
             "/h/.local/state/farhelm",
+            "1",
             // The unit's state and (empty) fragment path, then
             // the placeholder fields for no fragment.
             "active",
@@ -6472,6 +6487,7 @@ mod tests {
             "0",
             "",
             "",
+            "0",
             // The mount points, then the empty field ending them.
             "/",
             "/h/.local/lib/farhelm/home",
@@ -6491,6 +6507,7 @@ mod tests {
                 raw: Some(PathBuf::from(
                     "/a/.config/systemd/user/farhelm-supervisor.service"
                 )),
+                under_removed: false,
             }
         );
         assert_eq!(
@@ -6501,9 +6518,11 @@ mod tests {
                 symlink: true,
                 canonical: None,
                 raw: None,
+                under_removed: false,
             }
         );
         assert!(!inspection.default_state_dir.symlink);
+        assert!(inspection.default_state_dir.under_removed);
         assert_eq!(inspection.unit_fragment, None);
         assert_eq!(
             inspection.mounts,
@@ -6511,7 +6530,7 @@ mod tests {
         );
 
         // The lib directory's symlink flag.
-        fields[5] = "2";
+        fields[6] = "2";
         assert_eq!(
             parse_uninstall_inspection(encode(&fields).as_bytes(), &[unit, lib]),
             None
@@ -6758,7 +6777,8 @@ mod tests {
         }
 
         /// Query the actual inspection script under the fixture login, with
-        /// no real SSH connection or user manager involved.
+        /// no real SSH connection or user manager involved. The folder to
+        /// remove is the fixture's lib, as planning would ask.
         async fn inspect(&self, paths: &[&Path]) -> UninstallInspection {
             self.system
                 .inspect_uninstall(
@@ -6767,6 +6787,7 @@ mod tests {
                     },
                     "farhelm-supervisor.service",
                     paths,
+                    &self.lib,
                 )
                 .await
                 .unwrap()
@@ -7101,6 +7122,59 @@ mod tests {
         assert!(fixture.lib.join("farhelm").exists());
     }
 
+    /// A home alias can hide state inside the lib from every spelling, and
+    /// uninstall then deletes data it promised to keep. Here the state is
+    /// registered through the alias and the lib through the home, and the
+    /// state's own -ef cannot confirm the home spelling, so neither of its
+    /// spellings starts with either of the lib's. A missing state stands in
+    /// for the layout only this check closes, which this fixture cannot
+    /// build: two binds of the home and a mount over a folder ABOVE the
+    /// install folder visible through only one home path. No mount then
+    /// lies under either spelling of the lib, so the mount guard (its cases
+    /// in `uninstall_refuses_hosts_whose_removal_farhelm_does_not_own`)
+    /// cannot see it, and the identity refusal is not redundant with it.
+    /// Planning must refuse on the script's -ef walk over the state's
+    /// folders, before anything is removed. An ordinary aliased state still
+    /// plans, as
+    /// `uninstall_inspection_accepts_home_alias_for_unit_binary_and_state`
+    /// shows.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn uninstall_inspection_refuses_state_reaching_lib_through_home_alias() {
+        let fixture = UninstallAliasFixture::new().await;
+        let state = fixture.alias.join(".local/lib/farhelm/data");
+        assert_same_fixture_file(&fixture.alias, &fixture.home);
+        assert!(!state.exists());
+        fixture.report_fragment(&fixture.unit).await;
+        let inspection = fixture.inspect(&[&fixture.lib, &state]).await;
+        let [lib_path, state_path] = inspection.paths.as_slice() else {
+            panic!("two paths asked: {inspection:?}");
+        };
+        // The premise: no spelling of the state shows the containment, so
+        // only the identity flag can.
+        assert_eq!(lib_path.canonical.as_ref(), Some(&fixture.lib));
+        assert_eq!(lib_path.raw.as_ref(), Some(&fixture.lib));
+        assert_eq!(state_path.canonical.as_ref(), Some(&state));
+        assert_eq!(state_path.raw.as_ref(), Some(&state));
+        assert!(!state.starts_with(&fixture.lib));
+        assert!(state_path.under_removed);
+        let (_harness, host, backend, service) = fixture
+            .planning_service(fixture.lib.join("farhelm"), Some(state.clone()))
+            .await;
+        let refusal = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(
+            refusal.contains(&format!(
+                "data directory {} may be inside {}, which uninstall would remove: the data \
+                 folder, or a folder above it, is that folder under another path",
+                state.display(),
+                fixture.lib.display()
+            )),
+            "{refusal}"
+        );
+        assert_eq!(*backend.operations.lock().unwrap(), ["inspect-uninstall"]);
+        assert!(fixture.lib.join("farhelm").exists());
+    }
+
     /// Failing to resolve HOME must disable only respelling, not inspection.
     /// Both a failing readlink and an empty answer keep the old canonical
     /// spellings and unit-origin refusal; a normal home-spelled unit still
@@ -7247,6 +7321,7 @@ mod tests {
                 &target,
                 "farhelm-supervisor.service",
                 &[&unit, &lib, &missing, &linked_state],
+                &lib,
             )
             .await
             .unwrap();
@@ -7282,6 +7357,17 @@ mod tests {
                 .collect::<Vec<_>>(),
             [false, false, false, true]
         );
+        // The identity walk counts the removed folder itself and a link
+        // resolving into it, and terminates at `/` with no match for a
+        // missing path and an unrelated file beside the lib.
+        assert_eq!(
+            inspection
+                .paths
+                .iter()
+                .map(|host_path| host_path.under_removed)
+                .collect::<Vec<_>>(),
+            [false, true, false, true]
+        );
 
         // A lib directory that is itself a symlink is reported as one with
         // the target the host resolves, and a dangling one as a symlink the
@@ -7314,6 +7400,7 @@ mod tests {
                 &target,
                 "farhelm-supervisor.service",
                 &[&linked_lib, &dangling_lib, &under_linked_parent],
+                &linked_lib,
             )
             .await
             .unwrap();
@@ -10380,7 +10467,7 @@ mod tests {
         backend.remove_unit(&target, &unit_path).await.unwrap();
         backend.daemon_reload(&target).await.unwrap();
         let state = backend
-            .inspect_uninstall(&target, &unit, &[&unit_path])
+            .inspect_uninstall(&target, &unit, &[&unit_path], &root.path().join("lib"))
             .await
             .unwrap();
         assert!(
@@ -11013,6 +11100,7 @@ mod tests {
                     &planned.plan.target,
                     &unit,
                     &[&removed_unit, &removed_lib, &planned.plan.state_dir],
+                    &removed_lib,
                 )
                 .await
                 .unwrap();

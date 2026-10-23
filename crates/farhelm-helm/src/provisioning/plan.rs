@@ -517,6 +517,9 @@ pub(super) struct ResolvedPath {
     pub(super) canonical: PathBuf,
     /// The same resolution before that normalization (`HostPath::raw`).
     pub(super) raw: PathBuf,
+    /// Whether the host found this path inside the lib directory by file
+    /// identity, whatever either is called (`HostPath::under_removed`).
+    pub(super) under_lib: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -778,7 +781,8 @@ impl PlanLayout {
     /// installation actually in use (SPEC.md "Supported host setup": other
     /// setups get a clear refusal). The host's state directory must not
     /// be inside it in either the normalized or the unnormalized spelling,
-    /// so data is never removed with it. And no mount point may lie at or
+    /// nor by the host's file-identity check of the folders above it, so
+    /// data is never removed with it. And no mount point may lie at or
     /// below it, so `rm -rf` cannot reach into another folder. The kept
     /// state path must also pass the remote command-line text check, so a
     /// path the stop step could not name refuses here, before confirmation,
@@ -844,6 +848,28 @@ impl PlanLayout {
             return Err(refused(format!(
                 "the host's Farhelm data directory {} is inside {}, which uninstall would remove; \
                  uninstall keeps the data, so it does not run on this layout",
+                facts.state_dir.named.display(),
+                paths.lib_dir.display()
+            )));
+        }
+        // Spellings cannot show every alias. Take two binds of the home,
+        // the lib reached through one and the state through the other, and
+        // a mount over a folder ABOVE the install folder (say ~/install,
+        // which holds the lib) visible through only the home's own path.
+        // Both keep their bind's spelling, so neither of the state's
+        // spellings starts with either of the lib's, and no mount lies under
+        // either lib spelling, so the mount check below cannot see it
+        // either (a divergent mount BELOW the lib is that check's case). A
+        // state that does not exist yet keeps its alias spelling the same
+        // way. Only the host's -ef walk over the state's folders sees this
+        // containment, so this check is not redundant with the mount check;
+        // that identity only refuses.
+        if facts.lib_dir.is_some() && facts.state_dir.under_lib {
+            return Err(refused(format!(
+                "the host's Farhelm data directory {} may be inside {}, which uninstall would \
+                 remove: the data folder, or a folder above it, is that folder under another \
+                 path, such as a second mount of the home folder; uninstall keeps the data, so \
+                 it does not run on this layout",
                 facts.state_dir.named.display(),
                 paths.lib_dir.display()
             )));

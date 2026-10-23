@@ -1424,7 +1424,12 @@ impl ProvisioningService {
         asked.extend(dialed.as_deref());
         let inspection = self
             .backend
-            .inspect_uninstall(&target.transport, &self.layout.unit_name, &asked)
+            .inspect_uninstall(
+                &target.transport,
+                &self.layout.unit_name,
+                &asked,
+                &paths.lib_dir,
+            )
             .await
             .map_err(anyhow::Error::new)?;
         let [unit_file, lib_dir, rest @ ..] = inspection.paths.as_slice() else {
@@ -1521,6 +1526,7 @@ impl ProvisioningService {
                     named: host_path.path.clone(),
                     canonical,
                     raw,
+                    under_lib: host_path.under_removed,
                 })
                 .ok_or_else(|| unresolved(&host_path.path))
         };

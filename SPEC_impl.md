@@ -4742,7 +4742,11 @@ from before home normalization. Each path is respelled on its own, so the lib di
 spelling while the state directory inside it keeps the alias spelling, because its same-file guard failed (below a
 nested mount the bind lacks, or for a state directory that does not exist). The inspection therefore also reports each
 resolved path before normalization, and the state check refuses when the state directory is inside the lib directory in
-either spelling.
+either spelling. The state check also refuses on the host's same-folder test, an identity answer it never uses to accept
+a path: the inspection reports, per path, whether its unnormalized resolution or a folder above it is the same folder
+(`-ef`) as the lib directory, which catches the lib and the state reached through two binds of the home with a mount
+over a folder above the lib visible through only one, where no spelling shows the containment and no mount lies inside
+the lib.
 
 The last action deletes the row from inside the run, which already holds the host's provisioning lock and is the host's
 own run task, so it cannot go through Remove's entry point, which takes that lock and aborts the host's task. Both share

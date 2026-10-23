@@ -166,8 +166,9 @@ pub(super) enum ReachOutcome {
 /// Every uninstall guard consumes that spelling: the unit must be the file
 /// removed, the running binary must be inside the removed lib folder, and
 /// the state directory must stay outside it, which is also checked in the
-/// spelling from before normalization. Aliases of other folders
-/// remain distinct, per SPEC.md's narrow uninstall exception.
+/// spelling from before normalization and by file identity
+/// ([`HostPath::under_removed`], which can only refuse). Aliases of other
+/// folders remain distinct, per SPEC.md's narrow uninstall exception.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UninstallInspection {
     /// One entry per asked path, in the order asked.
@@ -212,6 +213,11 @@ pub(super) struct HostPath {
     /// exactly when `canonical` is; `inspect_uninstall` says why
     /// containment checks need it.
     pub(super) raw: Option<PathBuf>,
+    /// Whether `raw`, or a folder above it, is the same file (`-ef`) as
+    /// the folder uninstall would remove: containment no spelling shows,
+    /// such as state and lib reached through different binds of the home.
+    /// It only ever adds a refusal, never accepts an alias.
+    pub(super) under_removed: bool,
 }
 
 impl UninstallInspection {
@@ -327,12 +333,16 @@ pub(super) trait ProvisioningBackend: Send + Sync {
     /// the installation on the target: which of `paths` exist, whether each
     /// is itself a symlink, and where they really lead, the state directory
     /// a supervisor started without `--state-dir` would use there, and the
-    /// supervisor unit's run state and loaded unit-file location. See [`UninstallInspection`].
+    /// supervisor unit's run state and loaded unit-file location. Each path
+    /// also says whether it lies in `removed`, the folder the uninstall
+    /// would delete, by file identity rather than spelling
+    /// ([`HostPath::under_removed`]). See [`UninstallInspection`].
     async fn inspect_uninstall(
         &self,
         target: &ProvisioningTarget,
         unit: &str,
         paths: &[&Path],
+        removed: &Path,
     ) -> Result<UninstallInspection, BackendFailure>;
     /// Disable the supervisor unit without stopping it.
     async fn disable(
@@ -2456,12 +2466,13 @@ impl ProvisioningBackend for SystemBackend {
     ///
     /// The output is NUL-separated: an existence flag, a symlink flag, a
     /// canonical path (empty when unresolvable) with a verified alternate
-    /// home prefix normalized, and that path before normalization, per asked
-    /// path, then the default state directory and its four fields, then the
-    /// unit's `ActiveState` and `FragmentPath`, and the fragment's four
-    /// fields (no fragment prints two `0` flags and two empty paths,
-    /// through `%s` because a literal `\00` would read the second flag's
-    /// digit as part of an octal escape), then the mount points at or below
+    /// home prefix normalized, that path before normalization, and an
+    /// inside-`removed` flag, per asked path, then the default state
+    /// directory and its five fields, then the unit's `ActiveState` and
+    /// `FragmentPath`, and the fragment's five fields (no fragment prints
+    /// two `0` flags, two empty paths and a `0` flag, through `%s` because
+    /// a literal `\00` would read the second flag's digit as part of an
+    /// octal escape), then the mount points at or below
     /// each asked path's two spellings ([`MOUNT_POINTS_SH`]), ended by an
     /// empty field. A failing `systemctl show` or unreadable mount table fails
     /// the whole command rather than reading as empty values. `readlink -f`
@@ -2471,6 +2482,7 @@ impl ProvisioningBackend for SystemBackend {
         target: &ProvisioningTarget,
         unit: &str,
         paths: &[&Path],
+        removed: &Path,
     ) -> Result<UninstallInspection, BackendFailure> {
         // Only the home may have two names. For example, alex logs in with
         // /home/alex while systemd still loads its unit through
@@ -2498,13 +2510,27 @@ impl ProvisioningBackend for SystemBackend {
         // unit under .local/share/systemd/user remains a DIFFERENT path
         // after home normalization too; removing the planned unit would
         // leave that copy for systemd to start again. The comparisons in
-        // service.rs and PlanLayout::plan_uninstall deliberately stay text
-        // comparisons over these normalized values, not general identities.
+        // service.rs and PlanLayout::plan_uninstall that accept a path
+        // deliberately stay text comparisons over these normalized values,
+        // not general identities; identity only ever adds a refusal (below).
         // The rewrite is per path, so a lib rewritten to the login home can
         // hold state left in the alias spelling (a nested mount the bind
         // lacks fails that state's -ef); the unnormalized spelling printed
         // beside each path lets planning still see that containment.
-        let mut script = String::from(
+        //
+        // Two spellings still miss the lib reached through one bind of the
+        // home and the state through another, with a mount over a folder
+        // above the install folder (~/install, say) visible through only
+        // the home's own path: each keeps its bind's spelling, so neither
+        // spelling of the state starts with either of the lib's, and no
+        // mount lies under either lib spelling for MOUNT_POINTS_SH to
+        // report, yet `rm -rf` of the lib reaches the data. So
+        // each path also reports whether a folder on its unnormalized
+        // resolution's way to the root is -ef the folder to be removed. That
+        // identity only refuses (SPEC.md: uninstall "still refuses layouts it
+        // cannot tell apart safely"); it never accepts.
+        let mut script = format!("removed={}\n", shell_path(removed)?);
+        script.push_str(
             r#"home=''
 if [ -n "${HOME-}" ]; then
     home=$(readlink -f -- "$HOME" 2>/dev/null) || home=''
@@ -2539,7 +2565,17 @@ resolve() {
             done
             ;;
     esac
-    printf '%s\0%s\0' "$resolved" "$raw"
+    under=0
+    ancestor=$raw
+    while [ -n "$ancestor" ]; do
+        if [ "$ancestor" -ef "$removed" ] 2>/dev/null; then under=1; break; fi
+        case "$ancestor" in
+            /*/*) ancestor=${ancestor%/*} ;;
+            /?*) ancestor=/ ;;
+            *) break ;;
+        esac
+    done
+    printf '%s\0%s\0%s\0' "$resolved" "$raw" "$under"
 }
 "#,
         );
@@ -2557,7 +2593,7 @@ resolve() {
              active=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
              fragment=$(systemctl --user show -p FragmentPath --value -- {unit}) || exit 1; \
              printf '%s\\0%s\\0' \"$active\" \"$fragment\"; \
-             if [ -n \"$fragment\" ]; then resolve \"$fragment\"; else printf '%s\\0%s\\0\\0\\0' 0 0; fi; \
+             if [ -n \"$fragment\" ]; then resolve \"$fragment\"; else printf '%s\\0%s\\0\\0\\0%s\\0' 0 0 0; fi; \
              for p in \"$@\"; do if [ -n \"$p\" ]; then \
                mount_points \"$p\" '\\0' || exit 1; fi; done; printf '\\0'",
             unit = crate::ssh::shell_quote(unit),
@@ -2822,6 +2858,7 @@ pub(super) fn parse_uninstall_inspection(
         let symlink = flag(fields)?;
         let canonical = fields.next()?;
         let raw = fields.next()?;
+        let under_removed = flag(fields)?;
         let resolved = |field: &[u8]| {
             (!field.is_empty())
                 .then(|| bytes_path(field).ok())
@@ -2833,6 +2870,7 @@ pub(super) fn parse_uninstall_inspection(
             symlink,
             canonical: resolved(canonical),
             raw: resolved(raw),
+            under_removed,
         })
     }
     let mut fields = output.split(|byte| *byte == 0);

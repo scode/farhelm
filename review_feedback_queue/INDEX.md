@@ -26,10 +26,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   The CentOS test deletes the user's ssh config after a leftover start marker with no end marker; an accidental trigger
   is unverified, and the bucket is unsettled.
 
-- [`uninstall-two-home-aliases-hide-kept-data.md`](uninstall-two-home-aliases-hide-kept-data.md) — Two alternate home
-  paths with divergent nested mounts can hide retained data from uninstall; the configured source chain is established,
-  but occurrence and support scope are unresolved.
-
 - [`lost-shortcut-save-restores-misleading-assignment.md`](lost-shortcut-save-restores-misleading-assignment.md) — A
   lost committed-save reply restores an old shortcut indication while the next key resolves the new template; harmful
   reliance and coverage remain unproved.

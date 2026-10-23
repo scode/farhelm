@@ -365,12 +365,14 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         target: &ProvisioningTarget,
         _unit: &str,
         paths: &[&Path],
+        removed: &Path,
     ) -> Result<UninstallInspection, BackendFailure> {
         self.record(target, "inspect-uninstall").await?;
         let behavior = self.behavior(target).await?;
         let present = |path: PathBuf| HostPath {
             canonical: Some(path.clone()),
             raw: Some(path.clone()),
+            under_removed: path.starts_with(removed),
             path,
             exists: true,
             symlink: false,
