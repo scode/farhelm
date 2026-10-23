@@ -125,10 +125,13 @@ async function openTallDialog(page: Page, family: string): Promise<Locator> {
     fulfillAsHelm(route, { status: 400, contentType: "text/plain", body: LONG_REFUSAL }));
   await row.locator(".session-row-open").click();
   await page.locator(".restart-with-trigger").click();
-  const dialog = page.locator(".restart-with-dialog");
+  const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
+  // Cancel is the restart opening boundary; wait for it before replacing
+  // focus with the permission edit that makes this long refusal possible.
+  await expect(dialog.locator(".launch-composer-cancel")).toBeFocused();
   await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
-  await dialog.locator(".restart-with-submit").click();
-  await expect(dialog.locator(".restart-with-error")).toContainText("cannot be saved");
+  await dialog.locator(".create-session-submit").click();
+  await expect(dialog.locator(".launch-composer-refusal-alert")).toContainText("cannot be saved");
   return dialog;
 }
 

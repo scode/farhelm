@@ -34,7 +34,7 @@ use crate::{ApiBase, HostId, Session, SessionStatus};
 
 use super::create_form::{
     COMPOSER_DIALOG, CreatePrefill, CreateSessionForm, CreateTarget, CreatedSession,
-    mark_replace_with, prefill_from,
+    mark_replace_with, mark_restart_with, prefill_from,
 };
 use super::row::{IdentityFlow, SessionRow, session_identity_flow};
 use super::shared::{
@@ -136,6 +136,35 @@ fn capture_identity_movement(
 pub(crate) enum HeaderPrefillRequest {
     Clone(Session),
     ReplaceWith(Session),
+    RestartWith(Session, RestartBridge),
+}
+
+/// Keep terminal lifecycle work in its keyed view while the launcher owns
+/// editing and dispatch. A disposed view needs no remount; fallible reads
+/// prevent a late reply from invoking a callback whose scope was removed.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct RestartBridge {
+    pub(crate) current: Signal<Session>,
+    pub(crate) before: Callback<api::RestartEdit, Result<(), String>>,
+    pub(crate) after: EventHandler<bool>,
+}
+
+impl RestartBridge {
+    /// Admission immediately precedes the POST, after any host-setting await.
+    pub(crate) fn begin(self, edit: api::RestartEdit) -> Result<(), String> {
+        let alive = self.current.try_read().is_ok();
+        if !alive {
+            return Err("the session view closed; reopen restart with".into());
+        }
+        self.before.call(edit)
+    }
+
+    /// Every actual POST result reattaches, including refusals and lost replies.
+    pub(crate) fn finish(self, succeeded: bool) {
+        if self.current.try_read().is_ok() {
+            self.after.call(succeeded);
+        }
+    }
 }
 
 /// One-shot request from a session header to delete the session it shows,
@@ -1197,6 +1226,7 @@ pub(crate) fn ListView(
     // below, so an ordinary "new session" open never inherits a stale
     // clone's fields.
     let mut clone_prefill = use_signal(|| None::<CreatePrefill>);
+    let mut restart_bridge = use_signal(|| None::<RestartBridge>);
     // An ordinary New inherits only the selected session's directory. It is
     // intentionally separate from clone prefill: no title, host, command, or
     // structured launch choice is implied by this convenience.
@@ -2708,14 +2738,16 @@ pub(crate) fn ListView(
 
     // Header actions arrive through the single AppBody-owned request signal;
     // consuming and clearing it here prevents a keyed view remount from
-    // replaying an old clone or replace-with request.
+    // replaying an old clone, replace-with or restart-with request.
     use_effect(move || {
         let Some(request) = prefill_request.read().clone() else {
             return;
         };
-        let session = match request {
-            HeaderPrefillRequest::Clone(session) => session,
-            HeaderPrefillRequest::ReplaceWith(session) => session,
+        let (session, bridge) = match request {
+            HeaderPrefillRequest::Clone(session) | HeaderPrefillRequest::ReplaceWith(session) => {
+                (session, None)
+            }
+            HeaderPrefillRequest::RestartWith(session, bridge) => (session, Some(bridge)),
         };
         if clone_is_refused(
             ops.busy_now(),
@@ -2744,6 +2776,11 @@ pub(crate) fn ListView(
             mark_replace_with(&mut prefill, &session);
             replace_source_seen.set(None);
         }
+        if bridge.is_some() && !mark_restart_with(&mut prefill, &session) {
+            prefill_request.set(None);
+            return;
+        }
+        restart_bridge.set(bridge);
         opening_generation += 1;
         quick_launch_pending.set(false);
         auto_launch.set(false);
@@ -4169,6 +4206,19 @@ pub(crate) fn ListView(
                     opening_generation,
                     initial_error: initial_create_error(),
                     prefill: clone_prefill(),
+                    restart_bridge: restart_bridge(),
+                    on_restarted: move |_| {
+                        // The view already refreshed and reattached. Closing
+                        // must not select a new session or rewrite defaults.
+                        COMPOSER_DIALOG.release();
+                        opening_generation += 1;
+                        chosen_host.set(None);
+                        clone_prefill.set(None);
+                        restart_bridge.set(None);
+                        initial_create_action.set(None);
+                        ordinary_new_cwd.set(None);
+                        show_create.set(false);
+                    },
                     // Clone/Replace owns its seed even if it supersedes a
                     // switcher opening before the launcher unmounts.
                     initial_action: if clone_prefill().is_none() { initial_create_action() } else { None },
@@ -4195,6 +4245,7 @@ pub(crate) fn ListView(
                             .or_else(|| prefill.mode.source_opened().cloned())
                     }),
                     on_cancel: move |_| {
+                        let was_restart = clone_prefill.peek().as_ref().is_some_and(|prefill| prefill.mode.is_restart());
                         COMPOSER_DIALOG.release();
                         opening_generation += 1;
                         auto_launch.set(false);
@@ -4207,7 +4258,8 @@ pub(crate) fn ListView(
                         show_create.set(false);
                         // Release above must precede this immediate handback;
                         // the removed field would otherwise leave focus on body.
-                        FocusTarget::new(".new-session-button", None, false).focus();
+                        restart_bridge.set(None);
+                        FocusTarget::new(if was_restart { ".restart-with-trigger" } else { ".new-session-button" }, None, false).focus();
                     },
                     on_template_saved: move |template| {
                         // Templates owns the next focus; release the launcher

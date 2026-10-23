@@ -46,8 +46,8 @@
 //! - `list`: [`ListView`], `SessionRow`, and `CreateSessionForm` — the
 //!   session list and its lifecycle actions.
 //! - `launch_controls`: the values-in, changes-out structured choice controls
-//!   shared by the create form and the planned restart-with dialog. Their
-//!   caller owns harness choice, history, and create idempotency.
+//!   used by every session-launcher mode and the template editor. Their
+//!   caller owns held-field admission, history, and operation identity.
 //! - `hosts`: the hosts panel (PLAN_M6.md item 6) — the per-host state
 //!   chips SPEC.md requires to be always visible, the add/edit/remove/
 //!   adopt/retry management surface, and the renderer-free wording helpers
@@ -169,7 +169,6 @@ mod reader;
 mod reconnect;
 mod rename;
 mod replace;
-mod restart_with;
 mod rows;
 mod session_view;
 mod settings;

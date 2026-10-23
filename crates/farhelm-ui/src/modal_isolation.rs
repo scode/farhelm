@@ -7,7 +7,7 @@
 //! keys that already arrive inside the dialog. Focus that leaves by some other
 //! route (another component's `focus()` call, a click on the scrim, a focused
 //! control that is disabled or unmounted) is then free to walk into whatever
-//! is behind it. Behind the restart-with dialog that is an agent's terminal,
+//! is behind it. Behind a restart-mode launcher that is an agent's terminal,
 //! where a stray keystroke becomes agent input.
 //!
 //! Isolation closes those routes structurally, in two layers:
@@ -18,7 +18,7 @@
 //!   skipped by Tab, ignores the pointer, and leaves the accessibility tree,
 //!   so the question "which code might still call `focus()` behind the
 //!   modal" stops mattering. A dialog can render deep inside the page (the
-//!   restart-with dialog inside the session view, the host settings dialog
+//!   session launcher inside the list, the host settings dialog
 //!   inside the sidebar), which is why this walks the ancestor chain rather
 //!   than marking one app root. Siblings added to a path node while the
 //!   dialog is mounted (a band the view renders later, a container a
@@ -243,7 +243,7 @@ mod tests {
 
     /// Selectors travel into JavaScript as string literals.
     ///
-    /// The restart-with selector carries double quotes (`[role="dialog"]`);
+    /// A role-qualified selector carries double quotes (`[role="dialog"]`);
     /// naive interpolation would end the literal early and the installer
     /// would throw before isolating anything, silently leaving the page live.
     #[test]

@@ -298,8 +298,8 @@ pub(crate) const HARNESS_PICKER_ORDER: [LaunchHarness; 9] = [
 const _: () = assert!(LaunchHarness::is_ordering_of_all(&HARNESS_PICKER_ORDER));
 
 /// The short name a user sees for a harness. Every spelling of a structured
-/// harness in the composer, a session's menu header, and the restart-with
-/// dialog derives from this, the lowercase words included (see
+/// harness in the launcher or a session's menu header derives from this,
+/// the lowercase words included (see
 /// [`harness_word`]).
 ///
 /// One table rather than the Rust variant name, which only matches the
@@ -1727,12 +1727,11 @@ pub(crate) fn reconciliation_reset_reason(
 /// The starting effort (`baseline`, the stored choice "Restart with" opened
 /// from) stays for the same reason the selected one appears: once shown, a
 /// button that vanished when the user picked another effort would leave no
-/// way back to the stored choice, and could remove the button keyboard focus
-/// is still on when a WebKit click lands elsewhere without moving it
-/// (`restart_with.rs` explains why removing a focused control is a problem
-/// there). A dialog with no baseline, such as a clone,
-/// keeps only the selection, so there an unlisted effort's button lasts only
-/// while it is selected.
+/// way back to the stored choice. It could also remove a focused button when
+/// a WebKit click lands elsewhere without moving focus, leaving keystrokes
+/// outside a modal over a live terminal. A mode without a baseline, such as
+/// Clone, keeps only the selection: an unlisted effort then lasts only while
+/// it is selected.
 ///
 /// An added effort takes its place in the stable display order, which matters
 /// when an arrived catalog lists other efforts but not this one: appended, it

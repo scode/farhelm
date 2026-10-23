@@ -714,90 +714,91 @@ agent choice is independent of that destination:
   prefix clears it. Quick launch applies those same edits before starting the agent. A template whose field does not
   apply to what the launcher holds when it is applied, such as a model while the launch kind is command or a model the
   chosen agent type does not offer, is refused with a message naming the field, and nothing from it is applied. So is a
-  template that sets a field the current dialog holds fixed, such as the host in Replace with; Restart with does not
-  offer templates. A template names its host by the host's recorded install identity, exactly like the host default
-  below, so a registry row retargeted to another install makes the template's host field inapplicable rather than
-  silently aiming at the successor. A launch made after applying templates is, for remembered defaults and recent
-  setups, exactly the launch the same hand edits would have made; managed-checkout previews additionally apply a
-  template base name's numbering policy. The resulting choices count as the user's explicit selection, and a template
-  that changes host, installation, destination, title, or agent invalidates a pending checkout preview as the equivalent
-  hand edit does. The last template setting a name decides both its text and kind. In a managed checkout the Name field
-  shows the resolved name and a "from template · numbered if taken" pill; an advanced name also shows "(<base> is
-  taken)". Typing in Name or accepting `name:` makes it the user's exact name, removes the pill and disables numbering.
-  Because a template pins only what it contains, a field the launch requires and no template set still has to be filled
-  in by hand; that friction is accepted. New and Clone also offer "save as template": an inline name field and checklist
-  capture the current tab's choices, host, destination, and session name. Agent type, model and effort are checked
-  whenever set, including Clone's launch choices; a nonempty initial prompt is checked too, shown by its escaped first
-  line with an ellipsis when more lines follow. Command, YOLO and opted-in resume are checked when set. Permissions and
-  a wrapper prefix are checked only after an explicit choice; host only after a hand pick; a folder only after typing or
-  picking it; session name after typing it or applying a template that sets it. The session-name row offers base or
-  fixed name, defaulting to base for a typed name and retaining a template-supplied kind. A template base is saved as
-  its original text, never the numbered name displayed by the launcher. Base is absent from the saved definition and
-  reply. A GitHub repository is always checked. Remembered defaults and Clone's inherited host and folder are offered
-  unchecked. The saved template contains exactly the checked fields and always the active launch kind. A host without a
-  usable recorded install identity is omitted with an explanation. A taken template name is refused without overwriting.
-  Enter in the name field saves without launching; Escape returns to the launcher. Successful saving closes the launcher
-  and opens the new template in the Templates editor; errors preserve the launcher draft. Replace with does not offer
-  this action. Templates are created, edited, duplicated, and deleted in the Templates dialog beside New. A list of
-  names and summaries sits beside the selected template's editor; at phone width, opening a template shows the editor
-  with a back link. The editor shows only fields the template sets, with labeled controls and explicit add/remove
-  actions. The session-name label row offers "base name | fixed name" with help explaining numbering and conflicts.
-  Adding the name starts on base; removing it removes its kind. Duplicate and delete undo retain the kind, and saving a
-  base name leaves no unsaved changes. Its "switches launcher to" choice is agent, command, or don't switch; don't
-  switch offers only host, destination and session name. Agent and command choices store their matching launch kind, so
-  applying the template switches tabs. Existing kindless templates keep applying as stored; opening one infers its
-  switch in an unsaved draft, and saving stores that switch. Choices follow the agent type when one is set, while model
-  text may be arbitrary and other fields need no agent type. The initial prompt uses a resizable multiline textarea,
-  offered on the agent tab when the template's agent supports it or no agent is set. It explains that the message is
-  sent on every launch from the template and can be edited in the launcher first; the list summary mentions it. Newline
-  and tab remain editable. Invisible formatting is shown escaped and read-only, retaining its raw value through
-  unrelated saves; removing and adding the field replaces it. Incompatible fields stay visible and prevent saving until
-  corrected or removed. Saving is explicit; leaving an unsaved draft asks save, discard, or keep editing. Template names
-  are unique; duplicate opens an unsaved copy with a free name. A workspace-trust field in an older template remains
-  readable but is ignored when applied and omitted on every save, including duplicate and delete undo. Delete takes
-  effect immediately and offers undo inside the dialog for about ten seconds; undo refuses if its old name has been
-  taken. For a stored template that fails current save rules, the control says "delete permanently" before deletion and
-  no undo is offered. The label the user saw decides: a click on "delete permanently" never offers undo, and a click on
-  plain "delete" always does, even if the template list changed in between. Closing the dialog ends its undo notice.
+  template that sets a field the current launcher mode holds fixed, such as the host in Replace with or a field held by
+  Restart with (Lifecycle operations below). A template names its host by the host's recorded install identity, exactly
+  like the host default below, so a registry row retargeted to another install makes the template's host field
+  inapplicable rather than silently aiming at the successor. A launch made after applying templates is, for remembered
+  defaults and recent setups, exactly the launch the same hand edits would have made; managed-checkout previews
+  additionally apply a template base name's numbering policy. The resulting choices count as the user's explicit
+  selection, and a template that changes host, installation, destination, title, or agent invalidates a pending checkout
+  preview as the equivalent hand edit does. The last template setting a name decides both its text and kind. In a
+  managed checkout the Name field shows the resolved name and a "from template · numbered if taken" pill; an advanced
+  name also shows "(<base> is taken)". Typing in Name or accepting `name:` makes it the user's exact name, removes the
+  pill and disables numbering. Because a template pins only what it contains, a field the launch requires and no
+  template set still has to be filled in by hand; that friction is accepted. New, Clone and Restart with also offer
+  "save as template": an inline name field and checklist capture the current tab's choices, host, destination, and
+  session name. Agent type, model and effort are checked whenever set, including Clone's launch choices; a nonempty
+  initial prompt is checked too, shown by its escaped first line with an ellipsis when more lines follow. Command, YOLO
+  and opted-in resume are checked when set. Permissions and a wrapper prefix are checked only after an explicit choice;
+  host only after a hand pick; a folder only after typing or picking it; session name after typing it or applying a
+  template that sets it. The session-name row offers base or fixed name, defaulting to base for a typed name and
+  retaining a template-supplied kind. A template base is saved as its original text, never the numbered name displayed
+  by the launcher. Base is absent from the saved definition and reply. A GitHub repository is always checked. Remembered
+  defaults and Clone's inherited host and folder are offered unchecked. The saved template contains exactly the checked
+  fields and always the active launch kind. A host without a usable recorded install identity is omitted with an
+  explanation. A taken template name is refused without overwriting. Enter in the name field saves without launching;
+  Escape returns to the launcher. Successful saving closes the launcher and opens the new template in the Templates
+  editor; errors preserve the launcher draft. Replace with does not offer this action. Templates are created, edited,
+  duplicated, and deleted in the Templates dialog beside New. A list of names and summaries sits beside the selected
+  template's editor; at phone width, opening a template shows the editor with a back link. The editor shows only fields
+  the template sets, with labeled controls and explicit add/remove actions. The session-name label row offers "base name
+  | fixed name" with help explaining numbering and conflicts. Adding the name starts on base; removing it removes its
+  kind. Duplicate and delete undo retain the kind, and saving a base name leaves no unsaved changes. Its "switches
+  launcher to" choice is agent, command, or don't switch; don't switch offers only host, destination and session name.
+  Agent and command choices store their matching launch kind, so applying the template switches tabs. Existing kindless
+  templates keep applying as stored; opening one infers its switch in an unsaved draft, and saving stores that switch.
+  Choices follow the agent type when one is set, while model text may be arbitrary and other fields need no agent type.
+  The initial prompt uses a resizable multiline textarea, offered on the agent tab when the template's agent supports it
+  or no agent is set. It explains that the message is sent on every launch from the template and can be edited in the
+  launcher first; the list summary mentions it. Newline and tab remain editable. Invisible formatting is shown escaped
+  and read-only, retaining its raw value through unrelated saves; removing and adding the field replaces it.
+  Incompatible fields stay visible and prevent saving until corrected or removed. Saving is explicit; leaving an unsaved
+  draft asks save, discard, or keep editing. Template names are unique; duplicate opens an unsaved copy with a free
+  name. A workspace-trust field in an older template remains readable but is ignored when applied and omitted on every
+  save, including duplicate and delete undo. Delete takes effect immediately and offers undo inside the dialog for about
+  ten seconds; undo refuses if its old name has been taken. For a stored template that fails current save rules, the
+  control says "delete permanently" before deletion and no undo is offered. The label the user saw decides: a click on
+  "delete permanently" never offers undo, and a click on plain "delete" always does, even if the template list changed
+  in between. Closing the dialog ends its undo notice.
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Cmd+P on macOS or Ctrl+Shift+P elsewhere
   starts it directly in the browser and desktop app when no dialog is open, without showing the launcher on success.
-  While New, Clone or Replace with is the only visible dialog, the same chord applies its template to that draft and
-  leaves Launch to the user. Consecutive presses apply in order; a refusal changes nothing from that press and does not
-  discard a later press. A missing mark or failed read shows its refusal where `tl:` does, without opening Templates.
-  During a launch or while saving a template, the chord is consumed without changing the draft. Applying by shortcut
-  leaves focus and search text alone, unless its edits remove the focused control, when focus returns to the launcher's
-  search. Other visible dialogs keep the keyboard. A hidden quick-launch launcher still consumes the chord without
-  applying it. Applying it on the page uses exactly New's defaults and ordinary launch path: the open session's host,
-  else this machine, and New's default folder for that host (Working directory above), with the template overriding only
-  its own fields. Success selects the created session. When New was never shown, the rename dialog opens over it while
-  its agent is already starting, unless Settings' on-by-default **name sessions on quick launch** choice is off. This
-  applies to the bolt shortcut, number shortcuts, composed sequences, the quick-switcher row and the Cmd+J template
-  list, even when a template supplied the name. The actual created name is focused and fully selected. Enter with the
-  name unchanged or Escape keeps it without sending a rename; a changed name uses ordinary rename. Closing returns to
-  the new terminal, which takes no input while the dialog is open. A launch that revealed New gets no naming dialog,
-  even if a later submission succeeds. A held chord starts only once; the chord never reaches the terminal and visible
-  modals other than the launcher keep the keyboard. With no usable mark on the page it opens Templates with an
-  explanation. An edited marked template that no longer supplies what its active launch kind needs opens New with it
-  applied and a prominent banner saying it needs more choices before it can launch. The same banner accompanies an
-  incomplete Cmd+J or quick-switcher pick, without recommending the sequence prefix. A launch refusal or YOLO question
-  reveals New with the same draft, error or confirmation; nothing bypasses host admission, and the shortcut never
-  retries itself. The mark is a nullable template name on the helm's shared preferences, independent of the template
-  fields. Clicking another bolt moves it; clicking the lit bolt clears it. An agent-launch template needs an agent to be
-  marked; a command-launch template needs a nonblank command. With no launch kind, it is judged as an agent launch. The
-  same rule decides whether a template or combined sequence can launch directly. A marked template that no longer
-  qualifies can still be unmarked. Renaming repoints the mark before deleting the old name; deleting that name clears
-  its mark through the shared delete path, and Undo never restores the mark. The editor says whether its saved template
-  is marked. The shortcut reads the mark and templates fresh on each use, so another window's change takes effect
-  without reloading. Templates' hover and a separate quick-switcher row advertise the chord and marked name. A browser
-  that reserves the chord keeps its behavior; the quick-switcher row remains available. An agent may set or clear the
-  mark through `farhelm agent template create` or `edit`, behind a template approval card. The helm applies the same
-  eligibility rule to an agent's write as the Templates editor does.
+  While the session launcher is the only visible dialog, the same chord applies its template to that draft and leaves
+  Launch to the user. Consecutive presses apply in order; a refusal changes nothing from that press and does not discard
+  a later press. A missing mark or failed read shows its refusal where `tl:` does, without opening Templates. During a
+  launch or while saving a template, the chord is consumed without changing the draft. Applying by shortcut leaves focus
+  and search text alone, unless its edits remove the focused control, when focus returns to the launcher's search. Other
+  visible dialogs keep the keyboard. A hidden quick-launch launcher still consumes the chord without applying it.
+  Applying it on the page uses exactly New's defaults and ordinary launch path: the open session's host, else this
+  machine, and New's default folder for that host (Working directory above), with the template overriding only its own
+  fields. Success selects the created session. When New was never shown, the rename dialog opens over it while its agent
+  is already starting, unless Settings' on-by-default **name sessions on quick launch** choice is off. This applies to
+  the bolt shortcut, number shortcuts, composed sequences, the quick-switcher row and the Cmd+J template list, even when
+  a template supplied the name. The actual created name is focused and fully selected. Enter with the name unchanged or
+  Escape keeps it without sending a rename; a changed name uses ordinary rename. Closing returns to the new terminal,
+  which takes no input while the dialog is open. A launch that revealed New gets no naming dialog, even if a later
+  submission succeeds. A held chord starts only once; the chord never reaches the terminal and visible modals other than
+  the launcher keep the keyboard. With no usable mark on the page it opens Templates with an explanation. An edited
+  marked template that no longer supplies what its active launch kind needs opens New with it applied and a prominent
+  banner saying it needs more choices before it can launch. The same banner accompanies an incomplete Cmd+J or
+  quick-switcher pick, without recommending the sequence prefix. A launch refusal or YOLO question reveals New with the
+  same draft, error or confirmation; nothing bypasses host admission, and the shortcut never retries itself. The mark is
+  a nullable template name on the helm's shared preferences, independent of the template fields. Clicking another bolt
+  moves it; clicking the lit bolt clears it. An agent-launch template needs an agent to be marked; a command-launch
+  template needs a nonblank command. With no launch kind, it is judged as an agent launch. The same rule decides whether
+  a template or combined sequence can launch directly. A marked template that no longer qualifies can still be unmarked.
+  Renaming repoints the mark before deleting the old name; deleting that name clears its mark through the shared delete
+  path, and Undo never restores the mark. The editor says whether its saved template is marked. The shortcut reads the
+  mark and templates fresh on each use, so another window's change takes effect without reloading. Templates' hover and
+  a separate quick-switcher row advertise the chord and marked name. A browser that reserves the chord keeps its
+  behavior; the quick-switcher row remains available. An agent may set or clear the mark through
+  `farhelm agent template create` or `edit`, behind a template approval card. The helm applies the same eligibility rule
+  to an agent's write as the Templates editor does.
 - Template number shortcuts: a template may hold one of ten shared keys, 1–9 then 0, independently of ⚡. Cmd+digit in
   the Mac desktop app, or Ctrl+Shift+digit everywhere else (including a Mac browser), starts its template through the
-  same direct launch path as quick launch on the page, and applies it to an open New, Clone or Replace with draft under
-  the same focus, ordering and refusal rules as the ⚡ chord. It reads bindings and templates fresh each time. Unbound
-  keys open Templates with a binding hint; an incomplete template, refusal or YOLO question uses quick launch's ordinary
-  New fallback. Other visible modals retain the keyboard, held keys act once, and the chord never reaches the terminal.
+  same direct launch path as quick launch on the page, and applies it to an open session launcher draft under the same
+  focus, ordering and refusal rules as the ⚡ chord. It reads bindings and templates fresh each time. Unbound keys open
+  Templates with a binding hint; an incomplete template, refusal or YOLO question uses quick launch's ordinary New
+  fallback. Other visible modals retain the keyboard, held keys act once, and the chord never reaches the terminal.
   Matching uses the physical digit key, independent of the printed character; the numeric keypad is excluded. Each row's
   key button opens a menu with no shortcut, then 1–9 and 0; occupied keys name their template, and choosing one moves
   it. A template has at most one key and each key has at most one template. Any template can hold a number key,
@@ -819,8 +820,8 @@ agent choice is independent of that destination:
   it keeps Cut or the browser's normal action. The terminal's input textarea counts as the terminal. Bare physical
   number keys or their usual template chord queue templates in order; the ordinary ⚡ chord queues the marked template.
   Enter applies them in that order, later edits winning, and directly launches through the same defaults, validation and
-  admission as quick launch on the page. In New, Clone or Replace with, Enter instead applies the queued templates to
-  the current draft without launching; each completed sequence is one refusal unit, and the pill says "apply" instead of
+  admission as quick launch on the page. In the session launcher, Enter instead applies the queued templates to the
+  current draft without launching; each completed sequence is one refusal unit, and the pill says "apply" instead of
   "launch". An unbound key opens Templates at Enter with the binding hint on the page; inside the launcher it shows a
   refusal beneath the search box without changing the draft. A refusal names its template and reveals New with the draft
   on the page; an incomplete result opens New with a prominent banner saying "This sequence doesn't make a complete
@@ -904,28 +905,29 @@ launch uses the agent's own setting which Farhelm cannot override, custom flags 
 the command was asserted to be YOLO), and retries with the override only when the user confirms. Besides a one-off
 confirmation it offers to stop asking for that host: that answer first sets the host to start YOLO sessions without
 asking, exactly as its settings would, and then retries with the override; if changing that setting fails, nothing is
-started and the confirmation stays up with the reason. In the session launcher and Restart with, an explicit YOLO choice
-on an agent that offers guarded mode also offers starting the same launch guarded instead, without YOLO confirmation;
-Restart with offers it only when the resulting draft still differs from the stored launch. The session launcher does not
-offer it when the refused request retries an earlier attempt whose outcome is unknown (a lost reply, say): that attempt
-may already have started the session, which a guarded launch, being a new request, would duplicate, so the confirmation
-says the launch may already have started instead. The `farhelm` command line has no override: a request from inside a
-session is an agent's, and agents follow their own rule under Agent-spawned sessions, whatever the request claims. A
-plain restart relaunches the session's own stored launch and needs no YOLO confirmation again. Plain Replace, agent
-clone and inherited spawn also copy the stored command; pre-upgrade no-flag sessions therefore remain own-setting, with
-plain Replace asking on hosts that ask before YOLO launches and agent copies refused there. Clone, Replace with and
-Restart with compile new choices and get the guarded flags. Remote hosts must be updated after this protocol change
-before launches resume; older releases cannot read launches stored as guarded.
+started and the confirmation stays up with the reason. In the session launcher, an explicit YOLO choice on an agent that
+offers guarded mode also offers starting the same launch guarded instead, without YOLO confirmation; Restart with offers
+it only when the resulting draft still differs from the stored launch. The session launcher does not offer it when the
+refused request retries an earlier attempt whose outcome is unknown (a lost reply, say): that attempt may already have
+started the session, which a guarded launch, being a new request, would duplicate, so the confirmation says the launch
+may already have started instead. The `farhelm` command line has no override: a request from inside a session is an
+agent's, and agents follow their own rule under Agent-spawned sessions, whatever the request claims. A plain restart
+relaunches the session's own stored launch and needs no YOLO confirmation again. Plain Replace, agent clone and
+inherited spawn also copy the stored command; pre-upgrade no-flag sessions therefore remain own-setting, with plain
+Replace asking on hosts that ask before YOLO launches and agent copies refused there. Clone, Replace with and Restart
+with compile new choices and get the guarded flags. Remote hosts must be updated after this protocol change before
+launches resume; older releases cannot read launches stored as guarded.
 
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
 the session itself — **error** when the agent process could not be started at all (exec failure, command not found),
 **exited** when it started and then ended, however quickly, with its exit code visible. In the session launcher every
 refused launch (New, Clone, Replace with, quick launch) shows as a bordered alert with a warning icon beside Launch,
-starting "Not launched." before the refusal's own words, and announced to assistive technology; errors that are not a
-refused launch, such as "save as template" refusing a wrapper, keep the plain line. When the refusal says the folder
-does not exist, is not a directory or is not usable, the folder field is also marked and says so under it, naming the
-host, for as long as the form still names that host, its connection and that folder.
+starting "Not launched." before the refusal's own words, and announced to assistive technology. Restart mode uses the
+same alert beside Restart, with "Restart error." before the refusal's words. Errors that are not a refused launch, such
+as "save as template" refusing a wrapper, keep the plain line. When the refusal says the folder does not exist, is not a
+directory or is not usable, the folder field is also marked and says so under it, naming the host, for as long as the
+form still names that host, its connection and that folder.
 
 ### Managed checkouts
 
@@ -1226,26 +1228,25 @@ submission and focus-return behavior.
   carry changed launch settings (Restart with, below); the launch kind, agent type, host, and working directory remain
   fixed. If a harness rejects a changed model or other setting while resuming, that is an ordinary launch failure;
   restart again with settings the harness accepts.
-- **Restart with** opens a dialog for changing the launch before resuming the session's own or a user-named
-  conversation: the model, effort, or permissions of an agent launch, or the command, resume command, and YOLO assertion
-  of a command launch. The launch kind, agent type, host, and folder stay fixed; Replace with can change the harness or
-  folder, and Clone can change the host. The dialog shows the current settings and marks edited fields, and its primary
-  action is inactive until a setting changes or a conversation selector is entered. For an agent launch with a stored
-  resume command, it is available even without a captured conversation; then its conversation field is required and
-  explains why. Muse, Cursor and OpenCode still have no stored resume command, so they do not gain Restart with. Enter
-  on an effort or permission button applies that choice, then performs the primary action with the resulting settings,
-  except custom selects the mode and focuses its flags editor. Enter in the model field chooses the model and performs
-  the primary action; with the model list closed it uses the selected model. Enter on a YOLO radio or command field
-  performs the primary action with the values shown, without toggling the radio. An unchanged or invalid draft does
-  nothing, and held or composing Enter never restarts. Enter when the dialog itself has focus presses its enabled
-  primary action under those same rules. Action buttons and the YOLO confirmation keep their own Enter rules. When the
-  primary action says "stop and restart", Enter on a choice or field confirms that displayed action. A working agent is
-  stopped first with the user's confirmation on that action; a live agent in any other status is stopped first without
-  it, as for Restart. The edited launch is validated exactly as a create validates it before anything is stopped, so an
-  invalid edit leaves the agent running and the dialog open with the reason. A refusal leaves the dialog and its edits
-  visible with the reason. Restart with runs the resume command, so an edited start command of a command launch takes
-  effect the next time it is cloned or replaced. Command launches offer this action exactly when Restart is. Its header
-  button remains visible but greyed out otherwise, with a hover tooltip and accessible description explaining why.
+- **Restart with** opens the session launcher in restart mode before resuming the session's own or a user-named
+  conversation. It edits model, effort, permissions, wrapper prefix and conversation for an agent launch, or command,
+  resume command and YOLO assertion for a command launch. Launch kind, agent type, host, folder or destination, session
+  name and initial prompt are held: their editing controls are hidden, and templates, search results, recent setups and
+  template shortcuts that set one are refused without applying any edits, even when they name its current value. The
+  held agent type, host and folder remain visible. Replace with can change the harness or folder, and Clone can change
+  the host. The launcher shows the current settings and marks edited fields, and its primary action is inactive until a
+  setting changes or a conversation selector is entered. For an agent launch with a stored resume command, it is
+  available even without a captured conversation; then its conversation field is required and explains why. Muse, Cursor
+  and OpenCode still have no stored resume command, so they do not gain Restart with. The launcher's ordinary controls,
+  templates, validation and Enter rules apply. Its primary action reads "restart", or "stop and restart" while the shown
+  agent is working, with the agent type, host and folder beside it. A working agent is stopped first with the user's
+  confirmation on that action; a live agent in any other status is stopped first without it, as for Restart. The edited
+  launch is validated exactly as a create validates it before anything is stopped, so an invalid edit leaves the agent
+  running and the dialog open with the reason. A refusal leaves the dialog and its edits visible with the reason. The
+  held folder never uses or updates the per-host folder default; its advisory check still applies. Restart with runs the
+  resume command, so an edited start command of a command launch takes effect the next time it is cloned or replaced.
+  Command launches offer this action exactly when Restart is. Its header button remains visible but greyed out
+  otherwise, with a hover tooltip and accessible description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, title, and launch — the
   fresh-conversation counterpart to restart's resumed one unless the user names a conversation for this start. A session
   in a managed checkout starts on a managed checkout of the same repository, named `<title>-clone` with the first free
@@ -1296,13 +1297,13 @@ submission and focus-return behavior.
 The off-by-default **skip session confirmations** switch in Settings skips session row Delete and Replace, header
 Restart, Replace and Delete, interrupted-card Replace, and terminal-tab Close. Each runs on the first click through the
 ordinary action path, with consent from the state shown by that render. It does not skip YOLO, host or trash questions,
-nor the Restart with dialog or Replace with launcher. Host setup and removal retain their separate choices.
+nor the Restart with or Replace with launcher. Host setup and removal retain their separate choices.
 
 After a user explicitly opens a confirmation, keyboard focus starts on its enabled confirming button, so a new Enter
 goes ahead; if that button is disabled, focus starts on Cancel instead. This covers session Delete, Replace, Restart and
 tab close, host setup, removal and uninstall, and permanent trash deletion. Repeated or composing Enter cannot answer
 the new question. Escape cancels the header's Restart, Replace or Delete question and returns focus to the terminal. The
-YOLO confirmation and Restart with dialog still start on Cancel.
+YOLO confirmation and Restart with launcher still start on Cancel.
 
 Every modal dialog keeps Tab and Shift+Tab within its visible, enabled controls and keyboard scroll regions. The page
 behind it cannot receive focus or clicks, while independent agent approval cards remain usable. Hidden quick-launch

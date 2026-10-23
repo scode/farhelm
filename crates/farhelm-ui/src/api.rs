@@ -2946,7 +2946,7 @@ pub(crate) async fn restart_session(
     base: &str,
     id: &str,
     stop_if_running: bool,
-    with: Option<&crate::restart_with::RestartEdit>,
+    with: Option<&RestartEdit>,
     allow_yolo: bool,
 ) -> Result<Session, ActionRefusal> {
     let url = format!("{base}/api/sessions/{}/restart", encode_path_segment(id));
@@ -2967,27 +2967,57 @@ pub(crate) async fn restart_session(
 /// wire, and put each kind of edit under its own field: an agent edit's
 /// choices under `with`, a command edit's launch under `with_command`. The
 /// helm refuses a body naming both.
-fn restart_request_body(
-    stop_if_running: bool,
-    with: Option<&crate::restart_with::RestartEdit>,
-) -> serde_json::Value {
+fn restart_request_body(stop_if_running: bool, with: Option<&RestartEdit>) -> serde_json::Value {
     let mut body = serde_json::json!({ "stop_if_running": stop_if_running });
     match with {
         None => {}
-        Some(crate::restart_with::RestartEdit::Agent(selection)) => {
+        Some(RestartEdit::Agent(selection)) => {
             body["with"] =
                 serde_json::to_value(selection).expect("LaunchSelection is serializable");
         }
-        Some(crate::restart_with::RestartEdit::NamedAgent(selection, conversation)) => {
+        Some(RestartEdit::NamedAgent(selection, conversation)) => {
             body["with"] = serde_json::json!(selection);
             body["conversation"] = serde_json::json!(conversation);
         }
-        Some(crate::restart_with::RestartEdit::Command(command)) => {
+        Some(RestartEdit::Command(command)) => {
             body["with_command"] =
                 serde_json::to_value(command).expect("CommandLaunch is serializable");
         }
     }
     body
+}
+
+/// A restart edit preserves the distinction between reusable choices and a
+/// one-time conversation. It never carries create identity or destination.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RestartEdit {
+    /// Recompose an agent launch while resuming its captured conversation.
+    Agent(crate::LaunchSelection),
+    /// The selector is transient and stays outside the reusable launch value.
+    NamedAgent(crate::LaunchSelection, String),
+    /// Keep command, declared agent and resume bytes as explicit structured data.
+    Command(crate::CommandLaunch),
+}
+
+impl RestartEdit {
+    /// Compare against the command the session actually stored. New-launch
+    /// defaults must not turn a historical own-setting omission into Guarded.
+    pub(crate) fn baseline(session: &Session) -> Option<Self> {
+        match &session.launch {
+            Some(crate::SessionLaunch::Agent { selection, .. }) => {
+                let mut selection = selection.clone();
+                selection.permissions = selection.harness.stored_permission(selection.permissions);
+                selection.workspace_trust = None;
+                Some(Self::Agent(selection))
+            }
+            Some(crate::SessionLaunch::Command(command))
+                if command.agent.is_some() && command.resume.is_some() =>
+            {
+                Some(Self::Command(command.clone()))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// POST the rename endpoint for one session, returning the session as the
@@ -5190,10 +5220,7 @@ mod tests {
         assert!(create["launch"].get("conversation").is_none());
         let restart = restart_request_body(
             false,
-            Some(&crate::restart_with::RestartEdit::NamedAgent(
-                selection.clone(),
-                "target".into(),
-            )),
+            Some(&RestartEdit::NamedAgent(selection.clone(), "target".into())),
         );
         assert_eq!(restart["conversation"], "target");
         assert_eq!(restart["with"], serde_json::json!(selection));
@@ -5504,10 +5531,7 @@ mod tests {
         assert_eq!(plain, serde_json::json!({"stop_if_running": false}));
         assert!(plain.get("with").is_none());
 
-        let edited = restart_request_body(
-            true,
-            Some(&crate::restart_with::RestartEdit::Agent(selection.clone())),
-        );
+        let edited = restart_request_body(true, Some(&RestartEdit::Agent(selection.clone())));
         assert_eq!(edited["stop_if_running"], true);
         assert_eq!(edited["with"], serde_json::to_value(selection).unwrap());
         assert!(edited.get("with_command").is_none());
@@ -5518,10 +5542,7 @@ mod tests {
             agent: Some(LaunchHarness::Claude),
             resume: Some("claude --resume {conversation} {farhelm_args}".into()),
         };
-        let edited = restart_request_body(
-            false,
-            Some(&crate::restart_with::RestartEdit::Command(command.clone())),
-        );
+        let edited = restart_request_body(false, Some(&RestartEdit::Command(command.clone())));
         assert_eq!(
             edited["with_command"],
             serde_json::to_value(command).unwrap()

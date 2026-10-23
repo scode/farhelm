@@ -1,4 +1,4 @@
-//! The inline form for creating one session on a selected host.
+//! One launcher for creating, replacing and restarting a session.
 //!
 //! Intent binding and host reconciliation live beside the form because they
 //! define when an idempotency key still describes the submitted create.
@@ -9,6 +9,10 @@
 //! Every semantic edit enters a concrete draft operation. The owner alone
 //! publishes changes and settles edit-induced retry retirement; this module
 //! keeps submission lifetime, observations and ordered renderer completion.
+//! Restart holds source identity and placement, while the draft and shared
+//! controls still own its edits, templates, validation and YOLO question. Its
+//! local confirmation identity never travels as a create retry key; a narrow
+//! bridge leaves terminal reattachment with the originating session view.
 
 mod draft;
 use draft::{ModelTargets, PermissionUndo, RecoveryTargets, SearchInputs, SearchTargets};
@@ -583,7 +587,8 @@ fn launcher_snapshot(
 /// Validate a shortcut batch against one draft before any of its edits land.
 /// The shared fold checks ordered applicability, while the launcher also has
 /// to parse GitHub destinations before replay can safely choose one. Ordinary
-/// `tl:` acceptance uses this same check for its single template.
+/// `tl:` acceptance uses the same fold. Restart's held-field checks run inside
+/// it, so a later held assignment cannot hide an earlier ordinary refusal.
 fn validated_template_batch(
     templates: &[farhelm_proto::launcher::LaunchTemplate],
     hosts: &[HostOption],
@@ -625,6 +630,9 @@ fn validated_template_batch(
         .collect::<Vec<_>>();
     let mut repositories = Vec::with_capacity(normalized.len());
     for template in &normalized {
+        if let Some(reason) = draft.restart_template_refusal(template) {
+            return Err(reason);
+        }
         state = farhelm_proto::launcher::apply_template(&state, template, &context)
             .map_err(|refusal| refusal.to_string())?;
         // Check this before the next template, so the first refusal in the
@@ -1618,7 +1626,8 @@ fn scroll_repository_result(index: usize) {
 ///
 /// Clone uses `Create`, since its source only seeds a new session. Replace
 /// seeds the source folder, holds its host and addresses the replace endpoint.
-/// Its source and opening state describe the operation, not editable fields.
+/// Restart additionally holds kind, agent and folder, and compares edits with
+/// the opening launch. These source facts are operation data, not draft fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum LauncherMode {
     Create,
@@ -1626,26 +1635,36 @@ pub(super) enum LauncherMode {
         source: String,
         opened: (SessionStatus, usize),
     },
+    Restart {
+        /// The existing session; restart never creates a replacement identity.
+        source: String,
+        /// Stored-command semantics, with historical permission omissions kept.
+        baseline: api::RestartEdit,
+        /// Exact admission snapshot, including fields absent from the baseline.
+        /// Out-of-line storage keeps the small Create/Replace modes compact.
+        opened_launch: Option<Box<crate::SessionLaunch>>,
+        conversation_required: bool,
+    },
 }
 
 impl LauncherMode {
-    /// The session the replace endpoint addresses, absent for a create.
+    /// The session the replace endpoint addresses, absent for create or restart.
     ///
     /// Retry bindings carry this value, so a create and a replace with
     /// identical launch settings still mint different retry keys.
     pub(super) fn replace_source(&self) -> Option<&str> {
         match self {
-            Self::Create => None,
+            Self::Create | Self::Restart { .. } => None,
             Self::Replace { source, .. } => Some(source),
         }
     }
 
     /// Whether templates must preserve the source host instead of setting one.
-    /// Clone can choose another host; Replace always addresses its own source.
+    /// Clone can choose another host; Replace and Restart address their source.
     pub(super) fn holds_host(&self) -> bool {
         match self {
             Self::Create => false,
-            Self::Replace { .. } => true,
+            Self::Replace { .. } | Self::Restart { .. } => true,
         }
     }
 
@@ -1654,7 +1673,7 @@ impl LauncherMode {
     fn seeds_source_folder(&self) -> bool {
         match self {
             Self::Create => false,
-            Self::Replace { .. } => true,
+            Self::Replace { .. } | Self::Restart { .. } => true,
         }
     }
 
@@ -1666,9 +1685,14 @@ impl LauncherMode {
     /// read must not quietly return them to an older opening state.
     pub(super) fn source_opened(&self) -> Option<&(SessionStatus, usize)> {
         match self {
-            Self::Create => None,
+            Self::Create | Self::Restart { .. } => None,
             Self::Replace { opened, .. } => Some(opened),
         }
+    }
+
+    /// Restart retains its existing identity and all source placement fields.
+    pub(super) fn is_restart(&self) -> bool {
+        matches!(self, Self::Restart { .. })
     }
 }
 
@@ -1701,7 +1725,8 @@ pub(super) struct CreatePrefill {
     /// which case the form leaves the selector alone and falls back to its
     /// ordinary default precedence (`effective_create_host`) — the same
     /// degradation every other host-carrying field on `Session` already
-    /// accepts from such a peer.
+    /// accepts from such a peer. Restart is stricter: an absent or
+    /// unconfirmable source host refuses rather than acquiring that default.
     pub(super) host: Option<HostId>,
     /// The install identity the row reported alongside `host`, straight off
     /// `Session::host_identity` — see that field's own doc for the double-
@@ -1747,7 +1772,7 @@ pub(super) struct CreatePrefill {
 ///
 /// Always starts in [`LauncherMode::Create`]: a clone's source seeds the
 /// draft but does not change the operation. The caller marks Replace with
-/// afterward, since only it knows which action opened the launcher.
+/// or Restart with afterward, since only it knows which action opened it.
 pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill {
     CreatePrefill {
         generation,
@@ -1792,6 +1817,10 @@ fn harness_value(harness: LaunchHarness) -> String {
 /// references as its description while the warning has text.
 const REPLACE_WARNING_ID: &str = "launch-composer-replace-warning";
 
+/// The displayed stop-first consequence is part of restart consent, including
+/// keyboard submits and YOLO answers drawn while that consequence is visible.
+const RESTART_WARNING_ID: &str = "launch-composer-restart-warning";
+
 /// What a "replace with" launcher warns about its source, and the precondition
 /// its replace sends, from the source state one render shows.
 ///
@@ -1825,6 +1854,33 @@ pub(super) fn mark_replace_with(prefill: &mut CreatePrefill, session: &Session) 
         source: session.id.raw().to_owned(),
         opened: (session.status.clone(), session.tabs.len()),
     };
+}
+
+/// Seed a restart from stored bytes rather than applying new-launch defaults.
+/// The source remains a plain-folder destination even for a managed checkout.
+/// A source without an editable launch refuses; callers must not open the
+/// still-create prefill as a fallback for an existing-session operation.
+pub(super) fn mark_restart_with(prefill: &mut CreatePrefill, session: &Session) -> bool {
+    if let Some(baseline) = api::RestartEdit::baseline(session) {
+        let conversation_required = matches!(baseline, api::RestartEdit::Agent(_))
+            && session.restart_offer != crate::RestartOffer::Resume;
+        if let api::RestartEdit::Command(command) = &baseline {
+            prefill.invocation = command.command.clone();
+        }
+        prefill.launch = match &baseline {
+            api::RestartEdit::Agent(selection) => Some(selection.clone()),
+            _ => None,
+        };
+        prefill.mode = LauncherMode::Restart {
+            source: session.id.raw().to_owned(),
+            baseline,
+            opened_launch: session.launch.clone().map(Box::new),
+            conversation_required,
+        };
+        true
+    } else {
+        false
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -2376,6 +2432,18 @@ fn effective_title(
 /// generation (`CloneHostState::UserTookOver`). The derived target may catch
 /// up one render after `chosen_host`, but it gates host identity and
 /// idempotency only; it does not clear the launch draft.
+///
+/// ## Restart's held source
+///
+/// Restart uses those same editors, search, templates and confirmation, with
+/// source placement and launch kind held. Stored permission omissions remain
+/// own-setting omissions, rather than acquiring create defaults. Reset restores
+/// that stored baseline and clears the transient conversation. Folder advice
+/// checks only the confirmed source installation; neither history updates nor
+/// a withdrawn host binding may move the held folder to another destination.
+/// Submission uses the existing restart endpoint without a retry key. Its
+/// confirmation token is local draft identity only, and every actual POST
+/// result reaches the view's reattachment hooks even when this form stays open.
 #[component]
 pub(super) fn CreateSessionForm(
     hosts: Vec<HostOption>,
@@ -2461,6 +2529,10 @@ pub(super) fn CreateSessionForm(
     /// from this one prop in the same render, so the request never authorizes
     /// more than the text on screen said.
     replace_source_state: Option<(SessionStatus, usize)>,
+    /// Restart keeps terminal ownership in the originating keyed session view.
+    #[props(default)]
+    restart_bridge: Option<crate::list::RestartBridge>,
+    #[props(default)] on_restarted: EventHandler<()>,
     /// Discard this draft without creating a session.
     on_cancel: EventHandler<()>,
     on_created: EventHandler<CreatedSession>,
@@ -2748,7 +2820,67 @@ pub(super) fn CreateSessionForm(
     let host_fixed = prefill
         .as_ref()
         .is_some_and(|prefill| prefill.mode.holds_host());
-    let selected = effective_create_host(&hosts, chosen_host(), open_host.as_ref());
+    let restart_mode = prefill
+        .as_ref()
+        .is_some_and(|prefill| prefill.mode.is_restart());
+    let restart_baseline = prefill.as_ref().and_then(|prefill| match &prefill.mode {
+        LauncherMode::Restart { baseline, .. } => Some(baseline.clone()),
+        _ => None,
+    });
+    let conversation_required = prefill.as_ref().is_some_and(|prefill| {
+        matches!(
+            prefill.mode,
+            LauncherMode::Restart {
+                conversation_required: true,
+                ..
+            }
+        )
+    });
+    let restart_source = restart_bridge.and_then(|bridge| {
+        bridge
+            .current
+            .try_read()
+            .ok()
+            .map(|session| session.clone())
+    });
+    let restart_stop_first = restart_source
+        .as_ref()
+        .is_some_and(|source| source.status == SessionStatus::Running);
+    let restart_agent_baseline = restart_baseline
+        .as_ref()
+        .and_then(|baseline| match baseline {
+            api::RestartEdit::Agent(selection) => Some(selection.clone()),
+            _ => None,
+        });
+    let held_agent_label = prefill
+        .as_ref()
+        .and_then(|prefill| {
+            prefill
+                .launch
+                .as_ref()
+                .map(|launch| launch.harness)
+                .or_else(|| prefill.command.as_ref().and_then(|command| command.agent))
+        })
+        .map(crate::launch_composer::harness_label)
+        .unwrap_or("unknown agent");
+    let selected = if restart_mode {
+        prefill.as_ref().and_then(|prefill| prefill.host)
+    } else {
+        effective_create_host(&hosts, chosen_host(), open_host.as_ref())
+    };
+    let restart_host_confirmed = !restart_mode
+        || prefill.as_ref().is_some_and(|prefill| {
+            prefill.host.is_some_and(|id| {
+                matching_host_option(
+                    &OpenHost {
+                        id,
+                        identity: prefill.host_identity.clone(),
+                    },
+                    &hosts,
+                )
+                .is_some()
+            })
+        });
     let selected_folder = open_host
         .as_ref()
         .zip(open_cwd.as_ref())
@@ -2836,6 +2968,13 @@ pub(super) fn CreateSessionForm(
                 .find(|host| host.id == id && host.phase.is_none())
         })
         .filter(|_| !destination_draft().is_managed())
+        .filter(|_| {
+            restart_host_confirmed
+                && (!restart_mode
+                    || prefill
+                        .as_ref()
+                        .is_some_and(|prefill| prefill.cwd == draft.snapshot().submitted_cwd()))
+        })
         .and_then(|host| {
             let _ = (cwd(), cwd_edited());
             Some((
@@ -3075,7 +3214,7 @@ pub(super) fn CreateSessionForm(
     // two agree, so a transient target is never taken for a host choice and a
     // permission Undo's handoff waits for the host it restored.
     let target = create_target();
-    if !busy && target == destination_now {
+    if !restart_mode && !busy && target == destination_now {
         let prefill_generation = *prefill_applied.read();
         let (next, seed) = folder_default_step(
             folder_default.peek().clone(),
@@ -3110,7 +3249,7 @@ pub(super) fn CreateSessionForm(
     }
     // Whether Launch must wait for the host's default folder: only while one is
     // pending for a folder destination nobody chose.
-    let folder_default_waiting = folder_default.read().pending && {
+    let folder_default_waiting = !restart_mode && folder_default.read().pending && {
         let snapshot = draft.snapshot();
         !snapshot.folder_is_explicit()
             && matches!(snapshot.destination(), DestinationDraft::Existing { .. })
@@ -3206,6 +3345,33 @@ pub(super) fn CreateSessionForm(
     let cursor_launch =
         launch_tab() == LaunchTab::Agent && structured_harness() == Some(LaunchHarness::Cursor);
     let displayed_invocation = invocation.read().clone();
+    let command_snapshot = draft.snapshot();
+    let restart_command = match command_snapshot.restart_edit() {
+        Some(api::RestartEdit::Command(command)) if restart_mode => Some(command),
+        _ => None,
+    };
+    let restart_command_problem = restart_command
+        .as_ref()
+        .and_then(|command| command.validate().err());
+    let (command_changed, resume_changed, yolo_changed) =
+        match (&restart_command, &restart_baseline) {
+            (Some(command), Some(api::RestartEdit::Command(stored))) => (
+                command.command != stored.command,
+                command.resume != stored.resume,
+                command.yolo != stored.yolo,
+            ),
+            _ => (false, false, false),
+        };
+    let restart_command_readonly = restart_mode
+        && !command_snapshot.invocation_edited()
+        && command_snapshot
+            .invocation_raw_seed()
+            .is_some_and(|raw| raw.chars().any(farhelm_proto::text::is_presentation_unsafe));
+    let restart_resume_readonly = restart_mode
+        && !command_snapshot.command_resume_edited()
+        && command_snapshot
+            .command_resume_raw_seed()
+            .is_some_and(|raw| raw.chars().any(farhelm_proto::text::is_presentation_unsafe));
 
     let preview_agent_now = move || {
         format!(
@@ -3392,15 +3558,32 @@ pub(super) fn CreateSessionForm(
         .and_then(|id| hosts.iter().find(|host| host.id == id))
         .map(HostOption::label)
         .unwrap_or_else(|| "unavailable host".to_string());
+    // Confirmation owns raw peer text and escapes it at its own rendering
+    // boundary. Keep that snapshot separate from this form's display label.
+    let host_label_for_restart = if restart_mode {
+        restart_source
+            .as_ref()
+            .and_then(|source| source.host_name.as_ref())
+            .map(|name| name.raw().to_owned())
+            .unwrap_or(selected_host_label)
+    } else {
+        selected_host_label
+    };
+    let selected_host_label = if restart_mode {
+        display_peer(&host_label_for_restart)
+    } else {
+        host_label_for_restart.clone()
+    };
     // The host selector still shows unavailable destinations so a user can
     // see what changed, but an agent choice must not make Launch look ready
     // when the helm already knows that destination cannot accept it.
-    let selected_host_available = selected.is_some_and(|id| {
-        hosts
-            .iter()
-            .find(|host| host.id == id)
-            .is_some_and(|host| host.phase.is_none())
-    });
+    let selected_host_available = restart_host_confirmed
+        && selected.is_some_and(|id| {
+            hosts
+                .iter()
+                .find(|host| host.id == id)
+                .is_some_and(|host| host.phase.is_none())
+        });
     // A stored structured snapshot is provenance, rather than a promise that
     // a later release still supports every combination it named. Keep its
     // model and effort visible for clone, but refuse to turn an incompatible
@@ -3432,6 +3615,8 @@ pub(super) fn CreateSessionForm(
     let launch_harness = if *launch_tab.read() == LaunchTab::Agent {
         structured_harness()
             .map(|harness| crate::launch_composer::harness_label(harness).to_string())
+    } else if restart_mode {
+        command_agent().map(|harness| crate::launch_composer::harness_label(harness).to_string())
     } else {
         None
     };
@@ -3441,7 +3626,17 @@ pub(super) fn CreateSessionForm(
     // button itself rather than only in a menu item clicked a moment
     // earlier. `launch-composer-launch-context` beside it is unchanged
     // either way — the host/folder summary is equally true of both verbs.
-    let submit_verb = if is_replace_with { "replace" } else { "launch" };
+    let submit_verb = if restart_mode {
+        if restart_stop_first {
+            "stop and restart"
+        } else {
+            "restart"
+        }
+    } else if is_replace_with {
+        "replace"
+    } else {
+        "launch"
+    };
     // A recent setup's accessible name replaces its visible content, hint
     // included, so in Replace with the name carries the verb itself.
     let recent_name_prefix = if is_replace_with { "replace: " } else { "" };
@@ -3545,7 +3740,7 @@ pub(super) fn CreateSessionForm(
         || retry_binding.is_some()
         || current_preview.is_some();
     let command_requires_text = retry_binding.is_none();
-    let launch_refusal = LaunchPrerequisites {
+    let launch_prerequisites = LaunchPrerequisites {
         busy,
         saving_template: template_panel().is_some() || template_saving(),
         host_available: selected_host_available,
@@ -3564,8 +3759,26 @@ pub(super) fn CreateSessionForm(
             && structured_choice_error.is_some(),
         invalid_wrapper: launch_tab() == LaunchTab::Agent
             && wrapper_words(&structured_wrapper()).is_err(),
-    }
-    .refusal();
+    };
+    let launch_refusal = if restart_mode && !restart_host_confirmed {
+        Some("the source host installation cannot be confirmed; close and reopen restart with")
+    } else if restart_mode && !selected_host_available {
+        Some("the source host is unavailable; wait for it to reconnect before restarting")
+    } else {
+        launch_prerequisites.refusal()
+    }.or_else(|| {
+        if !restart_mode { return None; }
+        let current = draft.snapshot();
+        if model_open() && !model_draft().is_empty() || model_draft_error().is_some() {
+            Some("choose a model before restarting")
+        } else if conversation_required && current.conversation().is_empty() {
+            Some("enter a conversation to restart")
+        } else if current.restart_edit().as_ref() == restart_baseline.as_ref() {
+            Some("change a setting before restarting")
+        } else if matches!(current.restart_edit(), Some(api::RestartEdit::Command(ref command)) if command.validate().is_err()) {
+            Some("correct the command before restarting")
+        } else { None }
+    });
     let displayed_preview = retry_binding
         .as_ref()
         .and_then(|binding| {
@@ -4559,13 +4772,23 @@ pub(super) fn CreateSessionForm(
     // submit or Enter passes this render's, a guarded or YOLO answer its own
     // render's. Only the quick-launch auto-submit still goes through the
     // browser (`resubmit_quick_composer`).
-    let submit_composer = Callback::<crate::DeleteGuard>::new({
+    // The destructive consent belongs to the render that drew the action,
+    // including deferred YOLO answers. It is never widened after an await.
+    let submit_consent = (replace_guard, restart_stop_first, opening_generation());
+    let submit_composer = Callback::<(crate::DeleteGuard, bool, u64)>::new({
         let hosts = hosts.clone();
         let open_host = open_host.clone();
         let prefill_for_submit = prefill_for_submit.clone();
         let base = base.clone();
         let catalog_for_submit = catalog_for_submit.clone();
-        move |replace_guard: crate::DeleteGuard| {
+        move |(replace_guard, restart_stop_first, rendered_opening): (
+            crate::DeleteGuard,
+            bool,
+            u64,
+        )| {
+            if rendered_opening != *opening_generation.peek() {
+                return;
+            }
             // Any ordinary submit supersedes a guarded answer still waiting
             // for preview, including a submit refused before a request exists.
             guarded_submit_pending.set(None);
@@ -4677,8 +4900,15 @@ pub(super) fn CreateSessionForm(
             // captured host would send the create to the PREVIOUS machine
             // while the selector on screen names another.
             let target_now = create_target.peek().clone();
-            let selected_now =
-                effective_create_host(&hosts, chosen_host.peek().to_owned(), open_host.as_ref());
+            let selected_now = if restart_mode {
+                prefill_for_submit.as_ref().and_then(|prefill| prefill.host)
+            } else {
+                effective_create_host(&hosts, chosen_host.peek().to_owned(), open_host.as_ref())
+            };
+            if !restart_host_confirmed {
+                error.set(Some("restart keeps the source session's host, but its installation cannot be confirmed; close and reopen restart with once that host is back".into()));
+                return;
+            }
             if !remembered_destination_matches(
                 remembered_destination.peek().as_ref(),
                 live_destination.peek().as_ref(),
@@ -4687,7 +4917,7 @@ pub(super) fn CreateSessionForm(
             }
             // A folder nobody chose must be this host's default before it is
             // sent, or a host switch would launch the previous host's folder.
-            if folder_default.peek().pending {
+            if !restart_mode && folder_default.peek().pending {
                 let snapshot = draft.snapshot();
                 if !snapshot.folder_is_explicit()
                     && matches!(snapshot.destination(), DestinationDraft::Existing { .. })
@@ -4699,7 +4929,7 @@ pub(super) fn CreateSessionForm(
             // the request can bind its idempotency and connection claims.
             if !target_matches_selection(selected_now, &hosts, target_now.as_ref()) {
                 error.set(Some(
-                    "the target host changed while this create was being submitted, so nothing was sent — check the agent and press create again"
+                    "the target host changed while preparing this request, so nothing was sent — check the target and try again"
                         .to_string(),
                 ));
                 drop(op_guard);
@@ -4776,10 +5006,9 @@ pub(super) fn CreateSessionForm(
                 checkout: None,
             }) else {
                 error.set(Some(if hosts_loaded {
-                    "this helm reported no hosts at all, so there is nothing to create on"
-                        .to_string()
+                    "this helm reported no hosts at all, so this request cannot be sent".to_string()
                 } else {
-                    "the host list has not loaded yet, so this create was not sent — it \
+                    "the host list has not loaded yet, so this request was not sent — it \
                          would have gone to whichever host the helm picked rather than one \
                          you chose"
                         .to_string()
@@ -4819,6 +5048,157 @@ pub(super) fn CreateSessionForm(
             if crate::launch_composer::scoped_query(&composer_search()).0
                 == crate::launch_composer::SearchScope::Github
             {
+                return;
+            }
+            if let Some(CreatePrefill {
+                mode:
+                    LauncherMode::Restart {
+                        source,
+                        baseline,
+                        opened_launch,
+                        conversation_required,
+                    },
+                ..
+            }) = prefill_for_submit.as_ref()
+            {
+                let edit = current
+                    .restart_edit()
+                    .expect("restart has a complete launch");
+                if &edit == baseline {
+                    return;
+                }
+                if *conversation_required && current.conversation().is_empty() {
+                    error.set(Some("enter a conversation to restart".into()));
+                    return;
+                }
+                if model_open() && !model_draft().is_empty() || model_draft_error().is_some() {
+                    error.set(Some("choose a model before restarting".into()));
+                    return;
+                }
+                match &edit {
+                    api::RestartEdit::Agent(selection)
+                    | api::RestartEdit::NamedAgent(selection, _) => {
+                        if !crate::launch_composer::selection_fits_catalog(
+                            selection,
+                            catalog_for_submit.as_deref(),
+                        ) {
+                            return;
+                        }
+                    }
+                    api::RestartEdit::Command(command) => {
+                        if let Err(reason) = command.validate() {
+                            error.set(Some(reason));
+                            return;
+                        }
+                    }
+                }
+                let Some(bridge) = restart_bridge else {
+                    return;
+                };
+                let source = source.clone();
+                let opened_launch = opened_launch.clone();
+                let base = base.clone();
+                let bound = binding.clone();
+                let host_name = host_label_for_restart.clone();
+                // The key only names the shared confirmation's draft. Restart
+                // sends no retry key and never enters ambiguous-create recovery.
+                document::eval(
+                    "(() => { const dialog = document.querySelector('.create-session-form'); const submit = dialog?.querySelector('.create-session-submit'); (submit && !submit.disabled ? submit : dialog)?.focus({preventScroll:true}); })()",
+                );
+                // An admitted restart is progress. The shared busy refusal
+                // must not become an announced error while its POST or host
+                // preference write is still running.
+                launch_attempted.set(false);
+                error.set(None);
+                spawn(async move {
+                    let held = intent_key.peek().clone().filter(|(_, held)| held == &bound);
+                    let key = match held {
+                        Some((key, _)) => key,
+                        None => match mint_intent_key().await {
+                            Ok(key) => {
+                                intent_key.set(Some((key.clone(), bound.clone())));
+                                key
+                            }
+                            Err(reason) => {
+                                launch_attempted.set(true);
+                                error.set(Some(reason));
+                                return;
+                            }
+                        },
+                    };
+                    let allow_yolo = yolo_confirmed_key.peek().as_deref() == Some(key.as_str());
+                    if let Some(answered) =
+                        stop_asking_for.filter(|answer| answer.key().refused_key == key)
+                        && allow_yolo
+                        && let Err(reason) =
+                            crate::yolo_confirm::stop_asking(&base, bound.host, &host_name).await
+                    {
+                        yolo_confirmed_key.set(None);
+                        yolo_error.set(Some(reason));
+                        open_yolo_question(key, answered.key().ask.clone());
+                        return;
+                    }
+                    if rendered_opening != *opening_generation.peek() {
+                        return;
+                    }
+                    if create_target.peek().as_ref() != target_now.as_ref() {
+                        launch_attempted.set(true);
+                        error.set(Some("the source host changed while preparing restart; close and reopen restart with".into()));
+                        return;
+                    }
+                    let same_launch = bridge
+                        .current
+                        .try_read()
+                        .is_ok_and(|shown| shown.launch.as_ref() == opened_launch.as_deref());
+                    if !same_launch {
+                        launch_attempted.set(true);
+                        error.set(Some(
+                            "this session's launch settings changed; close and reopen restart with"
+                                .into(),
+                        ));
+                        return;
+                    }
+                    if let Err(reason) = bridge.begin(edit.clone()) {
+                        launch_attempted.set(true);
+                        error.set(Some(reason));
+                        return;
+                    }
+                    let result = api::restart_session(
+                        &base,
+                        &source,
+                        restart_stop_first,
+                        Some(&edit),
+                        allow_yolo,
+                    )
+                    .await;
+                    bridge.finish(result.is_ok());
+                    match result {
+                        Ok(_) => {
+                            drop(op_guard);
+                            COMPOSER_DIALOG.release();
+                            on_restarted.call(());
+                        }
+                        Err(refusal) if refusal.outcome.requires_yolo() => {
+                            open_yolo_question(
+                                key,
+                                crate::yolo_confirm::YoloAsk {
+                                    host: Some(bound.host),
+                                    host_name,
+                                    reason: crate::yolo_confirm::YoloReason::of_launch(
+                                        match &bound.agent {
+                                            LaunchIntent::Structured(selection) => Some(selection),
+                                            LaunchIntent::Command(_) => None,
+                                        },
+                                    ),
+                                },
+                            );
+                        }
+                        Err(refusal) => {
+                            launch_attempted.set(true);
+                            error.set(Some(refusal.text));
+                        }
+                    }
+                });
                 return;
             }
             let fresh_draft_snapshot = move || {
@@ -5400,7 +5780,7 @@ pub(super) fn CreateSessionForm(
     // `submit_composer` reads the live draft and host, and refuses a checkout
     // preview the choice made stale (`preview_revision`, preview agent); and
     // the form is `novalidate`, so the browser validated nothing on the way.
-    let launch_from_choice = EventHandler::new(move |_| submit_composer.call(replace_guard));
+    let launch_from_choice = EventHandler::new(move |_| submit_composer.call(submit_consent));
     let host_select = rsx! {
         super::host_picker::HostPicker {
             hosts: hosts.clone(), selected, busy,
@@ -5439,7 +5819,7 @@ pub(super) fn CreateSessionForm(
                     .is_some_and(|live| authority.accepts(live, &preview)) =>
             {
                 guarded_submit_pending.set(None);
-                submit_composer.call(answered_guard);
+                submit_composer.call((answered_guard, false, pending.opening));
             }
             PreviewState::Failed { message, .. } => {
                 guarded_submit_pending.set(None);
@@ -5468,7 +5848,9 @@ pub(super) fn CreateSessionForm(
                 // can be one turn stale immediately after submit, when
                 // unmounting would cancel the create future before it can
                 // reconcile the reply or run its success callback.
-                if !quick_launch_hidden() && !ops.busy_now() && !template_saving() {
+                // Restart's editor keeps its draft on backdrop clicks. The
+                // same modal trap recovers sequential focus from the backdrop.
+                if !restart_mode && !quick_launch_hidden() && !ops.busy_now() && !template_saving() {
                     on_cancel.call(());
                 }
             },
@@ -5477,7 +5859,7 @@ pub(super) fn CreateSessionForm(
             root: DialogRoot::Form,
             focus: DialogFocus {
                 initial_focus: InitialFocus::Surface {
-                    target: composer_surface_target(),
+                    target: if restart_mode { FocusTarget::new(".launch-composer-cancel", None, false) } else { composer_surface_target() },
                     // Sample on mount, after trap setup is submitted. Hidden
                     // preparation isolates without taking a field's focus.
                     hidden_now: composer_hidden_now,
@@ -5489,6 +5871,7 @@ pub(super) fn CreateSessionForm(
                 gap: true,
             },
             class: "create-session-form",
+            "data-launcher-mode": if restart_mode { "restart" } else if is_replace_with { "replace" } else { "create" },
             "data-permission-escalation": permission_escalation.read().as_ref().map(|notice| if notice.generation % 2 == 0 { "even" } else { "odd" }),
             tabindex: "-1",
             hidden: quick_launch_hidden(),
@@ -5514,7 +5897,7 @@ pub(super) fn CreateSessionForm(
             // Submit and the helm keep their ordinary validation authority.
             novalidate: true,
             aria_modal: "true",
-            aria_label: "launch a session",
+            aria_label: if restart_mode { "restart a session" } else { "launch a session" },
             onclick: move |evt: MouseEvent| {
                 // A click that leaves the search surface must make its
                 // hidden results ineligible before another control handles
@@ -5542,7 +5925,7 @@ pub(super) fn CreateSessionForm(
             },
             onsubmit: move |evt: FormEvent| {
                 evt.prevent_default();
-                submit_composer.call(replace_guard);
+                submit_composer.call(submit_consent);
             },
             if partial_template_hint() && pending_initial_templates.read().is_empty() {
                 div { class: "partial-template-banner", role: "alert",
@@ -5620,7 +6003,7 @@ pub(super) fn CreateSessionForm(
                 }
             } else {
             div { class: "launch-composer-topbar",
-                span { class: "launch-composer-section-label", "new session" }
+                span { class: "launch-composer-section-label", if restart_mode { "restart session" } else { "new session" } }
             }
             // Launch leads because reaching it was the maintainer's complaint:
             // it now says exactly which harness and destination it will use.
@@ -5631,8 +6014,11 @@ pub(super) fn CreateSessionForm(
                 button {
                     r#type: "submit",
                     class: "btn btn-primary create-session-submit",
-                    "data-tooltip": launch_refusal.unwrap_or(if is_replace_with { "replace: start this session, then delete the old one and its state" } else { "launch: start the session" }),
-                    aria_describedby: replace_warning.as_ref().map(|_| REPLACE_WARNING_ID),
+                    "data-tooltip": launch_refusal.unwrap_or(if restart_mode {
+                        if restart_stop_first { "stop and restart: stop the working agent, then relaunch this session with these settings" }
+                        else { "restart: relaunch this session with these settings" }
+                    } else if is_replace_with { "replace: start this session, then delete the old one and its state" } else { "launch: start the session" }),
+                    aria_describedby: if restart_mode && restart_stop_first { Some(RESTART_WARNING_ID) } else { replace_warning.as_ref().map(|_| REPLACE_WARNING_ID) },
                     // Keep refused attempts reachable: native disabled would
                     // swallow both a click and implicit Enter before submit can
                     // say why. The operation guard still prevents another create.
@@ -5668,7 +6054,7 @@ pub(super) fn CreateSessionForm(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral launch-composer-reset",
-                        "data-tooltip": "reset choices: clear the agent, model and effort; remember permissions and the next agent's wrapper prefix",
+                        "data-tooltip": if restart_mode { "reset choices: restore the session's stored settings and clear the conversation selector" } else { "reset choices: clear the agent, model and effort; remember permissions and the next agent's wrapper prefix" },
                         disabled: busy,
                         onclick: move |_| {
                             draft.reset_choices(preferences, choice_targets, composer_reset_reason,
@@ -5724,7 +6110,7 @@ pub(super) fn CreateSessionForm(
                         span { class: "launch-composer-refusal-icon", aria_hidden: "true", "⚠" }
                         PeerLine {
                             class: "launch-composer-refusal-text".to_string(),
-                            parts: vec![DetailPart::text("Not launched. "), DetailPart::peer(err)],
+                            parts: vec![DetailPart::text(if restart_mode { "Restart error. " } else { "Not launched. " }), DetailPart::peer(err)],
                         }
                     }
                 } else {
@@ -5748,6 +6134,9 @@ pub(super) fn CreateSessionForm(
             // Polite live region: the warning can appear or change while the
             // launcher stays open, and the replace button names it as its
             // description, since pressing that button is the confirmation.
+            if restart_mode && restart_stop_first {
+                p { id: RESTART_WARNING_ID, class: "launch-composer-restart-warning", aria_live: "polite", "The agent is working. This action stops it before restarting." }
+            }
             if is_replace_with {
                 div { id: REPLACE_WARNING_ID, class: "launch-composer-replace-warning", aria_live: "polite",
                     if let Some(warning) = &replace_warning {
@@ -5793,7 +6182,8 @@ pub(super) fn CreateSessionForm(
                         // question sits in, and the Replace warning above it.
                         // The answer binds to both (`GuardedSubmitStamp`).
                         let rendered_opening = *opening_generation.peek();
-                        question.key().offers_guarded(selection).then(|| Callback::new(move |_| {
+                        (question.key().offers_guarded(selection) && draft.snapshot().restart_guarded_changes()).then(|| Callback::new(move |_| {
+                            if !draft.snapshot().restart_guarded_changes() { return; }
                             let held = intent_key.peek().clone();
                             let current = held.as_ref()
                                 .filter(|(key, _)| key == &question.key().refused_key)
@@ -5822,7 +6212,7 @@ pub(super) fn CreateSessionForm(
                                     )));
                                 }
                             } else {
-                                submit_composer.call(replace_guard);
+                                submit_composer.call(submit_consent);
                             }
                         }))
                     },
@@ -5860,7 +6250,7 @@ pub(super) fn CreateSessionForm(
                                 &mut yolo_confirmed_key.write(),
                                 &mut yolo_stop_asking.write(),
                             ) {
-                                submit_composer.call(replace_guard);
+                                submit_composer.call(submit_consent);
                             }
                         }
                     },
@@ -5877,7 +6267,7 @@ pub(super) fn CreateSessionForm(
                                 &mut yolo_confirmed_key.write(),
                                 &mut yolo_stop_asking.write(),
                             ) {
-                                submit_composer.call(replace_guard);
+                                submit_composer.call(submit_consent);
                             }
                         }
                     },
@@ -5885,6 +6275,7 @@ pub(super) fn CreateSessionForm(
                         // Only this opening: a cancel drawn for an earlier
                         // question leaves a later one (and its error) alone.
                         if yolo_refusal.take(&question).is_some() {
+                            if restart_mode { document::eval("document.querySelector('.create-session-form .launch-composer-cancel')?.focus({preventScroll:true})"); }
                             yolo_error.set(None);
                         }
                     },
@@ -5946,6 +6337,7 @@ pub(super) fn CreateSessionForm(
                         // catalog or history renders.
                         onmounted: move |element| {
                             let input = element.data();
+                            if restart_mode { return; }
                             spawn(async move {
                                 let _ = input.set_focus(true).await;
                             });
@@ -6234,7 +6626,9 @@ pub(super) fn CreateSessionForm(
                 // this point reserves space, so a later match grows the
                 // layout rather than revealing a band that was secretly
                 // already there.
-                if !recent_launches.is_empty() {
+                // A direct recent owns destination and agent fields. Restart
+                // holds those controls; search still explains a rejected recent.
+                if !restart_mode && !recent_launches.is_empty() {
                     div { class: "launch-composer-recents",
                             span { class: "launch-composer-section-label", "recent setups" }
                             div { class: "launch-composer-recent-slots",
@@ -6295,7 +6689,7 @@ pub(super) fn CreateSessionForm(
                                             // carries this render's precondition;
                                             // see `launch_from_choice` for why it
                                             // submits directly.
-                                            submit_composer.call(replace_guard);
+                                            submit_composer.call(submit_consent);
                                         }
                                     },
                                     // The row is a grid so that harness, folder,
@@ -6399,6 +6793,14 @@ pub(super) fn CreateSessionForm(
                 }
             }
             div { class: "launch-composer-columns",
+                    if restart_mode {
+                        div { class: "launch-composer-held-context",
+                            p { "agent type (held): " span { class: "peer-value", dir: "ltr", "{held_agent_label}" } }
+                            p { "host (held): " span { class: "peer-value", dir: "ltr", "{selected_host_label}" } }
+                            p { "folder (held): " span { class: "peer-value", dir: "ltr", "{summary_folder}" } }
+                            if let Some(notice) = folder_notice() { PeerLine { class: "launch-composer-folder-warning".to_string(), parts: notice } }
+                        }
+                    } else {
                     div { class: "launch-composer-column-destination",
                         // A destination is a host and its folder or managed checkout.
                         // Keep that type choice, host reconciliation and the active
@@ -6740,6 +7142,7 @@ pub(super) fn CreateSessionForm(
                             }
                         }
                     }
+                    }
                     div { class: "launch-composer-column-choices",
                         // One tab per launch kind. Switching only changes
                         // which draft is shown and submitted; each tab keeps
@@ -6748,6 +7151,7 @@ pub(super) fn CreateSessionForm(
                         // selected tab), and the arrow, Home and End keys
                         // select and focus the other tab, as screen readers
                         // announcing "tab, 1 of 2" lead people to expect.
+                        if !restart_mode {
                         div { class: "launch-kind-tabs", role: "tablist", "aria-label": "launch kind",
                             for (tab, label) in [(LaunchTab::Agent, "agent"), (LaunchTab::Command, "command")] {
                                 button {
@@ -6788,7 +7192,8 @@ pub(super) fn CreateSessionForm(
                                 }
                             }
                         }
-                        if launch_tab() == LaunchTab::Agent {
+                        }
+                        if !restart_mode && launch_tab() == LaunchTab::Agent {
                         div { class: "launch-composer-choice launch-composer-harness-choice",
                             span { class: "launch-composer-section-label", "harness" }
                             div { class: "launch-composer-options",
@@ -6839,9 +7244,10 @@ pub(super) fn CreateSessionForm(
                             // and focus completion after those operations finish.
                             LaunchControls {
                                 prompt: prompt().unwrap_or_default(),
-                                on_prompt: Some(EventHandler::new(move |value: String| {
-                                    draft.edit_prompt(value);
-                                })),
+                                on_prompt: (!restart_mode).then(|| EventHandler::new(move |value: String| { draft.edit_prompt(value); })),
+                                baseline: restart_agent_baseline.clone(),
+                                fixed_harness: restart_mode,
+                                conversation_required,
                                 conversation: conversation(),
                                 on_conversation: Some(EventHandler::new(move |value| {
                                     draft.edit_conversation(value);
@@ -6959,13 +7365,19 @@ pub(super) fn CreateSessionForm(
                     autocapitalize: "none",
                     spellcheck: "false",
                     dir: "ltr",
-                    value: "{displayed_invocation}",
+                    value: "{displayed_invocation}", readonly: restart_command_readonly,
                     disabled: busy,
                     oninput: move |evt| {
                         draft.edit_invocation(evt.value());
                     },
                 }
             }
+            if restart_command_readonly {
+                button { r#type: "button", class: "btn btn-neutral", disabled: busy,
+                    onclick: move |_| { draft.edit_invocation(String::new()); }, "clear agent command" }
+            }
+            if command_changed { p { class: "launch-composer-changed-marker", "● changed" } }
+            if let Some(problem) = &restart_command_problem { p { class: "launch-command-error", role: "alert", "{problem}" } }
             // The YOLO assertion: a required choice with no default
             // (SPEC.md, Creation). Farhelm believes it and never reads the
             // command to check it.
@@ -7000,6 +7412,8 @@ pub(super) fn CreateSessionForm(
                     "no"
                 }
             }
+            if yolo_changed { p { class: "launch-composer-changed-marker", "● changed" } }
+            if !restart_mode {
             label {
                 "agent type"
                 select {
@@ -7025,10 +7439,12 @@ pub(super) fn CreateSessionForm(
                     }
                 }
             }
+            }
             if command_agent().is_some() {
                 p { class: "launch-command-hint",
                     "Put {{farhelm_args}} in the command where Farhelm adds its own arguments."
                 }
+                if !restart_mode {
                 label {
                     "data-tooltip": "resume: give the command a way to pick its conversation back up after a restart",
                     input {
@@ -7043,6 +7459,7 @@ pub(super) fn CreateSessionForm(
                     }
                     "resume"
                 }
+                }
                 if command_resume_on() {
                     label {
                         "resume command"
@@ -7054,13 +7471,18 @@ pub(super) fn CreateSessionForm(
                             autocapitalize: "none",
                             spellcheck: "false",
                             dir: "ltr",
-                            value: "{command_resume}",
+                            value: "{command_resume}", readonly: restart_resume_readonly,
                             disabled: busy,
                             oninput: move |evt| {
                                 draft.edit_command_resume(evt.value());
                             },
                         }
                     }
+                    if restart_resume_readonly {
+                        button { r#type: "button", class: "btn btn-neutral", disabled: busy,
+                            onclick: move |_| { draft.edit_command_resume(String::new()); }, "clear resume command" }
+                    }
+                    if resume_changed { p { class: "launch-composer-changed-marker", "● changed" } }
                 }
             }
                         }
@@ -8813,8 +9235,8 @@ mod tests {
     /// host and install identity together — and the generation is exactly
     /// what the caller passed in (`ListView` is the one that decides what
     /// counts as a new clone). The mode starts as Create: only the
-    /// "replace with" handler changes the operation afterward, so a clone
-    /// cannot accidentally replace its source (see `prefill_from`'s own doc).
+    /// Replace-with or Restart-with handler changes the operation afterward,
+    /// so a clone cannot accidentally relaunch or delete its source.
     #[farhelm_testtrace::test]
     fn prefill_from_carries_title_cwd_host_and_identity_verbatim() {
         let session = Session {
@@ -9118,6 +9540,30 @@ mod tests {
             },
             clone
         );
+    }
+
+    /// A refused restart initialization must stay distinguishable from an
+    /// ordinary create prefill. The list uses this result to avoid opening a
+    /// new-session editor in response to an existing-session action.
+    #[farhelm_testtrace::test]
+    fn marking_restart_refuses_sources_without_an_editable_resume() {
+        for launch in [
+            None,
+            Some(crate::SessionLaunch::Command(crate::CommandLaunch {
+                command: "claude {farhelm_args}".into(),
+                agent: Some(LaunchHarness::Claude),
+                resume: None,
+                yolo: false,
+            })),
+        ] {
+            let session = Session {
+                launch,
+                ..row_specimen("s1")
+            };
+            let mut prefill = prefill_from(&session, 4);
+            assert!(!mark_restart_with(&mut prefill, &session));
+            assert_eq!(prefill.mode, LauncherMode::Create);
+        }
     }
 
     /// Checkout association chooses Clone's new repository, including a
