@@ -224,6 +224,68 @@ test("single trash delete requires settled listings and a healthy host refresh",
   }
 });
 
+/**
+ * An entry delete has no confirmation, so a click aimed at one row must not
+ * delete the row that moved under the pointer. The dialog's own delete on one
+ * host re-reads every host, and the re-read inserts an archive above the row
+ * that was aimed at. A click at its old spot right after the move does nothing; the
+ * same click once the pause ends deletes the row now drawn there, so the pause,
+ * not a missed click, kept the first one inert. The page clock is paused so the
+ * 700 ms pause is crossed explicitly rather than raced.
+ */
+test("trash entry deletes pause after rows move under the pointer", async ({page, request}) => {
+  await page.clock.install();
+  const {ids, removed} = await stubArchives(page, request, ["settle-local", "settle-remote"], 2);
+  let inserted = false;
+  await page.route("**/api/checkout-trash/list", async (route) => {
+    const {host} = route.request().postDataJSON();
+    if (!inserted || host !== ids[0]) return route.fallback();
+    await fulfillAsHelm(route, {json: {issues: [], checkouts: ["new", 0, 1].map((suffix) => ({
+      id: `archive-${host}-${suffix}`, name: `archived-checkout-${suffix}`, repository: "example/repository",
+      path: `/work/checkouts/farhelm-archived-working-copies/archive-${suffix}`, archived_at: 1_700_000_000, bytes: 1024,
+    })).filter((entry) => !removed.get(host)?.has(entry.id))}});
+  });
+  const calls: {host: number; ids: string[]}[] = [];
+  await page.route("**/api/checkout-trash/delete", async (route) => {
+    const selected = route.request().postDataJSON();
+    calls.push(selected);
+    removed.set(selected.host, new Set([...(removed.get(selected.host) ?? []), ...selected.ids]));
+    await fulfillAsHelm(route, {json: {removed: selected.ids, issues: []}});
+  });
+  await page.setViewportSize({width: 1000, height: 700});
+  await page.goto("/");
+  await page.locator(".checkout-trash-button").click();
+  const dialog = page.locator(".checkout-trash-dialog");
+  const local = dialog.locator(`.checkout-trash-host[data-host-id="${ids[0]}"]`);
+  const remote = dialog.locator(`.checkout-trash-host[data-host-id="${ids[1]}"]`);
+  await expect(local.locator(".checkout-trash-entry")).toHaveCount(2);
+  // Every finished re-read starts a pause; let them all land before freezing time.
+  await expect(dialog).not.toContainText("measuring…");
+  await page.clock.pauseAt(new Date(Date.now() + 5_000));
+  await page.clock.runFor(700);
+  const aimed = local.getByRole("button", {name: "delete archived-checkout-0 permanently", exact: true});
+  await expect(aimed).toBeEnabled();
+  const box = (await aimed.boundingBox())!;
+  const point = {x: box.x + box.width / 2, y: box.y + box.height / 2};
+
+  inserted = true;
+  await remote.getByRole("button", {name: "delete archived-checkout-0 permanently", exact: true}).click();
+  await expect.poll(() => calls.length, {message: "the remote delete was sent"}).toBe(1);
+  await expect(local.locator(".checkout-trash-entry")).toHaveCount(3);
+  await expect(dialog).not.toContainText("measuring…");
+  const under = () => page.evaluate(({x, y}) => document.elementFromPoint(x, y)?.closest("button")?.getAttribute("aria-label"), point);
+  expect(await under(), "premise: the inserted row now sits under the pointer").toBe("delete archived-checkout-new permanently");
+  const moved = local.getByRole("button", {name: "delete archived-checkout-new permanently", exact: true});
+  await expect(moved).toBeDisabled();
+  await page.mouse.click(point.x, point.y);
+  await page.clock.runFor(700);
+  await expect(moved).toBeEnabled();
+  expect(calls, "the click during the pause deleted nothing").toHaveLength(1);
+  await page.mouse.click(point.x, point.y);
+  await expect.poll(() => calls.length, {message: "the same click deletes once settled"}).toBe(2);
+  expect(calls[1]).toMatchObject({host: ids[0], ids: [`archive-${ids[0]}-new`]});
+});
+
 for (const width of [1000, 360]) {
   for (const firstFails of [false, true]) {
     /**
