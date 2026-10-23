@@ -18018,7 +18018,7 @@
   the link-request paragraph in SPEC_impl.md to match, with unit tests for each range. Size gate: about 100 lines of
   diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and
   bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/tunnel-port-and-link-ranges.md`.
 
 ## agent-stop-kills-shared-personal-tmux.md
 
@@ -18042,7 +18042,7 @@
   provisioning", next to the background-servers sentence), naming the agent case and ssh masters. The user-documentation
   Doc todo in TODO.md about tab-started services is widened to cover the agent case and ssh masters. No code change.
   Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-docs-oct22.md`.
 
 ## tab-owns-first-personal-tmux.md
 
@@ -18062,7 +18062,7 @@
   the first tab routinely becomes the owner of the user's tmux server, and that with `exec tmux` a detach ends it.
   Correct the Doc todo in TODO.md that says services started for the agent launch are not affected. No code change.
   Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-docs-oct22.md`.
 
 ## named-restart-with-keeps-unreported-old-conversation.md
 
@@ -18082,7 +18082,7 @@
   Claude or Codex with hooks off. The Pi and OMP materialisation-failure variant is out of scope; mention it in the PR
   if it stays open. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/resume-target-fixes-oct22.md`.
 
 ## nested-goose-report-replaces-resume-target.md
 
@@ -18100,7 +18100,7 @@
   a nested Goose run that inherits it from the foreground conversation, so such a run can replace the session's Resume
   target, and that this is accepted. "First-class harnesses" makes clear this counts among the conversation-tracking
   limits it accepts. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-docs-oct22.md`.
 
 ## grok-unrecognized-pane-admits-nested-grok.md
 
@@ -18116,7 +18116,7 @@
   or an image basename `grok` or `grok-*`), the report is refused; resident wrapper panes keep working. A unit test
   covers the uncounted-pane chain. Size gate: about 100 lines as above; over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/resume-target-fixes-oct22.md`.
 
 ## omp-direct-bun-pane-admits-nested-omp.md
 
@@ -18131,7 +18131,7 @@
   while `bun x`, `bunx` and npm launcher panes keep the positional acceptance `omp-bun-pane-proof.md` chose. A unit test
   covers the chain in the feedback file. Size gate: about 100 lines as above; over it, block and bring it back. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/resume-target-fixes-oct22.md`.
 
 ## pi-child-report-replaces-resume-target.md
 
@@ -18143,7 +18143,7 @@
 - Completion criteria: SPEC.md "Durability and resume" states that a child Pi that loads Farhelm's reporter can replace
   the session's Resume target, and that this is accepted, alongside the Goose sentence from
   `nested-goose-report-replaces-resume-target.md`. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-docs-oct22.md`.
 
 ## shared-checkout-root-archives-other-host-work.md
 
@@ -18158,7 +18158,7 @@
 - Completion criteria: SPEC.md "Maintainer-confirmed decisions" states that a checkout root reachable from more than one
   host is unsupported, and lists it among the unsupported configurations that need no detection. No code change. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-docs-oct22.md`.
 
 ## no-birth-time-checkout-archives-reclone.md
 
@@ -18178,7 +18178,7 @@
   now keep the lenient comparison `inode-reuse-defeats-ownership-check.md` accepted for older rows. SPEC.md "Managed
   checkouts" states this. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/checkout-ownership-oct22.md`.
 
 ## uninstall-two-home-aliases-hide-kept-data.md
 
@@ -18192,7 +18192,7 @@
   an alias the inspection can detect (for example, any ancestor of the state path that is the same file as the resolved
   installation folder), with a test faking the inspection output. Refusals only; no general aliasing redesign. Size
   gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/uninstall-guards-oct22.md`.
 
 ## uninstall-home-bind-inside-installation.md
 
@@ -18207,7 +18207,7 @@
   from the mount table), checked during inspection and again in the same shell as the removal, as the existing symlink
   recheck does, with a test. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/uninstall-guards-oct22.md`.
 
 ## offline-uninstall-retry-skips-session-check.md
 
@@ -18221,7 +18221,7 @@
 - Completion criteria: an uninstall retry without a connection refuses, with an explanation, while the host's supervisor
   unit is still running; a test covers it. The crash route stays out of scope. Size gate: about 100 lines as above; over
   it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/uninstall-guards-oct22.md`.
 
 ## trash-entry-delete-hits-shifted-row.md
 
@@ -18237,7 +18237,7 @@
   rows or host sections change, the dialog's own deletes included, and disables them while a confirmation band is open;
   a browser test covers a click landing just after a row moved. Size gate: about 100 lines as above; over it, block and
   bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dialog-saves-oct22.md`.
 
 ## create-retry-takeover-replaces-restarted-session.md
 
@@ -18250,7 +18250,7 @@
 - Completion criteria: the takeover refuses once the session has been restarted (generation not zero), so the retry
   settles and replays the existing session as it does for a launched one; a store test covers it. Size gate: about 100
   lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/checkout-ownership-oct22.md`.
 
 ## interrupted-delete-loses-attachments-at-startup.md
 
@@ -18266,7 +18266,7 @@
   only those whose session no longer exists; the attachments module docs and the teardown comment are corrected; a test
   covers a surviving session. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/checkout-ownership-oct22.md`.
 
 ## uninstall-notice-copies-raw-remote-path.md
 
@@ -18280,7 +18280,7 @@
   to the kept state path and refuses before confirmation; a test covers it. The hidden-characters copy warning is not
   part of this outcome. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/uninstall-guards-oct22.md`.
 
 ## templates-dialog-new-name-overwrites-outside-template.md
 
@@ -18294,7 +18294,7 @@
 - Completion criteria: saving a new name or a rename in the Templates dialog re-reads the template list right before the
   write and refuses when the name is now taken, as the save-as-template panel already does; a test covers it. Size gate:
   about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dialog-saves-oct22.md`.
 
 ## lost-shortcut-save-restores-misleading-assignment.md
 
@@ -18308,7 +18308,7 @@
   refusal), the dialog says it may not have been saved and shows the bindings re-read from the helm rather than the
   pre-save ones. Coordinate with `plans/queue/sign-in-preservation-sweep.md`, which changes the same preferences writer.
   Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dialog-saves-oct22.md`.
 
 ## reseeded-launcher-retains-conversation-selector.md
 
@@ -18318,7 +18318,7 @@
   selector across reseeding is deliberate and tested, and the selector stays visible and editable.
 - Decision: the user accepted the recommendation to drop it (2026-10-22 triage page).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-docs-oct22.md`.
 
 ## recovery-retains-displaced-session-menu.md
 
@@ -18331,7 +18331,7 @@
 - Completion criteria: open session menus close when the previous listing was an error and a recovered one replaces it;
   a test covers it. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/session-view-fixes-oct22.md`.
 
 ## loading-cancel-may-discard-admitted-launch.md
 
@@ -18341,7 +18341,7 @@
   Cancel, so the Cancel cannot coexist with an admitted launch.
 - Decision: the user accepted the recommendation to drop it (2026-10-22 triage page).
 - Completion criteria: remove the feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-docs-oct22.md`.
 
 ## private-tmux-terminfo-path-under-tmp.md
 
@@ -18355,7 +18355,7 @@
   example `/etc/terminfo`, `/lib/terminfo` and `/usr/share/terminfo`), checked with `strings` on a built binary that no
   `/tmp` path remains. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/build-and-tooling-oct22.md`.
 
 ## plans-queue-counts-fork-prs-as-plan-work.md
 
@@ -18368,7 +18368,7 @@
 - Completion criteria: the queue script's PR listing and merged-PR lookups ignore PRs whose head repository is not this
   repository; `scripts/test-plans-queue.py` covers a cross-repository PR. Size gate: about 100 lines as above; over it,
   block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/build-and-tooling-oct22.md`.
 
 ## centos-ssh-scrub-drops-config-after-unmatched-marker.md
 
@@ -18381,7 +18381,7 @@
 - Completion criteria: both scrubs fail when a start marker has no end marker, and the script leaves the ssh config
   untouched with a message. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/build-and-tooling-oct22.md`.
 
 ## tunnel-can-take-standalone-helm-port.md
 
@@ -18404,7 +18404,7 @@
   preference is replaced. Covers `tunnel-shadows-busy-wildcard-port.md` too; one change for both is fine. Size gate:
   about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
   over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/tunnel-port-and-link-ranges.md`.
 
 ## tunnel-shadows-busy-wildcard-port.md
 
@@ -18418,7 +18418,7 @@
 - Completion criteria: as `tunnel-can-take-standalone-helm-port.md`, which this outcome shares: with no preferred port
   the wildcard collision cannot happen, and the kernel-chosen bind is made without address reuse. Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/tunnel-port-and-link-ranges.md`.
 
 ## stale-confirmation-optout-replayed-after-sign-in.md
 
@@ -18450,7 +18450,7 @@
   protected, as an ordinary query error already does; a unit test covers it. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and bring it
   back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/checkout-ownership-oct22.md`.
 
 ## shell-inspection-drains-exhaust-planning-pool.md
 
@@ -18467,7 +18467,7 @@
   remains, and the unreleased `releasing/changelog.d/planning-probe-bound.md` fragment is corrected if it still
   overstates. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/uninstall-guards-oct22.md`.
 
 ## replace-with-recent-row-says-launch.md
 
@@ -18480,7 +18480,7 @@
 - Completion criteria: in Replace with, a recent row's hint uses the launcher's replace wording ("⏎ replace") and the
   rows point screen readers at the replace warning as the replace button does; a browser assertion covers it. Size gate:
   about 100 lines as above. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/session-view-fixes-oct22.md`.
 
 ## commands-setting-help-omits-delete.md
 
@@ -18493,7 +18493,7 @@
 - Decision: the user accepted the recommendation (2026-10-22 high-bucket triage page).
 - Completion criteria: both help texts and the tooltip name deleting sessions and templates, and the SPEC.md summary
   list names delete. Size gate: about 100 lines as above. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dialog-saves-oct22.md`.
 
 ## spare-checkout-rewind-keeps-removed-history.md
 
@@ -18507,7 +18507,7 @@
   otherwise falls back to a normal clone into the still-empty folder, covering rewind and divergence; a test covers the
   rewind; SPEC.md "Managed checkouts" and SPEC_impl.md say so. Size gate: about 100 lines as above. Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/checkout-ownership-oct22.md`.
 
 ## untouched-checkout-folder-save-undoes-cli-edit.md
 
@@ -18521,7 +18521,7 @@
 - Completion criteria: an unedited Save writes nothing for the checkout folder and post-clone command fields, and the
   regression test that expects an unedited Save to write is updated. Size gate: about 100 lines as above. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/dialog-saves-oct22.md`.
 
 ## short-window-outage-blocks-pointer-recovery.md
 
@@ -18533,7 +18533,7 @@
 - Completion criteria: while the fallback shows, the sidebar stays clickable and the explanation stays readable; a
   browser check clicks a sidebar control in that state. Size gate: about 100 lines as above. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/session-view-fixes-oct22.md`.
 
 ## guarded-instead-can-duplicate-uncertain-launch.md
 
@@ -18547,7 +18547,7 @@
 - Completion criteria: when the refused request retries an attempt whose outcome is unknown, the question says the
   launch may have started and does not offer the guarded answer; a test covers it. Size gate: about 100 lines as above.
   Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/session-view-fixes-oct22.md`.
 
 ## terminal-reveal-takes-focus-from-plain-button.md
 
@@ -18560,7 +18560,7 @@
 - Completion criteria: the terminal takes focus only if focus has not moved since the selection that asked for it, so
   sidebar select-then-type still works; a browser test covers a button focused during catch-up. Size gate: about 100
   lines as above. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/session-view-fixes-oct22.md`.
 
 ## power-loss-version-folder-never-repaired.md
 
@@ -18574,7 +18574,7 @@
 - Completion criteria: the installer keeps an existing version folder only when its `farhelm` matches the verified
   staged download byte for byte, and otherwise replaces it as it does an incomplete folder; `scripts/test-install-sh.sh`
   covers a truncated version file. Size gate: about 100 lines as above. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/build-and-tooling-oct22.md`.
 
 ## cancelled-startup-sweep-outlives-directory-ownership.md
 
@@ -18592,7 +18592,7 @@
   as the helm; a test shows a successor cannot claim while old blocking work runs. Size gate: about 200 lines (raised
   for this outcome, which the recommendation estimated at 100-200); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-lock-outlives-work.md`.
 
 ## devbuild-update-strands-host-on-newer-schema.md
 
@@ -18616,7 +18616,7 @@
   misread variant is not part of this outcome. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/update-refuses-newer-host-schema.md`.
 
 ## devbuild-tmux-skips-release-signature.md
 
@@ -18632,4 +18632,4 @@
   script calls with the binary it has just built), and refuses on a bad or missing signature; a cached tmux is
   re-checked or re-fetched. The header comment is corrected. Size gate: about 100 lines as above; over it, block and
   bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/build-and-tooling-oct22.md`.
