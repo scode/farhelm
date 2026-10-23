@@ -18207,7 +18207,11 @@
   now keep the lenient comparison `inode-reuse-defeats-ownership-check.md` accepted for older rows. SPEC.md "Managed
   checkouts" states this. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/checkout-ownership-oct22.md`.
+- Execution: complete in change `txsqvnynolqpktxlvvoswqzlszkwvtwv`, bookmark
+  `plan/checkout-ownership-oct22/01-no-creation-time-unconfirmed`. Delete releases such a checkout, the trash's
+  permanent delete refuses it and a new session started in it is not trusted; legacy rows keep the lenient comparison.
+  Restart with in such a folder still trusts as before (follow-up). Size: 108 lines, about the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2634/changes.
 
 ## uninstall-two-home-aliases-hide-kept-data.md
 

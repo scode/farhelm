@@ -348,6 +348,13 @@ pub enum WorkingCopyError {
          still the same folder; refusing to act on it"
     )]
     DeviceChangedUnconfirmed { path: PathBuf },
+    /// No creation time vouches for the folder (see
+    /// [`creation_time_unconfirmed`]). Destructive acts refuse.
+    #[error(
+        "{path} cannot be confirmed as the folder Farhelm created: its filesystem records no \
+         creation time; refusing to act on it"
+    )]
+    CreationTimeUnconfirmed { path: PathBuf },
     /// Overlapping active records are inconsistent ownership evidence, even
     /// when each inode matches. Moving either would invalidate the other.
     #[error(
@@ -574,9 +581,10 @@ fn observe(path: &Path) -> std::io::Result<Observed> {
 /// path (a user re-cloning over a checkout Farhelm made, say) can carry the
 /// old `(dev, ino)`, and a match on those alone would let Delete archive the
 /// user's new folder. A recorded birth time that differs, or cannot be read
-/// now, means a different object. A row without one (recorded before birth
-/// times were kept, or on a filesystem without them) falls back to
-/// `(dev, ino)` alone: the accepted residual for those rows.
+/// now, means a different object. A row without one falls back to
+/// `(dev, ino)` alone. That is accepted for rows recorded before birth times
+/// were kept; where the folder reports none either, destructive and trusting
+/// acts refuse instead (see [`creation_time_unconfirmed`]).
 ///
 /// The device number is deliberately NOT required to match when a birth time
 /// did. btrfs subvolumes (Fedora's default `/home`), NFS, overlayfs and some
@@ -712,7 +720,34 @@ pub(crate) fn verify_archived_handle(
             path: path.to_path_buf(),
         });
     }
+    if creation_time_unconfirmed(row.path_birth_ns, observed.birth_ns) {
+        return Err(WorkingCopyError::CreationTimeUnconfirmed {
+            path: path.to_path_buf(),
+        });
+    }
     Ok(())
+}
+
+/// Whether a row recorded without a creation time still observes none, so
+/// only device and inode, which a re-clone at the same path can reuse, vouch
+/// for the folder. Such a checkout is released on Delete, never deleted by
+/// the trash, and confers no trust on a new session started in it (SPEC.md,
+/// "Managed checkouts"); a legacy row whose folder reports a creation time
+/// now keeps the lenient comparison.
+pub(crate) fn creation_time_unconfirmed(recorded: Option<i64>, observed: Option<i64>) -> bool {
+    recorded.is_none() && observed.is_none()
+}
+
+/// [`creation_time_unconfirmed`] for the row's folder now; unreadable counts.
+pub(crate) fn creation_time_unconfirmed_now(row: &WorkingCopyRow) -> bool {
+    let observed = row
+        .canonical_path
+        .as_deref()
+        .and_then(|path| observe(Path::new(path)).ok());
+    creation_time_unconfirmed(
+        row.path_birth_ns,
+        observed.and_then(|observed| observed.birth_ns),
+    )
 }
 
 /// Whether `observed` fails [`same_directory`] only because its device
@@ -1149,7 +1184,7 @@ pub fn attach_existing_ancestors(
 /// Nested checkouts can hide their outer memberships in session-list display
 /// projections, so a launch must ask the registry itself. An allocated ancestor
 /// counts only while the folder still matches its recorded identity; missing,
-/// replaced and unconfirmed-remount folders confer no trust.
+/// replaced, unconfirmed-remount and creation-time-less folders confer no trust.
 ///
 /// Snapshot rows under the database lock, then release it before filesystem
 /// observation. This read takes no lifecycle lease: admission still validates
@@ -1177,6 +1212,7 @@ pub(crate) fn cwd_is_managed(db: &crate::db::Db, canonical_cwd: &str) -> Result<
             .as_deref()
             .is_some_and(|path| managed_ancestor(Path::new(path), cwd))
             && verify_identity(&row)? == IdentityStatus::Matches
+            && !creation_time_unconfirmed_now(&row)
         {
             return Ok(true);
         }
@@ -1666,6 +1702,9 @@ fn archive_move_with_effects(
     };
     if !same_directory(&source_observed, expected, row.path_birth_ns) {
         return Err(WorkingCopyError::IdentityMismatch { path: source });
+    }
+    if creation_time_unconfirmed(row.path_birth_ns, source_observed.birth_ns) {
+        return Err(WorkingCopyError::CreationTimeUnconfirmed { path: source });
     }
     let source_identity = source_observed.identity();
     let archive_root = ensure_archive_root(&root)?;
@@ -3732,6 +3771,46 @@ mod tests {
             !dir.path().join("bar").exists(),
             "the checkout must have moved to the archive"
         );
+    }
+
+    /// Spec (SPEC.md "Managed checkouts"): no creation time on either side is
+    /// unconfirmed, since a re-clone can reuse device and inode; a legacy row
+    /// whose folder reports one now still archives. Tests cannot run without
+    /// creation times, so the pure decision is pinned plus the legacy path.
+    #[test]
+    fn a_checkout_without_any_creation_time_is_unconfirmed() {
+        assert!(creation_time_unconfirmed(None, None));
+        assert!(!creation_time_unconfirmed(None, Some(7)), "a legacy row");
+        assert!(
+            !creation_time_unconfirmed(Some(7), None),
+            "a recorded time decides by itself"
+        );
+        let conn = registry_conn();
+        let dir = tempfile::tempdir().expect("tempdir");
+        if !filesystem_reports_birth_time(dir.path()).expect("the birth-time probe must succeed") {
+            println!(
+                "SKIPPED: this filesystem reports no birth time, so no legacy row can be made"
+            );
+            return;
+        }
+        let row = planned_row(&conn, dir.path(), "bar");
+        allocate(&conn, &row.id, None).expect("allocate");
+        conn.execute(
+            "UPDATE working_copies SET path_birth_ns = NULL WHERE id = ?1",
+            rusqlite::params![row.id],
+        )
+        .expect("a row recorded before creation times were kept");
+        let legacy = get_working_copy(&conn, &row.id)
+            .expect("row")
+            .expect("present");
+        assert!(
+            !creation_time_unconfirmed_now(&legacy),
+            "premise: the folder reports a creation time now"
+        );
+        assert!(matches!(
+            archive_move(&conn, &row.id).expect("a legacy row still archives"),
+            ArchiveOutcome::Archived { .. }
+        ));
     }
 
     /// Spec: removing an allocated checkout and recreating a directory at the

@@ -1096,7 +1096,12 @@ overlayfs and some device-mapper configurations, the device number is assigned w
 change across an ordinary reboot or remount while the folder is untouched. A check that compares device numbers would
 then refuse the user's own folder as replaced and permanently break the operation it guards, while inode plus creation
 time still detects a folder actually replaced at the same path, which is what these checks exist for. Every check of
-such a directory against an identity recorded earlier follows this rule rather than comparing device numbers.
+such a directory against an identity recorded earlier follows this rule rather than comparing device numbers. Confirmed
+2026-10-22: a checkout recorded without a creation time, whose folder still reports none, cannot be told from a folder
+removed and re-cloned at the same path, so Farhelm treats it as unconfirmed: Delete releases it without archiving it,
+with the notice below; the trash never deletes it permanently; and a new session started in it does not trust its agent
+automatically. A checkout recorded before creation times were kept, on a filesystem that reports them now, keeps the
+inode and device comparison.
 
 Ownership follows use, not the lifetime of the session that first requested the checkout. Ordinary sessions in a managed
 directory or its canonical subdirectories also retain references, including references to managed ancestors. Stopped,
