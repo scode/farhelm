@@ -17838,7 +17838,11 @@
 - Completion criteria: in both tests each session is registered for cleanup right after its own create. Test-only,
   confined to these two sites. Size gate: about 100 lines as above; over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
+- Execution: complete in jj change `xsquxstsyyzupznpxvpqqmoyplkwptlz`, bookmark
+  `plan/test-hygiene-oct21/05-notification-cleanup-order`. Both paired sites now push each session id into `created`
+  right after its own create, as the three-session test already does, so a failed second create no longer leaves the
+  first session running. The test change totals 6 added/deleted lines, below the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2611/changes.
 
 ## replacement-cleanup-test-never-proves-child-lived.md
 
