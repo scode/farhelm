@@ -2,10 +2,11 @@
 """Render a draft release section as the interactive page the maintainer reviews it on.
 
 During a stable release the proposed `## vX.Y.Z` section lives in a scratch Markdown file, exactly as it will land in
-`CHANGELOG.md`, and the maintainer reviews it as a scode-snippets page (`releasing/.agents/stable.md`, "Cutting a stable
-release", step 2). This script turns that file into the page. Every entry gets a short id (the category's initial and
-its position: `B2`, `A14`, `M3`) and a note box under it, plus one box for general notes. **Copy feedback** gathers the
-non-empty notes into one plain-text block that the maintainer pastes back into the agent session:
+`CHANGELOG.md`, and the maintainer reviews it on a page served from this machine by `scripts/serve-page.ts`
+(`releasing/.agents/stable.md`, "Cutting a stable release", step 2). This script turns that file into the page. Every
+entry gets a short id (the category's initial and its position: `B2`, `A14`, `M3`) and a note box under it, plus one box
+for general notes. **Copy feedback** gathers the non-empty notes into one plain-text block that the maintainer pastes
+back into the agent session:
 
 ```
 notes-feedback v0.29.0
@@ -26,11 +27,14 @@ maintainer asked for this on 2026-10-16, when the first version kept applied not
 
 Only the Markdown subset the changelog format allows is handled (`releasing/.agents/changelog.md`, "Format"): one `##`
 release heading, `###` categories, `-` bullets, the italic Misc fixes paragraph, inline code, bold, italics, links, and
-trailing `(#N)` PR references, which become links to each PR's diff. The page links the snippets repository's `default1`
-stylepack by relative path, so it renders styled only inside that repository's `snippets/<slug>/` layout.
+trailing `(#N)` PR references, which become links to each PR's diff.
 
-What this does NOT do: publish the snippet (the agent commits and pushes it per the snippets repository's own
-instructions), parse the copied feedback, or check the section against the changelog format (that is
+The page is one self-contained file with its stylesheet inline, so it looks the same wherever it is served from. It used
+to be published as a scode-snippets snippet and linked that repository's `default1` stylepack by relative path, which
+resolves nowhere else; the maintainer moved the review to a locally served page on 2026-10-23.
+
+What this does NOT do: serve the page (the agent runs `scripts/serve-page.ts` on the directory it writes `index.html`
+to), parse the copied feedback, or check the section against the changelog format (that is
 `releasing/check-changelog.py format`, which runs on `CHANGELOG.md`).
 
 Usage:
@@ -127,7 +131,38 @@ def revision(md: str) -> str:
 
 # ---- Page -------------------------------------------------------------------------------------------------------------
 
+# The page's whole stylesheet: a served local page cannot reach a stylesheet outside its own directory, so nothing is
+# linked. The palette and type scale are `scripts/todo-picker.py`'s, which follow the maintainer's snippet stylepack, so
+# the local review pages look alike and like the snippets the maintainer is used to. Fonts are left to the system, as
+# there: the page is ephemeral and local.
 STYLE = """
+  :root {
+    --bg: #f3f5f6; --surface: #ffffff; --fg: #1b2530; --muted: #5a6875; --rule: #d4dbe0;
+    --accent: #1f6f8b; --accent-soft: #dcecf2;
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: ui-monospace, Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f161d; --surface: #16212b; --fg: #e3e9ee; --muted: #93a3b1; --rule: #2a3a47;
+      --accent: #6cc0dc; --accent-soft: #173341;
+      color-scheme: dark;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; padding: 0 16px; background: var(--bg); color: var(--fg); font: 16px/1.65 var(--font-body); }
+  main { max-width: 102ch; margin: 0 auto; padding-block: 48px 96px; }
+  h1 { font-size: 2.6rem; line-height: 1.2; letter-spacing: -0.025em; margin: 0.3em 0 0; }
+  h2 { font-size: 1.35rem; margin: 1.6em 0 0.4em; }
+  a { color: var(--accent); }
+  .eyebrow { font: 600 0.75rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.12em;
+             color: var(--accent); }
+  .lede { font-size: 1.2rem; color: var(--muted); font-style: italic; }
+  code, pre { font-family: var(--font-mono); font-size: 0.86em; }
+  :not(pre) > code { background: var(--accent-soft); padding: 0.1em 0.35em; border-radius: 4px; }
+  pre { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px;
+        white-space: pre-wrap; overflow-wrap: anywhere; }
   .entries li { margin-bottom: 0.9em; }
   .eid { font-family: var(--font-mono); font-size: 0.8em; color: var(--muted);
          border: 1px solid var(--rule); border-radius: 4px; padding: 0 0.3em; margin-right: 0.2em; }
@@ -275,7 +310,6 @@ def render(md: str) -> str:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Farhelm {html.escape(version)} release notes draft</title>
-<link rel="stylesheet" href="../stylepacks/default1/style.css">
 <style>{STYLE}</style>
 </head>
 <body>
@@ -404,6 +438,9 @@ def self_test() -> int:
     check(long_quote.endswith("…") and len(html.unescape(long_quote)) == QUOTE_LIMIT, "long quotes are cut")
     check(revision(FIXTURE) != revision(FIXTURE + "x"), "revision follows the text")
     check(revision(FIXTURE) in page, "page carries its revision")
+    # The page is served on its own from a scratch directory, where a linked stylesheet or script would 404.
+    check("<link" not in page and "<script src" not in page, "the page loads nothing from outside itself")
+    check("--accent:" in page, "the page carries its own palette")
 
     if shutil.which("node") is None:
         print("SKIPPED: node not on PATH; the page script's reload behavior was not exercised")

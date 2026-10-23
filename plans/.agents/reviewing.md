@@ -21,14 +21,31 @@ checkouts: when it last checked, or when and why it stopped. An idle monitor che
 `running` line whose last check is more than about two and a half hours old means it has probably died; say so. A
 missing log means no monitor has run on this machine, and nothing is landing. Add any flags `queue status` raises.
 
-By default, the landed plans are reviewed on one page rather than one at a time in conversation. The maintainer chose
-this on 2026-10-14. Publish one `scode-snippets` snippet holding every report in `REPORTS.md`, oldest first. Each report
-gets, in this order: its PRs and summary line; a TLDR written by the session preparing the page, at most three sentences
-saying what the plan was about, in product terms; then only what the maintainer should know (risks, caveats, release
-impact, checks that could not be run, follow-ups), stated as concisely as possible; then the full report; then an
-"approve" checkbox and a free-text comment field. The TLDR and the highlights are the session's own reading of the
-report and its Landing section, never new claims. A button at the bottom copies every choice as one block of text that
-the maintainer pastes back into the session. Give them the snippet's link, then act on the pasted block:
+By default, the landed plans are reviewed on one local interactive page rather than one at a time in conversation. The
+maintainer chose one page on 2026-10-14, and on 2026-10-23 moved it from a published `scode-snippets` snippet to a page
+served from this machine, the way the planning flow asks its up-front questions (`plans/.agents/planning.md`, "Asking
+the up-front questions on a local page"). Do not publish the page as a snippet or anywhere else unless the maintainer
+asks.
+
+The page holds every report in `REPORTS.md`, oldest first. Each report gets, in this order: its PRs and summary line; a
+TLDR written by the session preparing the page, at most three sentences saying what the plan was about, in product
+terms; then only what the maintainer should know (risks, caveats, release impact, checks that could not be run,
+follow-ups), stated as concisely as possible; then the full report; then an "approve" checkbox and a free-text comment
+field. The TLDR and the highlights are the session's own reading of the report and its Landing section, never new
+claims. A button at the bottom copies every choice as one block of text that the maintainer pastes back into the
+session.
+
+Write the page as `index.html` in a directory of its own inside your scratch directory (`AGENTS.md`, "Agent scratch
+space"), with its styles inline: a stylesheet linked by relative path from the snippets repository does not load from a
+local page. Serve that directory with `scripts/serve-page.ts <dir>`, run as a background command from the root of the
+checkout this flow works in, never with another server; if it fails to start, stop and report why. It binds `127.0.0.1`
+on port 14003, the todo picker's port, and marks every response uncacheable: every flow shares that URL, so a cached
+copy can be another session's page. If something else holds the port, it moves to the next free port above and prints
+the URL it got; give the maintainer that URL without asking, and say plainly that the port changed, since a forward of
+14003 does not reach it. Never stop a process you did not start. Put the page's URL in the last message of the turn,
+after every tool call. Stop the server once you have acted on the pasted block, or when the maintainer ends the review.
+
+Act on the pasted block:
 
 - a ticked box is an approval (`queue approve`, as the approve item in this section says);
 - a comment with an instruction is that instruction, whether or not the box is ticked: a follow-up, a TODO.md entry, a

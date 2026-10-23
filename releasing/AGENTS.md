@@ -89,7 +89,7 @@ Before step 1 of `releasing/.agents/stable.md`, "Cutting a stable release" (the 
 - `releasing/.agents/workflow.md`
 - `releasing/AGENTS.md`, "Release screenshot subagent (fixed prompt)" (the files you name in that subagent's prompt)
 - `releasing/AGENTS.md`, "Risk-report researchers (fixed prompt)" (when you split the risk report's research)
-- `AGENTS.md`, "Changelog fragments", "Talking to the user" and "Tests and validation" (root)
+- `AGENTS.md`, "Agent scratch space", "Changelog fragments", "Talking to the user" and "Tests and validation" (root)
 - `.agents/validation.md`
 - `.agents/test-evidence.md` and `docs/test-run-evidence.md` (the version-parity tests run through the recorder)
 
@@ -185,7 +185,7 @@ Outside a stable release, before editing `CHANGELOG.md`, read these in full:
 - `releasing/.agents/changelog.md`
 - `releasing/EDITORIAL_GUIDANCE.md`
 - `releasing/.agents/stable.md` (curation is its steps 1 to 4, and the changelog rules cite it)
-- `AGENTS.md`, "Changelog fragments" (root)
+- `AGENTS.md`, "Agent scratch space" and "Changelog fragments" (root)
 
 Fence: a published release's section changes only as a correction a task specifically targets; wording the maintainer
 approved is reproduced exactly.
