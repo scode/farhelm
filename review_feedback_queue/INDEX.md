@@ -181,9 +181,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Releasing a held catalog or finishing a pending key mint during cleanup may start an untracked fake test session;
   adverse scheduling is unmeasured.
 
-- [`changed-template-test-allows-missing-retry-key.md`](changed-template-test-allows-missing-retry-key.md) — The
-  changed-template regression can pass with no fresh retry key; no production omission is established.
-
 - [`classic-mouse-snapshot-copy-blocks-later-links.md`](classic-mouse-snapshot-copy-blocks-later-links.md) — Copying in
   a classic mouse-report snapshot may leave web clicks inert; native behavior is unverified.
 

@@ -1608,8 +1608,12 @@ test(`${numbered ? "number shortcut" : "quick launch"} ${retry === "refusal" ? "
     }
     await form.locator(".create-session-submit").click();
     await expect.poll(() => bodies.length).toBe(2);
-    if (retry === "changed-template") expect(bodies[1].intent_key).not.toBe(bodies[0].intent_key);
-    else expect(bodies[1]).toEqual(bodies[0]);
+    if (retry === "changed-template") {
+      // A launch that sent no key at all would also differ from the first one.
+      expect(bodies[1].intent_key).toEqual(expect.any(String));
+      expect(bodies[1].intent_key).not.toBe("");
+      expect(bodies[1].intent_key).not.toBe(bodies[0].intent_key);
+    } else expect(bodies[1]).toEqual(bodies[0]);
     await expect.poll(() => created.length).toBe(retry === "refusal" ? 1 : 2);
     expect((await listSessions(request)).sessions.filter((one) => one.title.startsWith(name)))
       .toHaveLength(retry === "changed-template" ? 2 : 1);

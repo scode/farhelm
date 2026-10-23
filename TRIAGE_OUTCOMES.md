@@ -17775,7 +17775,10 @@
 - Completion criteria: the test also asserts that the changed launch carries a non-empty retry key, copying the
   sibling's assertion. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
+- Execution: complete in jj change `zxsxqkyyzrqklkuvotupvkzsmmpvmsut`, bookmark
+  `plan/test-hygiene-oct21/02-changed-template-retry-key`. The changed-template round now also asserts the second launch
+  carries a non-empty string key, as the custom-permissions spec does. The test change totals 8 added/deleted lines,
+  below the 100-line gate. PR: https://github.com/scode/farhelm/pull/2606/changes.
 
 ## held-reveal-fixture-pins-before-cleanup.md
 
