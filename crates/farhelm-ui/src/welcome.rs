@@ -3,8 +3,8 @@
 //! The authenticated preferences gate decides whether to offer it, once per
 //! load and only after a successful read. The bar owns both this card and
 //! feedback, so their handoff removes one modal before mounting the other.
-//! Dismissal never waits for persistence: the existing preference queue keeps
-//! the local choice even when its best-effort write fails.
+//! Dismissal never waits for persistence: the card closes at once, and a failed
+//! write is only logged, so a later load may offer the card again.
 
 use dioxus::prelude::*;
 

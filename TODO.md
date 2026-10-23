@@ -53,21 +53,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - Initial version of agent2agent comms.
 
-- **Sweep out browser sign-in and failed-save preservation.** Decided 2026-10-22 (SPEC.md, "Signing in again" and the
-  failed-save rule under "One GUI at a time"): an expired browser sign-in is treated as reloading the interface from
-  scratch, recovered by a literal page reload or as close to one as possible, and a failed GUI save in the browser or
-  the desktop app is reported and discarded, never kept, treated as current or replayed. The spec forbids adding new
-  machinery of either kind; this entry removes what already exists. Known places to start: the shared-preferences writer
-  in `crates/farhelm-ui/src/api.rs`, which keeps failed writes as an overlay on later reads and replays them after
-  reauthentication (the "reauthentication seed", failed link choices and contact clears that "survive
-  reauthentication"); the browser token exchange in `crates/farhelm-ui/src/auth.rs`, which deliberately keeps the app
-  mounted and remounts only the active surface and feed instead of reloading the page
-  (`reauthentication_keeps_the_app_mounted`); and anything that retries or replays a save or click after sign-in. Search
-  the UI for "reauthentication", "replay", "overlay" and failed-save retention to find the rest. Each removal should
-  make the code smaller; the desktop app's own authentication path is out of scope, since it never signs in again.
-
-  Plan: `plans/queue/sign-in-preservation-sweep.md`.
-
 - **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
   indicates that one of those models is being used anyway.
 

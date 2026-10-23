@@ -226,15 +226,14 @@ then changes. A write is a sparse patch naming only the field the user changed, 
 field is untouched, an explicit `null` clears one), so two clients changing different fields at nearly the same time
 cannot clobber each other; the signal in the page is updated before the request leaves, which is what keeps the choice
 in force when the write fails. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot
-land on the helm in reverse order; the write queue is process state outside the remounted tree, and after the browser's
-credential recovery the gate overlays and replays any local choice whose write never got through, so reauthentication
-cannot roll the current client back to the helm's older row. The desktop app never signs in again, so nothing remounts
-its tree. The seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a
-stalled preference endpoint cannot blank the page for the funnel's full sixty seconds. Before each automatic session
-choice the list makes one more GET under that same short deadline. Only selection/history inputs refresh; unrelated
-settings retain their reload contract. A failed GET uses the current optimistic preference mirror. Selection writes
-update both values in that mirror before queueing their existing single-field PUT, including recovery overlays.
-Number-key bindings are not replayed: a failed or cancelled bindings write is discarded.
+land on the helm in reverse order. A write that fails, or whose writer is lost, is forgotten: the choice stays in effect
+only until the next read from the helm and is never resent. A failed write is logged; callers that must report it, such
+as the shortcut bindings, do so themselves (SPEC.md, "Errors and diagnostics"). The seed read runs under a seconds-scale
+deadline of its own and expiry reads as "nothing remembered", so a stalled preference endpoint cannot blank the page for
+the funnel's full sixty seconds. Before each automatic session choice the list makes one more GET under that same short
+deadline. Only selection/history inputs refresh; unrelated settings retain their reload contract. A failed GET uses the
+current optimistic preference mirror. Selection writes update both values in that mirror before queueing their existing
+single-field PUT.
 
 The GUI's HTTP funnel orders reads and actions after this client's earlier configuration saves: quick-launch and
 number-key bindings, template save/delete, checkout folder, post-clone command, and ntfy settings. A save registers
@@ -242,10 +241,9 @@ synchronously before its task is polled. Template name-validation reads capture 
 they validate, so validation cannot wait on itself. Saves to different settings remain parallel; same-field preference
 writes retain their serialized latest-wins queue. A dependent request snapshots the preceding tickets, including queued
 preference choices, and waits only for those batches, so newer edits cannot starve it. Its existing deadline includes
-that wait; only the remaining budget reaches HTTP. Completion, refusal, timeout and cancellation release tickets. Dirty
-idle preferences are not pending work: failure or writer loss releases readers, including the reauthentication seed
-whose completion restarts replay. A lost reply still has an unknown remote outcome: later requests can proceed while the
-helm may still apply that save, with no new retry or remote-order guarantee.
+that wait; only the remaining budget reaches HTTP. Completion, refusal, timeout and cancellation release tickets, and
+failure or writer loss releases readers. A lost reply still has an unknown remote outcome: later requests can proceed
+while the helm may still apply that save, with no new retry or remote-order guarantee.
 
 Read/unread and notification marks, every preference field other than the template bindings, and host settings register
 no tickets; host mutations can wait on remote operations and must not hold every read behind them. These requests still
@@ -1188,20 +1186,21 @@ it. Focus returns only while still owned by a closing menu, with `preventScroll`
 another popup's focus or undo the dialog's scroll. Re-delivery to an already closed popup does nothing. The two shortcut
 preference fields share acknowledgment and fresh-read overlay helpers. A rename repoints both before deleting the old
 name, and removes a stale new-name key when retaining the old name's key would otherwise violate one-key-per-template.
-Failed repoints keep both names. A failed number-key save, from a key edit or a repoint, is reported and its map
-discarded, so no later read or sign-in replay brings it back; the ⚡ mark still keeps dirty intent for recovery.
+Failed repoints keep both names. A failed number-key save from a key edit, or a failed repoint of either shortcut, is
+reported and its value discarded, so no later read brings it back. A failed quick-launch mark toggle in the Templates
+dialog is discarded the same way but is not yet reported.
 
 Quick launch uses that shared capture listener and the same list-owned New-open callback, followed by the ordinary
 template search action and form requestSubmit. The mark is one nullable shared preference rather than template data, so
 a stale editor save cannot move it. Both template delete paths clear only a matching mark in their existing immediate
 transaction; recreating a template does not restore the mark. The editor repoints between save-new-name and
 delete-old-name through the existing preference writer, awaiting its own acknowledgment. Rename reads the mark fresh,
-respecting an unconfirmed explicit local choice; its separate writes retain ordinary cross-client last-writer-wins
-semantics. An unconfirmed repoint keeps both template names and its dirty local choice for recovery. Delete waits for
-any owned mark request and retires matching dirty intent before releasing that wait, so credential recovery cannot
-restore a deleted mark. This sends no unconditional clear that could erase another client's different mark. Each
-shortcut fetches the saved mark and templates rather than trusting its startup preference snapshot, overlaying only an
-explicit local mark still awaiting persistence. A pending or failed mark write cannot silently launch the previous mark.
+respecting a local choice whose write is still pending; its separate writes retain ordinary cross-client
+last-writer-wins semantics. An unconfirmed repoint keeps both template names and shows the helm's mark again. Delete
+waits for any owned mark request, so the helm sees that write before the delete clears it. This sends no unconditional
+clear that could erase another client's different mark. Each shortcut fetches the saved mark and templates rather than
+trusting its startup preference snapshot, overlaying only an explicit local mark still awaiting persistence: a pending
+mark write cannot silently launch the previous mark, while a failed one is discarded and the helm's mark launches.
 
 The form's quick-launch flag changes visibility and schedules one ordinary submission after mount seeding,
 template/catalog reads, host binding and the current managed-checkout preview settle. Its transparent modal backdrop and
@@ -2329,8 +2328,8 @@ version-skew hello refusal. Helm schema 53 adds `checkout_config.claude_trust` (
 `preferences.claude_trust_hint_dismissed`. The protected `GET /api/checkout-claude-trust` returns `enabled` and
 `hint_dismissed`; PUT requires only an `enabled` bool. This setting changes no destination, so it does not bump the
 checkout preview revision. Its write and the sparse dismissal patch publish ordinary invalidation hints. UI saves use
-the configuration ordering funnel; dismissal uses the per-field preference queue and overlays unacknowledged intent on
-fresh reads.
+the configuration ordering funnel; dismissal uses the per-field preference queue and overlays a still-pending dismissal
+on fresh reads.
 
 Claude-specific file work lives in `agent_kind/claude/trust.rs`. After recording Ready, while still holding the
 preparation flock, the launch process resolves the canonical clone root and Claude's config from its login-shell
@@ -2374,7 +2373,7 @@ Helm schema 57 adds independent `codex_trust`, `muse_trust` and `pi_trust` check
 hint dismissals in preferences. Each switch defaults off and leaves the path-preview revision unchanged. The protected
 `GET`/`PUT /api/checkout-agent-trust/{harness}` exposes one switch and its dismissal; the original Claude route retains
 its exact body and reply. Configuration writes use the existing save-order funnel, and dismissals use the sparse
-per-field preference queue, including dirty-intent overlays and credential-recovery replay.
+per-field preference queue, including pending-write overlays on fresh reads.
 
 The helm resolves these settings into an agent selection before compilation. The compiler remains pure so the YOLO guard
 can still reproduce a launch exactly. Fresh checkout intent already proves managed ownership and freezes the whole
@@ -4021,8 +4020,8 @@ and their cause chains are never displayed. The ntfy response body is ignored. N
 or title. Dropping the final sender handle aborts the owned task; it holds no handle back to itself or the manager.
 Test-built helms default offline and inject a loopback client only for alert tests.
 
-Protected GET/PUT `/api/ntfy-alerts` read/save an independent schema-47 singleton, not replayed shared preferences. The
-JSON stored in helm.db includes the token; the response contains only `token_set`. Saves atomically preserve an
+Protected GET/PUT `/api/ntfy-alerts` read/save an independent schema-47 singleton, not the queued shared preferences.
+The JSON stored in helm.db includes the token; the response contains only `token_set`. Saves atomically preserve an
 omitted/null token only for the same server origin (scheme, host and effective port, with default ports normalized),
 clear it on an origin change, clear an empty token or replace a non-empty one. The comparison uses stored settings in
 the same save operation, so stale forms cannot carry a saved token across origins. While a saved token would be cleared

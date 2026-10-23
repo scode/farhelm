@@ -1805,9 +1805,10 @@ pub(super) fn TemplatesDialog(
             let result = match (result, old) {
                 (Ok(()), Some(old)) if old != value.name => {
                     // Another window may have marked this name, or moved the
-                    // mark away, since sign-in. Refresh only this field while
-                    // respecting our unconfirmed explicit queue choice. Rename
-                    // remains ordinary last-writer-wins writes across clients.
+                    // mark away, since this dialog read the bindings. Refresh
+                    // both fields, keeping a write of ours still in flight.
+                    // Rename remains ordinary last-writer-wins writes across
+                    // clients.
                     let fetched = match crate::api::fetch_preferences(&base).await {
                         Ok(fetched) => fetched,
                         Err(message) => {
@@ -1840,6 +1841,8 @@ pub(super) fn TemplatesDialog(
                         )
                         .await
                         {
+                            // The failed mark is discarded; show the helm's again.
+                            preferences.0.write().quick_launch_template = Some(old.clone().into());
                             busy.set(false);
                             error.set(Some("the new name was saved, but the quick launch mark could not be moved; the old template was kept".into()));
                             templates.restart();
@@ -1866,7 +1869,7 @@ pub(super) fn TemplatesDialog(
                         }
                     }
                     let deleting_request = crate::api::delete_template(&base, &old);
-                    if !crate::api::prepare_template_delete(&old).await {
+                    if !crate::api::prepare_template_delete().await {
                         busy.set(false);
                         error.set(Some("the new name was saved, but a shortcut write was interrupted; the old template was kept".into()));
                         templates.restart();
@@ -1939,7 +1942,7 @@ pub(super) fn TemplatesDialog(
         error.set(None);
         let deleting_request = crate::api::delete_template(&base, &name);
         spawn(async move {
-            if !crate::api::prepare_template_delete(&name).await {
+            if !crate::api::prepare_template_delete().await {
                 busy.set(false);
                 error.set(Some(
                     "a shortcut write was interrupted; try deleting the template again".into(),

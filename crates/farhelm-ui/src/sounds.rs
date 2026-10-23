@@ -1,10 +1,9 @@
 //! Device attention follows the sidebar's accepted view and fleet approval data.
 //!
 //! The authenticated mount owns history: reconnecting the feed preserves it,
-//! while a fresh mount of the authenticated tree (a browser sign-in) starts
-//! from a silent baseline. A desktop re-sign-in runs under the live tree and
-//! keeps history, so changes made meanwhile can still sound. A different sidebar
-//! filter reseeds status history without forgetting seen approval requests.
+//! while a fresh page load (signing in again in the browser reloads the page)
+//! starts from a silent baseline. A different sidebar filter reseeds status
+//! history without forgetting seen approval requests.
 //! The ordinary surface reader serializes approval reads and retries failures.
 //! JavaScript owns device switches, window activity and best-effort Web Audio.
 

@@ -996,13 +996,14 @@ for (const recover of [false, true]) {
   );
 }
 
-/** Fresh shared reads may replace acknowledged state, but they cannot undo
- * this window's explicit dirty choice. Hold the PUT before it reaches the helm
- * (or refuse it), then close Templates and observe the actual create payload.
- * A held save also fences the shortcut's read until released; once acknowledged,
- * only the newly persisted mark can decide which template launches. */
+/** A fresh shared read cannot undo this window's mark while its save is still
+ * pending, but a refused save is discarded, never kept as the current state
+ * (SPEC.md, "One GUI at a time"). Hold the PUT before it reaches the helm (or
+ * refuse it), then close Templates and observe the actual create payload. A
+ * held save also fences the shortcut's read until released, after which the
+ * new mark launches; after a refusal the helm's own mark launches. */
 for (const failed of [false, true]) {
-  test(`quick launch honors a ${failed ? "failed" : "held"} local mark over the shared read`, async ({ page, request }) => {
+  test(`quick launch ${failed ? "discards a failed" : "honors a held"} local mark against the shared read`, async ({ page, request }) => {
     const prefix = `quick-local-mark-${Date.now()}`;
     const [old, chosen] = ["old", "chosen"].map((suffix) => `${prefix}-${suffix}`);
     const gate = routeGate();
@@ -1078,9 +1079,10 @@ for (const failed of [false, true]) {
       const form = page.locator(".create-session-form");
       await expect(form).toBeVisible();
       await expect(form.locator(".create-session-error")).toContainText("local mark launch fixture refusal");
+      const launched = failed ? old : chosen;
       expect(bodies).toHaveLength(1);
-      expect(bodies[0].title).toBe(`${chosen}-session`);
-      await expect(page.locator(".templates-button")).toHaveAttribute("data-tooltip", new RegExp(chosen));
+      expect(bodies[0].title).toBe(`${launched}-session`);
+      await expect(page.locator(".templates-button")).toHaveAttribute("data-tooltip", new RegExp(launched));
     } finally {
       gate.release();
       await page.unrouteAll({ behavior: "wait" });

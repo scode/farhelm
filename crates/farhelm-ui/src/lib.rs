@@ -2010,12 +2010,10 @@ fn AppBody() -> Element {
 /// stalled preference endpoint costs the remembered values, never a
 /// minute of blank page. A recognized 401 takes an engine-specific path:
 /// in the browser `api::send` raises the token prompt and `AppBody`
-/// unmounts this gate in favor of it until a new token reloads the page —
-/// and on each mount `api::seed_with_local_changes` overlays any choice
-/// made in THIS client whose write never got through, so recovery cannot
-/// roll the current client back to the helm's older row. The desktop app
-/// never signs in again (its own credentials cannot be revoked; see
-/// `auth::DesktopBootstrapGate`), so nothing there remounts this gate.
+/// unmounts this gate in favor of it until a new token reloads the page.
+/// The desktop app never signs in again (its own credentials cannot be
+/// revoked; see `auth::DesktopBootstrapGate`), so nothing there unmounts
+/// this gate.
 #[component]
 fn PreferencesGate(children: Element) -> Element {
     let base = use_context::<ApiBase>().0;
@@ -2065,7 +2063,6 @@ fn PreferencesGate(children: Element) -> Element {
                     (api::Preferences::default(), false)
                 }
             };
-            let seed = api::seed_with_local_changes(&base, seed);
             // A failed read also yields defaults, but those defaults are not
             // evidence that this helm's welcome has never been dismissed.
             welcome_on_load
