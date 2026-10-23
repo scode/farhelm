@@ -271,9 +271,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`replacement-test-supervisor-spawns-before-pid-publication.md`](replacement-test-supervisor-spawns-before-pid-publication.md)
   — Worker interruption can leave a detached test supervisor outside cleanup registration.
 
-- [`duplicate-uninstall-advice-points-to-removed-owner.md`](duplicate-uninstall-advice-points-to-removed-owner.md) —
-  After owner removal, a duplicate's uninstall refusal points to the missing entry instead of explaining Retry.
-
 - [`retention-plan-omits-live-retry-downgrade-limit.md`](retention-plan-omits-live-retry-downgrade-limit.md) — The
   plan's downgrade caveat omits older-code refusal of converted live checkout retries; intended compatibility is
   ambiguous.

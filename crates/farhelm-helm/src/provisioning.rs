@@ -4366,7 +4366,9 @@ mod tests {
 
     /// A duplicate entry must name the owning entry as users see it, rather
     /// than its destination or internal ID. If that entry was removed, the
-    /// frozen duplicate snapshot still refuses safely with a missing-name fallback.
+    /// frozen duplicate snapshot still refuses safely with a missing-name
+    /// fallback, and its advice switches to the remedy that still works
+    /// (Retry on this entry) instead of sending the user to the removed one.
     #[farhelm_testtrace::test]
     async fn uninstall_duplicate_refusal_uses_the_twin_alias_and_missing_twin_fallback() {
         let shared = || HostScript {
@@ -4420,9 +4422,18 @@ mod tests {
             ));
             let text = refusal_text(error);
             assert!(
-                text.contains(&format!("choose uninstall on {expected}")),
+                text.contains(&format!("same machine as {expected}")),
                 "{text}"
             );
+            if expected == "\"build box\"" {
+                assert!(text.contains("choose uninstall on \"build box\""), "{text}");
+            } else {
+                assert!(
+                    text.contains("press retry so this entry can connect to the machine"),
+                    "{text}"
+                );
+                assert!(!text.contains("choose uninstall on another"), "{text}");
+            }
             assert!(backend.operations.lock().unwrap().is_empty());
             if expected == "\"build box\"" {
                 // Deliberately retain the manager snapshot to exercise the same

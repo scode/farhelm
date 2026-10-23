@@ -17926,7 +17926,10 @@
   uninstall through this entry, without promising that uninstall will then succeed (its ordinary checks still apply);
   the tests that pin the old wording are updated. The name fallback and the GUI host-details text stay as they are. Size
   gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/duplicate-uninstall-retry-advice.md`.
+- Execution: complete in jj change `zyuxqyoskuuowtlqwkqrswtxunsntrzq`, bookmark
+  `plan/duplicate-uninstall-retry-advice/01-retry-advice`. When the other entry is gone, the refusal now says to press
+  retry and then choose uninstall on this entry; about 70 changed lines of code and tests, within the gate.
+  [Draft PR #2605](https://github.com/scode/farhelm/pull/2605/changes).
 
 ## update-copies-launch-files-group-writable.md
 
