@@ -684,12 +684,14 @@ test("composer search survives a held terminal reveal", async ({ page, request }
   const title = `clone-held-reveal-${Date.now()}`;
   const cwd = stackScratchDir("clone-held-reveal-");
   const source = await createSession(request, { title, cwd });
-  // The hold catches the first primary reveal, which must be this source's:
-  // a page load otherwise opens the latest visit, another test's session.
-  await pinAutoSelect(page, source.id);
-  // The init script must precede navigation to catch the primary island.
-  await holdPrimaryTerminalReveal(page);
+  // Owned by the cleanup below from here on: a failure in the setup steps
+  // must not leave this session running in the shared stack.
   try {
+    // The hold catches the first primary reveal, which must be this source's:
+    // a page load otherwise opens the latest visit, another test's session.
+    await pinAutoSelect(page, source.id);
+    // The init script must precede navigation to catch the primary island.
+    await holdPrimaryTerminalReveal(page);
     await page.goto("/");
     const sourceRow = row(page, source.id);
     await expect(sourceRow).toBeVisible({ timeout: 20_000 });

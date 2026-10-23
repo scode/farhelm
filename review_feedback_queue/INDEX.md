@@ -187,9 +187,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`delayed-refusal-reopens-cancelled-replace-question.md`](delayed-refusal-reopens-cancelled-replace-question.md) — A
   delayed refusal may reopen a cancelled Replace question; a further affirmative answer is still required.
 
-- [`held-reveal-fixture-pins-before-cleanup.md`](held-reveal-fixture-pins-before-cleanup.md) — A preference-pin failure
-  can bypass cleanup for an owned test session; the failure has not been injected.
-
 - [`history-fixture-reset-races-selection-save.md`](history-fixture-reset-races-selection-save.md) — An automatic
   selection save may overwrite the history fixture's reset; adverse ordering is unverified.
 
