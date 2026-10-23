@@ -21,3 +21,4 @@ playwright settings.spec.ts post-clone commands with carriage returns refuse edi
 playwright launcher-template-shortcuts.spec.ts a template shortcut preserves editor focus when clearing a quick-launch YOLO question  # template-shortcut-editor-focus-webkit
 playwright provisioning.spec.ts a wrong-host UPDATE acceptance warns on its source row and claims nothing  # wrong-host-update-listing-reply-disposed
 playwright terminal-multihost.spec.ts remove-and-re-add-host: removal forgets, re-adding rediscovers  # re-added-host-session-new-output
+playwright sidebar.spec.ts the sidebar app bar explains the helm and window builds  # sidebar-build-skew-route-already-handled

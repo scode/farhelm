@@ -2850,3 +2850,37 @@ Received string:  "idle — new output"
 Class: ambiguous-observable
 
 Cause: hypothesis
+
+## 2026-10-23 — build-skew route already handled again (e2e/tests/sidebar.spec.ts)
+
+The Chromium project's `the sidebar app bar explains the helm and window builds` failed in full browser run
+`0f56085c-045c-42df-9d2d-93583fd67eb9` (2026-10-23, tested commit `dc1f5808`, clean tree, a landing stack that changes
+adding hosts and not the app bar), its only failure: `route.fulfill` in the build-skew interceptor (`forceBuildSkew` in
+`e2e/tests/helpers/fleet.ts`) threw "Route is already handled!". Repeated alone ten times on Chromium it failed 4 of 10
+on that stack (`8000f125-1f43-45c9-9493-63f3d6020c31`) and 3 of 10 on main `45e0bedb` with main's own build
+(`5888f7a6-44e2-4c33-87fc-6b1afec0fa57`), every failure the same. It passed on both engines in runs
+`4e8d25ff-03bd-47c6-8c8b-d90b8b33a3a4` and `aeb02db0-f5f1-4f00-a74f-9c81df1c2294` earlier the same day. All runs:
+Playwright 1.64.0, three workers with one stack each, zero retries, tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale `C.UTF-8`, child `FARHELM_*` names
+`FARHELM_TEST_TRACE_DIR` and, in the full run only, `FARHELM_PLAYWRIGHT_POLICY_FILE`. Load was not sampled. A failing
+repetition takes about as long as a passing one (the ten-run batches took 16 to 19 seconds); per-attempt durations are
+unavailable.
+
+This is the same error as the 2026-09-03 entries for this test (then named
+`the sidebar app bar shows the helm build and client tooltip`), which the 2026-09-05 entry marked fixed by draining
+active route handlers with `page.unrouteAll({ behavior: "wait" })` before removing the interceptor; the test still does
+that. So either another path reaches `route.fulfill` after the request is already resolved (a navigation cancelling an
+intercepted request while its handler awaits `route.fetch()`, say), or the drain no longer covers the handlers that
+matter. No trace was examined. Open; no fix attempted.
+
+```text
+Error: route.fulfill: Route is already handled!
+
+    const response = await route.fetch();
+    const headers = { ...response.headers(), "x-farhelm-build": stamp };
+>   await route.fulfill({ response, headers });
+```
+
+Class: unknown
+
+Cause: hypothesis
