@@ -18165,7 +18165,8 @@
 - Completion criteria: SPEC.md "Maintainer-confirmed decisions" states that a checkout root reachable from more than one
   host is unsupported, and lists it among the unsupported configurations that need no detection. No code change. Remove
   the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-docs-oct22.md`.
+- Execution: `complete`; draft PR [#2631](https://github.com/scode/farhelm/pull/2631/changes) on bookmark
+  `plan/triage-docs-oct22/05-shared-checkout-root`, jj change `ukxmrmyo`.
 
 ## no-birth-time-checkout-archives-reclone.md
 
