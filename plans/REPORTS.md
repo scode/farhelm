@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`launcher-typed-guarded`](reports/launcher-typed-guarded.report.md) landed 2026-10-18 in #2297, #2301: typing guarded in the launcher selects Guarded like yolo, plus typed routes for the remaining permission and effort choices
 - [`session-hover-text`](reports/session-hover-text.report.md) landed 2026-10-18 in #2293, #2300: hovering a session row shows one styled summary card: host, checkout, agent, times
 - [`launcher-template-keys`](reports/launcher-template-keys.report.md) landed 2026-10-18 in #2304, #2306, #2310, #2316: template shortcuts apply templates inside the open launcher, through one shared shortcut definition, and Cmd-J launches a template by name
 - [`host-uninstall-dialogs`](reports/host-uninstall-dialogs.report.md) landed 2026-10-19 in #2298, #2303, #2305, #2307, #2311, #2317: host setup, update and uninstall show their steps as a stepper in the dialog and in the row's progress, refusals open in dialogs, and the post-uninstall notice shrinks to one line
