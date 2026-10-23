@@ -52,6 +52,7 @@ use crate::icons::HostMark;
 use crate::modal_dialog::{
     DialogFocus, DialogHandle, FocusTarget, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
 };
+use crate::ops::ConfirmToken;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::{Host, HostId, HostKind, HostPhase};
 
@@ -685,14 +686,22 @@ pub(super) fn HostSettingsDialog(
 /// and closing. Rendered busy props alone cannot guard same-turn input.
 /// The dialog owns any refusal from that request. The permanent
 /// answer names the app-wide gear so users can restore this confirmation.
+///
+/// `shown` is the opening of the panel's removal question that the panel's
+/// render read. The dialog draws the host from it and hands that same token
+/// back with every answer: `on_remove` with whether to stop asking, and
+/// `on_cancel` from Cancel, the header's dismiss and Escape alike. That lets
+/// the panel refuse an answer drawn for a showing that is no longer the open
+/// one, and otherwise remove exactly the entry this dialog named.
 #[component]
 pub(super) fn HostRemoveDialog(
-    host: Host,
+    shown: ConfirmToken<Host>,
     busy: bool,
     error: Option<String>,
-    on_remove: EventHandler<bool>,
-    on_cancel: EventHandler<()>,
+    on_remove: EventHandler<(ConfirmToken<Host>, bool)>,
+    on_cancel: EventHandler<ConfirmToken<Host>>,
 ) -> Element {
+    let host = shown.key().clone();
     let shown_name = gui_host_name(host.name.raw(), host.kind.is_this_machine());
     // The shortened heading must leave the complete destination readable.
     let destination = host.destination.as_ref().unwrap_or(&host.name).escaped();
@@ -709,9 +718,12 @@ pub(super) fn HostRemoveDialog(
                 aria_modal: "true",
                 aria_label: "remove host · {shown_name}",
                 tabindex: "-1",
-                on_escape: move |evt: KeyboardEvent| {
-                    if !evt.is_composing() && !busy {
-                        on_cancel.call(());
+                on_escape: {
+                    let shown = shown.clone();
+                    move |evt: KeyboardEvent| {
+                        if !evt.is_composing() && !busy {
+                            on_cancel.call(shown.clone());
+                        }
                     }
                 },
                 HostDialogHeader {
@@ -721,9 +733,12 @@ pub(super) fn HostRemoveDialog(
                     summary_danger: error.is_some(),
                     dismiss_label: "cancel host removal",
                     dismiss_tooltip: "cancel: keep this host",
-                    on_dismiss: move |_| {
-                        if !busy {
-                            on_cancel.call(());
+                    on_dismiss: {
+                        let shown = shown.clone();
+                        move |_| {
+                            if !busy {
+                                on_cancel.call(shown.clone());
+                            }
                         }
                     },
                 }
@@ -752,9 +767,12 @@ pub(super) fn HostRemoveDialog(
                             "data-tooltip": "cancel: keep this host",
                             disabled: busy,
                             autofocus: busy,
-                            onclick: move |_| {
-                                if !busy {
-                                    on_cancel.call(())
+                            onclick: {
+                                let shown = shown.clone();
+                                move |_| {
+                                    if !busy {
+                                        on_cancel.call(shown.clone())
+                                    }
                                 }
                             },
                             "cancel"
@@ -766,7 +784,10 @@ pub(super) fn HostRemoveDialog(
                             aria_describedby: "host-remove-permanent-hint",
                             disabled: busy,
                             onkeydown: crate::guard_confirmation_enter,
-                            onclick: move |_| on_remove.call(true),
+                            onclick: {
+                                let shown = shown.clone();
+                                move |_| on_remove.call((shown.clone(), true))
+                            },
                             "remove, don't ask again"
                         }
                         button {
@@ -776,7 +797,7 @@ pub(super) fn HostRemoveDialog(
                             disabled: busy,
                             autofocus: !busy,
                             onkeydown: crate::guard_confirmation_enter,
-                            onclick: move |_| on_remove.call(false),
+                            onclick: move |_| on_remove.call((shown.clone(), false)),
                             "remove"
                         }
                     }

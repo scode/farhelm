@@ -1476,10 +1476,14 @@ pub(crate) fn HostsPanel(
     // Committed-but-unvalidated replies, kept apart from `errors` because
     // they mean the opposite thing — see this component's docs.
     let mut warnings = use_signal(HashMap::<HostId, String>::new);
-    // The host whose removal dialog is open. Keep its identity snapshot so
-    // a concurrent list refresh cannot tear down the question before the
-    // pending Remove request answers.
-    let mut remove_open = use_signal(|| None::<Host>);
+    // The removal question, keyed by the snapshot of the host entry it was
+    // opened for. The dialog draws from that snapshot and its answers act on
+    // that entry's id (see `answer_remove`), so a concurrent list refresh
+    // can neither tear the question down before the pending Remove request
+    // answers nor change what it removes. Unlike the other confirmations,
+    // a dialog answer leaves the question open: the dialog stays up through
+    // the request and owns its refusal, and the request's success clears it.
+    let mut remove_slot = use_confirm_slot::<Host, ()>();
     // A visible Remove confirmation remains mounted through the request and
     // owns its refusal. Skip-confirmation has no such surface and instead
     // sends a refusal through the panel's host-keyed modal map.
@@ -1603,7 +1607,7 @@ pub(crate) fn HostsPanel(
                 Ok(Commit::Confirmed) => {
                     if matches!(display, HostRequestDisplay::RemoveDialog) {
                         REMOVE_DIALOG.release();
-                        remove_open.set(None);
+                        remove_slot.clear();
                     }
                     on_changed.call(());
                 }
@@ -1613,7 +1617,7 @@ pub(crate) fn HostsPanel(
                 Ok(Commit::Unvalidated(warning)) => {
                     if matches!(display, HostRequestDisplay::RemoveDialog) {
                         REMOVE_DIALOG.release();
-                        remove_open.set(None);
+                        remove_slot.clear();
                     }
                     warnings.write().insert(host, warning);
                     on_changed.call(());
@@ -1724,21 +1728,21 @@ pub(crate) fn HostsPanel(
         );
     };
 
+    // Remove the host entry `shown` names: the opening the dialog's render
+    // drew (`show_dialog`), or the one `on_remove_start` just opened when
+    // the skip-confirmation preference answers for the user. A stale answer,
+    // for an opening since cancelled or replaced, does nothing and leaves the
+    // question now on screen as it is.
     let remove_base = base.clone();
     let on_remove_confirm = use_callback(
-        move |(host, skip_future, show_dialog): (HostId, bool, bool)| {
-            let Some(snapshot) = remove_open
-                .peek()
-                .as_ref()
-                .filter(|open| open.id == host)
-                .cloned()
-            else {
+        move |(shown, skip_future, show_dialog): (ConfirmToken<Host>, bool, bool)| {
+            let Some(snapshot) = answer_remove(&mut remove_slot, &shown, show_dialog) else {
                 return;
             };
+            let host = snapshot.id;
             remove_error.set(None);
             if !show_dialog {
                 REMOVE_DIALOG.release();
-                remove_open.set(None);
             }
             // A host the user removes by hand did not leave the list through an
             // uninstall, so a notice still owed for it (an uninstall whose reply
@@ -1785,9 +1789,11 @@ pub(crate) fn HostsPanel(
             return;
         };
         remove_error.set(None);
-        remove_open.set(Some(snapshot));
+        let opened = remove_slot.open(snapshot, ());
+        // No render runs between this open and the answer, so the token
+        // `open` returned is the showing this answer is for.
         if preferences.0.peek().skip_host_remove_confirmation == Some(true) {
-            on_remove_confirm.call((id, false, false));
+            on_remove_confirm.call((opened, false, false));
         }
     });
 
@@ -2039,7 +2045,7 @@ pub(crate) fn HostsPanel(
     // itself (see the `ops` module).
     let busy = ops.busy();
     let visible_refusal = if !adding()
-        && remove_open().is_none()
+        && !remove_slot.is_open()
         && settings_open().is_none()
         && !provisioning_menu_states
             .read()
@@ -2495,36 +2501,28 @@ pub(crate) fn HostsPanel(
                     host,
                 }
             }
-            if let Some(host) = remove_open() {
+            // The dialog draws the opening this render read and hands that
+            // same token back with every answer (Remove, Cancel, the header's
+            // dismiss, Escape), so each answer names the showing it was drawn
+            // for.
+            if let Some(shown) = remove_slot.current() {
                 settings_dialog::HostRemoveDialog {
-                    busy: mutation_busy_hosts.read().contains(&host.id)
-                        || provisioning_busy_hosts.read().contains(&host.id)
+                    busy: mutation_busy_hosts.read().contains(&shown.key().id)
+                        || provisioning_busy_hosts.read().contains(&shown.key().id)
                         || busy,
-                    host: host.clone(),
+                    shown: shown.clone(),
                     error: remove_error(),
-                    on_remove: {
-                        let handler = on_remove_confirm;
-                        move |skip_future| {
-                            // Copy the id out before calling: an `if let`
-                            // over `*remove_open.peek()` keeps the read guard
-                            // alive through its body, and the handler's
-                            // `remove_open.set(None)` then panics on the
-                            // still-borrowed signal, which a release wasm
-                            // build reports only as `unreachable`.
-                            let open = remove_open.peek().as_ref().map(|host| host.id);
-                            if let Some(id) = open {
-                                handler.call((id, skip_future, true));
-                            }
-                        }
+                    on_remove: move |(shown, skip_future): (ConfirmToken<Host>, bool)| {
+                        on_remove_confirm.call((shown, skip_future, true));
                     },
-                    on_cancel: move |_| {
-                        if !mutation_busy_hosts.peek().contains(&host.id) {
-                            // A dismissal can arrive before busy props render.
-                            // Keep isolation until the live request guard permits
-                            // the entire close, including its focus handoff.
-                            host_dialog.close(&settings_dialog::row_focus(host.id).script());
+                    on_cancel: move |shown: ConfirmToken<Host>| {
+                        let id = shown.key().id;
+                        // A dismissal can arrive before busy props render, so
+                        // the live request guard is read here, not the prop.
+                        let request_running = mutation_busy_hosts.peek().contains(&id);
+                        if cancel_remove(&mut remove_slot, &shown, request_running) {
+                            host_dialog.close(&settings_dialog::row_focus(id).script());
                             remove_error.set(None);
-                            remove_open.set(None);
                         }
                     },
                 }
@@ -4436,6 +4434,63 @@ enum AddConfirm<G> {
     Stale,
     /// The offer is taken and the page lock claimed: submit it.
     Accepted(G),
+}
+
+/// Decide whether a Remove answer drawn for `shown` may act, and on what:
+/// the host entry snapshot that opening displayed, or `None` for a stale
+/// answer (the opening was cancelled, cleared after a removal, or replaced,
+/// even by a new opening for the same host), which must change nothing.
+///
+/// The returned snapshot is the one the dialog drew, never the host list
+/// or the open question read at click time, so the request removes the
+/// entry the user saw named. Per SPEC.md ("Confirmed 2026-10-10") a removal
+/// follows the host entry: no installation-identity check belongs here.
+///
+/// `keep_open` is how the answer arrived. A dialog answer leaves the
+/// question open, because the dialog stays up through the request and owns
+/// its refusal (a retry after a refusal answers the same opening again);
+/// the request's success clears it. The skip-confirmation path has no
+/// dialog, so its answer consumes the opening it just made. This makes host
+/// Remove the one prompt `ConfirmSlot`'s docs sanction to answer without
+/// `take`.
+///
+/// Because a dialog answer does not consume the opening, a "remove" and a
+/// "remove, don't ask again" queued in one burst both pass here; the
+/// request's claim refuses the second request, but the second answer still
+/// stores the skip-confirmation preference. That quirk predates the move
+/// onto `ConfirmSlot` and is accepted by SPEC.md ("Confirmed 2026-10-10").
+fn answer_remove(
+    slot: &mut ConfirmSlot<Host>,
+    shown: &ConfirmToken<Host>,
+    keep_open: bool,
+) -> Option<Host> {
+    let current = if keep_open {
+        slot.is_current(shown)
+    } else {
+        slot.take(shown).is_some()
+    };
+    current.then(|| shown.key().clone())
+}
+
+/// Decide a Cancel, header dismiss or Escape drawn for `shown`: close the
+/// removal question and return `true` only if no removal request is running
+/// for that host (`request_running`, read live by the caller) and `shown` is
+/// still the open showing. On `true` the panel moves focus back to the
+/// host's row and clears the dialog's error; on `false` it does neither.
+///
+/// While the request runs, the dialog keeps its isolation, so the whole
+/// close (focus handoff included) waits for that request. A stale
+/// dismissal, drawn for a showing since cancelled, cleared or replaced,
+/// must not close, move focus away from, or wipe the error of the question
+/// now on screen. One test-and-clear (`take`) decides both whether the
+/// question closes and whether the panel moves focus, so a refused cancel
+/// cannot do one without the other.
+fn cancel_remove(
+    slot: &mut ConfirmSlot<Host>,
+    shown: &ConfirmToken<Host>,
+    request_running: bool,
+) -> bool {
+    !request_running && slot.take(shown).is_some()
 }
 
 /// Confirm `planned`, the opening of the offer the add dialog's answer was
@@ -7509,6 +7564,133 @@ mod tests {
             assert!(matches!(accepted, AddConfirm::Accepted(_)));
             assert_eq!(held.get(), 1, "the accepted answer holds its claim");
             assert!(!slot.is_open());
+        });
+    }
+
+    /// Mount a removal-question slot the way `HostsPanel` does and run `body`
+    /// against it inside the runtime, so the tests below exercise the real
+    /// signal-backed slot rather than a stand-in.
+    fn with_remove_slot(body: impl FnOnce(ConfirmSlot<Host>)) {
+        use std::cell::Cell;
+        std::thread_local! {
+            static SLOT: Cell<Option<ConfirmSlot<Host>>> = const { Cell::new(None) };
+        }
+
+        fn app() -> Element {
+            let slot = use_confirm_slot::<Host, ()>();
+            SLOT.with(|cell| cell.set(Some(slot)));
+            rsx! {}
+        }
+
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let slot = SLOT.with(Cell::get).expect("the slot mounted");
+        dom.in_runtime(|| body(slot));
+    }
+
+    /// Spec (`answer_remove`): a Remove answer acts only for the opening its
+    /// dialog was drawn for. Once that opening is cancelled, or replaced by
+    /// another host's question or by a new question for the same host, the
+    /// answer yields nothing and the question now open stays open; a stale
+    /// skip-confirmation answer consumes nothing either.
+    ///
+    /// Why: Remove makes Farhelm forget a host. An answer that read the open
+    /// question at click time, as this one once did, would remove whichever
+    /// host's dialog had replaced the one the user clicked in.
+    #[farhelm_testtrace::test]
+    fn a_stale_remove_answer_removes_nothing() {
+        with_remove_slot(|mut slot| {
+            let first = slot.open(flow_host(1, "1.0"), ());
+            // Another host's question replaces the one the click was drawn for.
+            let other = slot.open(flow_host(2, "1.0"), ());
+            assert_eq!(answer_remove(&mut slot, &first, true), None);
+            assert_eq!(answer_remove(&mut slot, &first, false), None);
+            assert!(slot.is_current(&other), "the newer question stays up");
+
+            // Cancel, then reopen for the same host: the first showing's
+            // Remove acts on nothing.
+            slot.cancel_for(&other);
+            let reopened = slot.open(flow_host(2, "1.0"), ());
+            assert_eq!(answer_remove(&mut slot, &other, true), None);
+            assert!(slot.is_current(&reopened), "the reopened question stays up");
+        });
+    }
+
+    /// Spec (`cancel_remove`): a dismissal (Cancel, the header's dismiss,
+    /// Escape) closes the removal question, and tells the panel to move focus
+    /// to the host's row and clear the dialog's error, only when it was
+    /// drawn for the showing still open and no removal request for that host
+    /// is running. A stale dismissal, or one that arrives while the request
+    /// runs, closes nothing and asks for neither.
+    ///
+    /// Why: a dismissal drawn for an earlier showing would otherwise close
+    /// the question the user now sees, pull focus out of it and wipe its
+    /// error; one that lands while the request runs would tear down the
+    /// dialog that owns that request's refusal.
+    #[farhelm_testtrace::test]
+    fn a_remove_cancel_acts_only_for_the_open_idle_showing() {
+        with_remove_slot(|mut slot| {
+            // Replaced by a new question for the same host.
+            let first = slot.open(flow_host(3, "1.0"), ());
+            let reopened = slot.open(flow_host(3, "1.0"), ());
+            assert!(!cancel_remove(&mut slot, &first, false));
+            assert!(slot.is_current(&reopened), "a stale cancel closes nothing");
+
+            // Current, but its removal request is running.
+            assert!(!cancel_remove(&mut slot, &reopened, true));
+            assert!(
+                slot.is_current(&reopened),
+                "the dialog stays up through the request"
+            );
+
+            // Current and idle: closes, and the panel moves focus.
+            assert!(cancel_remove(&mut slot, &reopened, false));
+            assert!(!slot.is_open());
+
+            // Once closed, a second dismissal from the same burst is stale.
+            assert!(!cancel_remove(&mut slot, &reopened, false));
+        });
+    }
+
+    /// Spec (`answer_remove`): a current answer yields the host entry
+    /// snapshot its opening was made with, which is what the dialog drew. A
+    /// dialog answer leaves its
+    /// opening open, so a retry after a refusal answers it again, until the
+    /// request's success clears it; the skip-confirmation answer consumes its
+    /// opening at once.
+    ///
+    /// Why: the dialog stays on screen through the request and owns its
+    /// refusal, so closing the question on the answer would hide that
+    /// refusal and the retry. And the request must remove the entry the user
+    /// saw named, which by SPEC.md follows the host entry's id with no
+    /// installation-identity check.
+    #[farhelm_testtrace::test]
+    fn a_remove_answer_acts_on_the_entry_it_showed() {
+        with_remove_slot(|mut slot| {
+            let drawn = flow_host(7, "1.0");
+            let shown = slot.open(drawn.clone(), ());
+            // `answer_remove` has no access to the host list or to anything
+            // but the slot and the token, so what it returns is the token's
+            // own snapshot.
+            assert_eq!(answer_remove(&mut slot, &shown, true), Some(drawn.clone()));
+            assert!(
+                slot.is_current(&shown),
+                "the dialog stays up through the request"
+            );
+            assert_eq!(
+                answer_remove(&mut slot, &shown, true),
+                Some(drawn.clone()),
+                "a retry after a refusal answers the same showing"
+            );
+            // The request's success clears the question; the dialog's
+            // answers are stale from then on.
+            slot.clear();
+            assert_eq!(answer_remove(&mut slot, &shown, true), None);
+
+            // The skip-confirmation path answers the opening it just made.
+            let skipped = slot.open(drawn.clone(), ());
+            assert_eq!(answer_remove(&mut slot, &skipped, false), Some(drawn));
+            assert!(!slot.is_open(), "no dialog is left behind");
         });
     }
 }

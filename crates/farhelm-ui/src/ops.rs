@@ -335,6 +335,8 @@ impl<K> ConfirmToken<K> {
 ///   confirmed THIS opening. It is a synchronous test-and-clear: it yields
 ///   the payload only if the open prompt's token equals the one the handler
 ///   carries (same opening AND same key), and otherwise changes nothing.
+///   (One kind of prompt is excepted; see below the list of things callers
+///   must not do.)
 /// - [`Self::cancel_for`] closes the prompt only under the same condition;
 ///   after a `take`, or once another opening has replaced it, it does
 ///   nothing.
@@ -359,6 +361,21 @@ impl<K> ConfirmToken<K> {
 ///   expecting it to reach a reopened prompt. It will not; that is the point.
 /// - Mint or forge a token. Outside this module the fields are private;
 ///   inside it, only a test builds one by hand, to isolate the key check.
+///
+/// One exception to "every confirm answer goes through `take`" is
+/// sanctioned: a prompt whose surface must stay up through the request its
+/// answer starts. The hosts panel's Remove confirmation is the example. Its
+/// dialog stays mounted while the removal runs and shows that request's
+/// refusal, so a retry after a refusal has to answer the same showing, and a
+/// `take` would unmount the dialog and lose both. Such a prompt accepts an
+/// answer with [`Self::is_current`] and leaves the opening open. The
+/// request's outcome then retires it (the panel calls [`Self::clear`] on
+/// success), or the prompt's own cancel does, through [`Self::cancel_for`]
+/// or `take` with the token that cancel was drawn for. Because the answer
+/// does not consume the opening, two answers queued in one burst can both
+/// pass `is_current`; such a prompt needs something else (for host Remove,
+/// the request's own claim) to keep the second from starting a second
+/// request. Every other prompt answers through `take`.
 ///
 /// `Copy` because it is a handle to a signal, like [`OpLock`]. Render code
 /// uses the tracked readers ([`Self::is_open`], [`Self::current`]);
@@ -518,7 +535,12 @@ impl<K: PartialEq + Clone + 'static, P: 'static> ConfirmSlot<K, P> {
     /// Whether `token`, the opening a handler's render drew, is still the
     /// open one, without subscribing. For a handler that must decide before
     /// it takes some other claim whether its answer can still land; the
-    /// answer itself goes through [`Self::take`], which checks again. Safe to
+    /// answer itself goes through [`Self::take`], which checks again. The
+    /// one exception is a prompt that stays up through the request its
+    /// answer starts (the hosts panel's Remove confirmation): its answer
+    /// checks `is_current` instead of taking, and the request's outcome or
+    /// the prompt's own cancel retires the opening (see the type's docs for
+    /// why and what that caller must supply instead). Safe to
     /// expose because the caller already holds the token it asks about: the
     /// result is a yes or no, never the live opening.
     pub(crate) fn is_current(&self, token: &ConfirmToken<K>) -> bool {
