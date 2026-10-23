@@ -18536,7 +18536,11 @@
   remains, and the unreleased `releasing/changelog.d/planning-probe-bound.md` fragment is corrected if it still
   overstates. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/uninstall-guards-oct22.md`.
+- Execution: complete in jj change `xmznvsmryxlymlsksplwwmrpnuwrzslr`, bookmark
+  `plan/uninstall-guards-oct22/05-bounded-output-reads`. The shared child-output capture bounds its post-exit reads with
+  a 10-second grace (the probe keeps its 2 seconds) and fails the command when it fires; the BUGS.md entry now covers
+  only the remaining file-transfer hang. About 112 changed lines of code, tests and BUGS.md, a little over the gate of
+  about 100; treated as within it. [Draft PR #2664](https://github.com/scode/farhelm/pull/2664/changes).
 
 ## replace-with-recent-row-says-launch.md
 

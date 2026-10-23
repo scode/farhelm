@@ -36,9 +36,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## High priority: material UX degradation
 
-- [`shell-inspection-drains-exhaust-planning-pool.md`](shell-inspection-drains-exhaust-planning-pool.md) — Pipe-draining
-  shell inspections can occupy every host-planning slot; an actual helper trigger is unverified.
-
 - [`untouched-checkout-folder-save-undoes-cli-edit.md`](untouched-checkout-folder-save-undoes-cli-edit.md) — Saving an
   untouched checkout-folder field can overwrite a newer CLI setting.
 

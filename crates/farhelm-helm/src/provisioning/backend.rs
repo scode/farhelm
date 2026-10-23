@@ -20,6 +20,13 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 // Once it does, only verified growth of that file renews the idle deadline.
 const TRANSFER_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const TRANSFER_PROGRESS_POLL: Duration = Duration::from_secs(2);
+// Once a child has exited or been killed, its pipes reach EOF unless another
+// process inherited them and outlived it (a local ssh helper, say). Expiry
+// fails the command on steps every install takes, so this exceeds the probe's
+// 2 s: a ControlPersist check saw EOF about 0.5 s after exit, a thin margin
+// under load, and a helper that lingers briefly used to cost only a delay.
+// Ten seconds still ends an indefinite wait and frees the planning slot.
+const CAPTURE_PIPE_GRACE: Duration = Duration::from_secs(10);
 pub(super) const MAX_CHILD_STREAM_BYTES: usize = 64 * 1024;
 const POSITIVE_ABSENCE_EXIT: i32 = 75;
 pub(super) const REMOTE_PROBE_MARKER: &str = "farhelm-probe-command-started-v1";
@@ -1583,6 +1590,8 @@ where
 
 /// Wait for one child while concurrently draining bounded stdout and stderr.
 /// Every timeout or stream failure kills and reaps before control returns.
+/// Output readers then get [`CAPTURE_PIPE_GRACE`]; after a normal exit, a
+/// helper still holding a pipe when it expires is not killed.
 /// The caller must isolate the command with [`isolate_process_group`] before
 /// spawning so descendants cannot outlive a timed-out shell.
 pub(super) async fn capture_child(
@@ -1603,8 +1612,7 @@ pub(super) async fn capture_child(
             Ok(status) => status,
             Err(error) => {
                 terminate_child(&mut child).await;
-                let _ = stdout_task.await;
-                let _ = stderr_task.await;
+                let _ = join_orphaned_readers([stdout_task, stderr_task]).await;
                 return Err(BackendFailure::new(
                     format!("waiting for {context}"),
                     error.to_string(),
@@ -1614,8 +1622,7 @@ pub(super) async fn capture_child(
         failure = signal_rx.recv() => {
             let failure = failure.expect("stream drain signal sender disappeared");
             terminate_child(&mut child).await;
-            let _ = stdout_task.await;
-            let _ = stderr_task.await;
+            let _ = join_orphaned_readers([stdout_task, stderr_task]).await;
             return Err(BackendFailure::new(
                 format!("reading {context} {} ({})", failure.stream, failure.detail),
                 String::from_utf8_lossy(&failure.prefix),
@@ -1623,8 +1630,7 @@ pub(super) async fn capture_child(
         }
         _ = tokio::time::sleep_until(deadline) => {
             terminate_child(&mut child).await;
-            let _ = stdout_task.await;
-            let _ = stderr_task.await;
+            let _ = join_orphaned_readers([stdout_task, stderr_task]).await;
             return Err(BackendFailure::new(format!("{context} timed out"), ""));
         }
     };
@@ -1807,12 +1813,12 @@ async fn finish_child_output(
     signal_rx: &mut tokio::sync::mpsc::UnboundedReceiver<DrainFailure>,
     context: &str,
 ) -> Result<CommandResult, BackendFailure> {
-    let stdout = stdout_task.await.map_err(|error| {
-        BackendFailure::new(format!("joining {context} stdout drain"), error.to_string())
-    })?;
-    let stderr = stderr_task.await.map_err(|error| {
-        BackendFailure::new(format!("joining {context} stderr drain"), error.to_string())
-    })?;
+    // After a normal exit only a lingering holder's bytes can be cut off, but a
+    // surfaced error beats silently missing stderr (the probe carries on instead).
+    let [stdout, stderr] = join_orphaned_readers([stdout_task, stderr_task]).await;
+    let failed = |stream, detail| format!("reading {context} {stream} ({detail}; {status})");
+    let stdout = stdout.map_err(|detail| BackendFailure::new(failed("stdout", detail), ""))?;
+    let stderr = stderr.map_err(|detail| BackendFailure::new(failed("stderr", detail), ""))?;
     if let Ok(failure) = signal_rx.try_recv() {
         return Err(BackendFailure::new(
             format!("reading {context} {} ({})", failure.stream, failure.detail),
@@ -1832,6 +1838,24 @@ async fn finish_child_output(
         stdout,
         stderr: String::from_utf8_lossy(&stderr).into_owned(),
     })
+}
+
+/// Join a gone child's stdout and stderr readers within one shared
+/// [`CAPTURE_PIPE_GRACE`], aborting any reader still waiting for EOF so it
+/// releases the pipe instead of waiting on as a detached task.
+async fn join_orphaned_readers(
+    readers: [tokio::task::JoinHandle<Vec<u8>>; 2],
+) -> [Result<Vec<u8>, String>; 2] {
+    let until = tokio::time::Instant::now() + CAPTURE_PIPE_GRACE;
+    let mut joined = [Ok(Vec::new()), Ok(Vec::new())];
+    for (slot, mut reader) in joined.iter_mut().zip(readers) {
+        *slot = match tokio::time::timeout_at(until, &mut reader).await {
+            Ok(result) => result.map_err(|error| error.to_string()),
+            Err(_) => Err("still open after the command exited".to_string()),
+        };
+        reader.abort(); // Harmless once joined.
+    }
+    joined
 }
 
 /// Kill a child and every helper in its isolated process group, then reap
