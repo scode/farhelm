@@ -17899,7 +17899,11 @@
 - Completion criteria: each test waits for the child's own pid file, takes cleanup ownership of the child, and only then
   waits for the remaining readiness files. Test-only, confined to these two tests. Size gate: about 100 lines as above;
   over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
+- Execution: complete in jj change `ynozqzrukvskzpwlyvzwyyyxntlumsvs`, bookmark
+  `plan/test-hygiene-oct21/08-unrelated-child-owned-first`. Both owner-death tests now wait for the unrelated child pid
+  alone (a shared helper, `await_unrelated_child`), arm its `Indirect` guard, and only then wait for their other
+  readiness files, so a readiness timeout no longer leaves the `sleep 300` running. The test change totals 41
+  added/deleted lines, below the 100-line gate. PR: https://github.com/scode/farhelm/pull/2618/changes.
 
 ## duplicate-uninstall-advice-points-to-removed-owner.md
 

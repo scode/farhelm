@@ -287,9 +287,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`spare-test-fifo-write-can-outlive-reader.md`](spare-test-fifo-write-can-outlive-reader.md) — A completion test's
   FIFO release can block after its reader exits; the standard runner supplies only an outer timeout.
 
-- [`spare-owner-tests-register-child-cleanup-after-readiness.md`](spare-owner-tests-register-child-cleanup-after-readiness.md)
-  — Owner-death tests can leave a disposable child outside cleanup after readiness failure.
-
 - [`checkout-test-skips-new-spare-setting-restoration.md`](checkout-test-skips-new-spare-setting-restoration.md) — An
   earlier caller-cleanup failure can skip restoring the new prepared-checkout switch; historical coverage remains
   ambiguous.
