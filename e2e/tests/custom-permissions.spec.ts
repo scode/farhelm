@@ -313,14 +313,20 @@ test("custom model acceptance keeps compatible effort with incomplete permission
   const flags = form.locator(".custom-permission-flags");
   const high = form.locator(".launch-composer-effort-choice").getByRole("button", { name: "high", exact: true });
   const model = form.getByRole("combobox", { name: "model", exact: true });
-  for (const draft of ["", "--mode '"]) {
+  for (const [round, draft] of ["", "--mode '"].entries()) {
     await flags.fill(draft);
     await high.click();
     await expect(high).toHaveAttribute("aria-pressed", "true");
     await expect(form.locator(".create-session-submit")).toBeDisabled();
-    await model.fill("private-permission-test-model");
+    // A distinct id per round, checked once the field closes: an open field
+    // shows the typed draft, so only the closed one proves Enter accepted it,
+    // and a reused id would let a later round pass on the earlier commit.
+    const id = `private-permission-test-model-${round}`;
+    await model.fill(id);
+    await expect(model).toHaveAttribute("aria-expanded", "true");
     await model.press("Enter");
-    await expect(model).toHaveValue("private-permission-test-model");
+    await expect(model).toHaveAttribute("aria-expanded", "false");
+    await expect(model).toHaveValue(id);
     await expect(high).toHaveAttribute("aria-pressed", "true");
     await expect(flags).toHaveValue(draft);
     await expect(form.locator(".create-session-submit")).toBeDisabled();

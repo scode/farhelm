@@ -196,9 +196,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`menu-blur-can-leave-delayed-arrow-current.md`](menu-blur-can-leave-delayed-arrow-current.md) — A blur without
   focus-in may leave delayed menu-arrow work current; browser event behavior is unverified.
 
-- [`model-effort-test-never-proves-model-accepted.md`](model-effort-test-never-proves-model-accepted.md) — The
-  model-effort regression can pass without committing its custom model; no product failure is established.
-
 - [`normal-quit-misses-empty-download-directory.md`](normal-quit-misses-empty-download-directory.md) — A narrow
   normal-Quit race may leave an empty download staging folder; saved files are unaffected by this mechanism.
 

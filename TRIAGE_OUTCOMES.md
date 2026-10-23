@@ -17817,7 +17817,11 @@
 - Completion criteria: each round uses a distinct model name and proves the model was accepted (field closed, accepted
   value shown) before the effort checks. Test-only, confined to this test. Size gate: about 100 lines as above; over it,
   block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/test-hygiene-oct21.md`.
+- Execution: complete in jj change `ooorouzwwwnnwrntmqvqowypoznvploz`, bookmark
+  `plan/test-hygiene-oct21/04-model-acceptance-proof`. Each round now types its own model id, asserts the field opened,
+  and after Enter asserts it closed (`aria-expanded="false"`) showing that id before the effort checks; a closed field
+  shows only the committed model. The test change totals 12 added/deleted lines, below the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2608/changes.
 
 ## notification-fixtures-register-ownership-too-late.md
 
