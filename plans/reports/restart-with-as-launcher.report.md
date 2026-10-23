@@ -133,3 +133,99 @@ A fresh scope reassessment at the executing model and effort found no unnecessar
 rounds. The exact source snapshot, editable baseline and local terminal hooks preserve separate existing contracts; they
 do not introduce another form or confirmation framework. The original three-part outline was reduced to a mode
 extraction and one coherent feature PR so no intermediate PR retained an unreachable old editor.
+
+### Landing
+
+Landed as built: Restart with is now a mode of the session launcher instead of a dialog of its own, so it offers the
+launcher's search, templates and template shortcuts, and refuses any that would change what the restart keeps. It was
+the second of two plans in this landing round, after agents asking to add, edit or remove a host (agent-add-host).
+
+- #2682: the session launcher tells creating a session apart from replacing one, so a third mode can follow.
+- #2683: Restart with opens the session launcher in that third mode.
+
+#### What landed since the stack was based, and whether it interacted
+
+A fresh-context reviewer and I read this plan against the other plan in the round and against what main gained since its
+base. The reviewer found no blocker and nothing that needs your decision. Three plans that landed earlier changed the
+launcher: the prominent launch error, each host's last-used folder as the default, and the session view fixes. This plan
+already handled them, and the code matches its SPEC.md changes. Restart with checks the folder only while it is the one
+it opened with, says "Restart error." when the restart is refused, never applies a host's last folder, and on Cancel
+returns focus to the session's Restart with button. Since then main gained the decisions from your plan review (#2689).
+One of them added a sentence to the SPEC.md paragraph #2683 rewrote: deleting a template offers Undo exactly when its
+button said "delete", not "delete permanently". The rebase conflicted there, and the resolution keeps #2683's paragraph
+with that sentence added.
+
+#### Fixes made at landing
+
+- Two docs pages still described the old dialog. The "Launch templates" page said Restart with offers no templates; it
+  now says the ⚡ shortcut, number keys and launch sequences also work there, and that Restart with refuses a template
+  that sets the agent, host, directory, session name or first message. The "Stop, restart and resume" page now says
+  Enter in the model field only picks the model, where it used to restart. No docs preview was started for these small
+  edits.
+- The new test "restart with refuses held composer actions and scopes model search" failed in the full browser suite on
+  both engines because the launcher offered the same folder twice. Either option is the same refused action, so the test
+  now takes the first. This changes the test, not the launcher.
+
+#### Possible follow-ups
+
+- Found at landing: when typing a folder, the launcher can list the same "Use this path" folder twice. It happened in
+  the full browser suite only, after other tests had run against the same helm, and I did not look into why, so a user
+  may see it too.
+- For triage: the queued review item about tunnel consent conflicting with the Restart with dialog cites that dialog,
+  which no longer exists. The conflict it describes probably applies to the session launcher now, in every mode, so the
+  item should be checked again rather than removed.
+- TODO.md's entry on moving to native dialogs names the Restart with dialog among the dialogs that keep focus inside
+  themselves by hand. That dialog is gone; the entry's wording could be refreshed.
+- For release curation: the changelog fragment is `kind: added`, but much of it changes existing behavior (Enter in the
+  model field no longer restarts), so `changed` may fit better.
+
+#### Checks
+
+This round landed two plans together: agents asking to add, edit or remove a host (agent-add-host) and Restart with as a
+mode of the session launcher (restart-with-as-launcher). Their executors ran selected tests. This round ran the
+following on both stacked together on this round's main, before the landing fixes:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the check that every
+  test delay states its reason, `dprint check` on the changed Markdown files,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (one warning, about a citation
+  main already had), the website build, the workspace debug build, the UI's release web build and
+  `scripts/check-desktop-assets.sh`: all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` with pinned nextest and tmux, four slots, no retries, run
+  `6b279275-558a-4a9f-890f-914e5fa2f0f2`: 4355 tests ran, 4353 passed and 2 failed; 40 more were skipped by design
+  (helper entries that only run as child processes of other tests, and tests that need a real signed-in Claude or
+  Codex). One failure was the known open flake `api::save_order::tests::a_hung_save_releases_waiters_at_their_deadline`,
+  already in TODO.md's Deflake list. The other, the instructions test pinning how `farhelm agent stop` is laid out,
+  failed because of agent-add-host's new command and was fixed at landing in that plan.
+  `cargo nextest run -p farhelm-ui --features desktop`, same settings without tmux, run
+  `3f9748ba-cb00-4c8e-841d-973cc923863d`: 926 passed. The asset script tests (`node --test` in
+  `crates/farhelm-ui/js-tests`), run `65a89506-7afc-4376-898e-402ba5ad79f2`: 333 passed.
+- `npx playwright test` in `e2e/`, the whole browser suite on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `6721bfe7-e393-42e3-8d1b-5902b30fa1ed`: 2565 passed, 14 skipped by design (WebKit
+  cannot be granted clipboard access), 7 failed. I repeated the failures three times each, on this stack (run
+  `a6eabb40-dd48-47ee-b1ab-4a0065357901`) and on main without either plan (run `512b4ebe-c4c8-4386-8da3-24e8f651adba`):
+  - Restart with's new test "refuses held composer actions and scopes model search" failed on both engines because the
+    launcher offered the same "Use this path" folder twice and Playwright refuses an ambiguous match. Alone on this
+    stack it passed 6 of 6, so the second option depends on what ran before it. The test was changed at landing in
+    restart-with-as-launcher.
+  - WebKit's "a template shortcut preserves editor focus when clearing a quick-launch YOLO question" passed 3 of 3 on
+    this stack and failed 1 of 3 on main: the open flake recorded in draft PR #2621.
+  - The two tests "rename closes a displaced template number popup" and "rename keeps an unchanged template number
+    popup", on both engines, failed all 12 attempts on this stack and all 12 on main. Neither plan touches the Templates
+    dialog. See the follow-ups.
+- After the landing fixes: `cargo fmt --all -- --check`, `cargo clippy -p farhelm --all-targets -- -D warnings`, the
+  website build, the debug build and the release web build passed. `cargo nextest run -p farhelm`, which includes the
+  fixed instructions test, run `ac4d9d8b-cb8c-4493-b759-470a371bcee9`: 655 passed, 6 skipped by design. Restart with's
+  browser spec on both engines, run `cd5eae82-8d62-4777-8b1a-71a18884089c`: 94 passed. That run cannot show the test
+  change working, because the duplicate folder appeared only in the full suite; the change is that the test now takes
+  the first of the matching options, which cannot be ambiguous. I did not rerun the full suite.
+- Rebasing onto today's main brought in only main's own documentation commits, compared line by line, after one SPEC.md
+  conflict was resolved in restart-with-as-launcher.
+- Reused: none. Skipped: the doctests (no documentation example changed), the desktop smoke test, and the native Mac app
+  (not runnable here).
+
+The report's checks were selected launcher and Restart with tests; this round ran the whole Rust workspace and the whole
+browser suite with both plans together. The full suite showed that the plan's new test depended on what ran before it,
+and two docs pages had gone stale; both were fixed above. Nothing else in the executor's report became untrue at
+landing.
