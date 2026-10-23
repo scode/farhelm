@@ -37,17 +37,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   root shared between hosts lets one host trash, then permanently delete, a checkout another host's session works in;
   whether a shared root is supported is unsettled.
 
-- [`update-copies-launch-files-group-writable.md`](update-copies-launch-files-group-writable.md) — Under a permissive
-  umask an update briefly leaves new launch files group-writable in the app, letting another account inject code; the
-  race's practicality is unverified.
-
 - [`create-retry-takeover-replaces-restarted-session.md`](create-retry-takeover-replaces-restarted-session.md) — A stale
   create retry may take over a session after an ambiguous Restart failure; active Restart is locked, and the complete
   record-loss/survivor chain and fault-pair coverage remain unresolved.
-
-- [`startup-reload-adopts-surviving-tab-as-agent.md`](startup-reload-adopts-surviving-tab-as-agent.md) — After an
-  interrupted restart, recovery can take a surviving tab for the agent so Stop and Restart kill it; reaching that shape
-  without direct private-tmux use is unverified.
 
 - [`interrupted-delete-loses-attachments-at-startup.md`](interrupted-delete-loses-attachments-at-startup.md) — A session
   that survives an interrupted Delete loses its attachments at the next supervisor start; the partial-deletion allowance
@@ -91,10 +83,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   The CentOS test deletes the user's ssh config after a leftover start marker with no end marker; an accidental trigger
   is unverified, and the bucket is unsettled.
 
-- [`grok-clock-step-pins-old-conversation.md`](grok-clock-step-pins-old-conversation.md) — After a backward clock step a
-  Grok session refuses /new and Restart resumes the conversation the user left; the explicit no-change-on-refusal rule
-  strengthens possible coverage, while the vendor-clock premise remains unverified.
-
 - [`pi-child-report-replaces-resume-target.md`](pi-child-report-replaces-resume-target.md) — A child Pi carrying
   Farhelm's reporter can replace its Pi session's Resume target; a forwarding extension is unverified.
 
@@ -109,14 +97,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`lost-shortcut-save-restores-misleading-assignment.md`](lost-shortcut-save-restores-misleading-assignment.md) — A
   lost committed-save reply restores an old shortcut indication while the next key resolves the new template; harmful
   reliance and coverage remain unproved.
-
-- [`sign-in-retains-failed-shortcut-assignment.md`](sign-in-retains-failed-shortcut-assignment.md) — Sign-in recovery
-  can retain attempted shortcut keys after their save fails; later launch resolves the stored map, with harmful reliance
-  unproved.
-
-- [`replace-cancel-can-erase-admitted-recovery-key.md`](replace-cancel-can-erase-admitted-recovery-key.md) — Cancel may
-  discard an admitted Replace's recovery key and permit duplication; the required trusted native input ordering is
-  source-incomplete.
 
 - [`reseeded-launcher-retains-conversation-selector.md`](reseeded-launcher-retains-conversation-selector.md) — A
   superseded mounted launcher retains a conversation selector; an accessible shipped action completing the sequence is

@@ -17883,3 +17883,492 @@
   the tests that pin the old wording are updated. The name fallback and the GUI host-details text stay as they are. Size
   gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/duplicate-uninstall-retry-advice.md`.
+
+## update-copies-launch-files-group-writable.md
+
+- Outcome: `other`.
+- Assessment: the mechanism is confirmed by code reading on main 74c80403 (not run): `replace_file` in
+  `scripts/install.sh` copies, then chmods, then moves, and the update path's sources are written under the caller's
+  umask, so under umask 002 the copy beside the destination is briefly group-writable. That is the exact gap
+  `update-temporaries-briefly-permit-cross-account-writes.md` assessed and the user accepted on 2026-10-10. The earlier
+  `app-info-plist-uses-caller-umask.md` fix (PR #1148) closed only the steady state and predates that acceptance.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC.md "Maintainer-confirmed
+  decisions", "Confirmed 2026-10-10": Farhelm "does not spend significant complexity on defence in depth against a
+  user's broad umask, such as closing the brief window between creating a file and restricting it."
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed during the 2026-10-22 triage of the highest bucket.
+
+## startup-reload-adopts-surviving-tab-as-agent.md
+
+- Outcome: `other`.
+- Assessment: the adoption mechanism is confirmed by code reading on main 74c80403 (not run), but no Farhelm path
+  produces its precondition, an agent window gone while a tab survives. Dead agent panes are kept by `remain-on-exit`;
+  respawn keeps the window; the old agent window is killed only after its replacement is confirmed; unwind kills only
+  the replacement; tab close refuses the recorded agent window; a supervisor that dies mid-Restart leaves the agent
+  window in place, so the session has two windows and markers are read. The code's own test helper (`kill_pane_for_test`
+  in `crates/farhelm-supervisor/src/tmux.rs`) says "Nothing but a deliberate `kill-pane` produces it". The comments that
+  still say the shape is reachable are stale.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC.md "Ownership during cleanup
+  and provisioning": "Windows, panes, processes and configuration changes made through the private server anyway are
+  outside every Farhelm guarantee ... Do not add code or complexity to detect, track, clean up after, or recover from
+  them." Same basis as `pane-states-skips-markers-single-window.md`.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed during the 2026-10-22 triage of the highest bucket.
+
+## grok-clock-step-pins-old-conversation.md
+
+- Outcome: `other`.
+- Assessment: confirmed by code reading on main 74c80403 (not run): an older-timestamped competing Grok `SessionStart`
+  is refused and the previous resumable selection stays. The vendor wall-clock premise is unverified.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC.md "Durability and resume":
+  "Equal or older competing selections fail closed, including after supervisor restart, without a general event log or
+  clock-recovery protocol" and "A refused report changes nothing: no stored identity, no offer, no pending state";
+  SPEC.md "First-class harnesses": "a resume they accept is not the lost user work this allowance excludes."
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed during the 2026-10-22 triage of the highest bucket.
+
+## sign-in-retains-failed-shortcut-assignment.md
+
+- Outcome: `other`.
+- Assessment: confirmed by code reading on main 74c80403 (not run): browser sign-in recovery lays a pending,
+  unacknowledged binding map over the fresh seed (`seed_with_local_changes`), and a later failure of that write leaves
+  it shown. Browser-only. This contradicts SPEC.md "Signing in again" ("nothing is replayed, restored or merged back")
+  and the 2026-10-22 decision that a failed GUI save is reported and discarded.
+- Decision: skipped as already planned work. `plans/queue/sign-in-preservation-sweep.md` (TODO.md Near term) removes
+  `seed_with_local_changes` and its call and turns sign-in recovery into a page reload; the `gui-saves-last-write-wins`
+  landing report names this case as covered by that plan. Planned, not implemented.
+- Completion criteria: remove the feedback file and its index entry immediately; the fix lands with that plan.
+- Execution: `complete` for the queue cleanup; removed during the 2026-10-22 triage of the highest bucket.
+
+## replace-cancel-can-erase-admitted-recovery-key.md
+
+- Outcome: `other`.
+- Assessment: the mechanism exists by code reading on main 74c80403 (not run), but its trigger is a Cancel delivered
+  between the permanent-answer click and the redraw that disables Cancel (the handler sets `replacing` synchronously),
+  followed by a partial replacement failure and a retry. The worst consequence is a duplicate session, which loses
+  nothing.
+- Decision: skipped under the triage rule for findings covered by the specifications. SPEC.md "One GUI at a time",
+  "Confirmed 2026-10-10": "an action a user takes inside a sub-second window before the screen updates ... may be
+  carried out as delivered. A Cancel and a submit of the same dialog that arrive together before a redraw may still
+  submit". Same basis as `queued-launch-capture-before-repaint.md`.
+- Completion criteria: remove the feedback file and its index entry immediately, without code or spec changes.
+- Execution: `complete`; removed during the 2026-10-22 triage of the highest bucket.
+
+## link-classifier-misses-embedded-ipv4.md
+
+- Outcome: `fix spec+code`.
+- Assessment: partly correct, by code reading on main 74c80403 (not run). Link classification (`permission_for_url` in
+  `crates/farhelm-helm/src/browser.rs`) treats an IPv6 literal as local only for mapped IPv4, loopback, unspecified,
+  multicast, unique-local and link-local addresses, so `64:ff9b::/96`, `64:ff9b:1::/48`, IPv4-compatible `::/96`, 6to4
+  `2002::/16` and site-local `fec0::/10` count as public and open without a card when only the host's public-link
+  permission is on. The code matches SPEC.md's list exactly. Unverified: that any such literal reaches the user's
+  machine or LAN (RFC 6052 forbids non-global IPv4 under the NAT64 prefix; IPv4-compatible addresses are generally
+  unrouted).
+- Decision: on the 2026-10-22 triage page the user chose "Treat IPv4-embedding IPv6 ranges as local".
+- Completion criteria: classify as local-network any IPv6 literal in `64:ff9b::/96`, `64:ff9b:1::/48`, `::/96` and
+  `2002::/16` whose embedded IPv4 address is local under the existing IPv4 rule (or those whole ranges, if simpler),
+  plus `fec0::/10`. Classification stays lexical. Update the local-network list in SPEC.md "Agent-spawned sessions" and
+  the link-request paragraph in SPEC_impl.md to match, with unit tests for each range. Size gate: about 100 lines of
+  diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and
+  bring it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## agent-stop-kills-shared-personal-tmux.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by code reading on main 74c80403 (not run). Agents run without `TMUX`/`TMUX_PANE`, so a plain
+  `tmux` from an agent reaches the user's own server or starts it when none runs; a server started that way sits in the
+  launch's scope and carries the session and agent markers, and windows later opened in it from an SSH login are its
+  children. Stop and Restart reap the scope and everything the markers claim, so they end the server and the user's
+  outside work in it. An ssh ControlMaster the agent starts first has the same shape. SPEC.md covers ending the server
+  itself ("Stop and delete reap everything the agent started"; teardown "including background servers") but not the
+  user's later work inside it, and never names ssh masters. A code fix cannot tell the agent's own `tmux new -d` jobs
+  from the user's windows in the same server.
+- Decision: the user chose to accept and document it (2026-10-22 triage page, principle question B), in their words:
+  "Yes, this is intentional, and I think at some point we had a discussion, or I had a discussion with some agent, but I
+  guess it wasn't specific enough. Yes, this is expected. If you're running a [tmux] from within that Farhelm-managed
+  [tmux], you're on your own." Principle: a per-user shared program, such as a personal tmux server or an ssh
+  ControlMaster, that a session's agent or tab is the first to start belongs to that session, and ending the session
+  (Stop, Restart, Delete, tab close) ends it along with everything later run in it or through it, including work started
+  from outside Farhelm.
+- Completion criteria: SPEC.md states that principle in "Lifecycle operations" (or "Ownership during cleanup and
+  provisioning", next to the background-servers sentence), naming the agent case and ssh masters. The user-documentation
+  Doc todo in TODO.md about tab-started services is widened to cover the agent case and ssh masters. No code change.
+  Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## tab-owns-first-personal-tmux.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by code reading on main 74c80403 (not run); the item's premise is right. The agent launch
+  removes the private server's `TMUX`/`TMUX_PANE` only after the login shell's startup files ran, so a
+  `[ -z "$TMUX" ]`-guarded tmux autostart never fires there; a tab's shell starts without them, so the guard fires in
+  the first tab. On a host with no personal tmux server running, the first tab therefore starts it and owns it, and
+  closing the tab (or, with `exec tmux ...`, detaching) ends it with every window in it. The behaviour is accepted in
+  SPEC.md "Session view", but its justification ("since the agent's launch has normally already run the same startup
+  files, a tab usually finds such a service running and only reuses it", also in SPEC_impl.md and the 2026-09-30 ledger
+  reasoning) is false for tmux.
+- Decision: the user kept the behaviour and asked for the premise to be corrected (2026-10-22 triage page, principle
+  question B; their comment is quoted under `agent-stop-kills-shared-personal-tmux.md`).
+- Completion criteria: correct the "usually finds such a service running" sentence in SPEC.md "Session view" and its
+  SPEC_impl.md counterpart to say that a tmux autostart guarded by `TMUX` does not fire during the agent's launch, so
+  the first tab routinely becomes the owner of the user's tmux server, and that with `exec tmux` a detach ends it.
+  Correct the Doc todo in TODO.md that says services started for the agent launch are not affected. No code change.
+  Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## named-restart-with-keeps-unreported-old-conversation.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed end to end by code reading on main 74c80403 (not run), through the conversation-hooks opt-out
+  only. Whether a named Restart with clears the old captured conversation is decided from the harness alone
+  (`clear_capture` in `crates/farhelm-supervisor/src/service/core.rs`), before and independently of whether the launch
+  is hooked; for Claude and Codex with Farhelm's hooks turned off, no report ever replaces the old capture, so a later
+  plain Restart or Resume enters the previous conversation indefinitely. The "reporter unavailable" variant cannot
+  happen for Claude or Codex; the Pi and OMP reporter-materialisation failure is decided after the transaction and is a
+  different shape. SPEC.md pulls both ways ("A named Restart with keeps the old capture until that report replaces it"
+  versus "A launch whose harness cannot report ... has no captured identity").
+- Decision: the user chose "Clear the old conversation when hooks are off" (2026-10-22 triage page, accepted
+  recommendation).
+- Completion criteria: a named Restart with clears the old captured conversation, through the existing Goose
+  clear-and-restore path, when Farhelm's conversation hooks are turned off for that harness; a service test covers
+  Claude or Codex with hooks off. The Pi and OMP materialisation-failure variant is out of scope; mention it in the PR
+  if it stays open. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## nested-goose-report-replaces-resume-target.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by code reading on main 74c80403 (not run). Goose's reporter is enabled through inherited
+  environment, Goose reports have no ownership check, and a report replaces the stored conversation, so a Goose
+  sub-agent or nested Goose resume that starts the reporter can become the session's Resume target. That native
+  sub-agents do so rests on the source research recorded in `lore/2026-09-23-goose-session-tracking.md`, not on a run;
+  if it holds, the trigger is ordinary use. The 2026-09-23 decision was to keep basic Goose support and document this
+  limitation, which never reached SPEC.md; SPEC.md "First-class harnesses" does not otherwise accept resuming the wrong
+  conversation.
+- Decision: the user chose to state it as an accepted limitation (2026-10-22 triage page, principle question C: fix Grok
+  and OMP, state Pi and Goose child reports as an accepted limitation).
+- Completion criteria: SPEC.md "Durability and resume" states that Goose's reporter does not tell a native sub-agent or
+  a nested Goose run that inherits it from the foreground conversation, so such a run can replace the session's Resume
+  target, and that this is accepted. "First-class harnesses" makes clear this counts among the conversation-tracking
+  limits it accepts. No code change. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## grok-unrecognized-pane-admits-nested-grok.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 74c80403 (not run). Grok attribution recognises only the images `grok`
+  and `grok-linux-x86_64` and accepts the pane process by position, so when the session's own Grok has another image
+  name, a recognised nested Grok below it becomes the only emitter and its conversation is admitted. This contradicts
+  SPEC.md "Durability and resume" in so many words ("a nested Grok or another session-hosting runtime cannot replace the
+  parent selection"). Unverified: the vendor's image names on other platforms, and two differently named Grok installs
+  on one host.
+- Decision: the user chose to fix it (2026-10-22 triage page, principle question C).
+- Completion criteria: when the pane process is not the emitter and looks like a Grok runtime (argv[0] basename `grok`,
+  or an image basename `grok` or `grok-*`), the report is refused; resident wrapper panes keep working. A unit test
+  covers the uncounted-pane chain. Size gate: about 100 lines as above; over it, block and bring it back. Remove the
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## omp-direct-bun-pane-admits-nested-omp.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 74c80403 (not run). A direct `bun <entry>` OMP command launch is
+  classified like `bun x`, so a readable Bun pane whose entry file Farhelm cannot match (a relative path on macOS, an
+  unknown layout) keeps the positional exemption, and a nested OMP carrying Farhelm's reporter becomes the only emitter.
+  SPEC_impl.md "The OMP ownership proof" grants that exemption only under a `bun x` or npm launch. Unverified: a nested
+  OMP that loads Farhelm's reporter.
+- Decision: the user chose to fix it (2026-10-22 triage page, principle question C).
+- Completion criteria: under a direct `bun <entry>` launch, a readable Bun or Node pane that is not the emitter refuses,
+  while `bun x`, `bunx` and npm launcher panes keep the positional acceptance `omp-bun-pane-proof.md` chose. A unit test
+  covers the chain in the feedback file. Size gate: about 100 lines as above; over it, block and bring it back. Remove
+  the feedback file and its index entry.
+- Execution: `pending`.
+
+## pi-child-report-replaces-resume-target.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by code reading on main 74c80403 (not run): Pi reports run no ownership corridor, so a child Pi
+  started with Farhelm's `-e` reporter passed on (by a third-party extension, say) can replace or withdraw the session's
+  Resume target. Unverified: that any extension or workflow does that; Pi has no built-in sub-agents.
+- Decision: the user chose to state it as an accepted limitation (2026-10-22 triage page, principle question C).
+- Completion criteria: SPEC.md "Durability and resume" states that a child Pi that loads Farhelm's reporter can replace
+  the session's Resume target, and that this is accepted, alongside the Goose sentence from
+  `nested-goose-report-replaces-resume-target.md`. No code change. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## shared-checkout-root-archives-other-host-work.md
+
+- Outcome: `fix spec`.
+- Assessment: mechanism confirmed by code reading on main 74c80403 (not run): last-reference counting, the archive move
+  and the trash guard consult only the local supervisor's records, so a session on another host working in a checkout
+  that both hosts reach is invisible to them, and the owning host can archive and later permanently delete it. Nothing
+  detects a shared checkout root. The reviewer's NFS-home example is probably blocked by the supervisor lock on a shared
+  state folder (unverified on NFS); the realistic case is a checkout root on a network mount both hosts see.
+- Decision: the user chose to declare it unsupported (2026-10-22 triage page, principle question D: refuse where it is
+  cheap; declare the shared checkout folder unsupported).
+- Completion criteria: SPEC.md "Maintainer-confirmed decisions" states that a checkout root reachable from more than one
+  host is unsupported, and lists it among the unsupported configurations that need no detection. No code change. Remove
+  the feedback file and its index entry.
+- Execution: `pending`.
+
+## no-birth-time-checkout-archives-reclone.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code reading on main 74c80403 (not run). Allocation stores no creation time when the
+  filesystem reports none, and the ownership check then falls back to device and inode alone, which a folder removed and
+  re-cloned at the same path can reuse; the archive move, the trash's permanent delete and automatic agent trust all go
+  through that check. SPEC.md contradicts itself here: a foreign replacement "must remain untouched" and the guard
+  "protects ordinary replacement, such as ... a re-clone", while the device number is used "only where no creation time
+  is available". Which supported setups lack creation times is unverified; current ext4, XFS and btrfs installs report
+  them.
+- Decision: the user chose "No creation time means release, never archive or trust" (2026-10-22 triage page, principle
+  question D).
+- Completion criteria: a managed checkout recorded without a creation time, whose folder still reports none, counts as
+  unconfirmed: Delete releases it with the existing release-without-archiving notice instead of archiving it, the trash
+  refuses its permanent delete, and it gets no automatic agent trust. Rows on a filesystem that reports a creation time
+  now keep the lenient comparison `inode-reuse-defeats-ownership-check.md` accepted for older rows. SPEC.md "Managed
+  checkouts" states this. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## uninstall-two-home-aliases-hide-kept-data.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed conditional mechanism by code reading on main 74c80403 (not run). With the installation reached
+  through one alternate path to home and the kept state through another, and a nested mount visible through only one,
+  the containment check misses that the state folder lies inside the removed installation, and uninstall deletes it. The
+  home-alias exception in SPEC.md says uninstall "still refuses layouts it cannot tell apart safely".
+- Decision: the user chose to refuse such layouts (2026-10-22 triage page, principle question D).
+- Completion criteria: uninstall refuses when the kept state folder could lie inside the installation it removes through
+  an alias the inspection can detect (for example, any ancestor of the state path that is the same file as the resolved
+  installation folder), with a test faking the inspection output. Refusals only; no general aliasing redesign. Size
+  gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## uninstall-home-bind-inside-installation.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed conditional mechanism by code reading on main 74c80403 (not run). Uninstall's recursive removal
+  of the installation folder has no mount-boundary guard, so a bind of home mounted inside it is traversed and home
+  files, kept data included, are deleted. `rm --one-file-system` does not help, because a bind on the same filesystem
+  has the same device number.
+- Decision: the user chose to refuse when a mount is inside the installation folder (2026-10-22 triage page, principle
+  question D).
+- Completion criteria: uninstall refuses when any mount point lies inside the installation folder it would remove (read
+  from the mount table), checked during inspection and again in the same shell as the removal, as the existing symlink
+  recheck does, with a test. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## offline-uninstall-retry-skips-session-check.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 74c80403 (not run) for the custom-command route: an uninstall retry
+  without a connection runs no session check, and the probe reports the supervisor absent whenever the registered
+  command name (a custom one such as `fh`) no longer resolves, so a still-running supervisor and its sessions are
+  stopped unchecked. The original route (the supervisor exits while its private tmux server survives) is narrower than
+  filed and unverified.
+- Decision: the user accepted the recommendation "Refuse while the service still runs" (2026-10-22 triage page).
+- Completion criteria: an uninstall retry without a connection refuses, with an explanation, while the host's supervisor
+  unit is still running; a test covers it. The crash route stays out of scope. Size gate: about 100 lines as above; over
+  it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## trash-entry-delete-hits-shifted-row.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 74c80403 (not run). The trash dialog re-reads and re-lays out its rows
+  while open (a new archive, a host connecting or disconnecting, the dialog's own delete removing a row) and re-enables
+  the per-entry delete buttons in the same render, with no settle delay or pointer hold, so a click aimed at one
+  archived checkout can permanently delete the row that moved under the pointer; a double-click on delete on a fast host
+  is the ordinary version. Click timing is unmeasured. The 2026-10-10 sub-second acceptance covers actions before the
+  screen updates, not after.
+- Decision: the user accepted the recommendation "Settle delay after list changes" (2026-10-22 triage page).
+- Completion criteria: the trash dialog ignores per-entry delete clicks for about 0.5 to 0.7 seconds after its rendered
+  rows or host sections change, the dialog's own deletes included, and disables them while a confirmation band is open;
+  a browser test covers a click landing just after a row moved. Size gate: about 100 lines as above; over it, block and
+  bring it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## create-retry-takeover-replaces-restarted-session.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 74c80403 (not run): the create-retry takeover's transaction
+  (`restart_pending_launch` in `crates/farhelm-supervisor/src/store.rs`) still admits a row past generation zero, unlike
+  the rollback fence PR #2570 added for the sibling case. Unverified: a complete sequence that loses a Restart with
+  choice or a conversation, which needs an interrupted create plus an ambiguous Restart failure.
+- Decision: the user accepted the recommendation "Add the restarted-session check" (2026-10-22 triage page).
+- Completion criteria: the takeover refuses once the session has been restarted (generation not zero), so the retry
+  settles and replays the existing session as it does for a launched one; a store test covers it. Size gate: about 100
+  lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## interrupted-delete-loses-attachments-at-startup.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 74c80403 (not run). Delete parks a session's attachments in the
+  quarantine before the row is removed; if the supervisor dies in between, or a failed Delete cannot move them back, the
+  session survives and the next startup's reconciliation discards the whole quarantine, its attachments included. The
+  attachments module's docs promise the opposite. SPEC.md "Partial deletion" leans toward accepting a requested Delete
+  removing attachments before failing.
+- Decision: the user accepted the recommendation "Restore attachments of surviving sessions" (2026-10-22 triage page).
+- Completion criteria: startup reconciliation moves a parked attachments directory back when its session still exists
+  and that session's attachments directory is absent, keeps rather than discards one it cannot move back, and discards
+  only those whose session no longer exists; the attachments module docs and the teardown comment are corrected; a test
+  covers a surviving session. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## uninstall-notice-copies-raw-remote-path.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct, by code reading on main 74c80403 (not run). The kept-data notice copies the remote state
+  path raw. A normal successful uninstall rejects line breaks and control characters, but only when the stop step's
+  script is built; uninstall planning never validates the path, and a second GUI removing the host after a failed
+  uninstall can still promote the notice. Clipboard success and an unsafe paste are unverified.
+- Decision: the user accepted the recommendation "Validate the path at planning" (2026-10-22 triage page).
+- Completion criteria: uninstall planning applies the same path check the stop step uses (UTF-8, no control characters)
+  to the kept state path and refuses before confirmation; a test covers it. The hidden-characters copy warning is not
+  part of this outcome. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file
+  and its index entry.
+- Execution: `pending`.
+
+## templates-dialog-new-name-overwrites-outside-template.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 74c80403 (not run). The Templates dialog checks a new or renamed name
+  against the list it read when it opened, then writes unconditionally, so a template an agent or the command line
+  created meanwhile under that name is replaced, and a rename also deletes the old name. SPEC_impl.md "Templates":
+  saving under a taken name "is refused in the panel rather than overwriting that template". The 2026-10-21
+  last-write-wins decision covers saving over the same template, not a different one.
+- Decision: the user accepted the recommendation "Fresh name check before saving" (2026-10-22 triage page).
+- Completion criteria: saving a new name or a rename in the Templates dialog re-reads the template list right before the
+  write and refuses when the name is now taken, as the save-as-template panel already does; a test covers it. Size gate:
+  about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## lost-shortcut-save-restores-misleading-assignment.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct, by code reading on main 74c80403 (not run). When a number-key save's reply is lost or
+  times out after the helm committed it, the Templates dialog reports a failure and restores the pre-save assignment,
+  while the key launches the newly saved template. SPEC.md "One GUI at a time" says the desktop app reports an outcome
+  or that it is unknown. The trigger is rare, and the key launches a template the user chose.
+- Decision: the user accepted the recommendation "Unknown-outcome wording plus re-read" (2026-10-22 triage page).
+- Completion criteria: when a number-key save's outcome is unknown (a lost reply or timeout, as distinct from a
+  refusal), the dialog says it may not have been saved and shows the bindings re-read from the helm rather than the
+  pre-save ones. Coordinate with `plans/queue/sign-in-preservation-sweep.md`, which changes the same preferences writer.
+  Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## reseeded-launcher-retains-conversation-selector.md
+
+- Outcome: `discard`.
+- Assessment: no reachable route found by code reading on main 74c80403. Every control that could reseed a mounted
+  launcher's source sits behind the launcher's backdrop and focus trap, with no keyboard or menu path; keeping the
+  selector across reseeding is deliberate and tested, and the selector stays visible and editable.
+- Decision: the user accepted the recommendation to drop it (2026-10-22 triage page).
+- Completion criteria: remove the feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## recovery-retains-displaced-session-menu.md
+
+- Outcome: `fix code`.
+- Assessment: plausible but unverified, by code reading on main 74c80403: if the session list recovers from a failed
+  read before the error screen renders, an open session menu can stay at its old position while the header reflows. It
+  depends on UI framework scheduling, and the menu's actions still target the session it names. Earlier displaced-menu
+  findings were fixed.
+- Decision: the user accepted the recommendation "Close menus on recovery" (2026-10-22 triage page).
+- Completion criteria: open session menus close when the previous listing was an error and a recovered one replaces it;
+  a test covers it. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## loading-cancel-may-discard-admitted-launch.md
+
+- Outcome: `discard`.
+- Assessment: incorrect, by code reading on main 74c80403: the launcher's loading-screen Cancel exists only while its
+  initial setup is pending, submit refuses during that time, and automatic submit waits for a render that removes the
+  Cancel, so the Cancel cannot coexist with an admitted launch.
+- Decision: the user accepted the recommendation to drop it (2026-10-22 triage page).
+- Completion criteria: remove the feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## private-tmux-terminfo-path-under-tmp.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading `scripts/build-private-tmux.sh` on main 74c80403 (no binary inspected): the Linux
+  ncurses build gets no terminfo search path, so the shipped Linux tmux looks for terminal definitions only under the
+  build's deleted `/tmp/farhelm-tmux.XXXXXX` folder, which another account could create; the macOS branch already sets
+  `/usr/share/terminfo`. Farhelm never runs this tmux in a terminal, so it matters only for a hand-run attach.
+- Decision: the user accepted the recommendation "Fixed terminfo search path" (2026-10-22 triage page).
+- Completion criteria: the Linux ncurses build gets a fixed system terminfo search path as the macOS branch does (for
+  example `/etc/terminfo`, `/lib/terminfo` and `/usr/share/terminfo`), checked with `strings` on a built binary that no
+  `/tmp` path remains. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file
+  and its index entry.
+- Execution: `pending`.
+
+## plans-queue-counts-fork-prs-as-plan-work.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 74c80403 (not run): `scripts/plans-queue.py` associates PRs with plans
+  by head branch name alone, so a PR from a fork with a branch named `plan/<slug>/...` counts as the plan's own work,
+  which unattended executors read and may build on, and which makes `landed` and `abandon` refuse. Unverified: whether
+  an executor would fetch the fork's commits.
+- Decision: the user accepted the recommendation "Ignore fork PRs" (2026-10-22 triage page).
+- Completion criteria: the queue script's PR listing and merged-PR lookups ignore PRs whose head repository is not this
+  repository; `scripts/test-plans-queue.py` covers a cross-repository PR. Size gate: about 100 lines as above; over it,
+  block and bring it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## centos-ssh-scrub-drops-config-after-unmatched-marker.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 74c80403 (not run): both ssh-config scrubs in
+  `scripts/test-provision-centos.sh` drop every line after a start marker that has no end marker and publish the result
+  over the user's ssh config, which can be all of it since the block is at the top. The route through an old,
+  differently spelled end marker is refuted by git history; the remaining trigger is a hand edit or dotfiles merge.
+- Decision: the user accepted the recommendation "Refuse on a missing end marker" (2026-10-22 triage page).
+- Completion criteria: both scrubs fail when a start marker has no end marker, and the script leaves the ssh config
+  untouched with a message. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## tunnel-can-take-standalone-helm-port.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code reading on main 74c80403 (not run). The tunnel's bind (`bind_listener` in
+  `crates/farhelm-helm/src/tunnels.rs`) tries the remote port number on `127.0.0.1` first and excludes nothing, so a
+  remote service on 7433 gets a tunnel at `127.0.0.1:7433`, the standalone helm's default address, which is free while
+  only the desktop app runs. A browser that ever signed in to a standalone helm keeps its device secret in localStorage
+  for exactly that origin, so the remote page can read it, and once a standalone helm runs there again the page is
+  same-origin with it. SPEC.md "Local authority and trust between hosts": a remote host must not gain access to secrets
+  on the helm's machine. Unverified: how often a desktop user still holds a browser credential for 7433.
+- Decision: the user chose "Always use a port the operating system picks; never reuse the remote number" (2026-10-22
+  triage page, principle question A), after asking why a port another program serves is not already treated as busy
+  (answered on the page: 7433 is genuinely free here, and on macOS a wildcard holder may not make the bind fail). This
+  reverses the 2026-10-18 same-port preference recorded under `tunnel-port-can-divert-local-traffic.md`.
+- Completion criteria: a tunnel always listens on a kernel-chosen port on `127.0.0.1`, never the remote port number,
+  bound without address reuse. SPEC.md "Terminal experience" (the tunnel bullet), the tunnel warning in SPEC.md "Local
+  authority and trust between hosts" and its UI text, SPEC_impl.md, the user docs and the unreleased changelog fragment
+  for the tunnel port warning stop promising or warning about the remote port number; the test pinning the old
+  preference is replaced. Covers `tunnel-shadows-busy-wildcard-port.md` too; one change for both is fine. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
+  over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## tunnel-shadows-busy-wildcard-port.md
+
+- Outcome: `fix spec+code`.
+- Assessment: code side confirmed by reading on main 74c80403 (not run): the tunnel's preferred-port bind goes through
+  mio, which sets `SO_REUSEADDR` before every bind outside Windows, and falls back only when the bind fails. Unverified:
+  that macOS lets a same-user bind of `127.0.0.1:P` succeed while another program holds `0.0.0.0:P` or `[::]:P`, and
+  routes connections to it; Linux refuses that bind.
+- Decision: the user chose "Always use a port the operating system picks; never reuse the remote number" (2026-10-22
+  triage page, principle question A).
+- Completion criteria: as `tunnel-can-take-standalone-helm-port.md`, which this outcome shares: with no preferred port
+  the wildcard collision cannot happen, and the kernel-chosen bind is made without address reuse. Remove the feedback
+  file and its index entry.
+- Execution: `pending`.
