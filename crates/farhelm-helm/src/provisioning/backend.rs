@@ -179,6 +179,9 @@ pub(super) struct UninstallInspection {
     /// uninstall would remove, and "no unit file left" says nothing about
     /// it.
     pub(super) unit_fragment: Option<HostPath>,
+    /// Mount points at or below an asked path's two spellings, octal escapes
+    /// decoded as `readlink -f` would print them.
+    pub(super) mounts: Vec<PathBuf>,
 }
 
 /// One path as the host sees it.
@@ -2434,7 +2437,9 @@ impl ProvisioningBackend for SystemBackend {
     /// unit's `ActiveState` and `FragmentPath`, and the fragment's four
     /// fields (no fragment prints two `0` flags and two empty paths,
     /// through `%s` because a literal `\00` would read the second flag's
-    /// digit as part of an octal escape). A failing `systemctl show` fails
+    /// digit as part of an octal escape), then the mount points at or below
+    /// each asked path's two spellings ([`MOUNT_POINTS_SH`]), ended by an
+    /// empty field. A failing `systemctl show` or unreadable mount table fails
     /// the whole command rather than reading as empty values. `readlink -f`
     /// rather than `realpath`: both GNU and BusyBox provide it.
     async fn inspect_uninstall(
@@ -2514,8 +2519,12 @@ resolve() {
 }
 "#,
         );
+        // Only mounts under each path's spellings (collected in "$@", empty
+        // under `sh -c`) leave the host: a whole table can pass the 64 KiB cap.
+        script.push_str(MOUNT_POINTS_SH);
         for path in paths {
             script.push_str(&format!("resolve {}; ", shell_path(path)?));
+            script.push_str("set -- \"$@\" \"$resolved\" \"$raw\"; ");
         }
         script.push_str(&format!(
             "case \"${{XDG_STATE_HOME-}}\" in /*) state=\"$XDG_STATE_HOME/farhelm\" ;; \
@@ -2524,7 +2533,9 @@ resolve() {
              active=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
              fragment=$(systemctl --user show -p FragmentPath --value -- {unit}) || exit 1; \
              printf '%s\\0%s\\0' \"$active\" \"$fragment\"; \
-             if [ -n \"$fragment\" ]; then resolve \"$fragment\"; else printf '%s\\0%s\\0\\0\\0' 0 0; fi",
+             if [ -n \"$fragment\" ]; then resolve \"$fragment\"; else printf '%s\\0%s\\0\\0\\0' 0 0; fi; \
+             for p in \"$@\"; do if [ -n \"$p\" ]; then \
+               mount_points \"$p\" '\\0' || exit 1; fi; done; printf '\\0'",
             unit = crate::ssh::shell_quote(unit),
         ));
         let output = self
@@ -2665,7 +2676,8 @@ resolve() {
     /// is caught there. The test is repeated here, in the same shell as the
     /// `rm`, for a link made after that re-check, while the earlier steps
     /// (disable, unit removal, reload, stop) ran. A dangling link refuses
-    /// too: `-L` sees it where `-e` does not.
+    /// too: `-L` sees it where `-e` does not. Planning's refusal of a mount
+    /// on or inside the directory is repeated here for the same reason.
     async fn remove_directory(
         &self,
         target: &ProvisioningTarget,
@@ -2673,12 +2685,18 @@ resolve() {
     ) -> Result<ActionOutcome, BackendFailure> {
         require_remote(target, "removing Farhelm's lib directory")?;
         let script = format!(
-            "d={dir}; \
+            "{MOUNT_POINTS_SH}d={dir}; \
              if [ ! -e \"$d\" ] && [ ! -L \"$d\" ]; then printf absent; exit 0; fi; \
              if [ -L \"$d\" ]; then \
                printf '%s\\n' \"refusing to remove $d: it has become a symbolic link since uninstall \
              last checked it, and removing it would leave the installation it points to in place; \
              nothing was removed\" >&2; exit 81; fi; \
+             r=$(readlink -f -- \"$d\") && [ -n \"$r\" ] || exit 1; \
+             inside=$(mount_points \"$r\" '\\n') || exit 1; \
+             if [ -n \"$inside\" ]; then \
+               printf '%s\\n' \"refusing to remove $d: something is mounted on or inside it ($inside), and \
+             removing it would also delete the files that mount shows; nothing was removed\" >&2; \
+             exit 82; fi; \
              rm -rf -- \"$d\"",
             dir = shell_path(path)?,
         );
@@ -2736,6 +2754,29 @@ resolve() {
     }
 }
 
+/// Shell function `mount_points DIR SEP`: print each mount point at or below
+/// DIR, a non-empty resolved path, each followed by SEP (`'\0'` or `'\n'`).
+///
+/// Field 5 of `/proc/self/mountinfo` is a resolved path with `\ooo` octal
+/// escapes for space, tab, newline and backslash, decoded here through
+/// `printf %b`'s `\0ooo` form so it compares with `readlink -f` output.
+/// Supported hosts are Linux, so an unreadable mount table fails the caller
+/// rather than reading as "no mounts".
+const MOUNT_POINTS_SH: &str = r#"mount_points() {
+    [ -r /proc/self/mountinfo ] || {
+        printf '%s\n' 'cannot read the mount table /proc/self/mountinfo' >&2
+        return 1
+    }
+    while read -r _ _ _ _ point _; do
+        case $point in *\\*)
+            point=$(printf '%s' "$point" | sed 's/\\/\\0/g')
+            point=$(printf '%b' "$point") ;;
+        esac
+        case $point in "$1" | "$1"/*) printf "%s$2" "$point" ;; esac
+    done < /proc/self/mountinfo
+}
+"#;
+
 /// Parse [`SystemBackend::inspect_uninstall`]'s output, or `None` when it
 /// does not have exactly the fields asked for.
 pub(super) fn parse_uninstall_inspection(
@@ -2781,6 +2822,12 @@ pub(super) fn parse_uninstall_inspection(
     let fragment = bytes_path(fields.next()?).ok()?;
     let unit_fragment = host_path(&mut fields, fragment.clone())?;
     let unit_fragment = (!fragment.as_os_str().is_empty()).then_some(unit_fragment);
+    // Mount points never print empty, so an empty field ends their list.
+    let mounts = fields
+        .by_ref()
+        .take_while(|field| !field.is_empty())
+        .map(|field| bytes_path(field).ok())
+        .collect::<Option<Vec<_>>>()?;
     // The output ends with a NUL, which leaves one empty trailing field.
     if fields.next() != Some(b"") || fields.next().is_some() {
         return None;
@@ -2790,6 +2837,7 @@ pub(super) fn parse_uninstall_inspection(
         default_state_dir,
         unit_active_state,
         unit_fragment,
+        mounts,
     })
 }
 

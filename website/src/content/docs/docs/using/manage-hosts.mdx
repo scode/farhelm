@@ -80,7 +80,7 @@ session on the host while the uninstall runs: one started then can end along wit
 to be connected to the host so it can check; if it shows needs update, too new, an identity problem or the same machine as another entry, follow its row's advice first; **remove** still works. A few less common setups are
 refused too, with the reason shown in a dialog: a host where Farhelm was set up by running `farhelm helm setup` on the
 host itself (its own `farhelm uninstall` removes it), one whose Farhelm runs from somewhere unexpected, and one whose
-`~/.local/lib/farhelm` directory is a symbolic link. **remove** still works for all of them.
+`~/.local/lib/farhelm` directory is a symbolic link or has something mounted on or inside it. **remove** still works for all of them.
 
 If something goes wrong partway, the host stays in the list and its details show which steps finished. Choose
 **uninstall** again to finish the job; it picks up where it stopped. Once a failed uninstall has removed the service,

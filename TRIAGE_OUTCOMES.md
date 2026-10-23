@@ -18240,7 +18240,11 @@
   from the mount table), checked during inspection and again in the same shell as the removal, as the existing symlink
   recheck does, with a test. Size gate: about 100 lines as above; over it, block and bring it back. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/uninstall-guards-oct22.md`.
+- Execution: complete in jj change `nowyqmvknynqrovxmzolumxqvkyvokzl`, bookmark
+  `plan/uninstall-guards-oct22/02-mount-inside-installation`. Uninstall refuses while anything is mounted at or inside
+  the installation folder, read from the host mount table during inspection and again in the same shell as the removal.
+  About 115 changed lines of code and tests, a little over the gate of about 100; treated as within it.
+  [Draft PR #2646](https://github.com/scode/farhelm/pull/2646/changes).
 
 ## offline-uninstall-retry-skips-session-check.md
 
