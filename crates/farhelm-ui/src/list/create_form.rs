@@ -651,18 +651,6 @@ fn draft_transition_allowed(ops: OpLock) -> bool {
     !ops.busy_now()
 }
 
-/// Submit the launcher's form, as its Launch button would.
-///
-/// Choice shortcuts apply their state before this call, and YOLO answers
-/// take their confirmation before it. Native submit buttons cannot express
-/// either ordering. `requestSubmit` reaches the same `onsubmit` as Launch,
-/// which reads the live draft and retains authority over admission.
-fn resubmit_composer() {
-    document::eval(
-        "document.querySelector('.create-session-form[role=\"dialog\"]')?.requestSubmit()",
-    );
-}
-
 /// A queued automatic submit belongs to one opening, never a later draft.
 /// The parent revokes the generation synchronously; the submit handler covers
 /// the pre-render gap, and this selector covers a replaced or remounted form.
@@ -690,11 +678,20 @@ struct LauncherYoloQuestion {
 }
 
 /// Answer the launcher's YOLO question `question` (the opening this answer's
-/// handler was drawn for). When it is still open: take it, record consent
-/// for its refused request in `confirmed_key`, and for "don't ask again"
-/// (`stop_asking`) also in `stop_asking_for`, and return `true`, after which
-/// the caller resubmits the form. Otherwise change nothing and return
-/// `false`: a stale answer leaves the form unauthorized and must not submit.
+/// handler was drawn for) with "start anyway". When it is still open and the
+/// launcher opening its render drew (`rendered_opening`) is still the live
+/// one (`live_opening`): take it, record consent for its refused request in
+/// `confirmed_key`, and for "don't ask again" (`stop_asking`) also in
+/// `stop_asking_for`, and return `true`, after which the caller submits the
+/// form. Otherwise change nothing and return `false`: a stale answer leaves
+/// the form unauthorized and must not submit.
+///
+/// The launcher opening the answer's render drew must still be the live one:
+/// opening another source swaps the launcher's prefill without unmounting it,
+/// and nothing closes the question's slot on that swap, so an answer
+/// delivered before the rerender would otherwise act on the earlier source,
+/// which the user has already moved away from. The Guarded answer refuses the
+/// same case (`take_launcher_guarded_answer`).
 ///
 /// The one-off answer also clears `stop_asking_for`, so it can never mark the
 /// host. Consent stays recorded under the refused key after the submit, which
@@ -704,10 +701,12 @@ fn answer_launcher_yolo(
     slot: &mut ConfirmSlot<LauncherYoloQuestion>,
     question: &ConfirmToken<LauncherYoloQuestion>,
     stop_asking: bool,
+    rendered_opening: u64,
+    live_opening: u64,
     confirmed_key: &mut Option<String>,
     stop_asking_for: &mut Option<ConfirmToken<LauncherYoloQuestion>>,
 ) -> bool {
-    if slot.take(question).is_none() {
+    if rendered_opening != live_opening || slot.take(question).is_none() {
         return false;
     }
     *confirmed_key = Some(question.key().refused_key.clone());
@@ -2366,13 +2365,14 @@ pub(super) fn CreateSessionForm(
     //
     // The question itself is a `ConfirmSlot` (`LauncherYoloQuestion`): a
     // YOLO answer records consent only by taking the opening it was drawn for,
-    // then resubmits the form, so an answer queued behind Cancel records
-    // nothing and submits nothing (`answer_launcher_yolo`).
+    // then submits the form with the Replace precondition its own render
+    // showed, so an answer queued behind Cancel records nothing and submits
+    // nothing (`answer_launcher_yolo`).
     //
     // "Start, and don't ask again on this host" adds a request to mark the
     // host safe first, held the same way: the token of the opening it
     // answered (and so its refused key), set by that button's click just
-    // before the form resubmits, and taken by that one submit, so it can
+    // before it submits the form, and taken by that one submit, so it can
     // never ride along with a later Launch or "start anyway". `yolo_error`
     // is that first step's failure; the question comes back up with it.
     let mut yolo_refusal = use_confirm_slot::<LauncherYoloQuestion, ()>();
@@ -3765,7 +3765,8 @@ pub(super) fn CreateSessionForm(
         });
     }));
     // Pointer and keyboard choices share their transition callbacks. Enter
-    // runs these synchronously before form resubmission reads the live draft.
+    // runs these synchronously before `launch_from_choice` submits, and the
+    // submit reads the live draft.
     let choose_harness = EventHandler::<LaunchHarness>::new({
         let catalog = catalog_for_harness.clone();
         move |harness| {
@@ -3788,7 +3789,6 @@ pub(super) fn CreateSessionForm(
         }
         focus_composer_surface(false);
     });
-    let launch_from_choice = EventHandler::new(move |_| resubmit_composer());
     // No timer guesses when a template or managed-checkout preview is ready.
     // Each boundary is the same one the ordinary Launch button consumes. Once
     // submitted, this flag is spent even after an ambiguous reply or path race.
@@ -3893,12 +3893,6 @@ pub(super) fn CreateSessionForm(
     let choose_host = EventHandler::new(move |id: HostId| {
         draft.choose_host(id, &hosts_for_destination_choice, placement_targets);
     });
-    let host_select = rsx! {
-        super::host_picker::HostPicker {
-            hosts: hosts.clone(), selected, busy,
-            on_pick: choose_host, on_enter: launch_from_choice,
-        }
-    };
     // The reconciliation, said out loud. A chosen host leaving the registry
     // moves the effective target, and the one thing that must not happen is
     // that move being invisible — a selector showing host A while the body
@@ -4014,11 +4008,14 @@ pub(super) fn CreateSessionForm(
             Some(binding)
         }
     };
-    // Native submit and admitted guarded answers share this one Rust entry.
-    // Keeping transition, admission and the synchronous operation claim in
-    // one turn avoids desktop JavaScript evaluation dispatching a later draft.
-    // Every caller passes the Replace precondition the press it acts for saw:
-    // a native submit passes this render's, a guarded answer its own render's.
+    // Native submit, choice and recent-row Enter, admitted guarded answers
+    // and taken YOLO answers share this one Rust entry. Keeping transition,
+    // admission and the synchronous operation claim in one turn avoids
+    // desktop JavaScript evaluation dispatching a later draft. Every caller
+    // passes the Replace precondition the press it acts for saw: a native
+    // submit or Enter passes this render's, a guarded or YOLO answer its own
+    // render's. Only the quick-launch auto-submit still goes through the
+    // browser (`resubmit_quick_composer`).
     let submit_composer = Callback::<crate::DeleteGuard>::new({
         let hosts = hosts.clone();
         let open_host = open_host.clone();
@@ -4799,6 +4796,29 @@ pub(super) fn CreateSessionForm(
             });
         }
     });
+    // Enter on a choice (a tab, harness, effort or permission segment, the
+    // closed host picker, a command-mode control) applies that choice and
+    // launches. In Replace with a launch is the source delete's
+    // confirmation, so it submits with this render's `replace_guard`, the
+    // precondition of the warning on screen at the key press, never one a
+    // later render computes (SPEC.md "Replace with").
+    //
+    // It calls `submit_composer` directly, in the same handler that applied
+    // the choice. It used to go through the browser (`requestSubmit`), whose
+    // `onsubmit` landed as a later event: on desktop after a JavaScript
+    // round trip that let renders, and their precondition, move on between
+    // the key press and the submit. No render is needed in between: on web
+    // that `onsubmit` already ran nested in this handler, before any render;
+    // `submit_composer` reads the live draft and host, and refuses a checkout
+    // preview the choice made stale (`preview_revision`, preview agent); and
+    // the form is `novalidate`, so the browser validated nothing on the way.
+    let launch_from_choice = EventHandler::new(move |_| submit_composer.call(replace_guard));
+    let host_select = rsx! {
+        super::host_picker::HostPicker {
+            hosts: hosts.clone(), selected, busy,
+            on_pick: choose_host, on_enter: launch_from_choice,
+        }
+    };
     // Waiting never owns an operation claim. An unchanged accepted answer is
     // spent before reaching ordinary submit, so a refusal or ambiguous reply
     // cannot turn preview updates into automatic retries.
@@ -5137,7 +5157,7 @@ pub(super) fn CreateSessionForm(
                     ask: question.key().ask.clone(),
                     busy,
                     error: yolo_error(),
-                    // Both YOLO answers resubmit the form themselves, and only
+                    // Both YOLO answers submit the form themselves, and only
                     // once they have taken this opening of the question
                     // (`answer_launcher_yolo`). As native submit buttons they
                     // would submit it whether or not the question was still
@@ -5190,31 +5210,58 @@ pub(super) fn CreateSessionForm(
                             }
                         }))
                     },
+                    // Both "start anyway" answers submit with this render's
+                    // `replace_guard`, the precondition matching the Replace
+                    // warning drawn above the question, by calling
+                    // `submit_composer` directly. Going through the browser
+                    // (`requestSubmit`) would run `onsubmit` as a later
+                    // event with a later render's precondition, which may
+                    // authorize deleting more than the warning the user
+                    // answered said. Nothing is lost by skipping it: the
+                    // form is `novalidate`, so the browser validated nothing
+                    // there, and `submit_composer` keeps every refusal of
+                    // its own and still reads the live draft, whose intent
+                    // key decides whether this consent applies to what is
+                    // sent. The answer also refuses once the launcher has
+                    // moved to another opening (`answer_launcher_yolo`), so
+                    // it never acts on a source the user has moved away
+                    // from.
+                    //
+                    // The `write()` guards are temporaries of the `if`
+                    // condition, dropped before the block runs, which
+                    // matters because `submit_composer` writes
+                    // `yolo_stop_asking` itself.
                     on_confirm: {
                         let question = question.clone();
+                        let rendered_opening = *opening_generation.peek();
                         move |_| {
                             if answer_launcher_yolo(
                                 &mut yolo_refusal,
                                 &question,
                                 false,
+                                rendered_opening,
+                                *opening_generation.peek(),
                                 &mut yolo_confirmed_key.write(),
                                 &mut yolo_stop_asking.write(),
                             ) {
-                                resubmit_composer();
+                                submit_composer.call(replace_guard);
                             }
                         }
                     },
                     on_confirm_and_stop_asking: {
                         let question = question.clone();
+                        let rendered_opening = *opening_generation.peek();
                         move |_| {
                             if answer_launcher_yolo(
                                 &mut yolo_refusal,
                                 &question,
                                 true,
+                                rendered_opening,
+                                *opening_generation.peek(),
                                 &mut yolo_confirmed_key.write(),
                                 &mut yolo_stop_asking.write(),
                             ) {
-                                resubmit_composer();
+                                submit_composer.call(replace_guard);
                             }
                         }
                     },
@@ -5621,7 +5668,11 @@ pub(super) fn CreateSessionForm(
                                             if !apply_recent.call(entry.clone()) {
                                                 return;
                                             }
-                                            resubmit_composer();
+                                            // A launch, so in Replace with it
+                                            // carries this render's precondition;
+                                            // see `launch_from_choice` for why it
+                                            // submits directly.
+                                            submit_composer.call(replace_guard);
                                         }
                                     },
                                     // The row is a grid so that harness, folder,
@@ -6762,6 +6813,8 @@ mod tests {
                         &mut fixture.slot,
                         &question,
                         permanent,
+                        1,
+                        1,
                         &mut consent,
                         &mut stop
                     ));
@@ -6784,6 +6837,8 @@ mod tests {
                     &mut fixture.slot,
                     &question,
                     true,
+                    1,
+                    1,
                     &mut consent,
                     &mut stop
                 ));
@@ -6801,6 +6856,8 @@ mod tests {
                     &mut fixture.slot,
                     &later,
                     false,
+                    1,
+                    1,
                     &mut consent,
                     &mut stop
                 ));
@@ -8399,12 +8456,14 @@ mod tests {
     }
 
     /// Spec (`LauncherYoloQuestion`): an answer to the launcher's YOLO
-    /// question records consent, and asks for a resubmit, only by taking the
+    /// question records consent, and asks for a submit, only by taking the
     /// opening it was drawn for. Cancel followed by either answer in one
     /// event burst records no consent, no "don't ask again" request, and no
-    /// resubmit; an answer drawn for an earlier opening takes nothing from a
-    /// later one; a genuine answer records consent for the refused request's
-    /// key, and only "don't ask again" also asks to mark the host.
+    /// submit; an answer drawn for an earlier opening takes nothing from a
+    /// later one; an answer whose render showed an earlier launcher opening
+    /// (another source opened since, question still up) takes nothing; a
+    /// genuine answer records consent for the refused request's key, and
+    /// only "don't ask again" also asks to mark the host.
     ///
     /// Why: the recorded consent is what lets the form's next submit of
     /// that request launch with no approval prompts (and, from Replace
@@ -8412,7 +8471,9 @@ mod tests {
     /// from the answer's own copy of the question, so an answer queued
     /// behind Cancel restored the consent the user had just withdrawn and
     /// submitted the draft. Consent kept under the key after a genuine
-    /// answer is what lets a retry of the same request keep it.
+    /// answer is what lets a retry of the same request keep it. An answer
+    /// drawn for an earlier launcher opening would act on the earlier source,
+    /// which the user has already moved away from, so it is refused too.
     #[farhelm_testtrace::test]
     fn a_cancelled_launcher_yolo_question_records_no_consent() {
         use dioxus::prelude::*;
@@ -8459,10 +8520,12 @@ mod tests {
                         &mut slot,
                         &open,
                         stop_asking,
+                        1,
+                        1,
                         &mut confirmed,
                         &mut stop_for
                     ),
-                    "an answer queued behind Cancel (stop asking: {stop_asking}) does not resubmit"
+                    "an answer queued behind Cancel (stop asking: {stop_asking}) does not submit"
                 );
                 assert_eq!(confirmed, None, "and records no consent");
                 assert!(
@@ -8480,6 +8543,8 @@ mod tests {
                 &mut slot,
                 &earlier,
                 true,
+                1,
+                1,
                 &mut confirmed,
                 &mut stop_for
             ));
@@ -8490,6 +8555,32 @@ mod tests {
             );
             assert!(slot.is_open(), "the later question is left alone");
 
+            // The current opening, but the launcher has since moved to
+            // another source (opening 2) without closing the question. The
+            // answer's render showed opening 1's Replace warning, so it must
+            // neither take the question nor record consent.
+            for stop_asking in [false, true] {
+                let (mut confirmed, mut stop_for) = (None, None);
+                assert!(
+                    !answer_launcher_yolo(
+                        &mut slot,
+                        &current,
+                        stop_asking,
+                        1,
+                        2,
+                        &mut confirmed,
+                        &mut stop_for
+                    ),
+                    "an answer from a superseded launcher opening (stop asking: {stop_asking}) does not submit"
+                );
+                assert_eq!(confirmed, None);
+                assert!(stop_for.is_none());
+                assert!(
+                    slot.peek_token() == Some(current.clone()),
+                    "and leaves the question for the live opening's own answer"
+                );
+            }
+
             // Positive controls. The one-off records consent and disarms a
             // stray "don't ask again" request.
             let mut stop_for = Some(current.clone());
@@ -8497,6 +8588,8 @@ mod tests {
                 &mut slot,
                 &current,
                 false,
+                1,
+                1,
                 &mut confirmed,
                 &mut stop_for
             ));
@@ -8510,6 +8603,8 @@ mod tests {
                 &mut slot,
                 &permanent,
                 true,
+                1,
+                1,
                 &mut confirmed,
                 &mut stop_for
             ));
@@ -8517,6 +8612,7 @@ mod tests {
             assert!(stop_for.is_some_and(|answered| answered == permanent));
         });
     }
+
     /// Why: a Guarded answer in Replace with waits for a checkout preview
     /// before submitting, and the source can start again meanwhile. SPEC.md
     /// says the replace then carries the precondition the launcher showed at
