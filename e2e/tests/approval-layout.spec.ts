@@ -13,6 +13,7 @@ import {
 } from "./helpers/fleet";
 import { attachSession } from "./helpers/term";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
+import { routeGate } from "./helpers/route-gate";
 
 // Capture the real helm's build stamp before fabricating replies. Missing
 // stamps deliberately put the UI into build-skew mode and close its feed.
@@ -49,6 +50,13 @@ function launchRequest(id: string, host = "devbox", title = "fix-flaky-ci"): App
   };
 }
 
+/** An add request uses the normal requester identity and editable form fields. */
+function hostAddRequest(id: string): Approval {
+  return { ...launchRequest(id, "build\u202ebox", "ask\u202eer"), action: {
+    kind: "host_add", destination: "user@original.invalid", alias: "original alias",
+  } };
+}
+
 /** Own the listing and answer replies; expiry is a new listing, never a client timer. */
 async function stageApprovals(page: Page, initial: Approval[]) {
   let waiting = initial;
@@ -81,6 +89,35 @@ async function stageApprovals(page: Page, initial: Approval[]) {
       await notifyListing();
     },
   };
+}
+
+/** Control only the window-focus input at the DOM boundary. Playwright treats
+ * every page as focused, so bringToFront cannot establish an inactive window
+ * (https://playwright.dev/docs/pages#multiple-pages). The real application still
+ * samples this API on arrival and admission; restoring focus removes the override
+ * rather than replacing the native positive result. Visibility stays native. */
+async function setWindowFocused(page: Page, focused: boolean) {
+  await page.evaluate((active) => {
+    if (active) Reflect.deleteProperty(document, "hasFocus");
+    else {
+      const samples = { count: 0 };
+      Object.defineProperty(document, "__inactiveFocusSamples", { configurable: true, value: samples });
+      Object.defineProperty(document, "hasFocus", { configurable: true, value: () => {
+        samples.count++;
+        return false;
+      } });
+    }
+    window.dispatchEvent(new Event(active ? "focus" : "blur"));
+  }, focused);
+  await expect.poll(() => page.evaluate(() => ({
+    focused: document.hasFocus(), visible: document.visibilityState !== "hidden",
+  })), { message: "premise: document focus input changed without hiding the page" })
+    .toEqual({ focused, visible: true });
+}
+
+/** Observe a fresh production read without calling the focus API from the assertion. */
+async function inactiveFocusSamples(page: Page): Promise<number> {
+  return page.evaluate(() => Reflect.get(document, "__inactiveFocusSamples").count);
 }
 
 let session: SessionRow | undefined;
@@ -120,6 +157,244 @@ async function placement(page: Page) {
     };
   });
 }
+
+/** The positive answer must retain edits while its own listing entry disappears,
+ * and must await the receipt response before any ordinary discovery request. */
+test("focused host add preserves edited fields and waits for its own answer receipt", async ({ page }) => {
+  const staged = await stageApprovals(page, []);
+  const gate = routeGate();
+  const answers: unknown[] = [];
+  const probes: unknown[] = [];
+  await page.route("**/api/approvals/add-edited", async (route) => {
+    answers.push(route.request().postDataJSON());
+    await gate.wait();
+    await fulfillAsHelm(route, { status: 204 });
+  });
+  await page.route("**/api/hosts/probe", async (route) => {
+    probes.push(route.request().postDataJSON());
+    await fulfillAsHelm(route, { json: { result: "manual", reason: "controlled discovery refusal" } });
+  });
+  await page.goto("/");
+  await page.bringToFront();
+  await expect.poll(() => page.evaluate(() => document.hasFocus() && document.visibilityState !== "hidden"),
+    { message: "premise: this window is live and focused before request arrival" }).toBe(true);
+  const hostile = { ...hostAddRequest("add-edited"), action: {
+    kind: "host_add", destination: "user@or\u202eiginal.invalid", alias: "or\u202eiginal alias",
+  } };
+  await staged.replace([hostile]);
+  const form = page.locator(".add-host-form");
+  try {
+    await expect(form).toBeVisible();
+    await expect(form.locator(".add-host-ssh")).toHaveValue("user@or\u202eiginal.invalid");
+    await expect(form.locator(".add-host-alias")).toHaveValue("or\u202eiginal alias");
+    await expect(form.locator(".agent-add-requester")).toContainText("build<U+202E>box");
+    await expect(form.locator(".agent-add-requester")).toContainText("ask<U+202E>er");
+    await expect(form.locator(".agent-add-approved-fields")).toContainText("user@or<U+202E>iginal.invalid");
+    await expect(form.locator(".agent-add-approved-fields")).toContainText("or<U+202E>iginal alias");
+    await expect(page.locator(".approval-always-allow")).toHaveCount(0);
+    await form.locator(".add-host-ssh").fill("user@edited.invalid");
+    await form.locator(".add-host-alias").fill("edited alias");
+    await staged.replace([hostile]);
+    await expect(form.locator(".add-host-ssh")).toHaveValue("user@edited.invalid");
+    await expect(form.locator(".add-host-alias")).toHaveValue("edited alias");
+    await expect(form.locator(".agent-add-approved-fields")).toContainText("user@edited.invalid");
+    await form.locator(".add-host-submit").click();
+    await expect.poll(() => answers.length).toBe(1);
+    expect(answers).toEqual([{ answer: "allow", host_add: { destination: "user@edited.invalid" } }]);
+    await staged.expire("add-edited");
+    await expect(page.locator(".approval-card")).toHaveCount(0);
+    await expect(form, "answering form survives disappearance caused by its own POST").toBeVisible();
+    expect(probes, "no discovery before positive receipt").toHaveLength(0);
+    gate.release();
+    await expect.poll(() => probes.length).toBe(1);
+    expect(probes[0]).toMatchObject({ target: { destination: "user@edited.invalid" }, new_entry: { alias: "edited alias" } });
+    await expect(form).toContainText("controlled discovery refusal");
+    await form.locator(".add-host-cancel").click();
+    await expect(form).toHaveCount(0);
+    expect(answers, "ordinary cancel after acceptance is not another Deny").toHaveLength(1);
+  } finally { gate.release(); }
+});
+
+/** A request first observed in the background stays a card; explicitly opening
+ * it never grants approval, and Escape sends the same route's Deny once. */
+test("inactive host add stays a card and explicit opening cancels through Deny", async ({ page }) => {
+  const staged = await stageApprovals(page, []);
+  await page.goto("/");
+  await setWindowFocused(page, false);
+  try {
+    await staged.replace([hostAddRequest("add-inactive")]);
+    const card = page.locator('[data-approval-id="add-inactive"]');
+    await expect(card.locator(".approval-allow")).toBeEnabled();
+    await expect(page.locator(".add-host-form")).toHaveCount(0);
+    await setWindowFocused(page, true);
+    await card.getByRole("button", { name: "open add dialog", exact: true }).click();
+    const form = page.locator(".add-host-form");
+    await expect(form).toBeVisible();
+    expect(staged.answers, "opening is not approval").toEqual([]);
+    await expect(form.locator(".add-host-ssh")).toBeFocused();
+    await form.locator(".add-host-ssh").press("Escape");
+    await expect(form).toHaveCount(0);
+    expect(staged.answers).toEqual([{ id: "add-inactive", answer: "deny" }]);
+  } finally { await setWindowFocused(page, true); }
+});
+
+/** Automatic admission must preserve a manual draft and recheck focus after
+ * that draft closes. Returning focus later does not auto-open an old card. */
+test("host add admission keeps a manual draft and rechecks live focus", async ({ page }) => {
+  const staged = await stageApprovals(page, []);
+  await page.goto("/");
+  await page.bringToFront();
+  await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
+  await page.getByRole("button", { name: "add host", exact: true }).click();
+  const form = page.locator(".add-host-form");
+  await form.locator(".add-host-ssh").fill("user@manual-draft.invalid");
+  await form.locator(".add-host-alias").fill("manual alias");
+  await staged.replace([hostAddRequest("add-deferred")]);
+  await expect(page.locator(".approval-allow")).toBeEnabled();
+  await expect(form).toHaveCount(1);
+  await expect(form.locator(".add-host-ssh")).toHaveValue("user@manual-draft.invalid");
+  await expect(form.locator(".add-host-alias")).toHaveValue("manual alias");
+  await setWindowFocused(page, false);
+  try {
+    const beforeAdmission = await inactiveFocusSamples(page);
+    // Invoke the owned manual cancellation without bringing its background
+    // window forward; the queued agent opening must now fail admission.
+    await form.locator(".add-host-cancel").evaluate((button: HTMLButtonElement) => button.click());
+    await expect(form).toHaveCount(0);
+    // Rejection must finish before native focus is restored; otherwise a late
+    // admission sample could observe the restored value and open the old card.
+    await expect.poll(() => inactiveFocusSamples(page),
+      { message: "queued admission sampled inactive focus after the manual dialog closed" }).toBeGreaterThan(beforeAdmission);
+    await expect(page.locator('[id^="host-modal-"]')).toHaveCount(0);
+    await expect(page.locator('[data-approval-id="add-deferred"]')).toBeVisible();
+    await setWindowFocused(page, true);
+    await expect(form).toHaveCount(0);
+    await page.locator(".approval-allow").click();
+    await expect(form.locator(".add-host-ssh")).toHaveValue("user@original.invalid");
+    expect(staged.answers).toEqual([]);
+    await form.locator(".add-host-cancel").click();
+    await expect(form).toHaveCount(0);
+    expect(staged.answers).toEqual([{ id: "add-deferred", answer: "deny" }]);
+  } finally { await setWindowFocused(page, true); }
+});
+
+/** A focused listing may contain several arrivals. Present them in order
+ * without replacing the current draft, and omit a queued request once a
+ * successful refresh proves that it expired. */
+test("simultaneous host adds open in order and omit expired queued requests", async ({ page }) => {
+  const staged = await stageApprovals(page, []);
+  await page.goto("/");
+  await page.bringToFront();
+  await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
+  const cards = ["first", "expired", "last"].map((id) => ({
+    ...hostAddRequest(id), action: { kind: "host_add", destination: `user@${id}.invalid`, alias: id },
+  }));
+  await staged.replace(cards);
+  const form = page.locator(".add-host-form");
+  await expect(form.locator(".add-host-ssh")).toHaveValue("user@first.invalid");
+  await expect(form.locator(".add-host-cancel")).toBeEnabled();
+  await staged.expire("expired");
+  await expect(page.locator('[data-approval-id="expired"]')).toHaveCount(0);
+  await expect(form.locator(".add-host-ssh")).toHaveValue("user@first.invalid");
+  await form.locator(".add-host-cancel").click();
+  await expect(form.locator(".add-host-ssh")).toHaveValue("user@last.invalid");
+  expect(staged.answers).toEqual([{ id: "first", answer: "deny" }]);
+  await form.locator(".add-host-cancel").click();
+  await expect(form).toHaveCount(0);
+  expect(staged.answers).toEqual([{ id: "first", answer: "deny" }, { id: "last", answer: "deny" }]);
+});
+
+/** Definite rejection and expiry cannot start discovery. The refused form stays
+ * editable; a later Cancel may still answer a request the helm kept waiting. */
+for (const status of [200, 409, 410]) {
+  test(`host add answer ${status} starts zero probes`, async ({ page }) => {
+    const staged = await stageApprovals(page, []);
+    let answers = 0;
+    let probes = 0;
+    await page.route("**/api/approvals/add-refused", async (route) => {
+      answers++;
+      await fulfillAsHelm(route, { status, body: "controlled add answer refusal" });
+    });
+    await page.route("**/api/hosts/probe", async (route) => {
+      probes++;
+      await route.abort();
+    });
+    await page.goto("/");
+    await page.bringToFront();
+    await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
+    await staged.replace([hostAddRequest("add-refused")]);
+    const form = page.locator(".add-host-form");
+    await expect(form).toBeVisible();
+    await form.locator(".add-host-submit").click();
+    await expect(form.locator(".add-host-error")).toContainText(status === 410 ? "no longer waiting"
+      : status === 200 ? "did not confirm acceptance" : "controlled add answer refusal");
+    expect(answers).toBe(1);
+    expect(probes).toBe(0);
+    await staged.expire("add-refused");
+    await expect(form).toHaveCount(0);
+  });
+}
+
+/** The server's sole answer winner is simulated here; helm tests exercise
+ * its real take/receipt. Each page must start discovery only after its own
+ * positive response, even when both had opened and edited the same request. */
+test("only the winning host add window probes its captured edited fields", async ({ page, context }) => {
+  const other = await context.newPage();
+  const gate = routeGate();
+  const windows = [page, other];
+  const staged = await Promise.all(windows.map((window) => stageApprovals(window, [])));
+  const answers: number[] = [];
+  const probes: Array<{ window: number; body: unknown }> = [];
+  let winner: number | undefined;
+  try {
+    for (const [index, window] of windows.entries()) {
+      await window.route("**/api/approvals/add-race", async (route) => {
+        answers.push(index);
+        if (winner === undefined) {
+          winner = index;
+          await gate.wait();
+          await fulfillAsHelm(route, { status: 204 });
+        } else { await fulfillAsHelm(route, { status: 410 }); }
+      });
+      await window.route("**/api/hosts/probe", async (route) => {
+        probes.push({ window: index, body: route.request().postDataJSON() });
+        await fulfillAsHelm(route, { json: { result: "manual", reason: "winner discovery complete" } });
+      });
+      await window.goto("/");
+    }
+    await other.bringToFront();
+    await expect.poll(() => other.evaluate(() => document.hasFocus())).toBe(true);
+    await setWindowFocused(page, false);
+    await staged[0].replace([hostAddRequest("add-race")]);
+    await staged[1].replace([hostAddRequest("add-race")]);
+    await expect(other.locator(".add-host-form")).toBeVisible();
+    await expect(page.locator(".approval-allow")).toBeEnabled();
+    await expect(page.locator(".add-host-form")).toHaveCount(0);
+    await setWindowFocused(page, true);
+    await page.locator(".approval-allow").click();
+    for (const [index, window] of windows.entries()) {
+      await expect(window.locator(".add-host-form")).toBeVisible();
+      await window.locator(".add-host-ssh").fill(`user@window-${index}.invalid`);
+      await window.locator(".add-host-alias").fill(`window ${index}`);
+    }
+    await page.locator(".add-host-submit").click();
+    await expect.poll(() => answers.length).toBe(1);
+    await other.locator(".add-host-submit").click();
+    await expect(other.locator(".add-host-error")).toContainText("no longer waiting");
+    await staged[0].expire("add-race");
+    await staged[1].expire("add-race");
+    await expect(page.locator(".approval-card")).toHaveCount(0);
+    await expect(page.locator(".add-host-form")).toBeVisible();
+    expect(probes, "neither window probes before the winner's receipt").toEqual([]);
+    gate.release();
+    await expect(page.locator(".add-host-error")).toContainText("winner discovery complete");
+    expect(answers).toEqual([0, 1]);
+    expect(probes).toEqual([{ window: 0, body: {
+      target: { kind: "ssh", destination: "user@window-0.invalid" },
+      remote_farhelm: null, remote_state_dir: null, new_entry: { alias: "window 0" },
+    } }]);
+  } finally { gate.release(); await other.close(); }
+});
 
 /** The common launch fits above the prompt; sidebar changes and narrow widths still follow the pane. */
 test("a compact card follows the main pane and keeps the answer buttons visible", async ({ page }, info) => {

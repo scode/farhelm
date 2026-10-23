@@ -1458,6 +1458,7 @@ pub(crate) fn HostsPanel(
     )>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let mut agent_add = use_context::<crate::approvals::AgentAddBridge>();
     let mut preferences = use_context::<crate::list::SharedPreferences>();
     let popovers = use_context::<crate::anchored_popovers::MovementOwner>();
     let capture_lower_hosts = use_lower_host_capture(hosts, popovers.clone());
@@ -1520,6 +1521,10 @@ pub(crate) fn HostsPanel(
     // remains on the panel. A definite refusal reopens the add dialog below.
     let mut add_error = use_signal(|| None::<String>);
     let mut add_reopen = use_signal(|| None::<AddReopen>);
+    // A setup POST closes its form but can still reopen that draft on a
+    // definite refusal. Defer another agent dialog through this interval so
+    // the reopened draft cannot collide with a newly admitted modal.
+    let mut add_submission_pending = use_signal(|| false);
     // Uninstalls this window confirmed, each with the notice owed once its
     // host leaves the list. The row's provisioning panel adds the entry as it
     // submits and drops it on a refusal or a failed run; the panel cannot
@@ -2076,15 +2081,18 @@ pub(crate) fn HostsPanel(
     // when the POST completes is what re-enables the heading's add button
     // and every other page mutation.
     let add_submit_base = base.clone();
-    let on_add_submit = move |submission: AddSubmission| {
+    let on_add_submit = use_callback(move |submission: AddSubmission| {
         let AddSubmission {
             probe_id,
             binding,
             claim,
+            from_agent_request,
         } = submission;
         settings_dialog::ADD_DIALOG
             .close(&FocusTarget::new(".add-host-button", None, false).script());
         adding.set(false);
+        add_submission_pending.set(true);
+        agent_add.opening.set(None);
         add_reopen.set(None);
         add_error.set(None);
         add_warning.set(None);
@@ -2098,17 +2106,22 @@ pub(crate) fn HostsPanel(
                 Err(crate::api::SubmissionError::Refused(reason)) => {
                     // A definite answer can return to the form with the
                     // destination intact; the one-use plan itself is gone.
-                    add_reopen.set(Some(AddReopen { binding, reason }));
+                    add_reopen.set(Some(AddReopen {
+                        binding,
+                        reason,
+                        from_agent_request,
+                    }));
                     adding.set(true);
                 }
                 Err(problem) => add_error.set(Some(problem.into_text())),
             }
+            add_submission_pending.set(false);
             // Every outcome refreshes: an accepted add registered a row whose
             // run the row itself follows, and a refused or ambiguous one may
             // still have committed (the probe id is one-use either way).
             on_changed.call(());
         });
-    };
+    });
     // A fast definite reply can reopen the form before the closing render
     // unmounts it. The key makes the reopened draft and refusal its own form
     // instance even when those two state writes share one render batch.
@@ -2227,6 +2240,7 @@ pub(crate) fn HostsPanel(
                 AddHostForm {
                     key: "{add_dialog_key}",
                     reopen: add_reopen(),
+                    agent_request: None,
                     ops,
                     on_refresh: on_changed,
                     on_submit: on_add_submit,
@@ -2247,6 +2261,71 @@ pub(crate) fn HostsPanel(
                         add_warning.set(unvalidated);
                         on_changed.call(());
                     },
+                }
+            }
+            if !adding() && !add_submission_pending() {
+                if let Some(opening) = (agent_add.opening)() {
+                    crate::modal_isolation::HostModal {
+                        key: "{opening.card.id}",
+                        require_active: opening.automatic,
+                        on_rejected: {
+                            let shown_id = opening.card.id.clone();
+                            move |_| {
+                                if agent_add.opening.peek().as_ref().is_some_and(|current| current.card.id == shown_id) {
+                                    agent_add.opening.set(None);
+                                }
+                            }
+                        },
+                        AddHostForm {
+                            agent_request: Some(opening.card.clone()),
+                            reopen: None,
+                            ops,
+                            on_refresh: on_changed,
+                            on_submit: on_add_submit,
+                            on_cancel: {
+                                let base = base.clone();
+                                let shown_id = opening.card.id.clone();
+                                move |_| {
+                                    // A queued dismissal belongs to the form
+                                    // it was drawn for, never the next request.
+                                    let Some(opening) = agent_add.opening.peek().clone().filter(|current| current.card.id == shown_id) else { return };
+                                    let id = opening.card.id;
+                                    if !opening.accepted && !*agent_add.armed.peek() { return; }
+                                    if !agent_add.answering.write().insert(id.clone()) { return; }
+                                    if opening.accepted {
+                                        agent_add.answering.write().remove(&id);
+                                        settings_dialog::ADD_DIALOG.close(&FocusTarget::new(".add-host-button", None, false).script());
+                                        agent_add.opening.set(None);
+                                        return;
+                                    }
+                                    let base = base.clone();
+                                    // This task belongs to the permanent panel,
+                                    // so closing the dialog cannot cancel Deny.
+                                    spawn(async move {
+                                        let result = crate::api::answer_approval(&base, &id, farhelm_proto::approvals::ApprovalAnswer::Deny).await;
+                                        agent_add.answering.write().remove(&id);
+                                        match result {
+                                            Ok(_) => {
+                                                settings_dialog::ADD_DIALOG.close(&FocusTarget::new(".add-host-button", None, false).script());
+                                                agent_add.opening.set(None);
+                                            }
+                                            Err(reason) => {
+                                                if let Some(opening) = agent_add.opening.write().as_mut() {
+                                                    opening.error = Some(reason);
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                            on_added: move |warning| {
+                                settings_dialog::ADD_DIALOG.close(&FocusTarget::new(".add-host-button", None, false).script());
+                                agent_add.opening.set(None);
+                                add_warning.set(warning);
+                                on_changed.call(());
+                            },
+                        }
+                    }
                 }
             }
             if let Some(warning) = add_warning() {
@@ -4550,6 +4629,9 @@ struct AddSubmission {
     probe_id: String,
     binding: AddBinding,
     claim: OpGuard,
+    /// Preserve setup-confirmation semantics if a definite refusal reopens
+    /// this attempt after its approval has already settled.
+    from_agent_request: bool,
 }
 
 /// Preserve the destination and alias after a definite setup submission
@@ -4559,6 +4641,9 @@ struct AddSubmission {
 struct AddReopen {
     binding: AddBinding,
     reason: String,
+    /// Approval may be gone by this reopen, but setup still needs its own
+    /// explicit confirmation for an add the user did not start in the UI.
+    from_agent_request: bool,
 }
 
 /// Keep probe and manual diagnostics inside the peer-text boundary.
@@ -4625,6 +4710,7 @@ fn destination_detail_parts(destination: impl Into<crate::peer::PeerText>) -> Ve
 #[component]
 fn AddHostForm(
     reopen: Option<AddReopen>,
+    agent_request: Option<farhelm_proto::approvals::PendingApproval>,
     mut ops: OpLock,
     on_added: EventHandler<Option<String>>,
     on_refresh: EventHandler<()>,
@@ -4632,7 +4718,26 @@ fn AddHostForm(
     on_cancel: EventHandler<()>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let mut agent_add = use_context::<crate::approvals::AgentAddBridge>();
     let mut preferences = use_context::<crate::list::SharedPreferences>();
+    // Immutable for this attempt, including accepted requests and definite
+    // setup refusals. Pending-card presence is not an origin indicator.
+    let from_agent_request = reopen
+        .as_ref()
+        .is_some_and(|value| value.from_agent_request)
+        || agent_request.is_some();
+    let request_id = agent_request.as_ref().map(|card| card.id.clone());
+    let requester_title = agent_request
+        .as_ref()
+        .map(|card| display_peer(card.session.title.as_deref().unwrap_or("unknown")))
+        .unwrap_or_default();
+    let close_request_id = request_id.clone();
+    let request_error = agent_add
+        .opening
+        .read()
+        .as_ref()
+        .filter(|opening| Some(&opening.card.id) == request_id.as_ref())
+        .and_then(|opening| opening.error.clone());
     let (initial_destination, initial_alias) = reopen
         .as_ref()
         .map(|value| {
@@ -4641,7 +4746,12 @@ fn AddHostForm(
                 value.binding.alias.clone(),
             )
         })
-        .unwrap_or_default();
+        .unwrap_or_else(|| match agent_request.as_ref().map(|card| &card.action) {
+            Some(farhelm_proto::approvals::ApprovalAction::HostAdd { destination, alias }) => {
+                (destination.clone(), alias.clone().unwrap_or_default())
+            }
+            _ => Default::default(),
+        });
     let initial_error = reopen.map(|value| value.reason);
     let mut ssh = use_signal(|| initial_destination);
     // The optional alias draft. Its shape is checked here before discovery,
@@ -4662,16 +4772,37 @@ fn AddHostForm(
     let mut offer = use_confirm_slot::<AddOffer, ()>();
     let mut auto_submit = use_signal(|| false);
     let page_busy = ops.busy();
-    let busy = page_busy || *probing.read();
+    let approval_busy = agent_request
+        .as_ref()
+        .is_some_and(|card| agent_add.answering.read().contains(&card.id));
+    let approval_waiting =
+        agent_add.opening.read().as_ref().is_some_and(|opening| {
+            Some(&opening.card.id) == request_id.as_ref() && !opening.accepted
+        });
+    let approval_paused = approval_waiting && !(agent_add.armed)();
+    let busy = page_busy || *probing.read() || approval_busy || approval_paused;
 
     // Close the dialog: Cancel (in the form or the setup question) and
     // Escape. Closing is reconciliation for whatever offer is open, hence
     // `clear`, not an answer.
-    let mut close = move || {
+    let close = use_callback(move |()| {
+        if agent_add.opening.peek().as_ref().is_some_and(|opening| {
+            Some(&opening.card.id) == close_request_id.as_ref()
+                && !opening.accepted
+                && !*agent_add.armed.peek()
+        }) {
+            return;
+        }
+        if close_request_id
+            .as_ref()
+            .is_some_and(|id| agent_add.answering.peek().contains(id))
+        {
+            return;
+        }
         offer.clear();
         auto_submit.set(false);
         on_cancel.call(());
-    };
+    });
 
     let preference_base = base.clone();
     // Confirm `planned`, the opening the answer was drawn for. `skip_future`
@@ -4712,6 +4843,7 @@ fn AddHostForm(
                 probe_id,
                 binding,
                 claim,
+                from_agent_request,
             });
         },
     );
@@ -4757,7 +4889,7 @@ fn AddHostForm(
                 tabindex: "-1",
                 on_escape: move |evt: KeyboardEvent| {
                     if !evt.is_composing() {
-                        close();
+                        close.call(());
                     }
                 },
             onsubmit: move |evt: FormEvent| {
@@ -4769,6 +4901,8 @@ fn AddHostForm(
                 if *probing.peek() || offer.is_open() || ops.busy_now() {
                     return;
                 }
+                if agent_add.opening.peek().as_ref().is_some_and(|opening|
+                    Some(&opening.card.id) == request_id.as_ref() && !opening.accepted && !*agent_add.armed.peek()) { return; }
                 // A malformed alias never leaves the browser; the draft
                 // stays for the user to fix.
                 if let Err(problem) = validate_alias_draft(&alias.peek()) {
@@ -4781,7 +4915,40 @@ fn AddHostForm(
                 let binding = AddBinding { destination: ssh(), alias: alias() };
                 let destination = binding.destination.clone();
                 let alias_draft = binding.alias.clone();
+                let pending_id = agent_add.opening.peek().as_ref()
+                    .filter(|opening| !opening.accepted && Some(&opening.card.id) == request_id.as_ref())
+                    .map(|opening| opening.card.id.clone());
+                if let Some(id) = &pending_id
+                    && !agent_add.answering.write().insert(id.clone())
+                {
+                    probing.set(false);
+                    return;
+                }
                 spawn(async move {
+                    if let Some(id) = pending_id {
+                        // Do not probe on send success, Gone or a refusal.
+                        // Only 204 includes the held handler's final receipt.
+                        match crate::api::answer_host_add(&base, &id, destination.clone()).await {
+                            Ok(crate::api::AnswerOutcome::Delivered) => {
+                                if let Some(opening) = agent_add.opening.write().as_mut() {
+                                    opening.accepted = true;
+                                }
+                                agent_add.answering.write().remove(&id);
+                            }
+                            Ok(crate::api::AnswerOutcome::Gone) => {
+                                agent_add.answering.write().remove(&id);
+                                probing.set(false);
+                                error.set(Some("this request is no longer waiting; no host was added".into()));
+                                return;
+                            }
+                            Err(reason) => {
+                                agent_add.answering.write().remove(&id);
+                                probing.set(false);
+                                error.set(Some(reason));
+                                return;
+                            }
+                        }
+                    }
                     // No remote binary or state directory: blank paths go out
                     // as null, and the helm's probe looks where setup installs.
                     // The new-entry alias makes a destination that is already
@@ -4795,7 +4962,7 @@ fn AddHostForm(
                         }) => {
                             offer.open(AddOffer { probe_id, confirmation: confirmation.raw().to_owned(), steps, binding }, ());
                             auto_submit.set(
-                                preferences.0.peek().skip_host_setup_confirmation == Some(true),
+                                !from_agent_request && preferences.0.peek().skip_host_setup_confirmation == Some(true),
                             );
                         }
                         // Local error state also carries transport failures;
@@ -4829,7 +4996,7 @@ fn AddHostForm(
                     }),
                     busy: page_busy,
                     on_confirm: move |skip_future| confirm.call((planned.clone(), skip_future)),
-                    on_cancel: move |_| close(),
+                    on_cancel: move |_| close.call(()),
                 }
             } else {
                 settings_dialog::HostDialogHeader {
@@ -4837,9 +5004,30 @@ fn AddHostForm(
                     summary: "an ssh destination this helm can reach",
                     dismiss_label: "cancel adding host",
                     dismiss_tooltip: "cancel: close without adding a host",
-                    on_dismiss: move |_| close(),
+                    on_dismiss: move |_| close.call(()),
                 }
                 div { class: "host-settings-body",
+                if let Some(card) = &agent_request {
+                    dl { class: "agent-add-requester",
+                        dt { "from host" }
+                        dd { class: "host-settings-value peer-value", dir: "ltr", "{display_peer(&card.host_name)}" }
+                        dt { "from session" }
+                        dd { class: "host-settings-value peer-value", dir: "ltr", "{requester_title}" }
+                        dt { "from session id" }
+                        dd { class: "host-settings-value peer-value", dir: "ltr", "{display_identity(&card.session.id)}" }
+                    }
+                }
+                if from_agent_request {
+                    // Inputs preserve editable raw bytes. Their separate peer
+                    // spelling makes invisible/bidi text visible before Allow,
+                    // and follows edits rather than the original agent draft.
+                    dl { class: "agent-add-approved-fields",
+                        dt { "destination to add" }
+                        dd { class: "host-settings-value peer-value", dir: "ltr", "{display_peer(&ssh())}" }
+                        dt { "alias to add" }
+                        dd { class: "host-settings-value peer-value", dir: "ltr", "{display_peer(&alias())}" }
+                    }
+                }
                 label {
                     "ssh destination"
                     // Same total opt-out of browser text mangling the create
@@ -4892,7 +5080,7 @@ fn AddHostForm(
                             ssh_help_open.set(true);
                         }, "Start its connections yourself first." }
                 }
-                if let Some(err) = error.read().clone() {
+                if let Some(err) = error.read().clone().or(request_error.clone()) {
                     PeerLine {
                         class: "create-session-error add-host-error",
                         parts: probe_error_parts(err),
@@ -4905,8 +5093,9 @@ fn AddHostForm(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral add-host-cancel",
+                        disabled: approval_busy || approval_paused,
                         "data-tooltip": "cancel: close without adding a host",
-                        onclick: move |_| close(),
+                        onclick: move |_| close.call(()),
                         "cancel"
                     }
                 button {

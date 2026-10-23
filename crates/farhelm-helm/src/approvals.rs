@@ -89,9 +89,13 @@ pub(crate) const ORIGIN_GONE_REFUSAL: &str = "the requesting host's connection w
 const ORIGIN_RECHECK: Duration = Duration::from_secs(5);
 
 /// How an entry left the table, as its parked handler learns it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 enum Verdict {
     Allow,
+    HostAdd {
+        destination: String,
+        receipt: oneshot::Sender<()>,
+    },
     TunnelAndOpen,
     Deny,
     /// The asking session is being deleted.
@@ -274,9 +278,10 @@ impl Approvals {
     }
 }
 
-/// Test-only gate that parks an agent's approved host edit or remove after
-/// the user's Allow and before it takes the host's locks, so a test can land
-/// a competing GUI write in exactly that window.
+/// Test-only gate at a host change's last approval boundary. Edits/removals
+/// stop before taking the host's write locks; additions stop before their
+/// final origin check and receipt. Tests can land a competing GUI write or
+/// retire the origin in exactly that window, without a scheduling sleep.
 ///
 /// The window is where an unprotected comparison of the host against its
 /// card used to sit: a check made there passed, and a GUI retarget or
@@ -366,7 +371,7 @@ fn gui_connected(state: &AppState) -> bool {
 /// The caller must still recheck that `origin` is live after an `Ok`, before
 /// acting: the connection can go between the answer and the action.
 /// An action whose [`ApprovalAction::requires_direct_allow`] is true
-/// (wrapper-bearing agent launches and template writes, host edits and
+/// (wrapper-bearing agent launches and template writes, host additions, edits and
 /// removals) always waits for one visible answer, whatever the host's
 /// ordinary command setting says; that method's docs give each reason.
 pub(crate) async fn ask(
@@ -380,15 +385,22 @@ pub(crate) async fn ask(
         .map(|_| ())
 }
 
-/// A successful answer retains how the user chose to open a link.
-/// Ordinary verbs use `ask`; only the browser handler acts on the tunnel case.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Preserve action-specific consent through the shared approval wait.
+/// Ordinary verbs use `ask`; links retain the chosen opening mode, while
+/// host add carries the edited destination and its acceptance receipt.
+#[derive(Debug)]
 pub(crate) enum Allowed {
     Raw,
     Tunnel,
+    /// The answer POST waits on this receipt. Only the host-add handler,
+    /// after its final origin check, may release the GUI's discovery step.
+    HostAdd {
+        destination: String,
+        receipt: oneshot::Sender<()>,
+    },
 }
 
-/// Preserve the distinct tunnel verdict through the ordinary approval lifecycle.
+/// Keep link choices and host-add acceptance in the ordinary approval lifecycle.
 /// Native preapproved links still return Raw immediately, without a card.
 pub(crate) async fn ask_with_answer(
     state: &AppState,
@@ -503,6 +515,13 @@ pub(crate) async fn ask_with_answer(
     tracing::info!(approval = seq, outcome = ?ending, "an agent approval request ended");
     match ending {
         Ending::Answered(Some(Verdict::Allow)) => Ok(Allowed::Raw),
+        Ending::Answered(Some(Verdict::HostAdd {
+            destination,
+            receipt,
+        })) => Ok(Allowed::HostAdd {
+            destination,
+            receipt,
+        }),
         Ending::Answered(Some(Verdict::TunnelAndOpen)) => Ok(Allowed::Tunnel),
         Ending::Answered(Some(Verdict::Deny)) => Err(refusal(
             ErrorKind::Unauthorized,
@@ -630,7 +649,8 @@ pub(crate) async fn list_approvals(
 
 /// `POST /api/approvals/{id}` — the user's answer to one card.
 ///
-/// 204 when the answer reached a waiting request; 410 Gone when the request
+/// 204 when the answer reached a waiting request (for HostAdd Allow, only
+/// after its handler's final positive receipt); 410 Gone when the request
 /// is no longer waiting (answered elsewhere, expired, or withdrawn), which a
 /// client answers by dropping the card. Gone has its own status so it cannot
 /// be confused with a refusal the client must show.
@@ -654,8 +674,34 @@ pub(crate) async fn answer_approval(
     AxPath(id): AxPath<String>,
     axum::Json(request): axum::Json<ApprovalAnswerRequest>,
 ) -> impl IntoResponse {
+    let Some((_, _, action, _)) = state.approvals.origin_of(&id) else {
+        return gone(&id);
+    };
+    // Validate the edited payload before taking the sole pending entry. A
+    // malformed or foreign payload must not spend another card's answer.
+    let host_add_allow =
+        matches!(action, ApprovalAction::HostAdd { .. }) && request.answer == ApprovalAnswer::Allow;
+    if host_add_allow != request.host_add.is_some() {
+        return http_error(refusal(
+            ErrorKind::InvalidRequest,
+            "an edited destination is required only for host add Allow".into(),
+        ));
+    }
+    if let Some(edited) = &request.host_add
+        && let Err(message) =
+            farhelm_proto::approvals::validate_host_add_destination(&edited.destination)
+    {
+        return http_error(refusal(ErrorKind::InvalidRequest, message));
+    }
+    let (receipt_tx, receipt_rx) = oneshot::channel();
     let verdict = match request.answer {
-        ApprovalAnswer::Allow => Verdict::Allow,
+        ApprovalAnswer::Allow => match request.host_add {
+            Some(edited) => Verdict::HostAdd {
+                destination: edited.destination,
+                receipt: receipt_tx,
+            },
+            None => Verdict::Allow,
+        },
         ApprovalAnswer::Deny => Verdict::Deny,
         ApprovalAnswer::TunnelAndOpen => {
             let Some((origin, _, action, asking)) = state.approvals.origin_of(&id) else {
@@ -772,6 +818,15 @@ pub(crate) async fn answer_approval(
     };
     match state.approvals.take(&id) {
         Some(entry) => {
+            if host_add_allow {
+                // Taking the ordinary entry elects one window. Delivery alone
+                // is insufficient: expiry or the handler's final origin veto
+                // can still refuse. A dropped receipt makes those paths Gone.
+                if entry.answer.send(verdict).is_err() || receipt_rx.await.is_err() {
+                    return gone(&id);
+                }
+                return axum::http::StatusCode::NO_CONTENT.into_response();
+            }
             // A failed send means the parked handler is already gone; its
             // guard announces the removal.
             let _ = entry.answer.send(verdict);
@@ -837,6 +892,130 @@ mod tests {
             Some(serde_json::json!({ "answer": answer })),
         )
         .await
+    }
+
+    /// A HostAdd payload cannot approve a different card. The request must
+    /// stay waiting so the user's ordinary Allow or Deny remains available.
+    #[farhelm_testtrace::test]
+    async fn foreign_host_add_payload_preserves_other_cards() {
+        let harness = rest_harness::idle_helm().await;
+        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let origin = local_origin(&harness).await;
+        let (task, id) = waiting(&harness, origin, "asker").await;
+        let (status, _) = request(
+            &harness,
+            "POST",
+            &format!("/api/approvals/{id}"),
+            Some(serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited"}})),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(harness.state.approvals.list()[0].id, id);
+        assert!(!task.is_finished());
+        assert_eq!(
+            answer(&harness, &id, "deny").await.0,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        assert!(ended(task).await.is_err());
+    }
+
+    /// Neither a dead verdict receiver nor a dropped acceptance receipt
+    /// licenses the GUI to probe. These explicit channel endings exercise
+    /// both failure boundaries without relying on a scheduler race.
+    #[farhelm_testtrace::test]
+    async fn host_add_failed_send_and_dropped_receipt_are_gone() {
+        for failed_send in [false, true] {
+            let harness = rest_harness::idle_helm().await;
+            let _gui = harness.state.manager.events().admit(1).unwrap();
+            let origin = local_origin(&harness).await;
+            let (task, id) = waiting_for_action(
+                &harness,
+                origin,
+                "asker",
+                ApprovalAction::HostAdd {
+                    destination: "user@original".into(),
+                    alias: None,
+                },
+            )
+            .await;
+            let mut task = Some(task);
+            if failed_send {
+                // Preserve the entry while dropping its actual receiver. The
+                // ordinary guard would remove it, so take it across that drop
+                // and restore only this synthetic dead-delivery premise.
+                let entry = harness.state.approvals.take(&id).unwrap();
+                let task = task.take().unwrap();
+                task.abort();
+                assert!(task.await.unwrap_err().is_cancelled());
+                let mut inner = harness.state.approvals.lock();
+                inner.next_seq += 1;
+                let seq = inner.next_seq;
+                inner.pending.insert(seq, entry);
+            }
+            let (status, _) = request(
+                &harness,
+                "POST",
+                &format!("/api/approvals/{id}"),
+                Some(
+                    serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited"}}),
+                ),
+            )
+            .await;
+            assert_eq!(status, axum::http::StatusCode::GONE);
+            // In the receipt-drop case `ask` intentionally ignores Allowed's
+            // payload, representing a handler that ended without accepting.
+            assert!(harness.state.approvals.list().is_empty());
+            if let Some(task) = task {
+                ended(task).await.unwrap();
+            }
+        }
+    }
+
+    /// Expiry remains the held wait's authority. A later complete edited
+    /// answer is Gone, rather than a false successful browser continuation.
+    #[farhelm_testtrace::test]
+    async fn expired_host_add_cannot_acknowledge_a_late_answer() {
+        let harness = rest_harness::FleetBuilder::new()
+            .await
+            .approval_wait(Duration::from_millis(300))
+            .local(rest_harness::HostScript {
+                identity: Some("local-identity".into()),
+                ..Default::default()
+            })
+            .await
+            .start()
+            .await;
+        let local = rest_harness::local_id(&harness.store).await;
+        harness.await_refreshed(local).await;
+        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let origin = live_origin(&harness, local);
+        let (task, id) = waiting_for_action(
+            &harness,
+            origin,
+            "asker",
+            ApprovalAction::HostAdd {
+                destination: "user@original".into(),
+                alias: None,
+            },
+        )
+        .await;
+        let error = refusal_of(ended(task).await);
+        assert_eq!(error.kind, ErrorKind::Unavailable);
+        assert!(error.message.contains("nobody answered"));
+        assert!(harness.state.approvals.list().is_empty());
+        assert_eq!(
+            request(
+                &harness,
+                "POST",
+                &format!("/api/approvals/{id}"),
+                Some(
+                    serde_json::json!({"answer":"allow", "host_add":{"destination":"user@edited"}})
+                )
+            )
+            .await
+            .0,
+            axum::http::StatusCode::GONE
+        );
     }
 
     /// The local host's LIVE connection as a request's origin, the way the

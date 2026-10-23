@@ -417,7 +417,7 @@ enum AgentCmd {
     /// Write launch templates; each waits for the user's approval.
     #[command(subcommand)]
     Template(TemplateCmd),
-    /// Change or remove hosts; each always waits for the user's explicit Allow.
+    /// Add, change or remove hosts; each always waits for the user's explicit Allow.
     #[command(subcommand)]
     Host(HostCmd),
     /// Print how to use these verbs, for an agent that was told to.
@@ -494,6 +494,17 @@ enum TemplateCmd {
 /// can change a host's destination or its permissions.
 #[derive(Subcommand)]
 enum HostCmd {
+    /// Ask to add a host. Accepted means approved, not installed: adding may
+    /// fail, need setup, or be cancelled. Check `farhelm agent hosts` and its
+    /// state before relying on the host.
+    Add {
+        /// SSH destination the helm can reach.
+        #[arg(value_name = "DEST", allow_hyphen_values = true)]
+        destination: String,
+        /// Optional name shown instead of the destination.
+        #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+        alias: Option<String>,
+    },
     /// Change a host's alias, icon or color; the card shows each old and new value.
     Edit {
         /// Host to change, by the name `farhelm agent hosts` shows.
@@ -1828,16 +1839,22 @@ fn run_template_write(command: &TemplateCmd) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `farhelm agent host edit|remove`: one relayed request, which waits for the
+/// `farhelm agent host add|edit|remove`: one relayed request, which waits for the
 /// user's explicit Allow, and one confirmation line on stdout naming the host,
 /// as the template writes confirm on stdout.
 ///
 /// An edit that names nothing to change is refused here, before anything is
 /// sent (the helm refuses it too). An edit's line names the host by the
 /// display name the helm reports after the edit, since an alias change gives
-/// the host a new one; a removal's names it as the caller did.
+/// the host a new one; a removal's names it as the caller did. An add names
+/// the destination the user approved, which may differ from the argument,
+/// and warns that accepting the request does not establish installation.
 fn run_host_change(command: &HostCmd) -> anyhow::Result<()> {
     let verb = match command {
+        HostCmd::Add { destination, alias } => farhelm_proto::AgentVerb::HostAdd {
+            destination: destination.clone(),
+            alias: alias.clone(),
+        },
         HostCmd::Edit {
             host,
             alias,
@@ -1867,6 +1884,12 @@ fn run_host_change(command: &HostCmd) -> anyhow::Result<()> {
     };
     let (_asking, reply) = runtime()?.block_on(agent_request(&SessionEnv::from_env(), verb))?;
     match (reply, command) {
+        (AgentReply::HostAddAccepted { destination }, HostCmd::Add { .. }) => {
+            println!(
+                "accepted; Farhelm is adding {}. Accepted is not installed: adding may fail, need setup, or be cancelled. Check farhelm agent hosts and the host's state before relying on it.",
+                quoted(&destination)
+            );
+        }
         (AgentReply::HostEdited { host }, HostCmd::Edit { .. }) => {
             println!("changed host {}", quoted(&host.name));
         }

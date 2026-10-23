@@ -158,7 +158,7 @@ pub(crate) async fn open_url(
     if !crate::agent_requests::origin_is_live(state, origin) {
         anyhow::bail!("the requesting host's connection changed before the link could open; retry");
     }
-    if answer == crate::approvals::Allowed::Tunnel {
+    if matches!(answer, crate::approvals::Allowed::Tunnel) {
         crate::tunnels::open_agent_url(state, origin, session, &url).await?;
     } else if let Some(opener) = state.link_opener.clone() {
         tokio::task::spawn_blocking(move || opener(&url))

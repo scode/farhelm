@@ -4670,18 +4670,55 @@ pub(crate) async fn answer_approval(
     id: &str,
     answer: farhelm_proto::approvals::ApprovalAnswer,
 ) -> Result<AnswerOutcome, String> {
-    let url = format!("{base}/api/approvals/{}", encode_path_segment(id));
-    let resp = send(
-        client()
-            .post(&url)
-            .json(&farhelm_proto::approvals::ApprovalAnswerRequest { answer }),
+    answer_approval_request(
+        base,
+        id,
+        farhelm_proto::approvals::ApprovalAnswerRequest {
+            answer,
+            host_add: None,
+        },
     )
-    .await?;
+    .await
+}
+
+/// Host add carries only the edited destination back to its held request.
+/// Delivered here includes the handler's positive acceptance receipt; it is
+/// the prerequisite for starting ordinary discovery in the answering window.
+pub(crate) async fn answer_host_add(
+    base: &str,
+    id: &str,
+    destination: String,
+) -> Result<AnswerOutcome, String> {
+    answer_approval_request(
+        base,
+        id,
+        farhelm_proto::approvals::ApprovalAnswerRequest {
+            answer: farhelm_proto::approvals::ApprovalAnswer::Allow,
+            host_add: Some(farhelm_proto::approvals::HostAddAnswer { destination }),
+        },
+    )
+    .await
+}
+
+/// Share status handling while keeping edited answers exclusive to host add.
+async fn answer_approval_request(
+    base: &str,
+    id: &str,
+    request: farhelm_proto::approvals::ApprovalAnswerRequest,
+) -> Result<AnswerOutcome, String> {
+    let expects_receipt = request.host_add.is_some();
+    let url = format!("{base}/api/approvals/{}", encode_path_segment(id));
+    let resp = send(client().post(&url).json(&request)).await?;
     if resp.status() == reqwest::StatusCode::GONE {
         return Ok(AnswerOutcome::Gone);
     }
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
+    }
+    if expects_receipt && resp.status() != reqwest::StatusCode::NO_CONTENT {
+        return Err(
+            "the host add answer did not confirm acceptance; no discovery was started".into(),
+        );
     }
     Ok(AnswerOutcome::Delivered)
 }

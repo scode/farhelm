@@ -1284,6 +1284,79 @@ test("real discovery offers one peer-safe concrete plan and mutates nothing befo
   expect((await backendEvents()).map((event) => event.event)).toEqual(["probe", "inspect"]);
 });
 
+/** An accepted agent request retains its origin through a definite setup
+ * refusal/reopen. The user's saved shortcut must never auto-submit either
+ * setup offer, and approval itself carries only the edited destination. */
+test("agent host add asks before setup despite preference and after refusal reopen", async ({ page, request }, testInfo) => {
+  const original = destination(testInfo, "agent-original");
+  const edited = destination(testInfo, "agent-edited");
+  await configureBackend({ targets: { [target(edited)]: {} } });
+  await patchPreferences(request, { skip_host_setup_confirmation: true });
+  expect((await readPreferences(request)).skip_host_setup_confirmation).toBe(true);
+  const feed = await stubFeed(page);
+  feed.notifyOnConnect(1);
+  let waiting = false;
+  const answers: unknown[] = [];
+  const order: string[] = [];
+  const probes: unknown[] = [];
+  let provisions = 0;
+  await page.route("**/api/approvals", async (route) => {
+    await route.fulfill({ headers: { "x-farhelm-build": HELM_BUILD }, json: { approvals: waiting ? [{
+      id: "agent-setup", host_id: 1, host_name: "asking host",
+      session: { id: "00000001-0000-4000-8000-000000000000:asking", title: "asking session", host_name: "asking host" },
+      expires_at_ms: Date.now() + 540_000,
+      action: { kind: "host_add", destination: original, alias: "original alias" },
+    }] : [] } });
+  });
+  await page.route("**/api/approvals/agent-setup", async (route) => {
+    answers.push(route.request().postDataJSON());
+    order.push("allow");
+    waiting = false;
+    feed.notify(3);
+    await route.fulfill({ status: 204, headers: { "x-farhelm-build": HELM_BUILD } });
+  });
+  page.on("request", (candidate) => {
+    if (candidate.method() === "POST" && new URL(candidate.url()).pathname === "/api/hosts/probe") {
+      order.push("probe"); probes.push(candidate.postDataJSON());
+    }
+  });
+  await page.route("**/api/hosts/provision", async (route) => {
+    provisions++;
+    await route.fulfill({ status: 409, headers: { "x-farhelm-build": HELM_BUILD }, body: "controlled definite setup refusal" });
+  });
+  await page.goto("/");
+  await page.bringToFront();
+  await expect.poll(() => page.evaluate(() => document.hasFocus() && document.visibilityState !== "hidden")).toBe(true);
+  await expect.poll(() => feed.openSockets()).toBe(1);
+  waiting = true; feed.notify(2);
+  let form = page.locator(".add-host-form");
+  await expect(form).toBeVisible();
+  await form.locator(".add-host-ssh").fill(edited);
+  await form.locator(".add-host-alias").fill("edited agent alias");
+  await form.locator(".add-host-submit").click();
+  await expect(form.locator(".provisioning-plan")).toBeVisible();
+  expect(order).toEqual(["allow", "probe"]);
+  expect(answers).toEqual([{ answer: "allow", host_add: { destination: edited } }]);
+  expect(probes[0]).toMatchObject({ target: { destination: edited }, new_entry: { alias: "edited agent alias" } });
+  expect(provisions, "preference did not auto-submit agent setup").toBe(0);
+  expect((await backendEvents()).map((event) => event.event)).toEqual(["probe", "inspect"]);
+  await form.getByRole("button", { name: "set up", exact: true }).click();
+  form = page.locator(".add-host-form");
+  await expect(form.locator(".add-host-error")).toContainText("controlled definite setup refusal");
+  await expect(form.locator(".add-host-ssh")).toHaveValue(edited);
+  await expect(form.locator(".add-host-alias")).toHaveValue("edited agent alias");
+  expect((await readPreferences(request)).skip_host_setup_confirmation).toBe(true);
+  await form.locator(".add-host-submit").click();
+  await expect(form.locator(".provisioning-plan")).toBeVisible();
+  expect(provisions, "origin retained after pending card is gone and form remounted").toBe(1);
+  expect(answers, "reprobe is ordinary flow, not a new approval").toHaveLength(1);
+  expect((await backendEvents()).map((event) => event.event)).toEqual(["probe", "inspect", "probe", "inspect"]);
+  await form.getByRole("button", { name: "cancel", exact: true }).click();
+  await expect(form).toHaveCount(0);
+  expect(answers, "post-acceptance cancel is not Deny").toHaveLength(1);
+  expect((await hosts(request)).some((host) => host.destination === edited)).toBe(false);
+});
+
 /** The host answer skips the next setup question, and the app-wide checkbox
  * restores that question in this same client without a preference reload.
  */

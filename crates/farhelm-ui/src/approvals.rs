@@ -48,6 +48,37 @@ use crate::list::{permission_description, session_permission};
 use crate::peer::{PeerBlock, display_identity, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 
+/// Page-local presentation bridge to the ordinary hosts dialog. The helm's
+/// approval table remains authoritative; this stores no installation work.
+#[derive(Clone, Copy)]
+pub(crate) struct AgentAddBridge {
+    pub(crate) opening: Signal<Option<AgentAddOpening>>,
+    pub(crate) answering: Signal<HashSet<String>>,
+    pub(crate) armed: Signal<bool>,
+}
+
+/// Freeze one form opening across listing refreshes. Accepted stays true
+/// after its pending card disappears, until ordinary add cancellation/setup.
+#[derive(Clone, PartialEq)]
+pub(crate) struct AgentAddOpening {
+    pub(crate) card: PendingApproval,
+    pub(crate) automatic: bool,
+    pub(crate) accepted: bool,
+    pub(crate) error: Option<String>,
+}
+
+impl AgentAddBridge {
+    /// Allocate only page-local presentation and shared answer guards. The
+    /// existing approval reader and timer remain their lifecycle owners.
+    pub(crate) fn new() -> Self {
+        Self {
+            opening: Signal::new(None),
+            answering: Signal::new(HashSet::new()),
+            armed: Signal::new(true),
+        }
+    }
+}
+
 /// Keep every waiting request reachable while showing one decision in full.
 ///
 /// Mounted once, beside the fleet feed, so the cards survive selection
@@ -62,11 +93,14 @@ use crate::reader::{SurfaceReader, Trigger, request_read};
 #[component]
 pub(crate) fn ApprovalCards() -> Element {
     let base = use_context::<ApiBase>().0;
+    let mut add = use_context::<AgentAddBridge>();
+    let mut seen_adds = use_signal(HashSet::<String>::new);
+    let mut add_openings = use_signal(Vec::<AgentAddOpening>::new);
     #[cfg(native_desktop)]
     let tunnel_controller = use_context::<crate::tunnels::TunnelController>();
     let mut approvals = use_signal(Vec::<PendingApproval>::new);
     // Answers in flight, so a double click cannot send two.
-    let answering = use_signal(HashSet::<String>::new);
+    let answering = add.answering;
     // Cards answered from this window, hidden at once rather than left
     // clickable until the next listing drops them; forgotten once a listing
     // no longer has them.
@@ -81,7 +115,7 @@ pub(crate) fn ApprovalCards() -> Element {
     let mut late = use_signal(|| None::<bool>);
     // Listing changes and switches both move a different decision under the
     // pointer. A generation keeps an older pause from arming a newer card.
-    let mut armed = use_signal(|| true);
+    let mut armed = add.armed;
     let mut shown = use_signal(|| (Vec::<String>::new(), None::<String>));
     let mut expanded = use_signal(|| None::<String>);
     // The generation only times the 700 ms pause SPEC.md names; what an
@@ -101,9 +135,47 @@ pub(crate) fn ApprovalCards() -> Element {
                     tunnel_controller.observe_cards(&list);
                     let waiting: HashSet<String> =
                         list.iter().map(|card| card.id.clone()).collect();
+                    // Only a successful read proves absence. A dialog awaiting
+                    // its own receipt must survive removal by that very POST.
+                    let expired = add.opening.peek().as_ref().is_some_and(|open| {
+                        !open.accepted
+                            && !answering.peek().contains(&open.card.id)
+                            && !waiting.contains(&open.card.id)
+                    });
+                    if expired {
+                        add.opening.set(None);
+                    }
+                    // Only still-waiting ids need an observation history;
+                    // completed requests must not accumulate for the page's life.
+                    seen_adds.write().retain(|id| waiting.contains(id));
+                    let candidates: Vec<_> = list
+                        .iter()
+                        .filter(|card| {
+                            matches!(card.action, ApprovalAction::HostAdd { .. })
+                                && !seen_adds.peek().contains(&card.id)
+                        })
+                        .cloned()
+                        .collect();
+                    add_openings
+                        .write()
+                        .retain(|opening| waiting.contains(&opening.card.id));
+                    for card in &list {
+                        if matches!(card.action, ApprovalAction::HostAdd { .. }) {
+                            seen_adds.write().insert(card.id.clone());
+                        }
+                    }
                     errors.write().retain(|id, _| waiting.contains(id));
                     answered.write().retain(|id| waiting.contains(id));
                     approvals.set(list);
+                    if !candidates.is_empty() {
+                        // Sample the live activity predicate; admission samples
+                        // it again after any other modal has left the page.
+                        if matches!(document::eval("return document.hasFocus() && document.visibilityState !== 'hidden';").join::<bool>().await, Ok(true))
+                        {
+                            add_openings.write().extend(candidates.into_iter().map(|card|
+                                AgentAddOpening { card, automatic: true, accepted: false, error: None }));
+                        }
+                    }
                     true
                 }
                 Err(_) => false,
@@ -135,6 +207,15 @@ pub(crate) fn ApprovalCards() -> Element {
         .filter(|card| !answered.read().contains(&card.id))
         .cloned()
         .collect();
+    // Several requests can arrive in one listing. Preserve their order as
+    // presentation candidates, while the existing modal owner keeps drafts
+    // intact. Requests first observed inactive are never queued by focus alone.
+    use_effect(move || {
+        if add.opening.read().is_none() && !add_openings.read().is_empty() {
+            let opening = add_openings.write().remove(0);
+            add.opening.set(Some(opening));
+        }
+    });
     // The helm lists oldest first. Resolve selection against this listing,
     // rather than its previous index: expiry or an answer can remove any
     // request, and refreshing must not replace one the user chose to read.
@@ -209,12 +290,23 @@ pub(crate) fn ApprovalCards() -> Element {
                         let request = request.clone();
                         let mut answering = answering;
                         let action = card.action.clone();
+                        let add_card = card.clone();
                         #[cfg(native_desktop)]
                         let tunnel_card = card.clone();
                         move |(id, answer): (String, ApprovalAnswer)| {
                             // DOM disabling follows rendering. Check the live pause and claim the
                             // answer before a queued click can open anything on the user's machine.
                             if !*armed.peek() || !answering.write().insert(id.clone()) {
+                                return;
+                            }
+                            if answer == ApprovalAnswer::Allow && matches!(action, ApprovalAction::HostAdd { .. }) {
+                                answering.write().remove(&id);
+                                if !add.opening.peek().as_ref().is_some_and(|opening| opening.card.id == id) {
+                                    // Explicit opens wait behind an existing
+                                    // draft too; they do not replace it.
+                                    add_openings.write().retain(|opening| opening.card.id != id);
+                                    add_openings.write().push(AgentAddOpening { card: add_card.clone(), automatic: false, accepted: false, error: None });
+                                }
                                 return;
                             }
                             if matches!(answer, ApprovalAnswer::Allow | ApprovalAnswer::AlwaysAllow)
@@ -461,7 +553,7 @@ fn ApprovalCard(
                     "Farhelm will forget this host. Its supervisor and sessions keep running, and adding the destination again finds them."
                 }
             }
-            if matches!(&card.action, ApprovalAction::HostEdit { .. } | ApprovalAction::HostRemove { .. }) {
+            if matches!(&card.action, ApprovalAction::HostAdd { .. } | ApprovalAction::HostEdit { .. } | ApprovalAction::HostRemove { .. }) {
                 p { class: "approval-card-note",
                     "Each host change needs your approval, even when the requesting host can run Farhelm commands without asking."
                 }
@@ -477,7 +569,8 @@ fn ApprovalCard(
                     "data-tooltip": "allow: let this one request go ahead",
                     disabled: busy,
                     onclick: answer(ApprovalAnswer::Allow),
-                    if tunnel_available { "Open" } else if preapproved { "open" } else { "allow" }
+                    if matches!(card.action, ApprovalAction::HostAdd { .. }) { "open add dialog" }
+                    else if tunnel_available { "Open" } else if preapproved { "open" } else { "allow" }
                 }
                 if !preapproved && !tunnel_available && !card.action.requires_direct_allow() {
                 button {
@@ -658,6 +751,7 @@ fn action_kind(action: &ApprovalAction) -> &'static str {
         ApprovalAction::TemplateWrite { .. } => "template_write",
         ApprovalAction::TemplateWriteWithShortcuts { .. } => "template_write_with_shortcuts",
         ApprovalAction::TemplateDelete { .. } => "template_delete",
+        ApprovalAction::HostAdd { .. } => "host_add",
         ApprovalAction::HostEdit { .. } => "host_edit",
         ApprovalAction::HostRemove { .. } => "host_remove",
     }
@@ -725,6 +819,7 @@ fn action_summary(action: &ApprovalAction) -> &'static str {
             ..
         } => "change a launch template and its shortcuts",
         ApprovalAction::TemplateDelete { .. } => "delete a launch template",
+        ApprovalAction::HostAdd { .. } => "add a host",
         ApprovalAction::HostEdit { .. } => "change a host's alias, icon or color",
         ApprovalAction::HostRemove { .. } => "remove a host",
     }
@@ -991,6 +1086,12 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
         // Each changed field shows its value now and the value approval
         // writes. Icon and color words are this UI's own fixed vocabulary;
         // the alias and the host's names are peer data.
+        ApprovalAction::HostAdd { destination, alias } => {
+            rows.push(CardRow::Value("ssh destination", destination.clone()));
+            if let Some(alias) = alias {
+                rows.push(CardRow::Value("alias", alias.clone()));
+            }
+        }
         ApprovalAction::HostEdit {
             host_name,
             destination,
