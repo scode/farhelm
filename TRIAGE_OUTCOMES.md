@@ -18628,7 +18628,8 @@
 - Completion criteria: the terminal takes focus only if focus has not moved since the selection that asked for it, so
   sidebar select-then-type still works; a browser test covers a button focused during catch-up. Size gate: about 100
   lines as above. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/session-view-fixes-oct22.md`.
+- Execution: `complete` within the size gate; bookmark `plan/session-view-fixes-oct22/05-reveal-keeps-moved-focus`, jj
+  change `wtxnysnu`; PR https://github.com/scode/farhelm/pull/2656/changes.
 
 ## power-loss-version-folder-never-repaired.md
 

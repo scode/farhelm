@@ -509,6 +509,35 @@ test("reattach-lands-at-tail (agent terminal): hidden through catch-up, one writ
   }
 });
 
+/**
+ * A reveal lands when the replay finishes, a moment the user did not choose.
+ * Focus they moved after selecting the session (a header button tabbed to
+ * while the terminal caught up) is their choice and must survive the reveal,
+ * or an Enter meant for that button would reach the agent. Select-then-type,
+ * with focus still where the selection left it, is the test above.
+ */
+test("a reveal leaves focus on a header button moved to during catch-up", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  let id: string | undefined;
+  try {
+    id = (await createTabSession(request, `replay-focus-${Date.now()}`)).id;
+    await holdCatchUpFromNextLoad(page);
+    await page.goto("/");
+    await page.locator(`[data-session-id="${id}"]`).click();
+    await waitForSessionMounted(page, id);
+    await waitForHeldCatchUp(page, "terminal");
+    const button = page.locator(".header-replace");
+    await button.focus();
+    await expect(button, "premise: focus moved to the header during catch-up").toBeFocused();
+    await releaseCatchUp(page, "terminal");
+    await waitForReplayReveal(page, "terminal");
+    await expect(page.locator("#terminal")).toBeVisible();
+    await expect(button, "the reveal must not take focus the user moved").toBeFocused();
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});
+
 // The same acceptance for a TAB, which is a separate claim rather than a
 // duplicate: every terminal has its own socket and its own marker
 // (PLAN_M5.md item 5), so the buffering is per island — a version that
