@@ -7,6 +7,7 @@
 use crate::activity::ActivityStamp;
 use crate::hosts::{gui_host_name, host_incarnation, is_connected, phase_display_label};
 use crate::icons::HostMark;
+use crate::ops::ConfirmToken;
 use crate::{Host, HostId, Session, SessionStatus};
 use dioxus::prelude::*;
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
@@ -86,6 +87,21 @@ pub(super) enum DeleteClick {
     DeleteGuarded(crate::DeleteGuard),
 }
 
+/// Which inline question a sidebar row's menu panel is asking: the key of
+/// that row's lane in `ListView`'s row question slots.
+///
+/// A row asks at most one at a time; `ListView`'s handlers refuse to open
+/// one question while the row holds the other. The kind is part of the key
+/// so the row can tell which prompt to draw from the token alone, and so a
+/// Delete answer can never be mistaken for a Replace answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RowQuestion {
+    /// "confirm delete?": the row's Delete of a session that may be alive.
+    Delete,
+    /// The row's Replace confirmation.
+    Replace,
+}
+
 /// The display state `ListView` derives for one `SessionRow` render.
 ///
 /// None of these values owns list behavior. Keeping them together makes
@@ -96,8 +112,12 @@ pub(super) enum DeleteClick {
 pub(super) struct RowState {
     pub(super) error: Option<String>,
     pub(super) busy: bool,
-    pub(super) confirming: bool,
-    pub(super) confirming_replace: bool,
+    /// The opening of this row's inline question that this render draws, if
+    /// one is open: the token `ListView` read from its row question slots
+    /// for this render. The row derives which prompt to show from its key
+    /// and hands the token back with the answer, so a confirm or cancel acts
+    /// only on the opening it was drawn for (see `ops::ConfirmSlots`).
+    pub(super) question: Option<ConfirmToken<RowQuestion>>,
     pub(super) renaming: bool,
     pub(super) nav_disabled: bool,
     /// Whether this row's actions menu is the at-most-one open row menu,

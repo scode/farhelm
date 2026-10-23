@@ -56,6 +56,10 @@
 //! at once. They keep their per-session in-flight set, and the open click
 //! consults both.
 
+use std::borrow::Borrow;
+use std::collections::HashMap;
+use std::hash::Hash;
+
 use dioxus::prelude::*;
 
 /// The page's one live-operation token.
@@ -273,20 +277,24 @@ impl ReadGate {
 
 /// One opening of one prompt: the identity an answer must present to act.
 ///
-/// Minted only by [`ConfirmSlot::open`], which numbers every opening from
-/// one process-wide counter and never reuses a number, so two openings of the
-/// same prompt (the same `key`, asked again after a cancel, say) still get
-/// different tokens, and neither do two slots with the same key type.
-/// `key` is what the opening was for (a tab id, a refused request, or `()`
-/// when the slot holds a single prompt); the opening number is what tells
-/// this asking of it apart from every other one.
+/// Minted only by [`ConfirmSlot::open`] and [`ConfirmSlots::open`], which
+/// number every opening from one process-wide counter and never reuse a
+/// number, so two openings of the same prompt (the same `key`, asked again
+/// after a cancel, say) still get different tokens, and neither do two slots,
+/// or two lanes, with the same key type. `key` is what the opening was for (a
+/// tab id, a refused request, a row's question kind, or `()` when the slot
+/// holds a single prompt); the opening number is what tells this asking of it
+/// apart from every other one.
 ///
 /// Callers cannot construct or alter one: the fields are private to this
-/// module, so the only tokens outside it come from [`ConfirmSlot::open`] or
-/// a render's [`ConfirmSlot::current`]; nothing in the app hands out the
-/// token of whatever is open at click time. A token is good for exactly the opening it names. Once that
-/// opening is answered, cancelled, cleared or replaced, the token matches
-/// nothing ever again, including a later opening with an equal key.
+/// module, so the only tokens outside it come from `open` or a render's
+/// `current` on either type ([`ConfirmSlot::current`],
+/// [`ConfirmSlots::current`]), plus the test-only `peek_token` readers. That
+/// no handler answers with the token of whatever is open at click time is a
+/// convention the `current` docs state, not something the types enforce.
+/// A token is good for exactly the opening it names. Once that opening is
+/// answered, cancelled, cleared or replaced, the token matches nothing ever
+/// again, including a later opening with an equal key.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) struct ConfirmToken<K> {
     opening: u64,
@@ -371,11 +379,13 @@ impl<K, P> SlotState<K, P> {
     }
 }
 
-/// The last opening number handed out, shared by every slot in the process.
-/// One counter rather than one per slot, so tokens from two slots with the
-/// same key type (the session view keeps two `ConfirmSlot<(), OpGuard>`
-/// apart on purpose) can never be equal, and a token passed to the wrong
-/// slot matches nothing.
+/// The last opening number handed out, shared by every slot and every lane
+/// in the process: [`ConfirmSlot::open`] and [`ConfirmSlots::open`] both
+/// mint through [`open_in`]. One counter rather than one per slot, so tokens
+/// from two slots with the same key type (the session view keeps two
+/// `ConfirmSlot<(), OpGuard>` apart on purpose), or from two lanes of one
+/// [`ConfirmSlots`], can never be equal, and a token passed to the wrong
+/// slot or lane matches nothing.
 static LAST_OPENING: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl<K: 'static, P: 'static> Clone for ConfirmSlot<K, P> {
@@ -525,6 +535,195 @@ impl<K: PartialEq + Clone + 'static, P: 'static> ConfirmSlot<K, P> {
             .peek()
             .open
             .as_ref()
+            .map(|(token, _)| token.clone())
+    }
+}
+
+/// A [`ConfirmSlot`] per lane, for prompts whose openings coexist: one
+/// independent slot for each `R` (a sidebar row's session id), all held by
+/// the one component that owns the lanes.
+///
+/// The sidebar rows need this shape and the single slot cannot give it.
+/// Each row keeps its own inline Delete or Replace question, several rows
+/// can hold one at the same time (opening a question on one row leaves
+/// another row's open question alone), and every question must outlive the
+/// row's own component: a filtered or failed listing unmounts rows whose
+/// questions reappear with them. So the slots live with the list, keyed by
+/// row, rather than in the rows.
+///
+/// Every lane follows [`ConfirmSlot`]'s rules exactly, through the same
+/// state, the same test-and-clear and the same process-wide opening
+/// counter: [`Self::open`] mints a fresh [`ConfirmToken`] and replaces
+/// whatever that lane held; [`Self::take`] and [`Self::cancel_for`] act only
+/// for the token of the lane's open opening; a token from an earlier opening,
+/// or from another lane, matches nothing. The caller rules on
+/// [`ConfirmSlot`] apply per lane, unchanged: read [`Self::current`] in the
+/// render and move that token into the handlers it draws; reconcile with
+/// [`Self::peek_key`] and [`Self::retain`], never with a token.
+///
+/// NOTE: `current` being for the render that draws the prompt is a
+/// convention, exactly as on [`ConfirmSlot::current`], not something the
+/// type enforces. Nothing stops a handler from calling it, and one that did
+/// would answer whatever is open at click time instead of what the user saw.
+/// The only untracked token reader, [`Self::peek_token`], is compiled for
+/// tests only.
+///
+/// A lane exists only while its prompt is open: an answer, a cancel or
+/// reconciliation removes it, so [`Self::open_lanes`] is exactly the set of
+/// lanes with a prompt on screen (or retained for a row not drawn now).
+pub(crate) struct ConfirmSlots<R: 'static, K: 'static, P: 'static = ()> {
+    state: Signal<HashMap<R, SlotState<K, P>>>,
+}
+
+impl<R: 'static, K: 'static, P: 'static> Clone for ConfirmSlots<R, K, P> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<R: 'static, K: 'static, P: 'static> Copy for ConfirmSlots<R, K, P> {}
+
+/// Create an empty set of lanes. A hook, like [`use_confirm_slot`]: call it
+/// unconditionally, once, in the component that owns every lane. What the
+/// open lanes hold is dropped when that component unmounts.
+pub(crate) fn use_confirm_slots<R: 'static, K: 'static, P: 'static>() -> ConfirmSlots<R, K, P> {
+    ConfirmSlots {
+        state: use_signal(HashMap::new),
+    }
+}
+
+impl<R, K, P> ConfirmSlots<R, K, P>
+where
+    R: Eq + Hash + Clone + 'static,
+    K: PartialEq + Clone + 'static,
+    P: 'static,
+{
+    /// Open `lane`'s prompt for `key` as a new opening, holding `payload`,
+    /// and return that opening's token. Replaces (and drops) whatever `lane`
+    /// held, exactly as [`ConfirmSlot::open`] does; other lanes are untouched.
+    /// Most openers drop the token: the next render reads it back through
+    /// [`Self::current`].
+    pub(crate) fn open(&mut self, lane: R, key: K, payload: P) -> ConfirmToken<K> {
+        open_in(
+            self.state
+                .write()
+                .entry(lane)
+                .or_insert_with(SlotState::closed),
+            key,
+            payload,
+        )
+    }
+
+    /// Consume `lane`'s confirmation drawn for `token`: the payload if the
+    /// lane's open prompt is exactly that opening, `None` (and nothing
+    /// changed) otherwise.
+    pub(crate) fn take<Q>(&mut self, lane: &Q, token: &ConfirmToken<K>) -> Option<P>
+    where
+        R: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        // Peeked first for `ConfirmSlot::take`'s reason: a refused answer
+        // must not write the signal and rerender every reader of the lanes.
+        let current = self
+            .state
+            .peek()
+            .get(lane)
+            .and_then(|state| state.open.as_ref())
+            .is_some_and(|(open, _)| open == token);
+        if !current {
+            return None;
+        }
+        let mut lanes = self.state.write();
+        let payload = take_in(lanes.get_mut(lane)?, token);
+        // The peek above saw `token` open in this lane, so the take succeeded
+        // and closed it. Drop the closed lane: a lane exists only while its
+        // prompt is open, which is what `open_lanes` relies on.
+        lanes.remove(lane);
+        payload
+    }
+
+    /// Dismiss `lane`'s prompt if it is still the opening `token` names,
+    /// dropping its payload. Does nothing once a confirmation has taken it
+    /// or another opening has replaced it.
+    pub(crate) fn cancel_for<Q>(&mut self, lane: &Q, token: &ConfirmToken<K>)
+    where
+        R: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        drop(self.take(lane, token));
+    }
+
+    /// Close every lane `keep` rejects, unconditionally, dropping what each
+    /// held. For reconciliation only (the row a lane belongs to left the
+    /// listing), never for an answer: [`ConfirmSlot::clear`] across lanes.
+    /// Calls `keep` once per open lane, and writes the signal only when it
+    /// closes something, so a listing that changes nothing rerenders nothing.
+    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&R) -> bool) {
+        let closing: Vec<R> = self
+            .state
+            .peek()
+            .keys()
+            .filter(|lane| !keep(lane))
+            .cloned()
+            .collect();
+        if closing.is_empty() {
+            return;
+        }
+        let mut lanes = self.state.write();
+        for lane in &closing {
+            lanes.remove(lane);
+        }
+    }
+
+    /// `lane`'s open prompt's token, for the RENDER that draws it (tracked
+    /// read). Capture it once per render and move it into every handler that
+    /// render draws for the prompt.
+    pub(crate) fn current<Q>(&self, lane: &Q) -> Option<ConfirmToken<K>>
+    where
+        R: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.state
+            .read()
+            .get(lane)
+            .and_then(|state| state.open.as_ref())
+            .map(|(token, _)| token.clone())
+    }
+
+    /// What `lane`'s open prompt is for, without subscribing: the key only,
+    /// never a token, for [`ConfirmSlot::peek_key`]'s reasons. For handlers
+    /// that must refuse other work while a lane's prompt is open, and for
+    /// reconciliation.
+    pub(crate) fn peek_key<Q>(&self, lane: &Q) -> Option<K>
+    where
+        R: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.state
+            .peek()
+            .get(lane)
+            .and_then(|state| state.open.as_ref())
+            .map(|(token, _)| token.key.clone())
+    }
+
+    /// Every lane with an open prompt, for a RENDER (tracked read), in no
+    /// particular order.
+    pub(crate) fn open_lanes(&self) -> Vec<R> {
+        self.state.read().keys().cloned().collect()
+    }
+
+    /// `lane`'s open token without subscribing, for tests that need to name
+    /// an opening no render drew. Not compiled into the app.
+    #[cfg(test)]
+    pub(crate) fn peek_token<Q>(&self, lane: &Q) -> Option<ConfirmToken<K>>
+    where
+        R: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.state
+            .peek()
+            .get(lane)
+            .and_then(|state| state.open.as_ref())
             .map(|(token, _)| token.clone())
     }
 }
@@ -757,6 +956,88 @@ mod tests {
         assert!(take_in(&mut slot, &replaced).is_none());
         assert!(!dropped.get(), "the replacing prompt keeps its payload");
         assert!(take_in(&mut slot, &replacing).is_some());
+    }
+
+    /// Why this matters: the sidebar rows' Delete and Replace questions live
+    /// in one lane per row, and their buttons' clicks can queue behind a
+    /// cancel and a reopen of the same row's question in one event burst.
+    /// Keyed by lane alone, a confirm drawn for the first showing would
+    /// answer the second, which the user has not seen yet; for Delete that
+    /// sends a request the user never confirmed in the showing it acts on.
+    ///
+    /// Spec (`ConfirmSlots`): a token drawn for an earlier opening of a lane
+    /// neither confirms (takes) nor cancels a reopened prompt in the same
+    /// lane, which stays open with its own token; another lane's open prompt
+    /// is independent of both, and its token answers nothing in this lane;
+    /// the reopened prompt's own token still answers it and leaves no lane
+    /// behind; `retain` closes a lane without a token, after which that
+    /// lane's old token matches nothing.
+    #[farhelm_testtrace::test]
+    fn a_stale_lane_token_answers_no_later_opening_of_that_lane() {
+        use std::cell::Cell;
+        std::thread_local! {
+            static LANES: Cell<Option<ConfirmSlots<String, &'static str>>> =
+                const { Cell::new(None) };
+        }
+        /// Mount a real set of lanes, so the signal writes and lane removal
+        /// are the methods the sidebar calls rather than a stand-in.
+        fn app() -> Element {
+            let lanes = use_confirm_slots::<String, &'static str, ()>();
+            LANES.with(|cell| cell.set(Some(lanes)));
+            rsx! {}
+        }
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let mut lanes = LANES.with(Cell::get).expect("the lanes mounted");
+        dom.in_runtime(|| {
+            let first = lanes.open("row-a".to_string(), "delete", ());
+            let other = lanes.open("row-b".to_string(), "replace", ());
+            lanes.cancel_for("row-a", &first);
+            assert_eq!(
+                lanes.peek_key("row-a"),
+                None,
+                "premise: the cancel closed it"
+            );
+            let reopened = lanes.open("row-a".to_string(), "delete", ());
+
+            assert!(
+                lanes.take("row-a", &first).is_none(),
+                "a confirm drawn for the first showing takes nothing"
+            );
+            lanes.cancel_for("row-a", &first);
+            assert_eq!(
+                lanes.peek_token("row-a").as_ref(),
+                Some(&reopened),
+                "a cancel drawn for the first showing leaves the reopened prompt"
+            );
+            assert!(
+                lanes.take("row-a", &other).is_none(),
+                "another lane's token does not answer this lane"
+            );
+            assert_eq!(
+                lanes.peek_token("row-b").as_ref(),
+                Some(&other),
+                "this lane's answers leave another lane's prompt alone"
+            );
+            assert!(
+                lanes.take("row-a", &reopened).is_some(),
+                "the reopened showing's own answer still works"
+            );
+            assert_eq!(lanes.peek_key("row-a"), None);
+            assert_eq!(
+                lanes.open_lanes(),
+                vec!["row-b".to_string()],
+                "an answered lane leaves nothing behind for the outside-click relays"
+            );
+
+            lanes.retain(|id| id != "row-b");
+            assert_eq!(
+                lanes.peek_key("row-b"),
+                None,
+                "reconciliation closes a vanished row's lane"
+            );
+            assert!(lanes.take("row-b", &other).is_none());
+        });
     }
 
     /// Why this matters: a stale token is refused only because its opening

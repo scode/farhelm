@@ -22,7 +22,7 @@ use crate::app_bar::AppBar;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostFlow, HostsPanel, HostsRead, host_rows_moved};
 use crate::modal_dialog::FocusTarget;
-use crate::ops::{OpLock, ReadGate, use_confirm_slot};
+use crate::ops::{ConfirmToken, OpLock, ReadGate, use_confirm_slot, use_confirm_slots};
 use crate::peer::PeerText;
 use crate::provisioning::ProvisioningTraceShape;
 use crate::reader::{SurfaceReader, Trigger, request_read};
@@ -38,8 +38,8 @@ use super::create_form::{
 };
 use super::row::{IdentityFlow, SessionRow, session_identity_flow};
 use super::shared::{
-    DeleteClick, DeleteTarget, HostOption, OpenDestination, RowState, effective_create_host,
-    host_options, matching_host_option, session_locality,
+    DeleteClick, DeleteTarget, HostOption, OpenDestination, RowQuestion, RowState,
+    effective_create_host, host_options, matching_host_option, session_locality,
 };
 use crate::rename::RenameDialog;
 use crate::replace::{PendingReplace, ReplaceAnswer, ReplaceController, ReplaceResult};
@@ -534,7 +534,7 @@ fn accepts_listing(
 }
 
 /// Whether a click that only SNAPSHOTS this row's `Session` — clone (opens
-/// the create form pre-filled) or replace (opens `confirming_replace`) —
+/// the create form pre-filled) or replace (opens the row's Replace question) —
 /// must be refused outright, before `ListView` touches a single signal for
 /// it.
 ///
@@ -550,48 +550,46 @@ fn accepts_listing(
 /// snapshot right now. Shared by both callers rather than duplicated,
 /// because clone and replace need the identical answer to the identical
 /// question.
+///
+/// `pending` is the row operation exclusion (`ListView`'s `row_pending`);
+/// `asking` is THIS row's open inline question, if any, as `ListView`'s row
+/// question slots report it (`ConfirmSlots::peek_key`).
 fn clone_is_refused(
     busy: bool,
     session_id: &str,
-    row_phases: &HashMap<String, RowPhase>,
+    pending: &HashSet<String>,
+    asking: Option<RowQuestion>,
     renaming: Option<&str>,
 ) -> bool {
-    busy || row_phases.contains_key(session_id) || renaming == Some(session_id)
+    busy || pending.contains(session_id) || asking.is_some() || renaming == Some(session_id)
 }
 
-/// What a session row is doing beyond being shown: an operation in flight, or
-/// one of the two inline confirmation prompts replacing its actions.
+/// Admit a new operation on row `id` into the row operation exclusion:
+/// `true` (and `id` now pending) only if the row has no operation in flight
+/// and no inline question open.
 ///
-/// One phase per row, held in a single map, because the three are mutually
-/// exclusive: a row with a delete prompt open must not start a stop, a row
-/// with a stop in flight must not open a prompt, and a delete prompt and a
-/// replace prompt cannot both hold the same action area. As separate sets
-/// that rule held only by each handler remembering to check the other two.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RowPhase {
-    /// A stop, delete, replace, or rename is in flight for this row.
-    Pending,
-    /// The inline "confirm delete?" prompt is showing.
-    ConfirmingDelete,
-    /// The inline replace confirmation is showing.
-    ConfirmingReplace,
-}
-
-/// Whether `id`'s row is in exactly `phase`.
-fn row_is(row_phases: &HashMap<String, RowPhase>, id: &str, phase: RowPhase) -> bool {
-    row_phases.get(id) == Some(&phase)
-}
-
-/// End `id`'s `phase`, returning whether the row was in it. A row in any other
-/// phase is left alone, which is what makes a stale confirm or cancel click a
-/// no-op.
-fn leave_phase(row_phases: &mut HashMap<String, RowPhase>, id: &str, phase: RowPhase) -> bool {
-    if row_is(row_phases, id, phase) {
-        row_phases.remove(id);
-        true
-    } else {
-        false
+/// A row's engagement has two parts that used to share one per-row phase,
+/// and are now held apart because they guarantee different things:
+///
+/// - The operation exclusion (`pending`, `ListView`'s `row_pending`) keeps a
+///   second stop, delete, replace or rename from starting on a row while one
+///   runs. It is a plain set, entered here and left by `ListView`'s
+///   `end_row_op`, and it says nothing about what the user saw.
+/// - The inline question (`ListView`'s `row_questions`, one
+///   `ops::ConfirmSlots` lane per row) carries opening identity: an answer
+///   acts only for the opening its render drew.
+///
+/// They still exclude each other, and this is one half of that rule: a row
+/// whose question is open admits no operation (its stop and delete buttons
+/// are gone, and a click queued before that render must not slip one in
+/// under the question), and the openers refuse a question while the row is
+/// pending. Pure so the rule is testable without mounting `ListView`.
+fn admit_row_op(pending: &mut HashSet<String>, asking: bool, id: &str) -> bool {
+    if asking || pending.contains(id) {
+        return false;
     }
+    pending.insert(id.to_owned());
+    true
 }
 
 /// The flat session list: host, title, cwd, invocation, and a truthful
@@ -846,45 +844,50 @@ pub(crate) fn ListView(
     let seen_toggle_successes = use_signal(|| 0_u64);
     // Not a row error: the row is gone. See `DeleteNotice`.
     let delete_notice = use_context::<DeleteNotice>();
-    // Each row's current phase, if any: an operation in flight
-    // (`RowPhase::Pending`, which disables that row's buttons and is the
-    // re-entry guard the click handlers check, since the DOM update disabling
-    // a button is not synchronous with its click handler) or one of the two
-    // inline confirmation prompts. See `RowPhase` for why one map.
+    // The rows' operation exclusion: every row with a stop, delete, replace
+    // or rename in flight. It disables that row's buttons and is the
+    // re-entry guard the click handlers check, since the DOM update
+    // disabling a button is not synchronous with its click handler. Entered
+    // only through `begin_row_op` and left only through `end_row_op`; see
+    // `admit_row_op` for why it is held apart from the questions below.
+    let mut row_pending = use_signal(HashSet::<String>::new);
+    // Each row's open inline question (Delete or Replace), one lane per row,
+    // so several rows can hold a question at once and each answer is bound
+    // to the opening its render drew. Opening identity is all this holds:
+    // whether the row may start an operation is `row_pending`'s job.
     //
-    // The prompts are deliberately client-side with no timeout and no
+    // The questions are deliberately client-side with no timeout and no
     // refresh-driven reset: a listing refresh must leave an in-progress
-    // confirmation alone (the user is mid-decision, not mid-refresh). The one
-    // reconciliation is in `commit_listing`, which drops a prompt once its
-    // session is no longer in the listing at all.
-    let mut row_phases = use_signal(HashMap::<String, RowPhase>::new);
-    // `pending`'s entry and exit, with the cross-pane bookkeeping attached:
+    // confirmation alone (the user is mid-decision, not mid-refresh), and so
+    // must a filter or a failed read that only stops drawing the row. The
+    // one reconciliation is in `commit_listing`, which closes a question
+    // once its session is no longer in the listing at all.
+    let mut row_questions = use_confirm_slots::<String, RowQuestion, ()>();
+    // `row_pending`'s entry and exit, with the cross-pane bookkeeping attached:
     // every row operation must (a) refuse to start while the SHARED token
     // is held — the session view or a page operation is mid-write, and a
     // row op landing under it is exactly the cross-pane race the shared
-    // gate exists to close — and (b) keep `row_ops` equal to `pending`'s
-    // size, because that count is what the session view's `PaneGate`
-    // consults to refuse ITS claims while a row op runs. Paired helpers
-    // rather than open-coded at each site so no exit path can forget the
-    // decrement (a stuck count would leave the session view inert).
+    // gate exists to close — and (b) keep `row_ops` equal to
+    // `row_pending`'s size, because that count is what the session view's
+    // `PaneGate` consults to refuse ITS claims while a row op runs. Paired
+    // helpers rather than open-coded at each site so no exit path can forget
+    // the decrement (a stuck count would leave the session view inert).
     // Borrow raw identity so decoded references and local action snapshots
-    // enter the same gate without changing the map's owned keys.
+    // enter the same gate without changing the set's owned keys. A row with
+    // its question open is refused too (`admit_row_op`).
     let mut begin_row_op = move |id: &str| -> bool {
         if ops.busy_now() {
             return false;
         }
-        {
-            let mut phases = row_phases.write();
-            if phases.contains_key(id) {
-                return false;
-            }
-            phases.insert(id.to_owned(), RowPhase::Pending);
+        let asking = row_questions.peek_key(id).is_some();
+        if !admit_row_op(&mut row_pending.write(), asking, id) {
+            return false;
         }
         row_ops += 1;
         true
     };
     let mut end_row_op = move |id: &String| {
-        if leave_phase(&mut row_phases.write(), id, RowPhase::Pending) {
+        if row_pending.write().remove(id) {
             row_ops -= 1;
         }
     };
@@ -961,7 +964,7 @@ pub(crate) fn ListView(
     use_hook(crate::menu_panel::install_row_menu_outside_dismiss);
     // The one stable rename editor, if any, and its text draft.
     //
-    // One at a time, unlike `confirming`'s set: rename is a focused edit the
+    // One at a time, unlike the rows' questions: rename is a focused edit the
     // user finishes or abandons. The dialog is ListView-owned rather than
     // nested in a row menu, so a listing can move or temporarily remove rows
     // without reparenting the textarea. The draft remains separate from the
@@ -1579,7 +1582,7 @@ pub(crate) fn ListView(
             if managed_disappeared {
                 trash_revision += 1;
             }
-            // Drop any `confirming` entry whose session is gone from
+            // Close any row question whose session is gone from
             // this fetch entirely — the counterpart to the "a poll
             // refresh must not clear an in-progress confirmation"
             // rule just above: that rule protects a row that is
@@ -1587,12 +1590,13 @@ pub(crate) fn ListView(
             // another client while this one sat mid-confirmation, an
             // externally-imposed departure the `retain` below cannot
             // distinguish from the id simply never having existed).
-            // These keys reconcile local operation state against routing identities,
+            // Reconciliation, not an answer, so it closes lanes by row
+            // and never needs a token. `row_pending` is left alone: an
+            // operation in flight ends only through its own completion.
+            // These keys reconcile local row state against routing identities,
             // never against the escaped spelling a user sees in a label.
             let live_ids: HashSet<&str> = listing.sessions.iter().map(|s| s.id.raw()).collect();
-            row_phases
-                .write()
-                .retain(|id, phase| *phase == RowPhase::Pending || live_ids.contains(id.as_str()));
+            row_questions.retain(|id| live_ids.contains(id.as_str()));
             // A complete committed fleet read is the only absence proof
             // strong enough to change an editor. It does not close one: a
             // user may still need its draft. If the exact source returns on
@@ -2011,26 +2015,27 @@ pub(crate) fn ListView(
     // only be dead weight — see `SessionRow`'s call site for the mirrored
     // simplification on the caller's side.
     let on_stop = move |id: String| {
-        // Cross-guard against `confirming`, not just `pending`: the
-        // stop/delete buttons are only ABSENT from the DOM once a
-        // rerender following `confirming.insert` has actually landed
+        // Cross-guard against an open row question, not just
+        // `row_pending`: the stop/delete buttons are only ABSENT from the
+        // DOM once a rerender following the question's opening has landed
         // (see `SessionRow`'s doc), so a stop click queued just ahead of
         // that rerender — a rapid synthetic double-click, say — could
         // otherwise still reach this handler for a row that is, or is
         // about to be, showing the confirm prompt. Refusing here keeps
         // the row's two lifecycle handlers from ever racing each other
         // for the same id: without it, a stop could slip `id` into
-        // `pending` WHILE a delete confirmation is open, and the eventual
-        // "confirm delete" click would then silently no-op — NOT because
-        // of anything in `confirm_delete` itself, but because `do_delete`
-        // (which it calls after removing `confirming`) has its OWN
-        // `pending`-insert re-entry guard, which would find the id
+        // `row_pending` WHILE a delete confirmation is open, and the
+        // eventual "confirm delete" click would then silently no-op — NOT
+        // because of anything in `confirm_delete` itself, but because
+        // `do_delete` (which it calls after taking the question) has its
+        // OWN `row_pending` re-entry guard, which would find the id
         // already occupied by that stop and bail with no error at all.
+        // (`begin_row_op` below also refuses a row whose question is open;
+        // this check keeps the refusal explicit at the handler.)
         //
         // The same argument covers an open RENAME field, which replaces
         // the same buttons for the same reason.
-        if row_is(&row_phases.read(), &id, RowPhase::ConfirmingDelete)
-            || row_is(&row_phases.read(), &id, RowPhase::ConfirmingReplace)
+        if row_questions.peek_key(&id).is_some()
             || rename_editor
                 .read()
                 .as_ref()
@@ -2264,27 +2269,28 @@ pub(crate) fn ListView(
     // SPEC.md's "Lifecycle operations": delete confirms first only when
     // the agent might still be alive, unless session questions are skipped;
     // an ended, tabless session deletes immediately (see the residual risk
-    // below). With the preference off, live and Unknown statuses enter the
-    // per-session `confirming` state that `SessionRow` reads to swap its action
-    // area; `confirm_delete` answers that prompt.
+    // below). With the preference off, live and Unknown statuses open the
+    // row's Delete question (`row_questions`), whose opening `SessionRow`
+    // reads to swap its action area; `confirm_delete` answers that prompt.
     //
-    // Refuses an id already in `pending` (the cross-guard mirroring
-    // `on_stop`'s `confirming` check above): the delete button is only
-    // disabled once a rerender following a `pending` insert lands, so a
+    // Refuses an id already in `row_pending` (the cross-guard mirroring
+    // `on_stop`'s question check above): the delete button is only
+    // disabled once a rerender following a `row_pending` insert lands, so a
     // rapid click queued just ahead of that rerender could otherwise
     // still reach this handler while, say, a stop is already in flight
-    // for the same session. Refusing here is what keeps `confirming` from
-    // ever being entered in that window — closing the door on the
+    // for the same session. Refusing here is what keeps the question from
+    // ever opening in that window — closing the door on the
     // opposite race `on_stop`'s guard closes. `do_delete`'s OWN
-    // `pending`-insert guard (not `confirm_delete`'s `confirming`-removal
-    // check, which exists for a different race entirely — see its own
-    // doc below) would eventually refuse this same id too, but only AFTER
-    // a confirm prompt had already opened for nothing; catching it here
-    // means the prompt never opens in the first place.
+    // `row_pending` guard (not `confirm_delete`'s opening check, which
+    // exists for a different race entirely — see its own doc below) would
+    // eventually refuse this same id too, but only AFTER a confirm prompt
+    // had already opened for nothing; catching it here means the prompt
+    // never opens in the first place. A row asking its Replace question is
+    // refused for the same reason: one question per row.
     let mut do_delete_on_confirm = do_delete.clone();
     let on_delete = move |target: DeleteTarget| {
-        if row_is(&row_phases.read(), &target.id, RowPhase::Pending)
-            || row_is(&row_phases.read(), &target.id, RowPhase::ConfirmingReplace)
+        if row_pending.read().contains(&target.id)
+            || row_questions.peek_key(&target.id) == Some(RowQuestion::Replace)
             || rename_editor
                 .read()
                 .as_ref()
@@ -2343,61 +2349,71 @@ pub(crate) fn ListView(
             // captured here, since a status that changes while a
             // confirmation sits open (a session stopped from another
             // client, say) should be reflected in the prompt too.
-            row_phases
-                .write()
-                .insert(target.id, RowPhase::ConfirmingDelete);
+            //
+            // A Delete question already open on this row stays as it is
+            // rather than reopening: a click queued just ahead of the
+            // render that swapped the menu for the prompt must not retire
+            // the opening that render's answers carry. (The Replace
+            // question was refused above, so an open lane here is Delete.)
+            if row_questions.peek_key(&target.id).is_none() {
+                row_questions.open(target.id, RowQuestion::Delete, ());
+            }
         }
     };
 
     // The confirm-delete button's click, inside the inline prompt: the
     // exact same DELETE call an accepted `window.confirm()` used to
     // trigger before this rewrite, just reached from a different UI
-    // widget. Clears `confirming` first so the row falls back to its
+    // widget. Takes the question first so the row falls back to its
     // normal (busy/disabled) button layout the instant `do_delete`'s own
-    // `pending` insert takes effect, rather than momentarily showing
+    // `row_pending` insert takes effect, rather than momentarily showing
     // both the prompt and a busy state.
     //
-    // Proceeds ONLY when `remove` reports the id was actually present:
-    // `HashSet::remove` returns `false` for an id already gone, which
-    // happens whenever this confirmation was already resolved by
+    // Proceeds ONLY when `take` hands back the opening the row drew: it
+    // refuses whenever this confirmation was already resolved by
     // something else — `cancel_delete` running first (a queued confirm
     // click landing just after a cancel click, both fired in the same
-    // burst), or a second confirm click racing the first's own removal.
-    // Without this check, that second call would fall through to
-    // `do_delete` regardless, which for the cancel-then-confirm race
-    // would delete a session the user just told the UI to leave alone.
+    // burst), a second confirm click racing the first's own take, or a
+    // cancel and a reopen in the same burst, which leave this click
+    // holding an earlier showing's token. Without this check, that click
+    // would fall through to `do_delete` regardless, which for the
+    // cancel-then-confirm race would delete a session the user just told
+    // the UI to leave alone.
     let mut header_do_delete = do_delete.clone();
-    // `guard` comes from the row render that drew the prompt the user
-    // answered (`status::delete_guard`), not from the row as it reads now.
-    let confirm_delete = move |(id, guard): (String, crate::DeleteGuard)| {
-        // Refused OUTRIGHT while the shared token is held, BEFORE the
-        // confirming flag is touched: `do_delete`'s own `begin_row_op`
-        // would refuse anyway, but by then the flag is gone and the
-        // prompt has silently dismissed itself with nothing deleted —
-        // the confirmation must survive a refusal so the user can answer
-        // it again once the other pane's operation finishes.
-        if ops.busy_now() {
-            return;
-        }
-        if !leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingDelete) {
-            return;
-        }
-        do_delete(id, guard);
-    };
+    // `guard` and `token` come from the row render that drew the prompt the
+    // user answered (`status::delete_guard`), not from the row as it reads now.
+    let confirm_delete =
+        move |(id, token, guard): (String, ConfirmToken<RowQuestion>, crate::DeleteGuard)| {
+            // Refused OUTRIGHT while the shared token is held, BEFORE the
+            // question is touched: `do_delete`'s own `begin_row_op`
+            // would refuse anyway, but by then the question is gone and the
+            // prompt has silently dismissed itself with nothing deleted —
+            // the confirmation must survive a refusal so the user can answer
+            // it again once the other pane's operation finishes.
+            if ops.busy_now() {
+                return;
+            }
+            if *token.key() != RowQuestion::Delete || row_questions.take(&id, &token).is_none() {
+                return;
+            }
+            do_delete(id, guard);
+        };
 
-    // The inline prompt's cancel button: just drops the flag. No API
-    // call, no `pending` involvement — cancelling was never in flight to
-    // begin with.
-    let cancel_delete = move |id: String| {
-        leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingDelete);
+    // The inline prompt's cancel button: closes the opening it was drawn
+    // for, and nothing later. No API call, no `row_pending` involvement —
+    // cancelling was never in flight to begin with.
+    let cancel_delete = move |(id, token): (String, ConfirmToken<RowQuestion>)| {
+        if *token.key() == RowQuestion::Delete {
+            row_questions.cancel_for(&id, &token);
+        }
     };
 
     // A delete the session header already confirmed. The header released its
     // lifecycle claim just before sending this, because `begin_row_op`
     // refuses while the shared token is held, so a request that still finds
     // the page busy lost a race in the frame between the two: another
-    // operation claimed the token, or this row has a phase of its own (an
-    // operation in flight, or its sidebar prompt open). Nothing was deleted
+    // operation claimed the token, or this row is engaged on its own (an
+    // operation in flight, or its sidebar question open). Nothing was deleted
     // then, and the refusal is shown on the session's row, where every other
     // delete failure is reported, rather than dropped silently.
     use_effect(move || {
@@ -2482,8 +2498,8 @@ pub(crate) fn ListView(
     // `on_clone` uses (`clone_is_refused`'s own doc explains why the two
     // share it — the difference between clone and replace is never in
     // whether either is refused, only in what happens once accepted), then
-    // opens `confirming_replace` when session questions are enabled, unlike
-    // `on_delete`'s
+    // opens the row's Replace question when session questions are enabled,
+    // unlike `on_delete`'s
     // `has_ended()` split. Delete's split exists because an already-finished
     // session has nothing left for the CONFIRMATION to be honest about
     // beyond "delete anyway"; replace always has something worth confirming
@@ -2498,7 +2514,8 @@ pub(crate) fn ListView(
         if clone_is_refused(
             ops.busy_now(),
             session.id.raw(),
-            &row_phases.read(),
+            &row_pending.read(),
+            row_questions.peek_key(session.id.raw()),
             rename_editor
                 .read()
                 .as_ref()
@@ -2513,9 +2530,9 @@ pub(crate) fn ListView(
                 direct_do_replace(session, guard, None);
             }
         } else {
-            row_phases
-                .write()
-                .insert(session.id.raw().to_owned(), RowPhase::ConfirmingReplace);
+            // `clone_is_refused` above refused a row already asking, so
+            // this opening never replaces another question of this row.
+            row_questions.open(session.id.raw().to_owned(), RowQuestion::Replace, ());
         }
     };
     // The loud YOLO confirmation's own way back into the same replace.
@@ -2523,25 +2540,27 @@ pub(crate) fn ListView(
     // The row hands up the session its prompt was drawn from, so the
     // nothing-alive answer is the one the user read, and a row that has since
     // left the listing is still replaced with its precondition rather than
-    // looked up and missed.
-    let confirm_replace = move |source: Session| {
+    // looked up and missed. The token is that same render's opening: an
+    // answer drawn for an earlier showing of the question takes nothing.
+    let confirm_replace = move |(source, token): (Session, ConfirmToken<RowQuestion>)| {
         // Same shared-token refusal as `confirm_delete`, for the same
         // keep-the-prompt reason.
         if ops.busy_now() {
             return;
         }
-        if leave_phase(
-            &mut row_phases.write(),
-            source.id.raw(),
-            RowPhase::ConfirmingReplace,
-        ) && begin_row_op(source.id.raw())
+        if *token.key() == RowQuestion::Replace
+            && row_questions.take(source.id.raw(), &token).is_some()
+            && begin_row_op(source.id.raw())
         {
             let guard = crate::status::delete_guard(&source.status, source.tabs.len());
             do_replace(source, guard, None);
         }
     };
-    let cancel_replace = move |id: String| {
-        if leave_phase(&mut row_phases.write(), &id, RowPhase::ConfirmingReplace) {
+    // Releases the Replace source only when this cancel closed the opening
+    // it was drawn for; a stale cancel leaves the newer question and its
+    // source selection alone.
+    let cancel_replace = move |(id, token): (String, ConfirmToken<RowQuestion>)| {
+        if *token.key() == RowQuestion::Replace && row_questions.take(&id, &token).is_some() {
             replace_controller.cancel_source(&id);
         }
     };
@@ -2570,11 +2589,11 @@ pub(crate) fn ListView(
     // `disabled`/`aria-disabled` attributes lag one render behind the
     // click that set them, so a clone queued just ahead of that render
     // (the shared token being claimed, or this very row entering a
-    // pending or confirming state) would otherwise still reach here and
-    // replace the form's prefill, or open it, out from under whatever the
-    // other operation is doing. `ops.busy_now()` covers the page-wide
-    // lock (a create submit already minting a key, a host mutation in
-    // flight); the three row-local sets cover this SPECIFIC row having a
+    // pending operation or opening a question) would otherwise still reach
+    // here and replace the form's prefill, or open it, out from under
+    // whatever the other operation is doing. `ops.busy_now()` covers the
+    // page-wide lock (a create submit already minting a key, a host mutation
+    // in flight); the three row-local states cover this SPECIFIC row having a
     // stop/delete in flight, a destructive confirmation open, or its
     // rename editor open — any of which means this row's own `Session` is
     // about to change or is mid-decision, not a stable thing to snapshot
@@ -2583,7 +2602,8 @@ pub(crate) fn ListView(
         if clone_is_refused(
             ops.busy_now(),
             session.id.raw(),
-            &row_phases.read(),
+            &row_pending.read(),
+            row_questions.peek_key(session.id.raw()),
             rename_editor
                 .read()
                 .as_ref()
@@ -2648,7 +2668,8 @@ pub(crate) fn ListView(
         if clone_is_refused(
             ops.busy_now(),
             session.id.raw(),
-            &row_phases.read(),
+            &row_pending.read(),
+            row_questions.peek_key(session.id.raw()),
             rename_editor
                 .read()
                 .as_ref()
@@ -2689,7 +2710,8 @@ pub(crate) fn ListView(
         if clone_is_refused(
             ops.busy_now(),
             session.id.raw(),
-            &row_phases.read(),
+            &row_pending.read(),
+            row_questions.peek_key(session.id.raw()),
             rename_editor
                 .read()
                 .as_ref()
@@ -2732,9 +2754,8 @@ pub(crate) fn ListView(
         // pane's operation owns the gate would present an editor whose
         // submit is guaranteed to be refused.
         if ops.busy_now()
-            || row_is(&row_phases.read(), &id, RowPhase::Pending)
-            || row_is(&row_phases.read(), &id, RowPhase::ConfirmingDelete)
-            || row_is(&row_phases.read(), &id, RowPhase::ConfirmingReplace)
+            || row_pending.read().contains(&id)
+            || row_questions.peek_key(&id).is_some()
             || rename_editor.peek().is_some()
         {
             return;
@@ -2896,12 +2917,7 @@ pub(crate) fn ListView(
     // handler that outlives this render, so a borrow cannot serve.
     let open_base = base.clone();
     let guarded_open = move |session: Session| {
-        if ops.busy_now()
-            || row_phases
-                .peek()
-                .values()
-                .any(|phase| *phase == RowPhase::Pending)
-        {
+        if ops.busy_now() || !row_pending.peek().is_empty() {
             return false;
         }
         remember_selection(&open_base, preferences, session.id.raw());
@@ -2965,10 +2981,7 @@ pub(crate) fn ListView(
             if selected.peek().is_none()
                 && !ops.busy_now()
                 && *row_ops.peek() == 0
-                && !row_phases
-                    .peek()
-                    .values()
-                    .any(|phase| *phase == RowPhase::Pending)
+                && row_pending.peek().is_empty()
             {
                 let mut preferences = preferences;
                 if let Ok(fresh) = fresh {
@@ -3317,7 +3330,7 @@ pub(crate) fn ListView(
         let current_editor = rename_editor.peek().clone();
         if let Some(editor) = current_editor
             && editor.generation == generation
-            && !row_is(&row_phases.read(), &editor.id, RowPhase::Pending)
+            && !row_pending.read().contains(&editor.id)
         {
             // Both cancellation paths originate inside the dialog: a click
             // on Cancel or an ordinary Escape from one of its controls.
@@ -3334,11 +3347,7 @@ pub(crate) fn ListView(
     // Cosmetic reflection of the same conditions, for the disabled
     // attributes. Not the guard — see `ops`.
     let busy = ops.busy();
-    let nav_locked = busy
-        || row_phases
-            .read()
-            .values()
-            .any(|phase| *phase == RowPhase::Pending);
+    let nav_locked = busy || !row_pending.read().is_empty();
     // EVERY host is offered as a create target, whatever phase it is in.
     // Filtering to connected hosts — which this used to do — quietly
     // rewrites SPEC.md's default: the local row is the fallback
@@ -3432,25 +3441,22 @@ pub(crate) fn ListView(
     });
     // Every session whose menu an outside click may have to dismiss: the one
     // whose menu is open, plus any row still holding a delete or replace
-    // confirmation. Sorted so the relays render in a stable order.
-    let outside_relay_sessions: Vec<String> = {
-        let mut ids: Vec<String> = row_phases
-            .read()
-            .iter()
-            .filter(|(_, phase)| {
-                matches!(
-                    phase,
-                    RowPhase::ConfirmingDelete | RowPhase::ConfirmingReplace
-                )
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
+    // confirmation. Sorted so the relays render in a stable order. Each
+    // carries the opening of its row's question that THIS render read, so
+    // the relay's cancel closes that opening only (see the relays below).
+    let outside_relay_sessions: Vec<(String, Option<ConfirmToken<RowQuestion>>)> = {
+        let mut ids: Vec<String> = row_questions.open_lanes();
         if let Some(open) = menu_open() {
             ids.push(open);
         }
         ids.sort();
         ids.dedup();
-        ids
+        ids.into_iter()
+            .map(|id| {
+                let shown = row_questions.current(&id);
+                (id, shown)
+            })
+            .collect()
     };
 
     // Both entry points open the ordinary New draft. Keep destination and
@@ -3901,14 +3907,22 @@ pub(crate) fn ListView(
         //
         // A session menu showing its delete or replace confirmation is the one
         // place this does more than Escape: Escape is deliberately unbound in
-        // those prompts, because closing the panel leaves the confirming phase
-        // behind and the row would reopen straight into the same prompt. A
+        // those prompts, because closing the panel leaves the row's question
+        // open and the row would reopen straight into the same prompt. A
         // click elsewhere is taken as the prompt's safe answer, cancel, so the
-        // relay clears that phase too. Rows with a pending confirmation keep a
+        // relay closes that question too. Rows with an open question keep a
         // relay even when another menu replaced their panel, so that answer is
         // not lost to the race above. Cancelling holds no claim to release;
-        // it only forgets the phase, exactly as the prompt's cancel does.
-        for id in outside_relay_sessions {
+        // it only closes the question, exactly as the prompt's cancel does,
+        // and like that cancel it carries the opening this render drew. So a
+        // relay click drawn before the row's current opening closes only the
+        // menu and leaves the question open. That covers a click left over
+        // from before a reopening, and also one drawn when the row had no
+        // question open at all, whose click lands after the question first
+        // opened: the menu closes and the question stays open behind it.
+        // Both follow the plan's decision that a stale answer does nothing
+        // and the current prompt stays; the row's menu reopens into it.
+        for (id, shown_question) in outside_relay_sessions {
             button {
                 key: "session:{id}",
                 r#type: "button",
@@ -3917,12 +3931,11 @@ pub(crate) fn ListView(
                 hidden: true,
                 tabindex: "-1",
                 onclick: move |_| {
+                    if let Some(token) = &shown_question
+                        && row_questions.take(&id, token).is_some()
+                        && *token.key() == RowQuestion::Replace
                     {
-                        let mut phases = row_phases.write();
-                        leave_phase(&mut phases, &id, RowPhase::ConfirmingDelete);
-                        if leave_phase(&mut phases, &id, RowPhase::ConfirmingReplace) {
-                            replace_controller.cancel_source(&id);
-                        }
+                        replace_controller.cancel_source(&id);
                     }
                     if menu_open.peek().as_deref() == Some(id.as_str()) {
                         menu_open.set(None);
@@ -4373,7 +4386,7 @@ pub(crate) fn ListView(
                             // in-flight replace shows as the source row's
                             // pending phase, not as `ops.busy()`.
                             busy: ops.busy()
-                                || row_is(&row_phases.read(), question.key().source.id.raw(), RowPhase::Pending),
+                                || row_pending.read().contains(question.key().source.id.raw()),
                             error: replace_controller.error(),
                             confirm_submits: false,
                             // Both answers continue the Replace the user
@@ -4482,10 +4495,11 @@ pub(crate) fn ListView(
                                     // holds it, `begin_row_op` refuses row
                                     // ops anyway, and the disabled state is
                                     // that refusal made visible.
-                                    busy: busy || row_is(&row_phases.read(), session.id.raw(), RowPhase::Pending),
-                                    confirming: row_is(&row_phases.read(), session.id.raw(), RowPhase::ConfirmingDelete),
+                                    busy: busy || row_pending.read().contains(session.id.raw()),
+                                    // The opening this render draws; the
+                                    // row's answers carry it back.
+                                    question: row_questions.current(session.id.raw()),
                                     deleting: row_deleting,
-                                    confirming_replace: row_is(&row_phases.read(), session.id.raw(), RowPhase::ConfirmingReplace),
                                     renaming: rename_editor
                                         .read()
                                         .as_ref()
@@ -4547,10 +4561,10 @@ pub(crate) fn ListView(
         if let Some(editor) = rename_editor() {
             RenameDialog {
                 draft: rename_draft,
-                busy: row_is(&row_phases.read(), &editor.id, RowPhase::Pending),
+                busy: row_pending.read().contains(&editor.id),
                 busy_now: {
                     let id = editor.id.clone();
-                    Callback::new(move |_| row_is(&row_phases.read(), &id, RowPhase::Pending))
+                    Callback::new(move |_| row_pending.read().contains(&id))
                 },
                 unavailable: editor.unavailable,
                 current_title: editor.current_title,
@@ -5470,41 +5484,82 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_clone_is_refused_by_any_one_of_its_guards() {
         let id = "session-1";
-        let empty = HashMap::new();
-        let holding = |phase| HashMap::from([(id.to_string(), phase)]);
+        let empty = HashSet::new();
+        let pending = HashSet::from([id.to_string()]);
 
         assert!(
-            !clone_is_refused(false, id, &empty, None),
+            !clone_is_refused(false, id, &empty, None, None),
             "nothing is holding this row, so the clone must proceed"
         );
         assert!(
-            clone_is_refused(true, id, &empty, None),
+            clone_is_refused(true, id, &empty, None, None),
             "the shared page-wide lock alone must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &holding(RowPhase::Pending), None),
+            clone_is_refused(false, id, &pending, None, None),
             "a stop or delete already in flight for THIS row must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &holding(RowPhase::ConfirmingDelete), None),
+            clone_is_refused(false, id, &empty, Some(RowQuestion::Delete), None),
             "an open delete confirmation on THIS row must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &holding(RowPhase::ConfirmingReplace), None),
+            clone_is_refused(false, id, &empty, Some(RowQuestion::Replace), None),
             "an open replace confirmation on THIS row must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &empty, Some(id)),
+            clone_is_refused(false, id, &empty, None, Some(id)),
             "this row's own open rename editor must refuse it"
         );
         // A guard keyed to a DIFFERENT row must never refuse this one —
-        // the per-row phases are per-row for exactly this reason, and a
-        // guard that read them as a single shared flag would block every
+        // the per-row state is per-row for exactly this reason, and a
+        // guard that read it as a single shared flag would block every
         // clone in the list the instant any one row was mid-operation.
-        let other = HashMap::from([("other-row".to_string(), RowPhase::Pending)]);
+        // (`asking` is already this row's own question, looked up by id.)
+        let other = HashSet::from(["other-row".to_string()]);
         assert!(
-            !clone_is_refused(false, id, &other, Some("other-row")),
-            "another row's phase or rename must not block this row's clone"
+            !clone_is_refused(false, id, &other, None, Some("other-row")),
+            "another row's operation or rename must not block this row's clone"
+        );
+    }
+
+    /// Why this matters: splitting the rows' questions out of their
+    /// operation state must not loosen the exclusion between the two. A
+    /// second stop or delete admitted on a row that already has one in
+    /// flight would race the first, and an operation admitted under an open
+    /// question would make that question's eventual confirm a silent no-op.
+    ///
+    /// Spec (`admit_row_op`): a row is admitted once and refused while it is
+    /// pending; a row whose question is open is refused and left unchanged;
+    /// another row's pending operation never refuses this one; ending the
+    /// operation (removing it from the set) admits the row again.
+    #[farhelm_testtrace::test]
+    fn the_row_operation_exclusion_still_blocks_a_second_operation() {
+        let mut pending = HashSet::new();
+        assert!(
+            admit_row_op(&mut pending, false, "row-a"),
+            "a free row is admitted"
+        );
+        assert!(
+            !admit_row_op(&mut pending, false, "row-a"),
+            "a second operation on a pending row is refused"
+        );
+        assert!(
+            admit_row_op(&mut pending, false, "row-b"),
+            "another row's operation does not block this one"
+        );
+        assert!(
+            !admit_row_op(&mut pending, true, "row-c"),
+            "a row with its question open admits no operation"
+        );
+        assert!(
+            !pending.contains("row-c"),
+            "a refused admission leaves the row out of the exclusion"
+        );
+        pending.remove("row-a");
+        assert!(
+            admit_row_op(&mut pending, false, "row-a"),
+            "an ended operation frees its row"
         );
     }
 
