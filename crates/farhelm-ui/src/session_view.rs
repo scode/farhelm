@@ -558,6 +558,46 @@ fn take_restart_guarded(
     question.is_some_and(|question| question.key().edit == *edit && slot.take(question).is_some())
 }
 
+/// Accept the header Restart's stop-first prompt only for the opening the
+/// answering render drew (`shown`), handing the lifecycle claim the prompt
+/// held to `view_claim`. Returns whether the caller may now send the
+/// restart.
+///
+/// The handoff is what lets this prompt sit on a [`ConfirmSlot`] while its
+/// claim is still released by the shared `restart` closure's rule
+/// ([`restart_releases_claim`]), the same rule Restart with depends on. A
+/// refused answer (a confirm queued behind Cancel or Escape, or one drawn
+/// for an earlier opening that has since been reopened) leaves the slot,
+/// its claim and `view_claim` untouched.
+///
+/// `view_claim` is empty whenever this succeeds: the prompt's claim and any
+/// claim `view_claim` holds are claims of the same lock, so they cannot both
+/// exist, and the set never drops someone else's claim.
+fn confirm_restart_prompt(
+    slot: &mut ConfirmSlot<(), OpGuard>,
+    shown: &ConfirmToken<()>,
+    view_claim: &mut Signal<Option<OpGuard>>,
+) -> bool {
+    let Some(claim) = slot.take(shown) else {
+        return false;
+    };
+    view_claim.set(Some(claim));
+    true
+}
+
+/// Whether a finished restart gives back the view's Restart claim
+/// (`view_claim`), given whether it carried new settings (Restart with) and
+/// whether it succeeded.
+///
+/// A plain restart (the header's, direct or confirmed, and the interrupted
+/// card's) always releases: nothing stays open that could use the claim. A
+/// Restart with keeps the claim after a failure, because its dialog stays
+/// open with the error (or the YOLO question) and the next submit runs under
+/// the same claim; the dialog's Cancel, or a later success, releases it.
+fn restart_releases_claim(with_settings: bool, succeeded: bool) -> bool {
+    !with_settings || succeeded
+}
+
 #[component]
 pub(crate) fn SessionView(
     session: Session,
@@ -624,21 +664,41 @@ pub(crate) fn SessionView(
     // asking; SPEC.md, Lifecycle operations).
     let mut relaunched = use_signal(|| false);
     // Whether a restart is in flight (disables the control and guards
-    // re-entry, mirroring `ListView`'s `pending`), and whether the inline
-    // confirm prompt is open for a still-running agent (the same in-page
-    // pattern delete uses — never a browser dialog, which wry's macOS
-    // webview does not have at all).
+    // re-entry, mirroring `ListView`'s `pending`).
     let mut restarting = use_signal(|| false);
-    let mut confirming = use_signal(|| false);
-    // The shared operation lock as claimed by this view's Restart controls
-    // (header Restart and its stop-first prompt, Restart with, and the
-    // interrupted card's Restart). Held here, as a guard in this view's own
-    // signal, rather than as a bare claim on the lock `AppBody` owns: when
-    // the view unmounts (the session deleted from another client, a sign-in
-    // prompt replacing the panes) the signal and its guard go with it, so a
-    // claim can never outlive the view and leave every write action in the
-    // window disabled. Releasing is setting it to `None`.
+    // The shared operation lock as claimed by this view's Restart
+    // operations: a header Restart once it is sent (directly, or after its
+    // stop-first prompt is confirmed), the Restart with dialog for as long
+    // as it is open, and the interrupted card's Restart. Held here, as a
+    // guard in this view's own signal, rather than as a bare claim on the
+    // lock `AppBody` owns: when the view unmounts (the session deleted from
+    // another client, a sign-in prompt replacing the panes) the signal and
+    // its guard go with it, so a claim can never outlive the view and leave
+    // every write action in the window disabled. Releasing is setting it to
+    // `None`.
+    //
+    // The shared `restart` closure below is what releases it, and its rule
+    // is the reason this is one signal for every Restart path rather than a
+    // claim per surface: a plain restart gives the claim back when it
+    // finishes, while a Restart with that fails keeps it, because the
+    // dialog stays open with the error and is still the operation holding
+    // the lock (`restart_releases_claim`). The dialog's own Cancel releases
+    // it then.
     let mut view_claim = use_signal(|| None::<OpGuard>);
+    // The header Restart's stop-first prompt for a still-running agent (the
+    // same in-page pattern delete uses, never a browser dialog, which wry's
+    // macOS webview does not have at all). Like the header Replace and
+    // Delete prompts, it holds the lifecycle claim it took when it opened,
+    // so Cancel, Escape and an unmount release that claim by dropping it,
+    // and an answer drawn for an earlier opening finds nothing to act on.
+    //
+    // Confirming does NOT move the claim into a task, which is where this
+    // prompt differs from Replace: it hands the claim to `view_claim`
+    // (`confirm_restart_prompt`) and then runs the shared `restart` closure,
+    // so a confirmed restart releases its claim by exactly the rule every
+    // other Restart path follows. The prompt only ever holds the claim
+    // between opening and its answer; Restart with never goes through it.
+    let mut confirming_restart: ConfirmSlot<(), OpGuard> = use_confirm_slot();
     let mut restart_error = use_signal(|| None::<String>);
     // One opening owns a fixed comparison baseline. Detail refreshes may
     // change the current offer, but they must not rewrite a draft in progress.
@@ -1500,7 +1560,7 @@ pub(crate) fn SessionView(
                 // working, and if it did not, the supervisor refuses the
                 // unconfirmed restart while the new run still reads working.
                 restarting.set(false);
-                if with.is_none() || outcome.is_ok() {
+                if restart_releases_claim(with.is_some(), outcome.is_ok()) {
                     view_claim.set(None);
                 }
                 // The authoritative refresh, asked for through the SAME door
@@ -1967,11 +2027,12 @@ pub(crate) fn SessionView(
         .as_ref()
         .and_then(|shown| tabs.iter().position(|candidate| candidate == shown.key()))
         .map(tab_label);
-    // The openings this render draws for the header's Replace and Delete
-    // questions and the interrupted card's Replace question. Their buttons
-    // (and the header's Escape) answer only these, so a click drawn before
-    // a cancel and reopen in the same burst cannot answer the reopened
-    // question, nor spend the claim it holds.
+    // The openings this render draws for the header's Restart, Replace and
+    // Delete questions and the interrupted card's Replace question. Their
+    // buttons (and the header's Escape) answer only these, so a click drawn
+    // before a cancel and reopen in the same burst cannot answer the
+    // reopened question, nor spend the claim it holds.
+    let header_restart_shown = confirming_restart.current();
     let header_replace_shown = confirming_header_replace.current();
     let header_delete_shown = confirming_header_delete.current();
     let card_replace_shown = confirming_replace.current();
@@ -2138,10 +2199,12 @@ pub(crate) fn SessionView(
                 // lifecycle admission. Once an answer has taken a claim, a
                 // queued Escape must leave the running operation alone.
                 //
-                // Escape answers the Replace and Delete questions as this
-                // render drew them, like their Cancel buttons: a question
-                // reopened since then is not the one the user dismissed.
+                // Escape answers the Restart, Replace and Delete questions
+                // as this render drew them, like their Cancel buttons: a
+                // question reopened since then is not the one the user
+                // dismissed. Taking a question drops the claim it held.
                 onkeydown: {
+                    let header_restart_shown = header_restart_shown.clone();
                     let header_replace_shown = header_replace_shown.clone();
                     let header_delete_shown = header_delete_shown.clone();
                     move |event: KeyboardEvent| {
@@ -2149,9 +2212,9 @@ pub(crate) fn SessionView(
                             return;
                         }
                         let mut cancelled = false;
-                        if *confirming.peek() {
-                            confirming.set(false);
-                            view_claim.set(None);
+                        if let Some(shown) = &header_restart_shown
+                            && confirming_restart.take(shown).is_some()
+                        {
                             cancelled = true;
                         }
                         if let Some(shown) = &header_replace_shown
@@ -2249,7 +2312,7 @@ pub(crate) fn SessionView(
                             // browser suite waits on it) instead of only
                             // observable after the fact by clicking.
                             "data-confirms": "{confirms_restart}",
-                            "aria-expanded": "{confirming()}",
+                            "aria-expanded": "{confirming_restart.is_open()}",
                             "aria-controls": "restart-confirm-panel",
                             // SPEC.md's "restart says so" (`restart_label`,
                             // e.g. "resume conversation") is what this
@@ -2269,17 +2332,18 @@ pub(crate) fn SessionView(
                             "aria-disabled": !restart_available,
                             disabled: lifecycle.busy(),
                             onclick: move |_| {
-                                if !restart_available
-                                    || !lifecycle.claim_into(&mut view_claim)
-                                {
+                                if !restart_available {
                                     return;
                                 }
                                 if confirms_restart {
                                     // A working agent would be stopped, so
                                     // the click obtains consent before
-                                    // sending that request.
-                                    confirming.set(true);
-                                } else {
+                                    // sending that request. The prompt
+                                    // holds the claim until it is answered.
+                                    if let Some(claim) = lifecycle.claim_guard() {
+                                        confirming_restart.open((), claim);
+                                    }
+                                } else if lifecycle.claim_into(&mut view_claim) {
                                     direct_restart(direct_restart_stops, None, false, None);
                                 }
                             },
@@ -2298,7 +2362,7 @@ pub(crate) fn SessionView(
                             class: "visually-hidden",
                             "{offer_explanation}"
                         }
-                        if confirming() {
+                        if let Some(shown_restart) = header_restart_shown.clone() {
                             // The same in-page confirmation delete uses, for
                             // the same reason (SPEC.md: restart on a running
                             // agent confirms, stops, then relaunches) and with
@@ -2326,18 +2390,24 @@ pub(crate) fn SessionView(
                                     autofocus: !restarting(),
                                     onkeydown: crate::guard_confirmation_enter,
                                     onmounted: move |_| crate::focus_confirmation(".restart-confirm", ".restart-cancel"),
-                                    onclick: move |_| {
-                                        if !confirming() {
-                                            return;
+                                    onclick: {
+                                        let shown_restart = shown_restart.clone();
+                                        move |_| {
+                                            // Only the opening this render
+                                            // drew; its claim moves to
+                                            // `view_claim`, which the restart
+                                            // releases when it finishes.
+                                            if !confirm_restart_prompt(&mut confirming_restart, &shown_restart, &mut view_claim) {
+                                                return;
+                                            }
+                                            // Carries THIS prompt's consent onto
+                                            // the wire (Restart with sends its
+                                            // dialog's, too), which the
+                                            // supervisor checks against the
+                                            // liveness and activity it reads
+                                            // itself.
+                                            confirm_restart(restart_prompt_stops, None, false, None);
                                         }
-                                        confirming.set(false);
-                                        // Carries THIS prompt's consent onto
-                                        // the wire (Restart with sends its
-                                        // dialog's, too), which the
-                                        // supervisor checks against the
-                                        // liveness and activity it reads
-                                        // itself.
-                                        confirm_restart(restart_prompt_stops, None, false, None);
                                     },
                                     "confirm restart"
                                 }
@@ -2346,22 +2416,13 @@ pub(crate) fn SessionView(
                                     class: "btn btn-neutral restart-cancel",
                                     "data-tooltip": "cancel: leave the agent running",
                                     autofocus: restarting(),
-                                    onclick: move |_| {
-                                        // Only the click that closes the prompt
-                                        // may release the claim. A cancel queued
-                                        // behind "confirm restart" finds the
-                                        // prompt already closed and the claim
-                                        // handed to the running restart, so it
-                                        // must not release it. (This prompt
-                                        // stays hand-rolled: its claim is shared
-                                        // with Restart With, which deliberately
-                                        // keeps it after a failed attempt.)
-                                        if !*confirming.peek() {
-                                            return;
-                                        }
-                                        confirming.set(false);
-                                        view_claim.set(None);
-                                    },
+                                    // Dismisses only the opening this render
+                                    // drew, dropping the claim it holds. A
+                                    // cancel queued behind "confirm restart"
+                                    // finds that opening taken and the claim
+                                    // already handed to the running restart,
+                                    // so it releases nothing.
+                                    onclick: move |_| confirming_restart.cancel_for(&shown_restart),
                                     "cancel"
                                 }
                             }
@@ -5049,6 +5110,126 @@ mod tests {
                 "genuine guarded admission consumes its opening"
             );
             assert!(!take_restart_guarded(&mut slot, Some(&later), &submitted));
+        });
+    }
+
+    /// Spec (`confirm_restart_prompt`, `restart_releases_claim`): the header
+    /// Restart's stop-first prompt holds the lifecycle claim while open. An
+    /// answer acts only for the opening its render drew: after Cancel and a
+    /// reopen, a Cancel, Escape or confirm drawn for the first opening
+    /// neither confirms nor closes the second, releases nothing and hands
+    /// no claim on. A genuine confirm moves the claim to the view's Restart
+    /// claim, where a Cancel queued behind it cannot release it, and the
+    /// finished plain restart gives it back whether it succeeded or not. A
+    /// failed Restart with keeps that same claim, so the header prompt
+    /// cannot open under the still-open dialog, until a success or the
+    /// dialog's Cancel releases it.
+    ///
+    /// Why: confirming stops a working agent. A confirm drawn before a
+    /// Cancel and reopen in one event burst used to answer whichever prompt
+    /// was open when it ran, i.e. a question the user had not seen yet. The
+    /// claim half pins why the prompt hands its claim to the view instead of
+    /// to a task, as the Replace prompts do: Restart with's dialog relies on
+    /// the shared claim surviving a failed attempt, and moving the prompt
+    /// onto the slot must not change when either path releases the lock.
+    #[farhelm_testtrace::test]
+    fn a_stale_restart_answer_neither_confirms_nor_cancels_a_reopened_prompt() {
+        use std::cell::Cell;
+        type Handles = (
+            crate::ops::PaneGate,
+            ConfirmSlot<(), OpGuard>,
+            Signal<Option<OpGuard>>,
+        );
+        std::thread_local! {
+            static HANDLES: Cell<Option<Handles>> = const { Cell::new(None) };
+        }
+
+        // The pieces `SessionView` wires together for this prompt: the
+        // shared gate, the prompt's slot and the view's Restart claim.
+        fn app() -> Element {
+            let lock = crate::ops::use_op_lock();
+            let row_ops = use_signal(|| 0_u32);
+            let slot = use_confirm_slot::<(), OpGuard>();
+            let view_claim = use_signal(|| None::<OpGuard>);
+            HANDLES.with(|cell| {
+                cell.set(Some((
+                    crate::ops::PaneGate::new(lock, row_ops),
+                    slot,
+                    view_claim,
+                )));
+            });
+            rsx! {}
+        }
+
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let (mut gate, mut slot, mut view_claim) =
+            HANDLES.with(Cell::get).expect("the handles mounted");
+
+        dom.in_runtime(|| {
+            // The restart closure's release step, as `SessionView` runs it
+            // when a restart finishes.
+            let finish = move |with_settings: bool, succeeded: bool| {
+                let mut view_claim = view_claim;
+                if restart_releases_claim(with_settings, succeeded) {
+                    view_claim.set(None);
+                }
+            };
+
+            let first = slot.open((), gate.claim_guard().expect("premise: the lock is free"));
+            assert!(gate.busy_now(), "premise: the open prompt holds the claim");
+            slot.cancel_for(&first);
+            assert!(!gate.busy_now(), "Cancel releases the prompt's claim");
+            let second = slot.open((), gate.claim_guard().expect("premise: reopened"));
+
+            // Answers drawn for the first opening, run after the reopen.
+            slot.cancel_for(&first);
+            assert!(slot.take(&first).is_none(), "a stale Escape takes nothing");
+            assert!(
+                !confirm_restart_prompt(&mut slot, &first, &mut view_claim),
+                "a stale confirm sends no restart"
+            );
+            assert!(slot.is_current(&second), "the reopened prompt stays up");
+            assert!(gate.busy_now(), "and keeps its claim");
+            assert!(view_claim.peek().is_none(), "no claim was handed on");
+
+            assert!(
+                confirm_restart_prompt(&mut slot, &second, &mut view_claim),
+                "the opening on screen confirms"
+            );
+            assert!(slot.peek_token().is_none(), "confirming closes the prompt");
+            assert!(view_claim.peek().is_some(), "the claim moved to the view");
+            slot.cancel_for(&second);
+            assert!(
+                gate.busy_now(),
+                "a Cancel queued behind the confirm leaves the running restart's claim"
+            );
+            assert!(
+                !confirm_restart_prompt(&mut slot, &second, &mut view_claim),
+                "a second confirm sends nothing"
+            );
+
+            // A plain restart releases when it finishes, failed or not.
+            finish(false, false);
+            assert!(!gate.busy_now(), "a failed plain restart releases");
+            assert!(gate.claim_into(&mut view_claim), "premise: claim again");
+            finish(false, true);
+            assert!(!gate.busy_now(), "a successful plain restart releases");
+
+            // Restart with: the dialog's claim survives a failed attempt.
+            assert!(
+                gate.claim_into(&mut view_claim),
+                "premise: the dialog claims"
+            );
+            finish(true, false);
+            assert!(gate.busy_now(), "a failed Restart with keeps the claim");
+            assert!(
+                gate.claim_guard().is_none(),
+                "so the header prompt cannot open under the open dialog"
+            );
+            assert!(slot.peek_token().is_none());
+            finish(true, true);
+            assert!(!gate.busy_now(), "a successful retry releases it");
         });
     }
 }
