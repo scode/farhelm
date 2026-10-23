@@ -18504,7 +18504,11 @@
   protected, as an ordinary query error already does; a unit test covers it. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and bring it
   back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/checkout-ownership-oct22.md`.
+- Execution: complete in change `xtytrmtltytuvrzzmlswrsklqqzpqzlx`, bookmark
+  `plan/checkout-ownership-oct22/04-duplicate-pane-uncertain`. Startup claim protection reads a pane listing with a
+  duplicated pane as uncertain, as it reads a failed query, so every claim stays protected; every other caller keeps the
+  per-pane drop. tmux at Farhelm's floor refuses newlines in session names, so this is defence in depth. Size: 69 lines,
+  within the gate. PR: https://github.com/scode/farhelm/pull/2645/changes.
 
 ## shell-inspection-drains-exhaust-planning-pool.md
 

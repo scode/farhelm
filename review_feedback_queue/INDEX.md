@@ -66,10 +66,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`spare-checkout-rewind-keeps-removed-history.md`](spare-checkout-rewind-keeps-removed-history.md) — After an upstream
   rewind, a prepared checkout can successfully retain removed commits instead of the current upstream worktree.
 
-- [`duplicate-pane-facts-can-unprotect-spare-claim.md`](duplicate-pane-facts-can-unprotect-spare-claim.md) —
-  Deliberately forged private-tmux facts can expose an active preparation to cleanup; explicit unsupported-use coverage
-  remains ambiguous.
-
 - [`cancelled-startup-sweep-outlives-directory-ownership.md`](cancelled-startup-sweep-outlives-directory-ownership.md) —
   Blocking cleanup can outlive supervisor ownership and delete a successor's claimed checkout or retry input; resulting
   failures are unmeasured.

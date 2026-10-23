@@ -6878,7 +6878,7 @@ impl Supervisor {
     /// The exact generation and owned pane matter: pane ids can be recycled,
     /// and an unreadable preparation or unattributed pane proves no abandonment.
     async fn spare_claims_at_startup(&self) -> crate::spare_checkouts::LiveClaims {
-        let states = match self.tmux.pane_states().await {
+        let states = match self.tmux.pane_states_without_duplicates().await {
             Ok(states) => states,
             Err(error) => {
                 warn!(error = %error, "spare cleanup could not inspect panes; claims retained");
