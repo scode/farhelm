@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`agent-wrappers`](reports/agent-wrappers.report.md) landed 2026-10-18 in #2271, #2272: optional command prefix for agent launches, treated exactly like the real agent
 - [`agent-quick-launch-templates`](reports/agent-quick-launch-templates.report.md) landed 2026-10-18 in #2273, #2274: agents can set the quick-launch template and number keys through the farhelm command
 - [`json-download-open`](reports/json-download-open.report.md) landed 2026-10-18 in #2296, #2299: Cmd-click opens downloads of the types listed in a new setting (md, txt, json by default), with loud warnings for types not known to be safe
 - [`launcher-typed-guarded`](reports/launcher-typed-guarded.report.md) landed 2026-10-18 in #2297, #2301: typing guarded in the launcher selects Guarded like yolo, plus typed routes for the remaining permission and effort choices
