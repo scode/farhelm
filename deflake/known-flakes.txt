@@ -20,3 +20,4 @@ nextest farhelm-ui api::save_order::tests::a_hung_save_releases_waiters_at_their
 playwright settings.spec.ts post-clone commands with carriage returns refuse edits but can be cleared  # post-clone-cleanup-waits-for-finished-save
 playwright launcher-template-shortcuts.spec.ts a template shortcut preserves editor focus when clearing a quick-launch YOLO question  # template-shortcut-editor-focus-webkit
 playwright provisioning.spec.ts a wrong-host UPDATE acceptance warns on its source row and claims nothing  # wrong-host-update-listing-reply-disposed
+playwright terminal-multihost.spec.ts remove-and-re-add-host: removal forgets, re-adding rediscovers  # re-added-host-session-new-output

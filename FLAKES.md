@@ -2816,3 +2816,37 @@ Error: apiResponse.json: Response has been disposed
 Class: unknown
 
 Cause: hypothesis
+
+## 2026-10-23 — re-added host's session reads "new output" on WebKit (e2e/tests/terminal-multihost.spec.ts)
+
+The WebKit project's `remove-and-re-add-host: removal forgets, re-adding rediscovers` failed in a browser run of eleven
+spec files on both engines, run `4e8d25ff-03bd-47c6-8c8b-d90b8b33a3a4` (2026-10-23, tested commit `be5ffa64`, clean
+tree, a landing stack of GUI fixes that does not touch this test's code paths), its only failure; Chromium passed. After
+the remote host is removed and added again, the rediscovered session's status read "idle — new output" where the test
+expects a plain live status (`running`, `waiting` or `idle`). The session runs `sleep 600` and never writes anything.
+Repeated alone ten times on WebKit it failed 7 of 10 on that stack (`499364cd-ccc2-4ec5-8887-9009ce02ff0b`) and 5 of 10
+on main `ab9cbfbe` with main's own build (`1dc305b6-8709-4fa4-ab21-1e138709a732`), every failure the same. It passed on
+both engines in full browser runs `aeb02db0-f5f1-4f00-a74f-9c81df1c2294` (2026-10-23, `6bea0847`) and
+`0f56085c-045c-42df-9d2d-93583fd67eb9` (2026-10-23, `dc1f5808`). All runs: Playwright 1.64.0, three workers with one
+stack each, zero retries, tmux 3.7c executable SHA256
+`1f51ad46eb731a90b75e74afc35719666405e8231fa73ab58ff35a5e9e6f92cd`, locale `C.UTF-8`, child `FARHELM_*` names
+`FARHELM_TEST_TRACE_DIR` and, in the full runs only, `FARHELM_PLAYWRIGHT_POLICY_FILE`. Load was not sampled. Per-attempt
+durations are unavailable. The test dates from #203 (2026-08-21); the spec last changed in other tests on 2026-10-21 and
+2026-10-23.
+
+Suspected cause: re-adding the host makes a new host entry, so the rediscovered session has a new reference and no
+record of having been seen, and the session list marks it as having unseen output (from its startup, or from the
+re-add's own refresh) on some runs. The test asserts the badge's exact text without hiding the seen state the way other
+specs do, so either the test should allow or hide the unseen suffix, or a rediscovered session should keep its seen
+state; which one is a product question. Open; no fix attempted.
+
+```text
+Error: expect(locator).toHaveText(expected) failed
+Locator: locator('.session-row').filter({ has: locator('.session-title').filter({ hasText: /^survives-removal-1792741634240$/ }) }).locator('.status-badge')
+Expected pattern: /^(running|waiting|idle)$/
+Received string:  "idle — new output"
+```
+
+Class: ambiguous-observable
+
+Cause: hypothesis

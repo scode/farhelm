@@ -262,6 +262,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Re-added host's session reads "new output" on WebKit.** The WebKit test
+  `remove-and-re-add-host: removal forgets, re-adding rediscovers` in `e2e/tests/terminal-multihost.spec.ts` sees the
+  rediscovered session's status as "idle — new output" instead of a plain live status, after the host is removed and
+  added again. It failed in run `4e8d25ff-03bd-47c6-8c8b-d90b8b33a3a4`, then 7 of 10 WebKit repeats on that stack
+  (`499364cd-ccc2-4ec5-8887-9009ce02ff0b`) and 5 of 10 on main `ab9cbfbe` (`1dc305b6-8709-4fa4-ab21-1e138709a732`).
+  Hypothesis: the re-added host's new entry leaves the session with no seen record, and the test asserts the badge's
+  exact text; whether the test or the seen state should change is a product question (FLAKES.md, 2026-10-23).
+
 - **Wrong-host UPDATE test's listing stub loses its reply.** The test
   `a wrong-host UPDATE acceptance warns on its source row and claims nothing` in `e2e/tests/provisioning.spec.ts` fails
   inside its own route handler for the hosts listing, where `response.json()` throws "Response has been disposed": on
