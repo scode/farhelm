@@ -5570,6 +5570,8 @@ test("composer holds offered history steady until destination and search promoti
 
 /**
  * Search text is inert until an explicit destination action is chosen.
+ * Automatic non-listing checks after a destination is selected are stubbed
+ * here; their routing and warnings have independent launch-refusal coverage.
  *
  * The final Browse forwards the real selected remote fixture's response.
  * Both localhost supervisors can read the same absolute paths, so the listing
@@ -5579,11 +5581,22 @@ test("composer holds offered history steady until destination and search promoti
 test("composer path actions keep typing inert and browse the selected remote host", async ({ page, request }) => {
   let browseBodies: any[] = [];
   let createPosts = 0;
-  const hosts = await (await request.get("/api/hosts")).json();
+  const hostsResponse = await request.get("/api/hosts");
+  const hosts = await hostsResponse.json();
+  const build = hostsResponse.headers()["x-farhelm-build"];
+  expect(build).toBeTruthy();
   const remoteFixture = hosts.hosts.find((candidate: { id: number; local?: boolean; remote_state_dir?: string | null; state?: { phase?: string } }) => !candidate.local && candidate.remote_state_dir);
   expect(remoteFixture, "the owned stack must expose a remote fixture before its connection premise is checked").toBeTruthy();
   expect(remoteFixture.state?.phase, "the selected remote fixture must already be connected").toBe("connected");
   await page.route("**/api/browse-directory", async (route) => {
+    if (route.request().postDataJSON().membership_only) {
+      // A non-listing receipt must not stand in for the manual Browse's
+      // independent supervisor witness below.
+      await route.fulfill({ headers: { "x-farhelm-build": build }, json: {
+        cwd: "/tmp", parent: null, children: [], truncated: false,
+      } });
+      return;
+    }
     browseBodies.push(route.request().postDataJSON());
     const response = await route.fetch();
     await route.fulfill({
@@ -5791,6 +5804,7 @@ test("composer rejects held and queued stale browse activation after destination
   });
   const releases: Array<() => void> = [];
   await page.route("**/api/browse-directory", async (route) => {
+    if (route.request().postDataJSON().membership_only) return route.continue();
     bodies.push(route.request().postDataJSON());
     if (bodies.length === 2 || bodies.length === 3) await new Promise<void>((resolve) => releases.push(resolve));
     await route.fulfill({
@@ -6178,6 +6192,7 @@ test("composer mounted clone generation replaces the prior draft and notice", as
     const browseBodies: any[] = [];
     const heldBrowse = new Promise<void>((resolve) => { releaseHeldBrowse = resolve; });
     await page.route("**/api/browse-directory", async (route) => {
+      if (route.request().postDataJSON().membership_only) return route.continue();
       browseBodies.push(route.request().postDataJSON());
       await heldBrowse;
       await route.fulfill({

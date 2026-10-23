@@ -842,6 +842,11 @@ agent choice is independent of that destination:
   and available on hover. Only arrow navigation highlights an entry. Choosing fills the destination without launching;
   local home also pins the local host. Escape closes an open dropdown first, then can close the launcher. Tab, blur and
   choosing close the list; typing reopens it. Managed-checkout mode has no folder dropdown.
+- Folder check: in plain-folder mode on a connected host, the launcher checks the folder 150 ms after the host or path
+  stops changing. A missing folder or a path that is not a directory marks the field and says so underneath, naming the
+  host. The warning is advisory and never disables Launch; the supervisor still validates the folder at launch time.
+  Managed-checkout paths are not checked this way. Permission errors, timeouts, busy hosts and other inconclusive
+  answers show no warning. An answer for an earlier host, connection or path is discarded.
 - Host: defaults to the host of the currently open session, else the helm's own host. "The host of the currently open
   session" means the install the user was looking at, not merely its registry row id: a row retargeted or adopted onto a
   different install after the session was selected falls back to the helm's own host rather than silently aiming the

@@ -2,7 +2,5 @@
 kind: added
 ---
 
-When the session launcher cannot start a session, it now says so in a bordered "Not launched." alert beside the launch
-button, with the host's own reason, instead of a small red line that was easy to miss. When the reason is the folder
-(it does not exist on the host, is not a folder, or cannot be used), the folder field is marked as well, with a short
-line naming the host, until you change the folder or the host.
+The session launcher now warns when a folder does not exist on the selected host, without preventing Launch. A refused
+launch shows a prominent "Not launched." alert, and a refusal about the folder also marks the folder field.

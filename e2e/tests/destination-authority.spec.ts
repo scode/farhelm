@@ -533,6 +533,9 @@ test("equal browse and current-directory choices preserve the unresolved create"
   const endpoint = "**/api/browse-directory";
   const browseRoute = async (route: Route) => {
     const body = route.request().postDataJSON();
+    // These counters and held-intent assertions describe explicit Browse.
+    // Advisory checks have a separate generation and never activate a path.
+    if (body.membership_only) return route.continue();
     browseBodies.push(body);
     // These bounded replies observe paths; they grant no new registry or
     // installation identity. The real mounted connection remains authority.
