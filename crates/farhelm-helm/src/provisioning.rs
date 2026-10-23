@@ -4295,8 +4295,13 @@ mod tests {
     /// would strand a half-removed host.
     ///
     /// Spec: an unconnected host whose unit file is still there is refused
-    /// with a concrete instruction to reconnect it. Once the unit file is gone,
-    /// and the probe shows no supervisor answering, the same host plans only what is
+    /// with a concrete instruction to reconnect it. With the unit file gone
+    /// but systemd still running the unit, it is refused too, naming the
+    /// unit: a failed run can leave the supervisor running past the file's
+    /// removal, and a custom command name that no longer resolves makes the
+    /// probe report no supervisor although one runs, so its sessions would be
+    /// ended unchecked. Once the unit has stopped as well, and the probe
+    /// shows no supervisor answering, the same host plans only what is
     /// left: reload, stop, remove the lib directory if it is still there,
     /// and forget the host; confirming that plan runs it to the end.
     #[farhelm_testtrace::test]
@@ -4323,6 +4328,16 @@ mod tests {
         assert!(refusal.contains("Once the host is connected"), "{refusal}");
 
         *backend.present.lock().unwrap() = Some(vec![root.path().join("lib")]);
+        assert_eq!(
+            *backend.unit_state.lock().unwrap(),
+            "active",
+            "the fake's default unit is running, the premise of this refusal"
+        );
+        let running = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        assert!(running.contains("is still running there"), "{running}");
+        assert!(running.contains("farhelm-provisioning-test-"), "{running}");
+
+        *backend.unit_state.lock().unwrap() = "inactive".to_string();
         let retry = service.plan_uninstall(host).await.unwrap();
         assert_eq!(
             step_labels(&retry.plan),
@@ -4870,6 +4885,8 @@ mod tests {
             .await;
         let backend = FakeBackend::absent(root.path().to_path_buf());
         *backend.present.lock().unwrap() = Some(vec![state.clone()]);
+        // An unconnected retry also needs systemd to have stopped the unit.
+        *backend.unit_state.lock().unwrap() = "inactive".to_string();
         let service = service(&harness, backend.clone(), root.path());
 
         let retry = service.plan_uninstall(host).await.unwrap();

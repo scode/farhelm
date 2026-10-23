@@ -18258,7 +18258,10 @@
 - Completion criteria: an uninstall retry without a connection refuses, with an explanation, while the host's supervisor
   unit is still running; a test covers it. The crash route stays out of scope. Size gate: about 100 lines as above; over
   it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/uninstall-guards-oct22.md`.
+- Execution: complete in jj change `yvooxxoqvvtmptqkpvuonysszxxqruyw`, bookmark
+  `plan/uninstall-guards-oct22/03-offline-retry-running-unit`. An uninstall retry with no connection refuses while the
+  inspection reports the supervisor unit running; the crash route stays out of scope. About 50 changed lines of code,
+  tests and spec text, within the gate. [Draft PR #2648](https://github.com/scode/farhelm/pull/2648/changes).
 
 ## trash-entry-delete-hits-shifted-row.md
 

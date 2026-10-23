@@ -8,10 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`offline-uninstall-retry-skips-session-check.md`](offline-uninstall-retry-skips-session-check.md) — An uninstall
-  retry can stop unchecked live sessions when a custom command disappears after a failed removal; the conditional
-  still-active-supervisor route is source-established.
-
 - [`trash-entry-delete-hits-shifted-row.md`](trash-entry-delete-hits-shifted-row.md) — A one-click trash delete can
   permanently delete a different checkout when rows shift under the pointer; click timing is unmeasured.
 
