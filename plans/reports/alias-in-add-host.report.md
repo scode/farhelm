@@ -82,3 +82,86 @@ Skipped:
 One fresh gpt-6.1-sol review at high effort per PR, as the plan requires, with the test-authoring checklist. #2666 had
 one finding, a changelog sentence written as an instruction, which was reworded; there were no correctness or design
 findings. #2667 had no findings.
+
+### Landing
+
+Landed as #2666 and #2667, merged bottom-up, with the content the report describes and two small wording fixes described
+below. It was the only plan in this landing round.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained session-view-fixes-oct22 (session menus, terminal focus, the YOLO launch question
+and the outage notice in the GUI), which touches neither hosts nor the add host dialog. A fresh-context reviewer and I
+also checked every other way a host gets added or set up again, since #2666 now refuses adding a destination that is
+already a host:
+
+- Re-running a failed setup, updating a host, the helm's startup list of hosts it must have (`--ensure-hosts`), adding a
+  host through the helm's API, and the test harnesses that register hosts do not go through the new check, so none of
+  them is newly refused. The browser tests that add a host again remove it first.
+- The duplicate check compares destinations exactly as written, the same way the rest of the helm does; two spellings of
+  one machine are still left to the existing same-machine check, as you decided while planning.
+- agent-add-host, the plan waiting on this one, is consistent with it.
+
+#### Fixes made during the landing
+
+- The "Add a remote host" docs page told a user whose destination is already a host to use **re-run** in that host's
+  menu. A host whose setup succeeded has no re-run there; it has **update**. The landing changed the sentence to "use
+  **update** in its `⋯` menu, or **re-run** if its setup failed", and changed "the aliases in `~/.ssh/config`" on the
+  same page to "the Host names in `~/.ssh/config`", so that "alias" there no longer means two things; the dialog's own
+  help now says "a Host name from your ssh config". Both in #2667.
+- The warning the helm logs at startup for a host in its `--ensure-hosts` list with a path starting with `~` told the
+  operator to repair it by adding the same destination again in the hosts panel, which #2666 now refuses. The landing
+  removed that remedy in #2666; the warning now only says to repair the host "with its set up action" (see the
+  follow-ups).
+
+#### Possible follow-ups
+
+- Found at landing: that startup warning's remaining remedy, the host's "set up action", matches no item in a remote
+  host's menu, which offers **update**, and **re-run** after a failed setup. It could name the right item; I did not
+  change it further because I have not checked which of them repairs a stored `~` path.
+- Found at landing, for release curation: the changelog entry's second paragraph is what tells users that adding a host
+  that is already listed is now refused; keep it when the entry is shortened.
+- Found at landing, for the next docs screenshot refresh: a callout on the "Add a remote host" screenshot still says
+  "host alias" for what is now the destination's ssh Host name, next to the new alias field.
+
+#### Checks
+
+Adding a host is a request many Rust end-to-end tests and browser tests make while setting up, and any of them that
+added a destination twice would now be refused, which the executor's selections did not cover. So this round ran the
+whole Rust workspace and the full browser suite on the plan stacked on this round's main. The first four items below ran
+before the landing's wording fixes (a docs page and a log message); the fifth ran after them:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on the changed Markdown files, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py` (one warning, about a citation main already had), the docs website build, the
+  workspace debug build, the UI's release web build and `scripts/check-desktop-assets.sh`: all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  slots, no retries, run `f21932ee-306b-41fd-b228-57ac27387853`: 4319 of 4320 passed, 40 skipped by design (helper
+  entries that only run as child processes of other tests, and tests that need a real signed-in Claude or Codex). The
+  one failure, `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay`, is a known open flake in terminal
+  output flow control, recorded in FLAKES.md, which this plan does not touch.
+  `cargo nextest run -p farhelm-ui --features desktop`, same settings without tmux, run
+  `4776902a-8209-47d8-b8c1-6942b74e26de`: 917 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `0f56085c-045c-42df-9d2d-93583fd67eb9`: 2495 passed, 14 skipped by design (WebKit
+  clipboard cases and tests that need a real signed-in agent or run on one engine only), 1 failed: Chromium's "the
+  sidebar app bar explains the helm and window builds", which failed inside the test's own network interception ("Route
+  is already handled!") rather than on an assertion.
+- That test, ten Chromium repeats on this plan (run `8000f125-1f43-45c9-9493-63f3d6020c31`): 4 failed the same way; and
+  ten on main without the plan, with main's own binaries and web build (run `5888f7a6-44e2-4c33-87fc-6b1afec0fa57`): 3
+  failed the same way. Main already fails this test about a third of the time on Chromium, in a part of the app this
+  plan does not change. The same error in this test was recorded in FLAKES.md as fixed on 2026-09-05, so this is a
+  recurrence; I am recording it as a new dated entry, with a Deflake entry in TODO.md, in a separate draft PR.
+- After the wording fixes, run by hand outside the round's check script: `cargo fmt --all -- --check`,
+  `cargo clippy -p farhelm-helm --all-targets -- -D warnings` and the docs website build passed again.
+- Reused: none. Skipped: the doctests (no documentation example changed), the desktop smoke test (it registers its host
+  through the helm's API, which the new check does not cover), the native Mac app (not runnable here) and the installer
+  (unchanged).
+
+The report's checks ran the helm's provisioning, store and host tests, the GUI's host tests and the add-dialog browser
+tests; this round ran the whole Rust workspace and the full browser suite on the plan before the landing's wording
+fixes, then the checks that read those fixes. One sentence in the report was already inaccurate: "re-run" sets a host up
+again only when its last setup failed; a host that was set up successfully is set up again with **update**, as the docs
+page now says. Nothing else in the executor's report became untrue at landing.
