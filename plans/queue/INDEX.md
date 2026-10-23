@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [blocked] `uninstall-guards-oct22.md` — Uninstall refuses aliased and mount-crossing layouts, unchecked offline retries and control characters in kept paths; host planning bounds a stuck output read (2026-10-22 triage)
 - [blocked] `update-refuses-newer-host-schema.md` — Update refuses a host whose supervisor database is newer than the supervisor it would install (2026-10-22 triage)
-- [complete] `session-view-fixes-oct22.md` — Five session-view and launcher fixes: displaced menus close, Replace with rows say replace, sidebar clickable under the outage card, no false "nothing started", terminal keeps off focus moved after selection
+- [landing 4b6bf3] `session-view-fixes-oct22.md` — Five session-view and launcher fixes: displaced menus close, Replace with rows say replace, sidebar clickable under the outage card, no false "nothing started", terminal keeps off focus moved after selection
 - [blocked] `dialog-saves-oct22.md` — Five dialog fixes: trash delete ignores clicks right after its list moves, Templates rechecks names, unknown shortcut saves say so, the commands help names deleting, unedited Settings Save writes nothing (after `sign-in-preservation-sweep.md`)
 - [blocked] `build-and-tooling-oct22.md` — Linux tmux terminfo path, plans queue ignores fork PRs, CentOS test keeps the ssh config, rerun installer repairs a damaged version folder, devbuild verifies the tmux signature (2026-10-22 triage)
 - [complete] `alias-in-add-host.md` — The add host dialog takes an optional alias, written with the host as it is added; adding a destination that is already a host is refused, naming that host
