@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`host-settings-focus`](reports/host-settings-focus.report.md) landed 2026-10-20 in #2424: Keep keyboard focus inside host settings and SSH help when a save ends or SSH help's commands arrive (1 TODO entry).
 - [`launch-sequences`](reports/launch-sequences.report.md) landed 2026-10-20 in #2425, #2426: Accurate quick-launch banners, one launchability rule for templates, and a centered amber launch-sequence pill (2 TODO entries).
 - [`download-staging-sweep`](reports/download-staging-sweep.report.md) landed 2026-10-20 in #2440: Remove hidden partial downloads a desktop Quit left behind, without touching another instance's save (1 triage outcome).
 - [`sidebar-bell-follows-row`](reports/sidebar-bell-follows-row.report.md) landed 2026-10-20 in #2427, #2430: Make the notification list hand focus back on every close and close when its row moves (2 triage outcomes).
