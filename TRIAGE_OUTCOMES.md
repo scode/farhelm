@@ -18225,7 +18225,11 @@
   an alias the inspection can detect (for example, any ancestor of the state path that is the same file as the resolved
   installation folder), with a test faking the inspection output. Refusals only; no general aliasing redesign. Size
   gate: about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/uninstall-guards-oct22.md`.
+- Execution: complete in jj change `qpzxvtvqztszuoyokvrusotoqlpuvmvp`, bookmark
+  `plan/uninstall-guards-oct22/06-alias-ancestor-refusal`. The uninstall inspection reports, per path, whether a folder
+  above it is the same file as the folder uninstall would remove, and planning refuses when the state path's answer is
+  yes. About 212 changed lines of code, tests and spec text; the maintainer lifted the 100-line gate for this plan to
+  about 700 (2026-10-23). [Draft PR #2668](https://github.com/scode/farhelm/pull/2668/changes).
 
 ## uninstall-home-bind-inside-installation.md
 
