@@ -262,6 +262,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Wrong-host UPDATE test's listing stub loses its reply.** The test
+  `a wrong-host UPDATE acceptance warns on its source row and claims nothing` in `e2e/tests/provisioning.spec.ts` fails
+  inside its own route handler for the hosts listing, where `response.json()` throws "Response has been disposed": on
+  Chromium in run `75df8763-718c-4845-997e-ce6026460bde`, on WebKit in full browser run
+  `aeb02db0-f5f1-4f00-a74f-9c81df1c2294`, and once in ten WebKit repeats (`d0f245cd-37fc-4b13-bfd1-a296993fef07`).
+  Hypothesis: the intercepted request finishes some other way while the handler still awaits the fetched reply
+  (FLAKES.md, 2026-10-23).
+
 - **Launcher name field does not take focus on WebKit.** The WebKit test
   `a template shortcut preserves editor focus when clearing a quick-launch YOLO question` in
   `e2e/tests/launcher-template-shortcuts.spec.ts` sometimes fails where it focuses the launcher's name field while a
