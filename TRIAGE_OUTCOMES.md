@@ -18352,7 +18352,11 @@
 - Completion criteria: saving a new name or a rename in the Templates dialog re-reads the template list right before the
   write and refuses when the name is now taken, as the save-as-template panel already does; a test covers it. Size gate:
   about 100 lines as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/dialog-saves-oct22.md`.
+- Execution: complete in change `zxqsnmqtxuzwsppnopturkopyoqonylq`, bookmark
+  `plan/dialog-saves-oct22/02-templates-fresh-name-check`. Saving a new name or a rename in the Templates dialog
+  re-reads the template list right before the write (declared before the save's ticket, as Undo does) and refuses when
+  the name is taken or the read fails; the browser test renames to a name another client took after the dialog opened.
+  Size: 39 lines, within the gate. PR: https://github.com/scode/farhelm/pull/2658/changes.
 
 ## lost-shortcut-save-restores-misleading-assignment.md
 

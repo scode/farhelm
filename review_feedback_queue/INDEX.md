@@ -8,10 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`templates-dialog-new-name-overwrites-outside-template.md`](templates-dialog-new-name-overwrites-outside-template.md)
-  — A new or renamed template in an open Templates dialog replaces one an agent or the CLI created meanwhile; coverage
-  by the last-write-wins decision is unsettled.
-
 - [`private-tmux-terminfo-path-under-tmp.md`](private-tmux-terminfo-path-under-tmp.md) — The shipped Linux tmux searches
   a deleted /tmp build path for terminal definitions another account could plant; only hand-run use reads it.
 

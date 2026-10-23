@@ -1799,9 +1799,32 @@ pub(super) fn TemplatesDialog(
         let base = save_base.clone();
         busy.set(true);
         error.set(None);
+        // A new name or a rename re-reads the names just before writing: the
+        // list this dialog holds was read when it opened or after its own last
+        // write, so it cannot see a template an agent or the command line
+        // created since, and the write would replace it (SPEC_impl.md,
+        // "Templates"). As for Undo, the read is declared before
+        // the save's ticket so it does not wait for the save it checks.
+        let listed = (old.as_deref() != Some(value.name.as_str()))
+            .then(|| crate::api::fetch_templates(&base));
         let saving_request = crate::api::put_template(&base, &value.name, &value.fields);
         spawn(async move {
-            let result = saving_request.await;
+            let refusal = match listed {
+                None => None,
+                Some(listed) => match listed.await {
+                    Ok(rows) => {
+                        let names = rows.iter().map(|t| t.name.as_str()).collect();
+                        save_name_refusal(None, &value.name, &ListedNames::Loaded(names))
+                    }
+                    Err(message) => Some(format!(
+                        "cannot check that no other template has this name: {message}"
+                    )),
+                },
+            };
+            let result = match refusal {
+                Some(message) => Err(message),
+                None => saving_request.await,
+            };
             let result = match (result, old) {
                 (Ok(()), Some(old)) if old != value.name => {
                     // Another window may have marked this name, or moved the
