@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`host-entry-session-ids`](reports/host-entry-session-ids.report.md) landed 2026-10-20 in #2366, #2367, #2368, #2369, #2370: Identify sessions by a helm-assigned host-entry UUID plus the session ID, so approvals and confirmations cannot reach another host entry (2 triage outcomes, plus one triage already folded in).
 - [`helm-lock-outlives-work`](reports/helm-lock-outlives-work.report.md) landed 2026-10-20 in #2383: Keep the helm's state-directory lock until every task on its runtime has finished, so a successor cannot claim the directory while old install work still writes the release cache (1 triage outcome).
 - [`hosts-panel-menu-close`](reports/hosts-panel-menu-close.report.md) landed 2026-10-20 in #2379: Close open sidebar menus when the hosts panel changes height, so a failing expanded setup cannot leave a menu beside the wrong row (1 triage outcome).
 - [`template-list-current-labels`](reports/template-list-current-labels.report.md) landed 2026-10-20 in #2381, #2382: Reword the Cmd-J spec so a pick follows the name's current template, and refresh the list's shortcut labels when it opens (2 triage outcomes).
