@@ -28,6 +28,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   The retry against the browser briefly reporting no face before the font is registered may still be needed. Accepted
   cost: in the web UI over a slow link, a terminal shows nothing until the roughly 2 MB font arrives instead of
   appearing in a fallback font after 3 s. Removes the cause of `terminal-font-promise-leak.md` (discarded 2026-10-01).
+  Plan: `plans/queue/terminal-font-required.md`.
 
 ## Planned
 
