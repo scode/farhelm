@@ -37,7 +37,9 @@ alias is only for display: it changes how the host is shown everywhere in Farhel
 the host itself. Your Mac's destination cannot be changed. **Start YOLO sessions without asking** is the same choice the
 YOLO confirmation offers when you [start a session](/docs/using/start-a-session/#confirm-a-yolo-launch). **Run farhelm
 commands without asking** decides whether agents in this host's sessions ask you before they start, stop, change, or
-delete sessions, or change your launch templates; [Approve what agents do](/docs/using/approve-agent-requests/) explains it.
+delete sessions, or edit or delete your launch templates; [Approve what agents do](/docs/using/approve-agent-requests/)
+explains it. An agent's request to add, edit or remove a host always asks, whatever this switch says
+([Host changes](/docs/using/approve-agent-requests/#host-changes)).
 
 **Open links without asking** and **Open local-network links without asking** are separate permissions for opening this
 host's sessions' links in your browser. Both start off, and the second includes your machine and private network. [Open
@@ -77,7 +79,9 @@ Uninstall never stops a session for you. If any session on the host has not ende
 its status is not known yet), or still has a terminal tab open, it says which ones and does nothing. Stop those sessions
 and close their terminal tabs first, as in [Stop, restart, and resume](/docs/using/stop-restart-resume/). Do not start a
 session on the host while the uninstall runs: one started then can end along with Farhelm. Uninstall also needs Farhelm
-to be connected to the host so it can check; if it shows needs update, too new, an identity problem or the same machine as another entry, follow its row's advice first; **remove** still works. A few less common setups are
+to be connected to the host so it can check. If its row shows **unreachable, retrying**, **needs update**, **too new**,
+**identity mismatch**, **identity unverified** or **duplicate**, fix that first: the refusal says how, and so do the
+host's [details](#see-more-about-each-host). **remove** still works. A few less common setups are
 refused too, with the reason shown in a dialog: a host where Farhelm was set up by running `farhelm helm setup` on the
 host itself (its own `farhelm uninstall` removes it), one whose Farhelm runs from somewhere unexpected, and one whose
 `~/.local/lib/farhelm` directory is a symbolic link or has something mounted on or inside it. **remove** still works for all of them.
@@ -96,7 +100,8 @@ To remove Farhelm from your Mac, see [Uninstall Farhelm](/docs/get-started/unins
 />
 
 As the dialog says, removing a host only makes Farhelm forget it. Nothing is stopped or uninstalled on the host, and
-adding the same destination again brings back its sessions. **cancel** or Escape leaves the host where it was.
+adding the same destination again brings back its sessions, though their pins, and which ones you had already looked
+at, start fresh. **cancel** or Escape leaves the host where it was.
 The dialog stays open until Farhelm answers; if removal is refused, it shows why. If you chose to skip the confirmation,
 a refusal opens a short dialog instead.
 
@@ -121,8 +126,8 @@ discards those drafts. At phone width, **‹ settings** returns to the section l
 [session actions and shell-tab close](/docs/using/stop-restart-resume/#stop-or-delete) without changing these host
 choices or YOLO and trash questions. **terminal** holds the [terminal link choices](/docs/using/session-list/#terminal-links)
 and, in the desktop app, file types to open with a modifier-click and
-[tunnels](/docs/using/work-in-a-session/#open-a-remote-localhost-link). **checkouts** holds **checkout folder** and
-**post-clone command**, while **agent trust** holds the managed-checkout trust switches; both are covered in
+[tunnels](/docs/using/work-in-a-session/#open-a-remote-localhost-link). **checkouts** holds **checkout folder**, **post-clone command** and
+[**keep a checkout ready for faster launches**](/docs/using/start-a-session/#prepared-checkouts), while **agent trust** holds the managed-checkout trust switches; both are covered in
 [Start a session](/docs/using/start-a-session/#start-from-a-managed-checkout).
 
 **notifications** groups [sounds](/docs/using/session-list/#sounds-when-an-agent-needs-you) and

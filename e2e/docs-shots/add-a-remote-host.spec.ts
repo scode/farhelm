@@ -35,7 +35,7 @@ test("add dialog", async ({ page, request }) => {
   await dialog.locator(".add-host-ssh").fill(scenario.add_host.ssh);
   await director.callout(
     dialog.locator(".add-host-ssh"),
-    "How you would ssh to it: user@host, or a host alias from your ssh config.",
+    "How you would ssh to it: user@host, or a Host name from your ssh config.",
     { side: "left", dy: -40 },
   );
   // Stacked down the left margin so the boxes do not overlap each other.

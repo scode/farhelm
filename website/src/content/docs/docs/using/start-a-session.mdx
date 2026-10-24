@@ -42,7 +42,9 @@ it until it is back. [Add a remote host](/docs/get-started/add-a-remote-host/) c
 The directory field starts at the directory of your last agent launch on that host, or at the host's home directory if
 you have not launched an agent there yet; a launch into a new managed checkout does not count. With a session open on
 the same host, it starts at that session's directory instead. Changing the host switches to that host's directory,
-unless you typed or picked one yourself.
+unless you typed or picked one yourself. With **folder** chosen, the launcher also checks the directory on a connected
+host: if it does not exist there, or is not a directory, a warning under the field names the host. You can still launch;
+the host checks the directory again when you do.
 
 **browse folders on** the host lists its directories one level at a time, for when you would rather find a directory
 than type it. Clicking the directory field, or pressing ↓ in it, lists recent directories and the two home choices;
@@ -327,7 +329,7 @@ like FAT: Farhelm does not detect such changes.
 
 What you see depends on how far the launch got. When Farhelm can tell before starting anything that the launch will not
 work, for example because the directory does not exist on that host or the host just went offline, it shows the reason
-beside the launch button and keeps your choices, so you can fix it and launch again. No session is created. When
+in a **Not launched.** alert beside the launch button and keeps your choices, so you can fix it and launch again. No session is created. When
 the agent itself fails to start, for example because it is not installed on that host, the session is created and its
 status shows error; the agent's page in [Supported agents](/docs/agents/) says what to install. An agent that starts and
 then quits shows exited. [Read the session list](/docs/using/session-list/) explains each status.

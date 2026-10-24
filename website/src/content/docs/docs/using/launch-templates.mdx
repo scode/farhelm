@@ -68,7 +68,8 @@ without opening the session launcher. Only one template is marked: another bolt 
 it. An **agent** template needs an agent to be marked; a **command** template needs a nonblank command. With **don't
 switch**, it is judged as an agent launch.
 
-Choices the template leaves out use **new**'s defaults, including the open session's host and directory. A template can
+Choices the template leaves out use **new**'s defaults: the open session's host, and the
+[directory **new** starts in](/docs/using/start-a-session/#choose-where-it-runs) on the launch's host. A template can
 start a fresh [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) this way too: marking it
 means you choose to create its new directory without first seeing the path. If Farhelm asks about YOLO or the launch
 fails, the session launcher opens with that setup and the question or error. With no marked template, the shortcut opens
@@ -141,7 +142,8 @@ immediately from the session list without the prefix.
 
 ## Save a setup from the launcher
 
-When you have set up a launch in **new** or **clone**, choose **save as template**, beside **reset choices**.
+When you have set up a launch in **new**, **clone** or **restart with**, choose **save as template**, beside **reset
+choices**.
 
 <Screenshot
   name="launch-templates/save-as-template"
@@ -171,7 +173,9 @@ The template keeps the current **agent** or **command** tab and only the choices
 Choose a template's row to open its editor. **duplicate** opens an unsaved copy with a new name. Changes are saved only
 when you choose **save**; leaving an edited template asks whether to save, discard, or keep editing. At phone width, **‹
 templates** returns to the list. Hidden formatting characters in a template's fields show as visible
-codes, and such a field cannot be edited in place: remove it with **✕** and add it again. A template whose session name
+codes, and such a field cannot be edited in place: remove it with **✕** and add it again. A template name
+with hidden characters shows them the same way and stays unchanged until you choose **replace name**, which clears it
+so you can type a new one. A template whose session name
 or command contains hidden or control characters still launches, but Farhelm refuses to save changes to it until you
 replace those fields. This includes joined emoji in a session name.
 
@@ -210,7 +214,7 @@ stay in place unless a template switches tabs and removes that field; focus then
 A template whose choices do not fit what the launcher holds is refused as a whole, with a message saying which choice
 did not fit: a model the chosen agent does not offer, for example, or an older template with a model and no saved tab
 choice while the launcher is on its **command** tab. In **replace with**, where the host is fixed, a template
-that sets a host is refused the same way, and in **restart with** so is one that sets the agent, host,
+that sets a host is refused the same way, and in **restart with** so is one that sets **switches launcher to**, the agent, host,
 directory, session name or first message, which the restarted session keeps.
 
 ## Templates and your agents

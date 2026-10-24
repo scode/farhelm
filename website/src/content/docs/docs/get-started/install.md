@@ -23,7 +23,8 @@ It needs no administrator password. It puts the Farhelm app in `~/Applications` 
 keeps itself up to date, installing new releases in the background; see
 [Update or uninstall Farhelm](/docs/using/update-and-uninstall/). Running the installer again also updates Farhelm, and
 that is safe while Farhelm is open: Farhelm notices the new version, and its version number turns red until you restart
-it.
+it. If an install was cut short, by a reboot or a power loss say, running the installer again finishes it and repairs
+the copy it left behind.
 
 ## If the installer asks for tmux
 

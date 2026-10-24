@@ -115,8 +115,9 @@ a **restart** before the switch would have resumed. If the followed Codex exits 
 terminal, Farhelm can follow the new one. The native Codex executable must still be named `codex`; a renamed one cannot
 supply the conversation **restart** needs.
 
-Grok accepts a wrapper that `exec`s Grok or stays resident as Grok's one parent process. A deeper resident chain
-prevents Farhelm from following the conversation, leaving **restart** unavailable. Its hooks still have to be
+Grok accepts a wrapper that `exec`s Grok or stays resident as Grok's one parent process, unless that resident wrapper is
+itself named `grok` or its program is named `grok-` followed by anything. A deeper resident chain prevents Farhelm from
+following the conversation, leaving **restart** unavailable. Its hooks still have to be
 [installed](/docs/agents/grok/#setup), and the wrapper must pass through its environment.
 
 OMP accepts a prefix wrapper only when the wrapper `exec`s OMP, leaving no extra process between the session and OMP's
