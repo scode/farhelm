@@ -1,16 +1,16 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-19T03:46:00Z",
-  "captured_from": "59cdaec049e410e4334ef4530a59c3496aacc224",
-  "commit": "97e7f9b08d03348be0244a6603073042c4bbcfad",
+  "captured_at": "2026-10-24T01:47:25Z",
+  "captured_from": "68288f067aeeb72fcebc05f9be68e1665ed6c3c7",
+  "commit": "ddcf6508e98f730e724d8b9e051e696c5b921f8b",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 418,
       "width": 1260
     },
     "add-a-remote-host/add-dialog": {
-      "height": 996,
+      "height": 1256,
       "width": 1754
     },
     "add-a-remote-host/connected-host": {
@@ -46,7 +46,7 @@
       "width": 1796
     },
     "launch-templates/panel": {
-      "height": 1078,
+      "height": 1114,
       "width": 1844
     },
     "launch-templates/save-as-template": {
@@ -58,8 +58,8 @@
       "width": 996
     },
     "manage-hosts/app-settings": {
-      "height": 3642,
-      "width": 1594
+      "height": 1250,
+      "width": 1822
     },
     "manage-hosts/details": {
       "height": 684,
@@ -70,11 +70,11 @@
       "width": 1830
     },
     "manage-hosts/host-settings": {
-      "height": 2124,
+      "height": 2156,
       "width": 1594
     },
     "manage-hosts/remove-dialog": {
-      "height": 896,
+      "height": 1042,
       "width": 1024
     },
     "release-notes/v0-25-0-feedback-contact": {
@@ -229,6 +229,26 @@
       "height": 356,
       "width": 1510
     },
+    "release-notes/v0-31-0-add-host-alias": {
+      "height": 1032,
+      "width": 1754
+    },
+    "release-notes/v0-31-0-prepared-checkouts": {
+      "height": 492,
+      "width": 1760
+    },
+    "release-notes/v0-31-0-quick-launch-indicator": {
+      "height": 584,
+      "width": 1516
+    },
+    "release-notes/v0-31-0-search-name-choice": {
+      "height": 620,
+      "width": 1860
+    },
+    "release-notes/v0-31-0-settings-sections": {
+      "height": 1364,
+      "width": 1656
+    },
     "session-list/controls": {
       "height": 696,
       "width": 1392
@@ -274,7 +294,7 @@
       "width": 1830
     },
     "start-a-session/host-yolo-setting": {
-      "height": 798,
+      "height": 830,
       "width": 1544
     },
     "start-a-session/launch-button": {
@@ -298,7 +318,7 @@
       "width": 1800
     },
     "start-a-session/yolo-confirmation": {
-      "height": 772,
+      "height": 838,
       "width": 1860
     },
     "stop-restart-resume/header-actions": {

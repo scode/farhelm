@@ -191,14 +191,14 @@ test("search with a prefix", async ({ page, request }) => {
   const { director } = await open(page, request);
   const form = await openLauncher(page);
   const search = form.locator(".launch-composer-search input[role=combobox]");
-  // A case where the prefix is required: without name:, a session name is
-  // never offered, since any word could be one.
-  await search.fill("name: fix login bug");
+  // Plain "claude" finds the agent; this prefix makes the same word a
+  // session name. Unmatched text already offers a name without a prefix.
+  await search.fill("name: claude");
   const results = form.locator(".launch-composer-search-results");
   await expect(results.getByRole("option").first()).toBeVisible();
   await director.callout(
     search,
-    "Some things need a prefix. name: sets the session's name, which a plain word never does.",
+    "name: makes the words a session name even when they match another choice, such as the Claude agent.",
     { side: "left" },
   );
   await shot(page, `${PAGE}/search-name`, [search, results], { maxWidth: 900 });
@@ -241,15 +241,13 @@ test("yolo confirmation", async ({ page, request }) => {
   await form.locator(".create-session-submit").click();
   const confirmation = form.locator(".yolo-confirmation");
   await expect(confirmation).toBeVisible();
-  // Left of and below the buttons, where the launcher's own controls are
-  // what they cover, rather than the confirmation's text. Cancel needs no
-  // callout: the confirmation itself says nothing has started.
-  // Both below their buttons, over the launcher's own controls, so the crop
-  // stays within the launcher and out of the session list beside it.
+  // The guarded alternative takes the first slot, so separate the callouts
+  // horizontally below the YOLO answers. They cover the launcher beneath
+  // the question rather than its text or another annotation.
   await director.callout(
     confirmation.locator(".yolo-confirm"),
     "Starts this launch. The host still asks next time.",
-    { side: "bottom", dx: -20 },
+    { side: "bottom", dx: 240 },
   );
   await director.callout(
     confirmation.locator(".yolo-confirm-stop-asking"),

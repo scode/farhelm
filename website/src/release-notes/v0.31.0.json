@@ -1,0 +1,29 @@
+{
+  "screenshots": [
+    {
+      "entry": 2447,
+      "name": "release-notes/v0-31-0-settings-sections",
+      "alt": "Settings with a sidebar of sections beside the session settings, explained as keeping unsaved fields while moving between sections."
+    },
+    {
+      "entry": 2510,
+      "name": "release-notes/v0-31-0-prepared-checkouts",
+      "alt": "The prepared-checkout switch in Settings, on by default, explained as preparing the next GitHub checkout in the background and using extra disk space."
+    },
+    {
+      "entry": 2666,
+      "name": "release-notes/v0-31-0-add-host-alias",
+      "alt": "Add host with an SSH destination and its optional alias entered before the host check."
+    },
+    {
+      "entry": 2444,
+      "name": "release-notes/v0-31-0-search-name-choice",
+      "alt": "The session launcher offering unmatched search text as the session name."
+    },
+    {
+      "entry": 2426,
+      "name": "release-notes/v0-31-0-quick-launch-indicator",
+      "alt": "The larger amber quick-launch sequence indicator centered over the terminal."
+    }
+  ]
+}

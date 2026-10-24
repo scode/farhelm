@@ -23,6 +23,113 @@ import { shot } from "./shot";
 
 const PAGE = "release-notes";
 
+/**
+ * v0.31.0: the sidebar makes Settings' sections visible without a long scroll.
+ * Only navigation changes here; no switch is toggled and no field is saved.
+ */
+test("v0.31.0 settings sections", async ({ page, request }) => {
+  const name = `${PAGE}/v0-31-0-settings-sections`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 930, height: 1300 });
+  const { director } = await open(page, request);
+  await page.locator(".app-settings-toggle").click();
+  const dialog = page.locator(".app-settings-dialog");
+  const navigation = dialog.getByRole("navigation", { name: "settings sections", exact: true });
+  await expect(navigation).toBeVisible();
+  await navigation.getByRole("button", { name: "sessions", exact: true }).click();
+  await director.callout(
+    navigation,
+    "Choose a section here. Moving between sections keeps your unsaved fields; closing Settings discards them.",
+    { side: "bottom", dy: 110 },
+  );
+  await shot(page, name, [dialog], { maxWidth: 930 });
+});
+
+/**
+ * v0.31.0: the new prepared-checkout switch explains the disk-space tradeoff.
+ * The default is photographed as read from the staged helm, never set by this shot.
+ */
+test("v0.31.0 prepared checkouts", async ({ page, request }) => {
+  const name = `${PAGE}/v0-31-0-prepared-checkouts`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1000 });
+  const { director } = await open(page, request);
+  await page.locator(".app-settings-toggle").click();
+  const dialog = page.locator(".app-settings-dialog");
+  await dialog.getByRole("navigation", { name: "settings sections", exact: true })
+    .getByRole("button", { name: "checkouts", exact: true }).click();
+  const field = dialog.locator("#checkout-spare");
+  await expect(field.getByRole("checkbox")).toBeChecked();
+  await director.callout(
+    field.locator("label"),
+    "On by default: prepare the next GitHub checkout in the background, using one extra checkout's disk space per repository and host.",
+    { side: "left" },
+  );
+  await shot(page, name, [field], { maxWidth: 930 });
+});
+
+/** v0.31.0: an alias can be entered before the first host check, without adding a host. */
+test("v0.31.0 add host alias", async ({ page, request }) => {
+  const name = `${PAGE}/v0-31-0-add-host-alias`;
+  skipFrozenReleaseShot(name);
+  const { scenario, director } = await open(page, request);
+  if (!scenario.add_host) throw new Error("the docs scenario needs an add_host");
+  await page.locator(".add-host-button").click();
+  const dialog = page.locator(".host-add-dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator(".add-host-ssh").fill(scenario.add_host.ssh);
+  const alias = dialog.getByRole("textbox", { name: /alias/i });
+  await alias.fill("new-box");
+  await director.callout(
+    alias,
+    "An optional name for the host, entered alongside its SSH destination before checking it.",
+    { side: "left", dy: 20 },
+  );
+  await shot(page, name, [dialog], { maxWidth: 930 });
+});
+
+/**
+ * v0.31.0: unmatched search text is offered as a session name.
+ * Choosing or launching is unnecessary to show the new choice.
+ */
+test("v0.31.0 search name choice", async ({ page, request }) => {
+  const name = `${PAGE}/v0-31-0-search-name-choice`;
+  skipFrozenReleaseShot(name);
+  const { director } = await open(page, request);
+  const form = await openLauncher(page);
+  const search = form.locator(".launch-composer-search input[role=combobox]");
+  await search.fill("investigate login timeout");
+  const results = form.locator(".launch-composer-search-results");
+  await expect(results).toContainText("investigate login timeout");
+  await director.callout(
+    results,
+    "When your search matches no choice, you can use the words as the session's name.",
+    { side: "bottom", dy: 20 },
+  );
+  await shot(page, name, [search, results], { maxWidth: 930 });
+});
+
+/**
+ * v0.31.0: the larger amber sequence indicator stays readable over the terminal.
+ * Stopping before Enter guarantees that the prefix starts no session.
+ */
+test("v0.31.0 quick launch indicator", async ({ page, request }) => {
+  const name = `${PAGE}/v0-31-0-quick-launch-indicator`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1000 });
+  const { director } = await open(page, request);
+  await expect(page.locator('.launch-sequence-trigger[data-sequence-action="begin"]')).toBeEnabled();
+  await page.keyboard.press("Control+Shift+KeyX");
+  const indicator = page.locator(".launch-sequence-indicator");
+  await expect(indicator).toContainText("press number keys");
+  await director.callout(
+    indicator,
+    "The quick-launch sequence stays centered over the terminal. Open the session launcher and it moves to the bottom, leaving room to edit.",
+    { side: "bottom", dy: 30 },
+  );
+  await shot(page, name, [indicator], { maxWidth: 930 });
+});
+
 /** v0.25.0: Cmd+K / Ctrl+Shift+K finds a session on any host. */
 test("v0.25.0 quick switcher", async ({ page, request }) => {
   const name = `${PAGE}/v0-25-0-quick-switcher`;
