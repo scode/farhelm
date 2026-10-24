@@ -34,6 +34,9 @@ that matter:
   (the agent bypasses its safety checks). For a new
   [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the card also names the repository it
   would clone, such as `GitHub: acme/web`, above the exact directory the clone would go into;
+- for a Codex, Muse or Pi launch or restart, whether it trusts the directory as a
+  [managed checkout](/docs/using/start-a-session/#trust-in-managed-checkouts) under **agent trust** in Settings, which
+  lets the repository's own hooks, settings and commands run without asking;
 - for a template change, the whole template as it would be saved, including any command line. If the agent changes its
   **⚡** mark or number key, the card shows the change and which other template loses the mark or key;
 - for a link, the site your browser would contact, above the full URL. Check the site: a URL can be written to look like
@@ -110,8 +113,8 @@ agent and leave the session listed.
 
 Each host has a **Run farhelm commands without asking** setting, in its settings next to the YOLO one
 ([Manage hosts](/docs/using/manage-hosts/#host-settings)). Every host starts with it off. Turning it on means agents in
-that host's sessions start, stop, restart, delete, rename, and copy sessions on any of your hosts, and change templates,
-without asking you, except for the [wrapper prefixes](#the-card) described above. It never covers
+that host's sessions start, stop, restart, delete, rename, and copy sessions on any of your hosts, and change or delete
+templates, without asking you, except for the [wrapper prefixes](#the-card) described above. It never covers
 [host changes](/docs/using/approve-agent-requests/#host-changes). Turn it on only for a host whose agents you would let
 do that unsupervised.
 

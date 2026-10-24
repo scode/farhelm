@@ -17,7 +17,8 @@ This page is planned but not written yet. The text below says what it will cover
 What Farhelm exposes and trusts: SSH as the only network path between machines, a web UI that listens only on loopback
 and that a link on a page from another local port cannot open, no relay or account, and nothing that needs root. Also
 how much the helm is trusted with on each host, since it can run commands there, and what an agent on one host can do to
-sessions on others through Farhelm, with your approval or a host's **Run farhelm commands without asking**
+sessions on others through Farhelm, with your approval or a host's **Run farhelm commands without asking**, and the host
+changes (adding, editing or removing a host) that always need your approval
 ([Approve what agents do](/docs/using/approve-agent-requests/)). The SSH prerequisite for adding a host is in
 [Add a remote host](/docs/get-started/add-a-remote-host/). It will also cover the connections that leave your machines:
 setting up or updating a host downloads Farhelm's release files from get.farhelm.io, which hands them over from GitHub,

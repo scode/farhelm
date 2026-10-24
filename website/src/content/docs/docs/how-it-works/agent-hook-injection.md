@@ -222,8 +222,10 @@ whose off position removes a feature must not be flipped by a typo.
 
 Turning `FARHELM_AGENT_HOOKS` off prevents new conversations from being saved for a restart by Claude, Codex, Goose, Pi,
 and OMP. A session with no saved conversation cannot be restarted. Turning the switch off does not erase a conversation
-already saved for the current launch. Grok's manual hooks are independent of this switch; remove or disable those
-entries in Grok itself when you want them off.
+already saved for the current launch, but a **restart with** that names another conversation forgets it, because no
+report can replace it: plain **restart** is then unavailable, and **restart with** can still open a conversation you
+name ([Stop, restart, and resume](/docs/using/stop-restart-resume/#the-headers-actions)). Grok's manual hooks are
+independent of this switch; remove or disable those entries in Grok itself when you want them off.
 
 ## When something goes wrong
 
@@ -231,9 +233,11 @@ The symptom is a session whose **restart** stays greyed out when it should not, 
 Look in this order.
 
 **1. The per-session hook log**, `<state dir>/hook-log/<session id>.log`, where `<state dir>` is the supervisor's state
-directory (`$XDG_STATE_HOME/farhelm`, or `~/.local/state/farhelm` by default). Two things write lines there, each shaped
-`<unix-seconds> <outcome> [<detail> ]<conversation-id> <source>`; the trailing id and source appear only once there is
-an id to name, and `<source>` is `-` when the vendor sent none or sent something that is not a string.
+directory (`$XDG_STATE_HOME/farhelm`, or `~/.local/state/farhelm` by default), and `<session id>` is the session's
+`$FARHELM_SESSION_ID`, the part after the first colon in the full id `farhelm agent sessions` shows. Two things write
+lines there, each shaped `<unix-seconds> <outcome> [<detail> ]<conversation-id> <source>`; the trailing id and source
+appear only once there is an id to name, and `<source>` is `-` when the vendor sent none or sent something that is not a
+string.
 
 The hook writes one line each time it runs, saying what it did:
 

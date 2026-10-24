@@ -91,8 +91,8 @@ Waiting is the status worth watching for: the agent has stopped to ask you somet
 does nothing until you answer. Not every agent can tell Farhelm when it is waiting; [Supported agents](/docs/agents/)
 says which ones can.
 
-An agent can also be waiting on Farhelm itself, when it asks to start, stop, change, or delete a session with the
-`farhelm` command. That request shows as a compact card near the top of the window, not in the session list, and you answer it on
+An agent can also be waiting on Farhelm itself, when it asks to start, stop, change, or delete a session, or to add,
+change, or remove a host, with the `farhelm` command. That request shows as a compact card near the top of the window, not in the session list, and you answer it on
 the card; [Approve what agents do](/docs/using/approve-agent-requests/) covers it.
 
 A session that has ended says how in words under its name, instead of a coloured dot (with **compact** ticked, as an
@@ -144,8 +144,8 @@ search box in the sidebar; with many sessions, filter by host and sort by title.
 ### Jump with the keyboard
 
 Press Cmd+K on a Mac, or Ctrl+Shift+K elsewhere, to open the quick switcher, even while typing in a terminal. Type a few
-letters from a session's name, host or directory. Matches in the name come first; within each group, the sessions you
-used most recently come first. The search covers every host, whatever the sidebar's host filter shows.
+letters from a session's name, host or directory. Matches in the name come first; within each group, the most recently
+active sessions come first. The search covers every host, whatever the sidebar's host filter shows.
 
 Use ↑ and ↓ to choose, then Enter to open the session. With nothing typed, Enter opens the most recently active one.
 If the host filter hid it, Farhelm changes the filter to ALL. Escape or a click outside closes the switcher and returns
