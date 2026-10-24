@@ -20,16 +20,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Definite simplification
 
-- **Make the bundled terminal font a hard requirement.** Decided 2026-10-01: JetBrains Mono Nerd Font ships with
-  Farhelm, so failing to load it is a broken deployment, like any other bundled asset, not something to survive. Remove
-  the fallback in `crates/farhelm-ui/assets/terminal.js` ("Font settling before mount": the 3 s settle deadline,
-  mounting in a fallback font, the late font swap and repaint paths, the do-nothing tracker for engines without the Font
-  Loading API) and gate terminal mounts on the font the way `mountWhenReady` already gates on the other bundled files.
-  The retry against the browser briefly reporting no face before the font is registered may still be needed. Accepted
-  cost: in the web UI over a slow link, a terminal shows nothing until the roughly 2 MB font arrives instead of
-  appearing in a fallback font after 3 s. Removes the cause of `terminal-font-promise-leak.md` (discarded 2026-10-01).
-  Plan: `plans/queue/terminal-font-required.md`.
-
 ## Planned
 
 ## Near term

@@ -213,11 +213,10 @@ async function scanViewportRow(page: Page, needle: string): Promise<RowGeometry>
  * index, the live grid size, and the row's text.
  *
  * Found live rather than assumed: the login shell is free to print above
- * the invocation's own output, and the rare font-backstop path can still
- * resize the terminal shortly after attach and make tmux redraw the pane
- * (the same reason terminal-clipboard.spec.ts's `findViewportRow` polls
- * rather than scanning once). Polling through `expect.poll` keeps this
- * free of fixed sleeps.
+ * the invocation's own output, and the terminal can still redraw or
+ * resize between scans (the same reason terminal-clipboard.spec.ts's
+ * `findViewportRow` polls rather than scanning once). Polling through
+ * `expect.poll` keeps this free of fixed sleeps.
  */
 async function findViewportRow(page: Page, needle: string): Promise<RowGeometry> {
   await expect

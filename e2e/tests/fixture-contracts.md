@@ -27,12 +27,10 @@ details, this is the map:
   order, so "newest" assertions need a >1s gap between creates.
 - **Playwright's fake clock ticks between `install()` and `pauseAt()`**: pause at a strictly future instant or a loaded
   box throws "Cannot fast-forward to the past".
-- **The post-mount font swap can reflow content out of the viewport**: terminal.js loads JetBrains Mono asynchronously
-  after `mount()` returns, then re-fits and re-measures cell size once it lands (its
-  `document.fonts.load(...).then(...)` block) — which can change `cols` and make xterm RE-WRAP everything already
-  printed. Content printed before that second `fit()` (a startup banner, a ready marker) can come out at a different row
-  than it went in at, with no guarantee it stays inside the CURRENT viewport window. A viewport-scoped poll for such
-  early content is exposed to this; read the full buffer instead (`real-agent.ts`'s `waitUntilAgentReady` was fixed this
-  way after it timed out on both engines with the marker sitting in scrollback and an effectively blank rendered
-  viewport), or await `document.fonts.ready` before trusting a viewport-scoped read at all (terminal-clipboard.spec.ts's
-  and terminal-keys.spec.ts's own `attachSession` helpers do the latter).
+- **The bundled terminal font is a mount precondition, so no post-mount font swap exists**: terminal.js waits for both
+  JetBrains Mono weights before constructing a terminal (its "## Font settling before mount" header), so the old
+  post-mount re-fit/re-flow class of bug is gone. Other resizes (window resize, a user font-size step) still reflow the
+  pane, and content printed early (a startup banner, a ready marker) can still end up outside the CURRENT viewport
+  window; a viewport-scoped poll for such early content is exposed to this. Read the full buffer instead
+  (`real-agent.ts`'s `waitUntilAgentReady` was fixed this way after it timed out on both engines with the marker sitting
+  in scrollback and an effectively blank rendered viewport).

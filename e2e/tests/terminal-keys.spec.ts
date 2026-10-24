@@ -202,15 +202,6 @@ const READ_GROUPED_DUMP_INVOCATION =
  */
 async function attachRawDumpSession(page: Page, id: string): Promise<void> {
   await attachSession(page, id);
-  // (per terminal-clipboard.spec.ts's own hard-won lesson) past the RARE
-  // backstop path terminal.js falls back to when its pre-mount font
-  // settling gives up before the real load lands (its own "## Font
-  // settling before mount" header): that backstop triggers a real resize
-  // of the pty (a fresh `fit()` call), and letting it settle before typing
-  // keeps a resize's own SIGWINCH-driven repaint from landing in the
-  // middle of a byte-level dump this file is about to start asserting on
-  // exactly.
-  await page.evaluate(() => (document as any).fonts.ready.then(() => undefined));
   // Release the gate in the shell's default cooked/echoing mode — any
   // single line does, its content is unimportant — then wait for the
   // marker `stty` itself gates (see `RAW_DUMP_INVOCATION`'s own doc).

@@ -86,14 +86,12 @@
    * (the `--font-ui` token below), it is the standard hygiene reason any
    * vendored web font sets it: text stays visible in the fallback stack
    * during the fetch instead of sitting invisible until this face lands.
-   * For the terminal, it matters less — terminal.js settles this font
-   * BEFORE it ever constructs a terminal (see its own "## Font settling
-   * before mount" header and `mountWhenReady`'s gate) specifically so
-   * xterm's character-cell metrics are stable at construction time, not
-   * because anything here would otherwise render invisibly. Set anyway,
-   * for the rare paths where settling gives up before this face has
-   * registered (a slow fetch past the settle deadline, or app.css itself
-   * not parsed yet when terminal.js first asked). */
+   * For the terminal, it matters less — the font is a mount precondition
+   * (terminal.js's own "## Font settling before mount" header), so xterm's
+   * character-cell metrics are stable at construction time, not because
+   * anything here would otherwise render invisibly. Set anyway: it costs
+   * nothing for a face terminal.js already waited for, and keeps chrome
+   * text visible in the fallback stack if this face is slow. */
   font-display: swap;
 }
 
