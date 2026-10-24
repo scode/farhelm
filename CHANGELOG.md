@@ -2,6 +2,125 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.31.0 - 2026-10-23
+
+**DRAFT release notes - not yet finalized**
+
+### 💥 Breaking
+
+- This release *requires* you to update your remote hosts. (#2511, #2674, #2681)
+- Agent commands now use the full session IDs from `farhelm agent sessions`, and discovery JSON uses schema version 7 with UUID host IDs. Scripts using bare session IDs need to use those full IDs; only the caller's exact own `FARHELM_SESSION_ID` remains accepted bare. (#2367, #2368, #2369, #2370)
+
+### 🚀 Added
+
+- Managed-checkout launches can now reuse a checkout prepared in the background, making the next launch faster. This is on by default under Settings → checkouts and uses one extra checkout's disk space per repository and host; the [prepared-checkout guide](https://farhelm.io/docs/using/start-a-session/#prepared-checkouts) explains when hooks and filters run and when Farhelm falls back to a fresh clone. (#2510, #2511, #2512, #2647)
+- The session launcher remembers your last agent-launch folder separately for each host, so switching hosts no longer carries one machine's path to another. A selected session on the same host still takes precedence, and folders you explicitly choose stay put; command launches and launches into a new managed checkout do not change the remembered folder. (#2669)
+- Agents can ask to add a host, change its alias, icon or color, or remove it. Every request needs your approval, even with **Run farhelm commands without asking** enabled; removing a host leaves its supervisor and sessions running, and approval to add a host does not mean setup has finished. (#2674, #2680, #2681)
+- Add host now accepts an optional alias alongside the destination. Adding a destination already in your hosts is refused before connecting, with the existing host named in the explanation. (#2666, #2667)
+- Restart with now uses the session launcher, including search and template shortcuts. It accepts templates that leave the agent/command choice, agent type, host, folder, session name and first message unset; these partial templates can be written through agent commands, but the Templates editor cannot yet create them and templates saved by New or Clone cannot be used as saved. (#2683)
+- The YOLO confirmation in the session launcher and Restart with can now start the same launch in guarded mode instead, when you explicitly chose YOLO and the agent supports guarded mode. (#2506, #2576, #2655)
+- The session launcher warns when a folder does not exist on the selected host, while still allowing Launch. A refused launch shows a prominent **Not launched.** alert and marks the folder field when the refusal concerns that folder. (#2675, #2677, #2678)
+- Host and unavailable-session details now show which connection step is pending, distinguishing SSH login problems, missing Farhelm, a missing or silent supervisor, and unfinished setup. Failed attempts include the last SSH error lines, while timeouts against older hosts explain what Farhelm could not establish. (#2502, #2505, #2507, #2567)
+- Search in the session launcher offers unmatched text as a session-name choice and explains searches with no choices. Enter reopens hidden search or repository suggestions before choosing one, waits while setup is loading, and gives a specific explanation for invalid custom permission flags. (#2444, #2450)
+
+### 🔄 Changed
+
+- Removing and re-adding a host now starts its pins, seen state and notification marks fresh. The upgrade also clears old viewer state and the last selection when Farhelm cannot tell which host an old session ID belonged to. (#2367, #2368, #2369, #2370)
+- Settings now groups its choices into sections beside a sidebar, with a **‹ settings** button on narrow screens. Switching sections keeps unsaved fields and pending saves; closing Settings still discards unsaved fields. (#2447)
+- When the open session goes away, Farhelm returns to the most recently visited session still listed in the sidebar. This history is shared across windows and remembered across reloads. (#2439, #2441)
+- Quick-launch sequences show queued templates in a larger amber indicator centered over the terminal. While the session launcher is open, the indicator stays at the bottom so you can keep editing. (#2426)
+- Repeated managed-checkout launches spend less time copying cached Git history. An occasional launch takes longer while Git consolidates the cache for later checkouts. (#2508)
+- Signing in again after a browser session expires now reloads the page from the helm's saved state. Open dialogs and unsaved drafts are lost in that reload. (#2614)
+- A setting the app could not save no longer returns later through a silent retry after signing in again. It remains in effect until the app next reads your saved settings, then disappears; failed moves of a template's quick-launch mark also show the mark where it was actually saved. (#2623)
+- Retrying a session creation with the same key after deleting its session now starts a fresh attempt, with agent approval still required. Refused attempts keep their answer for 24 hours before the key can be used again. (#2497)
+- The helm can finish an authenticated action after its client disconnects while the request is arriving. Uploads, downloads and operations meant to stop when their caller leaves keep that behavior. (#2458)
+- Refused host uninstalls now explain version and identity problems and offer Remove to forget the host without changing it. When another entry reaches the same machine, the explanation names that entry and how to uninstall through it. (#2491, #2605)
+
+### 🔧 Fixes worth highlighting
+
+- Starting a session, checking or recovering a new GitHub checkout, and opening or reconnecting a terminal tab no longer pause typing in other sessions on that host while waiting for another session operation. (#2409, #2456, #2457)
+- A different folder placed at an old managed checkout's path no longer inherits its automatic agent trust, and an agent spawning into an ordinary folder no longer carries that trust from its parent. Launch and Restart approval cards now show when checkout hooks, settings and commands will be trusted. (#2349, #2353, #2354)
+- Localhost tunnels on the Mac now always use a locally chosen port, preventing a remote service from occupying the browser helm's address and reading its saved sign-in. Remote apps that put their own localhost port into links or redirects now need to be opened through the tunnel's link. (#2364, #2635)
+- On Linux, the helm now rejects certificates from the eMudhra intermediate authorities whose keys leaked in October 2026, even before the system's certificate package is updated, through the [upstream certificate-validation fix](https://github.com/rustls/webpki/pull/546). macOS already blocks them through the operating system. (#2464)
+- Session attachments are restored after an interrupted deletion when the session itself survives, instead of being thrown away at the next startup. (#2640)
+- The trash's delete buttons briefly pause when its list moves, preventing a click from permanently deleting a different checkout that moved under the pointer. (#2651)
+- Saving or renaming a template no longer overwrites one an agent or the command line created under that name after the dialog opened. The dialog refuses the save and says the name is taken. (#2658)
+- Changing template shortcuts in an already-open Templates dialog no longer restores assignments changed elsewhere. A failed number-key save now reports uncertainty and rereads the assignments instead of silently retrying later and potentially launching the wrong template. (#2431, #2583, #2679)
+- Retrying Replace after a lost authentication reply or reapplying unchanged launcher choices no longer starts an extra session when the first launch succeeded. (#2393, #2398, #2536)
+- A terminal finishing loading no longer takes keyboard focus from a button you moved to after selecting the session, preventing Enter intended for that button from reaching the agent. Selecting a session and typing immediately still types into its terminal. (#2656)
+- Session confirmation buttons keep focus when a terminal reconnects or a terminal tab disappears, so Enter intended for the question no longer goes to the terminal. (#2357)
+- Dialogs keep Tab within their controls and prevent interaction with the page behind them, while agent approval cards remain answerable. Closing a dialog releases the page before focus returns or another dialog opens. (#2534, #2535)
+- Host setup, uninstall and refusal questions wait for another open dialog to close and then appear one at a time, preventing overlapping questions from ignoring clicks and keys. (#2408)
+- Approval answers, host dialogs and session outage explanations stay reachable in short windows. Long outage explanations can be scrolled with the pointer or keyboard while sessions and hosts in the sidebar remain clickable. (#2406, #2411, #2419, #2654)
+- The session launcher's checkout-folder field keeps your draft and keyboard focus when an unrelated settings change arrives while you type. (#2394)
+- Saving an unchanged checkout folder or post-clone command in Settings no longer overwrites a change made elsewhere or strips a trailing space from an existing folder name. An edited checkout folder still has surrounding whitespace removed. (#2397, #2663)
+- Starting or restarting an agent, replacing a session, or opening a terminal tab now reports an error if its folder cannot be entered, instead of silently using the home folder. Agent launches also return to the session folder if shell startup files change directories; terminal tabs keep normal shell startup behavior. (#2363)
+- An agent that exits before it starts now leaves an error showing the failed startup step, exit code and available output, including on macOS hosts. (#2493, #2499)
+- Rerunning the Mac installer repairs a damaged program for that version instead of reporting success over a copy that cannot start. (#2662)
+- Updating a host refuses before changing anything when a newer build has upgraded its saved data beyond what the update can read. This needs database-version reporting in the newer build; older development builds without that reporting are still not detected. (#2649)
+- Retrying an uninstall while a host cannot connect now refuses if its supervisor is still running, preserving sessions Farhelm cannot check. (#2648)
+- Host uninstall refuses while anything is mounted on or inside the folder it would delete, preventing files from another mounted folder from being deleted with Farhelm. (#2646)
+- Quitting and quickly reopening the desktop app no longer lets the old supervisor's unfinished cleanup delete the new supervisor's launch files. The reopened app waits for cleanup and reports that the previous supervisor is still shutting down if it takes longer than about 20 seconds. (#2637)
+- Links work again in the frozen terminal screen kept after a refused reconnect or takeover. (#2403, #2597)
+- Right-clicking a terminal no longer copies an old selection over newer clipboard contents. (#2399)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- Session and host menus, notification lists, template number menus and the desktop update menu close when updates move their buttons or rows, instead of floating beside a different item. Session menus also close when a failed session list recovers, preserving any pending Delete or Replace question for the next opening. (#2379, #2430, #2544, #2545, #2547, #2548, #2550, #2552, #2555, #2556, #2652)
+- Terminal connection notices and upload errors display invisible and direction-changing characters visibly, so host text cannot hide or reorder the explanation. (#2388)
+- Session action names for assistive technology spell out hidden formatting characters in titles, matching the visible title. (#2359)
+- The warning after copying a session's command or folder continues to describe the copied value if the details refresh. (#2358)
+- The Templates editor shows invisible formatting in names visibly and preserves existing names when saving other edits. (#2428)
+- Cloning a session shows invisible formatting in its repository name visibly throughout the launcher, and keeps such an inherited name read-only until cleared. (#2480)
+- Shortened folder suggestions no longer show broken fragments of the markers for invisible characters; the full path remains in the tooltip and available to screen readers. (#2473)
+- Native startup errors display hidden characters in reported versions and installation identities visibly. (#2471)
+- Farhelm refuses to start its supervisor from a program folder containing a colon, which could make sessions search unintended folders for commands. (#2361)
+- Agent-requested links using IPv6 forms of local IPv4 addresses, or IPv6 addresses reserved for local use, now need local-network approval rather than counting as public links. (#2630)
+- Terminal links refuse clicks while a tooltip, quick-launch indicator or tunnel-error notice covers their destination preview, and the explanation stays above the covering surface. Refusal explanations also stay visible when terminal output redraws the link. (#2348, #2392, #2596)
+- Repeated copies of a web link on consecutive terminal rows no longer show a false destination warning. (#2401)
+- Bare filenames such as `backup.7z` and `backup.001` now offer file hover and download without a directory prefix. (#2396, #2575)
+- A modified click in the desktop app opens a downloaded file only when its hover offered opening, even if another window changed that file type's setting. (#2351)
+- Quitting the desktop app during a download removes its hidden partial files from Downloads; files left by a crash, force-quit or an older build remain untouched. (#2440)
+- Closing a tunnel still finishes and updates other clients if the client that closed it disconnects during shutdown. (#2445)
+- Saving managed-checkout agent trust or dismissing its hint still updates other clients if the saving client disconnects before completion. (#2443)
+- Updating a host first added with an incompatible Farhelm no longer shows a false **host changed** warning after reconnecting. Real destination or identity changes show both values and advice. (#2501, #2504, #2571)
+- Host uninstall works when the home folder is reachable at two paths, while still refusing shared installations and keeping the host's data. (#2551, #2574, #2668)
+- Uninstall refuses before confirmation when the host's default data path contains control characters or invalid text, instead of stopping after disabling its supervisor. (#2650)
+- Setting up, updating or removing a host stops waiting after a few seconds if a local SSH helper keeps output open after the remote command finishes. Sending files during setup or update can still wait that way. (#2415, #2664)
+- Removing a host and confirming its setup, update or uninstall act on the host and plan shown in that confirmation, even if input was queued while the question changed. (#2586, #2590)
+- Focus stays on a usable control when a host setting finishes saving or SSH help finishes loading, and closing SSH help returns focus to Add host. (#2407, #2424)
+- Dialog text remains reachable with Tab while a request leaves no usable controls, and a delayed SSH help reply preserves focus on an agent approval answer. (#2537)
+- Automatically closing a notification list returns focus to its bell when the list held focus. (#2427)
+- Menu arrow keys no longer take focus back after you have moved it elsewhere. (#2438, #2569)
+- When an update installs while its check button has focus, focus moves to the restart control. (#2405)
+- The help for **Run farhelm commands without asking** now says that it also permits agents to delete sessions and templates. (#2661)
+- The session hover summary includes observed YOLO as well as the stored launch setting. (#2378)
+- A queued quick-launch sequence uses the template names shown when Enter was pressed, even if another client changed the shortcut assignments. (#2355, #2598)
+- Incomplete quick launches explain what still needs completing without asking you to repeat a prefix already entered, and pick up changed shortcuts and deleted templates. (#2425)
+- Opening the template list refreshes shortcut labels changed by an agent; changes while it stays open still appear at the next opening. (#2382)
+- The `farhelm agent templates` table shows custom permission flags with quoting that keeps separate arguments visible. (#2433)
+- The Templates dialog keeps edits when a stale Discard click arrives after **keep editing**. (#2593)
+- Choosing a custom model keeps a compatible reasoning effort while custom permission flags are empty or unfinished. (#2391)
+- Selecting the current agent again keeps custom permission flags, including unfinished quotes and spacing. (#2389)
+- Reset choices discards custom permission flags so choosing another agent cannot bring the old flags back. (#2523)
+- Editing custom permission flags while a launch is in progress no longer changes the pending setup or its retry. (#2515)
+- New, Clone and Replace with can retry after a refused launch's folder is restored, without editing or reopening the launcher. (#2390)
+- Applying a template that changes a launch clears its previous YOLO question. (#2538)
+- Replace from the sidebar and the top of a session can no longer leave two YOLO questions for the same session. (#2410)
+- Replace with's recent-setup rows say **replace** and announce the same running-session warning as the replace button. (#2653)
+- In the desktop app, Replace with preserves the old session if it starts running between your action and the launch; the launcher reports when both sessions now exist. (#2595)
+- A retry of an interrupted session creation no longer removes, stops or relaunches a session that has since been restarted. (#2570, #2638)
+- Farhelm clears temporary launch files after refused session creation and avoids repeating completed cleanup when stopping an agent that could not start. (#2518)
+- Existing repositories appear in launcher suggestions when the host selects a separate Git configuration file. (#2412)
+- With conversation hooks disabled, Restart with forgets the previous conversation when choosing another, so a later Restart cannot reopen the one you left. Plain Restart remains unavailable until Farhelm learns the current conversation; Restart with can still use a conversation you name. (#2636)
+- A second Grok or OMP running inside an existing session no longer takes over which conversation Restart resumes when the outer agent uses an unfamiliar Grok program name or runs OMP's entry file directly through Bun. Unrecognized Grok launches leave Restart unavailable. (#2639, #2641)
+- Recovering an interrupted Delete no longer leaves an intact checkout missing from the trash list. (#2374)
+- The trash keeps unknown archive sizes marked partial and no longer says it is empty when some folders could not be inspected. (#2402, #2404)
+- On filesystems without folder creation times, session deletion leaves checkout folders where they are and the trash refuses to delete them, because Farhelm cannot distinguish a replacement folder at the same path. Common Linux and macOS filesystems are unaffected. (#2634)
+- Farhelm's private Linux tmux now finds terminal definitions in normal system locations, fixing manual attachment from a terminal and avoiding reads from its vanished build folder. Sessions in the app were unaffected. (#2657)
+
 ## v0.30.0 - 2026-10-18
 
 ### 💥 Breaking
