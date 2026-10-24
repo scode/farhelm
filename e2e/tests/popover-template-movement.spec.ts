@@ -279,8 +279,17 @@ for (const moves of [true, false]) {
       const release = routeGate();
       const retired = routeGate();
       let expectedOrder: string[] = [];
+      // A rename re-reads the template list right before it writes, to refuse
+      // a name another client took since the dialog loaded (#2658). That read
+      // is not the refresh this test holds, so list reads pass through until
+      // the browser has sent the rename's own write.
+      const renamedPath = `/api/templates/${encodeURIComponent(renamed)}`;
+      let written = false;
+      page.on("request", sent => {
+        if (sent.method() === "PUT" && new URL(sent.url()).pathname === renamedPath) written = true;
+      });
       const stop = await drainedRoute(page, url => url.pathname === "/api/templates", async route => {
-        if (route.request().method() !== "GET") return route.fallback();
+        if (route.request().method() !== "GET" || !written) return route.fallback();
         const response = await route.fetch();
         expect(response.ok(), "actual post-rename list read succeeded").toBe(true);
         requireHelmBuild(response, "template movement rename refresh");
