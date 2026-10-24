@@ -4,8 +4,6 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ## v0.31.0 - 2026-10-23
 
-**DRAFT release notes - not yet finalized**
-
 ### 💥 Breaking
 
 - This release *requires* you to update your remote hosts. (#2511, #2674, #2681)
@@ -39,35 +37,35 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 ### 🔧 Fixes worth highlighting
 
 - Starting a session, checking or recovering a new GitHub checkout, and opening or reconnecting a terminal tab no longer pause typing in other sessions on that host while waiting for another session operation. (#2409, #2456, #2457)
-- A different folder placed at an old managed checkout's path no longer inherits its automatic agent trust, and an agent spawning into an ordinary folder no longer carries that trust from its parent. Launch and Restart approval cards now show when checkout hooks, settings and commands will be trusted. (#2349, #2353, #2354)
 - Localhost tunnels on the Mac now always use a locally chosen port, preventing a remote service from occupying the browser helm's address and reading its saved sign-in. Remote apps that put their own localhost port into links or redirects now need to be opened through the tunnel's link. (#2364, #2635)
 - On Linux, the helm now rejects certificates from the eMudhra intermediate authorities whose keys leaked in October 2026, even before the system's certificate package is updated, through the [upstream certificate-validation fix](https://github.com/rustls/webpki/pull/546). macOS already blocks them through the operating system. (#2464)
+- Session confirmation buttons keep focus when a terminal reconnects or a terminal tab disappears, so Enter intended for the question no longer goes to the terminal. (#2357)
+- Starting or restarting an agent, replacing a session, or opening a terminal tab now reports an error if its folder cannot be entered, instead of silently using the home folder. Agent launches also return to the session folder if shell startup files change directories; terminal tabs keep normal shell startup behavior. (#2363)
+- An agent that exits before it starts now leaves an error showing the failed startup step, exit code and available output, including on macOS hosts. (#2493, #2499)
+- Host uninstall refuses while anything is mounted on or inside the folder it would delete, preventing files from another mounted folder from being deleted with Farhelm. (#2646)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- A different folder placed at an old managed checkout's path no longer inherits its automatic agent trust, and an agent spawning into an ordinary folder no longer carries that trust from its parent. Launch and Restart approval cards now show when checkout hooks, settings and commands will be trusted. (#2349, #2353, #2354)
 - Session attachments are restored after an interrupted deletion when the session itself survives, instead of being thrown away at the next startup. (#2640)
 - The trash's delete buttons briefly pause when its list moves, preventing a click from permanently deleting a different checkout that moved under the pointer. (#2651)
 - Saving or renaming a template no longer overwrites one an agent or the command line created under that name after the dialog opened. The dialog refuses the save and says the name is taken. (#2658)
 - Changing template shortcuts in an already-open Templates dialog no longer restores assignments changed elsewhere. A failed number-key save now reports uncertainty and rereads the assignments instead of silently retrying later and potentially launching the wrong template. (#2431, #2583, #2679)
 - Retrying Replace after a lost authentication reply or reapplying unchanged launcher choices no longer starts an extra session when the first launch succeeded. (#2393, #2398, #2536)
 - A terminal finishing loading no longer takes keyboard focus from a button you moved to after selecting the session, preventing Enter intended for that button from reaching the agent. Selecting a session and typing immediately still types into its terminal. (#2656)
-- Session confirmation buttons keep focus when a terminal reconnects or a terminal tab disappears, so Enter intended for the question no longer goes to the terminal. (#2357)
 - Dialogs keep Tab within their controls and prevent interaction with the page behind them, while agent approval cards remain answerable. Closing a dialog releases the page before focus returns or another dialog opens. (#2534, #2535)
 - Host setup, uninstall and refusal questions wait for another open dialog to close and then appear one at a time, preventing overlapping questions from ignoring clicks and keys. (#2408)
 - Approval answers, host dialogs and session outage explanations stay reachable in short windows. Long outage explanations can be scrolled with the pointer or keyboard while sessions and hosts in the sidebar remain clickable. (#2406, #2411, #2419, #2654)
 - The session launcher's checkout-folder field keeps your draft and keyboard focus when an unrelated settings change arrives while you type. (#2394)
 - Saving an unchanged checkout folder or post-clone command in Settings no longer overwrites a change made elsewhere or strips a trailing space from an existing folder name. An edited checkout folder still has surrounding whitespace removed. (#2397, #2663)
-- Starting or restarting an agent, replacing a session, or opening a terminal tab now reports an error if its folder cannot be entered, instead of silently using the home folder. Agent launches also return to the session folder if shell startup files change directories; terminal tabs keep normal shell startup behavior. (#2363)
-- An agent that exits before it starts now leaves an error showing the failed startup step, exit code and available output, including on macOS hosts. (#2493, #2499)
 - Rerunning the Mac installer repairs a damaged program for that version instead of reporting success over a copy that cannot start. (#2662)
 - Updating a host refuses before changing anything when a newer build has upgraded its saved data beyond what the update can read. This needs database-version reporting in the newer build; older development builds without that reporting are still not detected. (#2649)
 - Retrying an uninstall while a host cannot connect now refuses if its supervisor is still running, preserving sessions Farhelm cannot check. (#2648)
-- Host uninstall refuses while anything is mounted on or inside the folder it would delete, preventing files from another mounted folder from being deleted with Farhelm. (#2646)
 - Quitting and quickly reopening the desktop app no longer lets the old supervisor's unfinished cleanup delete the new supervisor's launch files. The reopened app waits for cleanup and reports that the previous supervisor is still shutting down if it takes longer than about 20 seconds. (#2637)
 - Links work again in the frozen terminal screen kept after a refused reconnect or takeover. (#2403, #2597)
 - Right-clicking a terminal no longer copies an old selection over newer clipboard contents. (#2399)
-
-### 🩹 Misc fixes
-
-*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
-
 - Session and host menus, notification lists, template number menus and the desktop update menu close when updates move their buttons or rows, instead of floating beside a different item. Session menus also close when a failed session list recovers, preserving any pending Delete or Replace question for the next opening. (#2379, #2430, #2544, #2545, #2547, #2548, #2550, #2552, #2555, #2556, #2652)
 - Terminal connection notices and upload errors display invisible and direction-changing characters visibly, so host text cannot hide or reorder the explanation. (#2388)
 - Session action names for assistive technology spell out hidden formatting characters in titles, matching the visible title. (#2359)
