@@ -201,6 +201,11 @@ TEARDOWN_DONE=""
 SID="" # set once the create-form phase produces a session; read by teardown
 SID_NEWEST="" # second restart fixture; empty during the interaction-only create
 SID_ROTATED="" # post-rotation fixture: proves native REST still works; read by teardown
+# The helm's API IDs include their host entry; tmux names and systemd scopes
+# belong to this run's local supervisor and contain only the session component.
+# Keep both spellings so API cleanup never loses the routing identity.
+LOCAL_SID=""
+LOCAL_SID_NEWEST=""
 # Set by the answering-supervisor leg, which starts its own supervisor, tmux
 # server and desktop outside the main launch's state directory. Each is
 # cleared once stop_answering has stopped what it names, so a pid is never
@@ -275,8 +280,8 @@ teardown() {
   # UUIDv4s, so one can never be a prefix of another's — the glob cannot
   # catch a stranger's unit. Harmless no-op if the API delete above
   # already tore the scope down, or no systemd user manager exists.
-  if [ -n "$SID" ]; then
-    systemctl --user list-units "farhelm-$SID-*" --no-legend --plain 2>/dev/null |
+  if [ -n "$LOCAL_SID" ]; then
+    systemctl --user list-units "farhelm-$LOCAL_SID-*" --no-legend --plain 2>/dev/null |
       awk '{print $1}' | xargs -r -n1 systemctl --user stop 2>/dev/null
   fi
 
@@ -761,12 +766,14 @@ echo "== creating two bundle-substrate sessions before the hard restart"
 CREATE_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "command": {"command": "bash", "yolo": False}, "title": "zzz-remembered"}))' "$X/work") || fail "encoding remembered smoke session"
 SID=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$CREATE_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the pre-restart smoke session"
 [ -n "$SID" ] || fail "the pre-restart create returned no session id"
-tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID" 2>/dev/null || fail "the created session did not reach the supervisor's tmux"
+LOCAL_SID="${SID#*:}"
+tmux -S "$X/state/tmux.sock" has-session -t "fh-$LOCAL_SID" 2>/dev/null || fail "the created session did not reach the supervisor's tmux"
 sleep 1
 NEWEST_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "command": {"command": "bash", "yolo": False}, "title": "aaa-newest"}))' "$X/work") || fail "encoding newest smoke session"
 SID_NEWEST=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$NEWEST_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the newest pre-restart smoke session"
 [ -n "$SID_NEWEST" ] || fail "the newest pre-restart create returned no session id"
-tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID_NEWEST" 2>/dev/null || fail "the newest session did not reach the supervisor's tmux"
+LOCAL_SID_NEWEST="${SID_NEWEST#*:}"
+tmux -S "$X/state/tmux.sock" has-session -t "fh-$LOCAL_SID_NEWEST" 2>/dev/null || fail "the newest session did not reach the supervisor's tmux"
 
 # The default gate deliberately does not click rows: WebKitGTK's unreliable
 # Xvfb paint is why its CI leg is non-pixel. Seed the helm's shared preference
@@ -873,13 +880,13 @@ RESTART_SELECTION=$(printf '%s' "$RESTART_PREFERENCES" | python3 -c 'import json
 RESTART_SORT=$(printf '%s' "$RESTART_PREFERENCES" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("list_sort") or "")')
 [ "$RESTART_SELECTION" = "$SID" ] || fail "restart changed the helm's remembered selection"
 [ "$RESTART_SORT" = "title" ] || fail "restart dropped the helm's remembered sort"
-tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID" 2>/dev/null || fail "the tmux-held session did not survive the app restart"
+tmux -S "$X/state/tmux.sock" has-session -t "fh-$LOCAL_SID" 2>/dev/null || fail "the tmux-held session did not survive the app restart"
 wait_for_listing_request "$X/desktop-restart.log" "sort=title"
 RESTORED_ATTACHMENT=""
 for _ in $(seq 1 30); do
   CLIENT_SESSIONS=$(tmux -S "$X/state/tmux.sock" list-clients -F '#{session_name}' 2>/dev/null)
-  REMEMBERED_CLIENTS=$(printf '%s\n' "$CLIENT_SESSIONS" | grep -cx "fh-$SID")
-  NEWEST_CLIENTS=$(printf '%s\n' "$CLIENT_SESSIONS" | grep -cx "fh-$SID_NEWEST")
+  REMEMBERED_CLIENTS=$(printf '%s\n' "$CLIENT_SESSIONS" | grep -cx "fh-$LOCAL_SID")
+  NEWEST_CLIENTS=$(printf '%s\n' "$CLIENT_SESSIONS" | grep -cx "fh-$LOCAL_SID_NEWEST")
   if [ "$REMEMBERED_CLIENTS" -gt "$NEWEST_CLIENTS" ]; then
     RESTORED_ATTACHMENT=1
     break
@@ -919,7 +926,7 @@ echo "== rotating the token: the internal desktop credential carries on"
 # desktop's per-launch credential is in memory and deliberately outside that
 # authority. The webview must not re-authenticate, and its terminal client must
 # remain the same socket after rotation.
-PAGE_CLIENT_BEFORE=$(tmux -S "$X/state/tmux.sock" list-clients -t "fh-$SID" -F '#{client_name} #{client_created}' 2>/dev/null | sort)
+PAGE_CLIENT_BEFORE=$(tmux -S "$X/state/tmux.sock" list-clients -t "fh-$LOCAL_SID" -F '#{client_name} #{client_created}' 2>/dev/null | sort)
 [ -n "$PAGE_CLIENT_BEFORE" ] || fail "test premise: the page has no output client on the remembered session before rotation"
 "$BUILT_FARHELM" helm token rotate --state-dir "$X/state" >/dev/null || fail "rotating desktop helm token"
 ROTATED_STATUS=$(curl_auth -s -o /dev/null -w '%{http_code}' --max-time 5 "$API/api/hosts")
@@ -931,7 +938,7 @@ sleep 5
 AFTER_ROTATION_GENERATION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_auth_generation") or 0)' "$X/state/desktop-client.json")
 [ "$AFTER_ROTATION_GENERATION" = "$RESTART_WEBVIEW_GENERATION" ] ||
   fail "rotation made the webview authenticate again (generation $RESTART_WEBVIEW_GENERATION -> $AFTER_ROTATION_GENERATION)"
-PAGE_CLIENT_AFTER=$(tmux -S "$X/state/tmux.sock" list-clients -t "fh-$SID" -F '#{client_name} #{client_created}' 2>/dev/null | sort)
+PAGE_CLIENT_AFTER=$(tmux -S "$X/state/tmux.sock" list-clients -t "fh-$LOCAL_SID" -F '#{client_name} #{client_created}' 2>/dev/null | sort)
 [ "$PAGE_CLIENT_AFTER" = "$PAGE_CLIENT_BEFORE" ] ||
   fail "rotation closed the page's terminal socket (clients before: '$PAGE_CLIENT_BEFORE', after: '$PAGE_CLIENT_AFTER')"
 ROTATED_ROWS=$(device_rows)
@@ -979,6 +986,8 @@ curl_auth -sf --max-time 30 -X DELETE "$API/api/sessions/$SID" >/dev/null || fai
 curl_auth -sf --max-time 30 -X DELETE "$API/api/sessions/$SID_NEWEST" >/dev/null || fail "cleaning up the newest persisted smoke session"
 SID=""
 SID_NEWEST=""
+LOCAL_SID=""
+LOCAL_SID_NEWEST=""
 
 # Guards the watchdog's other failure mode: a false positive. Every phase
 # above ran with a healthy eval bridge, so its death message
@@ -1289,6 +1298,7 @@ print(next(iter(new)) if len(new) == 1 else '')" 2>/dev/null)
   sleep 1
 done
 [ -n "$SID" ] || fail "create through the desktop form did not yield exactly one new session (MT-5 class regression?)"
+LOCAL_SID="${SID#*:}"
 echo "   created $SID"
 
 # Creation is a user-initiated selection, so it exercises the same
@@ -1309,7 +1319,7 @@ DISPLAY=$DISP xdotool mousemove 700 400 click 1 sleep 0.5 type --delay 120 "echo
 DISPLAY=$DISP xdotool key Return
 OK=""
 for _ in $(seq 1 10); do
-  if tmux -S "$X/state/tmux.sock" capture-pane -p -t "fh-$SID" 2>/dev/null | grep -q "^smoke-ok"; then
+  if tmux -S "$X/state/tmux.sock" capture-pane -p -t "fh-$LOCAL_SID" 2>/dev/null | grep -q "^smoke-ok"; then
     OK=1
     break
   fi
@@ -1321,6 +1331,7 @@ done
 # escalation-and-response budget used by the default headless leg.
 curl_auth -sf --max-time 30 -X DELETE "$API/api/sessions/$SID" >/dev/null || fail "cleaning up smoke session"
 SID=""
+LOCAL_SID=""
 close_app_and_wait "$WID" "$(cat "$X/desktop.pid")"
 
 # The legacy path's ONE watchdog check, after every interaction that could
