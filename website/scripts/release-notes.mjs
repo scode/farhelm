@@ -84,11 +84,18 @@ function releases(changelog) {
  * (expressions) and `<` (tags). Code spans are left alone; MDX shows their
  * contents literally. The changelog has no fenced code blocks, and a line is
  * escaped on its own, so a code span never spans lines here.
+ *
+ * Canonical Farhelm docs links also become site paths outside code spans.
+ * CHANGELOG.md needs absolute links on GitHub; the website's link validator
+ * requires those same destinations as site paths so it can check their anchors.
+ * Only inline Markdown targets under https://farhelm.io/docs/ are adapted.
  */
 export function escapeMdx(line) {
   return line
     .split(/(`+[^`]*`+)/)
-    .map((part, i) => (i % 2 === 1 ? part : part.replace(/[{}<]/g, (c) => `\\${c}`)))
+    .map((part, i) => (i % 2 === 1 ? part : part
+      .replace(/\]\(https:\/\/farhelm\.io(?=\/docs\/)/g, '](')
+      .replace(/[{}<]/g, (c) => `\\${c}`)))
     .join('');
 }
 
