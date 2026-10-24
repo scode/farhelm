@@ -184,6 +184,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Test that localhost tunnels bind without address reuse.** Mac localhost tunnels bind their listener with address
   reuse off, so a tunnel cannot steal another program's connections; nothing tests that, and on Linux every test would
   still pass if it regressed. Add a test. From the review of `tunnel-port-and-link-ranges` on 2026-10-23.
+- **Settle on a standard link style.** The link color in settings is unreadable against its background (deep blue). Fix
+  it, audit anything else affected, and settle on one standard visual for all links.
 
 ## Doc todo
 
