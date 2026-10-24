@@ -91,13 +91,11 @@ function gatedShellInvocation(script: string): string {
  * made an early version of this file's drag tests select a blank row
  * (xterm trims a blank-cells selection to `""`, so `hasSelection()` was
  * true while `getSelection()` had nothing to copy). And the search is
- * POLLED, not single-shot: terminal.js settles its font BEFORE mounting in
- * the common case (its own "## Font settling before mount" header), but the
- * rare backstop path — the settle deadline firing before the real load
- * does — still resizes the terminal shortly after attach and makes tmux
- * redraw the pane, and a one-time scan can land mid-redraw and see a buffer
- * that briefly lacks the marker even though a text-wait already saw it
- * rendered.
+ * POLLED, not single-shot: a one-time scan can land mid-redraw and see a
+ * buffer that briefly lacks the marker even though a text-wait already saw
+ * it rendered. (A post-mount font reflow used to be an extra reason to
+ * poll; terminal.js's "## Font settling before mount" header documents why
+ * that source is gone.)
  */
 async function findViewportRow(
   page: Page,
@@ -141,10 +139,9 @@ async function findViewportRow(
  * pixels inside the CONTAINER can land outside the screen entirely and
  * never start a selection (observed as `hasSelection()` staying false on
  * this suite's first real run). The box is measured AFTER the row is
- * found, for the same rare-backstop reason `findViewportRow` polls: on the
- * uncommon path where the font settles late, the screen's on-page size can
- * still change under the backstop's own re-fit, and coordinates derived
- * from a pre-refit box would drag across the wrong pixels.
+ * found, for the same reason `findViewportRow` polls: measuring against the
+ * live layout at the moment of use stays correct even if the terminal
+ * redraws or resizes between the two reads.
  *
  * The two-stage move on the way out of mousedown (a short hop, then the
  * long sweep to `endpoint`) makes xterm register the drag as a selection
@@ -454,17 +451,9 @@ test("a real drag-select copies the local selection to the system clipboard exac
   page,
   request,
 }) => {
-  // The printf sits behind the gate for a SECOND reason beyond the general
-  // one this file's header covers: on the RARE path where terminal.js's
-  // pre-mount font settling gives up before the real load lands (its own
-  // "## Font settling before mount" header), the backstop re-fits the
-  // terminal after the fact, the resize makes tmux reflow the pane, and
-  // content printed BEFORE that reflow can end up in scrollback above a
-  // blank viewport (observed on this suite's early runs, before that
-  // pre-mount settling existed at all: viewportY 3, every visible row
-  // empty, the marker in lines 0-2). Printing only after attach + fonts
-  // settle puts the marker on the screen the drag actually sees, common
-  // case or not.
+  // The printf sits behind the gate: attach completes with both font
+  // weights already loaded, and the explicit gate puts the marker on the
+  // visible screen before the drag.
   const marker = `copysel-e2e-${Date.now()}`;
   const session = await createSession(request, {
     title: `copysel-e2e-${Date.now()}`,
@@ -474,7 +463,6 @@ test("a real drag-select copies the local selection to the system clipboard exac
   try {
     await page.goto("/");
     await attachSession(page, session.id);
-    await page.evaluate(() => (document as any).fonts.ready.then(() => undefined));
     // Click to FOCUS the terminal before typing (the row click that
     // attached it leaves focus on the sidebar row); without it the Enter
     // never reaches the pty and the gated printf never runs.
@@ -539,7 +527,6 @@ test("a drag released outside the terminal element still copies (F1)", async ({
   try {
     await page.goto("/");
     await attachSession(page, session.id);
-    await page.evaluate(() => (document as any).fonts.ready.then(() => undefined));
     await page.locator("#terminal").click();
     await page.keyboard.press("Enter");
     await waitForTermText(page, marker);
@@ -583,7 +570,6 @@ test("reselecting identical text re-copies after an external clipboard change (F
   try {
     await page.goto("/");
     await attachSession(page, session.id);
-    await page.evaluate(() => (document as any).fonts.ready.then(() => undefined));
     await page.locator("#terminal").click();
     await page.keyboard.press("Enter");
     await waitForTermText(page, marker);
@@ -637,7 +623,6 @@ test("under mouse reporting: a plain drag copies nothing, Shift+drag copies exac
   try {
     await page.goto("/");
     await attachSession(page, session.id);
-    await page.evaluate(() => (document as any).fonts.ready.then(() => undefined));
     await page.locator("#terminal").click();
     await page.keyboard.press("Enter");
     await waitForTermText(page, marker);

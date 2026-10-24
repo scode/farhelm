@@ -1086,7 +1086,8 @@ JetBrains Mono Nerd Font is vendored alongside xterm.js for the same self-contai
 xterm's `fontFamily` — but it is no longer terminal-only: `app.css`'s `--font-ui` token (see the design-tokens paragraph
 above) applies the identical vendored face to the rest of the chrome, so the whole app reads as one typeface. Chrome and
 terminal share the same two cached `.woff2` files rather than each vendoring its own copy; whichever surface asks first
-pays the fetch, and the other reads it back from the browser's cache.
+pays the fetch, and the other reads it back from the browser's cache. A terminal mounts only once both bundled weights
+have loaded, the same as its bundled scripts, with no fallback font.
 
 Sidebar width lives in `sidebar-width.js`, shared by web and desktop. It reads localStorage once at script load
 (`farhelm.sidebar-width`): plain digits only, clamped to 240–600px, with 340px for absent, malformed or unreadable

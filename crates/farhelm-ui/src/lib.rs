@@ -1297,7 +1297,8 @@ declare_assets! {
     // The generated [`all_assets`] does now name them, so the attribute is
     // belt-and-braces rather than the only thing keeping them alive. Keep it
     // anyway: the failure it guards — fonts silently absent from the bundle —
-    // shows up only as a wrongly-rendered page.
+    // shows up as terminals that never mount (terminal.js gates on the font),
+    // on top of chrome rendered in the fallback stack.
     //
     // Provenance: JetBrains Mono Nerd Font, from the nerd-fonts project's
     // `patched-fonts/JetBrainsMono` release build, OFL-1.1 licensed, re-encoded

@@ -162,14 +162,12 @@ async function bufferText(page: Page, mode: "full" | "viewport"): Promise<string
  * moving out of the current screenful: a reply marker must stay found
  * even after later output has pushed it off screen ("did a reply arrive"
  * does not stop being true just because the poll ran late), and a dialog
- * or ready marker must stay found even after the RARE font-settling
- * backstop refit (terminal.js's own "## Font settling before mount"
- * header — the deadline firing before the real load lands, now the only
- * remaining source of a post-mount reflow) RE-WRAPS everything already
- * printed and leaves it at a different row than it went in at (see
- * `waitUntilAgentReady`'s own doc for the concrete CI failure that
- * motivated the second case, from before that pre-mount settling
- * existed).
+ * or ready marker must stay found even after a reflow RE-WRAPS everything
+ * already printed and leaves it at a different row than it went in at
+ * (see `waitUntilAgentReady`'s own doc for the concrete CI failure that
+ * motivated the second case). A post-mount font swap used to be a source
+ * of such reflows; terminal.js's "## Font settling before mount" header
+ * documents why that source is gone.
  *
  * Not exported (no use exists outside this module). Like the terminal
  * family's shared `termText`, it promises the full buffer, but it is built
@@ -224,22 +222,19 @@ async function viewportText(page: Page): Promise<string> {
  * mount re-fit the terminal once JetBrains Mono actually loaded, and that
  * `fit.fit()` re-measured the cell size and could change `cols`, which
  * makes xterm RE-WRAP every row already printed to the new column width.
- * terminal.js now settles the font BEFORE constructing a terminal in the
- * common case (its own "## Font settling before mount" header), so this
- * reflow is no longer the routine event it was when this comment was
- * written — but it still happens on the rare backstop path (the settle
- * deadline firing before the real load lands), and the SAME re-wrap
- * follows from it: content printed early — a startup banner, a ready
- * marker — can come out of that reflow at a different row than it went in
- * at, and nothing guarantees it stays inside the CURRENT `[viewportY,
- * viewportY + rows)` window. This is exactly what timed out
- * `spawn.spec.ts`'s own ready-marker wait on both engines, before the
- * pre-mount settling existed, with an effectively blank rendered viewport
- * and the marker sitting in scrollback above it — kept here as a live
- * behavior this helper still has to tolerate, not merely a historical
- * note. Reading the full buffer instead makes the wait immune to where
- * the reflow happened
- * to leave the marker.
+ * terminal.js now gates mounts on the font BEFORE constructing a terminal
+ * (its own "## Font settling before mount" header), so a font-driven
+ * reflow no longer exists — but the SAME re-wrap still follows any other
+ * resize (a window resize, a user font-size step), and content printed
+ * early — a startup banner, a ready marker — can come out of that reflow
+ * at a different row than it went in at, with no guarantee it stays inside
+ * the CURRENT `[viewportY, viewportY + rows)` window. This is exactly what
+ * timed out `spawn.spec.ts`'s own ready-marker wait on both engines,
+ * before the pre-mount settling existed, with an effectively blank
+ * rendered viewport and the marker sitting in scrollback above it. Reading
+ * the full buffer instead makes the wait immune to where the reflow
+ * happened
+ * to leave the marker, and equally tolerates ordinary later resizes.
  *
  * This does reopen the specific risk `viewportText`'s own retired doc
  * described — a dialog marker's text lingering in scrollback after real
