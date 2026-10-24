@@ -20,6 +20,9 @@ import shutil
 import subprocess
 import time
 
+from checkpoint_contract import required_operations
+from window_geometry import require_drag_delivery, require_window_trace
+
 
 MAX_INPUT = 1024 * 1024
 MAX_LOG = 96 * 1024 * 1024
@@ -27,7 +30,9 @@ IDENTIFIER = re.compile(r'[a-z0-9][a-z0-9-]{0,100}')
 UPGRADE_PASS = re.compile(r'upgrade-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
 RESULT_STATES = ('pass', 'fail', 'could-not-run', 'permission-block', 'automation-failure')
 EXECUTOR_RECORDS = ('task.json', 'execution.json', 'events.jsonl', 'stderr.txt', 'result.json',
-                    'model-result.json', 'prompt.txt', 'final.txt', 'executor-state.json', 'cancel.json')
+                    'model-result.json', 'prompt.txt', 'final.txt', 'executor-state.json', 'cancel.json',
+                    'managed-failure.json', 'managed-operations.json', 'managed-bridge.json', 'managed-protocol.jsonl',
+                    'observation-schema.json')
 PRIVATE_NAME_PARTS = ('auth', 'token', 'credential', 'keychain')
 
 
@@ -35,7 +40,7 @@ class TesterError(RuntimeError):
     """An attempt cannot supply valid, unattended guest-native evidence."""
 
 
-def native_args(settings):
+def native_args(settings, managed=None):
     """Use the official bundle's native provider rather than browser-only defaults.
 
 CLI overrides leave the packaged plugin and global vendor configuration alone.
@@ -58,6 +63,18 @@ Authentication is supplied separately by the authorized host preparation step.
         'mcp_servers.cua_repl.args': [str(modules / '@oai/cua-repl/bin/cua-repl.mjs')],
         **{'mcp_servers.cua_repl.env.' + key: value for key, value in env.items()},
     }
+    if managed is not None:
+        # Keep the same signed native runtime and environment. Only its stdio
+        # entrypoint changes: one trusted bridge orders commands and UI calls.
+        values.update({'mcp_servers.cua_repl.command': settings['python'],
+                       'mcp_servers.cua_repl.args': [str(Path(__file__).with_name('guest_operations.py')),
+                           '--task', str(managed / 'task.json'), '--output', str(managed)],
+                       'mcp_servers.cua_repl.enabled_tools': ['brick_ui', 'brick_action'],
+                       'mcp_servers.cua_repl.default_tools_approval_mode': 'approve',
+                       'mcp_servers.cua_repl.tool_timeout_sec': 600,
+                       'features.shell_tool': False, 'features.multi_agent': False,
+                       'features.apps': False, 'features.plugins': False,
+                       'web_search': 'disabled', 'approval_policy': 'never'})
     return [settings['codex'], *[part for key, value in values.items()
                                 for part in ('-c', key + '=' + json.dumps(value))]]
 
@@ -109,6 +126,8 @@ missing OS/CUA/authentication prerequisites. Keeping that distinction explicit
 prevents an otherwise unattended test from inventing a manual approval pause.
 """
     identity = {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')}
+    if task['context'].get('managed_operations'):
+        return managed_prompt(task)
     return f'''You are the independent tester INSIDE a disposable macOS Tart guest.
 This is an actual test, not fixture setup. Its fixture permissions, CLI installation,
 authentication and guest-only authorization have already been prepared.
@@ -186,12 +205,118 @@ the deadline and retains incomplete evidence. Do not claim unrun checks passed.
 '''
 
 
+def managed_prompt(task):
+    """Limit the model to native UI decisions and a structured final observation.
+
+Commands, filenames, result serialization and cross-step handoffs are harness
+responsibilities. The fixed operation tool shares a failure gate with CUA, so
+an ignored command failure cannot be followed by another native UI action.
+"""
+    # The task carries its exact recipe obligations. Requiring a staged file
+    # read with shell tools disabled otherwise sends the model through Finder
+    # Quick Look just to discover what it is supposed to test.
+    required = required_operations(task['check_id'], task['pass_id'], task['context'].get('update_path'))
+    return f'''You are the independent UI tester INSIDE a disposable Mac guest.
+All ordinary product actions in this checkpoint are authorized, including
+Farhelm confirmations, per-run workspace trust and the updater restart.
+Never ask the maintainer a question or disable confirmation preferences.
+
+Use brick_ui for single genuine native GUI operations and brick_action for
+named fixed operations. Shell access is disabled. Do not write JavaScript, scripts,
+files or result.json; the harness owns every command, receipt and image.
+Use brick_action prior_receipts for earlier facts; do not guess earlier paths.
+The first brick_ui call must be desktop/getState or an app bind; read its
+returned documentation. The tool wraps the documented native APIs and accepts
+positional args as JSON data. Native docs show JavaScript examples, but this
+test exposes only structured single actions. Inspect full fresh AX state before indexed
+actions and verify the visible result. Request native screenshots of acceptance
+states; the executor retains the bytes. Do not encode or save images yourself.
+Use native paste for exact text, and inspect the reactive value before any
+submission. Do not browse fixture directories or recipe files through Finder;
+this task contains its complete acceptance instructions.
+No browser backend, host/Tart UI, AppleScript, private OS input or product
+HTTP/DB manipulation. Never grant OS/CUA permissions or log in during this
+test. Stop immediately on an operation error, tool refusal or permission prompt.
+For the actual Restart to update button use brick_ui method restart with
+coordinates from its fresh native menu image, never an AX index or ordinary
+click. The harness clicks once and waits for the candidate process
+before rebinding its UI; do not read the app during its process handoff.
+The bridge blocks further actions after a failure; do not work around it.
+An unavailable log before it appears is a structured observation, not a failed
+command. Query readiness or state; never infer success from elapsed time.
+
+Context: {json.dumps(task['context'])}
+Checkpoint: {task['check_id']}
+Required fixed operations for this selected path: {', '.join(sorted(required))}.
+{task['instructions']}
+
+Return only JSON matching the supplied output schema: status and detail.
+Use pass only after all declared actions and observations succeed; fail only
+for actual Farhelm product failure, could-not-run for unavailable product
+prerequisites, permission-block for OS/login refusals and automation-failure
+for tester/tool errors. Describe actual observed behavior, not inferred success.
+Retain the contract's native acceptance images before returning. For window-drag,
+take only its ten named screenshots; the final dialog close needs a frame query,
+not an eleventh image. Other GUI checkpoints need a final acceptance screenshot.
+A CLI version or echoed prompt is not a genuine agent reply. The harness adds
+task identity, command evidence, native captures and continuity receipts.
+'''
+
+
+def managed_result(task, root, value):
+    """Accept a UI observation only with this checkpoint's machine-owned premises.
+
+The native model cannot waive a failed operation, omit a required independent
+receipt or pass a restart on installed bytes while the old process still runs.
+Its original final reply remains separate from the enriched evidence record.
+"""
+    failure = root / 'managed-failure.json'
+    if failure.exists():
+        raise TesterError('managed action failed: ' + json.loads(failure.read_text())['error'])
+    if not isinstance(value, dict) or set(value) != {'status', 'detail'}:
+        raise TesterError('managed tester final observation has the wrong shape')
+    operations = root / 'managed-operations.json'
+    if not operations.is_file():
+        raise TesterError('managed tester retained no operation receipts')
+    record = json.loads(operations.read_text())
+    expected = required_operations(task['check_id'], task['pass_id'], task['context'].get('update_path'))
+    if value['status'] == 'pass':
+        missing = expected - set(record['completed'])
+        if missing:
+            raise TesterError('managed checkpoint omitted operations: ' + ', '.join(sorted(missing)))
+        if task['check_id'] in ('app-start', 'old-fixture', 'seed-state', 'update-relaunch', 'local-supervisor-agent', 'reopen'):
+            versions = record['observations']['versions']
+            tag = task['context']['previous'] if task['check_id'] in ('old-fixture', 'seed-state') else task['context']['candidate']
+            version = tag.removeprefix('v')
+            if (versions['installed'] != version or versions['bundle'] != version
+                    or not versions['desktop_running'] or version not in versions['running_versions']
+                    or versions.get('cli', {}).get('stdout', '').strip() != 'farhelm ' + version):
+                raise TesterError('managed running-version premise was not established')
+        if task['check_id'] in ('codex-conversation', 'seed-state', 'codex-resume'):
+            state = record['observations']['inspect_state']
+            sessions = state.get('supervisor.db', {}).get('sessions', [])
+            captured = [row for row in sessions if row.get('captured_conversation')]
+            if len(captured) < len(task['context'].get('agents', ['codex'])):
+                raise TesterError('managed conversation capture premise was not established')
+        bonus_preflight = task['check_id'] == 'native-preflight' and not task['pass_id'].startswith('p0-')
+        if task['check_id'] == 'window-drag' or bonus_preflight:
+            try:
+                trace = json.loads((root / 'work/managed-window-frames.json').read_text())
+                (require_drag_delivery if bonus_preflight else require_window_trace)(trace['observations'])
+            except (OSError, ValueError, RuntimeError, TypeError, KeyError) as error:
+                raise TesterError('managed window measurement premise failed: ' + str(error)) from error
+    return {'identity': {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')},
+            **value, 'evidence': record['receipts'], 'continuity': record['continuity']}
+
+
 def native_events(events):
     """Require actual native tool execution and reject refused/failed UI operations.
 
 This checks execution provenance, not image semantics. The operator still
 judges the retained screenshots and observation. It deliberately ignores the
 word 'permission' in ordinary tool documentation and product confirmation text.
+Fixed command operations share this server's failure boundary, but only actual
+provider-backed UI responses can contribute image provenance or native-call counts.
 """
     calls = []
     completed = False
@@ -203,12 +328,13 @@ word 'permission' in ordinary tool documentation and product confirmation text.
         item = row.get('item', {})
         if row.get('type') != 'item.completed' or item.get('type') != 'mcp_tool_call':
             continue
-        if item.get('server') != 'cua_repl' or item.get('tool') != 'js':
+        if item.get('server') != 'cua_repl' or item.get('tool') not in ('js', 'js_reset', 'brick_ui', 'brick_action'):
             raise TesterError('GUI task used an unexpected MCP backend')
         result = item.get('result') or {}
         if item.get('status') != 'completed' or item.get('error') or result.get('isError') or result.get('is_error'):
             raise TesterError('native computer-use operation failed or was refused')
-        calls.append(item)
+        if item.get('tool') in ('js', 'brick_ui'):
+            calls.append(item)
     if not completed:
         raise TesterError('tester turn did not complete')
     return calls
@@ -306,7 +432,9 @@ def retain_native_captures(task, value, directory, events):
 
 Image serialization is executor work: unsupported model-side encoding APIs
 must not invalidate an otherwise useful product observation. Keep the latest
-ten distinct captures, within the existing reference and byte budgets. Failed
+ten captures, within the existing reference and byte budgets. Ordinary checks
+deduplicate identical pixels; window-drag preserves separate image occurrences
+because cropped window pixels can be identical at different measured positions. Failed
 turns may retain earlier successful captures as diagnostics, but this helper
 cannot grant native completion or a product pass.
 """
@@ -319,7 +447,7 @@ cannot grant native completion or a product pass.
         item = row.get('item', {})
         result = item.get('result') or {}
         if (row.get('type') != 'item.completed' or item.get('type') != 'mcp_tool_call'
-                or item.get('server') != 'cua_repl' or item.get('tool') != 'js'
+                or item.get('server') != 'cua_repl' or item.get('tool') not in ('js', 'brick_ui')
                 or item.get('status') != 'completed' or item.get('error')
                 or result.get('isError') or result.get('is_error')):
             continue
@@ -331,8 +459,11 @@ cannot grant native completion or a product pass.
                 raise TesterError('native image exceeds the evidence bound')
             data = base64.b64decode(encoded, validate=True)
             digest = hashlib.sha256(data).hexdigest()
-            captures.pop(digest, None)
-            captures[digest] = data
+            if task['check_id'] == 'window-drag':
+                captures[f'{len(captures)}:{digest}'] = data
+            else:
+                captures.pop(digest, None)
+                captures[digest] = data
     available = min(10, 20 - len(value['evidence']))
     root = Path(directory)
     references = value['evidence'] + list((value['continuity'] or {}).values())
@@ -368,6 +499,30 @@ completion must not discard an otherwise safe screenshot or failure receipt.
     value = validate_observation(task, value, directory)
     root = Path(directory).resolve()
     calls = native_events(events)
+    if task['context'].get('managed_operations') and any(call.get('tool') != 'brick_ui' for call in calls):
+        raise TesterError('managed test used executable UI code instead of structured native actions')
+    if (value['status'] == 'pass' and task['context'].get('managed_operations')
+            and task['check_id'] == 'update-relaunch' and not any(
+                call.get('arguments', {}).get('method') == 'restart' for call in calls)):
+        raise TesterError('managed update did not use the owned native restart transition')
+    bonus_preflight = task['check_id'] == 'native-preflight' and not task['pass_id'].startswith('p0-')
+    if (value['status'] == 'pass' and task['context'].get('managed_operations')
+            and (task['check_id'] == 'window-drag' or bonus_preflight)):
+        count = sum(block.get('type') == 'image' for call in calls for block in call.get('result', {}).get('content', []))
+        if task['check_id'] == 'window-drag' and count != 10:
+            raise TesterError('window check requires exactly ten native image observations')
+        trace = json.loads((root / 'managed-window-frames.json').read_text())
+        hashes = native_image_digests(events)
+        if any(row['observation']['image']['sha256'] not in hashes for row in trace['observations']
+               if row['observation']['image'] is not None):
+            raise TesterError('window geometry references an image absent from the native event stream')
+        if bonus_preflight:
+            gestures = [call.get('arguments', {}) for call in calls]
+            if (not any(call.get('method') == 'drag' for call in gestures)
+                    or not any(call.get('method') == 'click' and len(call.get('args', [])) == 2
+                               and isinstance(call['args'][1], dict) and call['args'][1].get('clickCount') == 2
+                               for call in gestures)):
+                raise TesterError('bonus native readiness omitted an actual drag or double-click')
     if value['status'] == 'pass' and task['gui'] and not calls:
         raise TesterError('passing GUI check has no actual native CUA calls')
     if value['status'] == 'pass' and task['gui']:
@@ -454,6 +609,9 @@ unvalidated model-created artifacts. All exported bytes remain private.
     destination = root / 'export'
     destination.mkdir(mode=0o700)
     names = {'task.json', 'execution.json', 'events.jsonl', 'stderr.txt', 'model-result.json'}
+    managed_records = {'managed-failure.json', 'managed-operations.json', 'managed-bridge.json', 'managed-protocol.jsonl',
+                       'observation-schema.json', 'final.txt'}
+    names.update(name for name in managed_records if (root / name).is_file())
     if summary['status'] != 'automation-failure':
         names.add('result.json')
         names.update(summary['result']['evidence'])
@@ -463,7 +621,7 @@ unvalidated model-created artifacts. All exported bytes remain private.
         names.update(summary['unverified_result']['evidence'])
         names.update((summary['unverified_result']['continuity'] or {}).values())
     for name in names:
-        metadata = name in ('task.json', 'execution.json', 'events.jsonl', 'stderr.txt', 'model-result.json')
+        metadata = name in ('task.json', 'execution.json', 'events.jsonl', 'stderr.txt', 'model-result.json') or name in managed_records
         source = (root if metadata or (name == 'result.json' and (root / name).is_file()) else root / 'work') / name
         if not metadata and name != 'result.json':
             source = evidence_file(root / 'work', name)
@@ -548,8 +706,19 @@ authentication configuration is changed.
     (root / 'prompt.txt').write_text(prompt(task))
     state = root.parent / 'executor-state.json'
     state.write_text(json.dumps({'attempt': task['attempt'], 'phase': 'running'}))
-    argv = native_args(task['settings']) + [
-        'exec', '--yolo', '-m', task['settings']['model'], '--skip-git-repo-check',
+    managed = task['context'].get('managed_operations', False)
+    # Native CUA needs the disposable guest's unattended execution mode. A
+    # read-only Codex sandbox instead generates nested approval requests which
+    # policy=never declines. Isolation is the owned guest, while disabled shell
+    # tools and the serial fixed-operation bridge prevent accidental scripts.
+    options = ['--ignore-user-config', '-s', 'danger-full-access'] if managed else ['--yolo']
+    if managed:
+        schema = {'type': 'object', 'properties': {'status': {'type': 'string', 'enum': list(RESULT_STATES)},
+                  'detail': {'type': 'string'}}, 'required': ['status', 'detail'], 'additionalProperties': False}
+        (root / 'observation-schema.json').write_text(json.dumps(schema))
+        options += ['--output-schema', str(root / 'observation-schema.json')]
+    argv = native_args(task['settings'], root if managed else None) + [
+        'exec', *options, '-m', task['settings']['model'], '--skip-git-repo-check',
         '--json', '-C', str(work), '-o', str(root / 'final.txt'), prompt(task),
     ]
     process = None
@@ -576,6 +745,31 @@ authentication configuration is changed.
         if sum((root / name).stat().st_size for name in ('events.jsonl', 'stderr.txt')) > MAX_LOG:
             raise TesterError('guest tester output exceeded its bound')
         result = work / 'result.json'
+        if managed:
+            final = root / 'final.txt'
+            if not final.is_file() or final.stat().st_size > MAX_INPUT:
+                raise TesterError('managed tester did not return a bounded final observation')
+            reported = json.loads(final.read_text())
+            try:
+                observation = managed_result(task, root, reported)
+            except TesterError as error:
+                # A failed command must retain its receipt and any genuine UI
+                # captures even when it was the first operation of the turn.
+                # final.txt preserves the model's original claim separately.
+                record = root / 'managed-operations.json'
+                evidence = json.loads(record.read_text())['receipts'] if record.is_file() else []
+                # A real app failure can itself make a later native read fail.
+                # Keep that product claim unverified for review while the
+                # enclosing execution still reports automation failure.
+                claimed_failure = isinstance(reported, dict) and reported.get('status') == 'fail'
+                detail = (str(reported.get('detail', '')) + '\nUnverified because: ' + str(error)
+                          if claimed_failure else str(error))
+                observation = {'identity': {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')},
+                               'status': 'fail' if claimed_failure else 'automation-failure', 'detail': detail[:4000],
+                               'evidence': evidence, 'continuity': None}
+                result.write_text(json.dumps(observation, indent=2) + '\n')
+                raise
+            result.write_text(json.dumps(observation, indent=2) + '\n')
         if result.is_symlink() or not result.is_file() or result.stat().st_size > MAX_INPUT:
             raise TesterError('guest tester did not retain a bounded result')
         events = [json.loads(line) for line in (root / 'events.jsonl').read_text().splitlines() if line]

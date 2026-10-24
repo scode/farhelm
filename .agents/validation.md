@@ -178,6 +178,14 @@ that its required systemd or SSH substrate ran.
 - `deno test -A scripts/serve-page.ts` — the server every flow's local questions page goes through: that it answers with
   `Cache-Control: no-store` and moves past a taken port. Run it, with `deno check` on the same file, when the script
   changes; seconds. Needs Deno, and fetches `jsr:@std/http` the first time.
+- `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' --tmux none -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
+  — validates owned Tart lifecycle, signed-input planning, guest execution, fixed command operations, durable handoffs,
+  compiled checkpoint contracts, structured native actions, restart process handoffs, calibrated window measurements,
+  gesture-trace and bonus gesture-readiness gates, failure gates and evidence import with fictional fixtures. Use a
+  substrate that permits process-group inspection; Linux continuity cases skip on macOS. These tests prove harness
+  contracts, not native GUI behavior or a release pass. Actual native fixture probes and release checks retain their own
+  private evidence. The guest-only Swift geometry helper needs separate SDK type-check and read-only runtime validation
+  in an owned disposable guest; the portable suite does not exercise that OS API.
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` — the changelog
   layout lint the release gate runs on every tag, and the checker's own fixtures (format variants, a synthetic git
   history for the fragment sweep, synthetic dist manifests for the announcement comparison). Run the lint when

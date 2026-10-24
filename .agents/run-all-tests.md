@@ -110,6 +110,11 @@ Generic recorder wrapping is fine but not required for these; record each result
 - `python3 scripts/test-todo-picker.py`
 - `deno test -A scripts/serve-page.ts`
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
+- The recorded portable brick-test helper suite from `.agents/validation.md`, with process-group inspection available;
+  this exercises compiled task contracts, fixed operations, structured native actions, restart handoff failures and
+  calibrated window-trace and bonus gesture-readiness gates. The guest-only Swift helper separately needs SDK type-check
+  and read-only runtime validation in an owned disposable guest. Neither establishes live release product checks. Report
+  platform skips.
 
 Deliberately not here: everything the sweep runs (workspace nextest including the tmux e2e suite, the browser suite on
 both engines, desktop nextest, both doctest runs, the two JS harnesses, `test-install-sh.sh`, CentOS provisioning,

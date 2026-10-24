@@ -734,9 +734,13 @@ failures retain their artifacts and stop the sequence without automatic retry.
             context.update(ssh=ssh, pass_directory=guest_home + '/farhelm-brick-test/' + self.data['run_id'] + '/' + pass_id)
             context.update(source_checkout=context['pass_directory'] + '/source',
                            signed_inputs=context['pass_directory'] + '/signed-inputs',
-                           shared_state=context['pass_directory'] + '/shared_state.json')
+                           shared_state=context['pass_directory'] + '/shared_state.json',
+                           agents=self.profile.values['agents'],
+                           managed_operations=True)
             source_files = {name: (HERE / name).read_text() for name in
-                            ('guest_tester.py', 'fixture_probe.py', 'verify_release.py', 'continuity.py', 'RECIPE.md', 'OPERATIONS.md')}
+                            ('guest_tester.py', 'guest_operations.py', 'guest_ui.py', 'checkpoint_contract.py',
+                             'window_geometry.py', 'window_geometry.swift', 'fixture_probe.py', 'verify_release.py',
+                             'continuity.py', 'RECIPE.md', 'OPERATIONS.md')}
             with self.locked():
                 entry = self.selected(pass_id)
                 context['check_contracts'] = entry['required']
@@ -745,6 +749,7 @@ failures retain their artifacts and stop the sequence without automatic retry.
                     if addendum.is_symlink() or not addendum.is_file() or not 0 < addendum.stat().st_size <= 32768:
                         raise Unavailable('bonus checks require a bounded filled addendum.md in the private run')
                     source_files['addendum.md'] = addendum.read_text()
+                    context['addendum'] = addendum.read_text()
             with self.locked():
                 entry = self.selected(pass_id)
                 sequence = ([] if entry.get('native_preflight') else ['native-preflight']) + [
