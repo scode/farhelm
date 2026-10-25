@@ -122,6 +122,12 @@ A shot is a test in `e2e/docs-shots/<page>.spec.ts` named after the page. It ope
 the state it shows without launching sessions or changing settings, draws annotations with the docs overlay theme, and
 calls `shot(page, "<page>/<shot>", [regions])`. The image is cropped to the regions plus every annotation on screen.
 
+`visual-review.spec.ts` is the development-review exception: it captures unannotated app surfaces in dark and light
+mode, at wide and constrained window widths, for the Steel plans' visual reviews. It may change the owned staged fleet's
+preferences to show the states under review. Its `visual-review/` shots are referenced by no docs page and are never
+published; the publisher selects only shots the docs pages reference. It shares the real fleet and machine-detail check
+with ordinary docs shots.
+
 - `scripts/docs-screenshots.sh --only <page>` captures that page's shots into `website/public/docs-shots-local/`, and
   the local docs preview shows them straight away, labelled as local captures. Look at every one: the arrow points at
   what the label says, the label covers nothing the reader needs, and nothing from the capturing machine shows. A
