@@ -12,6 +12,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `codex-trust-hint.md` — The Codex trust hint also appears when Codex's folder dialog offers "Quit" instead of going back to its Agent Command Center
 - [in-flight 33b691] `emoji-streaming-corruption.md` — Emoji in terminals take two columns, as agents and tmux expect, so they stop being clipped while output streams
 - [in-flight 163756] `claude-wrapper-capture.md` — Claude conversations are captured through wrappers at any depth with Codex's pin model, plus an end-of-turn hook so a parent corrects a wrong pin promptly
-- [in-flight 35b29e] `trash-delete-blocking.md` — The trash dialog deletes one checkout at a time and shows it: a bobbing upside-down trash icon, counts ticking down, per-entry spinner and elapsed time
+- [complete] `trash-delete-blocking.md` — The trash dialog deletes one checkout at a time and shows it: a bobbing upside-down trash icon, counts ticking down, per-entry spinner and elapsed time
 - [complete] `tunnel-bind-reuse-test.md` — A test pins that localhost tunnel listeners are bound with address reuse off
 - [pending] `hidden-trash-folder.md` — Deleted managed checkouts go into a hidden `.farhelm-trash` folder, and each host's existing trash moves there on its own
