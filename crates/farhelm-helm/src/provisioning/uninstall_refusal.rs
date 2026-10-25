@@ -52,15 +52,17 @@ pub(super) fn unusable_host(state: &HostState, twin: Option<(&str, HostKind)>) -
                 )
             }
         }
-        HostState::IdentityMismatch { recorded, reported } => format!(
+        // The host list spells identities unambiguously, including spaces.
+        // Quoting them here would let the dialog collapse distinct values.
+        HostState::IdentityMismatch { .. } => {
             "Farhelm can't uninstall from this host: the Farhelm install at its ssh destination \
-             is not the one this entry was set up with (identity {} on record, {} now), for \
-             example because the host was reinstalled or the destination now reaches another \
-             machine. If it is the machine you mean, choose adopt in the host's menu, then \
-             uninstall again; otherwise correct the destination in the host's settings",
-            peer_text(recorded),
-            peer_text(reported),
-        ),
+             is not the one this entry was set up with, for example because the host was \
+             reinstalled or the destination now reaches another machine. The host list shows \
+             the recorded and reported identities. If it is the machine you mean, choose adopt \
+             in the host's menu, then uninstall again; otherwise correct the destination in \
+             the host's settings"
+                .to_string()
+        }
         HostState::IdentityUnverified { .. } => {
             "Farhelm can't uninstall from this host: something answers at its ssh destination \
              but doesn't say which Farhelm install it is, so Farhelm can't confirm it is the \
@@ -120,21 +122,16 @@ pub(super) fn not_connected() -> String {
 }
 
 /// A fresh probe must identify the machine whose sessions were checked earlier.
-/// Missing identities remain explicit; this refusal offers Retry rather than
-/// implying that the install can be adopted from inside the uninstall dialog.
-pub(super) fn changed_identity(recorded: Option<&str>, reported: Option<&str>) -> String {
-    let reported = reported
-        .map(peer_text)
-        .unwrap_or_else(|| "no identity".into());
-    let recorded = recorded
-        .map(peer_text)
-        .unwrap_or_else(|| "no identity".into());
-    format!(
-        "Farhelm can't uninstall from this host: the Farhelm answering at its ssh destination \
-         reports {reported}, but this entry has {recorded} on record, so Farhelm can't tell it \
+///
+/// Retry lets the host list explain the current identity state, including when
+/// either identity was missing. Do not promise both values will appear there or
+/// imply that the install can be adopted inside the uninstall dialog.
+pub(super) fn changed_identity() -> String {
+    "Farhelm can't uninstall from this host: the Farhelm answering at its ssh destination \
+         is not the install this entry has on record, so Farhelm can't tell it \
          is the same machine whose sessions it just checked. Choose retry in the host's menu \
          and follow what the host list then says, then choose uninstall again"
-    )
+        .to_string()
 }
 
 #[cfg(test)]
@@ -173,23 +170,27 @@ mod tests {
         }
     }
 
-    /// An identity mismatch permits an explicit adoption; an unidentified
-    /// install does not. Peer bytes must not disguise the identities quoted.
+    /// An identity mismatch permits adoption; an unidentified install does not.
+    /// Identities belong in the host list, where spaces remain distinguishable,
+    /// rather than in this dialog's whitespace-collapsing refusal sentence.
     #[farhelm_testtrace::test]
-    fn identity_refusals_keep_their_distinct_remedies_and_escape_peer_text() {
+    fn identity_refusals_keep_their_distinct_remedies_without_quoting_identities() {
+        let recorded = "identity  old";
+        let reported = "identity new";
         let mismatch = unusable_host(
             &HostState::IdentityMismatch {
-                recorded: "old\nidentity".into(),
-                reported: "new\u{202e}".into(),
+                recorded: recorded.into(),
+                reported: reported.into(),
             },
             None,
         )
         .unwrap();
-        assert!(
-            mismatch.contains(r#""old\nidentity""#) && mismatch.contains(r#""new\u{202e}""#),
-            "{mismatch}"
-        );
-        assert!(!mismatch.contains('\n') && !mismatch.contains('\u{202e}'));
+        for identity in [recorded, reported] {
+            assert!(!mismatch.contains(identity), "{mismatch}");
+            assert!(!mismatch.contains(&peer_text(identity)), "{mismatch}");
+        }
+        assert!(mismatch.contains("host list shows the recorded and reported identities"));
+        assert!(!mismatch.contains("no identity"), "{mismatch}");
         assert!(mismatch.contains("choose adopt") && mismatch.contains("settings"));
         assert_plain_remove_refusal(&mismatch);
         let unverified = unusable_host(
@@ -256,12 +257,10 @@ mod tests {
     #[farhelm_testtrace::test]
     fn neighbouring_refusals_explain_connection_and_identity_recovery() {
         assert!(not_connected().contains("Once the host is connected"));
-        for (recorded, reported) in [(Some("old"), None), (None, Some("new\nidentity"))] {
-            let text = changed_identity(recorded, reported);
-            assert!(text.contains("no identity") && text.contains("Choose retry"));
-            assert!(!text.contains('\n'));
-            assert!(!text.contains("remove it"));
-        }
+        let text = changed_identity();
+        assert!(text.contains("Choose retry in the host's menu and follow what the host list then says, then choose uninstall again"));
+        assert!(!text.contains("no identity"), "{text}");
+        assert!(!text.contains("remove it"), "{text}");
     }
 
     /// No state-machine token should leak back into the explanatory dialog.

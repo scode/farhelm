@@ -132,12 +132,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
   exposed are TBD.
 
-- **Show changed host identities unambiguously in uninstall refusals.** When Uninstall is refused because a host's
-  identity changed, the message shows the identities without making spaces visible, so two different identities can look
-  the same; the host list and the adopt prompt already spell them unambiguously. Show them the way the host list does,
-  or drop them and point to the host list. Complexity gate: fix it only if the fix is simple; otherwise leave it. From
-  the review of `uninstall-refusal-wording` on 2026-10-23. Plan: `plans/queue/uninstall-identity-display.md`.
-
 - **Escape in the launcher's save-as-template panel.** With the panel open but keyboard focus lost (for example after a
   refused save), Escape closes the whole launcher and discards its draft instead of closing just the panel. Complexity
   gate: fix it only if the fix is simple; otherwise leave it. From the review of `modal-dialog-shell` on 2026-10-23.
