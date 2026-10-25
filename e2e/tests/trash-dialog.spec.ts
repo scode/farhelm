@@ -384,6 +384,14 @@ for (const action of ["global", "host"] as const) {
       const first = entries.filter({hasText: `archived-checkout-${firstName}`});
       await expect(first.locator(".trash-entry-progress .delete-spinner")).toBeVisible();
       await expect(first.locator(".trash-entry-elapsed")).toHaveText("0s");
+      // A pending delete is the only state that mounts this technical age.
+      // Require the bundled mono face, not merely tabular digits in Inter.
+      await expect.poll(() => first.locator(".trash-entry-elapsed").evaluate(async (element) => {
+        const style = getComputedStyle(element);
+        if (style.fontFamily.split(",")[0].replace(/["']/g, "").trim() !== "JetBrains Mono") return false;
+        const faces = await document.fonts.load(`${style.fontWeight} ${style.fontSize} "JetBrains Mono"`, element.textContent || "0s");
+        return faces.length > 0 && faces.every((face) => face.status === "loaded");
+      }), { message: "pending cleanup elapsed time uses the loaded mono face" }).toBe(true);
       await expect(section.locator(".trash-entry-waiting")).toHaveCount(2);
       for (const waiting of await section.locator(".trash-entry-waiting").all()) await expect(waiting).toHaveText("waiting");
       await expect(section.locator(".trash-host-progress")).toHaveText("0 of 3 deleted");

@@ -91,7 +91,7 @@ fn HostCommands(host: SshHostCommands) -> Element {
     rsx! {
         section { class: "ssh-help-host host-settings-section",
             h3 { dir: "ltr", "{host.name.escaped()}" }
-            p { class: "peer-value", dir: "ltr", "{host.destination.escaped()}" }
+            p { class: "peer-value font-mono", dir: "ltr", "{host.destination.escaped()}" }
             for (label, command) in [("sessions connection", host.sessions), ("setup and updates connection", host.setup)] {
                 if let Some(command) = command {
                     div { class: "ssh-help-command",

@@ -620,6 +620,8 @@ fn Row(label: &'static str, value: String) -> Element {
 /// compactness cannot turn peer text into Farhelm's own verdict.
 /// A copyable identity shares that strict display path but retains its raw
 /// reference for the clipboard; presentation escapes never become target bytes.
+/// Technical value labels opt into mono individually. Other peer values here
+/// include host names and titles, so isolation alone cannot choose the font.
 #[component]
 fn CardDetail(row: CardRow) -> Element {
     let full = full_width_row(&row);
@@ -633,7 +635,10 @@ fn CardDetail(row: CardRow) -> Element {
         CardRow::Value(label, value) => rsx! {
             div { class,
                 dt { "{compact_label(label)}" }
-                dd { span { class: "peer-value", dir: "ltr", "{display_peer(&value)}" } }
+                dd { span {
+                    class: if matches!(label, "folder" | "URL" | "ssh destination" | "destination" | "permission flags") { "peer-value font-mono" } else { "peer-value" },
+                    dir: "ltr", "{display_peer(&value)}"
+                } }
             }
         },
         CardRow::Block(label, text) => rsx! {

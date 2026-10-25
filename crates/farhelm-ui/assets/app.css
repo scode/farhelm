@@ -2,8 +2,8 @@
  * web/desktop UI's own chrome: plain CSS, no preprocessing and no
  * framework transformation, linked as a static `<link rel="stylesheet">`
  * (lib.rs registers it as `APP_CSS` and decides the served path the same
- * way it does every other asset — see the `url()` note below for the two
- * fonts that need a hard-coded path). xterm.js's own look is a SEPARATE
+ * way it does every other asset — see the `url()` note below for the
+ * fonts that need hard-coded paths). xterm.js's own look is a SEPARATE
  * vendored stylesheet, `vendor/xterm.css`, linked alongside this one
  * (also lib.rs) and out of scope here — nothing in this file targets the
  * terminal's internal DOM.
@@ -38,7 +38,7 @@
  * the status colors are the loudest thing in the sidebar, each paired with
  * a shape of its own (`.status-dot`), so the session that needs a person
  * is louder than the one already open. There is one corner
- * scale and one typeface for the same reason the accent is single: the
+ * scale and shared font roles for the same reason the accent is single: the
  * launch composer once had a palette, radii, and a selection color of
  * its own, and read as a different application.
  *
@@ -47,51 +47,43 @@
  * same names — which only stays a one-block change for as long as no use
  * site holds a literal. */
 
-/* JetBrains Mono Nerd Font, vendored under assets/fonts/ (the full OFL.txt
- * license ships at /assets/OFL.txt) for the same self-contained reason xterm.js
- * itself is vendored — see SPEC_impl.md's "Terminal widget: xterm.js
- * island". Two consumers share this one vendored face: terminal.js sets it
- * as xterm's `fontFamily`, and the `--font-ui` token below applies the same
- * family to the rest of the chrome (see that token's own comment). One face
- * for both is deliberate, not incidental — its Latin glyphs are identical to
- * upstream JetBrains Mono, so chrome and terminal text read as the same
- * typeface family with zero extra bytes fetched: the browser already has to
- * pull this file for the terminal, and a second, non-Nerd copy just for
- * chrome would be a redundant download of glyphs this file already has.
+/* Both font families are vendored: Inter for interface text, JetBrains Mono
+ * Nerd Font for technical values and terminal cells. Their licenses ship as
+ * /assets/OFL-Inter.txt and /assets/OFL.txt. Static CSS cannot interpolate
+ * Rust asset handles, so lib.rs registers these basenames without hashes.
+ * Dioxus flattens source directories: /assets/fonts/ is never a served path.
  *
- * The `url()` paths are literal strings, not run through Rust's normal
- * `{ASSET}` asset-hash interpolation, because this file is served as
- * static text with no templating step. lib.rs registers both files with
- * `with_hash_suffix(false)` specifically so the served path is this exact,
- * predictable string — see the constants' own doc comment for why that
- * trade (no cache-busting on these two files) is acceptable. Note the
- * paths below are FLAT (`/assets/JetBrains...woff2`, no `fonts/` segment):
- * the bundler names every asset from its basename alone, regardless of
- * which subdirectory it started in under `assets/`, so `assets/fonts/`
- * is a source-tree organization only and never appears in a served path.
- *
- * Shipped as WOFF2, not the vendored TTF directly: WOFF2 is a lossless
- * container around the exact same glyph data (every Nerd Font glyph
- * survives re-encoding), and chrome now fetches this file on pages that
- * open no terminal at all, so the ~60% smaller transfer is not a terminal-
- * only nicety anymore. Re-run through `fontTools.ttLib.TTFont` with
- * `flavor = "woff2"` if the vendored face is ever updated; there is
- * deliberately no second copy of the source TTF kept in the tree. */
+ * Swap keeps chrome readable during a fetch. The terminal separately waits
+ * for both JetBrains weights before mounting, so its cell measurements never
+ * depend on a fallback face. Inter is not part of that readiness contract. */
+@font-face {
+  font-family: "Inter";
+  src: url("/assets/Inter-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("/assets/Inter-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("/assets/Inter-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
 @font-face {
   font-family: "JetBrains Mono";
   src: url("/assets/JetBrainsMonoNerdFont-Regular.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
-  /* `swap` serves two different consumers of this one face. For chrome
-   * (the `--font-ui` token below), it is the standard hygiene reason any
-   * vendored web font sets it: text stays visible in the fallback stack
-   * during the fetch instead of sitting invisible until this face lands.
-   * For the terminal, it matters less — the font is a mount precondition
-   * (terminal.js's own "## Font settling before mount" header), so xterm's
-   * character-cell metrics are stable at construction time, not because
-   * anything here would otherwise render invisibly. Set anyway: it costs
-   * nothing for a face terminal.js already waited for, and keeps chrome
-   * text visible in the fallback stack if this face is slow. */
   font-display: swap;
 }
 
@@ -382,22 +374,10 @@
   --row-slot: 12px;
   --row-slot-gap: 6px;
 
-  /* Font stacks. --font-ui carries the vendored JetBrains Mono Nerd Font
-     (the `@font-face` blocks above) into the chrome, the same face
-     terminal.js hands xterm.js — one download, one typeface, chrome and
-     terminal text agree. `ui-monospace` sits before the generic
-     `monospace` keyword as the fallback for the (uncommon) case where the
-     vendored face has not loaded yet: it is not a named platform font but
-     a CSS generic-family keyword, which asks the ENGINE to resolve its own
-     UI-monospace pick (macOS's San Francisco Mono, Windows' Consolas, and
-     so on) rather than falling straight to the coarser `monospace`
-     keyword's guess — a fallback that leans on the platform's own idea of
-     an interface monospace face, nothing claimed about its metrics or
-     whether it happens to already be installed. --font-mono mirrors the
-     exact stack terminal.js hands xterm.js; nothing in this sheet asks for
-     it yet, and it stays declared so any rule that has to line up with
-     terminal content names the same stack rather than a second copy. */
-  --font-ui: "JetBrains Mono", ui-monospace, monospace;
+  /* Names and interface wording inherit Inter. Technical values opt into
+     --font-mono, which matches terminal.js and includes Nerd Font glyphs.
+     Peer isolation is independent: a .peer-value may be a name or prose. */
+  --font-ui: "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 }
 
@@ -499,22 +479,14 @@ html {
   overscroll-behavior: none;
 }
 
-/* Every browser ships its OWN default `monospace` mapping for `code`,
- * `pre`, `kbd`, and `samp` (its user-agent stylesheet, not this file), so
- * without this rule those elements silently opt back out of `--font-ui`
- * and render in whatever platform monospace face the engine picked —
- * exactly the per-platform inconsistency unifying chrome onto the vendored
- * face was meant to end (the auth command in `code { }` (auth.rs) and the
- * clipboard/provisioning-plan `pre` blocks are the sites this actually
- * bites). `font-family` only: each element's own `white-space` handling —
- * the peer-authored `<pre>` blocks keep whatever wrap
- * behavior their own class rule sets — is untouched by this reset and must
- * stay that way. */
+/* Code and command blocks use the bundled mono face rather than the
+ * browser's platform monospace. Preserve their own whitespace rules;
+ * prose previews below opt back into the interface face. */
 code,
 pre,
 kbd,
 samp {
-  font-family: var(--font-ui);
+  font-family: var(--font-mono);
 }
 
 /* Form controls are the other elements that opt out of `--font-ui` on
@@ -3143,6 +3115,9 @@ a:any-link,
 .templates-quick-mark:disabled { opacity: .4; }
 .templates-number-control { flex: 0 0 auto; }
 .templates-number-key {
+  /* Anchor movement groups digit chords as equal-width labels. Keep that
+     physical contract explicit even though the interface face is proportional. */
+  font-variant-numeric: tabular-nums;
   padding: 4px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -3951,11 +3926,19 @@ a:any-link,
   flex-wrap: nowrap;
 }
 
-/* The pin belongs to the title, in the muted foreground and the same font. Keep
+/* The pin is a Nerd Font glyph, independent of the title's Inter face. Keep
    the leading pin block distinct without adding a second section heading. */
 .session-pin {
   flex: 0 0 auto;
   color: var(--fg-1);
+}
+
+/* A Nerd Font pin has different ascent/descent from the Inter title.
+   Center a bounded line box in compact rows so adding a pin cannot inflate
+   their single line through baseline alignment. Noncompact wrapping stays. */
+.session-identity-copy.compact .session-pin {
+  line-height: 1;
+  align-self: center;
 }
 
 .session-pin-separator {
@@ -4295,10 +4278,16 @@ a:any-link,
   min-width: 40px;
 }
 
-/* The colon between host and path is set in the same face and size as the
-   two runs it joins, so `host:~/path` reads as one string; without this it
-   inherited the button's 16px and sat as a visibly larger mark between two
-   smaller ones. Never shrinks: a colon that ellipsized would leave the
+/* A proportional short host must meet its colon without an empty width floor.
+   Refusing shrink protects its name from a long path; the existing 40% cap
+   still ellipsizes long names and leaves the directory room to identify itself. */
+.session-row-meta .session-host {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+/* The colon uses the host's interface face at the metadata size; the path
+   beside it uses mono. Never shrinks: a colon that ellipsized would leave the
    host and path fused with nothing to say where one ends. */
 .session-host-separator {
   color: var(--fg-1);
@@ -8329,3 +8318,49 @@ a:any-link,
   border: 1px solid currentColor;
 }
 .session-tunnel-error { color: var(--fg-0); padding: 4px 12px; }
+
+/* ===== Technical value typography ==================================
+ * Value roles are explicit, never inferred from the trust boundary class
+ * .peer-value. These follow the controls' font shorthands so inheritance
+ * resets cannot erase the role. The hidden age copy must share the visible
+ * age's metrics or the overlaid notification bell drifts. */
+.font-mono,
+.create-session-form .font-mono,
+.host-destination-input.font-mono,
+.app-version,
+.app-version-refresh,
+.feedback-version,
+.host-settings-version > .peer-value,
+.host-settings-row[data-setting="destination"] > .peer-value,
+.host-dialog-destination,
+.status-time,
+.session-bell-time-spacer,
+.session-bell-age,
+.session-cwd,
+.session-invocation,
+.header-copy > .peer-value,
+.session-summary-path,
+.quick-switcher-cwd,
+.launch-composer-folder-path,
+.launch-composer-recent-folder,
+.create-session-form .launch-composer-wrapper,
+.create-session-form .launch-command-resume,
+.create-session-form .custom-permission-flags,
+.checkout-root-field input,
+.provisioning-plan-path,
+.session-pin,
+.terminal-file-icon,
+.terminal-file-name,
+.terminal-file-directory,
+.terminal-link-target-text,
+.host-update-elapsed,
+.trash-entry-elapsed,
+.checkout-trash-path > .peer-value {
+  font-family: var(--font-mono);
+}
+
+/* Preformatted prompt prose and disclosure hints keep the interface face. */
+.approval-card-prompt,
+.terminal-file-hint {
+  font-family: var(--font-ui);
+}

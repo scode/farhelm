@@ -236,7 +236,7 @@ pub(crate) fn display_identity(raw: &str) -> String {
 /// came from somewhere else.
 ///
 /// The split exists so that a peer value can never lay out the sentence
-/// AROUND it. Each `Peer` run is rendered into its own element carrying
+/// AROUND it. Both peer variants render into their own element carrying
 /// `dir="ltr"` and CSS `unicode-bidi: isolate`, which bounds directional
 /// resolution to that element — so "recorded as install X; now reports Y"
 /// keeps X and Y on the sides the labels put them on, whatever they contain.
@@ -251,6 +251,10 @@ pub(crate) enum DetailPart {
     /// A value from the helm, a supervisor, or the registry. Escaped and
     /// isolated when rendered; typed raw storage keeps that choice at the boundary.
     Peer(PeerText),
+    /// A technical value with the same escaping and direction isolation as
+    /// Peer, but a mono face. Trust and typography are separate: names and
+    /// peer-authored prose must keep the surrounding interface face.
+    MonoPeer(PeerText),
 }
 
 impl DetailPart {
@@ -267,6 +271,12 @@ impl DetailPart {
     /// Capture someone else's value without pre-escaping its render snapshot.
     pub(crate) fn peer(value: impl Into<PeerText>) -> DetailPart {
         DetailPart::Peer(value.into())
+    }
+
+    /// Keep paths, commands and versions mono without widening the trust boundary.
+    /// Raw storage and escaping match `peer`; only the rendered font differs.
+    pub(crate) fn mono_peer(value: impl Into<PeerText>) -> DetailPart {
+        DetailPart::MonoPeer(value.into())
     }
 }
 
@@ -286,7 +296,7 @@ pub(crate) fn detail_text(parts: &[DetailPart]) -> String {
         .iter()
         .map(|part| match part {
             DetailPart::Text(text) => text.clone(),
-            DetailPart::Peer(value) => value.escaped(),
+            DetailPart::Peer(value) | DetailPart::MonoPeer(value) => value.escaped(),
         })
         .collect()
 }
@@ -313,10 +323,10 @@ pub(crate) fn PeerLine(
                     DetailPart::Text(text) => rsx! {
                         span { key: "{index}", "{text}" }
                     },
-                    DetailPart::Peer(value) => rsx! {
+                    DetailPart::Peer(value) | DetailPart::MonoPeer(value) => rsx! {
                         span {
                             key: "{index}",
-                            class: "peer-value",
+                            class: if matches!(part, DetailPart::MonoPeer(_)) { "peer-value font-mono" } else { "peer-value" },
                             dir: "ltr",
                             "data-tooltip": if peer_tooltips { value.escaped() },
                             "{value.escaped()}"

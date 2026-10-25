@@ -65,7 +65,7 @@ pub(super) fn SessionSummarySource(
         vec![
             DetailPart::peer(copy.repo.identifier()),
             DetailPart::text(" · "),
-            DetailPart::peer(folder.to_string()),
+            DetailPart::mono_peer(folder.to_string()),
         ]
     });
     let started = (session.created_at > 0).then(|| utc_stamp(session.created_at));
@@ -148,13 +148,13 @@ pub(super) fn SessionSummarySource(
                     if let Some(started) = started {
                         div { class: "session-summary-row",
                             span { class: "session-summary-label", "started" }
-                            span { class: "session-summary-value", "{started}" }
+                            span { class: "session-summary-value font-mono", "{started}" }
                         }
                     }
                     if let Some(last_active) = last_active {
                         div { class: "session-summary-row",
                             span { class: "session-summary-label", "last active" }
-                            span { class: "session-summary-value", "{last_active}" }
+                            span { class: "session-summary-value font-mono", "{last_active}" }
                         }
                     }
                 }

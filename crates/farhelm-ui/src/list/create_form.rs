@@ -6089,7 +6089,7 @@ pub(super) fn CreateSessionForm(
                         }
                         span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
                         " · "
-                        span { class: "peer-value", dir: "ltr", "{summary_folder}" }
+                        span { class: "peer-value font-mono", dir: "ltr", "{summary_folder}" }
                     }
                 }
                 button {
@@ -6633,9 +6633,15 @@ pub(super) fn CreateSessionForm(
                                                         crate::launch_composer::ComposerSearchResult::Host(host) => rsx! { "Host: {host.label}" },
                                                         // Folder actions alter only cwd; a recent
                                                         // setup visibly names every choice it owns.
+                                                        // Keep paths isolated and mono without giving
+                                                        // the interface's action label that font role.
                                                         crate::launch_composer::ComposerSearchResult::UsePath(folder)
-                                                        | crate::launch_composer::ComposerSearchResult::Folder(folder) => rsx! { "Use this path: {display_peer(folder)}" },
-                                                        crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => rsx! { "Browse this path: {display_peer(folder)}" },
+                                                        | crate::launch_composer::ComposerSearchResult::Folder(folder) => rsx! {
+                                                            "Use this path: " span { class: "peer-value font-mono", dir: "ltr", "{display_peer(folder)}" }
+                                                        },
+                                                        crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => rsx! {
+                                                            "Browse this path: " span { class: "peer-value font-mono", dir: "ltr", "{display_peer(folder)}" }
+                                                        },
                                                         crate::launch_composer::ComposerSearchResult::Harness(harness) => rsx! { "Harness: {crate::launch_composer::harness_label(*harness)}" },
                                                         crate::launch_composer::ComposerSearchResult::Template(name) => rsx! { "Template: {display_peer(name)}" },
                                                         crate::launch_composer::ComposerSearchResult::Github(repo) => rsx! { "Managed checkout: {display_peer(&repo.identifier())}" },
@@ -6656,7 +6662,13 @@ pub(super) fn CreateSessionForm(
                                                             }}
                                                         },
                                                         crate::launch_composer::ComposerSearchResult::Recent(entry) => rsx! {
-                                                            span { class: "launch-composer-search-recent-destination", "Recent setup: {display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label}" }
+                                                            span { class: "launch-composer-search-recent-destination",
+                                                                "Recent setup: "
+                                                                span { class: if entry.github_repo.is_none() { "font-mono" } else { "" },
+                                                                    "{display_peer(&crate::launch_composer::recent_destination_label(&entry))}"
+                                                                }
+                                                                " · {selected_host_label}"
+                                                            }
                                                             // Keep the dangerous permission as a semantic span
                                                             // instead of flattening it into the shared summary
                                                             // string, so search recents carry the same warning as
@@ -6858,7 +6870,7 @@ pub(super) fn CreateSessionForm(
                         div { class: "launch-composer-held-context",
                             p { "agent type (held): " span { class: "peer-value", dir: "ltr", "{held_agent_label}" } }
                             p { "host (held): " span { class: "peer-value", dir: "ltr", "{selected_host_label}" } }
-                            p { "folder (held): " span { class: "peer-value", dir: "ltr", "{summary_folder}" } }
+                            p { "folder (held): " span { class: "peer-value font-mono", dir: "ltr", "{summary_folder}" } }
                             if let Some(notice) = folder_notice() { PeerLine { class: "launch-composer-folder-warning".to_string(), parts: notice } }
                         }
                     } else {
@@ -7029,7 +7041,7 @@ pub(super) fn CreateSessionForm(
                                         },
                                         "managed checkout of {display_peer(&repo.identifier())} on {selected_host_label}"
                                         if let Some(preview) = &displayed_preview {
-                                            div { dir: "ltr", "{preview.cwd.escaped()}" }
+                                            div { class: "font-mono", dir: "ltr", "{preview.cwd.escaped()}" }
                                         }
                                         if retry_binding.is_some() {
                                             div { "retry reconciles the original request at this path" }
@@ -7048,6 +7060,7 @@ pub(super) fn CreateSessionForm(
                             }
                             div { class: "launch-composer-folder-picker",
                             input {
+                                class: "font-mono",
                                 r#type: "text",
                                 required: !checkout_mode,
                                 readonly: checkout_mode,
@@ -7419,6 +7432,7 @@ pub(super) fn CreateSessionForm(
             label {
                 "agent command"
                 input {
+                    class: "font-mono",
                     r#type: "text",
                     required: retry_binding.is_none(),
                     autocomplete: "off",
@@ -7584,7 +7598,7 @@ pub(super) fn CreateSessionForm(
                                     live_browse_connection, browse_activation_attempts);
                             }
                         },
-                        "use {result.cwd.escaped()}"
+                        "use " span { class: "font-mono", "{result.cwd.escaped()}" }
                     }
                     if let Some(parent) = result.parent.clone() {
                         button {
@@ -7598,7 +7612,7 @@ pub(super) fn CreateSessionForm(
                                     live_browse_connection, browse_activation_attempts);
                             }
                             },
-                            "parent: {parent.escaped()}"
+                            "parent: " span { class: "font-mono", "{parent.escaped()}" }
                         }
                     }
                     if result.truncated {
@@ -7606,6 +7620,7 @@ pub(super) fn CreateSessionForm(
                     }
                     for child in result.children {
                         button {
+                            class: "font-mono",
                             r#type: "button",
                             dir: "ltr",
                             "data-tooltip": "use this folder: the session will start here",

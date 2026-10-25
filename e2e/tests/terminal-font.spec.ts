@@ -216,8 +216,8 @@ test("a held font request keeps the terminal unmounted past the old 3 s deadline
 
     // Both weights' fetches must reach the held routes before the
     // observation window starts, so the window measures a held download
-    // rather than one never made. Chrome's own use of the face (app.css's
-    // `--font-ui`) may have issued them before any mount; the terminal
+    // rather than one never made. Chrome's explicit mono metadata may
+    // have issued them before any mount; the terminal
     // appearing once bold is released below is what proves a mount was
     // waiting on them.
     await expect

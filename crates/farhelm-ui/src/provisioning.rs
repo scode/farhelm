@@ -1158,6 +1158,7 @@ impl Eq for FlowText {}
 /// Keep peer isolation and authored wording intact while comparing exactly
 /// the runs PeerLine displays. Flattening the sentence would lose its bidi
 /// boundaries; comparing raw peer bytes would include invisible differences.
+/// Mono and interface runs remain distinct because font metrics affect flow.
 #[derive(Clone, Debug)]
 struct FlowParts(Vec<DetailPart>);
 
@@ -1170,7 +1171,8 @@ impl PartialEq for FlowParts {
                 .zip(&other.0)
                 .all(|(left, right)| match (left, right) {
                     (DetailPart::Text(left), DetailPart::Text(right)) => left == right,
-                    (DetailPart::Peer(left), DetailPart::Peer(right)) => {
+                    (DetailPart::Peer(left), DetailPart::Peer(right))
+                    | (DetailPart::MonoPeer(left), DetailPart::MonoPeer(right)) => {
                         left.escaped() == right.escaped()
                     }
                     _ => false,

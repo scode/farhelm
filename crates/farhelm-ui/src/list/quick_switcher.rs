@@ -405,7 +405,7 @@ pub(super) fn QuickSwitcher(
                                         onclick: move |_| on_pick.call(pick.clone()),
                                         span { class: "quick-switcher-template-name", bdi { "{display_peer(name)}" } }
                                         if let Some(template) = template {
-                                            span { class: "quick-switcher-template-summary", bdi { "{super::templates::template_summary(&template.fields)}" } }
+                                            super::templates::TemplateSummary { class: "quick-switcher-template-summary", fields: template.fields.clone() }
                                         }
                                         if !badges.is_empty() {
                                             span { class: "quick-switcher-template-keys",

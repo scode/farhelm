@@ -39,6 +39,7 @@ async function mountReadout(page: Page, spinning: boolean): Promise<void> {
   // under quirks rules before this test ever reaches the stylesheet's contract.
   expect(await page.evaluate(() => document.compatMode)).toBe("CSS1Compat");
   await page.evaluate(() => document.fonts.ready);
+  await expect(page.locator(".app-version-refresh")).toHaveCSS("font-family", /JetBrains Mono/);
   expect(await page.evaluate(() => document.fonts.check('12px "JetBrains Mono"', "↻"))).toBe(true);
   expect(await page.locator(".app-version-refresh").textContent()).toBe("↻");
 }

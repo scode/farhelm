@@ -508,18 +508,16 @@ turning it off brought it back. Animating only opacity or transform does not get
 layout and paint idle, but the compositor still redraws every frame the value changes, so "compositor-only" does not
 make a looping animation cheap.
 
-`--font-ui` and `--font-mono` name the same vendored face — JetBrains Mono Nerd Font, described below in the xterm.js
-island section — rather than two different ones. The chrome (`--font-ui`) and the terminal (`--font-mono`, the stack
-terminal.js hands xterm.js) used to differ, chrome sitting on the platform's `system-ui` face; unifying them means
-chrome-only pages that never open a terminal (the auth screen, an empty session list) now load the face too, and chrome
-text reads as the same typeface as whatever the agent prints instead of pairing a generic UI font against a distinctive
-monospace one. That extra load is a WOFF2 fetch rather than the vendored TTF's — a lossless re-encoding at roughly 40%
-of the TTF's size — and once either surface has fetched it, the browser serves the other from cache rather than fetching
-it a second time. Form controls get the face by default rather than by opting in: user-agent stylesheets give `button`,
-`input`, `select`, and `textarea` a platform face instead of letting them inherit, so one zero-specificity rule in
-app.css makes them inherit `font-family`, and a control added later cannot fall back to the platform sans-serif the way
-most of the launch composer's buttons once did. The rule leaves font size alone, and it excludes xterm.js's own helper
-textarea, which belongs to the vendored widget.
+`--font-ui` names the vendored Inter face for interface text, including labels, buttons, titles, menus, session names
+and host names. `--font-mono` names JetBrains Mono Nerd Font for the terminal, paths, versions, commands, ages and small
+Nerd Font glyphs. Technical values opt into that role explicitly; a peer-authored value is not necessarily technical
+text, so the shared trust and bidi classes do not select a font. Age overlays and their hidden measurement copies use
+the same mono metrics. Both families ship as WOFF2 with their licenses; Inter's regular, semibold and bold weights are
+the same files the docs website vendors. Form controls inherit their surrounding face rather than opting in: user-agent
+stylesheets give `button`, `input`, `select`, and `textarea` a platform face instead of letting them inherit, so one
+zero-specificity rule in app.css makes them inherit `font-family`, and a control added later cannot fall back to the
+platform sans-serif the way most of the launch composer's buttons once did. The rule leaves font size alone, and it
+excludes xterm.js's own helper textarea, which belongs to the vendored widget.
 
 The open session's chrome has one top row with terminal tabs on the left and Restart, Restart with, Replace, Clone,
 Replace with, and Delete on the right, and a slim details bar below the terminal. The bottom bar is ordered status,
@@ -1122,11 +1120,9 @@ byte-identical to upstream is what makes its provenance checkable and a future v
 workaround is already recorded here (the refresh above is one).
 
 JetBrains Mono Nerd Font is vendored alongside xterm.js for the same self-contained reason, and terminal.js sets it as
-xterm's `fontFamily` — but it is no longer terminal-only: `app.css`'s `--font-ui` token (see the design-tokens paragraph
-above) applies the identical vendored face to the rest of the chrome, so the whole app reads as one typeface. Chrome and
-terminal share the same two cached `.woff2` files rather than each vendoring its own copy; whichever surface asks first
-pays the fetch, and the other reads it back from the browser's cache. A terminal mounts only once both bundled weights
-have loaded, the same as its bundled scripts, with no fallback font.
+xterm's `fontFamily`. The terminal and the interface's technical values share the same two cached `.woff2` files;
+ordinary interface text uses Inter. A terminal mounts only once both bundled mono weights have loaded, the same as its
+bundled scripts, with no fallback font. Inter is not a terminal-mount prerequisite.
 
 Sidebar width lives in `sidebar-width.js`, shared by web and desktop. It reads localStorage once at script load
 (`farhelm.sidebar-width`): plain digits only, clamped to 240–600px, with 340px for absent, malformed or unreadable

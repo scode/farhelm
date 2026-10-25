@@ -451,7 +451,8 @@ test.describe("session notifications", () => {
    * in its accessible name and hover help, and it sits between the agent
    * marks and the activity time without displacing either, in both
    * densities. The position check is what holds the overlay design to the
-   * slot it is meant to cover (list/bell.rs).
+   * slot it is meant to cover (list/bell.rs). The hidden age copy must
+   * retain the visible age's mono metrics while the row title uses Inter.
    */
   test("the bell appears only with notifications, loud while unread, beside the time", async ({ page, request }) => {
     const stamp = Date.now();
@@ -486,6 +487,20 @@ test.describe("session notifications", () => {
         // Premise: the row really is compact before it is measured.
         await expect(target.locator(".session-row-meta")).toHaveCount(0);
       }
+      await page.evaluate(() => document.fonts.ready);
+      const age = target.locator(".status-time");
+      const spacer = target.locator(".session-bell-time-spacer");
+      await expect(age).toHaveCSS("font-family", /JetBrains Mono/);
+      await expect(spacer).toHaveCSS("font-family", await age.evaluate((node) => getComputedStyle(node).fontFamily));
+      expect(await spacer.textContent()).toBe(await age.textContent());
+      const ageFont = await age.evaluate((node) => {
+        const style = getComputedStyle(node);
+        return [style.fontSize, style.fontWeight, style.lineHeight];
+      });
+      expect(await spacer.evaluate((node) => {
+        const style = getComputedStyle(node);
+        return [style.fontSize, style.fontWeight, style.lineHeight];
+      })).toEqual(ageFont);
       const bellBox = (await bell.boundingBox())!;
       const slotBox = (await target.locator(".session-bell-slot").boundingBox())!;
       const agentBox = (await target.locator(".session-agent").boundingBox())!;
