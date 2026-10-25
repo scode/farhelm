@@ -176,6 +176,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `restart_template_refusal` (crates/farhelm-ui/src/list/create_form/draft.rs) and the proto's `host_fixed` host check
   (crates/farhelm-proto/src/launcher.rs). Plan: `plans/queue/restart-with-template-refusal.md`.
 
+- **Visual redesign: Steel.** Restyle the app as the "Steel" design the maintainer settled on 2026-10-25 from mockups:
+  blue-gray and periwinkle colors with a light counterpart, Inter for the interface, a host rail with a hosts panel, the
+  sort order as the list title over a status filter, split Restart and Replace buttons, a tunnel pill, one dialog and
+  menu anatomy, and sentence case. The reference mockups are `docs/design/steel/mockups.html`. Plans:
+  `plans/queue/steel-foundation.md`, `plans/queue/steel-sidebar.md`, `plans/queue/steel-session-chrome.md`,
+  `plans/queue/steel-dialogs.md`, `plans/queue/steel-sentence-case.md`.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
