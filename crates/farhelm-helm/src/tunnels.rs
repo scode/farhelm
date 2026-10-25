@@ -1570,6 +1570,42 @@ mod tests {
         );
     }
 
+    /// SPEC_impl.md's embedded-helm listener contract and triage outcome
+    /// `tunnel-shadows-busy-wildcard-port.md` require address reuse off:
+    /// macOS can otherwise shadow another program's wildcard listener.
+    /// Linux rejects that shadowing either way, so read the socket option
+    /// on the returned listener to catch a regression on both platforms,
+    /// including a switch to the convenience bind that enables reuse.
+    #[farhelm_testtrace::test]
+    async fn tunnel_listener_binds_without_address_reuse() {
+        use std::os::fd::AsRawFd;
+
+        let listener = bind_listener(80).unwrap();
+        let address = listener.local_addr().unwrap();
+        assert!(
+            address.is_ipv4(),
+            "fixture must be an IPv4 listener: {address}"
+        );
+        assert_eq!(address.ip(), Ipv4Addr::LOCALHOST);
+        let mut reuse: libc::c_int = -1;
+        let mut length = std::mem::size_of_val(&reuse) as libc::socklen_t;
+        // SAFETY: the listener owns a live socket throughout this call. Both
+        // output pointers are writable for their declared sizes, and length
+        // limits the kernel's option write to the integer's allocated storage.
+        let result = unsafe {
+            libc::getsockopt(
+                listener.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_REUSEADDR,
+                (&raw mut reuse).cast(),
+                &raw mut length,
+            )
+        };
+        assert_eq!(result, 0, "getsockopt: {}", std::io::Error::last_os_error());
+        assert_eq!(length as usize, std::mem::size_of_val(&reuse));
+        assert_eq!(reuse, 0, "tunnel listener must keep SO_REUSEADDR off");
+    }
+
     /// A tunnel never listens on the remote port number, even when it is free
     /// on the Mac (triage outcomes `tunnel-can-take-standalone-helm-port.md`
     /// and `tunnel-shadows-busy-wildcard-port.md`); manager destruction has no
