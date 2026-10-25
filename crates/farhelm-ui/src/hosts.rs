@@ -5073,7 +5073,7 @@ fn AddHostForm(
                 }
                 p { class: "host-dialog-help",
                     "Does this host ask for a second factor or other approval on every ssh login? "
-                    button { r#type: "button", class: "add-host-ssh-help welcome-feedback",
+                    button { r#type: "button", class: "add-host-ssh-help inline-link",
                         "data-tooltip": "ssh needs 2FA?: see the commands for the destination you're adding",
                         onclick: move |_| {
                             settings_dialog::ADD_DIALOG.release();

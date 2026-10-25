@@ -437,7 +437,7 @@ it may be spent on is a closed list rather than a palette to decorate with: sele
 actions, any PRESSED disclosure control, and the wait after a confirmed delete (the spinner and words on the session's
 row and over its terminal, and the dot and words in its header). That last entry is the maintainer's choice
 (2026-09-30): the wait is the outcome the user just confirmed, so the danger red it used to be read as a failure; grey
-is what an earlier indicator used, and it went unnoticed; and `--info`, the only other blue, already means idle with
+is what an earlier indicator used, and it went unnoticed; and `--info`, the blue for status, already means idle with
 unseen output. It is the one entry that does not mean "this is where you are" (see below), so it is kept narrow enough
 not to compete with selection: it colors only the spinner or dot, the words, and the terminal overlay card's edge, and
 the deleting row takes no tint or edge of its own, which would look exactly like the selection it usually already is.
@@ -460,6 +460,12 @@ are" — the same thing every entry but the delete wait says — because an acce
 leave nothing to make the selection readable. Both constraints have a contrast floor under them: the quiet foreground
 tokens are set so that metadata stays at WCAG AA against the brightest surface it lands on, which is what caps how light
 the selected row's fill may go.
+
+Links use their own `--link` role (`#78b7ff`), separate from the accent and from status colors. Every anchor and button
+styled as an inline link uses that color and stays underlined at rest, with no different visited or hover treatment. The
+underline matters because the link blue alone does not stand apart from the surrounding grey prose at the 3:1 contrast
+needed to identify a link by color alone. Keyboard focus keeps the shared accent ring. A link that opens a page outside
+the app ends in `↗`; an inline action inside the app does not.
 
 Selection is one construct wherever it appears — the sidebar's selected row, the selected tab, and the launch composer's
 chosen harness, segment, folder, and list option: the accent-tinted `--accent-fill`, an accent bar along one edge, and

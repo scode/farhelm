@@ -89,6 +89,7 @@ test("ssh help names the empty state and remains dismissible during a failed rea
 
 /** Viewing commands for a typed destination is not registration. Closing the
  * child must restore the still-mounted form, its bytes and its modal focus.
+ * The inline help action uses the shared link look and keeps the keyboard ring.
  */
 test("add host opens ssh help for its draft without losing the form", async ({ page, request }) => {
   await page.goto("/");
@@ -97,15 +98,24 @@ test("add host opens ssh help for its draft without losing the form", async ({ p
   const input = form.locator(".add-host-ssh");
   const link = form.getByRole("button", { name: "Start its connections yourself first.", exact: true });
   await expect(input).toBeFocused();
+  await expect(link).toHaveCSS("color", "rgb(120, 183, 255)");
+  await expect(link).toHaveCSS("text-decoration-line", "underline");
   await link.click();
   let dialog = page.getByRole("dialog", { name: "ssh needs 2FA?", exact: true });
   await expect(form).toBeHidden();
   await expect(dialog).toContainText("Enter an ssh destination in Add host first.");
   await expect(dialog.getByRole("button", { name: "close", exact: true })).toBeFocused();
+  // Park the pointer before the keyboard handoff so focus, rather than hover,
+  // is the premise for the ring checked on the restored inline action.
+  await page.mouse.move(0, 0);
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(form).toBeVisible();
   await expect(link).toBeFocused();
+  await expect.poll(() => link.evaluate(element => element.matches(":focus-visible"))).toBe(true);
+  await expect(link).toHaveCSS("outline-color", "rgb(88, 150, 232)");
+  await expect(link).toHaveCSS("outline-style", "solid");
+  await expect(link).toHaveCSS("outline-width", "2px");
   await expect.poll(() => page.locator('.app-help-toggle').evaluate((element) => element.closest('[inert]') !== null)).toBe(true);
   const destination = `draft-${randomUUID()}.invalid`;
   await input.fill(destination);

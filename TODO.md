@@ -136,10 +136,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   reuse off, so a tunnel cannot steal another program's connections; nothing tests that, and on Linux every test would
   still pass if it regressed. Add a test. From the review of `tunnel-port-and-link-ranges` on 2026-10-23. Plan:
   `plans/queue/tunnel-bind-reuse-test.md`.
-- **Settle on a standard link style.** The link color in settings is unreadable against its background (deep blue). Fix
-  it, audit anything else affected, and settle on one standard visual for all links. Plan:
-  `plans/queue/standard-link-style.md`.
-
 - **Restart with refuses templates that merely re-assert held fields.** Applying a template in Restart with rejects it
   whenever it sets a field the dialog keeps fixed — the host, the launch kind (agent vs command), and others — even when
   the template sets the same value the session already has, so a template that names the current host or the session's

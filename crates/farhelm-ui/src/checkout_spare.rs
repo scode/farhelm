@@ -77,7 +77,7 @@ pub(crate) fn CheckoutSpareSettings() -> Element {
                         event.prevent_default();
                         crate::app_bar::open_external_page("https://farhelm.io/docs/using/start-a-session/#prepared-checkouts");
                     },
-                    "How prepared checkouts differ from a fresh clone"
+                    "How prepared checkouts differ from a fresh clone ↗"
                 }
             }
             if let Some(message) = error().or(load_error) {
