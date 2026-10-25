@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing 53cee0] `trash-delete-blocking.md` — The trash dialog deletes one checkout at a time and shows it: a bobbing upside-down trash icon, counts ticking down, per-entry spinner and elapsed time
 - [complete] `tunnel-bind-reuse-test.md` — A test pins that localhost tunnel listeners are bound with address reuse off
 - [pending] `hidden-trash-folder.md` — Deleted managed checkouts go into a hidden `.farhelm-trash` folder, and each host's existing trash moves there on its own
 - [in-flight 8f81d1] `steel-foundation.md` — Steel redesign, part 1: blue-gray and periwinkle colors with a light counterpart and an appearance setting, Inter for the interface, solid selection, shared controls, and visual-review captures (after `standard-link-style.md`)
