@@ -215,6 +215,10 @@ pub(crate) fn ClaudeTrustSettings() -> Element {
 /// Announce discoverability without covering the question or taking focus.
 /// The page owns occurrence dismissal, so switching sessions or temporarily
 /// withdrawing a stale terminal cannot revive the same unanswered question.
+///
+/// Click completion owns only this view's error; each marked trust resource
+/// reconciles independently. A failed read can retain the local save error
+/// without advertising unknown trust configuration as disabled.
 #[component]
 pub(crate) fn ClaudeTrustBand(session: ReadSignal<Session>, agent_visible: bool) -> Element {
     let base = use_context::<ApiBase>().0;
@@ -230,6 +234,7 @@ pub(crate) fn ClaudeTrustBand(session: ReadSignal<Session>, agent_visible: bool)
     use_hint_read_reconciliation(state);
     let mut occurrences = use_context::<OccurrenceDismissals>();
     let mut settings_open = use_signal(|| false);
+    let mut hint_error = use_signal(|| None::<api::PreferenceWrite>);
     let settings_dialog = crate::modal_dialog::DialogHandle::new(crate::settings::DIALOG_SELECTOR);
     let session = session.read();
     let value = state
@@ -237,45 +242,71 @@ pub(crate) fn ClaudeTrustBand(session: ReadSignal<Session>, agent_visible: bool)
         .as_ref()
         .and_then(|result| result.as_ref().ok())
         .cloned();
+    let occurrence_closed = occurrences.0.read().contains(session.id.raw());
     let visible = show_hint(
         session.claude_trust_prompt,
         session.working_copy.is_some(),
         agent_visible,
         value.as_ref().map(|value| value.enabled),
         value.as_ref().is_some_and(|value| value.hint_dismissed),
-        occurrences.0.read().contains(session.id.raw()),
+        occurrence_closed,
     );
+    // Only the save error may survive an unknown read. The normal hint still
+    // requires an explicitly disabled trust setting; its actions remain hidden.
+    let error_visible = hint_error().is_some_and(|write| write.is_current())
+        && session.claude_trust_prompt
+        && session.working_copy.is_some()
+        && agent_visible
+        && !occurrence_closed
+        && !value.as_ref().is_some_and(|value| value.enabled);
     let id = session.id.raw().to_owned();
     rsx! {
-        // A mounted band may be hidden either by a saved choice or by an
-        // unanswered settings read. Keep that distinction observable without
-        // adding a box to the terminal's flow or changing focus.
+        // Keep read state observable even when neither the normal hint nor a
+        // local save error needs a row in the terminal's flow.
         div { class: "claude-trust-surface", style: "display: contents",
             "data-enabled": value.as_ref().map(|value| value.enabled.to_string()).unwrap_or_default(),
             "data-hint-dismissed": value.as_ref().map(|value| value.hint_dismissed.to_string()).unwrap_or_default(),
-        if visible {
+        if visible || error_visible {
             div { class: "claude-trust-band", role: "status", aria_live: "polite",
-                div { class: "claude-trust-band-copy",
-                    strong { "Claude asks this for every new checkout. " }
-                    "Farhelm can answer it for you, but it's off by default: there's no supported way to do it, so Farhelm would have to edit Claude's own settings file, which comes with caveats."
+                if visible {
+                    div { class: "claude-trust-band-copy",
+                        strong { "Claude asks this for every new checkout. " }
+                        "Farhelm can answer it for you, but it's off by default: there's no supported way to do it, so Farhelm would have to edit Claude's own settings file, which comes with caveats."
+                    }
+                    div { class: "claude-trust-band-actions",
+                        button { r#type: "button", class: "btn btn-primary",
+                            "data-tooltip": "open Settings at the option to answer this question for new checkouts, with its caveats",
+                            onclick: move |_| settings_open.set(true), "Settings and caveats" }
+                        button { r#type: "button", class: "btn btn-neutral",
+                            "data-tooltip": "stop showing this note for every session; Settings can turn it back on",
+                            onclick: move |_| {
+                                let (write, completion) = api::observe_preference(&base, PreferenceValue::ClaudeTrustHintDismissed(true));
+                                if let Some(Ok(value)) = state.write().as_mut() {
+                                    value.hint_dismissed = true;
+                                    value.pending_dismissal = Some(write);
+                                }
+                                hint_error.set(None);
+                                state.restart();
+                                // Navigation drops this error waiter, never the writer.
+                                // Read reconciliation belongs to the resource hook, not
+                                // this click, including for another view's copied marker.
+                                spawn(async move {
+                                    let saved = completion.await;
+                                    if !write.is_current() {
+                                        return;
+                                    }
+                                    hint_error.set((!saved).then_some(write));
+                                });
+                            }, "Don't show again" }
+                        button { r#type: "button", class: "btn btn-neutral", aria_label: "hide this trust hint for this occurrence",
+                            "data-tooltip": "hide this note for this question only",
+                            onclick: move |_| { occurrences.0.write().insert(id.clone()); }, "×" }
+                    }
                 }
-                div { class: "claude-trust-band-actions",
-                    button { r#type: "button", class: "btn btn-primary",
-                        "data-tooltip": "open Settings at the option to answer this question for new checkouts, with its caveats",
-                        onclick: move |_| settings_open.set(true), "Settings and caveats" }
-                    button { r#type: "button", class: "btn btn-neutral",
-                        "data-tooltip": "stop showing this note for every session; Settings can turn it back on",
-                        onclick: move |_| {
-                        let (write, _) = api::observe_preference(&base, PreferenceValue::ClaudeTrustHintDismissed(true));
-                        if let Some(Ok(value)) = state.write().as_mut() {
-                            value.hint_dismissed = true;
-                            value.pending_dismissal = Some(write);
-                        }
-                        state.restart();
-                    }, "Don't show again" }
-                    button { r#type: "button", class: "btn btn-neutral", aria_label: "hide this trust hint for this occurrence",
-                        "data-tooltip": "hide this note for this question only",
-                        onclick: move |_| { occurrences.0.write().insert(id.clone()); }, "×" }
+                if error_visible {
+                    p { class: "app-settings-error", role: "alert",
+                        "Could not save hiding this trust hint. Try again."
+                    }
                 }
             }
         }
