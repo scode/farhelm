@@ -29003,12 +29003,22 @@ exit 0
     /// them before the retries. A retry that created afresh instead of
     /// replaying would get past the launch publication and answer
     /// differently, or leave a session the last assertion would find.
+    ///
+    /// Scope availability is unrelated to request identity. Disable it so
+    /// the first create reaches the permission failure without first asking
+    /// the host's systemd manager: that real probe may take fifteen seconds,
+    /// longer than this fixture's ten-second reply deadline.
     #[farhelm_testtrace::test]
     async fn an_agent_create_is_matched_by_its_request_fingerprint_not_its_launch() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            scopeless_seams(),
+        )
+        .await
+        .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
@@ -33486,9 +33496,12 @@ exit 0
     // properties of that whole pipeline, not of any single function.
     // -------------------------------------------------------------------------
 
-    /// Default seams with the scope manager disabled, for checkout tests
-    /// that Delete, Restart, or retry a create but are not about cgroup
-    /// scopes.
+    /// Default seams with the scope manager disabled, for create and
+    /// lifecycle tests whose contract is independent of cgroup scopes.
+    ///
+    /// Even a create that fails before spawning probes availability while
+    /// choosing its durable scope policy. A test's reply deadline must not
+    /// be consumed by that unrelated host probe.
     ///
     /// On the default real manager, two paths ask the host's systemd user
     /// manager a question whose missing answer is a refusal by design. A
