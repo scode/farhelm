@@ -1,12 +1,11 @@
 #!/usr/bin/env -S deno run -A
 /**
- * Serve an agent-written page to the maintainer's browser, on loopback only, with every response uncacheable.
+ * Legacy static page server, retained for standalone use; agent flows use the `interactive-artifact` skill.
  *
- * This is the one way agents in this repository serve a local page: the review-triage decision page, the planning
- * flow's up-front questions, and any page a later flow adds. What goes on the page is the agent's to decide; this
- * script only serves the directory it is given, which must hold the page as `index.html` (the printed URL is `/`, and
- * directories are never listed). Give it a directory of its own rather than a whole scratch directory: any local
- * account that guesses a file name can read what is served. Usage:
+ * Do not use this for planning questions, review decisions or release-note feedback. It has no authenticated
+ * submission channel. It only serves the directory it is given, which must hold `index.html` (the printed URL is `/`,
+ * and directories are never listed). Give it a directory of its own rather than a whole scratch directory: any local
+ * account that guesses a file name can read what is served. Standalone usage:
  *
  *     scripts/serve-page.ts <dir> [--port <n>]
  *
@@ -18,17 +17,13 @@
  * these pages with `python3 -m http.server`, which sends `Last-Modified` and no `Cache-Control`, so the browser picks
  * its own freshness. On 2026-10-22 that showed the maintainer a planning session's page, cached hours earlier, when a
  * triage session was serving a different page at the same URL: the server's log showed the browser fetching only the
- * favicon. Every flow shares one URL, so a cached copy can be another session's page or an older version of this one.
+ * favicon. The old flows shared one URL, so a cached copy could be another session's page or an older version.
  * Conditional request headers are dropped before serving, so the server never answers 304 and lets the browser keep a
  * copy it cached from an earlier server, and redirects get the header too.
  *
- * The port defaults to 14003, the todo picker's port, because the maintainer keeps that one URL open and may forward
- * that one port from another machine. Like `scripts/todo-picker.py`, this is not a test harness, so the root AGENTS.md
- * rule against fixed ports does not apply. When the port is taken, the script moves up to the next free port, within
- * 20, and prints the URL it actually got, because the flows that use it say to move on without asking. A moved port is
- * not reachable through a forward of 14003, and a port squatter can exploit the move
- * (`review_feedback_queue/todo-picker-port-squatter-steers-planner.md`); the flows have the agent say plainly that the
- * port changed.
+ * The legacy default is port 14003. When it is taken, the script moves up to the next free port, within 20, and prints
+ * the URL it actually got. Neither a fixed address nor a fallback port authenticates the server in an old browser tab;
+ * the interactive-artifact skill replaces that shared-address and clipboard workflow for agent decisions.
  *
  * It never stops whatever holds a port, lists no directories, and binds nothing but `127.0.0.1`.
  */

@@ -175,6 +175,7 @@ Before presenting the first item, read these in full:
 - the `Planned` bucket of `TODO.md`
 - `review_feedback_queue/FILTER.md`
 - `BUGS.md`
+- the `interactive-artifact` skill
 - `AGENTS.md`, "Talking to the user" (root, already in context for agents started at the checkout root)
 - for each item: its feedback file, the code paths it names, and the authoritative `SPEC.md` and `SPEC_impl.md` sections
 

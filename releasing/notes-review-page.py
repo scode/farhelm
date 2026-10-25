@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Render a draft release section as the interactive page the maintainer reviews it on.
+"""Render a legacy standalone release-note review page.
 
-During a stable release the proposed `## vX.Y.Z` section lives in a scratch Markdown file, exactly as it will land in
-`CHANGELOG.md`, and the maintainer reviews it on a page served from this machine by `scripts/serve-page.ts`
-(`releasing/.agents/stable.md`, "Cutting a stable release", step 2). This script turns that file into the page. Every
-entry gets a short id (the category's initial and its position: `B2`, `A14`, `M3`) and a note box under it, plus one box
-for general notes. **Copy feedback** gathers the non-empty notes into one plain-text block that the maintainer pastes
-back into the agent session:
+Stable releases now use the `interactive-artifact` skill (`releasing/.agents/stable.md`, "Cutting a stable release",
+step 2). Do not use this generator for that flow: its full document and scripts are incompatible with the skill's body
+fragments. The remaining description covers the standalone page retained here.
+
+The proposed `## vX.Y.Z` section lives in a scratch Markdown file, exactly as it will land in `CHANGELOG.md`. This
+script turns that file into the page. Every entry gets a short id (the category's initial and its position: `B2`,
+`A14`, `M3`) and a note box under it, plus one box for general notes. **Copy feedback** gathers the non-empty notes into
+one plain-text block that the maintainer pastes back into the agent session:
 
 ```
 notes-feedback v0.29.0
@@ -33,9 +35,8 @@ The page is one self-contained file with its stylesheet inline, so it looks the 
 to be published as a scode-snippets snippet and linked that repository's `default1` stylepack by relative path, which
 resolves nowhere else; the maintainer moved the review to a locally served page on 2026-10-23.
 
-What this does NOT do: serve the page (the agent runs `scripts/serve-page.ts` on the directory it writes `index.html`
-to), parse the copied feedback, or check the section against the changelog format (that is
-`releasing/check-changelog.py format`, which runs on `CHANGELOG.md`).
+What this does NOT do: serve the page, parse the copied feedback, or check the section against the changelog format
+(that is `releasing/check-changelog.py format`, which runs on `CHANGELOG.md`).
 
 Usage:
   notes-review-page.py SECTION.md OUT.html

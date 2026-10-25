@@ -59,30 +59,26 @@ to fix forward, so it starts the moment the pre-tag checks pass.
    agent agree on in conversation, following that guidance. Sort every fix into Fixes worth highlighting or Misc fixes
    by the criteria in `releasing/.agents/changelog.md`, "Format"; the split is the agent's first call and the
    maintainer's to change. Keep the whole proposed `## vX.Y.Z - YYYY-MM-DD` section in a Markdown file in your scratch
-   directory, written exactly as it will go into `CHANGELOG.md`, and show it to the maintainer on the interactive review
-   page that `python3 releasing/notes-review-page.py SECTION.md OUT.html` renders from the scratch file (the script's
-   docstring has the details); do not substitute another way of showing the draft. The maintainer asked for a
-   `scode-snippets` snippet on 2026-10-13, replacing a local file they edited by hand, made this page the default on
-   2026-10-16, and on 2026-10-23 moved it from a published snippet to a page served from this machine, the way the
-   planning flow asks its up-front questions (`plans/.agents/planning.md`, "Asking the up-front questions on a local
-   page"). Do not publish the page as a snippet or anywhere else unless the maintainer asks.
+   directory, written exactly as it will go into `CHANGELOG.md`, and show it to the maintainer using the
+   `interactive-artifact` skill. Load and follow that skill by name. Do not publish the page as a snippet or anywhere
+   else unless the maintainer asks.
 
-   Render the page as `index.html` in a directory of its own inside your scratch directory (`AGENTS.md`, "Agent scratch
-   space") and serve that directory with `scripts/serve-page.ts <dir>`, run from the checkout root as a background
-   command, never with another server; if it fails to start, stop and report why. It binds `127.0.0.1` on port 14003,
-   the todo picker's port, and marks every response uncacheable: every flow shares that URL, so a cached copy can be
-   another session's page or an older version of this one. If something else holds the port, it moves to the next free
-   port above and prints the URL it got; give the maintainer that URL without asking, and say plainly that the port
-   changed, since a forward of 14003 does not reach it. Never stop a process you did not start. Give the maintainer the
-   URL as soon as the page is served, and again in the last message of the turn, after every tool call.
+   Write a body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent
+   scratch space"), rendering the scratch section faithfully with its categories, entries and PR diff links. Do not use
+   the legacy notes-review page generator: it emits a full document with its own scripts, which the skill does not
+   accept. The Markdown scratch file stays authoritative; page markup is only its presentation. Follow the skill for
+   styling, serving, sharing the URL and any tunnel instructions, waiting for submissions, status, replies and shutdown.
+   Use its chosen port and tokenized URL. If the skill is unavailable or its server fails, stop and report why. Give the
+   maintainer the URL as soon as the page is served.
 
-   The maintainer types feedback under individual entries and pastes back a `notes-feedback vX.Y.Z` block, in which each
-   note names its entry by id and by its opening words; match notes on the words, since ids are positions and shift
-   between rounds. Apply the feedback to the scratch file and regenerate the page into the same `index.html` after each
-   round, until the maintainer approves the text: the server keeps serving that directory, so regenerating the file
-   updates the page in place, and the regenerated page clears the notes that round applied. Stop the server once the
-   maintainer approves the text. The scratch file and the page hold the section as it will read once approved, without
-   the draft notice; `CHANGELOG.md` gets the notice added in step 4.
+   The maintainer comments on entries, suggests replacements, or submits general notes through the skill. Match feedback
+   to the quoted text and section, rather than positional entry ids that shift between rounds. Apply the feedback to the
+   scratch file, update the same page in place, and reply to and resolve handled threads as the skill describes. Ask for
+   explicit approval of the current text, using a picker whose id changes with each draft revision so approval of an
+   earlier draft cannot carry over. An edit request is not approval, and an approval submitted with edits approves only
+   the wording those edits unambiguously settle; ask if that is unclear. Iterate until the maintainer approves the text,
+   then finish the page using the skill's completion procedure. The scratch file and the page hold the section as it
+   will read once approved, without the draft notice; `CHANGELOG.md` gets the notice added in step 4.
 
    Do not wait for approval: go on to step 4 as soon as the page is served, and keep the review going alongside the rest
    of the procedure. Step 3 says how the approved text lands.

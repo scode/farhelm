@@ -21,11 +21,8 @@ checkouts: when it last checked, or when and why it stopped. An idle monitor che
 `running` line whose last check is more than about two and a half hours old means it has probably died; say so. A
 missing log means no monitor has run on this machine, and nothing is landing. Add any flags `queue status` raises.
 
-By default, the landed plans are reviewed on one local interactive page rather than one at a time in conversation. The
-maintainer chose one page on 2026-10-14, and on 2026-10-23 moved it from a published `scode-snippets` snippet to a page
-served from this machine, the way the planning flow asks its up-front questions (`plans/.agents/planning.md`, "Asking
-the up-front questions on a local page"). Do not publish the page as a snippet or anywhere else unless the maintainer
-asks.
+By default, review the landed plans on one page using the `interactive-artifact` skill; load and follow it by name. Do
+not publish the page as a snippet or anywhere else unless the maintainer asks.
 
 The page holds every report in `REPORTS.md`, oldest first, cut down to what the maintainer can act on; they made this
 concise form the default on 2026-10-23. Each report gets, in this order: its PRs and summary line; one or two sentences
@@ -36,27 +33,27 @@ says so. Leave out checks that ran, changelog and release bookkeeping, documenta
 hygiene, screenshot refreshes, what the landing already fixed, flakes already recorded, caveats that are design choices
 the maintainer already made, and notes that something was not tried on a real Mac or in the real desktop app, unless the
 untried case is particular or risky. A leftover that a later commit verifiably resolved may say so beside it. Then the
-full report, collapsed; then an "approve" checkbox and a free-text comment field. The summary and the leftovers are the
-session's own reading of the report and its Landing section, never new claims. A button at the bottom copies every
-choice as one block of text that the maintainer pastes back into the session.
+full report, collapsed; then a picker with an "approve" choice and a free-text field. Use the plan's slug as its stable
+picker id. The summary and the leftovers are the session's own reading of the report and its Landing section, never new
+claims. The skill's Submit and wait mechanism collects the choices, comments and suggestions.
 
-Write the page as `index.html` in a directory of its own inside your scratch directory (`AGENTS.md`, "Agent scratch
-space"), with its styles inline: a stylesheet linked by relative path from the snippets repository does not load from a
-local page. Serve that directory with `scripts/serve-page.ts <dir>`, run as a background command from the root of the
-checkout this flow works in, never with another server; if it fails to start, stop and report why. It binds `127.0.0.1`
-on port 14003, the todo picker's port, and marks every response uncacheable: every flow shares that URL, so a cached
-copy can be another session's page. If something else holds the port, it moves to the next free port above and prints
-the URL it got; give the maintainer that URL without asking, and say plainly that the port changed, since a forward of
-14003 does not reach it. Never stop a process you did not start. Put the page's URL in the last message of the turn,
-after every tool call. Stop the server once you have acted on the pasted block, or when the maintainer ends the review.
+Write the body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent scratch
+space"). Follow the skill for styling, serving, sharing the URL and any tunnel instructions, waiting for submissions,
+status, replies and shutdown. Use its chosen port and tokenized URL. If the skill is unavailable or its server fails,
+stop and report why.
 
-Act on the pasted block:
+Act on each submission:
 
-- a ticked box is an approval (`queue approve`, as the approve item in this section says);
-- a comment with an instruction is that instruction, whether or not the box is ticked: a follow-up, a TODO.md entry, a
-  question to answer, or anything else it asks for. Ask in conversation only where the comment is unclear;
-- an unticked report without a comment means the maintainer did not get to it. Leave it for later. It is never a
+- an "approve" pick is an approval (`queue approve`, as the approve item in this section says);
+- a comment with an instruction is that instruction, whether or not "approve" is selected: a follow-up, a TODO.md entry,
+  a question to answer, or anything else it asks for;
+- an unselected report without a comment means the maintainer did not get to it. Leave it for later. It is never a
   follow-up or a rejection.
+
+Comments and suggestions anchored to a report count as comments on that report; a suggested edit alone is not an
+approval. Reply on the page where clarification or an answer is needed. After recording decisions, remove handled
+reports and update the same page before waiting again; unchanged picks must not repeat queue actions. Finish the page
+using the skill's completion procedure when the review ends or no reports remain.
 
 The one-at-a-time walkthrough in this section is used when the maintainer asks for it. Blocked plans are still presented
 one at a time in conversation, because each needs an answer.
