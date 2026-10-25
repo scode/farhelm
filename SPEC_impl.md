@@ -1102,6 +1102,12 @@ SPEC.md's no-public-relay, no-third-party-services posture and the loopback depl
 the Dioxus tree. PTY bytes flow WebSocket → `term.write()` directly, bypassing Dioxus state entirely. Dioxus owns
 everything around the terminal (tabs, status, dialogs), not the terminal's content path.
 
+The unmodified `@xterm/addon-unicode-graphemes` 0.4.0 add-on selects `15-graphemes` before the terminal opens or parses
+any output, including reconnect prefill. It uses xterm's proposed Unicode API. Agents and tmux count emoji, including
+variation-selector emoji, as two cells; xterm's default Unicode 6 table counts them as one, which can clip glyphs and
+shift cursor-addressed redraws. The pinned tmux enables `variation-selector-always-wide` by default, so live output and
+replayed rows use the same widths without an extra generated configuration setting.
+
 Vendored xterm.js 6.0.0 has an observed, reproduced defect (`terminal-scroll-freeze.spec.ts` pins it): a scrolled-back
 viewport can paint stale rows during sustained output, both once scrollback is already full and when output is confined
 to a DECSTBM scroll region. What is established from the bundle: `BufferService.scroll` decrements `ydisp` by one per

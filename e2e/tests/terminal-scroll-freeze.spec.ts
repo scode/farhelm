@@ -374,11 +374,12 @@ async function expectStableViewport(
  * (`terminal.js`): whatever handles this is xterm.js's, which is the
  * point.
  *
- * Retries wheel ticks (rather than sending one large delta) until the
- * viewport has moved at least `minLines` back from wherever it started,
- * bounded by `timeoutMs` — the exact rows-per-wheel-tick mapping is an
- * xterm.js internal (`scrollSensitivity`) this file has no reason to
- * pin, so "keep nudging until far enough back" is the portable approach.
+ * Callers start at the live tail. Retries wheel ticks until the viewport
+ * sits at least `minLines` behind its current tail, bounded by `timeoutMs`.
+ * Output can advance the tail before the first wheel takes effect, so an
+ * old absolute row number is not a valid scrollback target. The exact
+ * rows-per-wheel-tick mapping is an xterm.js internal (`scrollSensitivity`)
+ * this file has no reason to pin.
  */
 async function scrollBackAtLeast(
   page: Page,
@@ -389,15 +390,16 @@ async function scrollBackAtLeast(
   await page.locator(`#${elementId}`).hover();
   const before = await viewportSnapshot(page, elementId);
   if (!before) throw new Error(`the island at ${elementId} is not mounted`);
+  expect(before.viewportY, "the wheel fixture must begin at the live tail").toBe(before.baseY);
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     await page.mouse.wheel(0, -400);
     const now = await viewportSnapshot(page, elementId);
-    if (now && before.viewportY - now.viewportY >= minLines) return;
+    if (now && now.baseY - now.viewportY >= minLines) return;
     if (Date.now() > deadline) {
       throw new Error(
         `scrolling back at least ${minLines} lines at "${elementId}" did not land within ${timeoutMs}ms; ` +
-          `started at viewportY=${before.viewportY}, now at ${now?.viewportY}`,
+          `started at viewportY=${before.viewportY}, now viewportY=${now?.viewportY} baseY=${now?.baseY}`,
       );
     }
     // sleep-ok: pace successive wheel ticks so the browser has a chance to process each one; the deadline above bounds the whole retry loop.

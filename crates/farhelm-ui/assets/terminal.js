@@ -3119,7 +3119,7 @@
     /**
      * Wait for xterm's globals (`Terminal`, `FitAddon`, the vendored
      * OSC 52 addon's `ClipboardAddon`, and the vendored plain-text link
-     * addon's `WebLinksAddon`), the term-bytes helper
+     * addon's `WebLinksAddon`, and `UnicodeGraphemesAddon`), the term-bytes helper
      * (`window.farhelmTermBytes`), the clipboard-naming helper
      * (`window.farhelmClipboardNames`), the Shift+Enter key decision
      * (`window.farhelmShiftEnterKey`), the copy-on-select decision
@@ -3222,6 +3222,7 @@
           window.FitAddon &&
           window.ClipboardAddon &&
           window.WebLinksAddon &&
+          window.UnicodeGraphemesAddon &&
           window.farhelmTermBytes &&
           window.farhelmTerminalTheme &&
           window.farhelmClipboardNames &&
@@ -3484,6 +3485,9 @@
           else paintBanner(spec.banner, message, false);
         });
         term = new Terminal({
+          // The grapheme width provider uses xterm's proposed Unicode API.
+          // Its width model must be selected before even replay prefill arrives.
+          allowProposedApi: true,
           // At most the tmux history floor (`HISTORY_LIMIT`,
           // farhelm-supervisor/src/tmux.rs), never more: PLAN_M2_5.md
           // holds this browser-side cap at or below that floor so that
@@ -3567,6 +3571,11 @@
             },
           },
         });
+        // Agent cursor addressing and tmux count emoji as two cells. The
+        // default Unicode 6 table counts one, clipping glyphs and shifting
+        // later redraws. Activation selects 15-graphemes before open or write;
+        // changing widths after prefill would leave already-parsed cells wrong.
+        term.loadAddon(new UnicodeGraphemesAddon.UnicodeGraphemesAddon());
         const fit = new FitAddon.FitAddon();
         term.loadAddon(fit);
         // OSC 52 support (the vendored `@xterm/addon-clipboard`; see
