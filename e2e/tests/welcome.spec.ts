@@ -151,10 +151,18 @@ test("a refused seen write still dismisses the welcome", async ({ page, request 
 
 /** Get started keeps the card open; global launch chords leave its focused
  * control alone. Short windows keep the closing controls outside body scroll.
+ * Both inline actions share the readable link style, including on hover.
  */
 test("welcome links, modal isolation and short-window dismissal", async ({ page, context }, testInfo) => {
   await context.route(GET_STARTED_URL, route => route.fulfill({ contentType: "text/html", body: "guide fixture" }));
   const dialog = await firstWelcome(page);
+  const guideLink = dialog.getByRole("link", { name: "Read Get started ↗", exact: true });
+  await page.mouse.move(0, 0);
+  for (const link of [guideLink, dialog.getByRole("button", { name: "Send feedback now", exact: true })]) {
+    expect(await link.evaluate(element => element.matches(":hover")), "premise: resting inline link").toBe(false);
+    await expect(link).toHaveCSS("color", "rgb(120, 183, 255)");
+    await expect(link).toHaveCSS("text-decoration-line", "underline");
+  }
   await page.keyboard.press("Control+Shift+P");
   await page.keyboard.press("Control+Shift+1");
   await expect(dialog.locator(".welcome-got-it")).toBeFocused();
@@ -163,8 +171,12 @@ test("welcome links, modal isolation and short-window dismissal", async ({ page,
   const answer = (await dialog.locator(".welcome-got-it").boundingBox())!;
   expect(hint.x + hint.width, "footer guidance stays beside its closing answer").toBeLessThanOrEqual(answer.x);
   await dialog.screenshot({ path: testInfo.outputPath("welcome.png") });
+  await guideLink.hover();
+  expect(await guideLink.evaluate(element => element.matches(":hover")), "premise: hovered guide link").toBe(true);
+  await expect(guideLink).toHaveCSS("color", "rgb(120, 183, 255)");
+  await expect(guideLink).toHaveCSS("text-decoration-line", "underline");
   const external = context.waitForEvent("page");
-  await dialog.getByRole("link", { name: "Read Get started ↗", exact: true }).click();
+  await guideLink.click();
   const guide = await external;
   try {
     await guide.waitForURL(GET_STARTED_URL);

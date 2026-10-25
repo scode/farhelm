@@ -542,7 +542,8 @@ test("settings frame-color rollback survives closing before failure", async ({ p
 
 /** The prepared-checkout choice is explicit configuration. Unknown reads stay
  * locked, refusals restore the saved native checkbox, and a dismissed field's
- * pending save must fence the next mounted read rather than lose that write. */
+ * pending save must fence the next mounted read rather than lose that write.
+ * Its external help link must get the global readable style, not browser defaults. */
 test("prepared checkout settings preserve saved choices across reads, refusals and close", async ({ page, request }) => {
   let build: string | undefined;
   const read = async () => {
@@ -598,7 +599,11 @@ test("prepared checkout settings preserve saved choices across reads, refusals a
     await expect(toggle).toBeEnabled();
     await expect(toggle).toBeChecked();
     await expect(field).toContainText("one extra checkout per repository and host");
-    await expect(field.getByRole("link")).toHaveAttribute("href", "https://farhelm.io/docs/using/start-a-session/#prepared-checkouts");
+    const help = field.getByRole("link");
+    await expect(help).toHaveAttribute("href", "https://farhelm.io/docs/using/start-a-session/#prepared-checkouts");
+    await expect(help).toHaveText("How prepared checkouts differ from a fresh clone ↗");
+    await expect(help).toHaveCSS("color", "rgb(120, 183, 255)");
+    await expect(help).toHaveCSS("text-decoration-line", "underline");
     mode = "refuse";
     // Refusal may restore the native state before Playwright checks an
     // uncheck() postcondition. Click tests that rollback without demanding

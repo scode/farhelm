@@ -70,7 +70,7 @@ pub(crate) fn WelcomeDialog(on_close: EventHandler<()>, on_feedback: EventHandle
                         "Send feedback, in the " strong { "?" }
                         " menu at the top of the sidebar, sends a private message straight to Farhelm's maintainer: bugs, rough edges, ideas. "
                         button {
-                            r#type: "button", class: "welcome-feedback",
+                            r#type: "button", class: "welcome-feedback inline-link",
                             "data-tooltip": "send feedback now: close the welcome card and write a private message",
                             onclick: move |_| on_feedback.call(()), "Send feedback now"
                         }

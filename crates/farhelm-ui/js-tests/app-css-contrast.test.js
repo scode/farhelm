@@ -126,6 +126,9 @@ function contrastRatio(hexA, hexB) {
 // added, so it is the pair a retune of either token is likeliest to break.
 const ROW_SURFACES = ["--bg-1", "--bg-2", "--accent-fill", "--accent-fill-hover"];
 const REQUIRED_BINDINGS = [
+  // Settings help, the welcome card and Add host's inline help all sit on
+  // dialog bodies. The link role must remain readable as prose on that fill.
+  ["--link", "--bg-2", 4.5],
   // The centered sequence pill uses amber for its queue and Enter/Escape
   // instructions; the attention fill must keep both readable as small text.
   ["--warn", "--warn-bg", 4.5],
