@@ -98,14 +98,13 @@ Farhelm cannot check for you. Its own tests stand in `sh -c` for the real wrappe
 agent command and forwards the rest is something only you can verify — `ps -o args= -p <agent pid>` against a live
 session shows what actually reached the agent.
 
-For Claude there is one more condition on the shape: the wrapper must start Claude as its own direct child. Farhelm only
-accepts a Claude report from the session's own process or that process's direct child, which is what keeps a `claude`
-the session starts through its shell (a shelled-out sub-agent) from replacing the conversation you are in. A resident
-wrapper that runs Claude itself is exactly one level, so it keeps reporting. A chain of two resident launchers — a
-wrapper that runs a script, which in turn runs Claude without `exec` — puts Claude too far below: its reports are
-refused, the hook log records a `refused conflict` line from the supervisor, and the session cannot be restarted. A
-launcher that `exec`s (as `env` does, and as a script ending in `exec claude "$@"` does) replaces itself rather than
-staying in the chain, so it adds no level.
+Claude works through multiple wrappers that stay running, including a wrapper that starts another script which then
+starts Claude without `exec`. Farhelm follows the first Claude process whose conversation it accepts. Another Claude
+started inside the session cannot replace a conversation already reported by its parent. If that nested Claude reports
+first, Farhelm may briefly follow its conversation. When the Claude that started it next reports at start, resume,
+`/clear`, or compact, Farhelm switches to that conversation and tells you in the session's notifications what a
+**restart** before the switch would have resumed. If the followed Claude exits and you start a fresh one in the same
+terminal, Farhelm can follow the new one.
 
 Codex also works through a wrapper that stays running, including one named `codex` itself. Farhelm follows the first
 Codex process whose conversation it accepts; wrappers above that process do not need to replace themselves. If another

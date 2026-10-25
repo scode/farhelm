@@ -29,13 +29,15 @@
 //!   recorded reporter does not match this build.
 //! - [`NotificationKind::CodexPinCorrected`]: Codex admission, after a recorded
 //!   ancestor's verified record corrects a child-first conversation choice.
+//! - [`NotificationKind::ClaudePinCorrected`]: Claude admission, when a recorded
+//!   ancestor corrects a child-first conversation choice.
 //!
 //! # The wording rule
 //!
 //! The maintainer's rule (the plan's M5): every text names something the
 //! user can actually do, or, when there is nothing, says plainly what they
 //! lose. Never a pointer to a log. Tracking failures explain Restart's lost
-//! ability to resume; a corrected Codex selection explains which conversation
+//! ability to resume; a corrected selection explains which conversation
 //! an earlier Restart would have resumed instead.
 
 use super::core::Supervisor;
@@ -66,15 +68,19 @@ pub(crate) enum NotificationKind {
     /// A verified Codex ancestor corrected a conversation selected by its child.
     /// The warning preserves what a Restart before correction would have used.
     CodexPinCorrected,
+    /// A recorded Claude ancestor corrected a conversation selected by its child.
+    /// This records the prior Restart target, so later capture does not resolve it.
+    ClaudePinCorrected,
 }
 
 impl NotificationKind {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::HookSilent,
         Self::HookNotAdded,
         Self::ResumeWithdrawn,
         Self::ReporterMismatch,
         Self::CodexPinCorrected,
+        Self::ClaudePinCorrected,
     ];
 
     /// Whether Resume becoming available ends this warning's condition.
@@ -83,7 +89,10 @@ impl NotificationKind {
     fn resolves_on_resume(self) -> bool {
         match self {
             Self::HookSilent | Self::ResumeWithdrawn => true,
-            Self::HookNotAdded | Self::ReporterMismatch | Self::CodexPinCorrected => false,
+            Self::HookNotAdded
+            | Self::ReporterMismatch
+            | Self::CodexPinCorrected
+            | Self::ClaudePinCorrected => false,
         }
     }
 
@@ -98,7 +107,8 @@ impl NotificationKind {
             NotificationKind::HookSilent | NotificationKind::HookNotAdded => true,
             NotificationKind::ResumeWithdrawn
             | NotificationKind::ReporterMismatch
-            | NotificationKind::CodexPinCorrected => false,
+            | NotificationKind::CodexPinCorrected
+            | NotificationKind::ClaudePinCorrected => false,
         }
     }
 
@@ -111,6 +121,7 @@ impl NotificationKind {
             NotificationKind::ResumeWithdrawn => "resume_withdrawn",
             NotificationKind::ReporterMismatch => "reporter_mismatch",
             NotificationKind::CodexPinCorrected => "codex_pin_corrected",
+            NotificationKind::ClaudePinCorrected => "claude_pin_corrected",
         }
     }
 }
@@ -120,6 +131,12 @@ impl NotificationKind {
 pub(crate) const CODEX_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a Codex conversation \
     started by another Codex process in this session. A Restart before now would have resumed \
     that conversation. Farhelm now follows the conversation of the Codex process that started it.";
+
+/// Preserve the consequence of child-first capture after the ancestor takes over.
+/// Like Codex's correction, this remains unresolved and appears once per launch.
+pub(crate) const CLAUDE_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a Claude conversation \
+    started by another Claude process in this session. A Restart before now would have resumed \
+    that conversation. Farhelm now follows the conversation of the Claude process that started it.";
 
 /// Explain the missed report using the same agent name and timing as Restart.
 ///

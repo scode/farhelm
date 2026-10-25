@@ -2908,19 +2908,23 @@ file is introduced.
 
   The first admitted selecting report pins its emitter and records the Codex-image ancestors above it, each by PID and
   kernel start token. A nullable JSON `codex_report_pin` column on the session row holds this launch authority
-  separately from the conversation locator. Schema 31 defaults existing rows to NULL without backfill; admission reads
-  the pin under the capture claim and writes it in the same CAS as the conversation, fencing the complete prior binding
-  and exact previous pin. No in-memory pin mirror is needed. Relaunch clears it, and abort does not restore it. Later
-  reports must come from the pinned emitter. A recorded Codex ancestor takes precedence: its verified record
-  independently selects and corrects both pin and conversation, never inheriting the child's file or persistent thread.
-  A correction records the once-per-launch Codex correction notification in the same transaction as adoption;
-  notification-write failure rolls back the correction, and reload restores it even if publication was interrupted. It
-  does not resolve on capture because it records the prior mistaken target. An unverified ancestor changes nothing, and
-  its unready Stop is acknowledged without effect. A pin whose process is gone, reused or non-running releases for a
-  fresh emitter only if the pin is absent from the new report's chain; descendants cannot inherit authority after its
-  exit. Unavailable process evidence does not release it. Rows already running across an upgrade start unpinned: a
-  nested child's first selecting report after upgrade may pin it, and the root's next report corrects and notifies.
-  There is no upgrade suppression.
+  separately from the conversation locator. The historical SQL name and JSON shape are retained for the shared
+  `ReportPin` used by Claude and Codex; a session has only one agent kind, so no migration or vendor tag is needed.
+  Schema 31 defaults existing rows to NULL without backfill. Admission reads the pin under the capture claim and writes
+  it through `Store::admit_pinned_conversation` in the same CAS as the conversation, fencing the complete prior binding
+  and exact previous pin. The writer takes the replacement ownership version explicitly: Codex passes 1 and Claude
+  passes 0; the previous version remains an independent CAS precondition. No in-memory pin mirror is needed. Relaunch
+  clears it, and abort does not restore it. Later reports must come from the pinned emitter, preserving the original
+  stored ancestry rather than replacing it with a later snapshot. A recorded Codex ancestor takes precedence: its
+  verified record independently selects and corrects both pin and conversation, never inheriting the child's file or
+  persistent thread. A correction records the once-per-launch Codex correction notification in the same transaction as
+  adoption; notification-write failure rolls back the correction, and reload restores it even if publication was
+  interrupted. It does not resolve on capture because it records the prior mistaken target. An unverified ancestor
+  changes nothing, and its unready Stop is acknowledged without effect. A pin whose process is gone, reused or
+  non-running releases for a fresh emitter only if the pin is absent from the new report's chain; descendants cannot
+  inherit authority after its exit. Unavailable process evidence does not release it. Rows already running across an
+  upgrade start unpinned: a nested child's first selecting report after upgrade may pin it, and the root's next report
+  corrects and notifies. There is no upgrade suppression.
 
   Process evidence is necessary but not sufficient: threads may share a process. A versioned `codex:` locator binds the
   reported runtime session ID to an absolute transcript path and a separately verified persistent thread ID. The bounded
@@ -2997,21 +3001,24 @@ file is introduced.
   own restrictive corridor to the anchored chain — only the reporter plus a narrow trampoline between runtime and
   reporter; any other session-hosting runtime or unclassified intermediary below the emitter refuses. Codex attributes
   its hook-shaped reporter through shell-`-c` trampolines to the innermost native `codex`, accepts arbitrary ancestry
-  above it, and applies its durable process pin. Grok retains exactly one native image with the required `--no-leader`
-  option. Admission runs five steps: cheap envelope/kind/generation gating with no vendor I/O (the report file's
-  discriminator check re-applied against the fenced resolution, plus raw event/source/agent-identity validation before
-  diagnostic sanitation); the unbounded capture claim (one shared session-keyed `capture_locks` registry for report
-  admission and readiness refresh, never the lifecycle claim; slow waits are logged for diagnostics) and a reload
-  comparing kind, generation, and the complete prior binding; the mutation-free runtime and vendor-root proofs over the
-  recorded chain (evidence recorded when the report was made cannot change during verification, so there is no repeat
-  walk); the atomic generation-plus-complete-binding CAS committing identity, locator, provenance, source, and readiness
-  reset together; and the mirror of only the committed result into the matching current-generation entry under the same
-  claim. Rejection at any pre-write step changes nothing durable, in memory, pending, or offered. Refresh and
-  report-only reconciliation passes take the same claim and reload before mirroring, carrying the row's version beside
-  the identity, so memory-derived offers apply the same gate as row-derived ones without a second lookup — and a
-  rejected report never triggers a readiness withdrawal through them. Restart verification and lifecycle resets retain
-  their durable generation/binding fences; they do not all acquire this capture claim. The report claim has no time
-  limit because every operation under it is local and no hook waits on it; a slow wait is logged for diagnostics.
+  above it, and applies its durable process pin. Claude selects its emitter by position through the same narrow hook
+  trampolines, accepts arbitrary ancestry above it, and uses the shared pin with every ancestor eligible to correct it.
+  Grok retains exactly one native image with the required `--no-leader` option. Admission runs five steps: cheap
+  envelope/kind/generation gating with no vendor I/O (the report file's discriminator check re-applied against the
+  fenced resolution, plus raw event/source/agent-identity validation before diagnostic sanitation); the unbounded
+  capture claim (one shared session-keyed `capture_locks` registry for report admission and readiness refresh, never the
+  lifecycle claim; slow waits are logged for diagnostics) and a reload comparing kind, generation, and the complete
+  prior binding; the mutation-free runtime and vendor-root proofs over the recorded chain (evidence recorded when the
+  report was made cannot change during verification, so there is no repeat walk); the atomic
+  generation-plus-complete-binding CAS committing identity, locator, provenance, source, readiness reset, and, for
+  pinned kinds, the replacement pin and any correction notification together, with the exact prior pin as an additional
+  fence; and the mirror of only the committed result into the matching current-generation entry under the same claim.
+  Rejection at any pre-write step changes nothing durable, in memory, pending, or offered. Refresh and report-only
+  reconciliation passes take the same claim and reload before mirroring, carrying the row's version beside the identity,
+  so memory-derived offers apply the same gate as row-derived ones without a second lookup — and a rejected report never
+  triggers a readiness withdrawal through them. Restart verification and lifecycle resets retain their durable
+  generation/binding fences; they do not all acquire this capture claim. The report claim has no time limit because
+  every operation under it is local and no hook waits on it; a slow wait is logged for diagnostics.
 
   **Ownership provenance and the offer gate.** Migration 20 adds `capture_ownership_version`
   (`INTEGER NOT NULL DEFAULT 0`, identical in fresh DDL and `ALTER`, tables kept `STRICT`): 0 means not established
@@ -3037,25 +3044,31 @@ file is introduced.
   every older OMP row has Restart unavailable (`not_captured`) until its first proven report.
 
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
-  Attribution proofs apply to Codex, Grok, and OMP. Goose and Pi retain their existing acceptance behind the
-  discriminator gate, and new framework entry points default to deny rather than allow. Claude stays on that legacy path
-  with one added check before the capture claim: the report's anchored chain (`procs::claude_corridor`), skipping the
-  hook's narrow `sh -c` trampolines, must end at the pane process or its direct child. It is positional on purpose.
-  Claude's native binary is named after its version and npm installs run under `node`, so an image rule would have to
-  track install layouts, and the injected `--settings` hook is a vendor detail that may change on its own; the closed
-  attempt in PR #830 shows where following either leads. A shelled-out child is always at least two links below the
-  pane, because the foreground's Bash tool runs it through a shell that does not `exec` it. Accepted costs: a wrapper
-  chain deeper than one level loses hook capture and, without a report, cannot be restarted, and a child the foreground
-  Claude spawned with no shell between them in a wrapperless launch would be admitted (not observed; the Bash tool
-  always interposes a shell). Reports reach admission one at a time, from one drain of the session's report files, so
-  two Claude reports never attribute concurrently; the generation fence keeps a check made before a relaunch from
-  committing into the new launch. The check writes no provenance and does not flip Claude's predicate, because flipping
-  it would make every existing Claude capture unresumable until its next proven report, and stopping replacement needs
-  no version. The offer gate has its final shape but flips per kind: Codex, Grok, and OMP require version 1, while the
-  other kinds keep today's offer behavior until their proof lands, writes 1, and flips the single per-kind predicate
-  every surface consults. There is no general report epoch. Grok's locator carries only its vendor-specific selection
-  timestamp; no other kind inherits that ordering rule. OMP uses serial cancellation fences, not cross-reporter
-  chronology. Old processes and assets fail closed after the upgrade; nothing is grandfathered.
+  Attribution proofs apply to Claude, Codex, Grok, and OMP. Goose and Pi retain their existing acceptance behind the
+  discriminator gate, and new framework entry points default to deny rather than allow. Claude admission runs under the
+  shared capture claim, reloading the complete binding and pin before attribution and committing them in one CAS. The
+  report's anchored chain (`procs::claude_corridor`), skipping the hook's narrow `sh -c` trampolines, identifies the
+  first remaining process as the emitter at any depth below the pane; the pane anchor itself ends that search. Every
+  process above the emitter through the pane is retained as a correction ancestor. It is positional on purpose: no
+  executable, command-line, or environment rule recognizes Claude. Claude's native binary is named after its version and
+  npm installs run under `node`, so an image rule would have to track install layouts, and the injected `--settings`
+  hook is a vendor detail that may change on its own; the closed attempt in PR #830 shows where following either leads.
+  Claude's first admitted selecting report pins the emitter by pid and start token. Reports from that emitter preserve
+  the original stored ancestors. A recorded ancestor takes precedence over liveness checks and corrects the pin and
+  plain conversation ID, recording `ClaudePinCorrected` once per launch in the same transaction. Notification-write
+  failure rolls the correction back; reload restores a committed correction even if publication was interrupted. Like
+  `CodexPinCorrected`, it remains unresolved because it records the earlier mistaken target. A gone, reused, or
+  non-running pin releases only when its identity is absent from the incoming report's complete chain; a descendant
+  cannot inherit authority after the pinned process exits. Unavailable process evidence never releases it. Relaunch
+  clears the shared pin, and abort does not restore it. Running sessions start unpinned after upgrade: if a parent's
+  report was lost, a nested Claude carrying a reporting hook can report first and be followed until an ancestor reports
+  at start, resume, clear, or compact. That gap is accepted without upgrade machinery. Claude adds no transcript
+  verification, stays at ownership version 0, and leaves its per-kind offer predicate false: changing it would withdraw
+  existing Restart offers, and the pin needs no versioned offer gate. Codex, Grok, and OMP require version 1 through the
+  single per-kind predicate every surface consults; Goose and Pi keep their existing offer behavior. There is no general
+  report epoch. Grok's locator carries only its vendor-specific selection timestamp; no other kind inherits that
+  ordering rule. OMP uses serial cancellation fences, not cross-reporter chronology. Pre-discriminator senders and
+  outdated OMP reporter assets fail closed; neither is grandfathered.
 
   **The per-launch identity hook.** Claude Code's `/clear` and Codex's `/new` can replace the conversation inside a live
   process. Farhelm needs the agent's explicit report so Resume does not return to the discarded conversation. Both
@@ -3065,7 +3078,7 @@ file is introduced.
   The `--vendor` flag is the report envelope's discriminator, sourced from the installed entry point rather than
   inferred from the payload; the Goose helper supplies its own value internally so the persisted declaration keeps
   invoking the same command, while the Pi/OMP assets pass theirs on the spawned command line and keep their JSON
-  `vendor` field purely as a consistency check. Claude takes it as `--settings <json>`; Codex takes
+  `vendor` field purely as a consistency check. Claude takes its `SessionStart` hook as `--settings <json>`; Codex takes
   `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=… -c hooks.Stop=…`. Per-launch is the
   whole point: nothing is written to `~/.claude` or to Codex's active configuration home (`$CODEX_HOME` when set,
   `~/.codex` otherwise), no trust state is left behind, and flags cannot outlive the process they were passed to — which
@@ -4035,7 +4048,8 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   after the withdrawal is committed, and only on a clean verdict, not a read error; the background refresh and Grok's
   final check before a Restart both record it), an OMP launch whose recorded reporter is older than this build's or
   whose installed reporter file is there with different contents (a missing or unreadable file records nothing), and a
-  Codex process pin corrected after a verified recorded ancestor replaces a child-first conversation. The correction
+  Claude or Codex process pin corrected after a recorded ancestor replaces a child-first conversation (verified against
+  the exact record for Codex). These are separate `ClaudePinCorrected` and `CodexPinCorrected` kinds. Each correction
   records the consequence for Restart before adoption and remains unresolved, giving one notification per launch. The
   first two say Restart cannot resume, so they are refused whenever the launch's row holds a captured conversation,
   checked in the same statement as the insert, which is also what closes the race between a report's commit and the

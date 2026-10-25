@@ -2376,10 +2376,10 @@ mod tests {
     /// Spec: an anchored chain must be one unbroken line of parents with no
     /// pid twice.
     ///
-    /// Why: Claude's corridor is positional ("the pane's direct child"), and
-    /// a chain read from a report file is input, not collection's own
-    /// output; a chain with a gap or a repeat would let position mean
-    /// something it does not.
+    /// Why: Claude selects its emitter and correction ancestors by position,
+    /// and a chain read from a report file is input, not collection's own
+    /// output. A gap or repeat would invent a parent relationship on which
+    /// attribution and the durable emitter pin cannot safely rely.
     #[farhelm_testtrace::test]
     fn anchoring_refuses_a_broken_or_looping_chain() {
         let mut gap = ancestry_above_a_pane();
@@ -3857,6 +3857,15 @@ mod tests {
 
     const CLAUDE_IMAGE: &str = "/home/user/.local/share/claude/versions/2.1.284";
 
+    /// Keep expected identities explicit about PID reuse without repeating
+    /// the deterministic start-token convention of `corridor_link` in each test.
+    fn claude_identity(pid: u32) -> ProcessIdentity {
+        ProcessIdentity {
+            pid,
+            start: u64::from(pid) * 1000,
+        }
+    }
+
     /// A plain launch as observed on Claude Code 2.1.284: the pane process
     /// IS Claude, which runs the hook through a non-exec'ing `sh -c`.
     ///
@@ -3870,9 +3879,9 @@ mod tests {
             claude_hook_trampoline(11),
             corridor_link(10, CLAUDE_IMAGE, &["claude"]),
         ];
-        let emitter = claude_corridor(&chain).expect("the foreground's own hook must be admitted");
-        assert_eq!(emitter.pid, 10, "the emitter is the pane process");
-        assert_eq!(emitter.start, 10_000);
+        let attribution = claude_corridor(&chain).expect("the foreground's hook must attribute");
+        assert_eq!(attribution.emitter, claude_identity(10));
+        assert!(attribution.ancestors.is_empty());
     }
 
     /// The same launch when the hook's shell `exec`s the hook (bash does;
@@ -3886,8 +3895,9 @@ mod tests {
             corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
             corridor_link(10, CLAUDE_IMAGE, &["claude"]),
         ];
-        let emitter = claude_corridor(&chain).expect("an exec'd hook must be admitted");
-        assert_eq!(emitter.pid, 10);
+        let attribution = claude_corridor(&chain).expect("an exec'd hook must attribute");
+        assert_eq!(attribution.emitter, claude_identity(10));
+        assert!(attribution.ancestors.is_empty());
     }
 
     /// A supported one-level wrapper launch: a resident wrapper is the
@@ -3904,19 +3914,20 @@ mod tests {
             corridor_link(11, CLAUDE_IMAGE, &["claude"]),
             corridor_link(10, "/opt/test/bin/wrapper", &["wrapper", "run", "/work"]),
         ];
-        let emitter = claude_corridor(&chain).expect("a one-level wrapper must be admitted");
-        assert_eq!(emitter.pid, 11, "the emitter is Claude, not the wrapper");
+        let attribution = claude_corridor(&chain).expect("a one-level wrapper must attribute");
+        assert_eq!(attribution.emitter, claude_identity(11));
+        assert_eq!(attribution.ancestors, vec![claude_identity(10)]);
     }
 
     /// A shelled-out sub-agent: the foreground Claude (the pane) runs a
     /// shell for its Bash tool, the shell runs a second `claude`, and that
     /// child runs a reporting hook it picked up from settings.
     ///
-    /// Why this test matters: this is the overwrite the corridor exists to
-    /// refuse. The child inherits the session credential, so without this
-    /// refusal its conversation would replace the one the user sees.
+    /// The corridor must identify the child and retain both its shell and
+    /// foreground parent. Admission uses those identities to refuse a rival
+    /// of the pinned parent or correct a child-first pin when the parent reports.
     #[farhelm_testtrace::test]
-    fn claude_refuses_a_hook_run_by_a_shelled_out_child() {
+    fn claude_attributes_a_shelled_out_child_and_every_ancestor() {
         let chain = vec![
             corridor_link(14, "/opt/test/bin/farhelm", &claude_hook_argv()),
             claude_hook_trampoline(13),
@@ -3933,15 +3944,19 @@ mod tests {
             ),
             corridor_link(10, CLAUDE_IMAGE, &["claude"]),
         ];
-        let refusal = claude_corridor(&chain).expect_err("a nested child must be refused");
-        assert!(refusal.contains("nested below"), "{refusal}");
+        let attribution = claude_corridor(&chain).expect("the child must attribute");
+        assert_eq!(attribution.emitter, claude_identity(12));
+        assert_eq!(
+            attribution.ancestors,
+            vec![claude_identity(11), claude_identity(10)]
+        );
     }
 
-    /// The same child with its own hook shell exec'd away still refuses:
-    /// skipping trampolines never moves the emitter upward past a real
-    /// process.
+    /// An exec'd hook shell does not change which child emitted the report.
+    /// Skipping trampolines must never move past the first real process, or
+    /// admission could mistake a nested child for its pinned foreground parent.
     #[farhelm_testtrace::test]
-    fn claude_refuses_a_shelled_out_child_whose_hook_shell_execd() {
+    fn claude_attributes_a_shelled_out_child_whose_hook_shell_execd() {
         let chain = vec![
             corridor_link(13, "/opt/test/bin/farhelm", &claude_hook_argv()),
             corridor_link(12, CLAUDE_IMAGE, &["claude", "-p", "x"]),
@@ -3952,14 +3967,19 @@ mod tests {
             ),
             corridor_link(10, CLAUDE_IMAGE, &["claude"]),
         ];
-        claude_corridor(&chain).expect_err("a nested child must be refused");
+        let attribution = claude_corridor(&chain).expect("the child must attribute");
+        assert_eq!(attribution.emitter, claude_identity(12));
+        assert_eq!(
+            attribution.ancestors,
+            vec![claude_identity(11), claude_identity(10)]
+        );
     }
 
-    /// A wrapper chain two levels deep refuses. This is the accepted cost
-    /// of a rule that recognizes no executable: such a session cannot be
-    /// restarted rather than widening the rule.
+    /// Resident wrappers at multiple levels keep positional attribution.
+    /// Every ancestor matters, including arbitrary non-Claude images: the
+    /// first report pins the emitter without imposing an install-layout rule.
     #[farhelm_testtrace::test]
-    fn claude_refuses_a_hook_under_a_two_level_wrapper() {
+    fn claude_attributes_a_hook_under_a_two_level_wrapper() {
         let chain = vec![
             corridor_link(14, "/opt/test/bin/farhelm", &claude_hook_argv()),
             claude_hook_trampoline(13),
@@ -3967,7 +3987,50 @@ mod tests {
             corridor_link(11, "/bin/sh", &["sh", "/work/run-claude.sh"]),
             corridor_link(10, "/opt/test/bin/wrapper", &["wrapper", "run", "/work"]),
         ];
-        claude_corridor(&chain).expect_err("a two-level wrapper must be refused");
+        let attribution = claude_corridor(&chain).expect("a two-level wrapper must attribute");
+        assert_eq!(attribution.emitter, claude_identity(12));
+        assert_eq!(
+            attribution.ancestors,
+            vec![claude_identity(11), claude_identity(10)]
+        );
+    }
+
+    /// The owned pane is the end of the chain even if its argv has hook-shell
+    /// shape. Skipping it would turn a valid direct launch into no emitter.
+    #[farhelm_testtrace::test]
+    fn claude_stops_skipping_trampolines_at_the_pane_anchor() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            claude_hook_trampoline(11),
+            claude_hook_trampoline(10),
+        ];
+        let attribution = claude_corridor(&chain).expect("the pane must remain the emitter");
+        assert_eq!(attribution.emitter, claude_identity(10));
+        assert!(attribution.ancestors.is_empty());
+    }
+
+    /// A shell doing more than invoking the hook is a real emitter, not a
+    /// trampoline. Retain all higher links, even ones that resemble hook shells;
+    /// only the consecutive trampoline prefix immediately above the reporter skips.
+    #[farhelm_testtrace::test]
+    fn claude_keeps_nontrampoline_shells_and_trampoline_shaped_ancestors() {
+        let chain = vec![
+            corridor_link(14, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            claude_hook_trampoline(13),
+            corridor_link(
+                12,
+                "/bin/sh",
+                &["sh", "-c", "farhelm internal hook --vendor claude; true"],
+            ),
+            claude_hook_trampoline(11),
+            corridor_link_no_argv(10, "/opt/test/bin/resident-wrapper"),
+        ];
+        let attribution = claude_corridor(&chain).expect("the nontrampoline shell must attribute");
+        assert_eq!(attribution.emitter, claude_identity(12));
+        assert_eq!(
+            attribution.ancestors,
+            vec![claude_identity(11), claude_identity(10)]
+        );
     }
 
     /// A process that is not the hook invocation refuses however clean the
@@ -3977,6 +4040,8 @@ mod tests {
     /// reporter, which only means something when the reporter is the hook.
     #[farhelm_testtrace::test]
     fn claude_refuses_a_non_hook_reporter_and_a_reporter_that_is_the_pane() {
+        let refusal = claude_corridor(&[]).expect_err("empty ancestry has no reporter");
+        assert!(refusal.contains("ancestry is empty"), "{refusal}");
         let not_hook = vec![
             corridor_link(
                 11,
@@ -3992,13 +4057,17 @@ mod tests {
             corridor_link_no_argv(11, "/opt/test/bin/farhelm"),
             corridor_link(10, CLAUDE_IMAGE, &["claude"]),
         ];
-        claude_corridor(&no_argv).expect_err("a reporter without argv evidence must refuse");
+        let refusal =
+            claude_corridor(&no_argv).expect_err("a reporter without argv evidence must refuse");
+        assert!(refusal.contains("supported hook invocation"), "{refusal}");
 
         let alone = vec![corridor_link(
             10,
             "/opt/test/bin/farhelm",
             &claude_hook_argv(),
         )];
-        claude_corridor(&alone).expect_err("a reporter that is the pane has no emitter");
+        let refusal =
+            claude_corridor(&alone).expect_err("a reporter that is the pane has no emitter");
+        assert!(refusal.contains("reporter is itself the pane"), "{refusal}");
     }
 }

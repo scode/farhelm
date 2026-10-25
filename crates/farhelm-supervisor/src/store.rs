@@ -7435,92 +7435,166 @@ mod tests {
         }
     }
 
-    /// A pin and its admitted binding survive reopen but never a new generation.
+    /// Real Claude and Codex launches exercise the same pin persistence contract.
+    /// Each case carries its ownership version, durable warning spelling, and a
+    /// resumable capture in its vendor's vocabulary. A generic row would miss
+    /// Claude's version-0 Restart compatibility, while a bare Codex id is not a
+    /// resumable locator even at ownership version 1.
+    fn report_pin_rows(id: &str) -> [(StoredSession, i64, &'static str, &'static str); 2] {
+        use farhelm_proto::AgentKind;
+
+        [
+            (
+                AgentKind::Claude,
+                "claude",
+                "--resume",
+                0,
+                "claude_pin_corrected",
+                "first",
+            ),
+            (
+                AgentKind::Codex,
+                "codex",
+                "resume",
+                1,
+                "codex_pin_corrected",
+                r#"codex:{"version":1,"runtime_session_id":"first","session_file":"/records/first.jsonl","thread_id":"first","resumable":true}"#,
+            ),
+        ]
+        .map(|(kind, program, resume_arg, version, notification, capture)| {
+            let mut row = launching_row(id);
+            row.launch = legacy_launch(
+                program,
+                kind,
+                Some(vec![
+                    program.to_string(),
+                    resume_arg.to_string(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                ]),
+            );
+            (row, version, notification, capture)
+        })
+    }
+
+    /// Both vendors retain a resumable binding on reopen, but no launch inherits
+    /// a prior process pin. Claude must keep Restart at ownership version 0.
     /// Stale pin or binding snapshots cannot partially adopt, and aborting a
     /// relaunch restores external-run facts without restoring process authority.
     #[farhelm_testtrace::test]
-    async fn codex_pin_cas_reload_and_relaunch_share_the_launch_contract() {
-        let (dir, store) = fresh_store().await;
-        let path = dir.path().join("supervisor.db");
-        store
-            .insert_session(launching_row("pinned"), None)
-            .await
-            .unwrap();
-        let initial = store.session("pinned").await.unwrap().unwrap();
-        let pin = r#"{"process":{"pid":41,"start":99},"ancestors":[]}"#;
-        assert!(
-            store
-                .admit_pinned_conversation(&initial, None, "first", pin, 1, None)
-                .await
-                .unwrap()
-        );
-        assert!(
-            !store
-                .admit_pinned_conversation(&initial, None, "stale", "other-pin", 1, None)
-                .await
-                .unwrap()
-        );
-        let row = store.session("pinned").await.unwrap().unwrap();
-        assert!(
-            !store
-                .admit_pinned_conversation(&row, Some("stale-pin"), "wrong", "other-pin", 1, None)
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            store.report_pin("pinned").await.unwrap().as_deref(),
-            Some(pin)
-        );
-        assert_eq!(
-            store
-                .session("pinned")
-                .await
-                .unwrap()
-                .unwrap()
-                .captured_conversation
-                .as_deref(),
-            Some("first")
-        );
-        drop(store);
-        let store = SessionStore::open(&path, true).await.unwrap();
-        assert_eq!(
-            store.report_pin("pinned").await.unwrap().as_deref(),
-            Some(pin)
-        );
-        let basis = OfferBasis {
-            captured_conversation: Some("first".into()),
-            capture_ownership_version: 1,
-        };
-        let RelaunchDecision::Claimed(claim) =
-            store.begin_relaunch("pinned", basis, false).await.unwrap()
-        else {
-            panic!("relaunch should claim the current offer")
-        };
-        assert_eq!(store.report_pin("pinned").await.unwrap(), None);
-        assert!(
-            store
-                .abort_relaunch("pinned", claim.generation, &claim.prior)
-                .await
-                .unwrap()
-        );
-        assert_eq!(store.report_pin("pinned").await.unwrap(), None);
-        assert!(
-            !store
-                .admit_pinned_conversation(&row, Some(pin), "late", pin, 1, None)
-                .await
-                .unwrap()
-        );
-        let current = store.session("pinned").await.unwrap().unwrap();
-        assert!(
-            store
-                .admit_pinned_conversation(&current, None, "new-launch", "new-pin", 1, None)
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            store.report_pin("pinned").await.unwrap().as_deref(),
-            Some("new-pin")
-        );
+    async fn report_pin_cas_reload_and_relaunch_share_the_launch_contract() {
+        for (seed, version, _, capture) in report_pin_rows("pinned") {
+            let (dir, store) = fresh_store().await;
+            let path = dir.path().join("supervisor.db");
+            let launch = seed.launch.clone();
+            store.insert_session(seed, None).await.unwrap();
+            let initial = store.session("pinned").await.unwrap().unwrap();
+            assert_eq!(initial.launch, launch);
+            let pin = r#"{"process":{"pid":41,"start":99},"ancestors":[]}"#;
+            assert!(
+                store
+                    .admit_pinned_conversation(&initial, None, capture, pin, version, None)
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                !store
+                    .admit_pinned_conversation(&initial, None, "stale", "other-pin", version, None)
+                    .await
+                    .unwrap()
+            );
+            let row = store.session("pinned").await.unwrap().unwrap();
+            // Every other CAS field is current: this refusal exercises the
+            // prior-pin fence independently of the binding and its version.
+            assert!(
+                !store
+                    .admit_pinned_conversation(
+                        &row,
+                        Some("stale-pin"),
+                        "wrong",
+                        "other-pin",
+                        version,
+                        None
+                    )
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(
+                store.report_pin("pinned").await.unwrap().as_deref(),
+                Some(pin)
+            );
+            assert_eq!(
+                store
+                    .session("pinned")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .captured_conversation
+                    .as_deref(),
+                Some(capture)
+            );
+            drop(store);
+            let store = SessionStore::open(&path, true).await.unwrap();
+            assert_eq!(
+                store.report_pin("pinned").await.unwrap().as_deref(),
+                Some(pin)
+            );
+            let reloaded = store.session("pinned").await.unwrap().unwrap();
+            assert_eq!(reloaded.launch, launch);
+            assert_eq!(reloaded.capture_ownership_version, version);
+            assert_eq!(reloaded.captured_conversation.as_deref(), Some(capture));
+            assert_eq!(reloaded.conversation_source.as_deref(), Some("hook"));
+            assert_eq!(
+                crate::agent_kind::IntegrationSnapshot::of(&reloaded.launch).restart_offer(
+                    reloaded.captured_conversation.as_deref(),
+                    reloaded.capture_ownership_version,
+                ),
+                farhelm_proto::RestartOffer::Resume,
+            );
+            let basis = OfferBasis {
+                captured_conversation: Some(capture.into()),
+                capture_ownership_version: version,
+            };
+            let RelaunchDecision::Claimed(claim) =
+                store.begin_relaunch("pinned", basis, false).await.unwrap()
+            else {
+                panic!("relaunch should claim the current offer")
+            };
+            assert_eq!(claim.generation, row.generation + 1);
+            assert_eq!(store.report_pin("pinned").await.unwrap(), None);
+            assert!(
+                store
+                    .abort_relaunch("pinned", claim.generation, &claim.prior)
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(store.report_pin("pinned").await.unwrap(), None);
+            assert!(
+                !store
+                    .admit_pinned_conversation(&row, Some(pin), "late", pin, version, None)
+                    .await
+                    .unwrap()
+            );
+            let current = store.session("pinned").await.unwrap().unwrap();
+            assert_eq!(current.capture_ownership_version, version);
+            assert_eq!(current.captured_conversation.as_deref(), Some(capture));
+            assert!(
+                store
+                    .admit_pinned_conversation(
+                        &current,
+                        None,
+                        "new-launch",
+                        "new-pin",
+                        version,
+                        None
+                    )
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(
+                store.report_pin("pinned").await.unwrap().as_deref(),
+                Some("new-pin")
+            );
+        }
     }
 
     /// A process pin does not imply versioned conversation ownership.
@@ -7568,138 +7642,168 @@ mod tests {
         );
     }
 
-    /// A correction's warning cannot be lost after its process authority moves.
+    /// Neither vendor can move process authority without its correction warning.
     /// A real SQLite insert failure rolls back the prior successful UPDATE;
-    /// successful adoption and its once-per-launch warning both survive reopen.
+    /// successful adoption, the vendor's ownership version, and its unresolved
+    /// once-per-launch warning all survive reopen.
     #[farhelm_testtrace::test]
-    async fn codex_pin_correction_notification_is_atomic_and_survives_reopen() {
-        let (dir, store) = fresh_store().await;
-        let path = dir.path().join("supervisor.db");
-        store
-            .insert_session(launching_row("atomic-correction"), None)
-            .await
-            .unwrap();
-        let initial = store.session("atomic-correction").await.unwrap().unwrap();
-        assert!(
+    async fn report_pin_correction_notification_is_atomic_and_survives_reopen() {
+        for (seed, version, notification_kind, _) in report_pin_rows("atomic-correction") {
+            let (dir, store) = fresh_store().await;
+            let path = dir.path().join("supervisor.db");
+            let launch = seed.launch.clone();
+            store.insert_session(seed, None).await.unwrap();
+            let initial = store.session("atomic-correction").await.unwrap().unwrap();
+            assert_eq!(initial.launch, launch);
+            assert!(
+                store
+                    .admit_pinned_conversation(&initial, None, "child", "child-pin", version, None)
+                    .await
+                    .unwrap()
+            );
+            let child = store.session("atomic-correction").await.unwrap().unwrap();
+            assert_eq!(child.captured_conversation.as_deref(), Some("child"));
+            assert_eq!(child.capture_ownership_version, version);
+            assert_eq!(child.conversation_source.as_deref(), Some("hook"));
+            assert_eq!(
+                store
+                    .report_pin("atomic-correction")
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                Some("child-pin")
+            );
+            let notification = Some((notification_kind, "earlier Restart followed the child"));
+            {
+                let conn = store.conn.lock();
+                conn.execute_batch(&format!("CREATE TRIGGER refuse_correction_warning BEFORE INSERT ON session_notifications
+                WHEN NEW.kind = '{notification_kind}' BEGIN SELECT RAISE(ABORT, 'controlled warning failure'); END;")).unwrap();
+            }
+            // The trigger sees a correction insert only after the binding UPDATE.
+            // Its error must undo that UPDATE as well as leave the notification absent.
+            assert!(
+                store
+                    .admit_pinned_conversation(
+                        &child,
+                        Some("child-pin"),
+                        "parent",
+                        "parent-pin",
+                        version,
+                        notification
+                    )
+                    .await
+                    .is_err()
+            );
+            let after = store.session("atomic-correction").await.unwrap().unwrap();
+            assert_eq!(after.captured_conversation, child.captured_conversation);
+            assert_eq!(
+                after.capture_ownership_version,
+                child.capture_ownership_version
+            );
+            assert_eq!(after.conversation_source, child.conversation_source);
+            assert_eq!(
+                store
+                    .report_pin("atomic-correction")
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                Some("child-pin")
+            );
+            assert!(
+                store
+                    .session_notifications("atomic-correction")
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
             store
-                .admit_pinned_conversation(&initial, None, "child", "child-pin", 1, None)
+                .conn
+                .lock()
+                .execute_batch("DROP TRIGGER refuse_correction_warning;")
+                .unwrap();
+            assert!(
+                !store
+                    .admit_pinned_conversation(
+                        &initial,
+                        None,
+                        "stale",
+                        "stale-pin",
+                        version,
+                        notification
+                    )
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                store
+                    .session_notifications("atomic-correction")
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(
+                store
+                    .admit_pinned_conversation(
+                        &child,
+                        Some("child-pin"),
+                        "parent",
+                        "parent-pin",
+                        version,
+                        notification
+                    )
+                    .await
+                    .unwrap()
+            );
+            drop(store);
+            let store = SessionStore::open(&path, true).await.unwrap();
+            let parent = store.session("atomic-correction").await.unwrap().unwrap();
+            assert_eq!(parent.launch, launch);
+            assert_eq!(parent.captured_conversation.as_deref(), Some("parent"));
+            assert_eq!(parent.capture_ownership_version, version);
+            assert_eq!(parent.conversation_source.as_deref(), Some("hook"));
+            assert_eq!(
+                store
+                    .report_pin("atomic-correction")
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                Some("parent-pin")
+            );
+            let warnings = store
+                .session_notifications("atomic-correction")
                 .await
-                .unwrap()
-        );
-        let child = store.session("atomic-correction").await.unwrap().unwrap();
-        let notification = Some(("codex_pin_corrected", "earlier Restart followed the child"));
-        {
-            let conn = store.conn.lock();
-            conn.execute_batch("CREATE TRIGGER refuse_correction_warning BEFORE INSERT ON session_notifications
-                WHEN NEW.kind = 'codex_pin_corrected' BEGIN SELECT RAISE(ABORT, 'controlled warning failure'); END;").unwrap();
+                .unwrap();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(warnings[0].text, "earlier Restart followed the child");
+            assert!(!warnings[0].resolved);
+            let records = store
+                .session_notification_records("atomic-correction")
+                .await
+                .unwrap();
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].kind, notification_kind);
+            assert_eq!(records[0].generation, parent.generation);
+            assert!(
+                store
+                    .admit_pinned_conversation(
+                        &parent,
+                        Some("parent-pin"),
+                        "higher-parent",
+                        "higher-pin",
+                        version,
+                        notification
+                    )
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(
+                store
+                    .session_notifications("atomic-correction")
+                    .await
+                    .unwrap(),
+                warnings
+            );
         }
-        // The trigger sees a correction insert only after the binding UPDATE.
-        // Its error must undo that UPDATE as well as leave the notification absent.
-        assert!(
-            store
-                .admit_pinned_conversation(
-                    &child,
-                    Some("child-pin"),
-                    "parent",
-                    "parent-pin",
-                    1,
-                    notification
-                )
-                .await
-                .is_err()
-        );
-        let after = store.session("atomic-correction").await.unwrap().unwrap();
-        assert_eq!(after.captured_conversation, child.captured_conversation);
-        assert_eq!(
-            after.capture_ownership_version,
-            child.capture_ownership_version
-        );
-        assert_eq!(after.conversation_source, child.conversation_source);
-        assert_eq!(
-            store
-                .report_pin("atomic-correction")
-                .await
-                .unwrap()
-                .as_deref(),
-            Some("child-pin")
-        );
-        assert!(
-            store
-                .session_notifications("atomic-correction")
-                .await
-                .unwrap()
-                .is_empty()
-        );
-        store
-            .conn
-            .lock()
-            .execute_batch("DROP TRIGGER refuse_correction_warning;")
-            .unwrap();
-        assert!(
-            !store
-                .admit_pinned_conversation(&initial, None, "stale", "stale-pin", 1, notification)
-                .await
-                .unwrap()
-        );
-        assert!(
-            store
-                .session_notifications("atomic-correction")
-                .await
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            store
-                .admit_pinned_conversation(
-                    &child,
-                    Some("child-pin"),
-                    "parent",
-                    "parent-pin",
-                    1,
-                    notification
-                )
-                .await
-                .unwrap()
-        );
-        drop(store);
-        let store = SessionStore::open(&path, true).await.unwrap();
-        let parent = store.session("atomic-correction").await.unwrap().unwrap();
-        assert_eq!(parent.captured_conversation.as_deref(), Some("parent"));
-        assert_eq!(
-            store
-                .report_pin("atomic-correction")
-                .await
-                .unwrap()
-                .as_deref(),
-            Some("parent-pin")
-        );
-        let warnings = store
-            .session_notifications("atomic-correction")
-            .await
-            .unwrap();
-        assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].text, "earlier Restart followed the child");
-        assert!(!warnings[0].resolved);
-        assert!(
-            store
-                .admit_pinned_conversation(
-                    &parent,
-                    Some("parent-pin"),
-                    "higher-parent",
-                    "higher-pin",
-                    1,
-                    notification
-                )
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            store
-                .session_notifications("atomic-correction")
-                .await
-                .unwrap(),
-            warnings
-        );
     }
 
     /// A relaunch preserves the captured identity together with its

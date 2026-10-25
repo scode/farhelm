@@ -770,17 +770,210 @@ async fn a_second_report_replaces_the_first() {
     serving.stop().await;
 }
 
+/// Surround the reporting fixture with two resident shells and an exec-only
+/// witness. Each prints its PID before invoking the next command. The final
+/// shell replaces itself with the fixture, so its witness names the emitter
+/// without adding a third resident level or changing the fixture's protocol.
+///
+/// Commands after the resident shells' child calls prevent shell tail-exec
+/// optimizations. Phase-specific markers keep restart assertions from matching
+/// the original launch's terminal replay.
+fn two_level_hook_wrapper(fixtures: &CaptureFixtures, phase: &str) -> Vec<String> {
+    let mut argv = Vec::new();
+    for role in ["OUTER", "INNER", "EMITTER"] {
+        argv.extend([
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            if role == "EMITTER" {
+                r#"printf '%s:%s\n' "$0" "$$"; exec "$@""#.to_string()
+            } else {
+                r#"printf '%s:%s\n' "$0" "$$"; "$@"; exit $?"#.to_string()
+            },
+            format!("CLAUDE-WRAPPER-{phase}-{role}"),
+        ]);
+    }
+    argv.extend([
+        fixtures.bin().join("claude").to_string_lossy().into_owned(),
+        "fake-agent".to_string(),
+        "--script".to_string(),
+        "hook-report".to_string(),
+        "--record-home".to_string(),
+        fixtures.home().to_string_lossy().into_owned(),
+    ]);
+    argv
+}
+
+/// Prove that both wrappers remain alive between the current pane and emitter.
+/// Startup text alone would also pass if a shell later exec'd its child. Live
+/// parent relationships and the pane PID distinguish that weaker fixture from
+/// the two resident levels this test needs. Both external probes use the shared
+/// bounded runner, with diagnostics collected while the harness is still alive.
+async fn assert_two_resident_wrappers(
+    h: &Harness,
+    id: &str,
+    transcript: &[u8],
+    phase: &str,
+) -> [u32; 3] {
+    let pids = ["OUTER", "INNER", "EMITTER"].map(|role| {
+        marker_value(transcript, &format!("CLAUDE-WRAPPER-{phase}-{role}:"))
+            .parse::<u32>()
+            .expect("wrapper witness PID")
+    });
+    let [outer, inner, emitter] = pids;
+    assert!(outer != inner && inner != emitter && outer != emitter);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let pane = tmux_query_before_deadline(
+        &h.state.path().join("tmux.sock"),
+        &[
+            "display-message",
+            "-p",
+            "-t",
+            &format!("fh-{id}"),
+            "#{pane_pid}",
+        ],
+        deadline,
+    )
+    .await
+    .expect("pane probe budget");
+    assert!(pane.status.success(), "pane probe: {pane:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&pane.stdout).trim().parse::<u32>(),
+        Ok(outer),
+        "the outer resident wrapper must own this pane"
+    );
+    let mut command = std::process::Command::new("ps");
+    command.args([
+        "-o",
+        "pid=,ppid=",
+        "-p",
+        &format!("{outer},{inner},{emitter}"),
+    ]);
+    let processes = command_output_before_deadline(command, deadline)
+        .await
+        .expect("resident ancestry probe budget");
+    assert!(processes.status.success(), "process probe: {processes:?}");
+    let text = String::from_utf8_lossy(&processes.stdout);
+    let relationships: Vec<Vec<u32>> = text
+        .lines()
+        .map(|line| {
+            line.split_whitespace()
+                .map(|field| field.parse().expect("ps PID field"))
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        relationships.len(),
+        3,
+        "all three must remain alive: {text}"
+    );
+    assert!(
+        relationships.iter().any(|row| row == &[inner, outer])
+            && relationships.iter().any(|row| row == &[emitter, inner]),
+        "two resident wrappers must precede the emitter: {text}"
+    );
+    pids
+}
+
+/// A Claude below two resident wrapper levels captures and actually restarts
+/// through both wrappers with the reported conversation in its resume argv.
+/// Observing live ancestry before the report prevents an exec-only fixture from
+/// passing the old one-level rule. A fresh post-restart report also proves the
+/// new launch acquired its own emitter pin and retained its injected hook.
+#[farhelm_testtrace::test]
+async fn a_two_level_resident_wrapper_captures_and_resumes_claude() {
+    let (h, fixtures, serving) = hook_harness().await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let mut start = two_level_hook_wrapper(&fixtures, "start");
+    start.push(farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER.into());
+    let mut resume = two_level_hook_wrapper(&fixtures, "resume");
+    resume.extend([
+        "--resume".into(),
+        farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+        farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER.into(),
+    ]);
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            declared_command(
+                &shell_words::join(&start),
+                farhelm_proto::LaunchHarness::Claude,
+                Some(&shell_words::join(&resume)),
+            ),
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras::default(),
+        )
+        .await
+        .expect("create two-level wrapper launch");
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    let before_pids = assert_two_resident_wrappers(&h, &session.id, &seen, "start").await;
+    report(&h, chan, &mut rx, &mut seen, "conv-deep-wrapper").await;
+    let before = snapshot_of(&h, &session.id).await;
+    assert_eq!(
+        before.captured_conversation.as_deref(),
+        Some("conv-deep-wrapper"),
+        "the two-level launch's report must be admitted; {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(before.restart_offer, farhelm_proto::RestartOffer::Resume);
+    assert_eq!(
+        resumed_conversation(&before.resume_argv),
+        "conv-deep-wrapper"
+    );
+    h.client
+        .restart_session(&session.id, true)
+        .await
+        .expect("resume through two resident wrappers");
+    drop(rx);
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    // The original READY may be in replay. Require the new emitter's
+    // phase-specific witness followed by its own READY before reading argv.
+    wait_for_after(
+        &mut rx,
+        &mut seen,
+        "CLAUDE-WRAPPER-resume-EMITTER:",
+        "FAKE-AGENT READY",
+        30,
+    )
+    .await;
+    let resumed = shell_words::split(&argv_marker(&seen)).expect("resumed fixture argv");
+    assert!(
+        resumed
+            .windows(2)
+            .any(|words| words == ["--resume", "conv-deep-wrapper"]),
+        "the real replacement must receive the captured identity: {resumed:?}"
+    );
+    let after_pids = assert_two_resident_wrappers(&h, &session.id, &seen, "resume").await;
+    assert_ne!(
+        before_pids[2], after_pids[2],
+        "Restart must replace the emitter"
+    );
+    assert_declares_session_start_hook(&injected_settings(&argv_marker(&seen)));
+    report(&h, chan, &mut rx, &mut seen, "conv-after-deep-resume").await;
+    let after = snapshot_of(&h, &session.id).await;
+    assert!(after.generation > before.generation);
+    assert_eq!(
+        after.captured_conversation.as_deref(),
+        Some("conv-after-deep-resume"),
+        "the restarted emitter must acquire its own pin; {}",
+        hook_log(&h, &session.id)
+    );
+    serving.stop().await;
+}
+
 /// A shelled-out child that inherited the session credential and fires its
 /// own reporting hook cannot replace the foreground's conversation: the
 /// supervisor refuses it, and the foreground's report stays the restart
 /// target.
 ///
-/// Why this test matters: this is the overwrite Claude's positional
-/// admission rule exists to stop. A `claude` run from the foreground's Bash
+/// Why this test matters: this is the overwrite Claude's emitter pin
+/// exists to stop. A `claude` run from the foreground's Bash
 /// tool inherits `FARHELM_SESSION_TOKEN` along with the rest of the
 /// environment, and if it picks up a reporting hook (a user- or
 /// project-level settings hook, say) its `SessionStart` names a different
-/// conversation. Before the rule, credential and id shape were all
+/// conversation. Before ancestry admission, credential and id shape were all
 /// admission asked for, so the child's id silently became what a restart
 /// would resume.
 ///
@@ -798,6 +991,15 @@ async fn a_shelled_out_child_cannot_replace_the_foreground_report() {
     let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
 
     report(&h, chan, &mut rx, &mut seen, "conv-parent").await;
+    assert_eq!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .as_deref(),
+        Some("conv-parent"),
+        "the foreground must be pinned before its child reports; {}",
+        hook_log(&h, &session.id)
+    );
 
     let from = seen.len();
     h.client
@@ -837,8 +1039,11 @@ async fn a_shelled_out_child_cannot_replace_the_foreground_report() {
         .find(|line| line.contains(" conv-child ") && !line.contains(" written "))
         .unwrap_or_else(|| panic!("the supervisor must have judged the child's report: {log:?}"));
     assert!(
-        child.contains(" refused conflict ") && child.contains("nested below"),
-        "the supervisor must have refused the child for its ancestry: {child}"
+        child.contains(" refused conflict ")
+            && child.contains(
+                "the Claude report came from a process other than this launch's pinned emitter"
+            ),
+        "the supervisor must have refused the child for its emitter pin: {child}"
     );
     assert!(
         log.iter()
