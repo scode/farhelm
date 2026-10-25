@@ -21,6 +21,7 @@ use dioxus::prelude::*;
 use farhelm_proto::{CheckoutTrashIssue, CheckoutTrashListing};
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use web_time::Instant;
 
 const DIALOG: &str = ".checkout-trash-dialog";
 /// Only whole-dialog dismissal returns here; cancelling a confirmation stays inside.
@@ -157,13 +158,76 @@ impl Selection {
     }
 }
 
-/// A run keeps its original denominator until every host has answered.
-/// Presence means at least one pending host: success and failure both remove
-/// their host, and the final reply clears this state before releasing the gate.
+/// Frozen per-host progress survives until the last host finishes, so a fast
+/// host does not lose its denominator while another host is still deleting.
+/// The cursor advances on every confirmed reply, including a per-record issue;
+/// only confirmed record removals increment `deleted`.
+#[derive(Clone)]
+struct HostDeletion {
+    /// Constant-time row lookup avoids scanning the frozen selection for every
+    /// displayed checkout. The task retains the ordered IDs for dispatch.
+    positions: HashMap<String, usize>,
+    /// Targets put displayed checkouts before diagnostic-only IDs. Keep their
+    /// count separate so unchecked record cleanup never inflates checkout totals.
+    checkouts: usize,
+    next: usize,
+    started_at: Option<Instant>,
+    deleted: usize,
+    finished: bool,
+}
+
+/// Presence holds the page claim across all per-host queues. Only the final
+/// host completion clears the run and triggers a single listing refresh.
 #[derive(Clone)]
 struct DeletionRun {
-    pending: HashSet<HostId>,
-    total: usize,
+    hosts: HashMap<HostId, HostDeletion>,
+}
+
+impl DeletionRun {
+    /// Describe outstanding requests, excluding queues stopped by a lost reply.
+    /// Diagnostic-only records remain visible as unchecked entries, not checkouts.
+    fn status(&self) -> String {
+        let (checkouts_left, unchecked_left) = self
+            .hosts
+            .values()
+            .filter(|host| !host.finished)
+            .fold((0, 0), |(checkouts_left, unchecked_left), host| {
+                (
+                    checkouts_left + host.checkouts.saturating_sub(host.next),
+                    unchecked_left
+                        + host
+                            .positions
+                            .len()
+                            .saturating_sub(host.next.max(host.checkouts)),
+                )
+            });
+        let status = format!(
+            "deleting… {checkouts_left} {} left",
+            checkouts(checkouts_left)
+        );
+        if unchecked_left == 0 {
+            status
+        } else {
+            format!("{status} · {unchecked_left} unchecked entries left")
+        }
+    }
+}
+
+/// Mount only for the current request. Its monotonic origin belongs to dispatch,
+/// not render; the component's timer is cancelled when that request leaves the row.
+#[component]
+fn EntryProgress(started_at: Instant) -> Element {
+    let mut elapsed = use_signal(|| started_at.elapsed().as_secs());
+    use_future(move || async move {
+        loop {
+            crate::reader::sleep_ms(1_000).await;
+            elapsed.set(started_at.elapsed().as_secs());
+        }
+    });
+    rsx! { span { class: "trash-entry-progress",
+        span { class: "delete-spinner", aria_hidden: "true" }
+        span { class: "trash-entry-elapsed", "{elapsed()}s" }
+    } }
 }
 
 /// Only connected rows can contribute current archives or accept cleanup.
@@ -238,7 +302,9 @@ fn reply_partial(reply: Option<&Result<CheckoutTrashListing, String>>) -> bool {
 }
 
 /// Collapse repeated diagnostic IDs into one selection, keeping every message
-/// visible separately. Sizes with any unknown checkout remain explicitly partial.
+/// visible separately. Displayed checkouts precede diagnostic-only IDs, which
+/// lets progress distinguish known checkout work from unchecked record cleanup.
+/// Sizes with any unknown checkout remain explicitly partial.
 fn target(host: &Host, state: Option<&HostTrash>) -> Option<Target> {
     let state = state.filter(|state| {
         connected(host) && state.incarnation == host.incarnation && !state.loading
@@ -625,55 +691,120 @@ pub(super) fn TrashControl(
         }
         claim.set(Some(guard));
         deletion.set(Some(DeletionRun {
-            pending: targets.iter().map(|target| target.host).collect(),
-            total: targets.len(),
+            hosts: targets
+                .iter()
+                .map(|target| {
+                    (
+                        target.host,
+                        HostDeletion {
+                            positions: target
+                                .ids
+                                .iter()
+                                .enumerate()
+                                .map(|(index, id)| (id.clone(), index))
+                                .collect(),
+                            checkouts: target.count,
+                            next: 0,
+                            started_at: None,
+                            deleted: 0,
+                            finished: false,
+                        },
+                    )
+                })
+                .collect(),
         }));
         generation += 1; // supersede every pre-delete count and size reply
         notices.write().clear();
         for target in targets {
             let base = delete_base.clone();
             spawn(async move {
-                let result = crate::api::empty_checkout_trash(
-                    &base,
-                    target.host,
-                    target.incarnation,
-                    &target.ids,
-                )
-                .await;
-                match result {
-                    Ok(reply) => {
-                        // These removals are confirmed records, not guessed
-                        // successful files. Always keep overlapping issues.
-                        if let Some(entry) = state
-                            .write()
-                            .get_mut(&target.host)
-                            .filter(|entry| entry.incarnation == target.incarnation)
-                            && let Some(Ok(listing)) = entry.reply.as_mut()
-                        {
-                            listing
-                                .checkouts
-                                .retain(|entry| !reply.removed.contains(&entry.id));
-                            listing
-                                .issues
-                                .retain(|entry| !reply.removed.contains(&entry.id));
-                        }
-                        notices.write().insert(target.host, reply.issues);
+                // A host owns one sequential queue; independent host tasks can
+                // progress together. Never rediscover targets between replies.
+                for (index, id) in target.ids.iter().enumerate() {
+                    let valid = {
+                        let hosts = hosts.peek();
+                        hosts.refresh_error().is_none()
+                            && hosts.hosts().unwrap_or_default().iter().any(|host| {
+                                host.id == target.host
+                                    && connected(host)
+                                    && host.incarnation == target.incarnation
+                            })
+                    };
+                    if !valid {
+                        notices.write().entry(target.host).or_default().push(CheckoutTrashIssue {
+                            id: String::new(), path: String::new(),
+                            message: "The host connection changed; remaining cleanup was not sent. Rechecking the trash.".into(),
+                        });
+                        break;
                     }
-                    Err(error) => {
-                        notices.write().insert(target.host, vec![CheckoutTrashIssue {
+                    if let Some(host) = deletion
+                        .write()
+                        .as_mut()
+                        .and_then(|run| run.hosts.get_mut(&target.host))
+                    {
+                        host.next = index;
+                        host.started_at = Some(Instant::now());
+                    }
+                    let result = crate::api::empty_checkout_trash(
+                        &base,
+                        target.host,
+                        target.incarnation,
+                        std::slice::from_ref(id),
+                    )
+                    .await;
+                    match result {
+                        Ok(reply) => {
+                            // These removals are confirmed records, not guessed
+                            // successful files. Always keep overlapping issues.
+                            if let Some(entry) = state
+                                .write()
+                                .get_mut(&target.host)
+                                .filter(|entry| entry.incarnation == target.incarnation)
+                                && let Some(Ok(listing)) = entry.reply.as_mut()
+                            {
+                                listing
+                                    .checkouts
+                                    .retain(|entry| !reply.removed.contains(&entry.id));
+                                listing
+                                    .issues
+                                    .retain(|entry| !reply.removed.contains(&entry.id));
+                            }
+                            if let Some(host) = deletion
+                                .write()
+                                .as_mut()
+                                .and_then(|run| run.hosts.get_mut(&target.host))
+                            {
+                                host.deleted += usize::from(reply.removed.contains(id));
+                                host.next = index + 1;
+                                host.started_at = None;
+                            }
+                            notices
+                                .write()
+                                .entry(target.host)
+                                .or_default()
+                                .extend(reply.issues);
+                        }
+                        Err(error) => {
+                            notices.write().entry(target.host).or_default().push(CheckoutTrashIssue {
                             id: String::new(), path: String::new(),
                             message: format!("The cleanup reply could not be confirmed; some folders may already be deleted. Rechecking the trash: {error}"),
-                        }]);
+                        });
+                            // The server owns accepted work after a lost reply.
+                            // Sending more on this host could hide that uncertainty.
+                            break;
+                        }
                     }
                 }
-                // A failed reply still finishes this host's wait. Updating the
-                // pending set after either outcome keeps progress and admission
-                // tied to the same run, including an uncertain cleanup reply.
+                // Retain this host's outcome while peers finish; only the last
+                // queue releases admission and permits listing reads again.
                 let finished = {
                     let mut run = deletion.write();
                     if let Some(active) = run.as_mut() {
-                        active.pending.remove(&target.host);
-                        if active.pending.is_empty() {
+                        if let Some(host) = active.hosts.get_mut(&target.host) {
+                            host.finished = true;
+                            host.started_at = None;
+                        }
+                        if active.hosts.values().all(|host| host.finished) {
                             *run = None;
                             true
                         } else {
@@ -724,7 +855,7 @@ pub(super) fn TrashControl(
         let notices = notices.read().get(&host.id).map(Vec::len);
         let deleting = progress
             .as_ref()
-            .is_some_and(|run| run.pending.contains(&host.id));
+            .is_some_and(|run| run.hosts.contains_key(&host.id));
         (host.id, connected(host), pending, rows, notices, deleting).hash(&mut layout);
     }
     let layout = layout.finish();
@@ -811,7 +942,7 @@ pub(super) fn TrashControl(
             r#type: "button", aria_label: accessible_name, aria_haspopup: "dialog", "data-count": "{count}",
             "data-tooltip": tooltip, disabled: gate.busy(),
             onclick: move |_| { if !gate.busy_now() { notices.write().clear(); confirmation.clear(); open.set(true); } },
-            TrashIcon { full }
+            span { class: if busy { "trash-delete-icon deleting" } else { "trash-delete-icon" }, TrashIcon { full } }
             if let Some(text) = count_text { span { class: "checkout-trash-count", "{text}" } }
         }
         if open() {
@@ -821,11 +952,16 @@ pub(super) fn TrashControl(
                     focus: DialogFocus::remembered(".trash-close", Some(".trash-confirm-cancel, .trash-close"), false, Some(".trash-confirm-submit")),
                     on_escape: { let mut close = close.clone(); move |event: KeyboardEvent| { if !event.is_composing() { event.prevent_default(); event.stop_propagation(); close(); } } },
                     div { class: "checkout-trash-header",
-                        h2 { id: "checkout-trash-title", TrashIcon { full } "trash" }
+                        h2 { id: "checkout-trash-title", span { class: if busy { "trash-delete-icon deleting" } else { "trash-delete-icon" }, TrashIcon { full } } "trash" }
                         span { class: "checkout-trash-total", "{count} {checkouts(count)} · {space(total_bytes, total_partial)} on reachable hosts" }
                         div { class: "checkout-trash-header-actions",
                             button { class: "btn btn-danger trash-delete-all", disabled: busy || !all_ready || targets.is_empty(), onclick: move |_| { if deletion.peek().is_none() { confirmation.open(Confirmation { host: None, targets: targets.clone() }, ()); } }, "delete all" }
-                            button { class: "btn btn-neutral trash-close", disabled: busy, onclick: { let mut close = close.clone(); move |_| close() }, "close" }
+                            // Native disabled controls suppress hover in some
+                            // engines. The wrapper receives the explanation's
+                            // pointer events while Close stays truly disabled.
+                            span { class: "trash-close-help", "data-tooltip": busy.then_some("Available when deletion finishes."),
+                                button { class: "btn btn-neutral trash-close", disabled: busy, onclick: { let mut close = close.clone(); move |_| close() }, "close" }
+                            }
                         }
                         // The status region stays mounted while idle so that a
                         // starting delete is a text change screen readers
@@ -833,8 +969,7 @@ pub(super) fn TrashControl(
                         // place is announced unreliably, notably under WebKit.
                         div { class: if progress.is_some() { "checkout-trash-progress" } else { "checkout-trash-progress idle" }, role: "status",
                             if let Some(run) = &progress {
-                                if run.total == 1 { "deleting…" }
-                                else { "deleting on {run.pending.len()} of {run.total} hosts…" }
+                                "{run.status()}"
                             }
                         }
                     }
@@ -858,7 +993,8 @@ pub(super) fn TrashControl(
                             let pending = entry.is_none_or(|entry| entry.loading);
                             let host_target = if hosts_known { target(host, entry) } else { None };
                             let action_host = host.clone();
-                            let deleting = progress.as_ref().is_some_and(|run| run.pending.contains(&host.id));
+                            let host_progress = progress.as_ref().and_then(|run| run.hosts.get(&host.id));
+                            let deleting = host_progress.is_some();
                             let show = deleting || !connected(host) || pending || listing.is_none_or(|listing| !listing.checkouts.is_empty() || !listing.issues.is_empty()) || !host_notices.is_empty();
                             let name = host.name.escaped();
                             let totals = listing.map(listing_totals);
@@ -873,7 +1009,7 @@ pub(super) fn TrashControl(
                                     section { key: "{host.id}", class: if connected(host) { "checkout-trash-host" } else { "checkout-trash-host unreachable" }, "data-host-id": "{host.id}",
                                         div { class: "checkout-trash-host-header",
                                             div { strong { class: "peer-value", dir: "ltr", "{name}" } div { "{host_count} · {host_size}" }
-                                                if deleting { div { class: "trash-host-progress", "deleting…" } }
+                                                if let Some(run) = host_progress { div { class: "trash-host-progress", "{run.deleted} of {run.positions.len()} deleted" } }
                                             }
                                             button { class: "btn btn-danger btn-outline trash-host-delete", disabled: busy || host_target.is_none(),
                                                 onclick: move |_| {
@@ -902,10 +1038,17 @@ pub(super) fn TrashControl(
                                                 let entry_host = host.id;
                                                 let entry_id = checkout.id.clone();
                                                 let delete_label = format!("delete {} permanently", display_peer(&checkout.name));
+                                                let selected = host_progress.and_then(|run| run.positions.get(&checkout.id).map(|index| (run, *index)))
+                                                    .filter(|(run, index)| !run.finished && *index >= run.next);
                                                 rsx! {
                                                 div { key: "{checkout.id}", class: "checkout-trash-entry",
                                                     div { class: "checkout-trash-entry-heading", strong { class: "peer-value", dir: "ltr", "{display_peer(&checkout.name)}" }
                                                         if !pending { if let Some(bytes) = checkout.bytes { span { "{space(bytes, false)}" } } }
+                                                        if let Some((run, index)) = selected {
+                                                            if let Some(started_at) = run.started_at.filter(|_| index == run.next) {
+                                                                EntryProgress { started_at }
+                                                            } else { span { class: "trash-entry-waiting", "waiting" } }
+                                                        }
                                                         button { class: "btn btn-danger btn-outline trash-entry-delete", aria_label: delete_label,
                                                             // An entry delete has no band of its own: keep it
                                                             // out of reach while a band asks about something

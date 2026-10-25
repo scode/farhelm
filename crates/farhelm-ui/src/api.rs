@@ -1853,9 +1853,13 @@ fn client() -> reqwest::Client {
 /// body: uploads never pass through this module (terminal.js owns them, see
 /// `attachments`), so a total-request deadline cannot cut a transfer short.
 ///
-/// Applied in [`send`] rather than on the client, so it holds for every
-/// request by construction — the same argument the funnel itself makes.
+/// Applied in [`send`] rather than on the client, so ordinary mutations inherit
+/// this bound. The few different request classes use the named deadlines below.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Recursive cleanup can legitimately take minutes for one large checkout.
+/// This bounds the client's wait only; the server still owns accepted deletion.
+const TRASH_DELETE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 /// How long an idempotent read (`send_read`'s callers) may take: helm-local
 /// reads, plus one bounded remote scan (see below).
@@ -1941,10 +1945,9 @@ fn send_save(
 
 /// [`send`] with a caller-chosen deadline instead of [`REQUEST_TIMEOUT`].
 ///
-/// One caller earns this: the preference seed behind `PreferencesGate`,
-/// which holds the whole authenticated tree and must give up in seconds
-/// rather than let a stalled best-effort read cost a minute of blank page
-/// (see [`PREFERENCE_SEED_TIMEOUT`]). Everything else goes through
+/// The preference seed behind `PreferencesGate` must give up in seconds
+/// rather than leave a blank page (see [`PREFERENCE_SEED_TIMEOUT`]); recursive
+/// trash deletion earns a longer wait ([`TRASH_DELETE_TIMEOUT`]). Other calls go through
 /// [`send`] or [`send_read`]; a deadline chosen per call site is a deadline
 /// someone eventually forgets.
 fn send_within(
@@ -3755,7 +3758,8 @@ pub(crate) async fn fetch_checkout_trash(
     resp.json().await.map_err(|e| e.to_string())
 }
 
-/// Empty a frozen confirmed selection on its original host connection.
+/// Delete frozen archive IDs on their original host connection, allowing fifteen
+/// minutes for recursive removal. The UI sends one ID at a time for progress.
 /// A transport error can follow completed deletion, so callers always refetch
 /// and describe the outcome as uncertain instead of inventing per-item failures.
 pub(crate) async fn empty_checkout_trash(
@@ -3765,9 +3769,12 @@ pub(crate) async fn empty_checkout_trash(
     ids: &[String],
 ) -> Result<farhelm_proto::CheckoutTrashDeleted, String> {
     let url = format!("{base}/api/checkout-trash/delete");
-    let resp = send(client().post(&url).json(&serde_json::json!({
-        "host": host, "expected_incarnation": incarnation, "ids": ids,
-    })))
+    let resp = send_within(
+        client().post(&url).json(&serde_json::json!({
+            "host": host, "expected_incarnation": incarnation, "ids": ids,
+        })),
+        TRASH_DELETE_TIMEOUT,
+    )
     .await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);

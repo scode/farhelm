@@ -293,8 +293,8 @@ function checkLoopingAnimations(css) {
 // ---------------------------------------------------------------------------
 
 /**
- * The shipped app.css complies, and the scanner saw each of the four
- * looping indicators the rule was written for. Without the second half a
+ * The shipped app.css complies, and the scanner saw each named
+ * looping indicator. Without the second half a
  * scanner that silently matched nothing would also report zero violations.
  */
 test("app.css: every looping animation is stepped and within the rate cap", () => {
@@ -306,6 +306,7 @@ test("app.css: every looping animation is stepped and within the rate cap", () =
     ".delete-spinner",
     ".app-version-refresh-spinning",
     ".delete-progress-dot",
+    ".trash-delete-icon.deleting",
   ]) {
     assert.ok(selectors.includes(expected), `expected a looping animation on ${expected}; saw ${selectors}`);
   }
@@ -337,6 +338,21 @@ test("app.css: the version refresh stops animating for reduced motion", () => {
   assert.ok(reduced.some((media) => media.items.some((rule) =>
     rule.prelude === ".app-version-refresh-spinning" && rule.items.includes("animation: none")
   )), "the refresh glyph needs its own reduced-motion override");
+});
+
+/** Permanent cleanup keeps its inverted can as a static busy cue under Reduce
+ * Motion; disabling the bob must not restore the idle, upright orientation. */
+test("app.css: trash cleanup bobs within the cap and stays inverted without motion", () => {
+  const css = fs.readFileSync(APP_CSS_PATH, "utf8");
+  const { looping } = checkLoopingAnimations(css);
+  assert.equal(looping.find((item) => item.selector === ".trash-delete-icon.deleting").changesPerSecond, 8);
+  const rules = parseCss(css);
+  assert.ok(rules.some((rule) => rule.prelude === ".trash-delete-icon.deleting"
+    && rule.items.includes("transform: rotate(180deg)")));
+  const reduced = rules.filter((rule) => rule.prelude === "@media (prefers-reduced-motion: reduce)");
+  assert.ok(reduced.some((media) => media.items.some((rule) =>
+    rule.prelude === ".trash-delete-icon.deleting" && rule.items.includes("animation: none")
+  )), "cleanup must stop bobbing without losing its static transform");
 });
 
 // ---------------------------------------------------------------------------

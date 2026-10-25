@@ -8104,11 +8104,29 @@ a:any-link,
   border-bottom: 1px solid var(--border);
 }
 .checkout-trash-header-actions { display: flex; flex-shrink: 0; gap: 10px; margin-left: auto; }
+.trash-close-help { display: inline-flex; }
+/* Hover reaches the wrapper even where native disabled buttons suppress it. */
+.trash-close:disabled { pointer-events: none; }
 .checkout-trash-total { flex: 1 1 12em; min-width: 0; color: var(--fg-1); }
 .checkout-trash-progress { flex-basis: 100%; color: var(--fg-1); }
 /* Idle, the status region stays in the accessibility tree but takes no row
    in the wrapped header; `display: none` would remove it from that tree. */
 .checkout-trash-progress.idle { position: absolute; }
+/* Both persistent and dialog cans show the same run. Two keyframe intervals
+   with four steps each make eight changes per second; the universal inactive
+   window rule pauses this animation along with every other indicator. */
+.trash-delete-icon { display: inline-flex; flex-shrink: 0; }
+.trash-delete-icon.deleting {
+  transform: rotate(180deg);
+  animation: trash-delete-bob 1s steps(4) infinite;
+}
+@keyframes trash-delete-bob {
+  0%, 100% { transform: translateY(0) rotate(180deg); }
+  50% { transform: translateY(-3px) rotate(180deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .trash-delete-icon.deleting { animation: none; }
+}
 .checkout-trash-body {
   min-height: 0;
   overflow: auto;
@@ -8175,6 +8193,9 @@ a:any-link,
 .checkout-trash-entry-heading { flex-wrap: wrap; }
 .checkout-trash-entry-heading > strong { flex: 1 1 10em; }
 .trash-entry-delete { flex-shrink: 0; }
+.trash-entry-progress { display: inline-flex; align-items: center; gap: 6px; }
+.trash-entry-elapsed { font-variant-numeric: tabular-nums; }
+.trash-entry-waiting { color: var(--fg-1); }
 
 .checkout-trash-entry-meta {
   display: flex;

@@ -1175,10 +1175,14 @@ action or automatic cleanup. Each checkout also has a delete button that removes
 a warning about uncommitted or unpushed work; it is unavailable under the same host-listing and operation guards as bulk
 cleanup. The header keeps the title, total, global delete action and close control visible while the host list scrolls.
 Global confirmation appears first in that scroll region; its actions are brought into view when it opens, and cancelling
-returns focus to the global delete action. There is no footer. While deletion runs, the header announces how many of the
-involved hosts are still deleting, such as "deleting on 2 of 3 hosts…". Each pending host also shows "deleting…" until
-its reply arrives, whether success or failure, then its cleanup result takes over. Close and Escape stay unavailable
-until every involved host has answered.
+returns focus to the global delete action. There is no footer. Deletion sends one checkout at a time on each host, with
+hosts progressing in parallel and up to fifteen minutes to confirm each request. While a run is active, the header and
+trash button show an upside-down, bobbing can (static but still upside down under Reduce Motion). Their checkout counts
+and the header's size total fall as confirmed deletions remove entries. Each current checkout shows a spinner and
+elapsed seconds; queued checkouts say "waiting". Host headers show "N of M deleted", and the header announces how many
+checkouts remain to process. Per-record issues accumulate while that host continues; an unconfirmed reply stops only
+that host's queue and warns that some folders may already be deleted. The listing is rechecked once the whole run
+finishes. Close and Escape stay unavailable until then, and Close's tooltip explains the wait.
 
 Only the client that issued a session Delete plays an archive cue, and only when the host confirms that a checkout
 moved: the row's dashed outline flies into the trash, which then wiggles briefly. Reduced motion skips both parts.
