@@ -22138,7 +22138,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
             let before = sup.store.session(id).await.unwrap().unwrap();
-            let before_pin = sup.store.codex_report_pin(id).await.unwrap();
+            let before_pin = sup.store.report_pin(id).await.unwrap();
             let mut bad = codex_pin_report(state.path(), "ancestor", &[root, higher], event);
             std::fs::write(state.path().join("ancestor.jsonl"), "not json\n").unwrap();
             assert!(
@@ -22155,7 +22155,7 @@ pub(crate) mod tests {
                     .captured_conversation,
                 before.captured_conversation
             );
-            assert_eq!(sup.store.codex_report_pin(id).await.unwrap(), before_pin);
+            assert_eq!(sup.store.report_pin(id).await.unwrap(), before_pin);
             let unchanged = sup.store.session(id).await.unwrap().unwrap();
             assert_eq!(
                 unchanged.capture_ownership_version,
@@ -22168,7 +22168,7 @@ pub(crate) mod tests {
                 sup.report_codex_conversation(id, pending, AgentKind::Codex, 0, None)
                     .await
                     .unwrap();
-                assert_eq!(sup.store.codex_report_pin(id).await.unwrap(), before_pin);
+                assert_eq!(sup.store.report_pin(id).await.unwrap(), before_pin);
                 assert_eq!(
                     sup.store
                         .session(id)
@@ -22197,15 +22197,9 @@ pub(crate) mod tests {
             .unwrap();
             assert_eq!(locator.runtime_session_id, "ancestor");
             assert_eq!(locator.thread_id.as_deref(), Some("thread-ancestor"));
-            let pin: crate::agent_kind::codex::CodexReportPin = serde_json::from_str(
-                sup.store
-                    .codex_report_pin(id)
-                    .await
-                    .unwrap()
-                    .as_deref()
-                    .unwrap(),
-            )
-            .unwrap();
+            let pin: crate::agent_kind::report_pin::ReportPin =
+                serde_json::from_str(sup.store.report_pin(id).await.unwrap().as_deref().unwrap())
+                    .unwrap();
             assert_eq!(pin.process, root);
             assert_eq!(pin.ancestors, [higher]);
             sup.report_codex_conversation(
@@ -22253,7 +22247,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let before = sup.store.session(id).await.unwrap().unwrap();
-        let pin = sup.store.codex_report_pin(id).await.unwrap();
+        let pin = sup.store.report_pin(id).await.unwrap();
         for processes in [vec![other, root], vec![other]] {
             let error = sup
                 .report_codex_conversation(
@@ -22275,7 +22269,7 @@ pub(crate) mod tests {
                     .captured_conversation,
                 before.captured_conversation
             );
-            assert_eq!(sup.store.codex_report_pin(id).await.unwrap(), pin);
+            assert_eq!(sup.store.report_pin(id).await.unwrap(), pin);
             let unchanged = sup.store.session(id).await.unwrap().unwrap();
             assert_eq!(
                 unchanged.capture_ownership_version,
@@ -22290,18 +22284,19 @@ pub(crate) mod tests {
             start: root.start.wrapping_add(1),
             ..root
         };
-        let dead_pin = serde_json::to_string(&crate::agent_kind::codex::CodexReportPin {
+        let dead_pin = serde_json::to_string(&crate::agent_kind::report_pin::ReportPin {
             process: dead,
             ancestors: vec![],
         })
         .unwrap();
         assert!(
             sup.store
-                .admit_codex_conversation(
+                .admit_pinned_conversation(
                     &before,
                     pin.as_deref(),
                     before.captured_conversation.as_deref().unwrap(),
                     &dead_pin,
+                    1,
                     None,
                 )
                 .await
@@ -22319,7 +22314,7 @@ pub(crate) mod tests {
             .is_err()
         );
         assert_eq!(
-            sup.store.codex_report_pin(id).await.unwrap().as_deref(),
+            sup.store.report_pin(id).await.unwrap().as_deref(),
             Some(dead_pin.as_str())
         );
         let mut changed_image = codex_pin_report(
@@ -22349,7 +22344,7 @@ pub(crate) mod tests {
         );
         assert_eq!(unchanged.conversation_source, before.conversation_source);
         assert_eq!(
-            sup.store.codex_report_pin(id).await.unwrap().as_deref(),
+            sup.store.report_pin(id).await.unwrap().as_deref(),
             Some(dead_pin.as_str())
         );
         sup.report_codex_conversation(
@@ -22362,8 +22357,8 @@ pub(crate) mod tests {
         .await
         .unwrap();
         let fresh = sup.store.session(id).await.unwrap().unwrap();
-        let fresh_pin = sup.store.codex_report_pin(id).await.unwrap();
-        let parsed: crate::agent_kind::codex::CodexReportPin =
+        let fresh_pin = sup.store.report_pin(id).await.unwrap();
+        let parsed: crate::agent_kind::report_pin::ReportPin =
             serde_json::from_str(fresh_pin.as_deref().unwrap()).unwrap();
         assert_eq!(parsed.process, other);
         let old_id = "old-unpinned";
@@ -22384,7 +22379,7 @@ pub(crate) mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(sup.store.codex_report_pin(old_id).await.unwrap(), None);
+        assert_eq!(sup.store.report_pin(old_id).await.unwrap(), None);
         sup.report_codex_conversation(
             old_id,
             codex_pin_report(state.path(), "fresh", &[other], "SessionStart"),
@@ -22394,7 +22389,7 @@ pub(crate) mod tests {
         )
         .await
         .unwrap();
-        assert!(sup.store.codex_report_pin(old_id).await.unwrap().is_some());
+        assert!(sup.store.report_pin(old_id).await.unwrap().is_some());
     }
 
     /// Seed the durable result of an ownership-proven Grok report without

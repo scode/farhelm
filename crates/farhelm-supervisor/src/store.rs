@@ -4952,7 +4952,7 @@ impl SessionStore {
     /// Commit an ownership-proven identity: conversation, exact locator,
     /// proof version and source, atomically.
     ///
-    /// Together with [`Self::admit_codex_conversation`], this is the only
+    /// Together with [`Self::admit_pinned_conversation`], this is the only
     /// admission writer that establishes `capture_ownership_version = 1`.
     /// Only the authoritative admission path calls it, after the
     /// kind's live runtime proof, vendor root proof, and repeat
@@ -5000,38 +5000,43 @@ impl SessionStore {
             .await
     }
 
-    /// Read Codex's launch pin without adding a second in-memory copy.
+    /// Read a launch's reporting-process pin without a second in-memory copy.
     /// Admission reads this under its capture claim alongside the session row;
     /// the write below fences both snapshots against concurrent lifecycle changes.
-    pub(crate) async fn codex_report_pin(&self, id: &str) -> anyhow::Result<Option<String>> {
+    /// The SQL column keeps its historical Codex name to preserve schema 31.
+    pub(crate) async fn report_pin(&self, id: &str) -> anyhow::Result<Option<String>> {
         let id = id.to_owned();
         self.conn
             .call(
-                "Codex pin read task panicked",
+                "Report pin read task panicked",
                 move |conn: &mut Connection| {
                     conn.query_row(
                         "SELECT codex_report_pin FROM sessions WHERE id = ?1",
                         [id],
                         |r| r.get(0),
                     )
-                    .context("reading the Codex reporting-process pin")
+                    .context("reading the reporting-process pin")
                 },
             )
             .await
     }
 
-    /// Adopt a verified Codex conversation and its process pin in one CAS.
+    /// Adopt a conversation and its process pin in one CAS after vendor admission.
     /// A correction's `(kind, text)` notification commits in that same transaction:
     /// this one-shot transition cannot reconstruct a lost warning on a later pass.
     /// The row snapshot and exact previous pin are both preconditions. A failed
     /// adoption cannot pin a process, and a concurrent correction cannot be
     /// overwritten by evidence verified against the earlier conversation.
-    pub(crate) async fn admit_codex_conversation(
+    /// The caller supplies the replacement ownership version independently of
+    /// the prior version in the CAS: a process pin alone does not establish a
+    /// vendor's versioned ownership proof. The SQL column retains its Codex name.
+    pub(crate) async fn admit_pinned_conversation(
         &self,
         expected: &StoredSession,
         expected_pin: Option<&str>,
         replacement: &str,
         replacement_pin: &str,
+        replacement_version: i64,
         correction_notification: Option<(&str, &str)>,
     ) -> anyhow::Result<bool> {
         let id = expected.id.clone();
@@ -5043,19 +5048,19 @@ impl SessionStore {
         let replacement_pin = replacement_pin.to_owned();
         let correction_notification =
             correction_notification.map(|(kind, text)| (kind.to_owned(), text.to_owned()));
-        self.conn.call("Codex admission task panicked", move |conn: &mut Connection| {
-            let tx = conn.transaction().context("beginning Codex admission")?;
+        self.conn.call("Pinned admission task panicked", move |conn: &mut Connection| {
+            let tx = conn.transaction().context("beginning pinned admission")?;
             let changed = tx.execute(
                 "UPDATE sessions SET captured_conversation = ?6, conversation_source = 'hook', \
-                 capture_ownership_version = 1, codex_report_pin = ?7 \
+                 capture_ownership_version = ?8, codex_report_pin = ?7 \
                  WHERE id = ?1 AND generation = ?2 AND captured_conversation IS ?3 \
                  AND capture_ownership_version = ?4 AND codex_report_pin IS ?5",
-                rusqlite::params![id, generation, conversation, version, pin, replacement, replacement_pin],
-            ).context("admitting a Codex conversation and reporting-process pin")?;
+                rusqlite::params![id, generation, conversation, version, pin, replacement, replacement_pin, replacement_version],
+            ).context("admitting a conversation and reporting-process pin")?;
             if changed > 0 && let Some((kind, text)) = correction_notification {
                 record_notification_within(&tx, &id, generation, &kind, &text, now_unix(), false)?;
             }
-            tx.commit().context("committing Codex admission and correction notification")?;
+            tx.commit().context("committing pinned admission and correction notification")?;
             Ok(changed > 0)
         }).await
     }
@@ -7426,7 +7431,7 @@ mod tests {
             );
             assert_eq!(row.capture_ownership_version, 1);
             assert_eq!(row.conversation_source.as_deref(), Some("hook"));
-            assert_eq!(reopened.codex_report_pin("old-codex").await.unwrap(), None);
+            assert_eq!(reopened.report_pin("old-codex").await.unwrap(), None);
         }
     }
 
@@ -7445,25 +7450,25 @@ mod tests {
         let pin = r#"{"process":{"pid":41,"start":99},"ancestors":[]}"#;
         assert!(
             store
-                .admit_codex_conversation(&initial, None, "first", pin, None)
+                .admit_pinned_conversation(&initial, None, "first", pin, 1, None)
                 .await
                 .unwrap()
         );
         assert!(
             !store
-                .admit_codex_conversation(&initial, None, "stale", "other-pin", None)
+                .admit_pinned_conversation(&initial, None, "stale", "other-pin", 1, None)
                 .await
                 .unwrap()
         );
         let row = store.session("pinned").await.unwrap().unwrap();
         assert!(
             !store
-                .admit_codex_conversation(&row, Some("stale-pin"), "wrong", "other-pin", None)
+                .admit_pinned_conversation(&row, Some("stale-pin"), "wrong", "other-pin", 1, None)
                 .await
                 .unwrap()
         );
         assert_eq!(
-            store.codex_report_pin("pinned").await.unwrap().as_deref(),
+            store.report_pin("pinned").await.unwrap().as_deref(),
             Some(pin)
         );
         assert_eq!(
@@ -7479,7 +7484,7 @@ mod tests {
         drop(store);
         let store = SessionStore::open(&path, true).await.unwrap();
         assert_eq!(
-            store.codex_report_pin("pinned").await.unwrap().as_deref(),
+            store.report_pin("pinned").await.unwrap().as_deref(),
             Some(pin)
         );
         let basis = OfferBasis {
@@ -7491,30 +7496,75 @@ mod tests {
         else {
             panic!("relaunch should claim the current offer")
         };
-        assert_eq!(store.codex_report_pin("pinned").await.unwrap(), None);
+        assert_eq!(store.report_pin("pinned").await.unwrap(), None);
         assert!(
             store
                 .abort_relaunch("pinned", claim.generation, &claim.prior)
                 .await
                 .unwrap()
         );
-        assert_eq!(store.codex_report_pin("pinned").await.unwrap(), None);
+        assert_eq!(store.report_pin("pinned").await.unwrap(), None);
         assert!(
             !store
-                .admit_codex_conversation(&row, Some(pin), "late", pin, None)
+                .admit_pinned_conversation(&row, Some(pin), "late", pin, 1, None)
                 .await
                 .unwrap()
         );
         let current = store.session("pinned").await.unwrap().unwrap();
         assert!(
             store
-                .admit_codex_conversation(&current, None, "new-launch", "new-pin", None)
+                .admit_pinned_conversation(&current, None, "new-launch", "new-pin", 1, None)
                 .await
                 .unwrap()
         );
         assert_eq!(
-            store.codex_report_pin("pinned").await.unwrap().as_deref(),
+            store.report_pin("pinned").await.unwrap().as_deref(),
             Some("new-pin")
+        );
+    }
+
+    /// A process pin does not imply versioned conversation ownership.
+    /// The replacement version is the caller's policy, while the prior version
+    /// remains an independent CAS fence even when conversation and pin match.
+    #[farhelm_testtrace::test]
+    async fn report_pin_replacement_version_is_independent_of_the_prior_cas_version() {
+        let (_dir, store) = fresh_store().await;
+        let mut initial = launching_row("unproven-pin");
+        initial.captured_conversation = Some("old".into());
+        initial.capture_ownership_version = 1;
+        store.insert_session(initial, None).await.unwrap();
+        let before = store.session("unproven-pin").await.unwrap().unwrap();
+        assert_eq!(before.capture_ownership_version, 1);
+        assert!(
+            store
+                .admit_pinned_conversation(&before, None, "current", "pin", 0, None)
+                .await
+                .unwrap()
+        );
+        let admitted = store.session("unproven-pin").await.unwrap().unwrap();
+        assert_eq!(admitted.capture_ownership_version, 0);
+        assert_eq!(admitted.captured_conversation.as_deref(), Some("current"));
+        let mut stale_version = admitted.clone();
+        stale_version.capture_ownership_version = 1;
+        assert!(
+            !store
+                .admit_pinned_conversation(
+                    &stale_version,
+                    Some("pin"),
+                    "stale",
+                    "stale-pin",
+                    0,
+                    None,
+                )
+                .await
+                .unwrap()
+        );
+        let after = store.session("unproven-pin").await.unwrap().unwrap();
+        assert_eq!(after.capture_ownership_version, 0);
+        assert_eq!(after.captured_conversation, admitted.captured_conversation);
+        assert_eq!(
+            store.report_pin("unproven-pin").await.unwrap().as_deref(),
+            Some("pin")
         );
     }
 
@@ -7532,7 +7582,7 @@ mod tests {
         let initial = store.session("atomic-correction").await.unwrap().unwrap();
         assert!(
             store
-                .admit_codex_conversation(&initial, None, "child", "child-pin", None)
+                .admit_pinned_conversation(&initial, None, "child", "child-pin", 1, None)
                 .await
                 .unwrap()
         );
@@ -7547,11 +7597,12 @@ mod tests {
         // Its error must undo that UPDATE as well as leave the notification absent.
         assert!(
             store
-                .admit_codex_conversation(
+                .admit_pinned_conversation(
                     &child,
                     Some("child-pin"),
                     "parent",
                     "parent-pin",
+                    1,
                     notification
                 )
                 .await
@@ -7566,7 +7617,7 @@ mod tests {
         assert_eq!(after.conversation_source, child.conversation_source);
         assert_eq!(
             store
-                .codex_report_pin("atomic-correction")
+                .report_pin("atomic-correction")
                 .await
                 .unwrap()
                 .as_deref(),
@@ -7586,7 +7637,7 @@ mod tests {
             .unwrap();
         assert!(
             !store
-                .admit_codex_conversation(&initial, None, "stale", "stale-pin", notification)
+                .admit_pinned_conversation(&initial, None, "stale", "stale-pin", 1, notification)
                 .await
                 .unwrap()
         );
@@ -7599,11 +7650,12 @@ mod tests {
         );
         assert!(
             store
-                .admit_codex_conversation(
+                .admit_pinned_conversation(
                     &child,
                     Some("child-pin"),
                     "parent",
                     "parent-pin",
+                    1,
                     notification
                 )
                 .await
@@ -7615,7 +7667,7 @@ mod tests {
         assert_eq!(parent.captured_conversation.as_deref(), Some("parent"));
         assert_eq!(
             store
-                .codex_report_pin("atomic-correction")
+                .report_pin("atomic-correction")
                 .await
                 .unwrap()
                 .as_deref(),
@@ -7630,11 +7682,12 @@ mod tests {
         assert!(!warnings[0].resolved);
         assert!(
             store
-                .admit_codex_conversation(
+                .admit_pinned_conversation(
                     &parent,
                     Some("parent-pin"),
                     "higher-parent",
                     "higher-pin",
+                    1,
                     notification
                 )
                 .await
