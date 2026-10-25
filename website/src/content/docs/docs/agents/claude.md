@@ -22,8 +22,8 @@ specific to Claude.
 - If you start Claude through a [wrapper prefix](/docs/agents/agent-wrappers/) or a
   [custom command](/docs/agents/custom-commands/), Farhelm can follow its conversation through multiple wrappers that
   stay running. Each wrapper must pass Claude's arguments and environment through. See
-  [Agent wrappers](/docs/agents/agent-wrappers/) for the requirements and what happens if another Claude started inside
-  the session reports first.
+  [Agent wrappers](/docs/agents/agent-wrappers/) for the requirements and how Farhelm switches back at the end of a turn
+  if another Claude started inside the session reports first.
 - On a Linux host, Claude's own way of opening links does not reach your browser through Farhelm. Ask it to run
   `farhelm agent open-url -- <url>` instead
   ([Open links from a remote session](/docs/using/approve-agent-requests/#open-links-from-a-remote-session)).

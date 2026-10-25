@@ -851,7 +851,7 @@ pub fn reads_as_waiting(kind: AgentKind, screen: &str) -> bool {
         == ScreenState::Waiting
 }
 
-/// Claude reports through its injected SessionStart hook; the integration
+/// Claude reports through injected SessionStart and Stop hooks; the integration
 /// supplies the settings argument and the conversation-specific Resume template.
 struct ClaudeIntegration;
 
@@ -1248,7 +1248,7 @@ impl AgentIntegration for ClaudeIntegration {
         Ok(None)
     }
 
-    /// `--settings <json>` carrying one SessionStart hook. Claude Code
+    /// `--settings <json>` carrying SessionStart and Stop hooks. Claude Code
     /// MERGES an inline `--settings` JSON's hooks with whatever the user's
     /// own settings files already declare — both fire — so this never
     /// displaces a hook the user configured for themselves, and nothing
@@ -1261,8 +1261,11 @@ impl AgentIntegration for ClaudeIntegration {
     /// that skip decision does not belong here, which is why this method
     /// never inspects its caller's argv.
     ///
-    /// The `command` string comes from [`hook_command`], which owns the
-    /// shell quoting and the `--announce` decision. The JSON is
+    /// SessionStart follows the launch's instructions policy. Stop reports
+    /// the current conversation at end of turn so an ancestor can correct a
+    /// child-first capture; it never announces instructions again. Both
+    /// command strings come from [`hook_command`], which owns the shell
+    /// quoting and the `--announce` decision. The JSON is
     /// built with `serde_json::json!` rather than string formatting so a
     /// path that happens to need JSON escaping (a quote, a backslash) can
     /// never produce malformed JSON, only a correctly escaped string. The
@@ -1272,12 +1275,24 @@ impl AgentIntegration for ClaudeIntegration {
     /// own timer can make a busy-supervisor report look lost.
     fn hook_argv(&self, hook_exe: &str, instructions: AgentInstructions) -> Vec<String> {
         let command = hook_command(hook_exe, instructions, farhelm_proto::ReportVendor::Claude);
+        let stop_command = hook_command(
+            hook_exe,
+            AgentInstructions::Off,
+            farhelm_proto::ReportVendor::Claude,
+        );
         let settings = serde_json::json!({
             "hooks": {
                 "SessionStart": [{
                     "hooks": [{
                         "type": "command",
                         "command": command,
+                        "timeout": 60
+                    }]
+                }],
+                "Stop": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": stop_command,
                         "timeout": 60
                     }]
                 }]
@@ -3856,9 +3871,9 @@ mod tests {
 
     /// The one property that actually matters about `hook_argv`: a path
     /// hostile to EITHER quoting layer survives being embedded through
-    /// BOTH of them and comes back out as the exact six argv elements
-    /// `farhelm internal hook` was launched with (the `--vendor`
-    /// discriminator included).
+    /// BOTH of them and comes back out as the expected argv, including
+    /// the `--vendor` discriminator. SessionStart announces when enabled;
+    /// Stop must preserve the same quoted executable without announcing.
     ///
     /// `hostile_path` is chosen to hit every character each layer is
     /// responsible for: a space (breaks an unquoted shell word), a single
@@ -3901,6 +3916,7 @@ mod tests {
         assert_eq!(claude_argv[0], "--settings");
         let claude_json: serde_json::Value = serde_json::from_str(&claude_argv[1])
             .expect("Claude's --settings value must be valid JSON");
+        assert_eq!(claude_json["hooks"].as_object().unwrap().len(), 2);
         let claude_hook = &claude_json["hooks"]["SessionStart"][0]["hooks"][0];
         assert_eq!(claude_hook["type"], "command");
         assert_eq!(claude_hook["timeout"], 60);
@@ -3910,6 +3926,20 @@ mod tests {
         let claude_words = shell_words::split(claude_command)
             .expect("Claude's rendered command must be one valid shell command line");
         assert_eq!(claude_words, expected_words);
+        let claude_stop = &claude_json["hooks"]["Stop"][0]["hooks"][0];
+        assert_eq!(claude_stop["type"], "command");
+        assert_eq!(claude_stop["timeout"], 60);
+        let claude_stop_words = shell_words::split(
+            claude_stop["command"]
+                .as_str()
+                .expect("Stop's command must be a JSON string"),
+        )
+        .expect("Claude's Stop command must be one valid shell command line");
+        assert_eq!(
+            claude_stop_words,
+            expected_words_for("claude")[..5],
+            "Stop must report without announcing instructions again"
+        );
 
         // --- Codex: selecting and confirming callbacks are separate. ---
         let codex_argv = CodexIntegration.hook_argv(hostile_path, AgentInstructions::On);

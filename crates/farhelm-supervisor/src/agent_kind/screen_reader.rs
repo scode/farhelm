@@ -551,9 +551,12 @@ fn claude_input_box_rule(lines: &[&str]) -> Option<usize> {
 /// changed between versions. The finished-turn line (`✻ Cogitated for 26s`)
 /// carries no ellipsis, and the background announcement must end exactly at
 /// `to finish`, so neither idle screen is mistaken for active work.
-/// Spinner verbs may contain several words. The ellipsis and digit-led
-/// parenthesis exclude ordinary finished-turn prose, but reply text with that
-/// same shape can still read as working when it falls in the input-box window.
+/// Spinner verbs may contain several words. The parenthesis must start with
+/// an ASCII digit, optionally after the exact `running Stop hook · ` prefix
+/// observed in Claude Code 2.1.310. Other hook names and timer forms are not
+/// inferred. The ellipsis and timer exclude ordinary finished-turn prose, but
+/// reply text with that same shape can still read as working in the
+/// input-box window.
 /// That cosmetic false-positive risk is accepted to cover multi-word spinners.
 fn is_claude_working_line(line: &str) -> bool {
     let mut chars = line.trim().chars();
@@ -580,7 +583,8 @@ fn is_claude_working_line(line: &str) -> bool {
     let Some((verb, after)) = rest.split_once("… (") else {
         return false;
     };
-    !verb.trim().is_empty() && after.starts_with(|c: char| c.is_ascii_digit())
+    let timer = after.strip_prefix("running Stop hook · ").unwrap_or(after);
+    !verb.trim().is_empty() && timer.starts_with(|c: char| c.is_ascii_digit())
 }
 
 // ---------------------------------------------------------------------
@@ -1124,6 +1128,58 @@ mod tests {
             "",
         ] {
             assert!(!is_claude_working_line(line), "{line:?}");
+        }
+    }
+
+    /// The observed silent Stop callback draws a working indicator in Claude Code
+    /// 2.1.310. Treat the two observed forms as work above the normal composer,
+    /// while keeping the empty composer and a non-digit near miss idle. These
+    /// synthetic screens exercise the reader without changing captured fixtures.
+    #[test]
+    fn claude_stop_hook_indicators_keep_the_composer_working() {
+        let composer = "────────────────────\n❯ \n────────────────────";
+        assert_eq!(
+            read(AgentKind::Claude, composer, ""),
+            Reading::anchored(ScreenState::Idle)
+        );
+        for indicator in [
+            "✽ Undulating… (running Stop hook · 4s · ↓ 205 tokens · thinking with high effort)",
+            "✶ Channeling… (running Stop hook · 2s · ↓ 6 tokens)",
+        ] {
+            assert_eq!(
+                read(AgentKind::Claude, &format!("{indicator}\n{composer}"), ""),
+                Reading::anchored(ScreenState::Working),
+                "{indicator:?}"
+            );
+            assert_eq!(
+                read(AgentKind::Claude, indicator, ""),
+                generic_reading(counts(9, 0)),
+                "a hook indicator alone does not establish a Claude composer"
+            );
+            assert_eq!(
+                read(
+                    AgentKind::Claude,
+                    &format!("{indicator}\na\nb\nc\nd\ne\nf\n{composer}"),
+                    "",
+                ),
+                Reading::anchored(ScreenState::Idle),
+                "the hook form must stay within the existing composer window"
+            );
+        }
+        for indicator in [
+            "✶ Channeling… (running Stop hook · soon)",
+            "✶ Channeling… (running Stop hook · ２s)",
+            "✶ Channeling… (running SessionStart hook · 2s)",
+            "✶ Channeling… (running Stop hook 2s)",
+            "Channeling… (running Stop hook · 2s)",
+            "✶   … (running Stop hook · 2s)",
+            "✶ Channeling (running Stop hook · 2s)",
+        ] {
+            assert_eq!(
+                read(AgentKind::Claude, &format!("{indicator}\n{composer}"), ""),
+                Reading::anchored(ScreenState::Idle),
+                "{indicator:?}"
+            );
         }
     }
 

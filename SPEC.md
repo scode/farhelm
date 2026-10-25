@@ -2314,13 +2314,18 @@ Later reports from that process may change the conversation; a nested Claude tha
 replace or withdraw it. Reports from the same emitter preserve the original recorded ancestry. A recorded ancestor's
 report corrects both the pin and conversation and posts a notification once per launch explaining what Restart before
 the correction would have resumed. If a nested Claude reports first, it may be followed until the parent next reports at
-start, resume, `/clear`, or compact. A proven gone, reused, or non-running pin releases only for an emitter whose report
-chain does not contain it; unavailable process evidence never releases it. The pin survives a supervisor restart but
-clears on relaunch and is not restored by an aborted relaunch. Sessions running across the upgrade start unpinned, so
-their first selecting report may come from a nested child until an ancestor reports. Native sub-agents never report:
-Claude fires no `SessionStart` for them, and any report naming a sub-agent is refused for every agent type. Claude
-requires no transcript check and takes no versioned ownership proof, so its existing captures stay resumable across the
-change.
+start, resume, `/clear`, compact, or the end of a turn. Claude's injected `Stop` hook reports the current conversation
+and is an ordinary selecting report under the same pin: it can establish the first pin, update the pinned process's
+conversation, or correct a child-first selection when a recorded ancestor reports. A `Stop` refused by the pin is
+acknowledged silently, with no warning or mutation. A proven gone, reused, or non-running pin releases only for an
+emitter whose report chain does not contain it; unavailable process evidence never releases it. The pin survives a
+supervisor restart but clears on relaunch and is not restored by an aborted relaunch. Sessions running across the
+upgrade start unpinned, so their first selecting report may come from a nested child until an ancestor reports. Running
+launches retain their old command line without `Stop` until relaunch; no upgrade machinery compensates for that gap.
+Farhelm subscribes to Claude's `SessionStart` and `Stop`, not `SubagentStop`. In the observed Claude Code 2.1.310, a
+native sub-agent completed through `SubagentStop`, while `Stop` carried the parent's conversation. Any report naming a
+sub-agent is refused for every agent type. Claude requires no transcript check and takes no versioned ownership proof,
+so its existing captures stay resumable across the change.
 
 Grok reports must come from one native `grok` process under the owned pane, launched with `--no-leader` before any real
 end-of-options boundary. The only admitted descendants are the documented reporter command and its narrow shell

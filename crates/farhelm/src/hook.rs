@@ -1,7 +1,7 @@
 //! `farhelm internal hook`: a bounded vendor callback that reports the
 //! conversation identity the agent is currently using.
 //!
-//! Most adapters report a session-start event. Grok uses three manually
+//! Claude and Codex report SessionStart and Stop. Grok uses three manually
 //! configured callbacks (`SessionStart`, `UserPromptSubmit`, and `Stop`) so
 //! the first event can select a UUID and later events can supply its exact
 //! record path. In every case this module runs as a short-lived child below
@@ -736,6 +736,12 @@ mod tests {
     /// ignored hook tests).
     const CLAUDE_PAYLOAD: &str = r#"{"session_id":"6af192d4-0000-4000-8000-000000000000","transcript_path":"/home/u/.claude/projects/x/6af192d4.jsonl","cwd":"/home/u/src","hook_event_name":"SessionStart","source":"startup"}"#;
 
+    /// The source-less Stop shape observed in Claude Code 2.1.310, with
+    /// conversation id, paths and reply text replaced by synthetic values.
+    /// Stop names the current conversation directly; it needs no source or
+    /// transcript lookup to replace the latest report after a clear.
+    const CLAUDE_STOP_PAYLOAD: &str = r#"{"session_id":"6af192d4-0000-4000-8000-000000000000","transcript_path":"/tmp/claude/transcript.jsonl","cwd":"/tmp/project","hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"DONE"}"#;
+
     /// The Codex CLI 0.149.1 `SessionStart` payload, verbatim from the
     /// hand-verified vendor audit (re-run by `real_agent_capture.rs`'s
     /// ignored hook tests). It carries two fields Claude's does not.
@@ -783,6 +789,24 @@ mod tests {
             .expect("claude payload parses");
         assert_eq!(id, "6af192d4-0000-4000-8000-000000000000");
         assert_eq!(source, "startup");
+    }
+
+    /// Stop's absent source must not erase its current conversation id or
+    /// event. Admission needs the event to apply its Stop refusal policy,
+    /// while unrelated vendor fields remain irrelevant to capture.
+    #[farhelm_testtrace::test]
+    fn parses_the_observed_source_less_claude_stop_shape() {
+        let report = parse_payload(CLAUDE_STOP_PAYLOAD.as_bytes(), ReportVendor::Claude)
+            .expect("Claude's source-less Stop parses");
+        assert_eq!(report.vendor, ReportVendor::Claude);
+        assert_eq!(report.conversation, "6af192d4-0000-4000-8000-000000000000");
+        assert_eq!(report.source, "");
+        assert_eq!(report.hook_event_name, Some(serde_json::json!("Stop")));
+        assert_eq!(report.agent_id, None);
+        assert_eq!(
+            report.transcript_path,
+            Some(serde_json::json!("/tmp/claude/transcript.jsonl"))
+        );
     }
 
     /// The same, for Codex — whose payload carries `model` and
@@ -1345,8 +1369,8 @@ mod tests {
     /// Two runs against one log leave two intact lines, in the order they
     /// ran.
     ///
-    /// A session fires this hook once per conversation, so a log holding
-    /// several lines is the normal case, not an edge one. What this pins
+    /// SessionStart and Stop can fire repeatedly within a launch, so a log
+    /// holding several lines is the normal case, not an edge one. What this pins
     /// is that appending is really appending: no truncation below the cap
     /// (which would silently discard the history a reader came for), and
     /// no partial line (each run writes its line in one `write_all`, which
@@ -1422,6 +1446,111 @@ mod tests {
             Some(std::process::id()),
             "the recorded chain starts at the reporting process"
         );
+    }
+
+    /// Claude's Stop carries the current id before and after a clear, so it
+    /// replaces SessionStart in the same Latest slot. No earlier selection
+    /// must survive separately for this source-less report to stand alone.
+    #[farhelm_testtrace::test]
+    fn claude_stop_replaces_the_latest_report_with_the_current_conversation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = hook_report::session_dir(dir.path(), "sess-1").expect("valid id");
+        let latest = session.join(hook_report::Slot::Latest.file_name());
+        run_with(
+            Some(credential(dir.path())),
+            Cursor::new(CLAUDE_PAYLOAD.as_bytes().to_vec()),
+            TEST_BUDGET,
+            None,
+            ReportVendor::Claude,
+        );
+        let initial: HookReport =
+            serde_json::from_slice(&std::fs::read(&latest).expect("initial report"))
+                .expect("initial report parses");
+        assert_eq!(
+            initial.hook_event_name,
+            Some(serde_json::json!("SessionStart"))
+        );
+        assert_eq!(initial.conversation, "6af192d4-0000-4000-8000-000000000000");
+
+        for current in [
+            "6af192d4-0000-4000-8000-000000000000",
+            "7af192d4-0000-4000-8000-000000000000",
+        ] {
+            let payload =
+                CLAUDE_STOP_PAYLOAD.replace("6af192d4-0000-4000-8000-000000000000", current);
+            run_with(
+                Some(credential(dir.path())),
+                Cursor::new(payload.into_bytes()),
+                TEST_BUDGET,
+                None,
+                ReportVendor::Claude,
+            );
+            let written: HookReport =
+                serde_json::from_slice(&std::fs::read(&latest).expect("latest Stop report"))
+                    .expect("Stop report parses");
+            assert_eq!(written.vendor, ReportVendor::Claude);
+            assert_eq!(written.conversation, current);
+            assert_eq!(written.hook_event_name, Some(serde_json::json!("Stop")));
+            assert_eq!(written.source, "");
+            let names: Vec<String> = std::fs::read_dir(&session)
+                .expect("drop directory")
+                .map(|entry| entry.expect("entry").file_name().into_string().unwrap())
+                .collect();
+            assert_eq!(names, [hook_report::Slot::Latest.file_name()]);
+        }
+    }
+
+    /// A child marker prevents either Stop event name from replacing an
+    /// unapplied foreground report. Real subagents emitted SubagentStop in
+    /// the observation; an injected or malformed Stop must obey the same
+    /// boundary, including when the marker has the wrong JSON type.
+    #[farhelm_testtrace::test]
+    fn child_marked_claude_stop_callbacks_preserve_the_latest_report() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        run_with(
+            Some(credential(dir.path())),
+            Cursor::new(CLAUDE_PAYLOAD.as_bytes().to_vec()),
+            TEST_BUDGET,
+            None,
+            ReportVendor::Claude,
+        );
+        let latest = hook_report::session_dir(dir.path(), "sess-1")
+            .expect("valid id")
+            .join(hook_report::Slot::Latest.file_name());
+        let original = std::fs::read(&latest).expect("foreground report exists");
+        let initial: HookReport =
+            serde_json::from_slice(&original).expect("foreground report parses");
+        assert_eq!(initial.conversation, "6af192d4-0000-4000-8000-000000000000");
+        for event in ["Stop", "SubagentStop"] {
+            for (marker, reason) in [
+                (serde_json::json!("child-1"), "subagent-report"),
+                (serde_json::json!(7), "agent-id-not-a-string"),
+            ] {
+                let log = dir.path().join(format!("{event}-{reason}.log"));
+                let payload = serde_json::json!({
+                    "session_id": "child-conversation",
+                    "hook_event_name": event,
+                    "agent_id": marker,
+                });
+                run_with(
+                    Some(credential(dir.path())),
+                    Cursor::new(payload.to_string().into_bytes()),
+                    TEST_BUDGET,
+                    Some(log.clone()),
+                    ReportVendor::Claude,
+                );
+                let line = single_line(&log);
+                assert!(
+                    line.contains(&format!(" bad-payload {reason} child-conversation -")),
+                    "{event}: {line:?}"
+                );
+                assert_eq!(
+                    std::fs::read(&latest).expect("foreground report remains"),
+                    original,
+                    "{event} with {reason} must not replace the foreground slot"
+                );
+            }
+        }
     }
 
     /// Spec: a payload naming a sub-agent is logged as `bad-payload

@@ -101,10 +101,11 @@ session shows what actually reached the agent.
 Claude works through multiple wrappers that stay running, including a wrapper that starts another script which then
 starts Claude without `exec`. Farhelm follows the first Claude process whose conversation it accepts. Another Claude
 started inside the session cannot replace a conversation already reported by its parent. If that nested Claude reports
-first, Farhelm may briefly follow its conversation. When the Claude that started it next reports at start, resume,
-`/clear`, or compact, Farhelm switches to that conversation and tells you in the session's notifications what a
-**restart** before the switch would have resumed. If the followed Claude exits and you start a fresh one in the same
-terminal, Farhelm can follow the new one.
+first, Farhelm may briefly follow its conversation. When the Claude that started it next reports at the end of a turn,
+or at start, resume, `/clear`, or compact, Farhelm switches to that conversation and tells you in the session's
+notifications what a **restart** before the switch would have resumed. If the followed Claude exits and you start a
+fresh one in the same terminal, Farhelm can follow the new one. Sessions already running before end-of-turn reporting
+was added gain it on relaunch; until then, correction waits for another start, resume, `/clear`, or compact.
 
 Codex also works through a wrapper that stays running, including one named `codex` itself. Farhelm follows the first
 Codex process whose conversation it accepts; wrappers above that process do not need to replace themselves. If another
