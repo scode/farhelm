@@ -316,8 +316,8 @@ impl ClosedBeforeHello {
 ///
 /// [`Display`] is the exact refusal text this handshake has always
 /// produced, and stays so deliberately: it is what the peer is told over
-/// the wire (`ControlMsg::Error`), what an operator reads on the helm's
-/// stderr, and what `annotate_ssh_handshake_eof`'s sibling tests assert on.
+/// the wire (`ControlMsg::Error`) and what an operator reads on the helm's
+/// stderr.
 /// Introducing this type changed the error's payload, never its rendering.
 ///
 /// [`Display`]: std::fmt::Display
