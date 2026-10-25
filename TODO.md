@@ -111,11 +111,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
   exposed are TBD.
 
-- **Test that localhost tunnels bind without address reuse.** Mac localhost tunnels bind their listener with address
-  reuse off, so a tunnel cannot steal another program's connections; nothing tests that, and on Linux every test would
-  still pass if it regressed. Add a test. From the review of `tunnel-port-and-link-ranges` on 2026-10-23. Plan:
-  `plans/queue/tunnel-bind-reuse-test.md`.
-
 - **Visual redesign: Steel.** Restyle the app as the "Steel" design the maintainer settled on 2026-10-25 from mockups:
   blue-gray and periwinkle colors with a light counterpart, Inter for the interface, a host rail with a hosts panel, the
   sort order as the list title over a status filter, split Restart and Replace buttons, a tunnel pill, one dialog and
