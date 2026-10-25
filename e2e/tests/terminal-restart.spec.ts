@@ -517,6 +517,55 @@ test("don't ask again on a refused YOLO replace marks the host, then replaces wi
   expect(replaceBodies).toHaveLength(2);
 });
 
+/**
+ * A Cancel queued behind "don't ask again" must not hide a failed save's
+ * reason while Replace continues. Both clicks run before the disabled
+ * render, so the test exercises handler admission rather than native button
+ * disabling. The header avoids the interrupted card's known click flake;
+ * both use the session surface's Replace controller and YOLO question.
+ */
+test("Cancel queued behind don't ask again keeps a refused Replace save visible", async ({ page, request }) => {
+  const sessionId = "11111111-2222-3333-4444-ccccccccccc0";
+  const title = `replace-yolo-cancel-${Date.now()}`;
+  const { sequence, marks, replaceBodies, control } = await injectYoloReplaceSession(page, request, sessionId, title);
+  control.refuseMark = true;
+
+  await page.goto("/");
+  await rowByTitle(page, title).locator(".session-row-open").click();
+  await expect(page.locator(".session-details .title")).toHaveText(title);
+  await page.locator(".header-replace").click();
+  await page.locator(".header-replace-confirm .btn-danger").click();
+  const confirmation = page.locator(".yolo-confirmation");
+  await expect(confirmation).toBeVisible();
+  expect(sequence).toEqual(["replace"]);
+
+  // Capturing both controls before either click preserves the race. A
+  // disconnected or disabled Cancel would never reach the handler and
+  // would make the central assertion pass without testing the guard.
+  const cancelWasLive = await confirmation.evaluate((node) => {
+    const answer = node.querySelector<HTMLButtonElement>(".yolo-confirm-stop-asking")!;
+    const cancel = node.querySelector<HTMLButtonElement>(".yolo-cancel")!;
+    answer.click();
+    const live = cancel.isConnected && !cancel.disabled;
+    cancel.click();
+    return live;
+  });
+  expect(cancelWasLive, "premise: Cancel was still live after the first answer").toBe(true);
+  await expect(confirmation.locator(".yolo-confirmation-error")).toContainText("held by the test");
+  await expect(confirmation).toBeVisible();
+  await expect(page.locator(".session-details .title")).toHaveText(title);
+  expect(sequence, "the refused save sends no Replace with the override").toEqual(["replace", "mark"]);
+  expect(marks).toEqual([{ yolo_without_asking: true }]);
+  expect(replaceBodies).toHaveLength(1);
+
+  // Once the request settles, an ordinary Cancel must still retire the
+  // question, leaving the original session selected and unchanged.
+  await confirmation.locator(".yolo-cancel").click();
+  await expect(confirmation).toHaveCount(0);
+  await expect(page.locator(".session-details .title")).toHaveText(title);
+  expect(sequence).toEqual(["replace", "mark"]);
+});
+
 // The same answer on a Replace started from the session row's menu, which
 // runs a separate path in the session list (it holds a row operation rather
 // than the page's lock). Specifies what the session-view test above does, for

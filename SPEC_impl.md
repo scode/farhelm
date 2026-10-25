@@ -798,21 +798,21 @@ it is convention, stated in `ConfirmSlot`'s docs and checked by review (`review_
 Four prompts stay up through the request their answer starts (host Remove, the desktop tunnel warning, the templates
 editor's "Save these changes before leaving?" prompt, and a session's Replace YOLO question answered with "don't ask
 again", which waits for the host setting to save); they accept an answer while its token is still the open one and let
-the request's outcome retire the prompt, and `ConfirmSlot`'s docs name them as the only exception. The first three
-refuse a second answer while their request runs; the YOLO question does not yet, so a Cancel queued with its "don't ask
-again" still closes it while the Replace carries on, and a failed save then has no question to report on. Destructive
-preconditions travel the same way: the launcher's Guarded answer submits the Replace with precondition and the launcher
-opening of the render the user answered, and its YOLO answers refuse once the launcher has moved to another opening and
-otherwise submit the precondition their render showed, so nothing is recomputed at send time. Two counters stay outside
-the mechanism on purpose, because neither binds an answer to a prompt: the launcher's opening generation identifies one
-opening of the launcher (answers and deferred work check that their opening is still the current one), and the approval
-cards' arm generation times the 700 ms pause SPEC.md names, while the answers themselves are bound by the helm's request
-id. Input the page holds across time is retired when its owner stops observing: a held terminal link press is dropped
-whenever the terminal removes its pointer listeners (as it does when it reconnects), and each snapshot of a quick-launch
-key press is used or dropped by exactly the launch it was taken for, with any still waiting dropped when the sidebar
-list goes away. The link covers under "Session-host file reads" apply the same rule to the destination preview: a
-surface that can hide it marks itself in its own markup, so counting a new cover no longer depends on updating a central
-list.
+the request's outcome retire the prompt, and `ConfirmSlot`'s docs name them as the only exception. All four refuse a
+second answer while their request runs; the Replace question uses the session surface's own running flag to refuse
+Cancel even before its buttons render disabled, so a failed host-setting save keeps its question and reason visible.
+Destructive preconditions travel the same way: the launcher's Guarded answer submits the Replace with precondition and
+the launcher opening of the render the user answered, and its YOLO answers refuse once the launcher has moved to another
+opening and otherwise submit the precondition their render showed, so nothing is recomputed at send time. Two counters
+stay outside the mechanism on purpose, because neither binds an answer to a prompt: the launcher's opening generation
+identifies one opening of the launcher (answers and deferred work check that their opening is still the current one),
+and the approval cards' arm generation times the 700 ms pause SPEC.md names, while the answers themselves are bound by
+the helm's request id. Input the page holds across time is retired when its owner stops observing: a held terminal link
+press is dropped whenever the terminal removes its pointer listeners (as it does when it reconnects), and each snapshot
+of a quick-launch key press is used or dropped by exactly the launch it was taken for, with any still waiting dropped
+when the sidebar list goes away. The link covers under "Session-host file reads" apply the same rule to the destination
+preview: a surface that can hide it marks itself in its own markup, so counting a new cover no longer depends on
+updating a central list.
 
 The dialog installers share a pointer rule: primary mouse-down on unused space cancels the browser's focus change, but
 controls and text keep their native behavior. An Enter listener runs only when the dialog container itself has focus; it
