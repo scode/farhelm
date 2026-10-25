@@ -176,9 +176,9 @@ Before the clean-main boundary's starting check, read these in full:
 - `plans/.agents/outside-files.md`
 - `plans/.agents/executing.md` (the goal file must match how an executor sets up, blocks and closes)
 - `AGENTS.md`, "Talking to the user", "Agent scratch space", "TODO.md and FLAKES.md" and "Tests and validation" (root)
-- the `scode-build-goal` and `jjstack` skills, as `plans/.agents/planning.md` uses them
+- the `scode-build-goal`, `jjstack` and `interactive-artifact` skills, as `plans/.agents/planning.md` uses them
 
-Fence: the up-front questions go on a local interactive page (`plans/.agents/planning.md`, "Asking the up-front
+Fence: the up-front questions use the `interactive-artifact` skill (`plans/.agents/planning.md`, "Asking the up-front
 questions on a local page"), never in conversation. Never reuse a slug that has ever existed under `plans/`
 (`queue check-slug` refuses one); the planning PR merges only once the maintainer approves it.
 
@@ -188,8 +188,8 @@ Before the clean-main boundary's starting check, read the planner's list in full
 
 - `scripts/todo-picker.py` (its header)
 
-Fence: if something else holds the picker's port, use the next free port above it and say which, without asking; never
-stop a process you did not start.
+Fence: use the `interactive-artifact` skill for the picker, with its own port and tokenized URL; never stop a process
+you did not start.
 
 ### Triage scheduling ("use the planning system to schedule these", "use the planning system to schedule these for execution")
 
@@ -273,10 +273,11 @@ Before reading the monitor's status, read these in full:
 - `plans/.agents/landing.md` and `plans/.agents/release-help.md` (what the flags `queue status` raises mean, and their
   remedies)
 - `AGENTS.md`, "Talking to the user", "Agent scratch space" and "TODO.md and FLAKES.md" (root)
-- the `jjstack` skill
+- the `jjstack` and `interactive-artifact` skills
 
 Fence: do its work in a checkout of its own, never in an executor's or the monitor's (any session may run it, the
-monitoring session included); an unticked report without a comment is left for later, never a follow-up or a rejection.
+monitoring session included); an unselected report without a comment is left for later, never a follow-up or a
+rejection.
 
 ### Release plan ("release plan X")
 

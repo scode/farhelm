@@ -9,28 +9,28 @@ outcomes through the planning system. The planner reads it before the clean-main
 
 ## Choosing what to plan: "todo planning flow"
 
-"Todo planning flow" lets the maintainer choose entries to plan by ticking boxes on a local page instead of naming them.
-It covers the Near term bucket unless the request names another one ("todo planning flow for maybe later"). The page
-lists every entry in that bucket that has no plan yet, each as a short label and a one-to-two sentence summary, and its
-"Copy code" button copies a line like `todo-plan near-term: pin-rust-toolchain, upgrade-epochs` for the maintainer to
-paste back. `scripts/todo-picker.py` renders and serves the page; its header covers the details.
+"Todo planning flow" lets the maintainer choose entries to plan on a page made with the `interactive-artifact` skill.
+Load and follow that skill by name. It covers the Near term bucket unless the request names another one ("todo planning
+flow for maybe later"). The page lists every entry in that bucket that has no plan yet, each as a short label and a
+one-to-two sentence summary.
 
 - Apply the clean-main boundary, then work from the latest `main@origin`, so the page shows TODO.md as it is now.
 - Run `python3 scripts/todo-picker.py skeleton --bucket "<bucket>"` and save its output in your scratch directory
   (`AGENTS.md`, "Agent scratch space"). It lists every entry without a plan, in file order, and reports the skipped ones
   on stderr.
-- Fill in each entry's `label` (a few words, used for the entry's slug in the pasted code) and `tldr` (what it is and,
-  when the entry says so, why or the first step), in product terms per `AGENTS.md`, "Talking to the user". Leave the
-  keys and their order alone.
-- Start `python3 scripts/todo-picker.py serve --summaries <file>` as a background command and give the maintainer
-  `http://127.0.0.1:14003/`. The script refuses a summaries file that no longer matches the bucket's unplanned entries,
-  which catches TODO.md moving since the skeleton: rerun the skeleton and fill it in again. If something else holds the
-  port (another agent's picker, say), serve on the next free port above it (`--port`) and give the maintainer that URL
-  instead, without asking; never stop a process you did not start.
-- When the maintainer pastes a `todo-plan` line, stop the server, map each slug back to its entry through the summaries
-  file, and run "plan to implement" (`plans/.agents/planning.md`, "Planning: "plan to implement <TODO items>"") on
-  exactly those entries. The pasted line is that request, so do not ask for confirmation; anything the maintainer writes
-  alongside it is what they said about the entries.
+- Fill in each entry's `label` (a few words) and `tldr` (what it is and, when the entry says so, why or the first step),
+  in product terms per `AGENTS.md`, "Talking to the user". Leave the keys and their order alone.
+- Recheck the bucket's unplanned entries against the skeleton before showing the page. If TODO.md moved, rerun the
+  skeleton and refresh the summaries. Use the skill's picker markup, with a stable id mapped to each entry's key, a
+  "plan this" choice and a free-text field for instructions. Write the body fragment as `page.html` in a private page
+  directory inside your scratch directory, and follow the skill for serving it and waiting for submissions. Do not run
+  the legacy picker server.
+- When the maintainer submits, run "plan to implement" (`plans/.agents/planning.md`, "Planning: "plan to implement
+  <TODO items>"") on exactly the selected entries, mapped back through the saved keys. A free-text instruction for an
+  entry also selects it, as the old picker's comment box did; a question or request for elaboration is answered on the
+  page before treating it as a planning request. The submission is the request, so do not ask for confirmation. Carry
+  its instructions into planning and finish the picker using the skill's completion procedure before opening the
+  planning questions page.
 
 ## Planning: "plan to implement <TODO items>"
 
@@ -49,9 +49,9 @@ For each plan, run `scode-build-goal` with the entry's text (and whatever the ma
 with these overrides on top of the skill's own rules:
 
 - No-workhorse mode.
-- Ask the up-front questions on a local interactive page (`plans/.agents/planning.md`, "Asking the up-front questions on
-  a local page"), never as a prose batch in conversation, a published snippet, or one question at a time through a
-  question tool.
+- Ask the up-front questions using the `interactive-artifact` skill (`plans/.agents/planning.md`, "Asking the up-front
+  questions on a local page"), never as a prose batch in conversation, a published snippet, or one question at a time
+  through a question tool.
 - When the entry changes the GUI (the web UI or the desktop app), default to mocking up the proposed change on that
   page, next to the questions it settles, rather than describing a layout in words. Settle the design on the mockup,
   then write what was agreed into the goal file in words: the executor cannot ask about it later, and the page lives
@@ -111,34 +111,30 @@ exist as far as an executor is concerned, because executors only read plans from
 
 ## Asking the up-front questions on a local page
 
-Every planning flow in this file asks its up-front questions this way. The maintainer chose it on 2026-10-15, because
-answers given in the terminal cannot be revisited or edited. One page holds every open question for every plan in the
-request, served from this machine on loopback only, the way the todo picker is. Here's what it needs:
+Every planning flow in this file asks its up-front questions using the `interactive-artifact` skill; load and follow it
+by name. One page holds every open question for every plan in the request, so the maintainer can revisit and edit
+answers. Here's what it needs:
 
 - One bordered box per plan, headed by the plan's name in product terms and its slug, with the heading kept in view
   while scrolling. A bare id prefix on each question does not tell the maintainer which plan it is about.
-- Each question offers its picks, the recommended one first and marked as such but not preselected, plus a free-text
-  comment.
-- Beside every question, a "Copy code" button that copies the answers for the whole page as one block for the maintainer
-  to paste back. A question with neither a pick nor a comment is left out of the block and stays open. Show the block on
-  the page as well, since the clipboard can be refused.
+- Each question uses the skill's picker markup with a stable id, the recommended choice first and marked as such but not
+  preselected, plus its free-text field. A question with neither a pick nor text stays open. Use the skill's Submit and
+  wait mechanism to collect answers.
 - Facts that are not questions (the delegation mode, where the plan files go) are stated on the page or in chat, not
   asked.
 
-Write the page as `index.html` in a directory of its own inside your scratch directory (`AGENTS.md`, "Agent scratch
-space") and serve that directory with `scripts/serve-page.ts <dir>`, run from the checkout root as a background command,
-never with another server, after stopping the picker; if it fails to start, stop and report why. The maintainer keeps
-that one URL open in a browser. It binds `127.0.0.1` on port 14003, the todo picker's port, and marks every response
-uncacheable: every flow shares that URL, so a cached copy can be another session's page or an older version of this one.
-If something else holds the port, it moves to the next free port above and prints the URL it got; give the maintainer
-that URL without asking, and say plainly that the port changed, since a forward of 14003 does not reach it. Never stop a
-process you did not start. Put the page's URL in the last message of the turn, after every tool call.
+Write the body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent scratch
+space"). Follow the skill for styling, serving, sharing the URL and any tunnel instructions, waiting for submissions,
+status, replies and shutdown. Keep its chosen port and tokenized URL; do not substitute a shared address or the legacy
+page server. If the skill is unavailable or its server fails, stop and report why.
 
-After acting on a pasted block (research, follow-up questions), update the same page in place before ending the turn:
-the questions still open, any new follow-ups, and the settled answers shown read-only, so the maintainer can see what is
+After acting on a submission (research, follow-up questions), update the same page in place before waiting again: the
+questions still open, any new follow-ups, and the settled answers shown read-only, so the maintainer can see what is
 still needed. A comment asking a question or for elaboration is answered on the page, beside the question it was asked
-on, not only in conversation (the maintainer set this on 2026-10-22). A plan whose questions are all settled leaves the
-page entirely, its settled answers included; only plans with something still open stay on it.
+on, using the skill's replies as well as any explanation beside the question. A plan whose questions are all settled
+leaves the page entirely, its settled answers included; only plans with something still open stay on it. Submissions
+include unchanged picks: apply only new or revised answers, and preserve settled decisions across rounds. Finish the
+page using the skill's completion procedure when no questions remain.
 
 ## Planning triage outcomes: "use the planning system to schedule these"
 

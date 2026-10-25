@@ -101,14 +101,14 @@ Generic recorder wrapping is fine but not required for these; record each result
 - `dist generate --check`
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test`
 - `python3 releasing/finalize-release-notes.py --self-test`
-- `python3 releasing/notes-review-page.py --self-test` (includes link attribute escaping and HTTP(S)/relative-only
-  targets)
+- `python3 releasing/notes-review-page.py --self-test` (legacy standalone page; includes link attribute escaping and
+  HTTP(S)/relative-only targets)
 - `python3 releasing/rehearse-release-gate.py --self-test`
 - `scripts/publish-docs-shots.sh --self-test`
 - `bash scripts/test-plans-watch.sh` and `python3 scripts/test-plans-queue.py`, with `shellcheck` over
   `scripts/plans-watch.sh`, `scripts/test-plans-watch.sh` and `scripts/publish-docs-shots.sh`
-- `python3 scripts/test-todo-picker.py`
-- `deno test -A scripts/serve-page.ts`
+- `python3 scripts/test-todo-picker.py` (TODO extraction and legacy standalone checklist)
+- `deno test -A scripts/serve-page.ts` (legacy standalone server; agent pages use the `interactive-artifact` skill)
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
 - The recorded portable brick-test helper suite from `.agents/validation.md`, with process-group inspection available;
   this exercises compiled task contracts, fixed operations, structured native actions, restart handoff failures and

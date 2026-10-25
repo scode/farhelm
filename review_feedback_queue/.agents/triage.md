@@ -71,37 +71,29 @@ then continue to the next undecided item. This is an exception to the per-item d
 
 ## Presenting items on one page
 
-By default, undecided items are triaged on one local interactive page rather than one at a time in conversation. The
-maintainer chose one page on 2026-10-16, and on 2026-10-21 moved it from a published `scode-snippets` snippet to a page
-served from this machine, the way the planning flow asks its up-front questions (`plans/.agents/planning.md`, "Asking
-the up-front questions on a local page"). Prepare every item first ("Preparing each item" in this file, including the
-immediate removal of covered, filtered and already-fixed items), then write one page holding every item still undecided,
-serve it, and give the maintainer its URL. Walk through items one at a time in conversation only when the maintainer
-asks for it. Do not publish the page as a snippet or anywhere else unless the maintainer asks.
+By default, triage undecided items on one page using the `interactive-artifact` skill; load and follow it by name.
+Prepare every item first ("Preparing each item" in this file, including the immediate removal of covered, filtered and
+already-fixed items), then write one page holding every item still undecided, serve it, and give the maintainer its URL.
+Walk through items one at a time in conversation only when the maintainer asks for it. Do not publish the page as a
+snippet or anywhere else unless the maintainer asks.
 
-Write the page as `index.html` in a directory of its own inside your scratch directory (`AGENTS.md`, "Agent scratch
-space") and serve that directory with `scripts/serve-page.ts <dir>`, run from the checkout root as a background command,
-never with another server; if it fails to start, stop and report why. It binds `127.0.0.1` on port 14003, the todo
-picker's port, and marks every response uncacheable: every flow shares that URL, so a cached copy can be another
-session's page. If something else holds the port, it moves to the next free port above and prints the URL it got; give
-the maintainer that URL without asking, and say plainly that the port changed, since a forward of 14003 does not reach
-it. Never stop a process you did not start. Put the page's URL in the last message of the turn, after every tool call.
-Stop the server when no undecided item is left on the page.
+Write the body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent scratch
+space"). Follow the skill for styling, serving, sharing the URL and any tunnel instructions, waiting for submissions,
+status, replies and shutdown. Use its chosen port and tokenized URL. If the skill is unavailable or its server fails,
+stop and report why. Finish the page using the skill's completion procedure when no undecided items remain or the
+maintainer ends triage.
 
 The page groups items by topic and keeps index order within a group. Each item says, in this order, what goes in a
 conversation under "Asking for a decision" in this file: its number, bucket and feedback filename; a short
 plain-language title; what the feature is; what goes wrong for the user; the assessment with its evidence and what
 remains unverified; the bucket and why; and the recommendation with its reason. Then comes the decision question, with
-one radio option per plausible outcome. Each option has a short label, its outcome value (`discard`, `fix spec`,
-`fix code`, `fix spec+code`, `other`), and a line on what it would change and roughly how much work it is. The
-recommended option comes first and is marked, a "leave for later" option comes last, and a free-text comment field
-follows. Picks and comments survive a reload (per-browser storage is enough). A "Copy code" button beside every question
-copies every answered item on the page as one `triage-answers` block of text, giving each item's filename, its pick
-(outcome and label) and its comment; items with neither are left out. Show the block on the page as well, since the
-clipboard can be refused. The `farhelm-triage-judgement-2026-10-15` and `farhelm-triage-judgement-2026-10-16` snippets,
-published before the page moved local, are working examples of the layout and the copy format.
+one picker choice per plausible outcome. Use the feedback filename as the stable picker id. Each choice has a short
+label, its outcome value (`discard`, `fix spec`, `fix code`, `fix spec+code`, `other`), and a line on what it would
+change and roughly how much work it is. The recommended option comes first and is marked, a "leave for later" option
+comes last, and a free-text comment field follows, using the skill's picker markup. Nothing is preselected. Use the
+skill's Submit and wait mechanism to collect answers; the skill preserves picks and text across page updates.
 
-Act on the pasted block item by item:
+Act on each submission item by item:
 
 - a pick is the maintainer's decision, recorded as "Recording the outcome" in this file describes; a comment alongside
   it is their rationale and scope, preserved in the Decision field in their words, and an instruction in it (a spec
@@ -112,9 +104,12 @@ Act on the pasted block item by item:
   maintainer decides;
 - "leave for later", or neither a pick nor a comment, leaves the item undecided in the queue. It is never a `discard`.
 
-Ask in conversation only where a comment is unclear. The pasted block is the decision, so do not ask the maintainer to
-confirm picks before recording them. Then update the same page in place before ending the turn: items still undecided
-stay, answers to their comments and follow-up questions are added, and decided items leave the page.
+Comments and suggestions anchored to an item follow the same rules as its free-text field; a proposed wording change
+alone does not choose an outcome. Use the skill's replies to answer and clarify on the page. The submission is the
+decision, so do not ask the maintainer to confirm picks before recording them. Then update the same page in place before
+waiting again: items still undecided stay, answers and follow-up questions are added, and decided items leave the page.
+Unchanged picks must not record duplicate outcomes. These submissions authorize triage decisions only; execution still
+needs the separate command in `review_feedback_queue/AGENTS.md`, "Triage and execution are separate".
 
 ## Asking for a decision
 

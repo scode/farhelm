@@ -147,10 +147,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`codex-output-mimics-queued-question.md`](codex-output-mimics-queued-question.md) — Codex output shaped like a
   queued-question hint reads waiting mid-turn, so Restart skips its question; the rendering premise is unverified.
 
-- [`todo-picker-port-squatter-steers-planner.md`](todo-picker-port-squatter-steers-planner.md) — Another local account
-  holding the picker or triage page's fixed address can forge pasted input; token-path routing alone does not
-  authenticate that server. Tab reuse is unverified and the bucket is unsettled.
-
 - [`sticky-parent-guard-contradicts-own-docs.md`](sticky-parent-guard-contradicts-own-docs.md) — The test recorder's and
   deflake's docs claim to refuse another account's /tmp/farhelm-tmp, which a sticky one passes.
 

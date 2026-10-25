@@ -81,6 +81,7 @@ Every list is complete: read each file it names in full before the first action 
 Before step 1 of `releasing/.agents/stable.md`, "Cutting a stable release" (the fragment sweep), read these in full:
 
 - `releasing/.agents/stable.md`
+- the `interactive-artifact` skill
 - `releasing/.agents/changelog.md`
 - `releasing/EDITORIAL_GUIDANCE.md`
 - `releasing/.agents/risk-report.md`
@@ -185,6 +186,7 @@ Outside a stable release, before editing `CHANGELOG.md`, read these in full:
 - `releasing/.agents/changelog.md`
 - `releasing/EDITORIAL_GUIDANCE.md`
 - `releasing/.agents/stable.md` (curation is its steps 1 to 4, and the changelog rules cite it)
+- the `interactive-artifact` skill
 - `AGENTS.md`, "Agent scratch space" and "Changelog fragments" (root)
 
 Fence: a published release's section changes only as a correction a task specifically targets; wording the maintainer

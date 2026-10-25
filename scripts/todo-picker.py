@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Serve a local checklist page for picking which TODO.md entries to plan.
+"""Extract unplanned TODO entries, with a legacy standalone checklist server.
 
-This is the tool behind the "todo planning flow" in `plans/AGENTS.md`. The maintainer ticks entries from one TODO.md
-bucket, clicks "Copy code", and pastes a line like `todo-plan near-term: pin-rust-toolchain, upgrade-epochs` back into
-the agent session, which then plans those entries. The page exists because choosing from a long bucket by typing entry
-names back is slow and error prone, while ticking boxes is not.
+The "todo planning flow" in `plans/AGENTS.md` uses only `skeleton` from this tool. Its page and submissions use the
+`interactive-artifact` skill; do not run this script's legacy `serve` command for that flow. The remaining description
+covers the standalone server retained here.
+
+The maintainer ticks entries from one TODO.md bucket, clicks "Copy code", and pastes a line like
+`todo-plan near-term: pin-rust-toolchain, upgrade-epochs` back into the agent session, which then plans those entries.
+The page exists because choosing from a long bucket by typing entry names back is slow and error prone, while ticking
+boxes is not.
 
 Each entry also has a comment box, so the maintainer can say what they want from an entry while choosing it rather than
 waiting for the planning questions. A ticked entry's comment follows the first line of the code as a `<slug>: <comment>`

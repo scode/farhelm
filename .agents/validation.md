@@ -171,13 +171,13 @@ that its required systemd or SSH substrate ran.
   loop against an in-memory GitHub that injects racing writers and lost responses. One case runs the real `dprint` when
   it is on PATH, which downloads dprint's plugins if its cache is cold. Run it when the script changes; seconds, no
   other network.
-- `python3 scripts/test-todo-picker.py` — the todo planning flow's checklist page (`scripts/todo-picker.py`): how
-  TODO.md buckets and entries are read, that entries with a plan are left out, that a summaries file written against an
-  older TODO.md is refused, and that summaries are escaped into the page. Run it when the script changes; seconds, no
-  network.
-- `deno test -A scripts/serve-page.ts` — the server every flow's local questions page goes through: that it answers with
-  `Cache-Control: no-store` and moves past a taken port. Run it, with `deno check` on the same file, when the script
-  changes; seconds. Needs Deno, and fetches `jsr:@std/http` the first time.
+- `python3 scripts/test-todo-picker.py` — TODO extraction and the legacy standalone checklist
+  (`scripts/todo-picker.py`): how TODO.md buckets and entries are read, that entries with a plan are left out, that a
+  summaries file written against an older TODO.md is refused, and that summaries are escaped into the page. Run it when
+  the script changes; seconds, no network.
+- `deno test -A scripts/serve-page.ts` — the legacy standalone static server (agent pages use the `interactive-artifact`
+  skill): that it answers with `Cache-Control: no-store` and moves past a taken port. Run it, with `deno check` on the
+  same file, when the script changes; seconds. Needs Deno, and fetches `jsr:@std/http` the first time.
 - `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' --tmux none -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
   — validates owned Tart lifecycle, signed-input planning, guest execution, fixed command operations, durable handoffs,
   compiled checkpoint contracts, structured native actions, restart process handoffs, calibrated window measurements,
@@ -193,10 +193,11 @@ that its required systemd or SSH substrate ran.
 - `python3 releasing/finalize-release-notes.py --self-test` — the body swap that replaces a stable release's draft notes
   on its GitHub release with the approved text, against bodies shaped like dist's, and the refusals that need no
   repository or release. Run it when that script or the checker's parser changes; seconds, no network.
-- `python3 releasing/notes-review-page.py --self-test` — the interactive page a stable release's draft notes are
-  reviewed on: entry ids, attribute escaping, HTTP(S)/relative-only link targets and PR links; under node, it checks
-  that the copied feedback block carries each note and a regenerated page drops notes typed on its previous revision.
-  Without node it says `SKIPPED` for the page script part. Run it when that script changes; seconds, no network.
+- `python3 releasing/notes-review-page.py --self-test` — the legacy standalone notes page (stable releases use the
+  `interactive-artifact` skill): entry ids, attribute escaping, HTTP(S)/relative-only link targets and PR links; under
+  node, it checks that the copied feedback block carries each note and a regenerated page drops notes typed on its
+  previous revision. Without node it says `SKIPPED` for the page script part. Run it when that script changes; seconds,
+  no network.
 
 This inventory names the relevant local checks. The CI workflow (`ci.yml`) covers formatter, Clippy, desktop
 compilation, the JS harness, the website build and its feedback endpoint tests, installer validation, generated-workflow
