@@ -391,6 +391,67 @@ test(`a failed number-key save is reported and never saved later: ${failure}`, a
 });
 }
 
+/** A refused mark must restore the helm's previous nonempty choice and report
+ * uncertainty: a failed reply alone cannot tell whether the helm committed.
+ * Independent reads distinguish rollback from merely changing the painted bolt;
+ * a later successful edit must clear the error without replaying the refusal.
+ */
+test("a refused quick-launch mark restores the stored mark and reports the failure", async ({ page, request }) => {
+  const prefix = `mark-failed-${Date.now()}`;
+  const [a, b] = ["a", "b"].map(suffix => `${prefix}-${suffix}`);
+  const previous = (await readPreferences(request)).quick_launch_template;
+  const build = requireHelmBuild(await request.get("/api/preferences"), "quick-launch mark refusal");
+  let writes = 0;
+  let rereads = 0;
+  let bodyFailed = false;
+  try {
+    await putTemplate(request, a, { kind: "agent", agent: "claude" });
+    await putTemplate(request, b, { kind: "agent", agent: "codex" });
+    await patchPreferences(request, { quick_launch_template: a });
+    expect((await readPreferences(request)).quick_launch_template).toBe(a);
+    const dialog = await openTemplates(page);
+    const oldMark = dialog.getByRole("button", { name: `quick launch ${a}`, exact: true });
+    const newMark = dialog.getByRole("button", { name: `quick launch ${b}`, exact: true });
+    await expect(oldMark).toHaveAttribute("aria-pressed", "true");
+    await expect(newMark).toHaveAttribute("aria-pressed", "false");
+    await page.route("**/api/preferences", async route => {
+      const write = route.request();
+      if (write.method() === "GET" && writes > 0) rereads++;
+      if (write.method() !== "PUT" || write.postDataJSON().quick_launch_template !== b) return route.fallback();
+      writes++;
+      await route.fulfill({ status: 503, headers: { "x-farhelm-build": build }, body: "mark refused by the test" });
+    });
+    await newMark.click();
+    await expect(dialog.locator(".templates-error")).toHaveText(
+      "the quick-launch mark may not have been saved; showing the mark read from Farhelm",
+    );
+    await expect(oldMark).toHaveAttribute("aria-pressed", "true");
+    await expect(newMark).toHaveAttribute("aria-pressed", "false");
+    expect(writes, "only the attempted new mark was refused").toBe(1);
+    expect(rereads, "the failed write must reconcile with a fresh helm read").toBeGreaterThan(0);
+    expect((await readPreferences(request)).quick_launch_template).toBe(a);
+    await page.unroute("**/api/preferences");
+    await newMark.click();
+    await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(b);
+    await expect(newMark).toHaveAttribute("aria-pressed", "true");
+    await expect(oldMark).toHaveAttribute("aria-pressed", "false");
+    await expect(dialog.locator(".templates-error")).toHaveCount(0);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    // Stop the page's writers before restoring the shared mark, so a late
+    // completion cannot overwrite cleanup or refer to a deleted fixture.
+    await cleanupOwnedSteps(bodyFailed, [
+      ["page writers", () => page.goto("about:blank")],
+      ["mark refusal route", () => page.unrouteAll({ behavior: "wait" })],
+      ["previous mark", () => patchPreferences(request, { quick_launch_template: previous ?? null })],
+      ["old-mark template", () => deleteTemplate(request, a)],
+      ["new-mark template", () => deleteTemplate(request, b)],
+    ]);
+  }
+});
+
 /** A model-only key is useful for composition even though it cannot launch
  * alone. Hold catalog loading past the notice lifetime to prove that loading
  * cannot consume the explanation; editing and elapsed visible time must both

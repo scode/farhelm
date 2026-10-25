@@ -2,4 +2,4 @@
 kind: fixed
 ---
 
-Settings now reports a failed save of terminal-frame colors, quick-launch naming, terminal link-click behavior or trust-hint visibility and restores the saved choice. Closing Settings still allows a failed shared choice to revert.
+Settings and the Templates dialog now report failed saves of terminal-frame colors, quick-launch naming, terminal link-click behavior, trust-hint visibility and the ⚡ quick-launch mark. Failed shared Settings choices still revert after the dialog closes.
