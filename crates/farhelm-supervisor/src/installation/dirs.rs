@@ -229,6 +229,19 @@ pub fn list(dir: BorrowedFd<'_>) -> io::Result<Vec<String>> {
     Ok(names)
 }
 
+/// Remove one entry inside `dir`: an empty folder when `folder`, otherwise
+/// a file or link (never followed). A missing entry is `NotFound`, which
+/// callers treat as already removed.
+pub fn remove_entry(dir: BorrowedFd<'_>, name: &str, folder: bool) -> io::Result<()> {
+    let flags = if folder {
+        AtFlags::REMOVEDIR
+    } else {
+        AtFlags::empty()
+    };
+    rustix::fs::unlinkat(dir, name, flags)?;
+    Ok(())
+}
+
 /// Remove the folder `name` inside `dir` and everything in it, without
 /// following any link inside. Absent is already removed.
 pub fn remove_tree(dir: BorrowedFd<'_>, name: &str) -> io::Result<()> {

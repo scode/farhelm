@@ -20,8 +20,11 @@
 //! - [`InstallLock`]: the installer's lock directory in the install
 //!   directory. An installer finding it held by a live process refuses; one
 //!   finding it left by a crashed uninstall clears it as stale.
-//! - [`BundleLock`] (macOS): the installer's lock beside
-//!   `~/Applications/Farhelm.app`, held while it rebuilds the app.
+//! - [`InstallationLocks`] (macOS): the installation lock on
+//!   `~/Applications` that installs and the app's updater take, and the lock
+//!   folder older installers use beside the app
+//!   (`farhelm_supervisor::installation`). The installation lock is a
+//!   kernel lock, so no run ever leaves it behind.
 //! - setup's unit-directory flock, taken through
 //!   `setup::lock_for_selected_services` (Linux).
 //! - [`RuntimeLocks`] (macOS): the supervisor's and helm's state-directory
@@ -51,8 +54,6 @@ use std::{
 /// The installer's lock directory name inside the install directory
 /// (`LOCK_DIR` in scripts/install.sh).
 const INSTALL_LOCK: &str = ".farhelm-install.lock";
-/// The installer's app-bundle lock beside `Farhelm.app` (scripts/install.sh).
-const BUNDLE_LOCK: &str = ".farhelm-app.lock";
 /// The supervisor's state-directory lock (`supervisor.lock`).
 const SUPERVISOR_LOCK: &str = "supervisor.lock";
 /// The helm's state-directory lock (`helm-token.lock`).
@@ -137,39 +138,63 @@ impl Drop for InstallLock {
     }
 }
 
-/// The installer's lock beside the macOS app bundle, held by this uninstall.
-pub(super) struct BundleLock {
-    dir: PathBuf,
+/// The installation lock and the older installers' lock folder, held by
+/// this uninstall (macOS).
+pub(super) struct InstallationLocks {
+    // Declared first so it drops first: the folder is removed while the
+    // kernel lock (or its fallback file) is still held, so no other
+    // install can take the lock and put its own folder in place first.
+    _compat: farhelm_supervisor::installation::CompatLockFolder,
+    pub(super) lock: farhelm_supervisor::installation::InstallationLock,
 }
 
-impl BundleLock {
-    /// Take the lock in `applications` (the bundle's parent directory), or
-    /// refuse if it exists. `None` when that directory does not exist: the
-    /// confirmed and re-checked plan then has no bundle and no leftover
-    /// receipt, so uninstall touches nothing there, whatever an installer
-    /// (possibly for another install directory) builds in the meantime.
-    pub(super) fn acquire(applications: &Path) -> Result<Option<Self>> {
-        let dir = applications.join(BUNDLE_LOCK);
-        match fs::DirBuilder::new().mode(0o700).create(&dir) {
-            Ok(()) => Ok(Some(Self { dir })),
-            Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => bail!(
-                "the app lock {} exists: the installer may be building Farhelm.app right now, or an \
-                 earlier run was interrupted; if no installer is running, remove {} by hand, then \
-                 retry uninstall",
-                super::path_text(&dir),
-                super::path_text(&dir)
-            ),
-            Err(error) => {
-                Err(error).with_context(|| format!("creating app lock {}", super::path_text(&dir)))
-            }
-        }
+impl InstallationLocks {
+    /// Take both in `applications` (`~/Applications`), waiting a few seconds
+    /// for a running install, or refuse. The folder is created if missing,
+    /// as for every operation (design, section 2): an app moved elsewhere is
+    /// still uninstalled under the one lock its installers take.
+    pub(super) fn acquire(applications: &Path) -> Result<Self> {
+        Self::acquire_waiting(
+            applications,
+            farhelm_supervisor::installation::TERMINAL_LOCK_WAIT,
+        )
     }
-}
 
-impl Drop for BundleLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir(&self.dir);
+    /// [`Self::acquire`] with the wait as a parameter, for tests.
+    pub(super) fn acquire_waiting(applications: &Path, wait: std::time::Duration) -> Result<Self> {
+        use farhelm_supervisor::installation::{
+            CompatLockError, InstallLockError, lock_installation, take_compat_lock_folder,
+        };
+        let lock = match lock_installation(applications, wait) {
+            Ok(lock) => lock,
+            Err(InstallLockError::Busy) => bail!(
+                "another Farhelm install or uninstall is running right now; wait for it to finish, \
+                 then retry uninstall; nothing was removed"
+            ),
+            Err(InstallLockError::Unsupported(path)) => bail!(
+                "{} is on a volume where files cannot be locked, so uninstall cannot tell what \
+                 still uses Farhelm; nothing was removed. To remove Farhelm anyway, quit it and \
+                 everything started from it, then delete ~/Applications/Farhelm.app and \
+                 ~/.local/bin/farhelm by hand",
+                super::path_text(&path)
+            ),
+            Err(error) => return Err(error).context("taking the installation lock"),
+        };
+        let compat = match take_compat_lock_folder(&lock) {
+            Ok(compat) => compat,
+            Err(CompatLockError::HeldByOlderTool(path)) => bail!(
+                "the app lock {} exists: an older installer may be changing Farhelm.app right now, \
+                 or an earlier run was interrupted; if no installer is running, remove {} by hand, \
+                 then retry uninstall",
+                super::path_text(&path),
+                super::path_text(&path)
+            ),
+            Err(error) => return Err(error).context("taking the app lock"),
+        };
+        Ok(Self {
+            _compat: compat,
+            lock,
+        })
     }
 }
 
@@ -394,35 +419,40 @@ mod tests {
         }
     }
 
-    /// The app lock refuses when held, is released on drop, and is skipped
-    /// when there is no directory to hold an app.
+    /// The installation locks refuse when another run holds either, are
+    /// released on drop, and create a missing `~/Applications` to lock it.
     ///
-    /// Why: creating `~/Applications` just to lock it would leave a stray
-    /// directory on a machine that never had the app; and a held lock means
-    /// the installer may be rebuilding the app right now. Spec: no parent
-    /// gives `None` and creates nothing; a free lock is taken and released;
-    /// an existing one refuses naming it.
+    /// Why: a held installation lock means an install or the app's updater
+    /// is working on the app right now, and an older installer's lock folder
+    /// means an older installer may be; and every operation, uninstalling a
+    /// moved app included, must meet on the same lock (design, section 2),
+    /// so a missing folder is created rather than skipped. Spec: a missing
+    /// parent is created and locked; a free pair is taken and released
+    /// (leaving no folder); a held kernel lock refuses as busy; an older
+    /// tool's folder refuses naming it.
     #[test]
-    fn bundle_lock_refuses_when_held_and_skips_a_missing_parent() {
+    fn installation_locks_refuse_when_held_and_create_a_missing_parent() {
+        let zero = std::time::Duration::ZERO;
         let home = tempfile::tempdir().expect("home");
         let applications = home.path().join("Applications");
-        assert!(
-            BundleLock::acquire(&applications)
-                .expect("no parent")
-                .is_none()
-        );
-        assert!(!applications.exists(), "nothing was created");
-        fs::create_dir(&applications).expect("applications");
-        let lock = BundleLock::acquire(&applications)
-            .expect("free lock")
-            .expect("taken");
-        let refusal = BundleLock::acquire(&applications)
+        let held = InstallationLocks::acquire_waiting(&applications, zero).expect("taken");
+        assert!(applications.is_dir(), "created to be locked");
+        let refusal = InstallationLocks::acquire_waiting(&applications, zero)
             .err()
-            .expect("a held lock refuses")
+            .expect("a held installation lock refuses")
+            .to_string();
+        assert!(
+            refusal.contains("another Farhelm install or uninstall"),
+            "{refusal}"
+        );
+        drop(held);
+        assert!(!applications.join(".farhelm-app.lock").exists());
+        fs::create_dir(applications.join(".farhelm-app.lock")).expect("an older tool's folder");
+        let refusal = InstallationLocks::acquire_waiting(&applications, zero)
+            .err()
+            .expect("an older tool's folder refuses")
             .to_string();
         assert!(refusal.contains(".farhelm-app.lock"), "{refusal}");
-        drop(lock);
-        assert!(!applications.join(BUNDLE_LOCK).exists());
     }
 
     /// Uninstall claims both runtime locks before a first desktop launch

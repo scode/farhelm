@@ -502,11 +502,15 @@ manually started Farhelm processes. Sessions may survive a supervisor exit, so q
 not enough. A one-time stop/restart when upgrading to the first uninstall-capable release is acceptable.
 
 Basic uninstall operates on files. It does not walk processes, discover runtime sockets, reconstruct session ownership,
-or introduce a runtime registry. The one runtime fact it reads is whether the supervisor's and helm's state-directory
-locks are held, on macOS, to keep an open desktop app from running against an installation being removed (see Concurrent
-and interrupted runs); a held lock is reported as such, not as proof of what is running. It neither forcibly terminates
-agents nor claims to prove that all processes have stopped. The command explains the stopping prerequisite before
-removal, including with `--yes`.
+or introduce a runtime registry. The runtime facts it reads on macOS are locks: whether the supervisor's and helm's
+state-directory locks are held, to keep an open desktop app from running against an installation being removed (see
+Concurrent and interrupted runs), and whether any version of Farhelm kept in the app is locked by a program still
+running it. A version in use refuses with nothing removed, naming the version and an `lsof` command that shows what
+holds it, since a lock says only that something holds it, not what (it need not be Farhelm). A held lock is reported as
+such, not as proof of what is running. On a volume where those locks cannot be taken, uninstall refuses and says how to
+remove Farhelm by hand, because it cannot tell what still uses a version. It neither forcibly terminates agents nor
+claims to prove that all processes have stopped. The command explains the stopping prerequisite before removal,
+including with `--yes`.
 
 Refusals identify the actual filesystem check, the path and observed result or concrete error. A file's existence must
 never be described as proof that a process is running. Diagnostics appear in ordinary output without requiring verbose
@@ -518,18 +522,22 @@ acceptable when the remaining installation can still be identified safely.
 
 Removal can fail partway through. Failures return a nonzero status, distinguish completed actions from remaining work,
 and explain how to retry. Completed removal steps need not be rolled back, but retry must tolerate them and continue
-cleanup safely. The CLI remains available until the other required removal steps succeed so an ordinary partial failure
-does not remove the user's retry command. Successful removal does not promise that the now-removed command remains
-invocable.
+cleanup safely. On macOS the app records that an uninstall is under way before anything is removed, so an interrupted
+uninstall stays recognizable: an update refuses to finish into it, the app's updater pauses and says to run uninstall
+again, and rerunning uninstall finishes it. The CLI remains available until the other required removal steps succeed so
+an ordinary partial failure does not remove the user's retry command. Successful removal does not promise that the
+now-removed command remains invocable.
 
 Uninstall running at the same time as installation, updates, setup, desktop startup, or session creation falls under
 [Concurrent and interrupted runs](#concurrent-and-interrupted-runs) like any other overlap: the outcome must be correct,
-and refusing is acceptable. Uninstall takes the locks those operations already use (on macOS the installer's app-bundle
-lock and the supervisor's and helm's state-directory locks; on Linux the installer's install-directory lock, and setup's
-unit-directory lock when setup's services or unit directory exist) without waiting, after confirmation, and then
-re-checks what it is about to remove under them; a lock already held, or a plan that changed since confirmation, refuses
-with nothing removed. An install or update that starts while uninstall holds the locks refuses in its own way, and so
-does a setup whenever uninstall holds setup's lock.
+and refusing is acceptable. Uninstall takes the locks those operations already use (on macOS the installer's
+installation lock on `~/Applications` together with the lock folder older installers use, and the supervisor's and
+helm's state-directory locks; on Linux the installer's install-directory lock, and setup's unit-directory lock when
+setup's services or unit directory exist) after confirmation, and then re-checks what it is about to remove under them;
+a lock already held, or a plan that changed since confirmation (including a different app put at the same place),
+refuses with nothing removed. Only the installation lock is waited for, a few seconds; the others are taken without
+waiting. An install or update that starts while uninstall holds the locks refuses in its own way, and so does a setup
+whenever uninstall holds setup's lock.
 
 ### Concurrent and interrupted runs
 
