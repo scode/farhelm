@@ -8,7 +8,52 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
+- [`template-delete-reads-new-selection.md`](template-delete-reads-new-selection.md) — On desktop, Delete still shown
+  for one template can delete a newly selected template. Its temporary Undo does not restore shortcut bindings; event
+  frequency is unmeasured.
+
+- [`template-retry-installs-unseen-permanent-delete.md`](template-retry-installs-unseen-permanent-delete.md) — After
+  partial failures involving an invalid older template, desktop Retry can leave ordinary Delete visible while its click
+  permanently deletes the template without the promised warning or Undo. Release-upgrade filtering covers at most part
+  of this conditional route.
+
+- [`template-delete-lost-reply-loses-undo.md`](template-delete-lost-reply-loses-undo.md) — An ordinary template deletion
+  can commit but offer no Undo when its success reply is lost. Manual recovery from the mounted editor remains possible
+  until it closes; the unknown-outcome exception's scope is ambiguous.
+
+- [`link-refusal-conceals-delete-warning.md`](link-refusal-conceals-delete-warning.md) — A raised link refusal can hide
+  a session's destructive Delete warning while keyboard opening and a fresh affirmative Enter still work. The complete
+  source path is established; actual overlap pixels and loss were not measured.
+
+- [`tunnel-reuses-custom-helm-credential-origin.md`](tunnel-reuses-custom-helm-credential-origin.md) — A desktop tunnel
+  can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
+  same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
+
+- [`restart-trust-follows-stale-checkout-membership.md`](restart-trust-follows-stale-checkout-membership.md) — With
+  automatic workspace trust enabled, Restart with can trust a replacement folder because a resumable Codex or Pi session
+  still belongs to the old managed checkout. Borrowing sessions skip the origin's folder-identity checks; no vendor
+  execution was attempted.
+
+- [`named-restart-reporter-failure-keeps-old-resume.md`](named-restart-reporter-failure-keeps-old-resume.md) — A
+  successful named Pi or OMP restart can keep the previous conversation when preparing its reporter fails. A later
+  ordinary Restart can then resume that previous conversation. The conditional source route is established; occurrence
+  is unmeasured.
+
 ## High priority: material UX degradation
+
+- [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
+  interrupted archive written by older development code can move a replacement folder after device/inode reuse when
+  birth time is unavailable. Current permanent deletion refuses this birthless case; a proven older-release variant may
+  be filtered.
+
+- [`devbuild-run-only-skips-old-payload-authentication.md`](devbuild-run-only-skips-old-payload-authentication.md) —
+  Launching an earlier staged development build bypasses the new tmux signature check. Whether the repair must cover
+  operator-staged older builds is unresolved; the claim that verification runs every time is too broad.
+
+- [`concurrent-devbuild-copy-outlives-hash-check.md`](concurrent-devbuild-copy-outlives-hash-check.md) — Overlapping
+  direct builds in one checkout can copy tmux bytes replaced after their digest was checked. This maintainer-tooling
+  authenticity concern is conditional on an ambiguous concurrency contract; practical race control and catastrophic harm
+  are unproved.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -85,8 +130,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   items leaves their machine-readable sweep exclusions orphaned.
 
 - [`landing-leaves-baseline-flake-unrecorded.md`](landing-leaves-baseline-flake-unrecorded.md) — Landing reports defer
-  recording recurring baseline flakes, including the initial-prompt regression; their private runtime evidence was not
-  authenticated here.
+  recording recurring baseline flakes, including further template, host-action and sidebar Replace observations; private
+  runtime evidence was not authenticated here.
 
 - [`launcher-report-confuses-apply-with-launch.md`](launcher-report-confuses-apply-with-launch.md) — The landing report
   says Enter launches where the launcher actually applies queued templates to the draft.
@@ -152,7 +197,7 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`uninstall-completion-bypasses-size-decision.md`](uninstall-completion-bypasses-size-decision.md) — Uninstall work
   entered unattended landing eligibility after exceeding a required size gate, without a maintainer waiver in the pinned
-  record; no product harm is established.
+  record; additional approximate-size cases retain their authorization ambiguity and later approvals.
 
 - [`launcher-subscription-test-masks-missing-observers.md`](launcher-subscription-test-masks-missing-observers.md) — A
   launcher regression shares replay subscriptions and changes several positive-control fields, masking the omission it
@@ -165,3 +210,260 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`held-preference-reply-blocks-fixture-restoration.md`](held-preference-reply-blocks-fixture-restoration.md) — A
   failed held reply can block four tests' preference/template restoration; the conditional contamination schedule is
   untested.
+
+- [`canonical-folder-history-contract-conflict.md`](canonical-folder-history-contract-conflict.md) — Host canonical-path
+  replies become remembered folder text, despite a product rule saying those replies must not choose remembered
+  defaults. The implementation specification explicitly carries canonical paths into history; spelling changes are
+  established, arbitrary path substitution is not.
+
+- [`history-reply-lacks-installation-provenance.md`](history-reply-lacks-installation-provenance.md) — If a host changes
+  installations and changes back while the GUI misses the intermediate snapshot, history from the intermediate
+  installation can become the current host's frozen folder default. Final launch still targets the current machine.
+
+- [`launcher-source-supersession-route-unresolved.md`](launcher-source-supersession-route-unresolved.md) — A mounted
+  launcher retains its earlier source, but no complete shipped input sequence establishes the suspected harmful action
+  after that source is superseded. Narrow token and permission repairs do not settle the whole conditional lead.
+
+- [`uncertain-launch-marker-overwrites-older-attempt.md`](uncertain-launch-marker-overwrites-older-attempt.md) — A later
+  uncertain launch overwrites the single visible marker while an earlier managed attempt remains retained. The original
+  duplicate-launch claim was refuted; a compatible pre-admission sequence producing the stronger harm remains missing.
+
+- [`restart-selector-retains-source-conversation.md`](restart-selector-retains-source-conversation.md) — Restart with
+  retains an entered conversation when its source is reseeded. A shipped source-switch action after editing, and a
+  harmful resulting restart, remain unestablished; the older Clone/Replace discard does not explicitly settle this new
+  surface.
+
+- [`trash-alias-refresh-skips-movement-pause.md`](trash-alias-refresh-skips-movement-pause.md) — A same-GUI host alias
+  refresh can change trash layout without triggering its movement pause. A supported layout placing another enabled
+  Delete under the old pointer remains unestablished, so this is a conditional fingerprint gap.
+
+- [`uninstall-final-scan-concurrent-mount-gap.md`](uninstall-final-scan-concurrent-mount-gap.md) — A mount introduced
+  after uninstall's last containment scan could be traversed by removal. No complete supported topology-change sequence
+  establishing loss of unrelated work was found; the stable-layout repairs remain valid.
+
+- [`uninstall-inspection-newline-identity-gap.md`](uninstall-inspection-newline-identity-gap.md) — Inspection can
+  transform newline-bearing path text before comparing identities. A supported incidental path and complete layout
+  defeating all removal guards remain missing; this is separate from the repaired ordinary path cases.
+
+- [`offline-uninstall-live-tmux-history-unresolved.md`](offline-uninstall-live-tmux-history-unresolved.md) — The offline
+  retry can omit the session check, but a supported history leaving the unit file gone, unit stopped, supervisor absent
+  and private tmux alive remains unestablished. Active-unit repairs do not explicitly accept losing surviving sessions.
+
+- [`older-direct-bun-omp-reporter-gap.md`](older-direct-bun-omp-reporter-gap.md) — Older direct-Bun launches keep a
+  permissive reporter corridor. A nested interactive OMP receiving the required reporter and ancestry remains
+  unestablished; only the proven older-release subset has filter coverage.
+
+- [`bun-option-value-retains-launcher-exemption.md`](bun-option-value-retains-launcher-exemption.md) — The OMP
+  classifier may treat a Bun option value of x as its launcher marker. Actual supported Bun parsing and a nested
+  reporter route remain missing, so no wrong-conversation execution is claimed.
+
+- [`renamed-grok-reporter-ancestry-gap.md`](renamed-grok-reporter-ancestry-gap.md) — A wholly renamed Grok may leave a
+  nested child looking like the sole recognized emitter. A runnable supported vendor configuration remains
+  unestablished; the concrete ordinary Grok chain was repaired.
+
+- [`repeated-ssh-markers-collapse-incidental-config.md`](repeated-ssh-markers-collapse-incidental-config.md) — The
+  provisioning test's begin/begin/end parser removes the intervening span. A supported unrelated stanza layout and stale
+  per-run alias selection producing actual config loss remain unestablished; balanced writers do not prove that route.
+
+- [`owner-death-child-precedes-pid-publication.md`](owner-death-child-precedes-pid-publication.md) — Killing the test
+  owner before it publishes the child's PID can leave its owned five-minute sleep outside cleanup. This is separate from
+  the explicitly accepted same-run PID-reuse limit.
+
+- [`quick-launch-mark-inverts-live-owner.md`](quick-launch-mark-inverts-live-owner.md) — A delayed mark/clear click
+  chooses its direction from the current owner rather than the direction its render offered. The conditional mismatch is
+  established; no harmful automatic launch is shown, and delivery-window coverage is ambiguous.
+
+- [`quick-launch-clear-erases-new-agent-mark.md`](quick-launch-clear-erases-new-agent-mark.md) — An agent can move the
+  quick-launch mark after the GUI's fresh read but before its unconditional clear, losing the newer choice. Broad
+  last-writer-wins wording and the narrower preservation rule conflict.
+
+- [`rename-lost-reply-restores-old-shortcut-indication.md`](rename-lost-reply-restores-old-shortcut-indication.md) — A
+  rename's shortcut change can commit while its reply is lost, leaving the GUI showing the old mark while the next
+  shortcut reads the new one. The implementation follows an explicit historical rollback criterion; its full
+  indication/dispatch consequences remain ambiguously covered.
+
+- [`post-clone-test-save-overtakes-restoration.md`](post-clone-test-save-overtakes-restoration.md) — The new post-clone
+  Save can remain in flight after the test restores its private stack's settings, then overwrite that restoration.
+  Adverse scheduling is unmeasured; no production user-work loss is claimed.
+
+- [`auth-skew-remount-retains-row-operation-count.md`](auth-skew-remount-retains-row-operation-count.md) — After another
+  tab restores shared credentials, a build-skew remount can leave the old GUI usable but keep an abandoned mutation
+  count that blocks Restart. The conditional route needs an outstanding mutation, authentication loss, build change and
+  another GUI.
+
+- [`shortcut-armed-state-survives-auth-remount.md`](shortcut-armed-state-survives-auth-remount.md) — A sequence started
+  inside New can reappear saying Enter apply after New is gone. A complete credential and input sequence turning that
+  into a harmful launch remains unestablished; upgrade-filter coverage is only partial and uncertain.
+
+- [`held-font-test-lacks-mount-attempt-witness.md`](held-font-test-lacks-mount-attempt-witness.md) — The font test can
+  finish its no-mount observation window before a terminal first tries mounting. Ordinary page text can request the font
+  first, so later terminal appearance does not prove the test would catch premature mounting.
+
+- [`restart-template-plan-overstates-refusal.md`](restart-template-plan-overstates-refusal.md) — The plan says no saved
+  template can apply in Restart with, although kindless older templates can already apply editable fields. This is a
+  background explanation error; its implementation criteria remain useful.
+
+- [`implementation-version-doc-omits-schema-update-guard.md`](implementation-version-doc-omits-schema-update-guard.md) —
+  The implementation specification's version/skew description omits the schema-based guard that can forbid Update. The
+  product specification and actual guard remain intact.
+
+- [`quick-launch-preparation-refusal-uses-plain-alert.md`](quick-launch-preparation-refusal-uses-plain-alert.md) — A
+  quick-launch preparation read failure bypasses the new bordered refusal presentation. Whether the presentation
+  requirement or diagnostic filter covers this stage is unresolved; request admission stays safe.
+
+- [`folder-refusal-classifier-matches-path-text.md`](folder-refusal-classifier-matches-path-text.md) — A path containing
+  familiar error phrases can be misclassified as missing rather than refused or non-directory. This changes an advisory
+  annotation, not launch authority; the rare-diagnostic filter's scope is ambiguous.
+
+- [`shortcut-batch-revalidates-with-new-host-snapshot.md`](shortcut-batch-revalidates-with-new-host-snapshot.md) — A
+  host refresh during the shortcut batch's context wait can make projection and per-template validation use different
+  snapshots. Earlier draft edits can remain after a later template refuses; no automatic launch or user-work loss is
+  established.
+
+- [`fresh-claude-trust-birthtime-contract-conflict.md`](fresh-claude-trust-birthtime-contract-conflict.md) — Initial
+  fresh-checkout creation can edit Claude trust without the no-birth-time check stated elsewhere. Fresh-creation rules
+  may intentionally be an exception; this is a source/specification conflict, not an established unauthorized
+  replacement-folder grant.
+
+- [`host-remove-doc-overstates-second-answer-guard.md`](host-remove-doc-overstates-second-answer-guard.md) — The GUI
+  contract says Host Remove refuses every second answer during its request, but another permanent answer can still
+  change the future confirmation preference. The helper explicitly preserves that same-burst behavior; the operation
+  itself remains guarded.
+
+- [`terminal-focus-origin-overwrites-header-focus.md`](terminal-focus-origin-overwrites-header-focus.md) — Delayed
+  terminal-script loading and automatic fallback after a tab disappears can move focus from a surviving header button
+  into the agent terminal. The source paths are established; harmful commands or approvals are not.
+
+- [`narrow-outage-card-left-edge-unreachable.md`](narrow-outage-card-left-edge-unreachable.md) — A very narrow, short
+  viewport may put part of an outage explanation beyond the left reachable edge. Actual supported sizing and recovery
+  geometry remain unverified; this differs from accepted overlap that remains scrollable.
+
+- [`ordinary-setup-discards-deferred-agent-add.md`](ordinary-setup-discards-deferred-agent-add.md) — Submitting ordinary
+  host setup can clear a deferred agent Add-host opening that was already seen. Its approval card remains available for
+  manual reopening; automatic presentation is lost.
+
+- [`queued-agent-dialog-inherits-elapsed-arm-timer.md`](queued-agent-dialog-inherits-elapsed-arm-timer.md) — The next
+  queued agent Add-host dialog can become interactive without a fresh pause. Whether every new dialog needs that pause
+  is ambiguous; no harmful carried-over input sequence was established.
+
+- [`installer-rerun-advice-omits-stale-lock-prerequisite.md`](installer-rerun-advice-omits-stale-lock-prerequisite.md) —
+  The install guide's blanket rerun recovery promise omits the manual removal an older unmarked stale installer lock may
+  require. Refusing that lock is accepted; the diagnostic-documentation filter's scope is ambiguous.
+
+- [`window-check-export-budget-omits-standalone-captures.md`](window-check-export-budget-omits-standalone-captures.md) —
+  Ten raw screenshots can exceed the standalone reference budget, leaving fewer exported captures even when the check
+  passes. Original image bytes remain in digest-bound raw events; total evidence loss is not claimed.
+
+- [`native-app-binding-may-relaunch-crashed-candidate.md`](native-app-binding-may-relaunch-crashed-candidate.md) — The
+  test provider's app-binding operation might relaunch a candidate that crashed after the PID check. The exact
+  provider-version semantics are unavailable, so a hidden false pass remains a conditional source lead.
+
+- [`old-process-regression-misses-cli-premise.md`](old-process-regression-misses-cli-premise.md) — The
+  old-running-version regression can fail because its fixture omits a CLI observation, even if the intended old-process
+  guard regresses. The production guard remains correct.
+
+- [`installer-prerequisite-test-conflates-two-guards.md`](installer-prerequisite-test-conflates-two-guards.md) —
+  Supplying neither prerequisite cannot show that each prerequisite is independently required. The test can miss removal
+  of either production guard; no shipped installer defect is established.
+
+- [`removal-copy-hidden-unicode-warning-unresolved.md`](removal-copy-hidden-unicode-warning-unresolved.md) — A retained
+  removal path can copy hidden Unicode without a warning. Control bytes and line breaks are rejected, and
+  validated/copied fields match; the warning requirement and harmful downstream paste remain unestablished.
+
+- [`schema-disposition-removes-excluded-variant-tracking.md`](schema-disposition-removes-excluded-variant-tracking.md) —
+  An explicit queue-removal instruction also removes an equal-number schema concern excluded from the planned fix.
+  Whether that means deliberate whole-finding discard is ambiguous; no concrete incompatible migration pair or
+  corruption route was established.
+
+- [`startup-surviving-tab-adoption-source-gap.md`](startup-surviving-tab-adoption-source-gap.md) — Startup could adopt a
+  surviving shell tab as the agent if the required agent-gone/tab-alive state existed. Ordinary Delete and tab creation
+  did not establish that history; the conditional concern is not a reproduced loss of Resume.
+
+- [`legacy-page-server-rebinding-source-gap.md`](legacy-page-server-rebinding-source-gap.md) — The legacy local static
+  server omits Host/Origin validation. Supported browser admission and an actual confidential served page remain
+  missing, so rebinding impact is unestablished. The instructed decision-page workflows were separately retired.
+
+- [`startup-alternative-live-clone-pane-source-gap.md`](startup-alternative-live-clone-pane-source-gap.md) — Startup
+  inspects one eligible pane's liveness. No ordinary supported producer was found for a pane-less row with a selected
+  dead pane and another eligible live clone; the possible destructive route remains an incomplete source lead.
+
+- [`retained-refusal-can-clear-restart-delete-protection.md`](retained-refusal-can-clear-restart-delete-protection.md) —
+  Retained-refusal settlement lacks a generation check and could replace terminal-less Launching with Error, weakening
+  Delete protection. A compatible supported validation-failure trigger across concurrent Restart remains missing; no
+  unconfirmed process kill is claimed.
+
+- [`stale-report-approval-retires-unseen-followup.md`](stale-report-approval-retires-unseen-followup.md) — If another
+  review's follow-up lands while an older report page remains open, approving that old page can retire the newer
+  report's tracking. This pre-existing slug-only approval gap is preserved by the rewrite; no product-data loss is
+  claimed.
+
+- [`invalid-folder-style-overrides-focus-ring.md`](invalid-folder-style-overrides-focus-ring.md) — After a folder
+  refusal, the focused editor uses the same outline as the blurred invalid field. CSS specificity establishes the
+  missing distinct ring; practical accessibility impact was not measured.
+
+- [`ensure-host-warning-names-unavailable-setup-action.md`](ensure-host-warning-names-unavailable-setup-action.md) — The
+  startup warning tells an ordinary remote host with an invalid install path to use a setup action its row does not
+  offer. Manual/API recovery remains possible; this is diagnostic correctness with ambiguous filter coverage.
+
+- [`host-edit-doc-overstates-preapproval-refusal.md`](host-edit-doc-overstates-preapproval-refusal.md) — A rename
+  colliding with another host's name can ask for approval and then fail, although its docstring says refused aliases get
+  no card. The source check is syntax-only before approval; no authorization defect is claimed.
+
+- [`window-check-inherits-preflight-image-history.md`](window-check-inherits-preflight-image-history.md) — The
+  window-drag check validates the whole pass's frame history against only its own event stream, so prior preflight
+  images can reject otherwise valid evidence. Actual captures and frequency are unmeasured; release-test availability is
+  the consequence.
+
+- [`template-cached-collision-blocks-freed-name.md`](template-cached-collision-blocks-freed-name.md) — After the CLI or
+  an agent deletes a template, repeated GUI saves under its now-free name can still report a collision without doing the
+  fresh check. Reopening refreshes the list; the gate predates the patch.
+
+- [`failed-test-response-does-not-fence-settings-write.md`](failed-test-response-does-not-fence-settings-write.md) — An
+  individual transport failure can let a settings test restore old values before its earlier owned save commits,
+  contaminating its private stack. The repair follows its prescribed response-wait strategy; acceptance of the residual
+  limitation is ambiguous.
+
+- [`devbuild-buffers-unauthenticated-metadata.md`](devbuild-buffers-unauthenticated-metadata.md) — A compromised release
+  origin can provide oversized checksum or signature files that are downloaded and fully read before rejection. Material
+  resource exhaustion is unmeasured; this is maintainer-tooling resource scope, not a demonstrated catastrophic failure.
+
+- [`reselecting-terminal-does-not-restore-focus.md`](reselecting-terminal-does-not-restore-focus.md) — Keyboard
+  activation of an already-selected session row or tab leaves typing focus on that button rather than returning it to
+  the revealed terminal. The exact reselection policy is unspecified; no harmful input route is alleged.
+
+- [`quick-switcher-pending-read-keeps-old-shortcut-labels.md`](quick-switcher-pending-read-keeps-old-shortcut-labels.md)
+  — A successful but still-pending opening read can leave old shortcut labels visible in the switcher. Existing
+  decisions accept failed reads and later moves, but this interval's coverage is ambiguous; selection still captures the
+  displayed template name.
+
+- [`tab-helper-can-fail-after-open-succeeds.md`](tab-helper-can-fail-after-open-succeeds.md) — A tab can pass its short
+  initial liveness check before its helper fails to enter the folder, then disappear without the promised directory
+  error. No wrong-directory command execution or work loss is established.
+
+- [`spare-ancestry-fallback-skips-destination-recheck.md`](spare-ancestry-fallback-skips-destination-recheck.md) — A
+  prepared-checkout ancestry refusal returns before the post-fetch destination ownership check, and fallback cloning can
+  use a replacement empty folder. No existing-file loss is shown; the scope of the accepted check/move window is
+  ambiguous.
+
+- [`closed-model-enter-test-can-misattribute-restart.md`](closed-model-enter-test-can-misattribute-restart.md) — An
+  incorrectly admitted early Enter can start an asynchronous restart after the immediate request-count assertion; the
+  later primary press can then be refused while the earlier request satisfies the test. Production behavior remains
+  correct.
+
+- [`claude-plan-abort-removes-established-report-pin.md`](claude-plan-abort-removes-established-report-pin.md) — The
+  planned reset can admit a delayed child report after a failed Restart stops the correcting parent. Later
+  specifications explicitly document pin removal after abort, but acceptance of this whole consequence is ambiguous.
+  This reviews the plan, not the later shipped implementation.
+
+- [`new-opening-folder-inherits-fallback-host.md`](new-opening-folder-inherits-fallback-host.md) — A host refresh before
+  New mounts can pair the selected remote session's raw folder with the fallback local host. This contextual mechanism
+  predates the reviewed patch; final launch still shows and fences its target, and delivery-window coverage is
+  ambiguous.
+
+- [`omitted-ipv6-local-routing-source-gap.md`](omitted-ipv6-local-routing-source-gap.md) — Some IPv6 forms receive
+  public-link permission. A supported route reaching a local resource remains unestablished, so a local authorization
+  bypass is conditional.
+
+- [`browse-result-survives-automatic-host-fallback.md`](browse-result-survives-automatic-host-fallback.md) — On desktop,
+  an old host's directory result can become an explicit folder after New falls back to the local host. Frequency and the
+  web route are unverified; final Launch still displays and checks its target.
