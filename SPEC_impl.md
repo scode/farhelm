@@ -2456,9 +2456,11 @@ unmanaged. The normal skew-aware update path remains unchanged.
 `SessionInfo.workspace_trust_prompt` is separate from the retained Claude-only flag. The ticker reads Claude and Codex
 through their integration readers and Muse through the exhaustive launch-harness seam, because Muse shares Generic's
 activity kind. The flag defaults false in older cached snapshots, resets with the run or failed capture, and shares the
-existing activity cell across renames. Codex recognition uses its captured 0.159.0 folder-access menu; Muse uses a
-captured 1.4.10-R6427.1 startup trust menu. Both require the dialog's choices and current footer instead of matching
-isolated transcript words. Pi has no trust recognizer; its setting still supplies its project-resource approval flag.
+existing activity cell across renames. Codex recognition uses its captured 0.159.0 folder-access menu (`waiting-trust`)
+and the reported Quit variant (`waiting-derived-trust-quit`, derived from that capture): the Back choice requires
+`esc back`, and Quit requires `esc quit`. Muse uses a captured 1.4.10-R6427.1 startup trust menu. Both require the
+dialog's choices and current footer instead of matching isolated transcript words. Pi has no trust recognizer; its
+setting still supplies its project-resource approval flag.
 
 Each host caches repository objects at `<state_dir>/repo-cache/<owner>/<name>.git`, derived from the validated,
 lowercased repository pair. The supervisor passes that absolute path in the preparation's `repo_cache_path`; it is not

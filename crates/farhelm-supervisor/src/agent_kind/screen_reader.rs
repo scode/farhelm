@@ -632,13 +632,17 @@ impl ScreenReader for CodexReader {
             .collect::<Vec<_>>()
             .join(" ");
         codex_dialog_may_be_open(&lines, text)
-            // This menu's footer must end the screen. Merely finding it in
-            // the last two rows would retain a hint after a transcript reply.
-            && joined.ends_with("enter continue · esc back")
             && joined.contains("Folder access")
             && joined.contains("Trust this folder?")
             && joined.contains("1. Trust and continue")
-            && joined.contains("2. Back to Agent Command Center")
+            // Each exit choice belongs to its own footer. The footer must
+            // end the screen: transcript output after it retires the hint.
+            && [
+                ("2. Back to Agent Command Center", "enter continue · esc back"),
+                ("2. Quit", "enter continue · esc quit"),
+            ]
+            .iter()
+            .any(|(choice, footer)| joined.contains(choice) && joined.ends_with(footer))
     }
 
     fn wants_title(&self) -> bool {
@@ -842,6 +846,47 @@ mod tests {
         let approval =
             include_str!("../../tests/fixtures/screens/codex/0.159.0/waiting-permission.txt");
         assert!(!reader.trust_prompt(approval));
+    }
+
+    /// The reported Quit menu answers the same folder-trust question as Back,
+    /// but its choice and footer must travel together. This derived screen
+    /// pins that variant without claiming it was captured from this version.
+    #[test]
+    fn codex_trust_prompt_accepts_quit_only_with_its_current_footer() {
+        let reader = reader_for(AgentKind::Codex);
+        let trust = include_str!(
+            "../../tests/fixtures/screens/codex/0.159.0/waiting-derived-trust-quit.txt"
+        );
+        assert!(trust.contains("› 1. Trust and continue\n  2. Quit"));
+        assert!(trust.trim_end().ends_with("enter continue · esc quit"));
+        assert!(reader.trust_prompt(trust));
+        let selected_quit = trust.replace(
+            "› 1. Trust and continue\n  2. Quit",
+            "  1. Trust and continue\n› 2. Quit",
+        );
+        assert_ne!(selected_quit, trust, "fixture premise: both choices exist");
+        let wrapped = trust.replace("Trust this folder?", "Trust this\nfolder?");
+        assert_ne!(wrapped, trust, "fixture premise: the question exists");
+        for screen in [trust, selected_quit.as_str(), wrapped.as_str()] {
+            assert!(reader.trust_prompt(screen));
+            assert!(!reader.claude_trust_prompt(screen));
+            assert!(!reader_for(AgentKind::Claude).trust_prompt(screen));
+            assert!(!reader_for(AgentKind::Generic).trust_prompt(screen));
+            for suffix in [
+                "\n\n› quoted trust dialog\n\n  ? for shortcuts",
+                "\n• That was the trust dialog.",
+            ] {
+                assert!(!reader.trust_prompt(&format!("{screen}{suffix}")));
+            }
+        }
+        for (from, to) in [
+            ("esc quit", "esc back"),
+            ("2. Quit", "2. Back to Agent Command Center"),
+        ] {
+            let mismatched = trust.replace(from, to);
+            assert_ne!(mismatched, trust, "fixture premise: {from} exists");
+            assert!(!reader.trust_prompt(&mismatched));
+        }
     }
 
     /// Muse has no dedicated activity kind, so the same captured dialog can
