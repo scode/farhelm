@@ -2708,10 +2708,11 @@ file is introduced.
   absent or non-executable agent is reported as a program failure, rather than a directory problem. tmux's `-c` alone is
   insufficient because tmux falls back to HOME when it cannot enter the folder, and login-shell startup may cd again.
   Older specs lacking the optional field retain their inherited directory. Terminal tabs run `internal tab-shell` inside
-  their existing scope, through the supervisor's own program rather than the app forwarder; the helper enters the folder
-  and scrubs the agent/private-tmux markers before execing the login shell. A failed tab entry reaches the existing
-  dead-before-open refusal with its last output. This keeps tab startup inside containment and preserves a tab shell's
-  own startup-file cd, while agent startup restores the session folder after those files have run.
+  their existing scope, through the app's forwarder in the Mac app's version layout (which claims the version it starts;
+  see "Side-by-side versions inside Farhelm.app") and the supervisor's own program elsewhere; the helper enters the
+  folder and scrubs the agent/private-tmux markers before execing the login shell. A failed tab entry reaches the
+  existing dead-before-open refusal with its last output. This keeps tab startup inside containment and preserves a tab
+  shell's own startup-file cd, while agent startup restores the session folder after those files have run.
 - Status heuristics: periodic sampling of each live agent pane's visible grid, read by one screen reader per agent kind
   (`agent_kind::screen_reader`). Sampling must never sit on the attach/input path — SPEC.md forbids status from gating
   interaction. The supervisor's own ticker takes the samples and stores one reading per successful capture; replies only
@@ -4499,13 +4500,13 @@ the shape, so elsewhere nothing changes.
 
 Inside that layout the supervisor hands sessions two different programs. Its own launch shim (`internal launch`, run in
 each session's tmux window) is its own versioned program, because the launch description it writes is read only by its
-own version. A terminal tab's helper (`internal tab-shell`) is its own versioned program too: it only enters the tab's
-folder and then replaces itself with the shell, so it never outlives the supervisor that started it. Everything a
-session keeps beyond its supervisor's life names the forwarder instead: the hook command lines, the reporter variables,
-and the directory put first on the session's `PATH`. Desktop-managed supervisors before this layout ran from
-`Contents/MacOS/farhelm`, so sessions they started already hold that path, and putting the forwarder exactly there is
-what keeps them working without migration; it must never move. Outside the layout the supervisor uses its own program
-for all of these, as it always has.
+own version. A terminal tab's helper (`internal tab-shell`) starts through the forwarder instead: tmux can start a tab's
+window after the supervisor that asked for it has stopped, and the forwarder claims the version it starts, which is this
+supervisor's own while it is there. Everything a session keeps beyond its supervisor's life names the forwarder instead:
+the hook command lines, the reporter variables, and the directory put first on the session's `PATH`. Desktop-managed
+supervisors before this layout ran from `Contents/MacOS/farhelm`, so sessions they started already hold that path, and
+putting the forwarder exactly there is what keeps them working without migration; it must never move. Outside the layout
+the supervisor uses its own program for all of these, as it always has.
 
 An update in place, as `install.sh` performs it: the new version's folder is staged privately and renamed into
 `Versions/`, then a complete copy of the new `farhelm-desktop` is renamed over the old one, then the icon, the forwarder
@@ -4560,6 +4561,31 @@ named by `FARHELM_DESKTOP_FARHELM` is never held, even inside a bundle. A versio
 missing or removed before the lock was taken, refuses startup with one sentence saying to open Farhelm again, and so
 does one still held exclusively after the five-second wait. The lock's descriptor is close-on-exec, so neither the
 supervisor nor the updater's installer inherits it.
+
+A session's window runs the supervisor's own versioned `farhelm`, not the forwarder, so in this layout the supervisor
+starts it as `<farhelm> internal hold <spec> -- <shell argv>` (`crates/farhelm-supervisor/src/session_hold.rs`) to hold
+the version through the login shell's startup. The hold step takes the version lock, starts a keeper
+(`internal keep-version`) and waits up to ten seconds for it to report ready, writes `<id>.<generation>.held` beside the
+launch spec with its own pid, and replaces itself with the shell, which inherits neither the lock's descriptor nor its
+variable. The keeper adopts the hold step's lock through `FARHELM_VERSION_LOCK_FD`; it is detached by a double fork into
+a session of its own, with its streams on `/dev/null`, ignoring SIGINT, SIGQUIT, SIGTSTP and SIGHUP, and carries the
+session's `FARHELM_SESSION_ID` and `FARHELM_AGENT_ID` so stopping the session finds it. It watches the hold step's pid
+(kqueue `NOTE_EXIT` on macOS, registered before it reports ready) and exits when that process exits or when
+`<id>.<generation>.launched` names that pid, which the launch shim writes with its own pid once it holds its own lock.
+Hold step, shell and shim replace one another in place, so they share that pid. A keeper that cannot start fails the
+session's start, recorded in the launch's status file like any launch failure, and so does a hold step or shim that
+cannot hold its version. The marks follow the spec through the startup sweep, a retaken create and delete; the startup
+sweep's removal of an unknown or superseded launch's marks is a start-up cleanup the maintainer approved for this case
+(2026-10-24), as "Cleanup on quit" asks. On an orderly stop the supervisor waits up to three seconds for the windows it
+started to show a `held` mark naming their pane's pid, including windows still being created when the stop begins; every
+tmux query in that wait is cut off at the remaining budget, so a tmux server that does not answer cannot hold the stop.
+A window that has not got there by then, or whose keeper is killed before the shim holds its own lock, is unprotected
+until it does; if an install removes its version in that moment the session fails to start, visibly, and starting it
+again works. A shell whose startup files `exec` another shell never reaches the shim, and its keeper then holds the
+version until the window closes. A terminal tab needs no hold step: its window starts the tab helper through the
+forwarder, which claims the version before the helper runs (the tab's environment names this supervisor's socket, so it
+picks this supervisor's version while that is there), and the helper replaces itself with the tab's shell, which needs
+no version afterwards.
 
 ### The desktop app's updater
 

@@ -8,8 +8,9 @@
 //! descriptor 8 open across its exec. What only a real process can show is
 //! here: that the real helper's claim survives the helper process exiting,
 //! that a real program refuses to run a version it cannot hold (silently,
-//! for an agent hook), and that the whole chain through the shipped
-//! forwarder text holds a version exactly as long as the program it started.
+//! for an agent hook), that the whole chain through the shipped forwarder
+//! text holds a version exactly as long as the program it started, and that
+//! a terminal tab started through it hands its shell a clean start.
 //!
 //! Every test owns its children through [`ChildGuard`], which kills and
 //! reaps them on any exit from the test, and bounds every read and wait, so
@@ -303,5 +304,71 @@ fn a_program_started_through_the_forwarder_holds_its_version_while_it_runs() {
     assert!(
         !version_is_held(&program),
         "nothing holds the version after it exits"
+    );
+}
+
+/// A terminal tab started through the forwarder (as the supervisor starts
+/// one in the app's version layout) reaches its shell in the tab's folder,
+/// and the shell inherits neither the claim's descriptor nor its variable,
+/// so nothing holds the version once the shell runs.
+///
+/// Why: tabs start the tab helper through the forwarder so their version is
+/// claimed from before the helper runs (tmux can start a tab's window after
+/// its supervisor has stopped); the helper must then hand over a clean
+/// shell, because a tab shell that kept the lock would hold its version for
+/// as long as the tab stays open and stop installs from ever pruning it.
+/// The stand-in shell reports what it was given and waits on its input, so
+/// the observation is taken while it runs.
+#[farhelm_testtrace::test]
+fn a_tab_started_through_the_forwarder_hands_a_clean_shell_its_folder() {
+    let root = farhelm_teststate::tempdir().expect("isolated root");
+    let (forwarder, program) = fake_bundle(root.path());
+    let folder = root.path().join("work");
+    std::fs::create_dir(&folder).expect("fixture: the tab's folder");
+    let shell = root.path().join("stand-in-shell");
+    std::fs::write(
+        &shell,
+        "#!/bin/sh\n\
+         fd8=closed\n\
+         if (: <&8) 2>/dev/null; then fd8=open; fi\n\
+         printf '%s|%s|%s\\n' \"$(pwd -P)\" \"${FARHELM_VERSION_LOCK_FD:-unset}\" \"$fd8\"\n\
+         read -r _ || :\n",
+    )
+    .expect("fixture: the stand-in shell");
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    let mut child = ChildGuard(
+        Command::new("/bin/sh")
+            .arg(&forwarder)
+            .args(["internal", "tab-shell", "--"])
+            .arg(&folder)
+            .arg(&shell)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start the forwarder"),
+    );
+    let stdin = child.0.stdin.take().expect("stdin");
+    let stdout = child.0.stdout.take().expect("stdout");
+    let deadline = Instant::now() + DEADLINE;
+    let report = read_line_by(stdout, deadline, "the stand-in shell's report").unwrap_or_default();
+    let expected_folder = folder.canonicalize().expect("canonical folder");
+    assert_eq!(
+        report.trim_end(),
+        format!("{}|unset|closed", expected_folder.display()),
+        "the shell runs in the tab's folder with no claim descriptor or variable"
+    );
+    assert!(
+        !version_is_held(&program),
+        "nothing holds the version once the tab's shell runs"
+    );
+    drop(stdin);
+    let status = child.wait_until(deadline, "the stand-in shell");
+    assert!(
+        status.success(),
+        "the stand-in shell exits at end of input: {status}"
     );
 }

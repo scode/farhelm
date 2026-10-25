@@ -4390,16 +4390,39 @@ pub struct Supervisor {
     /// layout, when it does (see [`crate::app_bundle`]). `None` everywhere
     /// else, which is every Linux install, development build and test.
     versioned_program: Option<crate::app_bundle::VersionedProgram>,
+    /// Launches this supervisor started through the hold step
+    /// (`crate::session_hold`) whose windows had not shown "held" when last
+    /// looked at: what an orderly shutdown waits for, briefly, so that a
+    /// session started just before Farhelm quits holds its version before
+    /// the app and this supervisor stop holding it
+    /// ([`Self::wait_for_pending_holds`]). Always empty outside the
+    /// versioned layout. Pruned of settled entries whenever one is added.
+    pending_holds: std::sync::Mutex<Vec<PendingHold>>,
+    /// Launches in the versioned layout between starting their tmux window
+    /// and being added to [`Self::pending_holds`] (or failing). The shutdown
+    /// wait keeps going while any are in flight, so a window created just as
+    /// a stop begins is still waited for. See [`StartingLaunch`].
+    starting_launches: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    /// Set when the shutdown wait ends: from then on no launch may start a
+    /// tmux window ([`Self::starting_launch`] refuses), because nothing would
+    /// wait for it any more. Read and written only while holding
+    /// [`Self::pending_holds`]'s lock, which is what makes "the wait saw no
+    /// launch in flight" and "no launch can start after it" one decision.
+    launches_closed: std::sync::atomic::AtomicBool,
     /// The `farhelm` a session keeps beyond this supervisor's life: the
     /// program in its hook command lines and reporter variables, and the
     /// directory put first on its `PATH`.
     ///
     /// The bundle's forwarder when this supervisor runs from the versioned
-    /// layout, [`Self::farhelm_exe`] otherwise. Not the launch shim or the
-    /// terminal-tab helper: the shim reads a launch description only this
-    /// supervisor's own version writes, and the tab helper replaces itself
-    /// with the tab's shell at once, so both stay [`Self::farhelm_exe`].
-    /// Everything here, by
+    /// layout, [`Self::farhelm_exe`] otherwise. Also the terminal-tab
+    /// helper's program: tmux can start a tab's window after this supervisor
+    /// has stopped holding its version, and the forwarder claims the version
+    /// it starts (this supervisor's own while it is there, found through the
+    /// socket variable in the tab's environment), where a bare path to the
+    /// version would run unheld until the helper's own lock. Not the launch
+    /// shim: it reads a launch description only this supervisor's own
+    /// version writes, so it stays [`Self::farhelm_exe`], held through the
+    /// session hold step instead. Everything here, by
     /// contrast, can be run again after Farhelm restarts on a newer
     /// version, and the forwarder is what sends it to the right one
     /// (SPEC_impl.md, "Side-by-side versions inside Farhelm.app").
@@ -5693,6 +5716,9 @@ impl Supervisor {
             next_transfer: AtomicU64::new(1),
             farhelm_exe,
             versioned_program,
+            pending_holds: std::sync::Mutex::new(Vec::new()),
+            starting_launches: Default::default(),
+            launches_closed: Default::default(),
             session_farhelm_exe,
             session_farhelm_exe_str,
             browser_forwarding: std::sync::atomic::AtomicBool::new(false),
@@ -6889,13 +6915,169 @@ impl Supervisor {
     /// the forwarder to find the Running record by, so through the forwarder
     /// a mid-update launch would run the newly installed shim against this
     /// version's description.
+    ///
+    /// In the Mac app's versioned layout the window starts with the hold
+    /// step instead (`crate::session_hold`), which holds this version
+    /// through the login shell's startup and then becomes the same argv.
     pub(crate) fn shim_window_command(
         &self,
         shell: &str,
         spec_path: &Path,
         scope_prefix: Vec<String>,
     ) -> Vec<String> {
-        window_command(shell, &self.farhelm_exe, spec_path, scope_prefix)
+        let window = window_command(shell, &self.farhelm_exe, spec_path, scope_prefix);
+        if self.versioned_program.is_some() {
+            crate::session_hold::held_window_command(&self.farhelm_exe, spec_path, window)
+        } else {
+            window
+        }
+    }
+
+    /// The window command of a terminal tab: the tab helper, started through
+    /// [`Self::session_farhelm_exe`] (the forwarder in the app's version
+    /// layout), so the version it runs is claimed before it starts.
+    fn tab_window_command(&self, shell: &str, cwd: &str, scope_prefix: Vec<String>) -> Vec<String> {
+        crate::launch::tab_window_command(shell, &self.session_farhelm_exe, cwd, scope_prefix)
+    }
+
+    /// Count a launch as starting until the returned guard is dropped (see
+    /// [`Self::starting_launches`]); `Ok(None)` outside the versioned layout,
+    /// where nothing waits for launches. Refused once the shutdown wait has
+    /// ended ([`Self::launches_closed`]): the count is taken under the same
+    /// lock the wait's last check holds, so a launch either counts before
+    /// that check (and is waited for) or is refused after it, never slips in
+    /// between unwatched.
+    fn starting_launch(&self) -> Result<Option<StartingLaunch>, LaunchesClosed> {
+        if self.versioned_program.is_none() {
+            return Ok(None);
+        }
+        let _pending = self
+            .pending_holds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self
+            .launches_closed
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(LaunchesClosed);
+        }
+        self.starting_launches
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(Some(StartingLaunch(std::sync::Arc::clone(
+            &self.starting_launches,
+        ))))
+    }
+
+    /// Remember a launch started through the hold step, for
+    /// [`Self::wait_for_pending_holds`], dropping entries that have since
+    /// shown "held" so the list only ever holds launches still starting.
+    fn track_pending_hold(&self, spec_path: &Path, session: String, pane: String) {
+        if self.versioned_program.is_none() {
+            return;
+        }
+        let mut pending = self
+            .pending_holds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        pending.retain(|hold| crate::session_hold::read_mark(&hold.held).is_none());
+        pending.push(PendingHold {
+            held: crate::session_hold::held_mark_path(spec_path),
+            session,
+            pane,
+        });
+    }
+
+    /// On an orderly shutdown, wait up to `budget` for the windows this
+    /// supervisor just started to show "held" (the design's narrowing of
+    /// the session-start gap; `crate::session_hold` says what stays open).
+    ///
+    /// A launch is settled when its mark names the pane's own pid, or when
+    /// its pane is gone or dead, since then nothing is left to protect. The
+    /// pid check is what keeps a mark from an earlier attempt at the same
+    /// launch from counting; retake and delete clear marks too, so this is
+    /// belt and braces. Launches still creating their window when the wait
+    /// begins (connections keep being served during a stop) are picked up
+    /// as they register, and the wait does not end while any are in
+    /// flight. Every tmux query is bounded by what is left of `budget`, so
+    /// the whole wait never outlasts it by more than one poll interval.
+    /// Returns whether every launch settled.
+    pub(crate) async fn wait_for_pending_holds(&self, budget: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + budget;
+        let mut waiting = Vec::new();
+        loop {
+            waiting.append(
+                &mut self
+                    .pending_holds
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            );
+            let mut still = Vec::new();
+            for hold in waiting {
+                let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if left.is_zero() || !self.hold_settled(&hold, left).await {
+                    still.push(hold);
+                }
+            }
+            // Read under the queue's lock: a launch registers before it stops
+            // counting as starting, so with the lock held an empty queue and
+            // a zero count together mean no launch is left unexamined. Read
+            // apart, a launch that registered while a probe above was
+            // running and then finished starting would be missed.
+            let (starting, queued) = {
+                let pending = self
+                    .pending_holds
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let starting = self
+                    .starting_launches
+                    .load(std::sync::atomic::Ordering::SeqCst);
+                let over = (still.is_empty() && starting == 0 && pending.is_empty())
+                    || tokio::time::Instant::now() >= deadline;
+                if over {
+                    // Closed under the lock the counts were read under: a
+                    // launch not counted by now never starts a window.
+                    self.launches_closed
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                (starting, pending.len())
+            };
+            if still.is_empty() && starting == 0 && queued == 0 {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                warn!(
+                    count = still.len() + starting + queued,
+                    "stopping before every new session's window held its version; an install \
+                     that removes this version now makes those sessions fail to start"
+                );
+                return false;
+            }
+            waiting = still;
+            if queued == 0 {
+                tokio::time::sleep(PENDING_HOLD_POLL).await;
+            }
+        }
+    }
+
+    /// Whether one tracked launch needs no more waiting for; see
+    /// [`Self::wait_for_pending_holds`]. A tmux query that fails or does not
+    /// answer within `left` is not settled, so the wait runs on until its
+    /// budget.
+    async fn hold_settled(&self, hold: &PendingHold, left: Duration) -> bool {
+        match self
+            .tmux
+            .pane_process_within(&hold.session, &hold.pane, Some(left))
+            .await
+        {
+            Ok(PaneProbe::Owned(pane)) if !pane.dead => {
+                crate::session_hold::read_mark(&hold.held) == Some(pane.pid)
+            }
+            Ok(_) => true,
+            Err(error) => {
+                debug!(error = %format!("{error:#}"), "could not check a new session's pane");
+                false
+            }
+        }
     }
 
     /// The directory a launch puts first on the session's `PATH`, so that
@@ -13416,10 +13598,10 @@ impl Supervisor {
         };
         let shell = self.launch_shell().await;
         let env = self.tab_environment(session_id, session_token, &tab_id);
-        // The tab helper runs now and immediately execs the shell; unlike hooks
-        // retained by a session, it needs this supervisor's own versioned program.
-        let window_cmd =
-            crate::launch::tab_window_command(&shell, &self.farhelm_exe, cwd, scope_prefix);
+        // The tab helper runs now and immediately execs the shell. It starts
+        // through the forwarder in the app's version layout, so its version is
+        // claimed from before it runs (see `Self::session_farhelm_exe`).
+        let window_cmd = self.tab_window_command(&shell, cwd, scope_prefix);
         let (window, pane) = self
             .tmux
             .new_window(&agent.tmux_name, cwd, &env, &window_cmd)
@@ -14563,6 +14745,30 @@ impl Supervisor {
 
         let shell = self.launch_shell().await;
         let cmd = self.shim_window_command(&shell, artifacts.spec(), scope_prefix);
+        // Counted from before tmux starts the window until it is tracked
+        // below (or this launch fails), so a stop in between still waits;
+        // once the stop's wait has ended, nothing is started at all.
+        let _starting = match self.starting_launch() {
+            Ok(starting) => starting,
+            Err(LaunchesClosed) => {
+                return Err(SpawnFailure::Tmux {
+                    artifacts,
+                    error: anyhow::anyhow!(
+                        "Farhelm's supervisor is stopping, so no new window was started"
+                    ),
+                    replacement: None,
+                    created: None,
+                    tmux_attempted: false,
+                });
+            }
+        };
+        // The tmux session the window lands in, for the shutdown wait's pane
+        // checks (`track_pending_hold`).
+        let window_session = match &target {
+            SpawnTarget::Reuse(terminal) => terminal.tmux_name.clone(),
+            SpawnTarget::ExistingSession(session) => (*session).to_string(),
+            SpawnTarget::NewSession => tmux_name.to_string(),
+        };
         let fresh_target = !matches!(&target, SpawnTarget::Reuse(_));
         let existing_session = match &target {
             SpawnTarget::ExistingSession(session) => Some((*session).to_string()),
@@ -14690,6 +14896,7 @@ impl Supervisor {
                     )
                     .await;
                 }
+                self.track_pending_hold(artifacts.spec(), window_session, pane.clone());
                 Ok(Spawned {
                     pane,
                     artifacts,
@@ -16003,7 +16210,43 @@ async fn serve_until_stopped(
             "some terminal-output clients did not finish closing in time; exiting anyway"
         );
     }
+    sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await;
     stopped
+}
+
+/// How long an orderly stop waits for the windows of sessions it just
+/// started to hold their version ([`Supervisor::wait_for_pending_holds`]).
+/// A window normally gets there in milliseconds; a few seconds covers a
+/// busy machine without making every quit wait on a window that was
+/// stopped or starved, which the design accepts as a visible, retryable
+/// failure.
+pub const PENDING_HOLD_WAIT: Duration = Duration::from_secs(3);
+
+/// Pause between checks while [`PENDING_HOLD_WAIT`] runs.
+const PENDING_HOLD_POLL: Duration = Duration::from_millis(50);
+
+/// [`Supervisor::starting_launch`]'s refusal: the shutdown wait has ended,
+/// so a new window would start with nothing waiting for it to hold its
+/// version.
+#[derive(Debug)]
+pub(crate) struct LaunchesClosed;
+
+/// A launch counted in [`Supervisor::starting_launches`] until dropped.
+struct StartingLaunch(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for StartingLaunch {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// One launch [`Supervisor::wait_for_pending_holds`] may wait for: where
+/// its "held" mark appears, and the tmux session and pane its window runs
+/// in.
+struct PendingHold {
+    held: PathBuf,
+    session: String,
+    pane: String,
 }
 
 /// Whether SIGHUP's disposition is currently "ignore", as `nohup` leaves it
@@ -26778,9 +27021,23 @@ exit 0
         let sup = Supervisor::new_with_exe(state.path(), program.clone())
             .await
             .expect("supervisor");
-        let window = sup
-            .shim_window_command("/bin/sh", Path::new("/state/launch/s.json"), Vec::new())
-            .join(" ");
+        let argv =
+            sup.shim_window_command("/bin/sh", Path::new("/state/launch/s.json"), Vec::new());
+        // The window starts with this version's hold step, which then
+        // becomes the shell (crate::session_hold).
+        assert_eq!(
+            argv[..5],
+            [
+                program.to_str().unwrap(),
+                "internal",
+                "hold",
+                "/state/launch/s.json",
+                "--"
+            ],
+            "{argv:?}"
+        );
+        assert_eq!(argv[5], "/bin/sh", "{argv:?}");
+        let window = argv.join(" ");
         assert!(window.contains(program.to_str().unwrap()), "{window}");
         assert!(!window.contains(forwarder.to_str().unwrap()), "{window}");
         assert_eq!(sup.session_bin_dir(), contents.join("MacOS"));
@@ -26822,6 +27079,341 @@ exit 0
     /// supervisor from the layout is removed when this one serves, so the
     /// forwarder in an older session sends its commands to the Installed
     /// version rather than to one that is no longer running.
+    /// An orderly stop waits, briefly, for the windows it just started to
+    /// hold their version, and counts only a "held" mark that names the
+    /// window's own pane process. This is the design's narrowing of the
+    /// session-start gap: without it, quitting Farhelm right after starting
+    /// a session drops the app's and the supervisor's holds before the new
+    /// window's keeper exists. A mark with another pid (left by an earlier
+    /// attempt) must not count, and a window that is gone needs no wait.
+    #[farhelm_testtrace::test]
+    async fn an_orderly_stop_waits_for_new_windows_to_hold_their_version() {
+        let state = StateDir::new();
+        let program = state
+            .path()
+            .join("Farhelm.app/Contents/Versions/9.9.9/farhelm");
+        let sup = Supervisor::new_with_exe(state.path(), program)
+            .await
+            .expect("supervisor");
+        let name = "fh-hold-wait";
+        let pane = sup
+            .tmux
+            .create_session(
+                name,
+                "/",
+                80,
+                24,
+                &[],
+                &["sh".to_string(), "-c".to_string(), "sleep 60".to_string()],
+            )
+            .await
+            .expect("a window standing in for a new session's");
+        let pane_pid = match sup.tmux.pane_process(name, &pane).await.expect("probe") {
+            PaneProbe::Owned(process) => process.pid,
+            other => panic!("fixture: the window must be running: {other:?}"),
+        };
+        let spec = crate::launch::spec_path_for_launch(state.path(), "s", 0);
+        let held = crate::session_hold::held_mark_path(&spec);
+        std::fs::create_dir_all(spec.parent().unwrap()).expect("launch dir");
+        let short = Duration::from_millis(300);
+
+        sup.track_pending_hold(&spec, name.to_string(), pane.clone());
+        assert!(
+            !sup.wait_for_pending_holds(short).await,
+            "no mark yet: the wait runs out"
+        );
+
+        std::fs::write(&held, format!("{}\n", pane_pid + 1)).expect("a stale mark");
+        sup.track_pending_hold(&spec, name.to_string(), pane.clone());
+        assert!(
+            !sup.wait_for_pending_holds(short).await,
+            "a mark naming another process does not count"
+        );
+
+        std::fs::write(&held, format!("{pane_pid}\n")).expect("this window's mark");
+        sup.track_pending_hold(&spec, name.to_string(), pane.clone());
+        assert!(
+            sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await,
+            "the window's own mark settles it"
+        );
+
+        std::fs::remove_file(&held).expect("clear the mark");
+        sup.track_pending_hold(&spec, name.to_string(), pane.clone());
+        sup.tmux.kill_session(name).await.expect("close the window");
+        assert!(
+            sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await,
+            "a window that is gone needs no wait"
+        );
+    }
+
+    /// The stop's wait is bounded even when tmux does not answer, and it
+    /// covers a launch that is still creating its window when the wait
+    /// begins. Both protect promises the design makes: a quit must not hang
+    /// on a wedged tmux server (each probe is cut off at what is left of the
+    /// budget, and its client killed), and a session started in the same
+    /// instant as a quit gets the same narrowing as one started a moment
+    /// earlier. The non-answering server is this test's own private one,
+    /// stopped with SIGSTOP and resumed by a guard whatever happens.
+    #[farhelm_testtrace::test]
+    async fn the_stop_wait_is_bounded_and_covers_launches_still_starting() {
+        let state = StateDir::new();
+        let program = state
+            .path()
+            .join("Farhelm.app/Contents/Versions/9.9.9/farhelm");
+        let sup = Supervisor::new_with_exe(state.path(), program)
+            .await
+            .expect("supervisor");
+        let name = "fh-hold-bound";
+        let pane = sup
+            .tmux
+            .create_session(
+                name,
+                "/",
+                80,
+                24,
+                &[],
+                &["sh".to_string(), "-c".to_string(), "sleep 60".to_string()],
+            )
+            .await
+            .expect("a window standing in for a new session's");
+        let pane_pid = match sup.tmux.pane_process(name, &pane).await.expect("probe") {
+            PaneProbe::Owned(process) => process.pid,
+            other => panic!("fixture: the window must be running: {other:?}"),
+        };
+        let spec = crate::launch::spec_path_for_launch(state.path(), "s", 0);
+        std::fs::create_dir_all(spec.parent().unwrap()).expect("launch dir");
+
+        // A launch still starting: the wait must not end while it is in
+        // flight, and must pick it up once it registers.
+        let starting = sup
+            .starting_launch()
+            .expect("launches are open before the stop's wait")
+            .expect("the versioned layout counts launches");
+        let register = {
+            let sup = Arc::clone(&sup);
+            let spec = spec.clone();
+            let pane = pane.clone();
+            tokio::spawn(async move {
+                // sleep-ok: scheduling stimulus; the launch registers after the wait has begun.
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                std::fs::write(
+                    crate::session_hold::held_mark_path(&spec),
+                    format!("{pane_pid}\n"),
+                )
+                .expect("the window's mark");
+                sup.track_pending_hold(&spec, name.to_string(), pane);
+                drop(starting);
+            })
+        };
+        assert!(
+            sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await,
+            "the launch that was still starting is waited for and settles"
+        );
+        register.await.expect("registration task");
+
+        // A wedged tmux server: the probe must give up at the budget.
+        std::fs::remove_file(crate::session_hold::held_mark_path(&spec)).expect("clear the mark");
+        sup.track_pending_hold(&spec, name.to_string(), pane.clone());
+        let (server, _, _) = crate::procs::read_process(pane_pid)
+            .expect("read the window's process")
+            .expect("the window's process exists");
+        struct Resume(i32);
+        impl Drop for Resume {
+            fn drop(&mut self) {
+                // SAFETY: resuming this test's own stopped tmux server.
+                unsafe { libc::kill(self.0, libc::SIGCONT) };
+            }
+        }
+        let server = i32::try_from(server).expect("pid");
+        // SAFETY: stopping this test's own private tmux server, which the
+        // guard below resumes.
+        assert_eq!(unsafe { libc::kill(server, libc::SIGSTOP) }, 0);
+        let _resume = Resume(server);
+        let budget = Duration::from_millis(500);
+        let started = tokio::time::Instant::now();
+        assert!(
+            !sup.wait_for_pending_holds(budget).await,
+            "an unanswered probe does not settle a launch"
+        );
+        let took = started.elapsed();
+        assert!(
+            took < budget + Duration::from_secs(2),
+            "the wait stayed near its budget even with tmux stopped: {took:?}"
+        );
+    }
+
+    /// A terminal tab's window starts the tab helper through the app's
+    /// forwarder in the version layout, and through the supervisor's own
+    /// program outside it.
+    ///
+    /// Why: tmux can start a tab's window after the supervisor that asked
+    /// for it has stopped, so a window naming the version's program directly
+    /// would run it unheld until the helper's own lock, and an install could
+    /// remove that version in between; the forwarder claims the version
+    /// before starting it (design, section 1: using a version means holding
+    /// it from before its program starts). Outside the layout there is no
+    /// forwarder and nothing to claim.
+    #[farhelm_testtrace::test]
+    async fn a_tab_starts_its_helper_through_the_forwarder_in_the_layout() {
+        let state = StateDir::new();
+        let app = state.path().join("Farhelm.app");
+        let sup =
+            Supervisor::new_with_exe(state.path(), app.join("Contents/Versions/9.9.9/farhelm"))
+                .await
+                .expect("supervisor in the layout");
+        let argv = sup.tab_window_command("/bin/sh", "/work", Vec::new());
+        assert_eq!(
+            argv.first().map(String::as_str),
+            Some(app.join("Contents/MacOS/farhelm").to_str().unwrap()),
+            "{argv:?}"
+        );
+        assert_eq!(&argv[1..3], ["internal", "tab-shell"], "{argv:?}");
+
+        let other = StateDir::new();
+        let program = other.path().join("bin/farhelm");
+        let sup = Supervisor::new_with_exe(other.path(), program.clone())
+            .await
+            .expect("supervisor outside the layout");
+        let argv = sup.tab_window_command("/bin/sh", "/work", Vec::new());
+        assert_eq!(
+            argv.first().map(String::as_str),
+            program.to_str(),
+            "{argv:?}"
+        );
+    }
+
+    /// Once the stop's wait has ended, no launch may start a window: the
+    /// wait's last look at the launches still starting and the refusal of
+    /// any later one are one decision, taken under one lock.
+    ///
+    /// Why: connections keep being served while a stop runs, so a create
+    /// that was still preparing when the wait saw nothing in flight could
+    /// otherwise start its window after the wait had returned, with nothing
+    /// waiting for it to hold its version (design, section 1). The wait here
+    /// ends with nothing pending, and a launch asking afterwards is refused.
+    /// (A launch counted before the wait is waited for: see the other stop
+    /// wait tests.)
+    #[farhelm_testtrace::test]
+    async fn no_launch_starts_once_the_stop_wait_has_ended() {
+        let state = StateDir::new();
+        let program = state
+            .path()
+            .join("Farhelm.app/Contents/Versions/9.9.9/farhelm");
+        let sup = Supervisor::new_with_exe(state.path(), program)
+            .await
+            .expect("supervisor");
+        let counted = sup
+            .starting_launch()
+            .expect("launches are open before the stop's wait")
+            .expect("the versioned layout counts launches");
+        drop(counted);
+        assert!(
+            sup.wait_for_pending_holds(Duration::from_millis(300)).await,
+            "nothing is in flight"
+        );
+        assert!(
+            sup.starting_launch().is_err(),
+            "a launch that asks after the wait ended is refused"
+        );
+    }
+
+    /// A launch that registers while the stop's wait is probing another
+    /// one, and stops counting as starting before that probe answers, is
+    /// still waited for.
+    ///
+    /// Why: the wait used to end as soon as its own list had settled and
+    /// the starting count read zero, without looking at the queue again,
+    /// so such a launch went unexamined and the stop returned at once
+    /// instead of narrowing that session's start gap (design, section 1).
+    /// The tmux server is stopped so the first probe is still running when
+    /// the second launch registers; the queue holding exactly that one
+    /// launch at that moment proves the wait had already taken the first.
+    #[farhelm_testtrace::test]
+    async fn the_stop_wait_sees_a_launch_registered_during_another_probe() {
+        let state = StateDir::new();
+        let program = state
+            .path()
+            .join("Farhelm.app/Contents/Versions/9.9.9/farhelm");
+        let sup = Supervisor::new_with_exe(state.path(), program)
+            .await
+            .expect("supervisor");
+        let name = "fh-hold-handover";
+        let pane = sup
+            .tmux
+            .create_session(
+                name,
+                "/",
+                80,
+                24,
+                &[],
+                &["sh".to_string(), "-c".to_string(), "sleep 60".to_string()],
+            )
+            .await
+            .expect("a window standing in for the new sessions'");
+        let pane_pid = match sup.tmux.pane_process(name, &pane).await.expect("probe") {
+            PaneProbe::Owned(process) => process.pid,
+            other => panic!("fixture: the window must be running: {other:?}"),
+        };
+        let first = crate::launch::spec_path_for_launch(state.path(), "a", 0);
+        let second = crate::launch::spec_path_for_launch(state.path(), "b", 0);
+        std::fs::create_dir_all(first.parent().unwrap()).expect("launch dir");
+        // The first launch has held: it settles as soon as tmux answers.
+        std::fs::write(
+            crate::session_hold::held_mark_path(&first),
+            format!("{pane_pid}\n"),
+        )
+        .expect("the first window's mark");
+        let starting = sup
+            .starting_launch()
+            .expect("launches are open before the stop's wait")
+            .expect("the versioned layout counts launches");
+        sup.track_pending_hold(&first, name.to_string(), pane.clone());
+
+        let (server, _, _) = crate::procs::read_process(pane_pid)
+            .expect("read the window's process")
+            .expect("the window's process exists");
+        let server = i32::try_from(server).expect("pid");
+        struct Resume(i32);
+        impl Drop for Resume {
+            fn drop(&mut self) {
+                // SAFETY: resuming this test's own stopped tmux server.
+                unsafe { libc::kill(self.0, libc::SIGCONT) };
+            }
+        }
+        // SAFETY: stopping this test's own private tmux server, which the
+        // guard below and the registering task resume.
+        assert_eq!(unsafe { libc::kill(server, libc::SIGSTOP) }, 0);
+        let _resume = Resume(server);
+        let register = {
+            let sup = Arc::clone(&sup);
+            let pane = pane.clone();
+            tokio::spawn(async move {
+                // sleep-ok: scheduling stimulus; the second launch registers while the wait is blocked in the first probe.
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                sup.track_pending_hold(&second, name.to_string(), pane);
+                let queued = sup
+                    .pending_holds
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .len();
+                drop(starting);
+                // SAFETY: resuming this test's own stopped tmux server.
+                unsafe { libc::kill(server, libc::SIGCONT) };
+                queued
+            })
+        };
+        let settled = sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await;
+        let queued = register.await.expect("registration task");
+        assert_eq!(
+            queued, 1,
+            "fixture premise: the wait had taken the first launch before the second registered"
+        );
+        assert!(
+            !settled,
+            "the second launch never held, so the wait runs to its budget rather than ending early"
+        );
+    }
+
     #[farhelm_testtrace::test]
     async fn a_supervisor_outside_the_layout_keeps_its_program_and_clears_the_record() {
         let state = StateDir::new();
@@ -26831,9 +27423,13 @@ exit 0
             .await
             .expect("supervisor");
         let own = sup.farhelm_exe.to_str().unwrap().to_string();
-        let window = sup
-            .shim_window_command("/bin/sh", Path::new("/state/launch/s.json"), Vec::new())
-            .join(" ");
+        let argv =
+            sup.shim_window_command("/bin/sh", Path::new("/state/launch/s.json"), Vec::new());
+        assert_eq!(
+            argv[0], "/bin/sh",
+            "no hold step outside the layout: {argv:?}"
+        );
+        let window = argv.join(" ");
         assert!(window.contains(&own), "{window}");
         let (argv, hooked) = sup.with_hook_argv(
             vec!["claude".to_string()],
