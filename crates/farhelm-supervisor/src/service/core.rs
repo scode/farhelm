@@ -778,6 +778,9 @@ fault_hooks! {
     /// promote the previous record before the report reads its binding.
     /// `None` in production.
     codex_report_gate: CaptureGate,
+    /// Fail Claude's pin liveness read without relying on host permissions or
+    /// changing process-wide state. Unavailable evidence must retain authority.
+    claude_pin_process_fault: Arc<dyn Fn(u32) -> Option<String> + Send + Sync>,
     /// See [`SinkReservationGate`]. `None` in production.
     sink_reservation_gate: SinkReservationGate,
     /// See [`SinkLookupGate`]. `None` in production.
@@ -15387,9 +15390,10 @@ impl Supervisor {
     /// Reports are the only source of new identities. For Codex, the credential alone does not
     /// establish authority: the reporter must belong to the current foreground
     /// process. Becoming resumable additionally requires the exact transcript
-    /// to identify its root conversation. For Claude, the hook must have been
-    /// run by the pane process or its direct child, which keeps a shelled-out
-    /// child from replacing its parent's conversation.
+    /// to identify its root conversation. Claude attributes the hook by position
+    /// through resident wrappers at any depth. Both pin the admitted process;
+    /// later children cannot replace it, and a recorded ancestor can correct an
+    /// earlier child-first selection.
     /// A second accepted report for the same launch REPLACES the first —
     /// `/clear` and `/new` start a new conversation inside a running
     /// process, and the id they retire is exactly the one that must not be
@@ -15494,9 +15498,9 @@ impl Supervisor {
     /// current launch (`report_files`). Codex attributes the innermost native
     /// emitter and applies its durable launch pin; Grok requires one native
     /// runtime in that chain, and OMP
-    /// through its launched runtime; Claude requires the hook to have been
-    /// run by the pane process or its direct child, checked before the
-    /// capture claim.
+    /// through its launched runtime. Claude attributes the first non-trampoline
+    /// process above the hook and applies its durable pin under the capture claim,
+    /// without recognizing an executable or reading a vendor transcript.
     ///
     /// ## Admission order
     ///
@@ -15519,10 +15523,9 @@ impl Supervisor {
     ///
     /// Rejection at any pre-write step is a no-op for durable capture,
     /// in-memory state, ambiguity, pending state, and resume
-    /// availability. Kinds whose proof is not yet implemented keep their
-    /// existing acceptance behind the discriminator gate (the legacy
-    /// path); kinds with an implemented proof go through the
-    /// prover path, which denies by default.
+    /// availability. Vendor dispatch is independent of the versioned ownership
+    /// offer gate: Claude's process pin keeps its existing version-0 Restart
+    /// behavior, while Goose and Pi retain legacy acceptance.
     pub(crate) async fn report_conversation(
         &self,
         id: &str,
@@ -15602,32 +15605,17 @@ impl Supervisor {
                 "the reported conversation identity does not match this session's agent kind",
             ));
         }
-        if crate::agent_kind::ownership_proof_implemented(kind) {
-            return self
-                .report_conversation_proven(id, report, kind, generation, entry)
-                .await;
-        }
-        return self
-            .report_conversation_legacy(
-                id,
-                report.conversation,
-                report.source,
-                report.ancestry,
-                kind,
-                generation,
-                entry,
-            )
-            .await;
+        self.report_conversation_for_kind(id, report, kind, generation, entry)
+            .await
     }
 
-    /// The framework admission path for kinds with an implemented
-    /// ownership proof: deny by default, with one explicit branch per
-    /// proven kind. A kind the predicate names but no branch handles is
-    /// refused rather than routed anywhere — adding a proof means adding
-    /// its branch in the same change that flips the predicate, never
+    /// Dispatch report authority independently of the Restart provenance gate.
+    /// Claude uses a process pin while retaining ownership version 0; routing it
+    /// through the proof predicate would withdraw existing Restart offers.
+    /// Every integration chooses its admission explicitly so a new kind cannot
+    /// inherit another vendor's process or record rules.
     #[warn(clippy::wildcard_enum_match_arm)]
-    /// inheriting another kind's.
-    async fn report_conversation_proven(
+    async fn report_conversation_for_kind(
         &self,
         id: &str,
         report: ReportedConversation,
@@ -15636,6 +15624,10 @@ impl Supervisor {
         entry: Option<Arc<SessionEntry>>,
     ) -> Result<(), RequestError> {
         match kind {
+            AgentKind::Claude => {
+                self.report_claude_conversation(id, report, kind, generation, entry)
+                    .await
+            }
             AgentKind::Codex => {
                 self.report_codex_conversation(id, report, kind, generation, entry)
                     .await
@@ -15648,77 +15640,44 @@ impl Supervisor {
                 self.report_omp_conversation(id, report, kind, generation, entry)
                     .await
             }
-            AgentKind::Claude | AgentKind::Goose | AgentKind::Pi | AgentKind::Generic => {
-                Err(RequestError::new(
-                    ErrorKind::Conflict,
-                    "no foreground ownership proof is implemented for this session's agent kind",
-                ))
+            AgentKind::Goose | AgentKind::Pi => {
+                self.report_conversation_legacy(
+                    id,
+                    report.conversation,
+                    report.source,
+                    kind,
+                    generation,
+                    entry,
+                )
+                .await
             }
+            AgentKind::Generic => Err(RequestError::new(
+                ErrorKind::Conflict,
+                "no conversation reporter is implemented for this session's agent kind",
+            )),
         }
     }
 
-    /// Legacy admission for kinds whose ownership proof is not yet
-    /// implemented: the original acceptance (shape, generation fence,
-    /// replace within the generation) behind the discriminator gate, under
-    /// the shared claim discipline.
-    ///
-    /// Claude additionally has to pass its positional corridor
-    /// (`procs::claude_corridor`) over the recorded chain: the hook must have
-    /// been run by the session's pane process or its direct child, so a
-    /// shelled-out `claude` that inherited the credential cannot replace its
-    /// parent's conversation. The check reads only the recorded evidence, so
-    /// it runs before the claim at no cost; the generation-fenced write keeps
-    /// a check made before a relaunch from committing into the new launch.
-    ///
-    /// That check sits after the id-shape check, so a malformed report is
-    /// refused as `InvalidRequest` before any evidence is read. Goose and Pi
-    /// ignore `ancestry` here (the drain has already tied their report to the
-    /// current launch by anchoring it) and are admitted as before.
-    ///
-    /// The write deliberately does NOT touch `capture_ownership_version`,
-    /// Claude's included: these rows stay at 0 — ownership not established
-    /// under the versioned contract — until their kind's PR wires a proof,
-    /// writes 1, and flips the predicate. Claude's positional check stops
-    /// replacement without that flip, which would otherwise withdraw the
-    /// resume offer of every existing Claude session. Preserved, not
-    /// re-blessed.
-    #[warn(clippy::wildcard_enum_match_arm)]
-    #[allow(clippy::too_many_arguments)]
+    /// Preserve Goose and Pi's existing report acceptance and provenance.
+    /// Their reports replace within the anchored generation under the shared
+    /// capture claim. The writer retains the row's ownership version; adopting
+    /// an identity here does not establish a versioned ownership proof.
     async fn report_conversation_legacy(
         &self,
         id: &str,
         conversation: String,
         source: String,
-        ancestry: Option<Vec<crate::procs::ChainLink>>,
         kind: AgentKind,
         generation: i64,
         entry: Option<Arc<SessionEntry>>,
     ) -> Result<(), RequestError> {
-        // A malformed identity can be rejected before any evidence is read.
         if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
-            warn!(
-                session = %id,
-                kind = ?kind,
-                bytes = conversation.len(),
-                "refused a reported conversation identity that does not match this session's \
-                 durable agent kind"
-            );
+            warn!(session = %id, kind = ?kind, bytes = conversation.len(),
+                "refused a reported conversation identity that does not match this session's durable agent kind");
             return Err(RequestError::new(
                 ErrorKind::InvalidRequest,
                 "the reported conversation identity does not match this session's agent kind",
             ));
-        }
-
-        match kind {
-            AgentKind::Claude => {
-                self.attribute_claude_report(ancestry.as_deref(), id, generation, &source)?;
-            }
-            AgentKind::Codex
-            | AgentKind::Goose
-            | AgentKind::Pi
-            | AgentKind::Omp
-            | AgentKind::Grok
-            | AgentKind::Generic => {}
         }
 
         // The shared claim is unbounded because all work under it is local.
@@ -16313,6 +16272,7 @@ pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    mod claude_pin;
     /// Cancelling startup does not cancel an already scheduled blocking edit.
     /// A successor must still be refused the OS lock until that edit finishes,
     /// even after the constructor and its async cleanup waiter have disappeared.
@@ -22569,10 +22529,9 @@ pub(crate) mod tests {
             panic!("report finished before the former one-second deadline: {result:?}");
         }
         if let Some(peer) = kill_before_release {
-            // Claude's attribution must already have completed. Killing the
-            // reporter at this parked boundary makes a regression that moves
-            // attribution back under the claim fail instead of passing on a
-            // process that happened to remain alive for the whole test.
+            // Attribution consumes the report's recorded chain after the claim
+            // releases. Killing the reporter here proves that saved evidence
+            // remains usable; admission must not repeat a live ancestry walk.
             // SAFETY: kill(2) touches no memory; this is the fixture's own
             // live reporter, verified Running when it was spawned.
             unsafe { libc::kill(peer.pid as libc::pid_t, libc::SIGKILL) };
@@ -22596,10 +22555,10 @@ pub(crate) mod tests {
         );
     }
 
-    /// Claude's positional attribution must finish before the parked claim:
-    /// the test kills the hook-shaped child while it is parked, so moving the
-    /// check under the claim makes admission fail. The accepted identity must
-    /// still reach both representations after release.
+    /// Claude's recorded evidence outlives both contention and the reporter.
+    /// The claim has no deadline, and attribution after release must use the
+    /// saved chain rather than walk a now-dead hook. Admission still publishes
+    /// the committed identity into both durable state and the current entry.
     #[farhelm_testtrace::test]
     async fn claude_report_survives_the_former_claim_deadline() {
         let mut fixture = OmpAdmission::launch().await;
@@ -22652,8 +22611,8 @@ pub(crate) mod tests {
 
     /// OMP keeps its live ownership checks under the claim, yet contention
     /// beyond the former deadline must not lose a still-live parent's report.
-    /// This complements Claude: the two paths take attribution on opposite
-    /// sides of the claim and both must publish the committed identity.
+    /// Both OMP and Claude attribute recorded evidence under the claim; OMP's
+    /// additional runtime proof still needs its owned process to remain alive.
     #[farhelm_testtrace::test]
     async fn omp_report_survives_the_former_claim_deadline() {
         let mut fixture = OmpAdmission::launch().await;

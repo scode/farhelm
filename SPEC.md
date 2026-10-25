@@ -1804,24 +1804,24 @@ ordinary Enter rule applies), for an agent that reports by its first prompt (Pi 
 reply, which can take as long as the first turn, so their silence proves nothing and is not reported); a launch Farhelm
 could not add its conversation hook to, unless the user turned hooks off for that agent themselves; a Codex or Grok
 conversation record that Restart finds missing, which withdraws the resume offer; and an OMP launch whose conversation
-reporter does not match the running Farhelm, the one refused conversation report that notifies; and a Codex launch whose
-first conversation report came from a nested Codex process, corrected when a recorded Codex ancestor reports. That
-correction says which conversation a Restart before now would have resumed and that Farhelm now follows the conversation
-of the Codex process that started it, without claiming no further ancestor can correct it. Every other refused report
-(from a subagent, from an agent process the session's agent started itself, overtaken by a relaunch or delete, or turned
-away by a passing error) is the system working and never notifies. A launch that still carries a conversation Farhelm
-captured earlier is never told Restart cannot resume it, because Restart can. After a supervisor restart, a launch that
-received the hook starts its silent-hook clock at the next qualifying Enter; launches stored before this behavior was
-introduced stay unchecked. Each notification says what happened and what the user can do about it, or, when nothing can
-be done, what they lose; it never points at a log. The silent-conversation-hook warning names the agent and when it
-normally reports its conversation, using the same timing as Restart's explanation. It says Restart cannot resume until
-that report arrives, and asks users of custom commands to check that they pass on `{farhelm_args}`; otherwise it invites
-feedback from the help (?) menu. There is at most one notification of each problem per launch of the session's agent.
-The warning that the agent never reported its conversation and the warning that Restart stopped offering to resume are
-marked resolved when Restart can resume that launch's conversation again, including after a supervisor restart. The
-other kinds and notifications from earlier launches stay as they are. If a resolved problem returns in the same launch,
-its existing notification reopens at the top as new and unread, even if the user had cleared it; repeated checks while
-it remains unresolved do not repeat it.
+reporter does not match the running Farhelm, the one refused conversation report that notifies; and a Claude or Codex
+launch whose first conversation report came from a nested process of that agent, corrected when a recorded ancestor
+reports. That correction says which conversation a Restart before now would have resumed and that Farhelm now follows
+the conversation of the agent process that started it, without claiming no further ancestor can correct it. Every other
+refused report (from a subagent, from an agent process the session's agent started itself, overtaken by a relaunch or
+delete, or turned away by a passing error) is the system working and never notifies. A launch that still carries a
+conversation Farhelm captured earlier is never told Restart cannot resume it, because Restart can. After a supervisor
+restart, a launch that received the hook starts its silent-hook clock at the next qualifying Enter; launches stored
+before this behavior was introduced stay unchecked. Each notification says what happened and what the user can do about
+it, or, when nothing can be done, what they lose; it never points at a log. The silent-conversation-hook warning names
+the agent and when it normally reports its conversation, using the same timing as Restart's explanation. It says Restart
+cannot resume until that report arrives, and asks users of custom commands to check that they pass on `{farhelm_args}`;
+otherwise it invites feedback from the help (?) menu. There is at most one notification of each problem per launch of
+the session's agent. The warning that the agent never reported its conversation and the warning that Restart stopped
+offering to resume are marked resolved when Restart can resume that launch's conversation again, including after a
+supervisor restart. The other kinds and notifications from earlier launches stay as they are. If a resolved problem
+returns in the same launch, its existing notification reopens at the top as new and unread, even if the user had cleared
+it; repeated checks while it remains unresolved do not repeat it.
 
 A session with notifications shows a bell on its sidebar row (see Session list); a row without notifications shows none.
 The bell is grey when everything in it has been read and unmistakable when something is unread, and its accessible name
@@ -2306,15 +2306,21 @@ record pairs. Arbitrary later file changes are noticed at Restart rather than th
 withdraws Resume and records its notification then; a different conversation withdraws silently. An I/O read failure
 refuses that Restart with a retry message and preserves Resume. None of these refusals launches an agent.
 
-Claude reports must come from a hook run by the session's pane process or by that process's direct child, so a `claude`
-started underneath the foreground one — a shelled-out sub-agent that inherited the session credential and loaded a
-reporting hook from its own settings — cannot replace or withdraw the foreground's conversation. The rule is positional:
-Farhelm does not recognize Claude's executable and does not read the injected hook out of anyone's command line, because
-both are vendor details that change independently of Farhelm. A plain launch makes the pane process Claude itself and a
-one-level wrapper command makes Claude its direct child, so both keep reporting; a wrapper chain deeper than that loses
-hook capture, and without an accepted report has no captured identity and cannot be restarted. Native sub-agents never
-report: Claude fires no `SessionStart` for them, and any report naming a sub-agent is refused for every agent type.
-Claude takes no versioned ownership proof, so its existing captures stay resumable across the change.
+Claude attribution is positional: the first process above the hook's narrow shell trampolines is its emitter, at any
+depth below the session's owned pane. Farhelm does not recognize Claude by executable, command line, or environment;
+those are vendor details that change independently of Farhelm. Resident wrapper chains therefore keep reporting. The
+first admitted selecting report pins its emitter by pid and start token and records every ancestor through the pane.
+Later reports from that process may change the conversation; a nested Claude that inherited the credential cannot
+replace or withdraw it. Reports from the same emitter preserve the original recorded ancestry. A recorded ancestor's
+report corrects both the pin and conversation and posts a notification once per launch explaining what Restart before
+the correction would have resumed. If a nested Claude reports first, it may be followed until the parent next reports at
+start, resume, `/clear`, or compact. A proven gone, reused, or non-running pin releases only for an emitter whose report
+chain does not contain it; unavailable process evidence never releases it. The pin survives a supervisor restart but
+clears on relaunch and is not restored by an aborted relaunch. Sessions running across the upgrade start unpinned, so
+their first selecting report may come from a nested child until an ancestor reports. Native sub-agents never report:
+Claude fires no `SessionStart` for them, and any report naming a sub-agent is refused for every agent type. Claude
+requires no transcript check and takes no versioned ownership proof, so its existing captures stay resumable across the
+change.
 
 Grok reports must come from one native `grok` process under the owned pane, launched with `--no-leader` before any real
 end-of-options boundary. The only admitted descendants are the documented reporter command and its narrow shell
@@ -2348,11 +2354,11 @@ discriminator naming the adapter that produced it — the injected hook command,
 and a report addressed to a session of another agent type is refused before any vendor state is consulted. The
 discriminator routes; it does not prove. Codex and Grok admission require foreground and record proofs, and their exact
 resume additionally requires versioned proof that the binding was admitted under those proofs, with the historical Codex
-exception described in SPEC_impl.md. Claude admission requires the positional check above but no versioned proof, so its
-resume rules are unchanged. Goose and Pi retain their existing admission and resume rules; for them the discriminator
-alone adds no foreground protection. Old senders that predate the discriminator fail closed rather than reporting
-untagged. A refused report changes nothing: no stored identity, no offer, no pending state. Resume is never silently
-turned into fresh, and historical captures are never rewritten to look proven.
+exception described in SPEC_impl.md. Claude admission requires the positional attribution and pin checks above but no
+versioned proof, so its resume rules are unchanged. Goose and Pi retain their existing admission and resume rules; for
+them the discriminator alone adds no foreground protection. Old senders that predate the discriminator fail closed
+rather than reporting untagged. A refused report changes nothing: no stored identity, no offer, no pending state. Resume
+is never silently turned into fresh, and historical captures are never rewritten to look proven.
 
 Confirmed 2026-10-22, an accepted exception to restart resuming exactly the session's own conversation (above): Goose's
 reporter does not tell a native Goose sub-agent, or a nested Goose run that inherits the reporter, from the session's

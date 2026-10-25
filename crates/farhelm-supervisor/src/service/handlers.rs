@@ -8289,16 +8289,18 @@ mod tests {
     /// not the stored identity, not the in-memory capture, not the offer.
     /// A malformed id is still refused as `InvalidRequest` first.
     ///
-    /// Why this test matters: Claude admission requires the hook to have
-    /// been run by the pane process or its direct child, so that a
-    /// shelled-out `claude` holding the inherited credential cannot replace
-    /// its parent's conversation. A report with no recorded ancestry is
-    /// the cheapest shape of "cannot be attributed", and it must fail
-    /// closed rather than fall through to the old credential-only
-    /// acceptance. The ordering half pins that the positional check runs
-    /// after the shape check, so a bad id is refused before any evidence
-    /// is read. The positional rule itself is covered by the
-    /// corridor tests in `procs` and end to end in `e2e/hook_identity.rs`.
+    /// Why this test matters: Claude admission attributes the hook by its
+    /// position in a process chain anchored at the session's pane process,
+    /// and pins the first admitted emitter, so that a shelled-out `claude`
+    /// holding the inherited credential cannot replace its parent's
+    /// conversation. A report with no recorded ancestry is the cheapest
+    /// shape of "cannot be attributed", and it must fail closed rather than
+    /// fall through to the old credential-only acceptance. The ordering half
+    /// pins that the positional check runs after the shape check, so a bad id
+    /// is refused before any evidence is read. The positional rule and the
+    /// pin are covered by the corridor tests in `procs`, the pin tests in
+    /// `service::core::tests::claude_pin`, and end to end in
+    /// `e2e/hook_identity.rs`.
     #[farhelm_testtrace::test]
     async fn an_unattributed_claude_report_is_refused_and_changes_nothing() {
         let state = StateDir::new();

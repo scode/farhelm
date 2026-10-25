@@ -1,41 +1,40 @@
-//! Claude Code's foreground corridor: the positional check that a hook
-//! report came from the session's foreground Claude process.
+//! Claude Code's positional attribution of a hook to its emitting process.
+//! Admission pins that process; ancestry alone does not establish authority.
 
 use super::*;
 
-/// Claude's corridor over an already-walked chain: a positional rule, not
-/// an image rule. The reporter (first link) must be the supported hook
-/// invocation; the links directly above it that are narrow
-/// [`is_hook_trampoline`] shells are skipped; the next link is the process
-/// that ran the hook (the emitter), and it must be the pane anchor (last
-/// link) or the anchor's direct child (second-to-last link).
+/// The emitter and every possible correcting ancestor through the pane anchor.
+/// Ancestors are nearest-first and exclude the emitter and hook trampolines
+/// below it. Claude has no image rule, so every ancestor can correct a pin.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct ClaudeAttribution {
+    pub(crate) emitter: ProcessIdentity,
+    pub(crate) ancestors: Vec<ProcessIdentity>,
+}
+
+/// Attribute an already-anchored chain by the position of the hook invocation.
+/// The reporter (first link) must be the supported hook invocation; narrow
+/// [`is_hook_trampoline`] shells immediately above it are skipped, and the
+/// next link is the process that ran the hook (the emitter). The pane anchor
+/// ends that search even if its argv resembles a trampoline.
 ///
-/// The contract it enforces is narrow on purpose: a `claude` started
-/// underneath the session's foreground Claude — a shelled-out sub-agent
-/// that inherited the session credential and loaded a reporting hook from
-/// somewhere — cannot replace the foreground's conversation. Such a child
-/// always sits at least two links below the pane, because the foreground's
-/// Bash tool runs it through a shell that does not `exec` it. A plain
-/// launch makes the pane process Claude itself (the login shell, any
-/// `systemd-run --scope`, and the launch shim all `exec`), and a supported
-/// one-level wrapper launch makes Claude the pane's direct child, so both
-/// keep reporting. Native sub-agents never reach this: they fire no
-/// `SessionStart`, and the doorway refuses any report carrying `agent_id`.
+/// Resident launch wrappers may put the emitter at any depth. Every link
+/// above it is retained through the anchor so a later report from a parent
+/// can correct a child-first pin. A nested child's report has the same
+/// positional shape: admission, under the capture claim, must judge its
+/// authority against the launch's durable pin before changing capture.
 ///
 /// It deliberately recognizes no executable and reads no argv beyond the
 /// hook and trampoline shapes. Claude's native binary is named after its
 /// version (`.../claude/versions/<version>`) and npm installs run under
 /// `node`, so an image rule would have to track install layouts, and the
 /// injected `--settings` hook is a vendor detail that may change on its
-/// own. The accepted costs, recorded in SPEC_impl.md: a wrapper chain
-/// deeper than one level loses hook capture and falls back to the record
-/// scan, and a child the foreground spawns WITHOUT an intermediate shell
-/// in a wrapperless launch would be admitted (not observed in practice).
+/// own. Neither argv nor environment above the emitter identifies Claude.
 ///
 /// Trampoline skipping is load-bearing, not tidiness: whether the hook's
 /// `sh -c` survives as a link or `exec`s the hook depends on the shell,
 /// and the position of the emitter must not depend on that.
-pub(crate) fn claude_corridor(chain: &[ChainLink]) -> Result<ProcessIdentity, String> {
+pub(crate) fn claude_corridor(chain: &[ChainLink]) -> Result<ClaudeAttribution, String> {
     let reporter = chain
         .first()
         .ok_or_else(|| "the hook ancestry is empty".to_string())?;
@@ -57,16 +56,18 @@ pub(crate) fn claude_corridor(chain: &[ChainLink]) -> Result<ProcessIdentity, St
                     .is_some_and(|argv| is_hook_trampoline(&chain[index].exe, argv))
         })
         .ok_or_else(|| "the hook reporter is itself the pane process".to_string())?;
-    if anchor - emitter > 1 {
-        return Err(
-            "the hook was run by a process nested below this session's foreground; only the \
-             pane process or its direct child may report"
-                .to_string(),
-        );
-    }
     let link = &chain[emitter];
-    Ok(ProcessIdentity {
-        pid: link.pid,
-        start: link.start,
+    Ok(ClaudeAttribution {
+        emitter: ProcessIdentity {
+            pid: link.pid,
+            start: link.start,
+        },
+        ancestors: chain[emitter + 1..]
+            .iter()
+            .map(|link| ProcessIdentity {
+                pid: link.pid,
+                start: link.start,
+            })
+            .collect(),
     })
 }

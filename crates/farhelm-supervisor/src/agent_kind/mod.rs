@@ -2003,17 +2003,16 @@ pub fn validate_named_conversation(value: &str) -> Result<(), String> {
 /// kind-specific record check) are implemented, so its admissions write
 /// versioned ownership provenance and its exact-resume offers require it.
 ///
-/// Codex, Grok, and OMP have complete proofs. Goose, Claude, and Pi keep
-/// their arm false until their own proof lands. `false` does not mean "no
-/// check": Claude's legacy admission still refuses a report unless the pane
-/// process or its direct child ran the hook (a positional check, with no
-/// record proof and no versioned provenance), so flipping Claude here would
-/// be a separate decision that withdraws every existing Claude resume
-/// offer until its next proven report. Admission, durable writers,
-/// the refresh mirror, and every offer surface consult this one predicate,
-/// so a later kind needs one deliberate flip rather than scattered match
-/// changes. New framework entry points default to deny; legacy paths are
-/// preserved, not re-blessed, until their kind flips.
+/// Codex, Grok, and OMP have complete proofs. Claude attributes by position
+/// and pins the admitted process, without a vendor record proof or versioned
+/// provenance. It deliberately stays false: flipping it would withdraw every
+/// existing Claude Restart offer. Goose and Pi retain their legacy behavior.
+///
+/// This is the provenance/offer policy, not the report-dispatch policy. Each
+/// kind's admission chooses its checks and replacement version explicitly;
+/// refresh mirrors and every offer surface carry that committed version.
+/// A new versioned proof requires a deliberate flip here alongside its writer,
+/// rather than inheriting another kind's admission through this predicate.
 #[warn(clippy::wildcard_enum_match_arm)]
 pub fn ownership_proof_implemented(kind: AgentKind) -> bool {
     match kind {

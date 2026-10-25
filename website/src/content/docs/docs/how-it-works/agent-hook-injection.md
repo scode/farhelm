@@ -135,15 +135,14 @@ The hook does not talk to the supervisor. It saves the report as a small file un
 supervisor's state directory, together with a record of which processes it was started by, and exits 0 — always,
 including on a panic. The supervisor applies saved reports on its regular pass every two seconds, and when it starts. It
 uses the record of processes to check that the report came from your session's terminal, under the launch Farhelm made
-there last, so a report left over from before a restart is refused. For Claude, Codex, Grok, and OMP it also checks that
-the report came from that agent itself rather than from something the agent started, such as a sub-agent; see
-[What you will see](#what-you-will-see). Each session keeps only its newest report, except Codex and Grok: both keep the
-report that starts a conversation apart from the latest report that confirms its saved files. Codex confirms at the end
-of a turn; Grok can also confirm when you submit a prompt. This keeps confirmation from overwriting the conversation it
-belongs to while Farhelm is closed, so the directory stays tiny however long the supervisor is away. Outside a farhelm
-session there is no session environment, so identity reporting exits immediately and saves nothing — though if
-`--announce` was passed on the command line, the pointer line described below still prints regardless, since it needs no
-credential at all.
+there last, so a report left over from before a restart is refused. For Claude, Codex, Grok, and OMP it also checks
+which agent process can report for the session; see [What you will see](#what-you-will-see). Each session keeps only its
+newest report, except Codex and Grok: both keep the report that starts a conversation apart from the latest report that
+confirms its saved files. Codex confirms at the end of a turn; Grok can also confirm when you submit a prompt. This
+keeps confirmation from overwriting the conversation it belongs to while Farhelm is closed, so the directory stays tiny
+however long the supervisor is away. Outside a farhelm session there is no session environment, so identity reporting
+exits immediately and saves nothing — though if `--announce` was passed on the command line, the pointer line described
+below still prints regardless, since it needs no credential at all.
 
 It never prints a diagnostic, on either descriptor. It does print one deliberate line, on stdout, unless you have turned
 that off: the pointer telling the agent that `$farhelm ...` in your message means the `farhelm agent` CLI and that
@@ -154,12 +153,13 @@ model's context, which is the whole delivery mechanism — nothing is written to
 
 ## What you will see
 
-Claude: nothing new. The session's **restart** button becomes available within a few seconds of launch, before you have
-typed anything, because Claude fires the hook at process start. Only a hook run by the session's own foreground Claude
-counts: the pane process, or its direct child under a one-level wrapper. A `claude` that the session starts through its
-shell (a shelled-out sub-agent) inherits the session's credential, but if it reports a conversation Farhelm refuses it,
-and the hook log records a `refused conflict` line from the supervisor. A nested invocation cannot replace its parent's
-target.
+Claude: the session's **restart** button becomes available within a few seconds of launch, before you have typed
+anything, because Claude fires the hook at process start. This works through
+[multiple wrappers that stay running](/docs/agents/agent-wrappers/). Farhelm follows the first Claude process whose
+conversation it accepts. Another Claude started inside the session cannot replace a conversation already reported by its
+parent. If the nested Claude reports first, the parent's next report at start, resume, `/clear`, or compact switches
+Farhelm to its conversation. A session notification explains what **restart** would have resumed before the switch. If
+the followed Claude exits, a fresh Claude in the same terminal can report its own conversation.
 
 Codex: on the launches that get the flags, the `⚠ --dangerously-bypass-hook-trust is enabled` line above the composer,
 and the resume offer only after your first prompt — Codex fires `SessionStart` at first prompt submission, not at
