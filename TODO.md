@@ -24,6 +24,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Investigate the missing Codex trust hint.** On Farhelm 0.31.0, Codex showed its "Folder access" / "Trust this
+  folder?" question without Farhelm's prominent reminder that Settings can answer it for managed checkouts. Check the
+  current behavior and restore the reminder where it should appear; this is already specified for Codex as well as
+  Claude. The reported screen offers "1. Trust and continue", "2. Quit" and "enter continue · esc quit", but both 0.31.0
+  and current main recognize only "2. Back to Agent Command Center" and "enter continue · esc back". Account for that
+  dialog variant and verify the managed-checkout, setting, dismissal and visible-agent-tab conditions too.
+
 - Initial version of agent2agent comms.
 
 - **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
