@@ -43,15 +43,16 @@ pub(crate) fn WelcomeDialog(on_close: EventHandler<()>, on_feedback: EventHandle
                         on_close.call(());
                     }
                 },
-                div { class: "host-settings-header welcome-header",
-                    h2 { class: "host-settings-title", "welcome to farhelm" }
-                    button {
-                        r#type: "button", class: "host-settings-dismiss welcome-dismiss",
+                crate::modal_dialog::DialogHeader {
+                    class: "welcome-header",
+                    title: rsx! { "welcome to farhelm" },
+                    close: rsx! { button {
+                        r#type: "button", class: "dialog-close host-settings-dismiss welcome-dismiss",
                         aria_label: "close welcome", "data-tooltip": "close: done with the welcome card",
                         onclick: move |_| on_close.call(()), "×"
-                    }
+                    } },
                 }
-                div { class: "host-settings-body welcome-body",
+                div { class: "dialog-body host-settings-body welcome-body",
                     p { class: "welcome-introduction",
                         "One window for every coding agent you run, on your Mac and on any Linux box you can ssh to. Each agent keeps running on its machine when you close the window, and you pick it up where it was."
                     }
@@ -76,11 +77,13 @@ pub(crate) fn WelcomeDialog(on_close: EventHandler<()>, on_feedback: EventHandle
                         }
                     }
                 }
-                div { class: "host-settings-footer welcome-footer",
-                    span { "This card is in the ? menu as welcome if you want it again." }
-                    button {
-                        r#type: "button", class: "btn btn-primary welcome-got-it",
-                        "data-tooltip": "got it: close the welcome card", onclick: move |_| on_close.call(()), "got it"
+                crate::modal_dialog::DialogFooter { class: "welcome-footer",
+                    span { class: "dialog-footer-hint", "This card is in the ? menu as welcome if you want it again." }
+                    crate::modal_dialog::DialogActions {
+                        button {
+                            r#type: "button", class: "btn btn-primary welcome-got-it",
+                            "data-tooltip": "got it: close the welcome card", onclick: move |_| on_close.call(()), "got it"
+                        }
                     }
                 }
             }

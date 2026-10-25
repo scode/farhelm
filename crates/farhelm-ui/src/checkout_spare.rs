@@ -39,10 +39,10 @@ pub(crate) fn CheckoutSpareSettings() -> Element {
 
     rsx! {
         div { id: "checkout-spare", class: "checkout-spare-setting",
-            label { class: "app-settings-choice",
+            label { class: "app-settings-choice setting-row",
                 "data-tooltip": "prepare one extra checkout per repository and host so the next launch can update it instead of cloning again",
                 span { "keep a checkout ready for faster launches" }
-                input { r#type: "checkbox", class: "host-settings-switch", checked: enabled, disabled: locked,
+                input { r#type: "checkbox", class: "control-switch", checked: enabled, disabled: locked,
                     aria_describedby: "checkout-spare-help",
                     onchange: move |event| {
                         let choice = event.checked();

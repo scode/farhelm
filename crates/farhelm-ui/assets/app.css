@@ -1703,15 +1703,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    button, so its tooltip could never show. */
 .titlebar-actions .restart-primary[aria-disabled="true"],
 .titlebar-actions .restart-with-trigger[aria-disabled="true"] {
-  opacity: 0.5;
   cursor: not-allowed;
-}
-
-.titlebar-actions .restart-primary[aria-disabled="true"]:hover,
-.titlebar-actions .restart-primary[aria-disabled="true"]:focus-visible,
-.titlebar-actions .restart-with-trigger[aria-disabled="true"]:hover,
-.titlebar-actions .restart-with-trigger[aria-disabled="true"]:focus-visible {
-  background: var(--control-hover-bg);
 }
 
 /* A trigger whose confirmation is open reads as PRESSED, not merely
@@ -1926,9 +1918,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    actions the shared quiet chrome, and `.btn-danger` marks an irreversible
    confirmation with the danger palette. The sidebar keeps exactly one blue
    resting control (`.new-session-button`); dialogs and popovers may each
-   have their own affirmative primary. Shape (font-size, padding, alignment)
-   still lives per call-site class exactly as before; these classes only
-   choose the shared visual tier.
+   have their own affirmative primary. The base supplies compact interface
+   typography and alignment; explicit surface classes can still size tabs,
+   titlebar actions and other controls whose geometry has its own contract.
 
    The border is TRANSPARENT, not `none`: a ghost button and a filled-
    primary or selected one (`.btn-primary`, `.tab.selected`) sit beside
@@ -1944,6 +1936,13 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   border-radius: var(--radius-sm);
   color: var(--fg-1);
   font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   cursor: pointer;
   /* ~100ms, and only on the color that actually changes. This chrome is
      stared at all day: a fade long enough to notice becomes a tic, and
@@ -1982,6 +1981,20 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   color: var(--on-fill);
 }
 
+/* An unavailable filled action retires the active fill rather than fading
+   its inverse text into a pale light-mode background. ARIA-disabled actions
+   keep their focusable explanations and caller-owned admission guards.
+   Pressed disclosures still identify the question they opened. */
+.btn.btn-primary:disabled,
+.btn.btn-danger:disabled,
+.btn.btn-primary:not(.btn-outline)[aria-disabled="true"]:not([aria-expanded="true"]),
+.btn.btn-danger:not(.btn-outline)[aria-disabled="true"]:not([aria-expanded="true"]) {
+  opacity: 1;
+  background: var(--bg-2);
+  border-color: var(--border-dim);
+  color: var(--fg-2);
+}
+
 /* Secondary actions retain the quiet sidebar chrome without inheriting the
    ghost base's transparent border. This is intentionally opt-in so the
    many controls whose subdued ghost state carries meaning stay unchanged. */
@@ -2015,6 +2028,19 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   color: var(--danger);
   background: transparent;
   border-color: var(--danger);
+}
+
+/* A permanent primary answer has the same outline contract as the danger
+   tier. Its one-off answer remains the filled, visually dominant action. */
+.btn-primary.btn-outline {
+  background: transparent;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-primary.btn-outline:hover:not(:disabled),
+.btn-primary.btn-outline:focus-visible:not(:disabled) {
+  background: var(--control-hover-bg);
 }
 
 /* The permanent answer remains outlined even under hover/focus. Its red
@@ -2553,26 +2579,13 @@ a:any-link,
   display: none;
 }
 
-/* The header is context for the command list, outside its menu role.
-   Truncation keeps an unbounded title or command from changing placement;
-   the full values remain on the header's native tooltips. */
+/* Domain classes remain stable hooks for the existing menu owners. Shared
+   presentation below bounds peer headers and keeps command prose readable. */
 .session-row-menu-header {
   padding: 6px 11px 7px;
   border-bottom: 1px solid var(--border-dim);
   margin-bottom: 4px;
   min-width: 0;
-}
-
-/* The ellipsis belongs on the block whose own line box holds the text.
-   `text-overflow` neither inherits nor reaches into a child block, and the
-   summary's text lives in `PeerLine`'s block (`-runs`), so the same three
-   declarations on the outer summary only clipped the line without an
-   ellipsis. The title's text is an inline child of the title itself. */
-.session-row-menu-title,
-.session-row-menu-summary-runs {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .session-row-menu-title {
@@ -3265,8 +3278,6 @@ a:any-link,
 }
 .templates-remove:hover { color: var(--danger); background: var(--control-hover-bg); }
 .templates-incompatible { border-left: 2px solid var(--warn); padding-left: 10px; }
-.templates-segments { display: flex; flex-wrap: wrap; gap: 4px; }
-.templates-segments button,
 .templates-suggestion,
 .templates-back {
   border: 1px solid var(--border-dialog);
@@ -3277,8 +3288,6 @@ a:any-link,
   font: inherit;
   cursor: pointer;
 }
-.templates-segments button[aria-pressed="true"] { background: var(--accent-fill); border-color: var(--accent-edge); color: var(--on-fill); }
-.templates-segments button:hover:not([aria-pressed="true"]),
 .templates-suggestion:hover { background: var(--control-hover-bg); }
 .templates-model-suggestions { display: flex; flex-wrap: wrap; gap: 4px; }
 .templates-suggestion { font-size: 12px; overflow-wrap: anywhere; text-align: left; }
@@ -3330,13 +3339,17 @@ a:any-link,
   gap: 8px;
   color: var(--fg-0);
 }
-/* Feedback shares both dialog and choice classes for an ordinary checkbox.
-   The dialog's accessible name confines right-hand switches to Settings. */
-.app-settings-dialog[aria-label="settings"] .app-settings-choice {
+/* Only standing settings opt into right-hand switches. The existing choice
+   class also serves affirmative checkboxes and described radio options. */
+.setting-row {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
+  min-width: 0;
+  color: var(--fg-0);
 }
-.app-settings-dialog[aria-label="settings"] .app-settings-choice > span { min-width: 0; }
+.setting-row > span { min-width: 0; }
 .app-settings-dialog[aria-label="settings"] .host-settings-mark svg { width: 28px; height: 28px; }
 
 /* Settings shares the host-dialog frame with unrelated modals. Scope its wider
@@ -3414,31 +3427,13 @@ a:any-link,
 .checkout-post-clone-field textarea {
   font-family: var(--font-mono); line-height: 1.5; padding: 8px 12px; resize: vertical;
 }
-.checkout-root-field button, .checkout-post-clone-field button {
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  background: transparent; color: var(--fg-0); font: inherit;
-  padding: 6px 12px; cursor: pointer;
-}
-.checkout-root-field button:hover, .checkout-post-clone-field button:hover { background: var(--control-hover-bg); }
-.checkout-root-field button[aria-disabled="true"], .checkout-post-clone-field button[aria-disabled="true"] { opacity: .5; cursor: default; }
 .checkout-root-error, .checkout-root-success { font-size: 12px; line-height: 1.5; margin: 0; overflow-wrap: anywhere; }
 .checkout-root-error { color: var(--danger); }
 .checkout-root-success { color: var(--fg-1); }
-/* ntfy is explicitly saved helm configuration. Its secret field and priority
-   use the same wells as checkout fields, and long topics fit phone-width dialogs. */
+/* ntfy is explicitly saved helm configuration. Its fields fit phone-width
+   dialogs; priority segments share the same draft and require explicit Save. */
 .ntfy-settings .checkout-root-label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.ntfy-settings select {
-  /* WebKit's native face needs the dark scheme, as the template editor does. */
-  color-scheme: dark;
-  min-height: 36px; background: var(--well); color: var(--fg-0);
-  border: 1.5px solid var(--border); border-radius: var(--radius-sm); padding: 0 12px;
-}
-.ntfy-settings button {
-  justify-self: start; border: 1px solid var(--border); border-radius: var(--radius-sm);
-  background: transparent; color: var(--fg-0); padding: 6px 12px; cursor: pointer;
-}
-.ntfy-settings button:hover { background: var(--control-hover-bg); }
-.ntfy-settings button:disabled { opacity: .5; cursor: default; }
+.ntfy-settings > .btn { justify-self: start; }
 .host-add-dialog,
 .host-uninstall-dialog {
   width: min(560px, 100%);
@@ -3642,9 +3637,14 @@ a:any-link,
 .host-settings-refreshed .host-commands-without-asking { justify-content: space-between; gap: 16px; }
 .host-settings-refreshed .host-settings-help,
 .host-settings-refreshed .host-settings-outcome { margin-left: 0; }
+/* A description belongs to its own label, including a refused-write outcome.
+   The section's larger gap separates settings; unrelated help keeps its
+   existing spacing rather than inheriting a global prose-margin change. */
+.host-settings-section .setting-group { display: grid; gap: 4px; min-width: 0; }
+.host-settings-refreshed .host-settings-commands { gap: 14px; }
 /* These remain native checkboxes: labels, Space activation, disabled writes
    and refused-write reset all use the existing input and focus lifecycle. */
-.host-settings-switch {
+.control-switch {
   appearance: none;
   flex: 0 0 34px;
   width: 34px;
@@ -3655,7 +3655,7 @@ a:any-link,
   background: var(--well);
   cursor: pointer;
 }
-.host-settings-switch::before {
+.control-switch::before {
   content: "";
   display: block;
   width: 12px;
@@ -3664,9 +3664,9 @@ a:any-link,
   border-radius: 50%;
   background: var(--fg-1);
 }
-.host-settings-switch:checked { background: var(--accent-fill); border-color: var(--accent-edge); }
-.host-settings-switch:checked::before { transform: translateX(14px); background: var(--on-fill); }
-.host-settings-switch:disabled { opacity: .5; cursor: default; }
+.control-switch:checked { background: var(--accent-fill); border-color: var(--accent-edge); }
+.control-switch:checked::before { transform: translateX(14px); background: var(--on-fill); }
+.control-switch:disabled { opacity: .5; cursor: default; }
 .host-settings-footer {
   align-items: center;
   justify-content: space-between;
@@ -3703,14 +3703,11 @@ a:any-link,
 }
 
 /* The hint describes a choice, but is outside the answer row so it cannot
-   push one answer off the common baseline. Only host confirmations use this
+   push one answer off the common baseline. DialogActions shares this answer-row
    sizing; inline update answers keep their compact row treatment. */
 .host-dialog-footer { display: flex; flex-direction: column; align-items: stretch; }
 .host-dialog-answers { display: flex; justify-content: flex-end; align-items: baseline; gap: 8px; }
 .host-dialog-answers .btn { font-size: 12px; line-height: 1.4; padding: 7px 12px; margin: 0; }
-/* Setup's permanent answer is the primary tier's outlined choice. Keep
-   this scoped: other primary surfaces deliberately have their own fills. */
-.host-dialog-answers .btn-primary.btn-outline { background: transparent; border-color: var(--accent); color: var(--accent); }
 .host-dialog-permanent-hint { color: var(--fg-1); font-size: 11px; margin: 0; }
 /* Removal keeps its narrower 480px card. Leave enough room for the full hint
    even while the vendored face is loading and the engine uses a fallback. */
@@ -5226,7 +5223,7 @@ a:any-link,
 .add-host-form label {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
   font-size: 12px;
   color: var(--fg-1);
 }
@@ -6196,7 +6193,7 @@ a:any-link,
      any column at least as wide as the widest single control, which also
      covers the phone layout that used to need its own one-column override.
      A control wider than the whole column is the segmented control's own
-     problem, and it wraps its segments (see `.launch-composer-segmented`).
+     problem, and it wraps its segments (see `.segmented-control`).
 
      A visible consequence: the controls now hug their segments. As
      stretched grid items they used to draw their border at the full track
@@ -6329,33 +6326,19 @@ a:any-link,
   color: var(--fg-1);
 }
 
-/* Fixed, mutually exclusive choices read as one decision when their buttons
-   share an outer border instead of looking like unrelated actions.
-
-   The control wraps onto a second row when it is wider than the line it sits
-   on. It has to: `overflow: hidden` (which is what clips the segments to the
-   rounded corners) also clips any segment that does not fit, and a clipped
-   segment cannot be clicked. Goose's five-segment permissions control is
-   about 420px wide, more than a phone's whole column, so without the wrap
-   its last choice disappears there.
-
-   Wrapping is also why the rules between segments are drawn as the
-   container's own color showing through a 1px `gap`, with each segment
-   painting the control fill, instead of a `border-left` on every segment but
-   the first: a left border would also land on the first segment of a wrapped
-   row and leave nothing between the rows, where a gap separates segments in
-   both directions. `flex: 1 0 auto` lets a wrapped row's segments grow to
-   fill the control's width, so no strip of separator color shows to the
-   right of a short last row; on a single row the control is content-sized
-   and there is nothing to grow into. */
-.launch-composer-segmented {
+/* Two to five choices share this presentation while retaining their native
+   button or radio semantics. Wrapping keeps the last option reachable in a
+   narrow column. An inset focus ring stays visible inside the rounded well. */
+.segmented-control {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 1px;
-  overflow: hidden;
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--border);
+  gap: 2px;
+  padding: 2px;
+  max-width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-md);
+  background: var(--well);
 }
 
 /* Destination type uses one control in both editors. Keep its glyph with
@@ -6411,30 +6394,127 @@ a:any-link,
   line-height: 1.5;
 }
 
-.launch-composer-segmented > button {
+.segmented-control > button,
+.segmented-control > .segment-radio > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   flex: 1 0 auto;
   min-height: 30px;
-  padding: 0 14px;
+  box-sizing: border-box;
+  padding: 4px 10px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-0);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.segmented-control > button:hover:not(:disabled):not([aria-pressed="true"]),
+.segment-radio:hover > input:not(:checked):not(:disabled) + span {
+  background: var(--control-hover-bg);
+}
+
+.segmented-control > button:disabled,
+.segment-radio > input:disabled + span {
+  opacity: .5;
+  cursor: default;
+}
+
+.segmented-control > button[aria-pressed="true"],
+.segment-radio > input:checked + span {
+  background: var(--accent-fill);
+  color: var(--on-fill);
+  font-weight: 600;
+}
+
+.segmented-control > button[aria-pressed="true"]:hover:not(:disabled),
+.segment-radio:hover > input:checked:not(:disabled) + span {
+  background: var(--accent-fill-hover);
+}
+
+.segmented-control > button:focus-visible,
+.segment-radio > input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.segmented-control > button[aria-pressed="true"]:focus-visible,
+.segment-radio > input:checked:focus-visible + span {
+  outline-color: var(--on-fill);
+}
+
+/* Radios remain real inputs: clipping only their drawing preserves the
+   page owner's checked property, label activation and native arrow keys. */
+.segment-radio { position: relative; display: flex; flex: 1 0 auto; }
+.segment-radio > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.appearance-settings { display: grid; gap: 14px; min-width: 0; }
+.appearance-choices { border: 0; padding: 0; margin: 0; min-width: 0; }
+.appearance-legend { margin-bottom: 8px; padding: 0; color: var(--fg-0); font-size: 13px; font-weight: 600; }
+
+/* These three choices have consequential explanations. Keep the existing
+   stacked arrangement inside one shared well so every description is visible,
+   rather than squeezing them into columns or hiding them in tooltips. */
+.terminal-link-choices { flex-direction: column; }
+.terminal-link-choices > .segment-radio { min-width: 0; }
+.terminal-link-choices > .segment-radio > span {
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.terminal-link-description { color: var(--fg-1); font-size: 12px; font-weight: 400; }
+.segment-radio > input:checked + span .terminal-link-description { color: var(--on-accent-dim); }
+
+/* Template choices also contain peer-authored host names. Their presentation
+   may wrap an unbounded caption without changing the submitted identity. */
+.template-choice > button {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Help is an action beside the group, never an extra permission choice. */
+.launch-composer-permission-controls { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.launch-permission-help {
+  flex: 0 0 30px;
+  min-height: 36px;
+  padding: 0;
+  color: var(--fg-1);
+}
+.launch-composer-effort-select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   background: var(--well);
   color: var(--fg-0);
   font-size: 13px;
 }
 
-/* Help belongs beside the permission choices, without looking selected or
-   stretching into a second row. It opens documentation rather than choosing a mode. */
-.launch-composer-segmented > button.launch-permission-help {
-  flex: 0 0 30px;
-  padding: 0;
-  color: var(--fg-1);
-}
-
 /* Composer selections share the row/tab fill and inverse text. The YOLO
    label remains explicit warning wording; its selected text also inverts,
    because red text over periwinkle cannot carry that warning readably. */
-.launch-composer-options > button.selected,
-.launch-composer-segmented > button.selected {
+.launch-composer-options > button.selected {
   background: var(--accent-fill);
   color: var(--on-fill);
 }
@@ -6445,12 +6525,8 @@ a:any-link,
   color: var(--on-fill);
 }
 
-.launch-composer-segmented > button.selected {
-  font-weight: 600;
-}
-
 /* Unchosen YOLO remains red; solid selection needs an inverse foreground. */
-.launch-composer-segmented > button.launch-composer-segment-danger:not(.selected) {
+.segmented-control > button.launch-composer-segment-danger:not([aria-pressed="true"]) {
   color: var(--danger);
 }
 
@@ -6789,8 +6865,12 @@ a:any-link,
 /* Refused launch attempts stay reachable to explain themselves; their grey
    presentation must not depend on native disabled, which swallows submission. */
 .launch-composer-actions .create-session-submit[aria-disabled="true"] {
-  opacity: 0.5;
   cursor: not-allowed;
+}
+/* The launch context has its own inverse role while the action is filled.
+   Retire that child color too when the unavailable owner becomes neutral. */
+.launch-composer-actions .create-session-submit[aria-disabled="true"] .launch-composer-launch-context {
+  color: var(--fg-2);
 }
 
 .launch-composer-refusal {
@@ -8390,40 +8470,186 @@ a:any-link,
 /* Selected segments retain their fill under pointer hover. Neutral hover is
    for an unchosen option, and must never erase the active value. */
 .templates-row[aria-pressed="true"]:hover,
-.templates-segments button[aria-pressed="true"]:hover,
 .host-icon-choice[aria-pressed="true"]:hover:not(:disabled),
 .launcher-host-option[aria-selected="true"]:hover,
 .quick-switcher-row[aria-selected="true"]:hover {
   background: var(--accent-fill-hover);
 }
 
-/* The ordinary accent ring does not contrast with its own solid fill.
-   Inverse focus applies to the selected owner and controls inside it, plus
-   filled primary/danger actions and pressed disclosures. Outlined permanent
-   answers retain the neutral-surface ring. Existing offsets stay intact. */
-.session-row.selected :focus-visible,
+/* Selected-row descendants keep their existing clipping geometry: the row
+   opener already insets its ring separately from its small sibling controls. */
+.session-row.selected :focus-visible { outline-color: var(--on-fill); }
+
+/* Standalone filled controls need the inverse ring INSIDE that fill. An
+   external white ring disappears against a light raised panel. Outlined and
+   quiet ARIA-disabled actions retain the ordinary neutral-surface ring. */
 .quick-switcher-row[aria-selected="true"]:focus-visible,
 .launcher-host-option[aria-selected="true"]:focus-visible,
 .host-icon-choice[aria-pressed="true"]:focus-visible,
 .host-color-choice[aria-pressed="true"]:focus-visible,
 .templates-row[aria-pressed="true"]:focus-visible,
-.templates-segments button[aria-pressed="true"]:focus-visible,
 .app-settings-navigation button[aria-pressed="true"]:focus-visible,
 .launch-composer-folder-options button[aria-selected="true"]:focus-visible,
 .launch-composer-repository-options > button[aria-selected="true"]:focus-visible,
 .launch-composer-options > button.selected:focus-visible,
-.launch-composer-segmented > button.selected:focus-visible,
 .launch-composer-listbox > button.selected:focus-visible,
 .launch-composer-search-group > button.selected:focus-visible,
 .launch-kind-tab.selected:focus-visible,
 .tab.selected:focus-visible,
-.host-settings-switch:checked:focus-visible,
+.control-switch:checked:focus-visible,
 .session-row-menu-item:focus-visible:not([aria-disabled="true"]),
 .host-row-menu-item:focus-visible:not([aria-disabled="true"]),
-.btn-primary:not(.btn-outline):focus-visible,
-.btn-danger:not(.btn-outline):focus-visible,
+.btn-primary:not(.btn-outline):not([aria-disabled="true"]):focus-visible,
+.btn-danger:not(.btn-outline):not([aria-disabled="true"]):focus-visible,
 .btn[aria-expanded="true"]:focus-visible {
   outline-color: var(--on-fill);
+  outline-offset: -3px;
+}
+
+/* ===== Shared menu and dialog anatomy ==============================
+ * These classes add presentation to the existing domain elements. Menus
+ * keep their focus/placement owners; dialog bodies remain the existing
+ * scrollports rather than gaining a wrapper and a second scroll region. */
+.menu-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 11px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border-dim);
+}
+.menu-title { color: var(--fg-0); font-size: 12px; font-weight: 600; }
+.menu-summary { color: var(--fg-1); font-size: 11px; }
+/* Peer values stay escaped and direction-isolated by their callers.
+   Wrapping bounds an unbroken value without hiding ordinary explanations. */
+.menu-title,
+.menu-summary,
+.menu-summary .session-row-menu-summary-runs,
+.menu-label,
+.menu-description {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: clip;
+}
+/* Peer-authored titles and commands have no size bound. Let them wrap over
+   several lines, then retain full existing tooltips rather than letting a
+   remote value consume the menu's entire viewport. Command descriptions
+   below are ordinary prose and keep their unrestricted wrapping. */
+.menu-title,
+.menu-summary .session-row-menu-summary-runs {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.menu-title { -webkit-line-clamp: 3; }
+.menu-summary { margin-top: 0; }
+.menu-summary .session-row-menu-summary-runs { -webkit-line-clamp: 4; }
+/* The host summary already separates destination, prose and version. Keep
+   the concrete version atom intact while its siblings can wrap normally;
+   an oversized peer version remains bounded and keeps its full tooltip. */
+.menu-summary .host-row-menu-summary-runs > .font-mono:last-child {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.menu-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 8px;
+  box-sizing: border-box;
+  width: calc(100% - 8px);
+  margin: 0 4px;
+  padding: 6px 7px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.menu-icon { width: 14px; height: 14px; flex: 0 0 14px; color: var(--fg-1); margin-top: 1px; }
+.menu-icon > svg { width: 100%; height: 100%; }
+.menu-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.menu-label { color: inherit; }
+.menu-description { color: var(--fg-1); font-size: 11px; }
+.menu-danger,
+.menu-danger .menu-icon { color: var(--danger); }
+.menu-item:hover:not([aria-disabled="true"]),
+.menu-item:focus:not([aria-disabled="true"]) { background: var(--accent-fill); color: var(--on-fill); }
+.menu-item:hover:not([aria-disabled="true"]) .menu-icon,
+.menu-item:focus:not([aria-disabled="true"]) .menu-icon { color: var(--on-fill); }
+.menu-item:hover:not([aria-disabled="true"]) .menu-description,
+.menu-item:focus:not([aria-disabled="true"]) .menu-description { color: var(--on-accent-dim); }
+.menu-item[aria-disabled="true"] { background: transparent; opacity: .5; cursor: default; }
+.menu-separator { height: 1px; margin: 4px 10px; border: 0; background: var(--border-dim); }
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 14px;
+  padding: 20px 24px;
+  background: var(--control-hover-bg);
+  border-bottom: 1px solid var(--border-dim);
+}
+.dialog-tile {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+  color: var(--fg-0);
+}
+.dialog-heading { flex: 1; min-width: 0; }
+.dialog-title { margin: 0; color: var(--fg-0); font-size: 18px; font-weight: 600; }
+.dialog-summary { margin-top: 6px; color: var(--fg-1); font-size: 12px; overflow-wrap: anywhere; }
+.dialog-summary.host-settings-summary-danger { color: var(--danger); }
+.dialog-close {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-left: auto;
+  border: 0;
+  padding: 2px 6px;
+  background: transparent;
+  color: var(--fg-1);
+  font-size: 20px;
+  cursor: pointer;
+}
+.dialog-close:hover:not(:disabled) { color: var(--fg-0); }
+.dialog-body {
+  /* The caller keeps its grid, flex or block content layout. This class
+     owns the existing scrollport, not a second content arrangement. */
+  flex-shrink: 1;
+  min-height: 0;
+  gap: 20px;
+  padding: 20px 24px;
+  overflow: auto;
+}
+.dialog-body[tabindex="0"]:focus-visible { outline-offset: -2px; }
+.dialog-footer {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 24px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border-dim);
+}
+.dialog-footer-hint { min-width: 0; margin: 0 auto 0 0; color: var(--fg-1); font-size: 11px; }
+.dialog-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+/* A narrow footer keeps the same answer order as its native DOM order:
+   Cancel, any permanent answer, then the ordinary main action. */
+@media (max-width: 560px) {
+  .dialog-actions { flex-direction: column; align-items: stretch; width: 100%; }
 }
 
 /* ===== Technical value typography ==================================
@@ -8433,6 +8659,7 @@ a:any-link,
  * age's metrics or the overlaid notification bell drifts. */
 .font-mono,
 .create-session-form .font-mono,
+.add-host-form .font-mono,
 .host-destination-input.font-mono,
 .app-version,
 .app-version-refresh,

@@ -535,9 +535,9 @@ pub(crate) fn TunnelSettings() -> Element {
     });
     let allowed = controller.preferences.0.read().tunnel_consent == Some(true);
     rsx! {
-        label { class: "app-settings-choice",
+        label { class: "app-settings-choice setting-row",
             span { "allow tunnels from remote sessions" }
-            input { r#type: "checkbox", class: "host-settings-switch tunnel-settings-switch",
+            input { r#type: "checkbox", class: "control-switch tunnel-settings-switch",
                 checked: allowed, disabled: (controller.busy)() || reading(), aria_describedby: "tunnel-settings-help",
                 onchange: move |event| {
                     let enable = event.checked();

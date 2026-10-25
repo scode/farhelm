@@ -186,7 +186,7 @@ fn HostRefusalDialog(
                     dismiss_tooltip: "close this refusal",
                     on_dismiss: on_close,
                 }
-                ScrollRegion { class: "host-settings-body",
+                ScrollRegion { class: "dialog-body host-settings-body",
                     handle: DialogHandle::new(".host-refusal-dialog"), selector: ".host-settings-body", name: "reason for refusal",
                     recovery: RecoveryFocus::new(".host-refusal-close", None, true, RecoveryDelay::OneFrame),
                     p { class: "host-settings-value peer-value host-dialog-destination", dir: "ltr", "{destination}" }
@@ -195,8 +195,8 @@ fn HostRefusalDialog(
                         parts: vec![DetailPart::peer(refusal.reason)],
                     }
                 }
-                div { class: "host-settings-footer host-dialog-footer",
-                    div { class: "host-dialog-answers",
+                crate::modal_dialog::DialogFooter { class: "host-dialog-footer",
+                    crate::modal_dialog::DialogActions {
                         button {
                             r#type: "button",
                             class: "btn btn-neutral host-refusal-close",
@@ -2686,34 +2686,31 @@ enum HostMenuAction {
     Remove,
 }
 
-/// Draw the compact line icon used beside a host command.
+/// Map host commands to shared drawings without coupling their lifecycles.
 ///
 /// Host and session menus share the same visual language, but their action
-/// enums are intentionally different. Keeping this small renderer beside
-/// the host enum lets the host menu reuse the session menu's CSS contract
-/// without coupling host lifecycle names to session lifecycle code.
+/// enums remain intentionally different. This adapter chooses only a
+/// decorative shape; eligibility, focus and requests stay with the host row.
 #[component]
 fn HostMenuActionIcon(action: HostMenuAction) -> Element {
-    rsx! {
-        svg {
-            class: "session-row-menu-icon",
-            view_box: "0 0 14 14",
-            fill: "none",
-            stroke: "currentColor",
-            stroke_width: "1.2",
-            stroke_linejoin: "round",
-            "aria-hidden": "true",
-            match action {
-                HostMenuAction::Retry => rsx! { path { d: "M11.5 5.5 A4.6 4.6 0 0 0 3 4.5 M2.5 8.5 A4.6 4.6 0 0 0 11 9.5 M11.8 2.5 V5.8 H8.6 M2.2 11.5 V8.2 H5.4" } },
-                HostMenuAction::Adopt => rsx! { path { d: "M2 7 H12 M7 2 V12" } circle { cx: "7", cy: "7", r: "4.5" } },
-                HostMenuAction::Rerun => rsx! { path { d: "M11.5 5.5 A4.6 4.6 0 0 0 3 4.5 M2.5 8.5 A4.6 4.6 0 0 0 11 9.5 M11.8 2.5 V5.8 H8.6 M2.2 11.5 V8.2 H5.4" } },
-                HostMenuAction::AutomaticSetup => rsx! { path { d: "M7 1.8 L8.3 5.5 L12.2 6.8 L8.3 8.2 L7 12 L5.7 8.2 L1.8 6.8 L5.7 5.5 Z" } },
-                HostMenuAction::Update => rsx! { path { d: "M7 2 V10 M4 5 L7 2 L10 5 M3 11.5 H11" } },
-                HostMenuAction::Settings => rsx! { path { d: "M5.2 2.2 H8.8 L9.3 4.1 L11 5.1 L12.7 4.2 L14 6.5 L12.5 7.8 V9.8 L14 11.1 L12.7 13.4 L11 12.5 L9.3 13.5 H5.2 L4.7 11.6 L3 10.6 L1.3 11.5 L0 9.2 L1.5 7.9 V5.9 L0 4.6 L1.3 2.3 L3 3.2 L4.7 2.2 Z" } circle { cx: "7", cy: "7.9", r: "1.7" } },
-                HostMenuAction::Uninstall => rsx! { path { d: "M7 2 V10 M4 7 L7 10 L10 7 M3 12 H11" } },
-                HostMenuAction::Remove => rsx! { path { d: "M2.5 4 H11.5 M5.5 4 V2.5 H8.5 V4 M3.8 4 L4.5 12 H9.5 L10.2 4" } },
-            }
+    use crate::icons::{ActionGlyph, ActionIcon};
+    let glyph = match action {
+        HostMenuAction::Retry | HostMenuAction::Rerun => ActionGlyph::Restart,
+        HostMenuAction::Adopt => ActionGlyph::Adopt,
+        HostMenuAction::AutomaticSetup => ActionGlyph::Setup,
+        HostMenuAction::Update => ActionGlyph::Update,
+        HostMenuAction::Uninstall => ActionGlyph::Uninstall,
+        HostMenuAction::Remove => ActionGlyph::Delete,
+        HostMenuAction::Settings => {
+            return rsx! {
+                span { class: "menu-icon session-row-menu-icon", "aria-hidden": "true",
+                    crate::icons::SettingsIcon {}
+                }
+            };
         }
+    };
+    rsx! {
+        ActionIcon { glyph, class: "menu-icon session-row-menu-icon" }
     }
 }
 
@@ -3563,9 +3560,6 @@ fn HostRow(
     // even while a menu built against the wider list is still up.
     let adoptable_now = adopt_identity.is_some();
     let menu_order = host_menu_order(adoptable_now, manageable, provisioning_menu);
-    let has_provisioning_menu = provisioning_menu.rerun.is_some()
-        || provisioning_menu.automatic_setup
-        || provisioning_menu.update;
     // Setup still refuses behind the page lock, so its items stay disabled
     // while another operation holds it. Update planning mutates nothing and
     // its submission claim retries reactively, so the update item answers
@@ -3957,22 +3951,19 @@ fn HostRow(
                             }
                             div {
                                 class: "host-row-menu-panel",
-                                div {
-                                    class: "session-row-menu-header",
-                                    div {
-                                        class: "session-row-menu-title",
-                                        "data-tooltip": "{shown_name}",
+                                menu_panel::MenuHeader {
+                                    title_tooltip: shown_name.clone(),
+                                    summary_tooltip: peer_parts_tooltip(&menu_summary_parts),
+                                    title: rsx! {
                                         span { class: "peer-value", dir: "ltr", "{shown_name}" }
-                                    }
-                                    div {
-                                        class: "session-row-menu-summary",
-                                        "data-tooltip": "{peer_parts_tooltip(&menu_summary_parts)}",
+                                    },
+                                    summary: rsx! {
                                         PeerLine {
-                                            class: "session-row-menu-summary-runs".to_string(),
+                                            class: "session-row-menu-summary-runs host-row-menu-summary-runs".to_string(),
                                             parts: menu_summary_parts.clone(),
                                             peer_tooltips: true,
                                         }
-                                    }
+                                    },
                                 }
                                 div {
                                 class: "host-row-menu-items session-row-menu-items",
@@ -3980,7 +3971,7 @@ fn HostRow(
                                 aria_label: host_menu_label(host.name.raw()),
                                 button {
                                     r#type: "button",
-                                    class: "btn session-row-menu-item host-row-menu-item host-retry",
+                                    class: "btn menu-item session-row-menu-item host-row-menu-item host-retry",
                                     role: "menuitem",
                                     aria_describedby: "host-menu-retry-description",
                                     aria_disabled: if busy { "true" },
@@ -4008,15 +3999,16 @@ fn HostRow(
                                         on_retry.call(id);
                                     },
                                     HostMenuActionIcon { action: HostMenuAction::Retry }
-                                    span { class: "session-row-menu-copy",
-                                        span { class: "session-row-menu-label", "retry" }
-                                        span { id: "host-menu-retry-description", class: "session-row-menu-description", "try the connection again" }
+                                    menu_panel::MenuItemCopy {
+                                        label: rsx! { "retry" },
+                                        description_id: "host-menu-retry-description",
+                                        description: rsx! { "try the connection again" },
                                     }
                                 }
                                 if let (Some(reported), Some(label)) = (adopt_identity, adopt_label) {
                                     button {
                                         r#type: "button",
-                                        class: "btn session-row-menu-item host-row-menu-item host-adopt",
+                                        class: "btn menu-item session-row-menu-item host-row-menu-item host-adopt",
                                         role: "menuitem",
                                         aria_describedby: "host-menu-adopt-description",
                                         aria_disabled: if busy { "true" },
@@ -4049,19 +4041,17 @@ fn HostRow(
                                         // make "adopt X" read as something
                                         // else.
                                         HostMenuActionIcon { action: HostMenuAction::Adopt }
-                                        span { class: "session-row-menu-copy",
-                                            span { class: "session-row-menu-label peer-value", dir: "ltr", "{label}" }
-                                            span { id: "host-menu-adopt-description", class: "session-row-menu-description", "accept the supervisor's identity" }
+                                        menu_panel::MenuItemCopy {
+                                            label: rsx! { span { class: "peer-value", dir: "ltr", "{label}" } },
+                                            description_id: "host-menu-adopt-description",
+                                            description: rsx! { "accept the supervisor's identity" },
                                         }
                                     }
-                                }
-                                if has_provisioning_menu {
-                                    div { class: "host-row-menu-separator", role: "separator" }
                                 }
                                 if let Some(operation) = provisioning_menu.rerun {
                                     button {
                                         r#type: "button",
-                                        class: "btn session-row-menu-item host-row-menu-item provisioning-rerun",
+                                        class: "btn menu-item session-row-menu-item host-row-menu-item provisioning-rerun",
                                         role: "menuitem",
                                         aria_describedby: "host-menu-rerun-description",
                                         aria_disabled: if rerun_disabled { "true" },
@@ -4095,24 +4085,23 @@ fn HostRow(
                                             }
                                         },
                                         HostMenuActionIcon { action: HostMenuAction::Rerun }
-                                        span { class: "session-row-menu-copy",
-                                            span { class: "session-row-menu-label", if provisioning_menu.planning { "planning…" } else { "re-run" } }
-                                            span {
-                                                id: "host-menu-rerun-description",
-                                                class: "session-row-menu-description",
+                                        menu_panel::MenuItemCopy {
+                                            label: rsx! { if provisioning_menu.planning { "planning…" } else { "re-run" } },
+                                            description_id: "host-menu-rerun-description",
+                                            description: rsx! {
                                                 match operation {
                                                     ProvisioningOperation::Update => "try the failed update again",
                                                     ProvisioningOperation::Add => "try the failed setup again",
                                                     ProvisioningOperation::Uninstall => "try the failed uninstall again",
                                                 }
-                                            }
+                                            },
                                         }
                                     }
                                 }
                                 if provisioning_menu.automatic_setup {
                                     button {
                                         r#type: "button",
-                                        class: "btn session-row-menu-item host-row-menu-item provisioning-auto-setup",
+                                        class: "btn menu-item session-row-menu-item host-row-menu-item provisioning-auto-setup",
                                         role: "menuitem",
                                         aria_describedby: "host-menu-automatic-setup-description",
                                         aria_disabled: if setup_disabled { "true" },
@@ -4150,16 +4139,17 @@ fn HostRow(
                                             }
                                         },
                                         HostMenuActionIcon { action: HostMenuAction::AutomaticSetup }
-                                        span { class: "session-row-menu-copy",
-                                            span { class: "session-row-menu-label", "set up automatically" }
-                                            span { id: "host-menu-automatic-setup-description", class: "session-row-menu-description", "install Farhelm on this host" }
+                                        menu_panel::MenuItemCopy {
+                                            label: rsx! { "set up automatically" },
+                                            description_id: "host-menu-automatic-setup-description",
+                                            description: rsx! { "install Farhelm on this host" },
                                         }
                                     }
                                 }
                                 if provisioning_menu.update {
                                     button {
                                         r#type: "button",
-                                        class: "btn session-row-menu-item host-row-menu-item provisioning-update",
+                                        class: "btn menu-item session-row-menu-item host-row-menu-item provisioning-update",
                                         role: "menuitem",
                                         aria_describedby: "host-menu-update-description",
                                         aria_disabled: if update_disabled { "true" },
@@ -4204,18 +4194,16 @@ fn HostRow(
                                             }
                                         },
                                         HostMenuActionIcon { action: HostMenuAction::Update }
-                                        span { class: "session-row-menu-copy",
-                                            span { class: "session-row-menu-label", if provisioning_menu.planning && !local_app_update { "planning…" } else { "update" } }
-                                            span { id: "host-menu-update-description", class: "session-row-menu-description", "{update_item.description}" }
+                                        menu_panel::MenuItemCopy {
+                                            label: rsx! { if provisioning_menu.planning && !local_app_update { "planning…" } else { "update" } },
+                                            description_id: "host-menu-update-description",
+                                            description: rsx! { "{update_item.description}" },
                                         }
                                     }
                                 }
-                                if has_provisioning_menu {
-                                    div { class: "host-row-menu-separator", role: "separator" }
-                                }
                                 button {
                                     r#type: "button",
-                                    class: "btn session-row-menu-item host-row-menu-item host-settings",
+                                    class: "btn menu-item session-row-menu-item host-row-menu-item host-settings",
                                     role: "menuitem",
                                     aria_describedby: "host-menu-settings-description",
                                     aria_disabled: if settings_disabled { "true" },
@@ -4239,9 +4227,10 @@ fn HostRow(
                                         }
                                     },
                                     HostMenuActionIcon { action: HostMenuAction::Settings }
-                                    span { class: "session-row-menu-copy",
-                                        span { class: "session-row-menu-label", "settings" }
-                                        span { id: "host-menu-settings-description", class: "session-row-menu-description", "edit this host's connection" }
+                                    menu_panel::MenuItemCopy {
+                                        label: rsx! { "settings" },
+                                        description_id: "host-menu-settings-description",
+                                        description: rsx! { "edit this host's connection" },
                                     }
                                 }
                                 if manageable {
@@ -4251,11 +4240,11 @@ fn HostRow(
                                     // applies identically here. Not counted
                                     // by `MenuOrder`, so arrow navigation
                                     // steps straight past it.
-                                    div { class: "host-row-menu-separator", role: "separator" }
+                                    menu_panel::MenuSeparator { class: "host-row-menu-separator" }
                                     if provisioning_menu.uninstall {
                                         button {
                                             r#type: "button",
-                                            class: "btn session-row-menu-item host-row-menu-item provisioning-uninstall",
+                                            class: "btn menu-item menu-danger session-row-menu-item host-row-menu-item provisioning-uninstall",
                                             role: "menuitem",
                                             aria_describedby: "host-menu-uninstall-description",
                                             aria_disabled: if uninstall_disabled { "true" },
@@ -4292,15 +4281,16 @@ fn HostRow(
                                                 }
                                             },
                                             HostMenuActionIcon { action: HostMenuAction::Uninstall }
-                                            span { class: "session-row-menu-copy",
-                                                span { class: "session-row-menu-label", "uninstall" }
-                                                span { id: "host-menu-uninstall-description", class: "session-row-menu-description", "remove Farhelm from this host, keeping its data" }
+                                            menu_panel::MenuItemCopy {
+                                                label: rsx! { "uninstall" },
+                                                description_id: "host-menu-uninstall-description",
+                                                description: rsx! { "remove Farhelm from this host, keeping its data" },
                                             }
                                         }
                                     }
                                     button {
                                         r#type: "button",
-                                        class: "btn session-row-menu-item host-row-menu-item host-remove",
+                                        class: "btn menu-item menu-danger session-row-menu-item host-row-menu-item host-remove",
                                         role: "menuitem",
                                         aria_describedby: "host-menu-remove-description",
                                         aria_disabled: if busy { "true" },
@@ -4332,9 +4322,10 @@ fn HostRow(
                                             on_remove_start.call(id);
                                         },
                                         HostMenuActionIcon { action: HostMenuAction::Remove }
-                                        span { class: "session-row-menu-copy",
-                                            span { class: "session-row-menu-label", "remove" }
-                                            span { id: "host-menu-remove-description", class: "session-row-menu-description", "forget this host" }
+                                        menu_panel::MenuItemCopy {
+                                            label: rsx! { "remove" },
+                                            description_id: "host-menu-remove-description",
+                                            description: rsx! { "forget this host" },
                                         }
                                     }
                                 }
@@ -5014,7 +5005,7 @@ fn AddHostForm(
                     dismiss_tooltip: "cancel: close without adding a host",
                     on_dismiss: move |_| close.call(()),
                 }
-                div { class: "host-settings-body",
+                div { class: "dialog-body host-settings-body",
                 if let Some(card) = &agent_request {
                     dl { class: "agent-add-requester",
                         dt { "from host" }
@@ -5044,7 +5035,7 @@ fn AddHostForm(
                     // "corrected" one dials a host the user did not type.
                     input {
                         r#type: "text",
-                        class: "add-host-ssh",
+                        class: "add-host-ssh font-mono",
                         aria_describedby: "add-host-destination-help",
                         required: true,
                         autocomplete: "off",
@@ -5095,8 +5086,8 @@ fn AddHostForm(
                     }
                 }
                 }
-                div { class: "host-settings-footer host-dialog-footer",
-                div { class: "host-dialog-answers",
+                crate::modal_dialog::DialogFooter { class: "host-dialog-footer",
+                crate::modal_dialog::DialogActions {
                     // Discovery never holds the user behind its request.
                     button {
                         r#type: "button",

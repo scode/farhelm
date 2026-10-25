@@ -9,7 +9,8 @@ import { type APIRequestContext, type Locator, type Page } from "@playwright/tes
 import { randomUUID } from "node:crypto";
 import { clickDialogGap } from "./helpers/dialog-gap";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
-import { cleanupSession, createSession, listHosts, openRowMenu, stubFeed } from "./helpers/fleet";
+import { drainedRoute } from "./helpers/drained-route";
+import { agentLaunchRow, cleanupSession, createSession, listHosts, openRowMenu, SESSION_LISTING, stubFeed } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 
 /** Clone must offer the typed name visibly before a separate Enter launches.
@@ -438,17 +439,128 @@ async function observeChoiceCreates(
   return { form, bodies, build };
 }
 
-/** Establish keyboard focus and await this attempt's ordinary refusal before inspecting its body. */
-async function enterCreateChoice(form: Locator, control: Locator, bodies: Record<string, unknown>[]) {
+/** Establish keyboard focus and await this attempt's ordinary refusal before inspecting its body.
+ * An optional native selection key goes immediately before Enter, without a
+ * value assertion or render wait that could conceal stale controlled state.
+ */
+async function enterCreateChoice(
+  form: Locator,
+  control: Locator,
+  bodies: Record<string, unknown>[],
+  selectionKey?: string,
+) {
   const before = bodies.length;
   await control.focus();
   await expect(control).toBeFocused();
+  if (selectionKey) await control.press(selectionKey);
   await control.press("Enter");
   await expectReasonByLaunch(form, `choice fixture refused create ${before + 1}`);
   expect(bodies, "one Enter must send exactly one ordinary create").toHaveLength(before + 1);
   await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "false");
   return bodies[before];
 }
+
+/** Native effort edits must reach the ordinary launch before Enter can read an older render.
+ * Repeat and composition refusals run while idle, so a busy guard cannot
+ * hide their failure; the same select then supplies the positive control.
+ */
+test("launcher effort dropdown keyboard edits submit the new value exactly once", async ({ page, request }) => {
+  const levels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+  const { form, bodies } = await observeChoiceCreates(page, request, [
+    { id: "controls-omp-model", harness: "omp", efforts: levels },
+  ]);
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "OMP", exact: true }).click();
+  const effort = form.getByRole("combobox", { name: "effort", exact: true });
+  await expect(effort).toBeVisible();
+  await expect(effort.locator("option")).toHaveText(["default", ...levels]);
+  await expect(effort).toHaveValue("default");
+  await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "false");
+  for (const flags of [{ repeat: true }, { isComposing: true }]) {
+    await effort.focus();
+    await expect(effort).toBeFocused();
+    // Inject only the otherwise inaccessible held/composing edge. Ordinary
+    // selection and submission below remain actual native keyboard input.
+    const uncanceled = await effort.evaluate((node, flags) => node.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter", code: "Enter", bubbles: true, cancelable: true, ...flags,
+    })), flags);
+    expect(uncanceled, "the refused edge must also cancel the select's native Enter").toBe(false);
+    await expect(effort).toHaveValue("default");
+    expect(bodies, "a ready dropdown must refuse held and composing Enter").toHaveLength(0);
+  }
+
+  // No observed value or renderer readiness sits between each native edit
+  // and its Enter. The outgoing body is the selected-value ordering oracle.
+  for (const [key, value, serialized] of [
+    ["ArrowDown", "off", "off"],
+    ["End", "max", "max"],
+    ["Home", "default", null],
+  ] as const) {
+    const body = await enterCreateChoice(form, effort, bodies, key);
+    expect(body).toMatchObject({ launch: { harness: "omp", model: null, effort: serialized, permissions: "guarded" } });
+    await expect(effort).toHaveValue(value);
+  }
+});
+
+/** An inherited unsupported effort stays visible until corrected, rather than displaying a false Default.
+ * The live listing supplies real destination metadata; only the historical
+ * selection and current catalog are controlled. No old agent is launched.
+ * The rewrite drains while the page is alive, including after a failed assertion.
+ */
+test("launcher effort dropdown preserves an unsupported inherited choice until a native edit", async ({ page, request }) => {
+  const id = randomUUID();
+  const title = `inherited-effort-${id}`;
+  const { form, bodies } = await observeChoiceCreates(page, request, [
+    { id: "controls-omp-model", harness: "omp", efforts: ["off", "minimal", "low", "medium", "high", "xhigh", "max"] },
+  ]);
+  // Install after the create observer: GET is this fixture's real listing,
+  // while POST falls back to that observer's ordinary stamped refusal.
+  const stopListing = await drainedRoute(page, SESSION_LISTING, async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const response = await route.fetch();
+    expect(response.ok(), "the inherited fixture must extend the actual healthy listing").toBe(true);
+    const listing = await response.json();
+    const source = listing.sessions.find((candidate: { stale?: boolean }) => !candidate.stale);
+    expect(source?.id, "the fixture needs a real source row before inheriting its destination").toBeTruthy();
+    expect(typeof source.host, "the source must carry its actual connected host").toBe("number");
+    await route.fulfill({ response, json: {
+      ...listing,
+      total: listing.total + 1,
+      sessions: [...listing.sessions, {
+        ...source,
+        id,
+        title,
+        invocation: "omp",
+        launch: agentLaunchRow({ harness: "omp", model: "controls-omp-model", effort: "ultra", permissions: "guarded" }),
+      }],
+    } });
+  });
+  try {
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(form).toHaveCount(0);
+    await page.reload();
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row).toBeVisible({ timeout: 20_000 });
+    await expect(row).toContainText(title);
+    await openRowMenu(row);
+    await row.locator(".session-row-clone").click();
+    await expect(form).toBeVisible();
+    const effort = form.getByRole("combobox", { name: "effort", exact: true });
+    await expect(effort).toHaveValue("ultra");
+    await expect(effort.locator('option[value="ultra"]')).toHaveText("ultra");
+    await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "true");
+    await effort.focus();
+    await expect(effort).toBeFocused();
+    await effort.press("Enter");
+    await expectReasonByLaunch(form, "this saved choice is no longer supported by the current catalog; choose a compatible model or effort");
+    expect(bodies, "the visible incompatible effort cannot launch").toHaveLength(0);
+    expect(await enterCreateChoice(form, effort, bodies, "ArrowUp"))
+      .toMatchObject({ launch: { harness: "omp", model: "controls-omp-model", effort: "max", permissions: "guarded" } });
+    await expect(effort).toHaveValue("max");
+    await expect(effort.locator('option[value="ultra"]'), "Clone has no baseline to retain after replacing the old choice").toHaveCount(0);
+  } finally {
+    await stopListing();
+  }
+});
 
 /**
  * Retrying unchanged choices retains one intent, but each real change

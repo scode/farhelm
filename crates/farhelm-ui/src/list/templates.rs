@@ -369,7 +369,7 @@ fn NumberShortcutMenu(
     let tooltip = format!("{behavior} Only one template can hold each key. {state}");
     rsx! {
         span { class: "templates-number-control", "data-row-menu-key": "{menu_key}",
-            button { r#type: "button", class: "templates-number-key",
+            button { r#type: "button", class: "templates-number-key font-mono",
                 disabled,
                 aria_label: "number shortcut {display_peer(&name)}", aria_haspopup: "menu", aria_expanded: open(),
                 "data-bound": bound.is_some(),
@@ -390,9 +390,14 @@ fn NumberShortcutMenu(
             if open() {
                 div { class: "host-row-menu-flyout templates-number-flyout", style: session_menu_placement_style(placement()),
                     div { class: "host-row-menu-panel",
+                        crate::menu_panel::MenuHeader {
+                            title_tooltip: display_peer(&name),
+                            title: rsx! { span { class: "peer-value", dir: "ltr", "{display_peer(&name)}" } },
+                            summary: rsx! { "Number shortcut" },
+                        }
                         div { class: "session-row-menu-items", role: "menu", aria_label: "number key for {display_peer(&name)}",
                             for key in order.actions() {
-                                button { r#type: "button", class: "btn session-row-menu-item templates-number-option", role: "menuitem",
+                                button { r#type: "button", class: "btn menu-item session-row-menu-item templates-number-option", role: "menuitem",
                                     tabindex: if focused().and_then(|position| order.get(position)).or(order.get(0)) == Some(key) { "0" } else { "-1" },
                                     "data-menu-focus": crate::menu_panel::menu_item_focus_key(wiring, key),
                                     "data-tooltip": if let Some(key) = key { format!("give this template {}", TEMPLATE_SHORTCUTS.number_chord(key)) } else { "remove this template's number shortcut".into() },
@@ -400,11 +405,14 @@ fn NumberShortcutMenu(
                                     onfocusin: move |_| record_menu_item_focus(wiring, key), onfocusout: move |_| focused.set(None),
                                     onkeydown: move |event| { event.stop_propagation(); handle_menu_key(&event, order.position(key), wiring, &()); },
                                     onclick: move |_| { close_menu.call(()); on_choose.call(key.map(str::to_string)); },
-                                    span { if let Some(key) = key { "{TEMPLATE_SHORTCUTS.number_chord(key)}" } else { "no shortcut" } }
-                                    if let Some(owner) = key.and_then(|key| bindings.get(key)) {
-                                        span { class: "templates-number-owner peer-value", dir: "ltr",
-                                            if owner.raw() == name { "this template" } else { "{owner.escaped()} (moves here)" }
-                                        }
+                                    crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Templates, class: "menu-icon session-row-menu-icon" }
+                                    crate::menu_panel::MenuItemCopy {
+                                        label: rsx! { if let Some(key) = key { span { class: "font-mono", "{TEMPLATE_SHORTCUTS.number_chord(key)}" } } else { "no shortcut" } },
+                                        description: key.and_then(|key| bindings.get(key)).map(|owner| rsx! {
+                                            span { class: "templates-number-owner peer-value", dir: "ltr",
+                                                if owner.raw() == name { "this template" } else { "{owner.escaped()} (moves here)" }
+                                            }
+                                        }),
                                     }
                                 }
                             }
@@ -1064,7 +1072,7 @@ pub(super) fn NameKindControl(
 ) -> Element {
     let fixed = kind == Some(TemplateNameKind::Fixed);
     rsx! {
-        div { class: "templates-segments template-name-kind", role: "group", aria_label: "session name kind",
+        div { class: "segmented-control template-name-kind", role: "group", aria_label: "session name kind",
             for (value, text) in [(None, "base name"), (Some(TemplateNameKind::Fixed), "fixed name")] {
                 button { r#type: "button", disabled, aria_pressed: fixed == value.is_some(),
                     "data-tooltip": "session name: {text}. {NAME_KIND_HELP}",
@@ -1075,12 +1083,15 @@ pub(super) fn NameKindControl(
     }
 }
 
-/// One native select, including an older incompatible value until the user
-/// corrects it. Dropping an unknown option would visually claim a different
-/// choice while the draft still held the old one. Its explicit accessible name
-/// stays independent of the option text nested inside the visible label.
-/// Options also mark the saved selection: a select's initial value can be applied
-/// before its options mount, which otherwise leaves the first option displayed.
+/// Present the complete draft vocabulary without normalizing an old value.
+///
+/// Count after retaining an incompatible selection: two to five displayed
+/// choices use shared segments, while other counts keep a native select.
+/// Changing either presentation edits only this template's draft, including
+/// native button Enter; saving and launching remain the caller's actions.
+/// Select options also mark the saved selection because the controlled value
+/// can arrive before its options mount. Both forms keep an explicit field name
+/// independent of the option text, including peer-authored host names.
 #[component]
 fn Choice(
     label: String,
@@ -1093,11 +1104,27 @@ fn Choice(
         options.push((value.clone(), format!("{value} (not offered)")));
     }
     rsx! {
-        label { class: "templates-field",
-            span { "{label}" }
-            select { disabled, value: "{value}", aria_label: "{label}", "data-tooltip": "{label}: the value this template applies",
-                onchange: move |event| on_change.call(event.value()),
-                for (key, text) in options { option { value: "{key}", selected: key == value, "{text}" } }
+        if (2..=5).contains(&options.len()) {
+            div { class: "templates-field",
+                span { "{label}" }
+                div { class: "segmented-control template-choice", role: "group", aria_label: "{label}",
+                    for (key, text) in options {
+                        button { key: "{key}", r#type: "button", value: "{key}", disabled,
+                            aria_pressed: key == value,
+                            "data-tooltip": "{label}: the value this template applies",
+                            onclick: move |_| on_change.call(key.clone()),
+                            "{text}"
+                        }
+                    }
+                }
+            }
+        } else {
+            label { class: "templates-field",
+                span { "{label}" }
+                select { disabled, value: "{value}", aria_label: "{label}", "data-tooltip": "{label}: the value this template applies",
+                    onchange: move |event| on_change.call(event.value()),
+                    for (key, text) in options { option { value: "{key}", selected: key == value, "{text}" } }
+                }
             }
         }
     }
@@ -2233,7 +2260,7 @@ pub(super) fn TemplatesDialog(
                                             button { r#type: "button", class: "templates-row", disabled: disabled || templates.pending(), aria_pressed: previous().as_ref()==Some(&row.template.name), "data-tooltip": "edit template {display_peer(&row.template.name)}", onclick: move |_| depart.call(Departure::Open(Box::new(row.template.clone()))),
                                                 span { class: "templates-row-name peer-value", dir: "ltr", "{display_peer(&row.template.name)}" }
                                                 TemplateSummary { class: "templates-row-summary", fields: row.template.fields.clone() }
-                                                if row.anchor.marked { span { class: "templates-quick-chord", "{quick_launch_chord}" } }
+                                                if row.anchor.marked { span { class: "templates-quick-chord font-mono", "{quick_launch_chord}" } }
                                             }
                                         }
                                     }
@@ -2276,7 +2303,7 @@ pub(super) fn TemplatesDialog(
                             }
                             div { class: "templates-field",
                                 span { "switches launcher to" }
-                                div { class: "templates-segments", role: "group", aria_label: "switches launcher to",
+                                div { class: "segmented-control", role: "group", aria_label: "switches launcher to",
                                     for (kind,text) in [(Some(LauncherKind::Agent),"agent"),(Some(LauncherKind::Command),"command"),(None,"don't switch")] {
                                         button { r#type: "button", disabled, aria_pressed: current.fields.kind==kind, "data-tooltip": "switches launcher to: {text}; incompatible fields stay visible", onclick: move |_| { draft.with_mut(|d| d.fields.kind=kind); add_open.set(false); }, "{text}" }
                                     }

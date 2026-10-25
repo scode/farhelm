@@ -120,11 +120,16 @@ test("composer word search drives a structured launch", async ({ page, request }
     .toHaveAttribute("aria-pressed", "true");
 
   await search.fill("perms:yolo");
-  await expect(form.getByRole("group", { name: "Permissions" })).toBeVisible();
+  // The search section and the persistent mode choices need distinct names
+  // even while both are visible to assistive technology.
+  await expect(form.getByRole("group", { name: "Permissions", exact: true })).toBeVisible();
+  const permissionModes = form.getByRole("group", { name: "permission mode", exact: true });
+  await expect(permissionModes).toBeVisible();
+  await expect(form.locator(".launch-composer-permissions-choice .launch-composer-section-label")).toHaveText("permissions");
   await expect(form.getByRole("option", { name: "Permissions: yolo", exact: true, selected: true }))
     .toBeVisible();
   await search.press("Enter");
-  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }))
+  await expect(permissionModes.getByRole("button", { name: "yolo", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();
@@ -136,7 +141,7 @@ test("composer word search drives a structured launch", async ({ page, request }
   await expect(form.getByRole("option", { name: "Permissions: guarded", exact: true, selected: true }))
     .toBeVisible();
   await search.press("Enter");
-  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }))
+  await expect(permissionModes.getByRole("button", { name: "guarded", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();

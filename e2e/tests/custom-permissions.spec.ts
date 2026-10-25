@@ -311,12 +311,15 @@ test("custom model acceptance keeps compatible effort with incomplete permission
   const form = await openNew(page);
   await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true }).click();
   const flags = form.locator(".custom-permission-flags");
-  const high = form.locator(".launch-composer-effort-choice").getByRole("button", { name: "high", exact: true });
+  // Claude's default plus five explicit levels use the shared native dropdown.
+  // Selecting through it must preserve the same draft as a short effort row.
+  const effort = form.getByRole("combobox", { name: "effort", exact: true });
+  await expect(effort).toBeVisible();
   const model = form.getByRole("combobox", { name: "model", exact: true });
   for (const [round, draft] of ["", "--mode '"].entries()) {
     await flags.fill(draft);
-    await high.click();
-    await expect(high).toHaveAttribute("aria-pressed", "true");
+    await effort.selectOption("high");
+    await expect(effort).toHaveValue("high");
     await expect(form.locator(".create-session-submit")).toBeDisabled();
     // A distinct id per round, checked once the field closes: an open field
     // shows the typed draft, so only the closed one proves Enter accepted it,
@@ -327,7 +330,7 @@ test("custom model acceptance keeps compatible effort with incomplete permission
     await model.press("Enter");
     await expect(model).toHaveAttribute("aria-expanded", "false");
     await expect(model).toHaveValue(id);
-    await expect(high).toHaveAttribute("aria-pressed", "true");
+    await expect(effort).toHaveValue("high");
     await expect(flags).toHaveValue(draft);
     await expect(form.locator(".create-session-submit")).toBeDisabled();
   }

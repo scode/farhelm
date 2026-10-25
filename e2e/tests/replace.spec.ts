@@ -907,6 +907,11 @@ test("opening replace-with from the keyboard focuses search before any typing", 
   }
 });
 
+/** Search edits in Replace with must reach the replacement request, not just
+ * repaint the source's prefilled controls. Reading back the new session and
+ * the source's removal proves that the ordinary empty-search Enter uses those
+ * edits at the destructive endpoint while keeping the source's destination.
+ */
 test("replace with pre-fills clone's form from the source, and editing the harness and effort through search then launching creates the edited session in the source's place", async ({
   page,
   request,
@@ -978,9 +983,9 @@ test("replace with pre-fills clone's form from the source, and editing the harne
     // value the harness switch cleared on its own).
     await search.fill("medium");
     await search.press("Enter");
-    await expect(
-      form.locator(".launch-composer-effort-choice").getByRole("button", { name: "medium", exact: true }),
-    ).toHaveAttribute("aria-pressed", "true");
+    // Claude's longer effort list uses a dropdown. Search still commits the
+    // choice without moving focus from the launcher's search box.
+    await expect(form.getByRole("combobox", { name: "effort", exact: true })).toHaveValue("medium");
     await expect(search).toHaveValue("");
     await expect(search).toBeFocused();
 

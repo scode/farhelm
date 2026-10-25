@@ -1213,9 +1213,11 @@ test("templates save explicit guarded and default-YOLO permissions", async ({ pa
     await addField(dialog, "approvals");
     for (const [agent, permission] of [["codex", "guarded"], ["omp", "yolo"], ["goose", "yolo"]]) {
       await dialog.getByLabel("agent type", { exact: true }).selectOption(agent);
-      const choices = dialog.getByLabel("approvals", { exact: true });
-      await expect(choices.locator(`option[value="${permission}"]`)).not.toHaveText(/not offered/);
-      await choices.selectOption(permission);
+      const choices = dialog.getByRole("group", { name: "approvals", exact: true });
+      const offered = choices.locator(`button[value="${permission}"]`);
+      await expect(offered).not.toHaveText(/not offered/);
+      await offered.click();
+      await expect(offered).toHaveAttribute("aria-pressed", "true");
       await expect(dialog.locator(".templates-save")).toBeEnabled();
       await dialog.locator(".templates-save").click();
       await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
@@ -1349,7 +1351,8 @@ test("the Templates dialog creates, edits, renames, deletes and undoes", async (
     await addField(dialog, "agent type");
     await dialog.getByLabel("agent type", { exact: true }).selectOption("codex");
     await addField(dialog, "effort");
-    await dialog.getByLabel("effort", { exact: true }).selectOption("high");
+    const effort = dialog.getByRole("group", { name: "effort", exact: true });
+    await effort.getByRole("button", { name: "high", exact: true }).click();
     await dialog.locator(".templates-save").click();
     const row = dialog.locator(".templates-row", { hasText: name });
     await expect(row).toBeVisible();
@@ -1360,8 +1363,8 @@ test("the Templates dialog creates, edits, renames, deletes and undoes", async (
     await expect(row).toHaveAttribute("aria-pressed", "false");
     await row.click();
     await expect(dialog.getByLabel("agent type", { exact: true })).toHaveValue("codex");
-    await expect(dialog.getByLabel("effort", { exact: true })).toHaveValue("high");
-    await dialog.getByLabel("effort", { exact: true }).selectOption("low");
+    await expect(effort.getByRole("button", { name: "high", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await effort.getByRole("button", { name: "low", exact: true }).click();
     await dialog.locator(".templates-name").fill(renamed);
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-row-name", { hasText: renamed })).toBeVisible();
@@ -1511,7 +1514,15 @@ test("unsaved departures support keep editing, discard and save before leaving",
     await dialog.locator(".templates-save-leave").click();
     await expect(dialog.locator(".templates-name")).toHaveValue(other);
     expect((await storedTemplate(request, copy)).fields.name).toBe("saved-before-leaving");
-    await dialog.getByLabel("approvals", { exact: true }).selectOption("true");
+    // This is the command template's statement, not the launcher's YOLO
+    // question. Native button Enter edits only the unsaved template draft.
+    const yolo = dialog.getByRole("group", { name: "approvals", exact: true }).getByRole("button", { name: "YOLO", exact: true });
+    await yolo.focus();
+    await expect(yolo).toBeFocused();
+    await yolo.press("Enter");
+    await expect(yolo).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.locator(".templates-unsaved")).toBeVisible();
+    expect((await storedTemplate(request, other)).fields.yolo).toBe(false);
     await dialog.locator(".templates-close").click();
     await dialog.locator(".templates-keep-editing").click();
     await expect(dialog.locator(".templates-departure")).toHaveCount(0);
@@ -1531,7 +1542,10 @@ test("unsaved departures support keep editing, discard and save before leaving",
 /**
  * Legacy inference is an unsaved editor interpretation, not a migration on
  * read. Unsupported approvals stay visible after agent changes, while custom
- * model text remains saveable. Mobile Back must use the same draft guard.
+ * model text remains saveable. Retaining an unsupported choice determines
+ * whether the full vocabulary needs a select or fits shared segments. Native
+ * correction across that boundary must leave the dialog keyboard reachable.
+ * Mobile Back must use the same draft guard.
  */
 test("legacy switches and agent choices remain explicit at phone width", async ({ page, request }) => {
   const name = `e2e-legacy-${Date.now()}`;
@@ -1544,11 +1558,36 @@ test("legacy switches and agent choices remain explicit at phone width", async (
     await expect(dialog.locator(".templates-inferred")).toBeVisible();
     await expect(dialog.locator(".templates-unsaved")).toBeVisible();
     expect((await storedTemplate(request, name)).fields.kind).toBeUndefined();
-    // Opening an existing template must initialize each native select from
-    // its saved value, even when that value is not the first offered option.
+    // Both presentations must initialize from the saved value, even when it
+    // is not the first offered option. Goose has reset plus four approvals.
     await expect(dialog.getByLabel("agent type", { exact: true })).toHaveValue("goose");
-    await expect(dialog.getByLabel("approvals", { exact: true })).toHaveValue("smart_approve");
+    const approvals = dialog.getByRole("group", { name: "approvals", exact: true });
+    await expect(approvals.getByRole("button")).toHaveCount(5);
+    await expect(approvals.locator('button[value="smart_approve"]')).toHaveAttribute("aria-pressed", "true");
+    await dialog.getByLabel("agent type", { exact: true }).selectOption("omp");
+    const longer = dialog.getByRole("combobox", { name: "approvals", exact: true });
+    await expect(longer.locator("option")).toHaveCount(6);
+    await expect(longer).toHaveValue("smart_approve");
+    await expect(longer.locator('option[value="smart_approve"]')).toHaveText(/not offered/);
+    // Assert the actual neighbor before using a native arrow to correct the
+    // inherited value. Removing it leaves five options and replaces the select.
+    await expect(longer.locator("option").nth(4)).toHaveAttribute("value", "approve");
+    await longer.focus();
+    await expect(longer).toBeFocused();
+    await longer.press("ArrowUp");
+    await expect(approvals.getByRole("button")).toHaveCount(5);
+    await expect(approvals.locator('button[value="approve"]')).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+    await page.keyboard.press("Tab");
+    await expect.poll(() => dialog.evaluate((element) => element.contains(document.activeElement) && document.activeElement !== element)).toBe(true);
+    expect((await storedTemplate(request, name)).fields.permissions).toBe("smart_approve");
+    // Restore the same unsupported draft for the existing refusal path.
+    await dialog.getByLabel("agent type", { exact: true }).selectOption("goose");
+    await approvals.locator('button[value="smart_approve"]').click();
     await dialog.getByLabel("agent type", { exact: true }).selectOption("claude");
+    await expect(approvals.getByRole("button")).toHaveCount(5);
+    await expect(approvals.locator('button[value="smart_approve"]')).toHaveAttribute("aria-pressed", "true");
+    await expect(approvals.locator('button[value="smart_approve"]')).toHaveText(/not offered/);
     await expect(dialog.locator('.templates-set-field[data-field="permissions"] .templates-error')).toContainText("does not offer");
     await dialog.locator(".templates-save").click();
     const refusal = dialog.locator('p.templates-error[role="status"]');
@@ -1560,7 +1599,7 @@ test("legacy switches and agent choices remain explicit at phone width", async (
       return element.getBoundingClientRect().top >= footer.getBoundingClientRect().bottom;
     })).toBe(true);
     expect((await storedTemplate(request, name)).fields.agent).toBe("goose");
-    await dialog.getByLabel("approvals", { exact: true }).selectOption("default");
+    await approvals.locator('button[value="default"]').click();
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
     expect((await storedTemplate(request, name)).fields).toEqual({ kind: "agent", agent: "claude", permissions: null, model: "future custom model" });

@@ -11,6 +11,8 @@
 //! the controls. The refresh has its own CSS class because the base dialog styles also serve
 //! unrelated modals. The switches remain native checkboxes, including their
 //! write-disable, refused-write reset and keyboard contracts.
+//! Each permission's label, explanation and outcome form one spacing group,
+//! so adjacent independent grants do not look like one setting.
 //!
 //! What this module owns is presentation and focus. The state it renders
 //! (which host is open, which field is being edited, the draft, the outcome
@@ -289,6 +291,9 @@ fn commands_help(commands_without_asking: bool) -> &'static str {
 /// Titles remain caller-rendered markup so peer values keep
 /// their escaping and direction isolation. Dismiss runs the caller's cancel
 /// path; this header must not decide when an operation permits cancellation.
+/// The shared DialogHeader receives only presentation elements: host facts
+/// and the caller-owned close control remain this adapter's responsibility.
+/// An unknown host kind with no mark contributes no empty icon tile.
 #[component]
 pub(crate) fn HostDialogHeader(
     host: Option<Host>,
@@ -307,49 +312,48 @@ pub(crate) fn HostDialogHeader(
         HostPhase::VersionSkew { peer_build, .. } => Some(peer_build.clone()),
         _ => None,
     });
+    let tile = tile.or_else(|| match host.as_ref() {
+        Some(host) => match host.kind {
+            HostKind::Local => {
+                Some(rsx! { HostMark { icon: host.icon, color: host.color, local: true } })
+            }
+            HostKind::Ssh => Some(rsx! { HostMark { icon: host.icon, color: host.color } }),
+            HostKind::Unrecognized => None,
+        },
+        None => Some(rsx! { HostMark {} }),
+    });
+    // Only this adapter knows host phases and reported versions. The shared
+    // frame receives their already separated, escaped presentation elements.
+    let summary = summary.map(|summary| rsx! { "{summary}" }).or_else(|| {
+        host.map(|host| {
+            rsx! {
+                span { class: "host-status {phase_class(&host.state)}",
+                    span { class: "status-dot", "aria-hidden": "true" }
+                    "{phase_display_label(&host.state)}"
+                }
+                if let Some(version) = reported_version {
+                    span { class: "host-settings-version",
+                        "Farhelm "
+                        span { class: "peer-value", dir: "ltr", "{version.escaped()}" }
+                    }
+                }
+            }
+        })
+    });
     rsx! {
-        div { class: "host-settings-header",
-            div { class: "host-settings-mark", "aria-hidden": "true",
-                if let Some(tile) = tile {
-                    {tile}
-                } else {
-                    match host.as_ref() {
-                        Some(host) => match host.kind {
-                            HostKind::Local => rsx! { HostMark { icon: host.icon, color: host.color, local: true } },
-                            HostKind::Ssh => rsx! { HostMark { icon: host.icon, color: host.color } },
-                            HostKind::Unrecognized => rsx! {},
-                        },
-                        None => rsx! { HostMark {} },
-                    }
-                }
-            }
-            div { class: "host-settings-heading",
-                h2 { class: "host-settings-title", {title} }
-                div { class: if summary_danger.unwrap_or(false) { "host-settings-summary host-settings-summary-danger" } else { "host-settings-summary" },
-                    if let Some(summary) = summary {
-                        "{summary}"
-                    } else if let Some(host) = host {
-                        span { class: "host-status {phase_class(&host.state)}",
-                            span { class: "status-dot", "aria-hidden": "true" }
-                            "{phase_display_label(&host.state)}"
-                        }
-                        if let Some(version) = reported_version {
-                            span { class: "host-settings-version",
-                                "Farhelm "
-                                span { class: "peer-value", dir: "ltr", "{version.escaped()}" }
-                            }
-                        }
-                    }
-                }
-            }
-            button {
+        crate::modal_dialog::DialogHeader {
+            title,
+            tile,
+            summary,
+            summary_class: if summary_danger.unwrap_or(false) { "host-settings-summary-danger" } else { "" },
+            close: rsx! { button {
                 r#type: "button",
-                class: "host-settings-dismiss",
+                class: "dialog-close host-settings-dismiss",
                 aria_label: "{dismiss_label}",
                 "data-tooltip": "{dismiss_tooltip}",
                 onclick: move |_| on_dismiss.call(()),
                 "×"
-            }
+            } },
         }
     }
 }
@@ -485,7 +489,7 @@ pub(super) fn HostSettingsDialog(
                     dismiss_tooltip: "close: done with this host's settings",
                     on_dismiss: move |_| on_close.call(()),
                 }
-                ScrollRegion { class: "host-settings-body",
+                ScrollRegion { class: "dialog-body host-settings-body",
                 handle: DIALOG, selector: ".host-settings-body", name: "host settings",
                 recovery: settings_recovery(),
                 if manageable || alias_supported {
@@ -602,13 +606,13 @@ pub(super) fn HostSettingsDialog(
                 }
                 section { class: "host-settings-section", aria_label: "Permissions",
                     h3 { class: "host-settings-section-title", "Permissions" }
-                div { class: "host-settings-yolo",
-                    label { class: "host-yolo-without-asking",
+                div { class: "host-settings-yolo setting-group",
+                    label { class: "host-yolo-without-asking setting-row",
                         "data-tooltip": "start YOLO sessions on this host without asking first",
                         span { "Start YOLO sessions without asking" }
                         input {
                             r#type: "checkbox",
-                            class: "host-yolo-without-asking-toggle host-settings-switch",
+                            class: "host-yolo-without-asking-toggle control-switch",
                             checked: host.yolo_without_asking,
                             "data-yolo-without-asking": "{host.yolo_without_asking}",
                             // One setting at a time: a toggle while a field
@@ -622,21 +626,23 @@ pub(super) fn HostSettingsDialog(
                     {outcome_for(SettingsField::YoloWithoutAsking)}
                 }
                 div { class: "host-settings-commands",
-                    label { class: "host-commands-without-asking",
-                        "data-tooltip": "let agents in this host's sessions start, stop, change and delete sessions and templates without asking first",
-                        span { "Run farhelm commands without asking" }
-                        input {
-                            r#type: "checkbox",
-                            class: "host-commands-without-asking-toggle host-settings-switch",
-                            checked: host.commands_without_asking,
-                            "data-commands-without-asking": "{host.commands_without_asking}",
-                            // One setting at a time, as for the YOLO box above.
-                            disabled: busy || editing.is_some(),
-                            onchange: move |event| on_commands_without_asking.call((id, event.checked())),
+                    div { class: "setting-group",
+                        label { class: "host-commands-without-asking setting-row",
+                            "data-tooltip": "let agents in this host's sessions start, stop, change and delete sessions and templates without asking first",
+                            span { "Run farhelm commands without asking" }
+                            input {
+                                r#type: "checkbox",
+                                class: "host-commands-without-asking-toggle control-switch",
+                                checked: host.commands_without_asking,
+                                "data-commands-without-asking": "{host.commands_without_asking}",
+                                // One setting at a time, as for the YOLO box above.
+                                disabled: busy || editing.is_some(),
+                                onchange: move |event| on_commands_without_asking.call((id, event.checked())),
+                            }
                         }
+                        p { class: "host-settings-help", "{commands_help(host.commands_without_asking)}" }
+                        {outcome_for(SettingsField::CommandsWithoutAsking)}
                     }
-                    p { class: "host-settings-help", "{commands_help(host.commands_without_asking)}" }
-                    {outcome_for(SettingsField::CommandsWithoutAsking)}
                     for (local_network, allowed, label, help, field) in [
                         (false, host.links_without_asking, "Open links without asking",
                          "Agents on this host may open public web addresses. Local-network addresses still need their own permission.",
@@ -645,34 +651,38 @@ pub(super) fn HostSettingsDialog(
                          "Agents on this host may make your browser load addresses on your own machine or private network without an approval question.",
                          SettingsField::LocalLinksWithoutAsking),
                     ] {
-                        label {
-                            class: "host-settings-choice",
-                            "data-tooltip": help,
-                            span { "{label}" }
-                            input {
-                                r#type: "checkbox",
-                                class: if local_network { "host-local-links-without-asking-toggle host-settings-switch" }
-                                    else { "host-links-without-asking-toggle host-settings-switch" },
-                                checked: allowed,
-                                "data-browser-permission": "{allowed}",
-                                disabled: busy || editing.is_some(),
-                                onchange: move |event| on_browser_permission.call((id, local_network, event.checked())),
+                        div { class: "setting-group",
+                            label {
+                                class: "host-settings-choice setting-row",
+                                "data-tooltip": help,
+                                span { "{label}" }
+                                input {
+                                    r#type: "checkbox",
+                                    class: if local_network { "host-local-links-without-asking-toggle control-switch" }
+                                        else { "host-links-without-asking-toggle control-switch" },
+                                    checked: allowed,
+                                    "data-browser-permission": "{allowed}",
+                                    disabled: busy || editing.is_some(),
+                                    onchange: move |event| on_browser_permission.call((id, local_network, event.checked())),
+                                }
                             }
+                            p { class: "host-settings-help", "{help}" }
+                            {outcome_for(field)}
                         }
-                        p { class: "host-settings-help", "{help}" }
-                        {outcome_for(field)}
                     }
                 }
                 }
                 }
-                div { class: "host-settings-actions host-settings-footer",
-                    span { "changes save as you make them" }
-                    button {
-                        r#type: "button",
-                        class: "btn btn-neutral host-settings-close",
-                        "data-tooltip": "close: done with this host's settings",
-                        onclick: move |_| on_close.call(()),
-                        "close"
+                crate::modal_dialog::DialogFooter { class: "host-settings-actions",
+                    span { class: "dialog-footer-hint", "changes save as you make them" }
+                    crate::modal_dialog::DialogActions {
+                        button {
+                            r#type: "button",
+                            class: "btn btn-neutral host-settings-close",
+                            "data-tooltip": "close: done with this host's settings",
+                            onclick: move |_| on_close.call(()),
+                            "close"
+                        }
                     }
                 }
             }
@@ -745,7 +755,7 @@ pub(super) fn HostRemoveDialog(
                         }
                     },
                 }
-                ScrollRegion { class: "host-settings-body",
+                ScrollRegion { class: "dialog-body host-settings-body",
                     handle: DIALOG, selector: ".host-settings-body", name: "host removal details",
                     recovery: RecoveryFocus::new(".host-settings-close", None, true, RecoveryDelay::OneFrame),
                     p { class: "host-settings-value peer-value host-dialog-destination", dir: "ltr", "{destination}" }
@@ -759,11 +769,11 @@ pub(super) fn HostRemoveDialog(
                         }
                     }
                 }
-                div { class: "host-settings-footer host-dialog-footer",
-                    p { id: "host-remove-permanent-hint", class: "host-dialog-permanent-hint",
+                crate::modal_dialog::DialogFooter { class: "host-dialog-footer",
+                    p { id: "host-remove-permanent-hint", class: "dialog-footer-hint host-dialog-permanent-hint",
                         "undo \"don't ask again\" with the gear at the top of the sidebar"
                     }
-                    div { class: "host-dialog-answers host-remove-actions",
+                    crate::modal_dialog::DialogActions { class: "host-remove-actions",
                         button {
                             r#type: "button",
                             class: "btn btn-neutral host-settings-close",

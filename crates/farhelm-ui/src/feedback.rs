@@ -263,51 +263,15 @@ pub(crate) fn FeedbackDialog(
                         on_close.call(());
                     }
                 },
-                // Reuse the host frame's geometry, not its host-specific
-                // header component. Every dismiss path still asks the live
-                // send state, including clicks queued before disabling renders.
-                div { class: "host-settings-header",
-                    div { class: "host-settings-mark", "aria-hidden": "true",
-                        svg {
-                            class: "feedback-glyph",
-                            view_box: "0 0 32 32",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "1.6",
-                            stroke_linejoin: "round",
-                            path { d: "M5 5h22a3 3 0 0 1 3 3v11a3 3 0 0 1-3 3H16l-6 5v-5H5a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3Z" }
-                            circle {
-                                cx: "10",
-                                cy: "13.5",
-                                r: "1.4",
-                                fill: "currentColor",
-                                stroke: "none",
-                            }
-                            circle {
-                                cx: "16",
-                                cy: "13.5",
-                                r: "1.4",
-                                fill: "currentColor",
-                                stroke: "none",
-                            }
-                            circle {
-                                cx: "22",
-                                cy: "13.5",
-                                r: "1.4",
-                                fill: "currentColor",
-                                stroke: "none",
-                            }
-                        }
-                    }
-                    div { class: "host-settings-heading",
-                        h2 { class: "host-settings-title", "send feedback" }
-                        div { class: "host-settings-summary",
-                            "goes privately to Farhelm's maintainer, not a public tracker"
-                        }
-                    }
-                    button {
+                // Presentation is shared, but every dismiss path still asks
+                // the live send state, including already queued clicks.
+                crate::modal_dialog::DialogHeader {
+                    title: rsx! { "send feedback" },
+                    summary: rsx! { "goes privately to Farhelm's maintainer, not a public tracker" },
+                    tile: rsx! { crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Feedback, size: 28, class: "feedback-glyph" } },
+                    close: rsx! { button {
                         r#type: "button",
-                        class: "host-settings-dismiss feedback-dismiss",
+                        class: "dialog-close host-settings-dismiss feedback-dismiss",
                         aria_label: "close send feedback",
                         "data-tooltip": "close: leave this feedback dialog",
                         disabled: sending,
@@ -317,9 +281,9 @@ pub(crate) fn FeedbackDialog(
                             }
                         },
                         "×"
-                    }
+                    } },
                 }
-                ScrollRegion { class: "host-settings-body",
+                ScrollRegion { class: "dialog-body host-settings-body",
                     handle: DialogHandle::new(DIALOG_SELECTOR), selector: ".host-settings-body",
                     // Sending disables the editors too; native eligibility
                     // keeps that retained message reachable before success.
@@ -406,9 +370,9 @@ pub(crate) fn FeedbackDialog(
                         }
                     }
                 }
-                div { class: "host-settings-actions host-settings-footer",
+                crate::modal_dialog::DialogFooter { class: "host-settings-actions",
                     if matches!(state(), SendState::Editing | SendState::Failed(_)) {
-                        span { class: "feedback-hint",
+                        span { class: "dialog-footer-hint feedback-hint",
                             if matches!(state(), SendState::Failed(_)) {
                                 "nothing was sent"
                             } else {
@@ -416,7 +380,7 @@ pub(crate) fn FeedbackDialog(
                             }
                         }
                     }
-                    div { class: "host-dialog-answers",
+                    crate::modal_dialog::DialogActions {
                         button {
                             r#type: "button",
                             class: "btn btn-neutral feedback-cancel",

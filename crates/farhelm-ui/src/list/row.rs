@@ -356,44 +356,25 @@ fn menu_header_summary_tooltip(parts: &[DetailPart]) -> String {
         .collect()
 }
 
-/// Decorative line art for commands; the button text supplies the name.
+/// Map session commands to shared drawings without sharing their behavior.
 ///
-/// These paths come from design C's small action glyphs. Keeping them in
-/// one component makes every command use the same stroke and box size.
+/// The domain enum still owns menu order and activation. The decorative
+/// glyph carries no accessible name or focus stop of its own.
 #[component]
 fn MenuActionIcon(action: MenuAction) -> Element {
+    use crate::icons::{ActionGlyph, ActionIcon};
+    let glyph = match action {
+        MenuAction::Rename => ActionGlyph::Edit,
+        MenuAction::MarkSeen => ActionGlyph::MarkSeen,
+        MenuAction::TogglePin => ActionGlyph::Pin,
+        MenuAction::Clone => ActionGlyph::Clone,
+        MenuAction::ReplaceWith => ActionGlyph::Adjust,
+        MenuAction::Replace => ActionGlyph::Replace,
+        MenuAction::Stop => ActionGlyph::Stop,
+        MenuAction::Delete => ActionGlyph::Delete,
+    };
     rsx! {
-        svg {
-            class: "session-row-menu-icon",
-            view_box: "0 0 14 14",
-            fill: "none",
-            stroke: "currentColor",
-            stroke_width: "1.2",
-            stroke_linejoin: "round",
-            "aria-hidden": "true",
-            match action {
-                MenuAction::Rename => rsx! { path { d: "M2.5 11.5 L2.5 9.5 L9 3 L11 5 L4.5 11.5 Z" } },
-                MenuAction::MarkSeen => rsx! {
-                    path { d: "M1.5 7 C3.5 3.5 10.5 3.5 12.5 7 C10.5 10.5 3.5 10.5 1.5 7 Z" }
-                    circle { cx: "7", cy: "7", r: "1.6", fill: "currentColor", stroke: "none" }
-                },
-                MenuAction::TogglePin => rsx! { path { d: "M5 2h4l-.5 4 2 2H7.5v4L6 10V8H3.5l2-2z" } },
-                MenuAction::Clone => rsx! {
-                    rect { x: "2", y: "4.5", width: "7", height: "7", rx: "1" }
-                    path { d: "M5 4.5 V2.5 H11.5 V9 H9" }
-                },
-                MenuAction::ReplaceWith => rsx! {
-                    path { d: "M2 4 H12 M2 10 H12" }
-                    circle { cx: "5", cy: "4", r: "1.6", fill: "var(--bg-2)" }
-                    circle { cx: "9", cy: "10", r: "1.6", fill: "var(--bg-2)" }
-                },
-                MenuAction::Replace => rsx! {
-                    path { d: "M11.5 5.5 A4.6 4.6 0 0 0 3 4.5 M2.5 8.5 A4.6 4.6 0 0 0 11 9.5 M11.8 2.5 V5.8 H8.6 M2.2 11.5 V8.2 H5.4" }
-                },
-                MenuAction::Stop => rsx! { rect { x: "3.5", y: "3.5", width: "7", height: "7", rx: "1" } },
-                MenuAction::Delete => rsx! { path { d: "M2.5 4 H11.5 M5.5 4 V2.5 H8.5 V4 M3.8 4 L4.5 12 H9.5 L10.2 4" } },
-            }
-        }
+        ActionIcon { glyph, class: "menu-icon session-row-menu-icon" }
     }
 }
 
@@ -806,9 +787,9 @@ std::thread_local! {
 /// closed, it walks open → toggle and on to the next row; open, the
 /// panel's controls follow the toggle (rename → clone → stop →
 /// delete, as visible per `RowControlVisibility`); confirming, the panel
-/// holds consequence text plus confirm → cancel (with initial FOCUS on
-/// cancel — see "Focus-on-open" below). Rename instead opens ListView's
-/// independent dialog and immediately closes this anchored panel.
+/// holds consequence text plus Cancel → confirm (with initial focus on the
+/// enabled confirming answer, or Cancel while busy). Rename instead opens
+/// ListView's independent dialog and immediately closes this anchored panel.
 ///
 /// ## Host and staleness (PLAN_M6.md item 6)
 ///
@@ -876,14 +857,14 @@ std::thread_local! {
 /// `RowState::question` (the opening of this row's question that `ListView`
 /// holds in its per-row question slots, narrowed to this row like
 /// `error`/`busy`) swaps the stop/delete pair out for a prompt plus
-/// **confirm delete**/**cancel** in place — there used to be a
+/// **cancel**/**confirm delete** in place — there used to be a
 /// `window.confirm()` call here instead; wry ships no native JS dialogs on
 /// macOS's WKWebView (observed directly running the desktop build), which
 /// made delete-on-a-live-session silently do nothing on that target. An
 /// in-page prompt has no such platform dependency, so it replaces the
 /// eval-based one everywhere, not just on desktop. While it is open, tab
-/// order walks confirm delete → cancel; initial FOCUS lands directly on
-/// cancel regardless of tab order (see below).
+/// order walks Cancel → confirm delete; initial focus still lands directly on
+/// the enabled confirming answer, falling back to Cancel while busy.
 ///
 /// Both answers (button click, or the Enter or Space that activates the
 /// focused button) hand that render's token back up with the row's id, and
@@ -2177,47 +2158,49 @@ pub(super) fn SessionRow(
                                     "The managed checkout stays while another session uses it. When its last session is deleted, its folder moves to the trash; no files are deleted."
                                 }
                             }
-                            button {
-                                r#type: "button",
-                                class: "btn btn-danger confirm-delete",
-                                "data-tooltip": "delete this session and its state now",
-                                // Disabled while the shared token is held:
-                                // the handler refuses then anyway (keeping
-                                // the prompt), and the attribute is that
-                                // refusal made visible. Cancel stays
-                                // enabled — backing out is always safe.
-                                disabled: busy,
-                                autofocus: !busy,
-                                onkeydown: crate::guard_confirmation_enter,
-                                onmounted: move |_| crate::focus_confirmation(".session-row-menu-panel .confirm-delete", ".session-row-menu-panel .confirm-cancel"),
-                                // The guard comes from THIS render's
-                                // snapshot, the one the consequence text
-                                // above was drawn from, so a prompt that
-                                // drifted is answered for what it said.
-                                onclick: move |_| {
-                                    if let Some(token) = confirm_delete_question.clone() {
-                                        on_confirm_delete.call((
-                                            confirm_id.clone(),
-                                            token,
-                                            crate::status::delete_guard(&session.status, session.tabs.len()),
-                                        ));
-                                    }
-                                },
-                                "confirm delete"
-                            }
-                            button {
-                                r#type: "button",
-                                class: "btn btn-neutral confirm-cancel",
-                                "data-tooltip": "cancel: keep this session",
-                                // A disabled confirming answer cannot receive
-                                // focus; keep a usable escape hatch instead.
-                                autofocus: busy,
-                                onclick: move |_| {
-                                    if let Some(token) = cancel_delete_question.clone() {
-                                        on_cancel_delete.call((cancel_id.clone(), token));
-                                    }
-                                },
-                                "cancel"
+                            crate::modal_dialog::DialogActions {
+                                button {
+                                    r#type: "button",
+                                    class: "btn btn-neutral confirm-cancel",
+                                    "data-tooltip": "cancel: keep this session",
+                                    // A disabled confirming answer cannot receive
+                                    // focus; keep a usable escape hatch instead.
+                                    autofocus: busy,
+                                    onclick: move |_| {
+                                        if let Some(token) = cancel_delete_question.clone() {
+                                            on_cancel_delete.call((cancel_id.clone(), token));
+                                        }
+                                    },
+                                    "cancel"
+                                }
+                                button {
+                                    r#type: "button",
+                                    class: "btn btn-danger confirm-delete",
+                                    "data-tooltip": "delete this session and its state now",
+                                    // Disabled while the shared token is held:
+                                    // the handler refuses then anyway (keeping
+                                    // the prompt), and the attribute is that
+                                    // refusal made visible. Cancel stays
+                                    // enabled — backing out is always safe.
+                                    disabled: busy,
+                                    autofocus: !busy,
+                                    onkeydown: crate::guard_confirmation_enter,
+                                    onmounted: move |_| crate::focus_confirmation(".session-row-menu-panel .confirm-delete", ".session-row-menu-panel .confirm-cancel"),
+                                    // The guard comes from THIS render's
+                                    // snapshot, the one the consequence text
+                                    // above was drawn from, so a prompt that
+                                    // drifted is answered for what it said.
+                                    onclick: move |_| {
+                                        if let Some(token) = confirm_delete_question.clone() {
+                                            on_confirm_delete.call((
+                                                confirm_id.clone(),
+                                                token,
+                                                crate::status::delete_guard(&session.status, session.tabs.len()),
+                                            ));
+                                        }
+                                    },
+                                    "confirm delete"
+                                }
                             }
                         } else if confirming_replace {
                             // Same two-element, consequence-first shape as
@@ -2246,58 +2229,57 @@ pub(super) fn SessionRow(
                                 title: session.title.clone(),
                                 quoted: true,
                             }
-                            button {
-                                r#type: "button",
-                                class: "btn btn-danger confirm-replace",
-                                "data-tooltip": "replace this session now, as described",
-                                // See confirm-delete: refusal made visible.
-                                disabled: busy,
-                                autofocus: !busy,
-                                onkeydown: crate::guard_confirmation_enter,
-                                onmounted: move |_| crate::focus_confirmation(".session-row-menu-panel .confirm-replace", ".session-row-menu-panel .replace-cancel"),
-                                onclick: move |_| {
-                                    if let Some(token) = confirm_replace_question.clone() {
-                                        on_confirm_replace.call((confirm_replace_source.clone(), token));
-                                    }
-                                },
-                                "confirm replace"
-                            }
-                            button {
-                                r#type: "button",
-                                class: "btn btn-neutral replace-cancel",
-                                "data-tooltip": "cancel: keep this session as it is",
-                                autofocus: busy,
-                                onclick: move |_| {
-                                    if let Some(token) = cancel_replace_question.clone() {
-                                        on_cancel_replace.call((cancel_replace_id.clone(), token));
-                                    }
-                                },
-                                "cancel"
+                            crate::modal_dialog::DialogActions {
+                                button {
+                                    r#type: "button",
+                                    class: "btn btn-neutral replace-cancel",
+                                    "data-tooltip": "cancel: keep this session as it is",
+                                    autofocus: busy,
+                                    onclick: move |_| {
+                                        if let Some(token) = cancel_replace_question.clone() {
+                                            on_cancel_replace.call((cancel_replace_id.clone(), token));
+                                        }
+                                    },
+                                    "cancel"
+                                }
+                                button {
+                                    r#type: "button",
+                                    class: "btn btn-danger confirm-replace",
+                                    "data-tooltip": "replace this session now, as described",
+                                    // See confirm-delete: refusal made visible.
+                                    disabled: busy,
+                                    autofocus: !busy,
+                                    onkeydown: crate::guard_confirmation_enter,
+                                    onmounted: move |_| crate::focus_confirmation(".session-row-menu-panel .confirm-replace", ".session-row-menu-panel .replace-cancel"),
+                                    onclick: move |_| {
+                                        if let Some(token) = confirm_replace_question.clone() {
+                                            on_confirm_replace.call((confirm_replace_source.clone(), token));
+                                        }
+                                    },
+                                    "confirm replace"
+                                }
                             }
                         } else {
                             // The header is outside the menu role: it names
                             // the target and its saved launch state, but is
                             // not another command in the roving tab order.
-                            div {
-                                class: "session-row-menu-header",
-                                div {
-                                    class: "session-row-menu-title",
-                                    "data-tooltip": "{session.title.escaped()}",
+                            menu_panel::MenuHeader {
+                                title_tooltip: session.title.escaped(),
+                                summary_tooltip: menu_header_summary_tooltip(&menu_summary_parts),
+                                title: rsx! {
                                     span {
                                         class: "peer-value",
                                         dir: "ltr",
                                         "{session.title.escaped()}"
                                     }
-                                }
-                                div {
-                                    class: "session-row-menu-summary",
-                                    "data-tooltip": "{menu_header_summary_tooltip(&menu_summary_parts)}",
+                                },
+                                summary: rsx! {
                                     PeerLine {
                                         class: "session-row-menu-summary-runs".to_string(),
                                         parts: menu_summary_parts.clone(),
                                         peer_tooltips: true,
                                     }
-                                }
+                                },
                             }
                             // The menu proper: ONLY the actionable rows,
                             // in their own element. The panel around it
@@ -2349,7 +2331,7 @@ pub(super) fn SessionRow(
                                 if controls.rename {
                                     button {
                                         r#type: "button",
-                                        class: "btn session-row-menu-item session-row-rename",
+                                        class: "btn menu-item session-row-menu-item session-row-rename",
                                         role: "menuitem",
                                         aria_label: "rename",
                                         "data-tooltip": if selected {
@@ -2386,7 +2368,7 @@ pub(super) fn SessionRow(
                                             on_rename_start.call(rename_start.clone());
                                         },
                                         MenuActionIcon { action: MenuAction::Rename }
-                                        span { class: "session-row-menu-label", "rename" }
+                                        menu_panel::MenuItemCopy { label: rsx! { "rename" } }
                                     }
                                 }
                                 // Offered whenever `offers_mark_seen` says so
@@ -2401,7 +2383,7 @@ pub(super) fn SessionRow(
                                 if controls.mark_seen {
                                     button {
                                         r#type: "button",
-                                        class: "btn session-row-menu-item session-row-mark-seen",
+                                        class: "btn menu-item session-row-menu-item session-row-mark-seen",
                                         role: "menuitem",
                                         aria_label: "{mark_seen_label}",
                                         "data-tooltip": "{mark_seen_tooltip}",
@@ -2434,12 +2416,12 @@ pub(super) fn SessionRow(
                                             on_mark_seen.call(mark_seen_target.clone());
                                         },
                                         MenuActionIcon { action: MenuAction::MarkSeen }
-                                        span { class: "session-row-menu-label", "{mark_seen_label}" }
+                                        menu_panel::MenuItemCopy { label: rsx! { "{mark_seen_label}" } }
                                     }
                                 }
                                 button {
                                     r#type: "button",
-                                    class: "btn session-row-menu-item session-row-pin",
+                                    class: "btn menu-item session-row-menu-item session-row-pin",
                                     role: "menuitem",
                                     aria_label: "{pin_label}",
                                     "data-tooltip": if session.pinned {
@@ -2458,9 +2440,9 @@ pub(super) fn SessionRow(
                                         if !busy { on_pin.call(pin_target.clone()); }
                                     },
                                     MenuActionIcon { action: MenuAction::TogglePin }
-                                    span { class: "session-row-menu-label", "{pin_label}" }
+                                    menu_panel::MenuItemCopy { label: rsx! { "{pin_label}" } }
                                 }
-                                div { class: "session-row-menu-separator", role: "separator" }
+                                menu_panel::MenuSeparator { class: "session-row-menu-separator" }
                                 // Offered on every row, unconditionally —
                                 // see `RowControlVisibility`'s own doc for
                                 // why clone has no visibility field to gate
@@ -2474,7 +2456,7 @@ pub(super) fn SessionRow(
                                 // here mutates or restarts anything itself.
                                 button {
                                     r#type: "button",
-                                    class: "btn session-row-menu-item session-row-clone",
+                                    class: "btn menu-item session-row-menu-item session-row-clone",
                                     role: "menuitem",
                                     aria_label: "clone",
                                     aria_describedby: "session-menu-clone-description",
@@ -2503,9 +2485,10 @@ pub(super) fn SessionRow(
                                         on_clone.call(clone_target.clone());
                                     },
                                     MenuActionIcon { action: MenuAction::Clone }
-                                    span { class: "session-row-menu-copy",
-                                        span { class: "session-row-menu-label", "clone" }
-                                        span { id: "session-menu-clone-description", class: "session-row-menu-description", "new session, keep this one" }
+                                    menu_panel::MenuItemCopy {
+                                        label: rsx! { "clone" },
+                                        description_id: "session-menu-clone-description",
+                                        description: rsx! { "new session, keep this one" },
                                     }
                                 }
                                 // Between clone and replace: clone's exact
@@ -2523,7 +2506,7 @@ pub(super) fn SessionRow(
                                 // by itself.
                                 button {
                                     r#type: "button",
-                                    class: "btn session-row-menu-item session-row-replace-with",
+                                    class: "btn menu-item session-row-menu-item session-row-replace-with",
                                     role: "menuitem",
                                     aria_label: "replace with",
                                     aria_describedby: "session-menu-replace-with-description",
@@ -2552,9 +2535,10 @@ pub(super) fn SessionRow(
                                         on_replace_with.call(replace_with_target.clone());
                                     },
                                     MenuActionIcon { action: MenuAction::ReplaceWith }
-                                    span { class: "session-row-menu-copy",
-                                        span { class: "session-row-menu-label", "replace with…" }
-                                        span { id: "session-menu-replace-with-description", class: "session-row-menu-description", "edit settings, then swap" }
+                                    menu_panel::MenuItemCopy {
+                                        label: rsx! { "replace with…" },
+                                        description_id: "session-menu-replace-with-description",
+                                        description: rsx! { "edit settings, then swap" },
                                     }
                                 }
                                 // Also unconditional, directly beside the
@@ -2570,7 +2554,7 @@ pub(super) fn SessionRow(
                                 // calls the API.
                                 button {
                                     r#type: "button",
-                                    class: "btn session-row-menu-item session-row-replace",
+                                    class: "btn menu-item session-row-menu-item session-row-replace",
                                     role: "menuitem",
                                     aria_label: "replace",
                                     aria_describedby: "session-menu-replace-description",
@@ -2599,16 +2583,17 @@ pub(super) fn SessionRow(
                                         on_replace.call(replace_target.clone());
                                     },
                                     MenuActionIcon { action: MenuAction::Replace }
-                                    span { class: "session-row-menu-copy",
-                                        span { class: "session-row-menu-label", "replace" }
-                                        span { id: "session-menu-replace-description", class: "session-row-menu-description", "fresh conversation, same settings" }
+                                    menu_panel::MenuItemCopy {
+                                        label: rsx! { "replace" },
+                                        description_id: "session-menu-replace-description",
+                                        description: rsx! { "fresh conversation, same settings" },
                                     }
                                 }
                                 if controls.stop {
-                                    div { class: "session-row-menu-separator", role: "separator" }
+                                    menu_panel::MenuSeparator { class: "session-row-menu-separator" }
                                     button {
                                         r#type: "button",
-                                        class: "btn session-row-menu-item session-row-stop",
+                                        class: "btn menu-item menu-danger session-row-menu-item session-row-stop",
                                         role: "menuitem",
                                         aria_label: "stop",
                                         aria_describedby: "session-menu-stop-description",
@@ -2641,9 +2626,10 @@ pub(super) fn SessionRow(
                                             on_stop.call(stop_id.clone());
                                         },
                                         MenuActionIcon { action: MenuAction::Stop }
-                                        span { class: "session-row-menu-copy",
-                                            span { class: "session-row-menu-label", "stop" }
-                                            span { id: "session-menu-stop-description", class: "session-row-menu-description", "ends the agent and its processes" }
+                                        menu_panel::MenuItemCopy {
+                                            label: rsx! { "stop" },
+                                            description_id: "session-menu-stop-description",
+                                            description: rsx! { "ends the agent and its processes" },
                                         }
                                     }
                                 }
@@ -2652,12 +2638,12 @@ pub(super) fn SessionRow(
                                 // assistive technology but remains outside
                                 // the action order and arrow navigation.
                                 if delete_follows_a_separator {
-                                    div { class: "session-row-menu-separator", role: "separator" }
+                                    menu_panel::MenuSeparator { class: "session-row-menu-separator" }
                                 }
                                 if controls.delete {
                                     button {
                                         r#type: "button",
-                                        class: "btn session-row-menu-item session-row-delete",
+                                        class: "btn menu-item menu-danger session-row-menu-item session-row-delete",
                                         role: "menuitem",
                                         aria_label: "delete",
                                         aria_describedby: "session-menu-delete-description",
@@ -2690,9 +2676,10 @@ pub(super) fn SessionRow(
                                             on_delete.call(delete_target.clone());
                                         },
                                         MenuActionIcon { action: MenuAction::Delete }
-                                        span { class: "session-row-menu-copy",
-                                            span { class: "session-row-menu-label", "delete" }
-                                            span { id: "session-menu-delete-description", class: "session-row-menu-description", "removes the session and its state" }
+                                        menu_panel::MenuItemCopy {
+                                            label: rsx! { "delete" },
+                                            description_id: "session-menu-delete-description",
+                                            description: rsx! { "removes the session and its state" },
                                         }
                                     }
                                 }

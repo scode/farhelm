@@ -141,8 +141,8 @@ test("archive metadata keeps labels in Inter and only known timestamps in mono",
 
 /**
  * Saved wrapper/argument bytes retain mono in both selection surfaces, while
- * shortcut digits use Inter's tabular metrics. Measuring the actual configured
- * chords catches a proportional-digit regression hidden by string normalization.
+ * shortcut chords keep the technical mono role and tabular digits. Measuring
+ * the configured chords catches a digit-metric regression hidden by normalization.
  */
 test("template summaries split command fonts and shortcut digits keep equal widths", async ({ page, request }) => {
   const prefix = `font-summary-${Date.now()}`;
@@ -178,7 +178,7 @@ test("template summaries split command fonts and shortcut digits keep equal widt
     for (const [index, name] of names.entries()) {
       const toggle = dialog.getByRole("button", { name: `number shortcut ${name}`, exact: true });
       await expect(toggle).toHaveText(`Ctrl+Shift+${index === 0 ? "1" : "8"}`);
-      await expectLoadedFont(toggle, "Inter");
+      await expectLoadedFont(toggle, "JetBrains Mono");
       await expect(toggle).toHaveCSS("font-variant-numeric", "tabular-nums");
       widths.push(await toggle.evaluate((element) => {
         const range = document.createRange();

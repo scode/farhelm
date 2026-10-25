@@ -1,4 +1,4 @@
-//! Shared launch choices for every session launcher mode and the template editor.
+//! Shared launch choices for the session launcher's creation and restart modes.
 //!
 //! Values enter as props and user changes leave through callbacks. The caller owns
 //! the selected harness, model draft, and every consequential state transition;
@@ -25,7 +25,7 @@ pub(crate) fn DestinationTypeControl(
     on_change: EventHandler<bool>,
 ) -> Element {
     rsx! {
-        div { class: "launch-composer-segmented destination-type-control", role: "group", aria_label: "destination type",
+        div { class: "segmented-control destination-type-control", role: "group", aria_label: "destination type",
             for (choice, label) in [(false, "folder"), (true, "managed checkout")] {
                 button { r#type: "button", disabled, class: if choice == managed { "selected" } else { "" },
                     aria_pressed: choice == managed, onclick: move |_| on_change.call(choice),
@@ -96,8 +96,13 @@ fn model_marker_label(old: Option<&str>) -> DetailPart {
 /// `model_id_prefix` scopes the transient listbox and option IDs when two
 /// surfaces are mounted together. The launcher passes its historical prefix
 /// so its DOM and existing browser selectors remain unchanged.
-/// `on_choice_enter` opts the segment buttons into apply-then-primary behavior;
-/// the model field has a separate policy: `on_model_primary_enter`, when set,
+/// `on_choice_enter` opts choice controls into apply-then-primary behavior;
+/// longer effort lists use a native select with the same callback and values.
+/// Its input event updates the caller; Enter invokes primary against that
+/// live draft without replaying a render's old value. Space and arrow
+/// handling stay with the native select. Omitting primary leaves choice
+/// editing without launch admission.
+/// The model field has a separate policy: `on_model_primary_enter`, when set,
 /// runs after an open pick is applied or directly from the closed field. Its
 /// caller must validate the live draft, including a pick the model handler refused.
 /// Omitting it keeps New session's selection-only model Enter behavior.
@@ -158,6 +163,9 @@ pub(crate) fn LaunchControls(
             )
         })
         .unwrap_or_default();
+    // The default is a choice too. Longer vocabularies use a native select,
+    // but retain the same displayed list, including inherited old values.
+    let effort_select_options = efforts.clone();
     let mut options =
         launch_composer::model_options(&catalog, harness, &model_draft, model_show_all);
     if fixed_harness {
@@ -249,6 +257,7 @@ pub(crate) fn LaunchControls(
                 div { class: "launch-composer-model",
                     input {
                         r#type: "text",
+                        class: "font-mono",
                         role: "combobox",
                         aria_label: "model",
                         aria_expanded: model_open,
@@ -373,28 +382,63 @@ pub(crate) fn LaunchControls(
                 div { class: "launch-composer-choice launch-composer-effort-choice",
                     span { class: "launch-composer-section-label", "effort" }
                     if let Some(parts) = effort_change { PeerLine { class: "launch-composer-changed-marker", parts } }
-                    div { class: "launch-composer-segmented",
-                        button {
-                            r#type: "button",
-                            class: if effort.is_none() { "selected" } else { "" },
-                            "data-tooltip": "use the agent's default reasoning effort",
-                            aria_pressed: effort.is_none(),
+                    if efforts.len() + 1 > 5 {
+                        select {
+                            class: "launch-composer-effort-select",
+                            aria_label: "effort",
+                            value: effort.map(launch_composer::effort_value).unwrap_or("default"),
                             disabled: busy,
-                            onkeydown: move |event| enter_choice(event, busy, || on_effort.call(None), on_choice_enter),
-                            onclick: move |_| on_effort.call(None),
-                            "default"
+                            // The native input event must update the caller
+                            // before Enter admits a primary action. Reusing its
+                            // controlled value avoids a second selected-state
+                            // owner or a harness-specific effort parser here.
+                            oninput: move |event| {
+                                if busy { return; }
+                                let value = event.value();
+                                if value == "default" {
+                                    on_effort.call(None);
+                                } else if let Some(offered) = effort_select_options.iter().copied()
+                                    .find(|offered| launch_composer::effort_value(*offered) == value) {
+                                    on_effort.call(Some(offered));
+                                }
+                            },
+                            // The caller already owns the last input. Replaying
+                            // this render's `effort` could undo an input whose
+                            // callback ran before the next render completed.
+                            onkeydown: move |event| enter_choice(event, busy, || {}, on_choice_enter),
+                            option { value: "default", selected: effort.is_none(), "default" }
+                            for offered in efforts {
+                                option {
+                                    value: launch_composer::effort_value(offered),
+                                    selected: effort == Some(offered),
+                                    "{launch_composer::effort_value(offered)}"
+                                }
+                            }
                         }
-                        for offered in efforts {
+                    } else {
+                        div { class: "segmented-control", role: "group", aria_label: "effort",
                             button {
-                                key: "{launch_composer::effort_value(offered)}",
                                 r#type: "button",
-                                class: if effort == Some(offered) { "selected" } else { "" },
-                                "data-tooltip": "use {launch_composer::effort_value(offered)} reasoning effort",
-                                aria_pressed: effort == Some(offered),
+                                class: if effort.is_none() { "selected" } else { "" },
+                                "data-tooltip": "use the agent's default reasoning effort",
+                                aria_pressed: effort.is_none(),
                                 disabled: busy,
-                                onkeydown: move |event| enter_choice(event, busy, || on_effort.call(Some(offered)), on_choice_enter),
-                                onclick: move |_| on_effort.call(Some(offered)),
-                                "{launch_composer::effort_value(offered)}"
+                                onkeydown: move |event| enter_choice(event, busy, || on_effort.call(None), on_choice_enter),
+                                onclick: move |_| on_effort.call(None),
+                                "default"
+                            }
+                            for offered in efforts {
+                                button {
+                                    key: "{launch_composer::effort_value(offered)}",
+                                    r#type: "button",
+                                    class: if effort == Some(offered) { "selected" } else { "" },
+                                    "data-tooltip": "use {launch_composer::effort_value(offered)} reasoning effort",
+                                    aria_pressed: effort == Some(offered),
+                                    disabled: busy,
+                                    onkeydown: move |event| enter_choice(event, busy, || on_effort.call(Some(offered)), on_choice_enter),
+                                    onclick: move |_| on_effort.call(Some(offered)),
+                                    "{launch_composer::effort_value(offered)}"
+                                }
                             }
                         }
                     }
@@ -403,40 +447,103 @@ pub(crate) fn LaunchControls(
             div { class: "launch-composer-choice launch-composer-permissions-choice",
                 span { class: "launch-composer-section-label", "permissions" }
                 if let Some(parts) = permission_change { PeerLine { class: "launch-composer-changed-marker", parts } }
-                div { class: "launch-composer-segmented",
-                    if harness.is_some_and(|harness| harness.omitted_permission().is_none()) {
-                        span { class: "visually-hidden", id: "{own_help_id}",
-                            {launch_composer::permission_help(harness.expect("own-setting has a harness"), None)}
+                div { class: "launch-composer-permission-controls",
+                    // Search results have a separate Permissions group. Name
+                    // these choices by their role while keeping the visible label.
+                    div { class: "segmented-control", role: "group", aria_label: "permission mode",
+                        if harness.is_some_and(|harness| harness.omitted_permission().is_none()) {
+                            span { class: "visually-hidden", id: "{own_help_id}",
+                                {launch_composer::permission_help(harness.expect("own-setting has a harness"), None)}
+                            }
+                            button {
+                                r#type: "button",
+                                class: if permissions.is_none() { "selected" } else { "" },
+                                "data-tooltip": "agent's own setting: Farhelm cannot force or classify this permission mode",
+                                aria_describedby: "{own_help_id}",
+                                aria_pressed: permissions.is_none(),
+                                disabled: busy,
+                                onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(None), on_choice_enter),
+                                onclick: move |_| on_permissions.call(None),
+                                "agent's own setting"
+                            }
                         }
-                        button {
-                            r#type: "button",
-                            class: if permissions.is_none() { "selected" } else { "" },
-                            "data-tooltip": "agent's own setting: Farhelm cannot force or classify this permission mode",
-                            aria_describedby: "{own_help_id}",
-                            aria_pressed: permissions.is_none(),
-                            disabled: busy,
-                            onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(None), on_choice_enter),
-                            onclick: move |_| on_permissions.call(None),
-                            "agent's own setting"
+                        if harness.is_none_or(|harness| harness.offers_permission(LaunchPermission::Guarded)) {
+                            span { class: "visually-hidden", id: "{guarded_help_id}",
+                                {harness.map(|harness| launch_composer::permission_help(harness, Some(LaunchPermission::Guarded))).unwrap_or_else(|| "guarded: choose an agent to see its automatic safety mode".to_string())}
+                            }
+                            button {
+                                r#type: "button",
+                                class: if permissions == Some(LaunchPermission::Guarded)
+                                    || (permissions.is_none() && (harness.is_none() || omitted_permission == Some(LaunchPermission::Guarded))) { "selected" } else { "" },
+                                "data-tooltip": harness.map(|harness| launch_composer::permission_help(harness, Some(LaunchPermission::Guarded))).unwrap_or_else(|| "guarded: choose an agent to see its automatic safety mode".to_string()),
+                                "data-tooltip-paragraphs": "true",
+                                aria_describedby: "{guarded_help_id}",
+                                aria_pressed: permissions == Some(LaunchPermission::Guarded)
+                                    || (permissions.is_none() && (harness.is_none() || omitted_permission == Some(LaunchPermission::Guarded))),
+                                disabled: busy,
+                                onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(Some(LaunchPermission::Guarded)), on_choice_enter),
+                                onclick: move |_| on_permissions.call(Some(LaunchPermission::Guarded)),
+                                "guarded"
+                            }
                         }
-                    }
-                    if harness.is_none_or(|harness| harness.offers_permission(LaunchPermission::Guarded)) {
-                        span { class: "visually-hidden", id: "{guarded_help_id}",
-                            {harness.map(|harness| launch_composer::permission_help(harness, Some(LaunchPermission::Guarded))).unwrap_or_else(|| "guarded: choose an agent to see its automatic safety mode".to_string())}
+                        if harness.is_none_or(|harness| harness.offers_permission(LaunchPermission::Yolo)) {
+                            button {
+                                r#type: "button",
+                                class: if permissions == Some(LaunchPermission::Yolo)
+                                    || (permissions.is_none() && omitted_permission == Some(LaunchPermission::Yolo)) {
+                                    "selected launch-composer-segment-danger"
+                                } else {
+                                    "launch-composer-segment-danger"
+                                },
+                                aria_pressed: permissions == Some(LaunchPermission::Yolo)
+                                    || (permissions.is_none() && omitted_permission == Some(LaunchPermission::Yolo)),
+                                "data-tooltip": launch_composer::permission_tooltip(LaunchPermission::Yolo),
+                                disabled: busy,
+                                onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(Some(LaunchPermission::Yolo)), on_choice_enter),
+                                onclick: move |_| on_permissions.call(Some(LaunchPermission::Yolo)),
+                                "yolo"
+                            }
                         }
-                        button {
-                            r#type: "button",
-                            class: if permissions == Some(LaunchPermission::Guarded)
-                                || (permissions.is_none() && (harness.is_none() || omitted_permission == Some(LaunchPermission::Guarded))) { "selected" } else { "" },
-                            "data-tooltip": harness.map(|harness| launch_composer::permission_help(harness, Some(LaunchPermission::Guarded))).unwrap_or_else(|| "guarded: choose an agent to see its automatic safety mode".to_string()),
-                            "data-tooltip-paragraphs": "true",
-                            aria_describedby: "{guarded_help_id}",
-                            aria_pressed: permissions == Some(LaunchPermission::Guarded)
-                                || (permissions.is_none() && (harness.is_none() || omitted_permission == Some(LaunchPermission::Guarded))),
-                            disabled: busy,
-                            onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(Some(LaunchPermission::Guarded)), on_choice_enter),
-                            onclick: move |_| on_permissions.call(Some(LaunchPermission::Guarded)),
-                            "guarded"
+                        if harness.is_some_and(|harness| harness.offers_permission(LaunchPermission::Custom)) {
+                            button {
+                                r#type: "button", class: if permissions == Some(LaunchPermission::Custom) { "selected" } else { "" },
+                                aria_pressed: permissions == Some(LaunchPermission::Custom), disabled: busy,
+                                "data-tooltip": launch_composer::permission_tooltip(LaunchPermission::Custom),
+                                onclick: move |_| {
+                                    on_permissions.call(Some(LaunchPermission::Custom));
+                                    document::eval("requestAnimationFrame(() => document.querySelector('.custom-permission-flags')?.focus())");
+                                },
+                                // This choice opens an editor. Native button Enter
+                                // follows the same focus handoff as a click, rather
+                                // than invoking primary on an incomplete choice.
+                                "custom"
+                            }
+                        }
+                        // The approval modes after guarded and YOLO, in their
+                        // fixed order, shown for whichever harness offers them
+                        // (Goose all three, OMP Approve alone). Filtered in the
+                        // iterator so each keyed button stays the loop's root.
+                        for permission in [
+                            LaunchPermission::Approve,
+                            LaunchPermission::SmartApprove,
+                            LaunchPermission::Chat,
+                        ]
+                        .into_iter()
+                        .filter(|permission| {
+                            harness.is_some_and(|harness| harness.offers_permission(*permission))
+                        })
+                        {
+                            button {
+                                key: "{launch_composer::permission_value(permission)}",
+                                r#type: "button",
+                                class: if permissions == Some(permission) { "selected" } else { "" },
+                                "data-tooltip": launch_composer::permission_tooltip(permission),
+                                aria_pressed: permissions == Some(permission),
+                                disabled: busy,
+                                onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(Some(permission)), on_choice_enter),
+                                onclick: move |_| on_permissions.call(Some(permission)),
+                                "{launch_composer::permission_value(permission)}"
+                            }
                         }
                     }
                     if let Some(harness) = harness {
@@ -445,72 +552,13 @@ pub(crate) fn LaunchControls(
                         }
                         button {
                             r#type: "button",
-                            class: "launch-permission-help",
+                            class: "btn launch-permission-help",
                             aria_label: "About permission modes",
                             aria_describedby: "{permission_help_id}",
                             "data-tooltip": launch_composer::permission_help(harness, harness.request_permission(permissions)),
                             "data-tooltip-paragraphs": "true",
                             onclick: move |_| crate::app_bar::open_external_page("https://farhelm.io/docs/agents/#permission-modes"),
                             "?"
-                        }
-                    }
-                    if harness.is_none_or(|harness| harness.offers_permission(LaunchPermission::Yolo)) {
-                        button {
-                            r#type: "button",
-                            class: if permissions == Some(LaunchPermission::Yolo)
-                                || (permissions.is_none() && omitted_permission == Some(LaunchPermission::Yolo)) {
-                                "selected launch-composer-segment-danger"
-                            } else {
-                                "launch-composer-segment-danger"
-                            },
-                            aria_pressed: permissions == Some(LaunchPermission::Yolo)
-                                || (permissions.is_none() && omitted_permission == Some(LaunchPermission::Yolo)),
-                            "data-tooltip": launch_composer::permission_tooltip(LaunchPermission::Yolo),
-                            disabled: busy,
-                            onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(Some(LaunchPermission::Yolo)), on_choice_enter),
-                            onclick: move |_| on_permissions.call(Some(LaunchPermission::Yolo)),
-                            "yolo"
-                        }
-                    }
-                    if harness.is_some_and(|harness| harness.offers_permission(LaunchPermission::Custom)) {
-                        button {
-                            r#type: "button", class: if permissions == Some(LaunchPermission::Custom) { "selected" } else { "" },
-                            aria_pressed: permissions == Some(LaunchPermission::Custom), disabled: busy,
-                            "data-tooltip": launch_composer::permission_tooltip(LaunchPermission::Custom),
-                            onclick: move |_| {
-                                on_permissions.call(Some(LaunchPermission::Custom));
-                                document::eval("requestAnimationFrame(() => document.querySelector('.custom-permission-flags')?.focus())");
-                            },
-                            // This choice opens an editor. Native button Enter
-                            // follows the same focus handoff as a click, rather
-                            // than invoking primary on an incomplete choice.
-                            "custom"
-                        }
-                    }
-                    // The approval modes after guarded and YOLO, in their
-                    // fixed order, shown for whichever harness offers them
-                    // (Goose all three, OMP Approve alone). Filtered in the
-                    // iterator so each keyed button stays the loop's root.
-                    for permission in [
-                        LaunchPermission::Approve,
-                        LaunchPermission::SmartApprove,
-                        LaunchPermission::Chat,
-                    ]
-                    .into_iter()
-                    .filter(|permission| {
-                        harness.is_some_and(|harness| harness.offers_permission(*permission))
-                    })
-                    {
-                        button {
-                            key: "{launch_composer::permission_value(permission)}",
-                            r#type: "button",
-                            class: if permissions == Some(permission) { "selected" } else { "" },
-                            "data-tooltip": launch_composer::permission_tooltip(permission),
-                            aria_pressed: permissions == Some(permission),
-                            disabled: busy,
-                            onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(Some(permission)), on_choice_enter),
-                            onclick: move |_| on_permissions.call(Some(permission)),
-                            "{launch_composer::permission_value(permission)}"
                         }
                     }
                 }
@@ -591,7 +639,7 @@ pub(crate) fn LaunchControls(
                         "clear wrapper prefix"
                     }
                 }
-                p { "Runs before agent command; blank means none." }
+                p { class: "launch-composer-choice-help", "Runs before agent command; blank means none." }
                 if let Some(reason) = wrapper_error.as_ref() {
                     div { class: "launch-composer-choice-error", role: "status", "{reason}" }
                 }

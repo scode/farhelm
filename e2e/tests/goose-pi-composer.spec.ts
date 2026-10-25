@@ -86,12 +86,20 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
   );
   // Shared model IDs must use Pi's effort vocabulary even without a harness
   // transition. Goose appears first in the catalog and lacks these levels.
-  const efforts = form.locator(".launch-composer-effort-choice");
+  // Pi's longer vocabulary is a native dropdown; its committed value must
+  // survive the same-model-owner edit just as a selected segment would.
+  const effort = form.getByRole("combobox", { name: "effort", exact: true });
+  await expect(effort).toBeVisible();
   for (const level of ["minimal", "xhigh"]) {
-    await efforts.getByRole("button", { name: level, exact: true }).click();
+    // selectOption changes the value without moving focus. A real dropdown
+    // edit leaves the model input first, so focusing it again reopens its list.
+    await effort.focus();
+    await expect(effort).toBeFocused();
+    await effort.selectOption(level);
+    await expect(effort).toHaveValue(level);
     await model.focus();
     await form.getByRole("option", { name: "z-ai/glm-5.3-flash (Pi)", exact: true }).click();
-    await expect(efforts.getByRole("button", { name: level, exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(effort).toHaveValue(level);
     await expect(status).toHaveCount(0);
   }
 } finally {

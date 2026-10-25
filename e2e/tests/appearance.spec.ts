@@ -54,6 +54,15 @@ async function expectChoice(panel: Locator, choice: Choice): Promise<void> {
   }
 }
 
+/** Pointer users activate the visible label, while the clipped native input owns checked state. */
+async function clickAppearanceChoice(panel: Locator, choice: Choice): Promise<void> {
+  const label = panel.locator("label").filter({ hasText: new RegExp(`^${labels[choice]}$`) });
+  const text = label.locator("span");
+  await expect(text).toBeVisible();
+  await text.click();
+  await expect(panel.getByRole("radio", { name: labels[choice], exact: true })).toBeChecked();
+}
+
 /** Follow the actual Settings navigation rather than invoking the JS owner. */
 async function openAppearance(page: Page): Promise<Locator> {
   await openSettings(page, "Appearance");
@@ -344,7 +353,7 @@ test("appearance choices survive Settings remounts and reloads", async ({ page }
   await waitForAppReady(page);
   for (const choice of ["light", "dark", "system"] as const) {
     const panel = await openAppearance(page);
-    await panel.getByRole("radio", { name: labels[choice], exact: true }).check();
+    await clickAppearanceChoice(panel, choice);
     await expectChoice(panel, choice);
     expect(await page.evaluate((key) => localStorage.getItem(key), appearanceKey)).toBe(choice);
     await selectSettingsSection(page, "terminal");
@@ -380,7 +389,7 @@ test("another same-origin page updates appearance and clearing restores System",
   const owner = await page.evaluateHandle(() => (window as any).farhelmAppearance);
   expect(await owner.evaluate((value) => typeof value?.mountSettings)).toBe("function");
   let panel = await openAppearance(page);
-  await panel.getByRole("radio", { name: "Dark", exact: true }).check();
+  await clickAppearanceChoice(panel, "dark");
   await expectPalette(page, "dark");
   const other = await context.newPage();
   try {
@@ -390,13 +399,13 @@ test("another same-origin page updates appearance and clearing restores System",
     expect(new URL(other.url()).origin, "both pages must share the actual storage origin").toBe(new URL(page.url()).origin);
     const otherPanel = await openAppearance(other);
     await expectChoice(otherPanel, "dark");
-    await otherPanel.getByRole("radio", { name: "Light", exact: true }).check();
+    await clickAppearanceChoice(otherPanel, "light");
     await expectPalette(other, "light");
     await expectPalette(page, "light");
     await expectChoice(panel, "light");
     await page.locator(".app-settings-close").click();
     await expect(page.getByRole("dialog", { name: "settings", exact: true })).toHaveCount(0);
-    await otherPanel.getByRole("radio", { name: "Dark", exact: true }).check();
+    await clickAppearanceChoice(otherPanel, "dark");
     await expectPalette(page, "dark");
     panel = await openAppearance(page);
     await expectChoice(panel, "dark");

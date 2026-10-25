@@ -14,8 +14,65 @@
 //! dismissal and which focus destination belongs to that close reason. DOM
 //! removal only releases leftover isolation; it never returns focus, since a
 //! successful handoff can intentionally give the keyboard to another surface.
+//!
+//! Frame helpers below share only presentation. They receive caller-rendered
+//! headings, hints and native controls; scroll bodies keep their existing
+//! ScrollRegion rather than acquiring a wrapper or another focus owner.
 
 use dioxus::prelude::*;
+
+// ===== Frame presentation, without a second modal or request owner ======
+
+/// Render a framed heading while its caller owns the close control's behavior.
+///
+/// The supplied close element retains its native disabled state, live
+/// cancellation guard and focus selector. Optional tile and summary content
+/// leave no empty placeholder. Element props preserve peer escaping and
+/// direction isolation; this component neither flattens values nor installs
+/// modal behavior on the header.
+#[component]
+pub(crate) fn DialogHeader(
+    title: Element,
+    summary: Option<Element>,
+    tile: Option<Element>,
+    close: Element,
+    #[props(default)] class: String,
+    #[props(default)] summary_class: String,
+) -> Element {
+    rsx! {
+        div { class: "dialog-header host-settings-header {class}",
+            if let Some(tile) = tile {
+                div { class: "dialog-tile host-settings-mark", "aria-hidden": "true", {tile} }
+            }
+            div { class: "dialog-heading host-settings-heading",
+                h2 { class: "dialog-title host-settings-title", {title} }
+                if let Some(summary) = summary {
+                    div { class: "dialog-summary host-settings-summary {summary_class}", {summary} }
+                }
+            }
+            {close}
+        }
+    }
+}
+
+/// Keep a frame's hint and actions on its existing pinned footer element.
+///
+/// Children retain their own hint ids, request guards and native buttons.
+/// The footer adds no action schema or focus boundary; scroll bodies remain
+/// their caller's existing div or ScrollRegion sibling.
+#[component]
+pub(crate) fn DialogFooter(#[props(default)] class: String, children: Element) -> Element {
+    rsx! { div { class: "dialog-footer host-settings-footer {class}", {children} } }
+}
+
+/// Share action-row spacing without changing native or visual answer order.
+///
+/// Callers supply Cancel, any outlined permanent answer and the ordinary main
+/// action in that order. No handlers or disabled state move into this wrapper.
+#[component]
+pub(crate) fn DialogActions(#[props(default)] class: String, children: Element) -> Element {
+    rsx! { div { class: "dialog-actions host-dialog-answers {class}", {children} } }
+}
 
 /// Address the same modal from its shell and from its surviving state owner.
 ///

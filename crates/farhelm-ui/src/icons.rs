@@ -1,4 +1,4 @@
-//! Inline SVG glyphs for compact sidebar facts.
+//! Inline SVG glyphs for identity, compact facts and actions.
 //!
 //! This is the app's first icon vocabulary (2026-09-03): before this
 //! module the only glyph anywhere in the UI was the "⋯" menu
@@ -47,8 +47,262 @@
 //! this module's own answer, independent of the caller's separately
 //! spoken word, so a test can pin the actual glyph rather than trusting it
 //! by association.
+//!
+//! Shared action glyphs use their own 14-unit box. Their names describe
+//! controls, not harness identity or host identity; callers retain the action
+//! enums, accessible labels, and color rules that give those drawings meaning.
 
 use dioxus::prelude::*;
+
+// ===== Shared action glyphs ===========================================
+
+/// Name a control's drawing without coupling its behavior to another screen.
+///
+/// Domain action enums stay with their callers: retrying a host and replacing
+/// a session can share arrow geometry without sharing lifecycle behavior.
+/// These are Farhelm originals, separate from harness and host identity marks.
+/// Already shared folder, branch, bell, settings, help and trash components
+/// remain the vocabulary for those meanings.
+// The Steel foundation supplies the rail, toolbar and dialog glyphs before
+// their screen-specific plans land. Keep this allowance on the vocabulary,
+// rather than making unused product controls solely to exercise the drawings.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActionGlyph {
+    AllHosts,
+    Hosts,
+    Add,
+    Templates,
+    ChevronDown,
+    Restart,
+    Replace,
+    Clone,
+    Delete,
+    /// An action's editable "with…" variant, rather than an immediate retry.
+    Adjust,
+    Edit,
+    /// The same eye accompanies both directions of the caller's seen toggle.
+    MarkSeen,
+    Pin,
+    Stop,
+    Adopt,
+    Setup,
+    Update,
+    Uninstall,
+    Tunnel,
+    Close,
+    Sessions,
+    Appearance,
+    Terminal,
+    /// Settings for trust decisions; this does not assert session permissions.
+    AgentTrust,
+    App,
+    Launch,
+    Copy,
+    Document,
+    External,
+    Feedback,
+    Warning,
+    Info,
+}
+
+/// Draw a decorative action in a caller-sized square, inheriting its color.
+///
+/// The containing control supplies its accessible name and any explanation;
+/// this SVG never adds a second spoken label or a focus stop. `data-glyph`
+/// identifies the requested meaning independently of that label, including
+/// meanings that share geometry. The 14-unit box preserves the existing menu
+/// drawings; `size` scales the whole drawing and its stroke together. Callers
+/// may retain their layout and selected/danger rules through `class`.
+#[component]
+pub(crate) fn ActionIcon(
+    glyph: ActionGlyph,
+    #[props(default = 14)] size: u16,
+    #[props(default)] class: String,
+) -> Element {
+    let (token, drawing) = match glyph {
+        ActionGlyph::AllHosts => (
+            "all-hosts",
+            rsx! {
+                rect { x: "2", y: "2", width: "4", height: "4", rx: ".7" }
+                rect { x: "8", y: "2", width: "4", height: "4", rx: ".7" }
+                rect { x: "2", y: "8", width: "4", height: "4", rx: ".7" }
+                rect { x: "8", y: "8", width: "4", height: "4", rx: ".7" }
+            },
+        ),
+        ActionGlyph::Hosts => (
+            "hosts",
+            rsx! {
+                rect { x: "5", y: "1.5", width: "4", height: "3", rx: ".7" }
+                rect { x: "1.5", y: "9", width: "4", height: "3.5", rx: ".7" }
+                rect { x: "8.5", y: "9", width: "4", height: "3.5", rx: ".7" }
+                path { d: "M7 4.5V7H3.5v2M7 7h3.5v2" }
+            },
+        ),
+        ActionGlyph::Add => ("add", rsx! { path { d: "M7 2v10M2 7h10" } }),
+        ActionGlyph::Templates => (
+            "templates",
+            rsx! {
+                path { d: "M4.5 2H12v8M2 4h7.5v8H2zM4 6.5h3.5M4 9h3.5" }
+            },
+        ),
+        ActionGlyph::ChevronDown => ("chevron-down", rsx! { path { d: "M3 5l4 4 4-4" } }),
+        ActionGlyph::Restart | ActionGlyph::Replace => (
+            if glyph == ActionGlyph::Restart {
+                "restart"
+            } else {
+                "replace"
+            },
+            rsx! {
+                path { d: "M11.5 5.5 A4.6 4.6 0 0 0 3 4.5 M2.5 8.5 A4.6 4.6 0 0 0 11 9.5 M11.8 2.5 V5.8 H8.6 M2.2 11.5 V8.2 H5.4" }
+            },
+        ),
+        ActionGlyph::Clone | ActionGlyph::Copy => (
+            if glyph == ActionGlyph::Clone {
+                "clone"
+            } else {
+                "copy"
+            },
+            rsx! {
+                rect { x: "2", y: "4.5", width: "7", height: "7", rx: "1" }
+                path { d: "M5 4.5 V2.5 H11.5 V9 H9" }
+            },
+        ),
+        ActionGlyph::Delete => (
+            "delete",
+            rsx! { path { d: "M2.5 4 H11.5 M5.5 4 V2.5 H8.5 V4 M3.8 4 L4.5 12 H9.5 L10.2 4" } },
+        ),
+        ActionGlyph::Adjust => (
+            "adjust",
+            rsx! {
+                // Leave gaps under the knobs instead of painting surface-colored
+                // holes, so solid menu selection keeps one inherited color.
+                path { d: "M2 4h1.4M6.6 4H12M2 10h5.4M10.6 10H12" }
+                circle { cx: "5", cy: "4", r: "1.6" }
+                circle { cx: "9", cy: "10", r: "1.6" }
+            },
+        ),
+        ActionGlyph::Edit => (
+            "edit",
+            rsx! { path { d: "M2.5 11.5 L2.5 9.5 L9 3 L11 5 L4.5 11.5 Z" } },
+        ),
+        ActionGlyph::MarkSeen => (
+            "mark-seen",
+            rsx! {
+                path { d: "M1.5 7 C3.5 3.5 10.5 3.5 12.5 7 C10.5 10.5 3.5 10.5 1.5 7 Z" }
+                circle { cx: "7", cy: "7", r: "1.6", fill: "currentColor", stroke: "none" }
+            },
+        ),
+        ActionGlyph::Pin => (
+            "pin",
+            rsx! { path { d: "M5 2h4l-.5 4 2 2H7.5v4L6 10V8H3.5l2-2z" } },
+        ),
+        ActionGlyph::Stop => (
+            "stop",
+            rsx! { rect { x: "3.5", y: "3.5", width: "7", height: "7", rx: "1" } },
+        ),
+        ActionGlyph::Adopt => (
+            "adopt",
+            rsx! {
+                path { d: "M2 7 H12 M7 2 V12" }
+                circle { cx: "7", cy: "7", r: "4.5" }
+            },
+        ),
+        ActionGlyph::Setup => (
+            "setup",
+            rsx! { path { d: "M7 1.8 L8.3 5.5 L12.2 6.8 L8.3 8.2 L7 12 L5.7 8.2 L1.8 6.8 L5.7 5.5 Z" } },
+        ),
+        ActionGlyph::Update => (
+            "update",
+            rsx! { path { d: "M7 2 V10 M4 5 L7 2 L10 5 M3 11.5 H11" } },
+        ),
+        ActionGlyph::Uninstall => (
+            "uninstall",
+            // An arrow leaving the tray means removal; the old downward
+            // arrow read as downloading the installation instead.
+            rsx! { path { d: "M7 9 V1.5 M4 4.5 L7 1.5 L10 4.5 M3 8.5 V12 H11 V8.5" } },
+        ),
+        ActionGlyph::Tunnel => (
+            "tunnel",
+            rsx! {
+                path { d: "M5.5 8.5l3-3M5 5l1.8-1.8a2.8 2.8 0 0 1 4 4L9 9M5 5 3.2 6.8a2.8 2.8 0 0 0 4 4L9 9" }
+            },
+        ),
+        ActionGlyph::Close => ("close", rsx! { path { d: "M3 3l8 8M11 3l-8 8" } }),
+        ActionGlyph::Sessions => (
+            "sessions",
+            rsx! {
+                rect { x: "1.5", y: "4.5", width: "9", height: "7.5", rx: "1" }
+                path { d: "M4 4.5V2h8.5v7.5h-2M1.5 7h9" }
+            },
+        ),
+        ActionGlyph::Appearance => (
+            "appearance",
+            rsx! {
+                circle { cx: "7", cy: "7", r: "4.8" }
+                path { d: "M7 2.2a4.8 4.8 0 0 1 0 9.6z", fill: "currentColor", stroke: "none" }
+            },
+        ),
+        ActionGlyph::Terminal => (
+            "terminal",
+            rsx! {
+                rect { x: "1.5", y: "2.5", width: "11", height: "9", rx: "1" }
+                path { d: "M3.5 5l2 2-2 2M7.5 9h3" }
+            },
+        ),
+        ActionGlyph::AgentTrust => (
+            "agent-trust",
+            rsx! { path { d: "M7 1.5 12 3.5v3.2c0 2.7-2.2 4.6-5 5.8-2.8-1.2-5-3.1-5-5.8V3.5zM4.5 6.8l1.7 1.7 3.3-3.3" } },
+        ),
+        ActionGlyph::App => (
+            "app",
+            rsx! {
+                rect { x: "2", y: "2", width: "10", height: "10", rx: "1" }
+                path { d: "M2 4.5h10M4 3.3h.01M5.8 3.3h.01" }
+            },
+        ),
+        ActionGlyph::Launch => (
+            "launch",
+            rsx! {
+                path { d: "M5 5.5C6.5 3.3 8.8 2 12 2c0 3.2-1.3 5.5-3.5 7L5 5.5zM5 5.5H2L1.5 9 5.7 8.3M8.5 9v3l-3.5.5.7-4.2M3.8 10.2 2 12" }
+                circle { cx: "9", cy: "5", r: "1" }
+            },
+        ),
+        ActionGlyph::Document => (
+            "document",
+            rsx! { path { d: "M3 1.5h5l3 3v8H3zM8 1.5v3h3M5 7h4M5 9.5h4" } },
+        ),
+        ActionGlyph::External => (
+            "external",
+            rsx! { path { d: "M8 2h4v4M12 2 6 8M6 3H2v9h9V8" } },
+        ),
+        ActionGlyph::Feedback => (
+            "feedback",
+            rsx! { path { d: "M2 2.5h10v7H6l-3.5 3V9.5H2zM4.5 5h5M4.5 7h3.5" } },
+        ),
+        ActionGlyph::Warning => (
+            "warning",
+            rsx! { path { d: "M7 1.5 13 12H1zM7 5v3.2M7 10h.01" } },
+        ),
+        ActionGlyph::Info => (
+            "info",
+            rsx! {
+                circle { cx: "7", cy: "7", r: "5.5" }
+                path { d: "M7 6v4M7 4h.01" }
+            },
+        ),
+    };
+    rsx! {
+        svg {
+            class: "action-glyph {class}", "data-glyph": token,
+            width: "{size}", height: "{size}", view_box: "0 0 14 14",
+            fill: "none", stroke: "currentColor", stroke_width: "1.2",
+            stroke_linecap: "round", stroke_linejoin: "round",
+            "aria-hidden": "true", "focusable": "false",
+            {drawing}
+        }
+    }
+}
 
 // ===== Destination glyphs and managed-checkout marks ===================
 
