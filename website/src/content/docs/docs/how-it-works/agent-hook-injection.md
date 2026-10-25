@@ -47,12 +47,14 @@ resume the conversation you had just thrown away. So Farhelm does not guess: it 
 itself reported, and a session with no such report cannot be restarted.
 
 Claude and Codex offer a session-start hook — a command they run whenever a conversation begins — and the hook receives
-the conversation id. Codex also runs a `Stop` hook at the end of a turn to confirm a new transcript that was not ready
-when `/clear` began. It cannot change an already saved conversation. Grok's three configured lifecycle hooks split the
-job: `SessionStart` selects the UUID, while `UserPromptSubmit` and `Stop` can supply or refresh the exact saved-record
-path for that same selection. For Codex and Grok, Farhelm also requires the report to come from the agent process it
-follows in your terminal, plus vendor-owned record evidence: another process can inherit the credential without becoming
-the conversation in your terminal. No status, control operation, or extra permission rides on the identity report.
+the conversation id. Both also run a `Stop` hook at the end of a turn. Claude reports its current conversation again, so
+Farhelm can switch back if another Claude started inside the session reported first. Codex uses it to confirm a new
+transcript that was not ready when `/clear` began. It cannot change an already saved conversation. Grok's three
+configured lifecycle hooks split the job: `SessionStart` selects the UUID, while `UserPromptSubmit` and `Stop` can
+supply or refresh the exact saved-record path for that same selection. For Codex and Grok, Farhelm also requires the
+report to come from the agent process it follows in your terminal, plus vendor-owned record evidence: another process
+can inherit the credential without becoming the conversation in your terminal. No status, control operation, or extra
+permission rides on the identity report.
 
 Goose exposes the same fact as `AGENT_SESSION_ID` to its MCP extensions. Pi exposes it to extensions together with its
 optional persisted session file. OMP exposes it to extensions through separate session events — `session_start`,
@@ -85,8 +87,8 @@ its credential-free reporter declaration persists in conversation metadata: outs
 empty MCP server, but without Farhelm launch credentials it reports nothing and exposes no tools.
 
 If a reporter fails, the session itself is unaffected. Farhelm gains no new conversation to resume. A new session whose
-agent has not reported cannot be restarted until it does. The one visible thing is the Codex warning line, and that is
-Codex talking, not the reporter.
+agent has not reported cannot be restarted until it does. The agents can still show their own hook status or warnings,
+as described below.
 
 ## Which launches get a reporter
 
@@ -118,18 +120,21 @@ bare `--`.
 
 The farhelm binary itself is the hook, invoked as `farhelm internal hook --vendor <adapter> --announce` by an absolute
 path for injected session-start hooks — the announce flag is present by default; see "Turning it off" below for the
-switch that removes it. Codex's end-of-turn command is `farhelm internal hook --vendor codex` without `--announce`.
-Grok's manual command is `farhelm internal hook --vendor grok` without `--announce`. The `--vendor` flag names which
-adapter this hook invocation is (Claude or Codex from an injected command, Pi or OMP from Farhelm's extension, which
-runs it without `--announce` and passes the pointer to those agents as a launch argument instead, and Grok from its
-manual configuration; the Goose helper supplies its own internally), so the supervisor can refuse a report addressed to
-a session of another kind before consulting any vendor state. It reads one callback payload from stdin and saves the
-conversation id, the vendor's `source`, and any transcript path and event name (a report naming a sub-agent is dropped
-instead; see below). Claude uses the source for diagnostics. Codex requires `SessionStart` with source `startup`,
-`resume`, `clear`, or `compact` to select a conversation; its source-less `Stop` can confirm that same conversation
-after a pending `/clear`, or correct an earlier conversation reported by a Codex process it started. Both require
-process attribution and exact-record validation. Grok requires `SessionStart`, `UserPromptSubmit`, or `Stop`; its
-selecting event also carries source `new` or `load` and a timestamp used to reject delayed replacement reports.
+switch that removes it. Claude's and Codex's end-of-turn commands use `--vendor claude` and `--vendor codex`
+respectively, without `--announce`. Grok's manual command is `farhelm internal hook --vendor grok` without `--announce`.
+The `--vendor` flag names which adapter this hook invocation is (Claude or Codex from an injected command, Pi or OMP
+from Farhelm's extension, which runs it without `--announce` and passes the pointer to those agents as a launch argument
+instead, and Grok from its manual configuration; the Goose helper supplies its own internally), so the supervisor can
+refuse a report addressed to a session of another kind before consulting any vendor state. It reads one callback payload
+from stdin and saves the conversation id, the vendor's `source`, and any transcript path and event name (a report naming
+a sub-agent is dropped instead; see below). Claude uses the source for diagnostics. Its `SessionStart` and `Stop` both
+report the current conversation; either can be the first report Farhelm accepts. A `Stop` from another Claude started
+inside the one Farhelm already follows is acknowledged without changing the conversation or logging a refusal warning.
+Codex requires `SessionStart` with source `startup`, `resume`, `clear`, or `compact` to select a conversation; its
+source-less `Stop` can confirm that same conversation after a pending `/clear`, or correct an earlier conversation
+reported by a Codex process it started. Both Codex callbacks require process attribution and exact-record validation.
+Grok requires `SessionStart`, `UserPromptSubmit`, or `Stop`; its selecting event also carries source `new` or `load` and
+a timestamp used to reject delayed replacement reports.
 
 The hook does not talk to the supervisor. It saves the report as a small file under `hook-reports/<session id>/` in the
 supervisor's state directory, together with a record of which processes it was started by, and exits 0 — always,
@@ -137,9 +142,10 @@ including on a panic. The supervisor applies saved reports on its regular pass e
 uses the record of processes to check that the report came from your session's terminal, under the launch Farhelm made
 there last, so a report left over from before a restart is refused. For Claude, Codex, Grok, and OMP it also checks
 which agent process can report for the session; see [What you will see](#what-you-will-see). Each session keeps only its
-newest report, except Codex and Grok: both keep the report that starts a conversation apart from the latest report that
-confirms its saved files. Codex confirms at the end of a turn; Grok can also confirm when you submit a prompt. This
-keeps confirmation from overwriting the conversation it belongs to while Farhelm is closed, so the directory stays tiny
+newest report, except Codex and Grok. For Claude, that is enough because its end-of-turn report names the current
+conversation too. Codex and Grok keep the report that starts a conversation apart from the latest report that confirms
+its saved files. Codex confirms at the end of a turn; Grok can also confirm when you submit a prompt. This keeps
+confirmation from overwriting the conversation it belongs to while Farhelm is closed, so the directory stays tiny
 however long the supervisor is away. Outside a farhelm session there is no session environment, so identity reporting
 exits immediately and saves nothing — though if `--announce` was passed on the command line, the pointer line described
 below still prints regardless, since it needs no credential at all.
@@ -157,9 +163,12 @@ Claude: the session's **restart** button becomes available within a few seconds 
 anything, because Claude fires the hook at process start. This works through
 [multiple wrappers that stay running](/docs/agents/agent-wrappers/). Farhelm follows the first Claude process whose
 conversation it accepts. Another Claude started inside the session cannot replace a conversation already reported by its
-parent. If the nested Claude reports first, the parent's next report at start, resume, `/clear`, or compact switches
-Farhelm to its conversation. A session notification explains what **restart** would have resumed before the switch. If
-the followed Claude exits, a fresh Claude in the same terminal can report its own conversation.
+parent. If the nested Claude reports first, the parent's next report at the end of a turn, or at start, resume,
+`/clear`, or compact, switches Farhelm to its conversation. A session notification explains what **restart** would have
+resumed before the switch. If the followed Claude exits, a fresh Claude in the same terminal can report its own
+conversation. Sessions already running before end-of-turn reporting was added keep their old command until relaunch, so
+their correction still waits for start, resume, `/clear`, or compact. Claude 2.1.310 can briefly display its own
+`running Stop hook` line at the end of a turn even though the reporter prints nothing.
 
 Codex: on the launches that get the flags, the `⚠ --dangerously-bypass-hook-trust is enabled` line above the composer,
 and the resume offer only after your first prompt — Codex fires `SessionStart` at first prompt submission, not at
@@ -260,9 +269,10 @@ The hook writes one line each time it runs, saying what it did:
 The supervisor adds one line for each saved report once it has decided about it, usually within two seconds, or when it
 next starts if it was not running:
 
-- `acked` — the report was accepted, and the session now tracks that conversation. Whether Restart can resume it yet
-  depends on the agent: Codex and Grok wait for the conversation's saved files, and Pi and OMP for their session files
-  (see each agent's guide).
+- `acked` — the supervisor has finished with the report. It may have saved the conversation, confirmed it, or left it
+  unchanged: a nested Claude's `Stop` and a Codex `Stop` that cannot confirm a conversation can be acknowledged without
+  changing anything. Whether Restart can resume it yet depends on the agent: Codex and Grok wait for the conversation's
+  saved files, and Pi and OMP for their session files (see each agent's guide).
 - `refused` — the report was turned down; the detail carries the error kind and the reason, or `unreadable` and why when
   the saved file itself could not be read (that line names no conversation). A `conflict` about the session's foreground
   means the report came from something other than the agent in your terminal (a separately started or shelled-out agent)
@@ -312,9 +322,10 @@ reporter first.
   long as the first turn, so their line here is a hint rather than proof.
 
 **3. Confirm the reporter is active.** Use `ps -o args= -p <agent pid>` for injected reporters. Claude's flags are
-`--settings` followed by a JSON blob naming the farhelm binary; Codex's are `--dangerously-bypass-hook-trust` plus three
-`-c` overrides for `features.hooks=true`, `hooks.SessionStart`, and `hooks.Stop`. For Grok, use `/hooks` inside Grok and
-confirm that the `SessionStart`, `UserPromptSubmit`, and `Stop` entries name the absolute Farhelm binary.
+`--settings` followed by a JSON blob with `SessionStart` and `Stop` entries naming the farhelm binary; Codex's are
+`--dangerously-bypass-hook-trust` plus three `-c` overrides for `features.hooks=true`, `hooks.SessionStart`, and
+`hooks.Stop`. For Grok, use `/hooks` inside Grok and confirm that the `SessionStart`, `UserPromptSubmit`, and `Stop`
+entries name the absolute Farhelm binary.
 
 In every one of these failure cases the session keeps working. The only thing at stake is which conversation the restart
 offer points at. Without an accepted report, a new session cannot be restarted, but if you know the conversation's id

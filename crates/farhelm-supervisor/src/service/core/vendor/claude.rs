@@ -12,6 +12,9 @@ impl Supervisor {
     /// binding. Ancestor correction and its once-per-launch notification commit
     /// together; refusals and failed writes publish nothing. Claude still takes
     /// no transcript proof and writes ownership version 0.
+    /// Stop is an ordinary selecting report of the current conversation. A
+    /// rival Stop acknowledges without effect or warning, including when pin
+    /// liveness is unavailable; validation and storage failures remain errors.
     pub(in crate::service::core) async fn report_claude_conversation(
         &self,
         id: &str,
@@ -24,8 +27,10 @@ impl Supervisor {
             conversation,
             source,
             ancestry,
+            hook_event_name,
             ..
         } = report;
+        let stop = hook_event_name.as_ref().and_then(serde_json::Value::as_str) == Some("Stop");
         if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
             return Err(RequestError::new(
                 ErrorKind::InvalidRequest,
@@ -92,12 +97,17 @@ impl Supervisor {
                         Some(reason) => Err(reason),
                         None => crate::procs::read_process(pin.process.pid),
                     };
-                    let live = evidence
-                        .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?
-                        .is_some_and(|(_, start, state)| {
+                    let live = match evidence {
+                        Ok(process) => process.is_some_and(|(_, start, state)| {
                             start == pin.process.start
                                 && state == crate::procs::ProcessState::Running
-                        });
+                        }),
+                        // A nested agent can report at every turn. Unknown
+                        // liveness still retains the pin, but an ordinary Stop
+                        // refusal must not become a warning on every turn.
+                        Err(_) if stop => return Ok(()),
+                        Err(reason) => return Err(RequestError::new(ErrorKind::Conflict, reason)),
+                    };
                     pin.judge(attribution.emitter, live, &chain)
                 } else {
                     initial
@@ -105,6 +115,11 @@ impl Supervisor {
             }
         };
         if decision == PinDecision::Refuse {
+            // Returning before the writer and finish helper keeps the report
+            // acknowledged without changing capture or logging a refusal.
+            if stop {
+                return Ok(());
+            }
             return Err(RequestError::new(
                 ErrorKind::Conflict,
                 "the Claude report came from a process other than this launch's pinned emitter",

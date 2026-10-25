@@ -2778,22 +2778,23 @@ file is introduced.
   layout, preferring text shown to the user as an instruction over decoration: every dialog that asks the user something
   ends in a key-hint footer ("Esc to cancel", "enter to submit answer", "enter continue"), Claude shows a spinner line
   directly above its ruled `❯` input box for the whole of a turn. Its verb can have one or several words, followed by an
-  ellipsis and a parenthesized timer beginning with a digit; compaction (`Compacting conversation… (1m 3s)`) counts as
-  working too. Finished-turn prose without that ellipsis remains idle. Reply text of the same shape just above the input
-  box (`- Ran the suite… (2 failures)`) also reads as working; that cosmetic false positive is accepted. Claude's
-  explicit `Waiting for N background … to finish` announcement in that same position also means the turn is still
-  working, while footer hints and a listed task without that announcement remain idle. Codex animates a Braille spinner
-  in its pane title for the whole of a turn (its on-screen `Working (…)` widget appears only during tool runs, never
-  while prose streams, so the title is fetched with a separate `display-message` for Codex sessions only — the title is
-  written by the pane, so it never rides the authoritative pane-fact query). A waiting prompt wins over a busy
-  indicator. A recognized screen that carries no state (a model picker, a transcript view) reads "can't tell" and the
-  previous reading stands. A screen with none of the anchors falls back to the generic reader for that sample, and after
-  a few such samples in a row (so a half-drawn startup frame does not count) the supervisor logs that once per run,
-  without screen content, as likely rule drift. The rules are tested against real captures under
-  `crates/farhelm-supervisor/tests/fixtures/screens/`, which `scripts/capture-agent-screens.py` re-captures from the
-  installed agents (`docs/agent-screen-fixtures.md`). The earlier Codex-only masking of its composer out of change
-  comparison is gone: whenever it applied, the Codex reader now recognizes the composer and answers from content, so the
-  comparison no longer decides anything there.
+  ellipsis and a parenthesized timer beginning with an ASCII digit. The exact prefix `running Stop hook · ` may precede
+  that digit, as observed in Claude Code 2.1.310; the existing glyph, nonempty verb, composer and proximity requirements
+  still apply. Compaction (`Compacting conversation… (1m 3s)`) counts as working too. Finished-turn prose without that
+  ellipsis remains idle. Reply text of the same shape just above the input box (`- Ran the suite… (2 failures)`) also
+  reads as working; that cosmetic false positive is accepted. Claude's explicit `Waiting for N background … to finish`
+  announcement in that same position also means the turn is still working, while footer hints and a listed task without
+  that announcement remain idle. Codex animates a Braille spinner in its pane title for the whole of a turn (its
+  on-screen `Working (…)` widget appears only during tool runs, never while prose streams, so the title is fetched with
+  a separate `display-message` for Codex sessions only — the title is written by the pane, so it never rides the
+  authoritative pane-fact query). A waiting prompt wins over a busy indicator. A recognized screen that carries no state
+  (a model picker, a transcript view) reads "can't tell" and the previous reading stands. A screen with none of the
+  anchors falls back to the generic reader for that sample, and after a few such samples in a row (so a half-drawn
+  startup frame does not count) the supervisor logs that once per run, without screen content, as likely rule drift. The
+  rules are tested against real captures under `crates/farhelm-supervisor/tests/fixtures/screens/`, which
+  `scripts/capture-agent-screens.py` re-captures from the installed agents (`docs/agent-screen-fixtures.md`). The
+  earlier Codex-only masking of its composer out of change comparison is gone: whenever it applied, the Codex reader now
+  recognizes the composer and answers from content, so the comparison no longer decides anything there.
 - Permission-footer evidence: the same sampling pass calls the exhaustive launch-harness reader in
   `agent_kind::screen_reader`, independently of the activity kind (Muse and Cursor use generic activity). Its optional
   bool latches `ActivitySample::screen_yolo` on the first definite YOLO reading of a run and hints connected helms only
@@ -3062,13 +3063,24 @@ file is introduced.
   cannot inherit authority after the pinned process exits. Unavailable process evidence never releases it. Relaunch
   clears the shared pin, and abort does not restore it. Running sessions start unpinned after upgrade: if a parent's
   report was lost, a nested Claude carrying a reporting hook can report first and be followed until an ancestor reports
-  at start, resume, clear, or compact. That gap is accepted without upgrade machinery. Claude adds no transcript
-  verification, stays at ownership version 0, and leaves its per-kind offer predicate false: changing it would withdraw
-  existing Restart offers, and the pin needs no versioned offer gate. Codex, Grok, and OMP require version 1 through the
-  single per-kind predicate every surface consults; Goose and Pi keep their existing offer behavior. There is no general
-  report epoch. Grok's locator carries only its vendor-specific selection timestamp; no other kind inherits that
-  ordering rule. OMP uses serial cancellation fences, not cross-reporter chronology. Pre-discriminator senders and
-  outdated OMP reporter assets fail closed; neither is grandfathered.
+  at start, resume, clear, compact, or the end of a turn. That gap is accepted without upgrade machinery. Claude adds no
+  transcript verification, stays at ownership version 0, and leaves its per-kind offer predicate false: changing it
+  would withdraw existing Restart offers, and the pin needs no versioned offer gate. Codex, Grok, and OMP require
+  version 1 through the single per-kind predicate every surface consults; Goose and Pi keep their existing offer
+  behavior. There is no general report epoch. Grok's locator carries only its vendor-specific selection timestamp; no
+  other kind inherits that ordering rule. OMP uses serial cancellation fences, not cross-reporter chronology.
+  Pre-discriminator senders and outdated OMP reporter assets fail closed; neither is grandfathered.
+
+  Claude's `Stop` is an ordinary selecting report carrying the current conversation ID, not a confirmation of a prior
+  `SessionStart`. It can establish the first pin, select from the pinned process, or correct from a recorded ancestor,
+  under the same capture claim and complete-binding/pin CAS. When the pin refuses a rival emitter's `Stop`, admission
+  acknowledges it silently without changing the binding, pin, offer or notifications and without a refusal warning.
+  Unavailable liveness evidence still never releases a pin. Claude Code 2.1.310 was observed reporting the current
+  conversation on `Stop` before and after `/clear`; `/clear` itself emitted `SessionStart`, with no intervening `Stop`
+  in that observation. A native background sub-agent completed through `SubagentStop`, while the surrounding `Stop`
+  callbacks carried the parent's ID and no `agent_id`. Farhelm subscribes to `SessionStart` and `Stop`, not
+  `SubagentStop`; reports carrying a sub-agent marker remain dropped. These observations do not establish behavior for
+  other Claude versions or every permission mode.
 
   **The per-launch identity hook.** Claude Code's `/clear` and Codex's `/new` can replace the conversation inside a live
   process. Farhelm needs the agent's explicit report so Resume does not return to the discarded conversation. Both
@@ -3078,7 +3090,8 @@ file is introduced.
   The `--vendor` flag is the report envelope's discriminator, sourced from the installed entry point rather than
   inferred from the payload; the Goose helper supplies its own value internally so the persisted declaration keeps
   invoking the same command, while the Pi/OMP assets pass theirs on the spawned command line and keep their JSON
-  `vendor` field purely as a consistency check. Claude takes its `SessionStart` hook as `--settings <json>`; Codex takes
+  `vendor` field purely as a consistency check. Claude takes `SessionStart` and `Stop` entries in `--settings <json>`,
+  each with a 60-second timeout; Codex takes
   `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=… -c hooks.Stop=…`. Per-launch is the
   whole point: nothing is written to `~/.claude` or to Codex's active configuration home (`$CODEX_HOME` when set,
   `~/.codex` otherwise), no trust state is left behind, and flags cannot outlive the process they were passed to — which
@@ -3108,9 +3121,10 @@ file is introduced.
   The injected command line outlives the binary that wrote it, so it is part of what newer binaries keep accepting (see
   "What running sessions hold across versions").
 
-  Codex's Stop hook carries no instructions announcement: only SessionStart adds that context. Sessions launched before
-  Stop was injected retain their old argv, so a pending clear in one of them cannot be confirmed until relaunch. No
-  polling or upgrade machinery compensates for that accepted breaking gap.
+  Claude's and Codex's Stop hooks carry no instructions announcement: only SessionStart adds that context. Sessions
+  launched before Stop was injected retain their old argv until relaunch. For Codex, a pending clear in one of them
+  cannot be confirmed; for Claude, ancestor correction waits for another SessionStart rather than the end of a turn. No
+  polling or upgrade machinery compensates for those accepted gaps.
 
   **Report files.** The hook never talks to the supervisor and never waits for it. It reads the vendor's payload
   (bounded at 30 s, for a vendor that holds stdin open, under the 60 s outer timers Farhelm sets or documents; Pi and
@@ -3118,14 +3132,16 @@ file is introduced.
   `hook-reports/<session-id>/` under the state directory (the socket's parent), and exits 0. It requires the launch's
   complete credential environment, as before, but carries no token: the file sits in the supervisor's private state
   directory, and attribution, not a secret, is what stops a nested agent's report. Each session has fixed slots, each
-  replaced by rename: `latest.json` for the single-report integrations; Codex and Grok use `selection.json`
-  (`SessionStart`) and `enrichment.json` (Codex Stop; Grok's later events), drained selection first. Enrichment is
-  refused without its selection, and the separate slot keeps a long outage's enrichments from evicting it. The directory
-  is therefore bounded at two files with no queue, cap, or eviction rule. Two hooks firing at once still race for a
-  slot, and the later rename wins. A report that names a sub-agent is never written, since it would take the slot of a
-  pending report from the session's own agent and then be refused; a nested runtime that carries no such marker (a
-  second Grok started inside a Grok session, whose hooks are global) can still take that slot, within one pass while the
-  supervisor runs or across an outage, and is then refused, which is an accepted gap.
+  replaced by rename: `latest.json` for the single-report integrations, including Claude. Claude's SessionStart and Stop
+  both select the current conversation under the pin, so the newest report suffices without a separate confirmation
+  slot. Codex and Grok use `selection.json` (`SessionStart`) and `enrichment.json` (Codex Stop; Grok's later events),
+  drained selection first. Enrichment is refused without its selection, and the separate slot keeps a long outage's
+  enrichments from evicting it. The directory is therefore bounded at two files with no queue, cap, or eviction rule.
+  Two hooks firing at once still race for a slot, and the later rename wins. A report that names a sub-agent is never
+  written, since it would take the slot of a pending report from the session's own agent and then be refused; a nested
+  runtime that carries no such marker (a second Grok started inside a Grok session, whose hooks are global) can still
+  take that slot, within one pass while the supervisor runs or across an outage, and is then refused, which is an
+  accepted gap.
 
   The supervisor applies waiting reports on recursive file-watch events and at the start of every reconciliation pass
   (`capture_now`: the 2 s ticker, startup, reload, Restart) and does nothing while it is not recording. It takes a slot
@@ -3142,18 +3158,19 @@ file is introduced.
   because a report waiting on disk may name the conversation it is about to resume, and after the relaunch that report
   would be discarded as the old launch's. The watch task also waits for the drain lock, so an event is never lost to an
   already-running drain. Every settled report leaves a verdict line in the session's hook log, beside the hook's own
-  `written` line: `acked`, or `refused` with the error kind and reason. Delete removes the drop directory; a pass
-  removes one whose session no longer exists, which a hook racing the delete can recreate. The supervisor creates the
-  report root with mode 0700 before attaching notify's recommended recursive watcher (inotify on Linux, default FSEvents
-  on macOS). An independent task drains the whole root; a single stored wake coalesces bursts and retains events during
-  a drain. A 100 ms pause between drains bounds the feedback from retried reports linked back into place. Access events
-  are ignored so the drain's own reads cannot keep waking it. The timer remains the backstop. Watch setup or backend
-  failure logs once and disables the watch for that supervisor lifetime, without changing periodic pickup. The ticker
-  handle owns the watcher's cooperative stop; in-flight admission completes before backend drop requests native shutdown
-  (notify's inotify thread finishes asynchronously). A closed supervisor lifetime channel ends an idle watch when the
-  last supervisor reference disappears. macOS backend batching can add latency; pickup on Linux is normally well below a
-  second. A report made while no supervisor runs waits on disk for the next one; a supervisor older than the hook binary
-  (mid-update) may miss reports briefly, which is accepted.
+  `written` line: `acked`, or `refused` with the error kind and reason. An `acked` Stop need not change the
+  conversation: Claude's pin can silently turn a rival away, and Codex can acknowledge a Stop without effect. Delete
+  removes the drop directory; a pass removes one whose session no longer exists, which a hook racing the delete can
+  recreate. The supervisor creates the report root with mode 0700 before attaching notify's recommended recursive
+  watcher (inotify on Linux, default FSEvents on macOS). An independent task drains the whole root; a single stored wake
+  coalesces bursts and retains events during a drain. A 100 ms pause between drains bounds the feedback from retried
+  reports linked back into place. Access events are ignored so the drain's own reads cannot keep waking it. The timer
+  remains the backstop. Watch setup or backend failure logs once and disables the watch for that supervisor lifetime,
+  without changing periodic pickup. The ticker handle owns the watcher's cooperative stop; in-flight admission completes
+  before backend drop requests native shutdown (notify's inotify thread finishes asynchronously). A closed supervisor
+  lifetime channel ends an idle watch when the last supervisor reference disappears. macOS backend batching can add
+  latency; pickup on Linux is normally well below a second. A report made while no supervisor runs waits on disk for the
+  next one; a supervisor older than the hook binary (mid-update) may miss reports briefly, which is accepted.
 
   Grok uses the same hook executable and report files but not this injection path. Its native TUI cannot take a
   per-launch hook overlay, so the user installs three matcher groups under `$GROK_HOME/hooks`: one each for

@@ -170,12 +170,14 @@ pub enum Script {
     /// Sharing `ClaudeRecord` keeps argv, input and record markers identical
     /// for report-driven tests and plain launch fixtures.
     ///
-    /// See [`hook_report`] for the markers and what each one proves.
+    /// See [`run_report_hook`] for the markers and what each one proves.
     ///
     /// It also takes `nested-report <id>`, which fires the same hook from
     /// a second copy of this fixture run through a resident shell, standing
     /// in for a shelled-out sub-agent that inherited the credential; see
     /// [`nested_hook_report`].
+    /// `stop-report <id>` runs this launch's injected Claude `Stop` command
+    /// with its current conversation, without a SessionStart announcement.
     HookReport,
     /// The whole agent-facing chain, acted out end to end: read the
     /// injected `SessionStart` hook out of this launch's own `--settings`
@@ -655,32 +657,7 @@ fn run_checkout_create(request: &str) -> Result<String, String> {
 /// hook's identity half does real work rather than bailing on an empty
 /// payload — this fixture stands in for the vendor, and a vendor sends one.
 fn run_injected_hook() -> anyhow::Result<String> {
-    let argv: Vec<String> = std::env::args().collect();
-    let settings = argv
-        .iter()
-        .enumerate()
-        .find_map(|(index, element)| {
-            if let Some(inline) = element.strip_prefix("--settings=") {
-                return Some(inline.to_string());
-            }
-            if element == "--settings" {
-                return argv.get(index + 1).cloned();
-            }
-            None
-        })
-        .context(
-            "this launch carries no --settings; it was not started as a Claude-kind session",
-        )?;
-
-    let settings: serde_json::Value =
-        serde_json::from_str(&settings).context("the injected --settings is not JSON")?;
-    // Borrowed from `settings`, which outlives the spawn below: the command
-    // is only ever handed to `Command::arg`, and copying it would be an
-    // allocation for nothing.
-    let command = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-        .as_str()
-        .context("the injected settings declare no SessionStart hook command")?;
-
+    let command = injected_hook_command("SessionStart")?;
     let session = std::env::var("FARHELM_SESSION_ID").unwrap_or_default();
     let cwd = std::env::current_dir()
         .map(|path| path.to_string_lossy().into_owned())
@@ -737,6 +714,36 @@ fn run_injected_hook() -> anyhow::Result<String> {
         .read_to_end(&mut stdout)
         .context("reading the hook's stdout")?;
     Ok(String::from_utf8_lossy(&stdout).trim_end().to_string())
+}
+
+/// Read a callback command from this launch's own injected Claude settings.
+/// Only supervisor-created argv is trusted here; callers may pass the result
+/// to `sh -c` because Claude's settings store shell commands, not argv arrays.
+/// Both vendor-supported spellings of `--settings` preserve that boundary.
+fn injected_hook_command(event: &str) -> anyhow::Result<String> {
+    let argv: Vec<String> = std::env::args().collect();
+    let settings = argv
+        .iter()
+        .enumerate()
+        .find_map(|(index, element)| {
+            if let Some(inline) = element.strip_prefix("--settings=") {
+                return Some(inline.to_string());
+            }
+            if element == "--settings" {
+                return argv.get(index + 1).cloned();
+            }
+            None
+        })
+        .context(
+            "this launch carries no --settings; it was not started as a Claude-kind session",
+        )?;
+
+    let settings: serde_json::Value =
+        serde_json::from_str(&settings).context("the injected --settings is not JSON")?;
+    settings["hooks"][event][0]["hooks"][0]["command"]
+        .as_str()
+        .map(str::to_owned)
+        .with_context(|| format!("the injected settings declare no {event} hook command"))
 }
 
 /// Parse one `$farhelm clone this session onto <host>[ in <dir>]` line.
@@ -1002,13 +1009,16 @@ fn record_agent(
                 let (id, _forked_path) = write_record(shape, &home, &cwd)?;
                 writeln!(out, "RECORD-FORKED:{id}\r")?;
             }
-            // The one extra form [`Script::HookReport`] adds. Guarded on
+            // The report forms [`Script::HookReport`] adds. Guarded on
             // the flag so `ClaudeRecord`/`CodexRecord` keep treating a line
             // starting with `report ` as ordinary prompt text — those
             // fixtures' contract with their tests must not shift because a
             // sibling script grew a command.
             (line, _) if hook_reports && line.starts_with(REPORT_COMMAND) => {
                 hook_report(shape, line[REPORT_COMMAND.len()..].trim(), &mut out)?;
+            }
+            (line, _) if hook_reports && line.starts_with(STOP_REPORT_COMMAND) => {
+                stop_hook_report(line[STOP_REPORT_COMMAND.len()..].trim(), &mut out)?;
             }
             (line, _) if hook_reports && line.starts_with(NESTED_REPORT_COMMAND) => {
                 nested_hook_report(&home, line[NESTED_REPORT_COMMAND.len()..].trim(), &mut out)?;
@@ -1038,6 +1048,11 @@ fn record_agent(
 /// never answers rather than as a compile error.
 const REPORT_COMMAND: &str = "report ";
 
+/// A current-conversation Claude Stop callback, distinct from SessionStart so
+/// tests exercise the injected command and the event's source-free payload.
+/// Like [`REPORT_COMMAND`], the spelling also lives in the identity e2e tests.
+const STOP_REPORT_COMMAND: &str = "stop-report ";
+
 /// The prefix of [`Script::HookReport`]'s nested input form,
 /// `nested-report <id>`. Spelled again in `tests/e2e/hook_identity.rs`,
 /// for the same reason as [`REPORT_COMMAND`].
@@ -1062,10 +1077,9 @@ fn option_after(args: impl Iterator<Item = String>, flag: &str) -> Option<String
 ///
 /// The ancestry is the whole point, so each link is pinned rather than
 /// assumed. The shell command ends in `; :` so the shell cannot `exec` the
-/// child away: a single `sh -c` between pane and hook is correctly
-/// admitted by Claude's positional rule (it is either a trampoline or the
-/// pane's direct child), and a fixture that let it disappear would see the
-/// child's report accepted and blame the rule. The child prints its
+/// child away. The shell makes this a shelled-out child rather than a hook
+/// trampoline, so the report must be judged against the foreground's pin.
+/// The child prints its
 /// parent's image name (`NESTED-PARENT:`), so a test can see that a live
 /// shell, not the pane, ran it. Everything past the child is the same
 /// genuine hook, socket, and inherited credential [`hook_report`] uses.
@@ -1240,10 +1254,9 @@ fn product_farhelm() -> anyhow::Result<std::path::PathBuf> {
 /// Restart only ever resumes a captured conversation, and the browser specs
 /// that restart a real session cannot easily type `report <id>` into it, so
 /// this reports at start instead. It goes through [`hook_report`], the same
-/// genuine hook, socket and inherited credential the typed form uses, with
-/// this process as the hook's parent — which is what Claude's positional
-/// attribution admits, provided the launch `exec`ed the fixture. The
-/// markers [`hook_report`] prints land above the script's own output.
+/// genuine hook, socket and inherited credential the typed form uses. This
+/// process is the report's emitter; wrappers above it remain launch ancestry.
+/// The markers [`run_report_hook`] prints land above the script's own output.
 pub fn report_conversation_at_start(conversation: &str) -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
     hook_report(RecordShape::Claude, conversation, &mut out)?;
@@ -1252,23 +1265,66 @@ pub fn report_conversation_at_start(conversation: &str) -> anyhow::Result<()> {
 }
 
 /// Fire the real `farhelm internal hook` for `conversation`, as the vendor
-/// would at `SessionStart`, and report what came back.
+/// would at `SessionStart`, without the optional instructions announcement.
 ///
-/// The child is the CURRENT EXECUTABLE — the same multi-call binary this
-/// fixture is a subcommand of, and the same one the supervisor injects into
-/// the vendor's hook configuration — invoked exactly as the injected
-/// configuration invokes it. The environment is inherited untouched because
+/// The child runs the product binary selected for this fixture, using the
+/// same vendor entry point the supervisor injects into the hook configuration.
+/// The environment is inherited untouched because
 /// that is where the session credential lives (`FARHELM_SESSION_ID` and
 /// friends, injected at launch); nothing here has to know those names, and
 /// a test that had to set them would be faking the very thing under test.
 ///
-/// The payload is deliberately small: `session_id` and `source` are the
-/// only fields the hook reads at all, and both vendors send many more that
-/// it is specified to ignore, so transcribing them would test this
-/// fixture's copying rather than the parser's tolerance.
-/// `hook_event_name` is the one field here the hook never looks at — it is
-/// carried because every real `SessionStart` payload carries it, so the
-/// bytes on the wire stay vendor-shaped rather than minimal.
+/// The payload names the current conversation and callback. `source` belongs
+/// to SessionStart; [`stop_hook_report`] deliberately omits it for Stop.
+fn hook_report(shape: RecordShape, conversation: &str, out: &mut impl Write) -> anyhow::Result<()> {
+    let exe = product_farhelm()?;
+    // The discriminator comes from the shape under test — the entry point
+    // a real injection would have installed — never from the payload.
+    let vendor = match shape {
+        RecordShape::Claude => "claude",
+        RecordShape::Codex => "codex",
+    };
+    let mut command = std::process::Command::new(&exe);
+    command.args(["internal", "hook", "--vendor", vendor]);
+    run_report_hook(
+        command,
+        serde_json::json!({
+            "session_id": conversation,
+            "hook_event_name": "SessionStart",
+            "source": "startup",
+        }),
+        conversation,
+        out,
+    )
+}
+
+/// Run the Stop callback the supervisor actually supplied to this launch.
+/// The source-free payload carries the current conversation. Parsing and
+/// running the injected command catches broken or announcing Stop injection
+/// that a hand-built `internal hook` invocation would miss.
+fn stop_hook_report(conversation: &str, out: &mut impl Write) -> anyhow::Result<()> {
+    let injected = injected_hook_command("Stop")?;
+    let words = shell_words::split(&injected).context("parsing the injected Stop command")?;
+    anyhow::ensure!(
+        !words.iter().any(|word| word == "--announce"),
+        "the injected Stop command must not announce instructions"
+    );
+    let mut command = std::process::Command::new("sh");
+    command.args(["-c", &injected]);
+    run_report_hook(
+        command,
+        serde_json::json!({
+            "session_id": conversation,
+            "hook_event_name": "Stop",
+        }),
+        conversation,
+        out,
+    )
+}
+
+/// Run one real report callback under a deadline and expose its silence result.
+/// SessionStart and Stop use the same observation contract so neither can
+/// silently acquire output that the vendor would surface to the user.
 ///
 /// ## The markers, and what each proves
 ///
@@ -1287,7 +1343,8 @@ pub fn report_conversation_at_start(conversation: &str) -> anyhow::Result<()> {
 ///   reply are all genuine at once. The child is invoked WITHOUT
 ///   `--announce`, which is what keeps that assertion about silence rather
 ///   than about the announce flag being off; the pointer line has its own
-///   tests in `e2e/hook_identity.rs`.
+///   tests in `e2e/hook_identity.rs`. Stop instead runs its actual injected
+///   command, which must never carry `--announce`.
 /// - `HOOK-STDOUT-DIRTY:<bytes>` / `HOOK-EXIT:<code>` — the two ways that
 ///   contract breaks, reported separately (and never instead of each other)
 ///   so a failing test names which one happened rather than just "not
@@ -1298,29 +1355,19 @@ pub fn report_conversation_at_start(conversation: &str) -> anyhow::Result<()> {
 /// child's output to this fixture's own pty, where it would be
 /// indistinguishable from the fixture's markers and would silently satisfy
 /// a naive transcript scan.
-fn hook_report(shape: RecordShape, conversation: &str, out: &mut impl Write) -> anyhow::Result<()> {
-    let exe = product_farhelm()?;
-    let payload = serde_json::json!({
-        "session_id": conversation,
-        "hook_event_name": "SessionStart",
-        "source": "startup",
-    })
-    .to_string();
-    // The discriminator comes from the shape under test — the entry point
-    // a real injection would have installed — never from the payload.
-    let vendor = match shape {
-        RecordShape::Claude => "claude",
-        RecordShape::Codex => "codex",
-    };
-
-    let mut child = std::process::Command::new(&exe)
-        .args(["internal", "hook", "--vendor", vendor])
+fn run_report_hook(
+    mut command: std::process::Command,
+    payload: serde_json::Value,
+    conversation: &str,
+    out: &mut impl Write,
+) -> anyhow::Result<()> {
+    let mut child = command
         .env("FARHELM_TEST_HOOK_BUDGET_MS", TEST_HOOK_BUDGET_MS)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .with_context(|| format!("spawning the hook binary {}", exe.display()))?;
+        .context("spawning the report hook")?;
     {
         // Scoped so the pipe is CLOSED before the wait below: the hook
         // reads to EOF under a budget, and a writer that never hangs up
@@ -1330,8 +1377,8 @@ fn hook_report(shape: RecordShape, conversation: &str, out: &mut impl Write) -> 
             .take()
             .context("the hook child was spawned with a piped stdin")?;
         stdin
-            .write_all(payload.as_bytes())
-            .context("writing the SessionStart payload to the hook")?;
+            .write_all(payload.to_string().as_bytes())
+            .context("writing the callback payload to the hook")?;
     }
     // Polled against a local deadline rather than `wait_with_output`,
     // which waits forever. The hook is the process under test here, so

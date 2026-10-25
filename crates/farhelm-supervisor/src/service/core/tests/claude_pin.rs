@@ -485,3 +485,247 @@ async fn claude_pin_preserves_all_state_on_evidence_validation_and_write_failure
     assert_eq!(corrected.notifications[0].kind, "claude_pin_corrected");
     assert!(!corrected.notifications[0].notification.resolved);
 }
+
+/// Claude's Stop carries a complete current identity, rather than Codex's
+/// confirmation-only evidence. Keeping source empty matches the callback shape
+/// whose admission must not depend on a preceding SessionStart reaching Farhelm.
+fn claude_stop_report(conversation: &str, processes: &[ProcessIdentity]) -> ReportedConversation {
+    let mut report = claude_pin_report(conversation, processes);
+    report.source.clear();
+    report.hook_event_name = Some(serde_json::json!("Stop"));
+    report
+}
+
+/// Stop can recover an unpinned launch and select its later current conversation.
+/// A shorter repeat must retain the first report's correction ancestors, and
+/// neither selection introduces transcript confirmation or version-1 provenance.
+#[farhelm_testtrace::test]
+async fn claude_stop_selects_without_session_start_and_preserves_pin_ancestors() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .unwrap();
+    let id = "claude-stop-selection";
+    seed_claude_pin_session(&sup, id).await;
+    let emitter = ProcessIdentity::read(std::process::id()).unwrap();
+    let ancestor = ProcessIdentity {
+        pid: 900_050,
+        start: 50,
+    };
+    assert_eq!(sup.store.report_pin(id).await.unwrap(), None);
+    sup.report_conversation(id, claude_stop_report("stop-first", &[emitter, ancestor]))
+        .await
+        .unwrap();
+    let first = assert_claude_pin(&sup, id, "stop-first", emitter, &[ancestor]).await;
+    assert!(first.notifications.is_empty());
+
+    sup.report_conversation(id, claude_stop_report("stop-current", &[emitter]))
+        .await
+        .unwrap();
+    let current = assert_claude_pin(&sup, id, "stop-current", emitter, &[ancestor]).await;
+    assert_eq!(
+        current.pin, first.pin,
+        "Stop must preserve the original serialized authority"
+    );
+    assert!(current.notifications.is_empty());
+}
+
+/// An ancestor's end-of-turn report repairs child-first capture immediately.
+/// A second, higher ancestor may correct again, but the launch retains one
+/// unresolved warning about what an earlier Restart would have resumed.
+#[farhelm_testtrace::test]
+async fn claude_stop_corrects_child_first_capture_and_notifies_once() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .unwrap();
+    let id = "claude-stop-correction";
+    seed_claude_pin_session(&sup, id).await;
+    let parent = ProcessIdentity::read(std::process::id()).unwrap();
+    let child = ProcessIdentity {
+        pid: 900_060,
+        start: 60,
+    };
+    let higher = ProcessIdentity {
+        pid: 900_061,
+        start: 61,
+    };
+    sup.report_conversation(id, claude_pin_report("child", &[child, parent, higher]))
+        .await
+        .unwrap();
+    let child_state = assert_claude_pin(&sup, id, "child", child, &[parent, higher]).await;
+    assert!(
+        child_state.notifications.is_empty(),
+        "the child-first premise must be observable"
+    );
+
+    sup.report_conversation(id, claude_stop_report("parent", &[parent, higher]))
+        .await
+        .unwrap();
+    let parent_state = assert_claude_pin(&sup, id, "parent", parent, &[higher]).await;
+    assert_eq!(parent_state.notifications.len(), 1);
+    let notice = &parent_state.notifications[0];
+    assert_eq!(notice.kind, "claude_pin_corrected");
+    assert_eq!(notice.generation, 0);
+    assert_eq!(
+        notice.notification.text,
+        crate::service::notifications::CLAUDE_PIN_CORRECTED_TEXT
+    );
+    assert!(!notice.notification.resolved);
+
+    sup.report_conversation(id, claude_stop_report("higher", &[higher]))
+        .await
+        .unwrap();
+    let higher_state = assert_claude_pin(&sup, id, "higher", higher, &[]).await;
+    assert_eq!(higher_state.notifications, parent_state.notifications);
+}
+
+/// Routine rival Stops acknowledge without warnings or partial capture changes.
+/// Unknown liveness evidence has the same silent no-effect outcome, while a
+/// malformed report or failed authoritative write remains an actual error.
+/// The existing per-test trace capture measures WARN events only after setup,
+/// so hook silence cannot pass merely because every hook already hides errors.
+/// A failed authoritative write supplies a positive warning control, proving the
+/// same capture and level spelling actually observe admission's diagnostics.
+#[farhelm_testtrace::test]
+async fn claude_stop_silences_rivals_but_preserves_validation_and_write_errors() {
+    let state = StateDir::new();
+    let fail_process = Arc::new(AtomicBool::new(false));
+    let process_reads = Arc::new(AtomicUsize::new(0));
+    let fail_write = Arc::new(AtomicBool::new(false));
+    let sup = Supervisor::new_with_seams(
+        state.path(),
+        dummy_exe(),
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            faults: FaultHooks {
+                claude_pin_process_fault: Some(Arc::new({
+                    let fail = fail_process.clone();
+                    let reads = process_reads.clone();
+                    move |_| {
+                        reads.fetch_add(1, Ordering::SeqCst);
+                        fail.load(Ordering::SeqCst)
+                            .then(|| "controlled Stop process evidence unavailable".into())
+                    }
+                })),
+                capture_store_fault: Some(Arc::new({
+                    let fail = fail_write.clone();
+                    move |write, _| {
+                        if write == crate::service::capture::CaptureWrite::Report
+                            && fail.load(Ordering::SeqCst)
+                        {
+                            anyhow::bail!("controlled Stop capture write failure");
+                        }
+                        Ok(())
+                    }
+                })),
+                ..FaultHooks::default()
+            },
+            ..SupervisorSeams::default()
+        },
+    )
+    .await
+    .unwrap();
+    let id = "claude-stop-silence";
+    seed_claude_pin_session(&sup, id).await;
+    let parent = ProcessIdentity::read(std::process::id()).unwrap();
+    let rival = ProcessIdentity {
+        pid: 900_070,
+        start: 70,
+    };
+    sup.report_conversation(id, claude_pin_report("parent", &[parent]))
+        .await
+        .unwrap();
+    let before = assert_claude_pin(&sup, id, "parent", parent, &[]).await;
+    let capture = farhelm_testtrace::current_capture().expect("annotated test has a trace capture");
+
+    for (unavailable, processes) in [(false, vec![rival, parent]), (true, vec![rival])] {
+        fail_process.store(unavailable, Ordering::SeqCst);
+        let baseline = capture.snapshot().expect("complete warning baseline");
+        let warnings_before = baseline
+            .events()
+            .iter()
+            .filter(|event| event.level == "WARN")
+            .count();
+        let reads_before = process_reads.load(Ordering::SeqCst);
+        sup.report_conversation(id, claude_stop_report("rival", &processes))
+            .await
+            .expect("a rival Stop is acknowledged without effect");
+        assert_eq!(
+            process_reads.load(Ordering::SeqCst),
+            reads_before + 1,
+            "the test must reach the live-pin or unavailable-evidence decision"
+        );
+        assert_eq!(
+            observe_claude_pin(&sup, id).await,
+            before,
+            "rival Stop changed authority (unavailable={unavailable})"
+        );
+        let after = capture.snapshot().expect("complete warning observation");
+        assert_eq!(
+            after
+                .events()
+                .iter()
+                .filter(|event| event.level == "WARN")
+                .count(),
+            warnings_before,
+            "rival Stop warned (unavailable={unavailable}): {:?}",
+            after.events()
+        );
+    }
+
+    let invalid_id = claude_stop_report("bad\nid", &[parent]);
+    let error = sup.report_conversation(id, invalid_id).await.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InvalidRequest);
+    assert_eq!(observe_claude_pin(&sup, id).await, before);
+    let mut invalid_corridor = claude_stop_report("parent", &[parent]);
+    invalid_corridor.ancestry.as_mut().unwrap()[0].argv = Some(vec![b"not-a-hook".to_vec()]);
+    let error = sup
+        .report_conversation(id, invalid_corridor)
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Conflict);
+    assert!(
+        error.message.contains("supported hook invocation"),
+        "{error:?}"
+    );
+    assert_eq!(observe_claude_pin(&sup, id).await, before);
+
+    let failure_baseline = capture
+        .snapshot()
+        .expect("complete write-failure warning baseline");
+    let warnings_before_failure = failure_baseline
+        .events()
+        .iter()
+        .filter(|event| event.level == "WARN")
+        .count();
+    fail_write.store(true, Ordering::SeqCst);
+    let error = sup
+        .report_conversation(id, claude_stop_report("parent-after-clear", &[parent]))
+        .await
+        .expect_err("an authoritative Stop must expose a failed write");
+    assert_eq!(error.kind, ErrorKind::Internal);
+    assert_eq!(
+        observe_claude_pin(&sup, id).await,
+        before,
+        "failed authoritative Stop published speculative capture"
+    );
+    let failure_trace = capture
+        .snapshot()
+        .expect("complete write-failure warning observation");
+    assert!(
+        failure_trace
+            .events()
+            .iter()
+            .filter(|event| event.level == "WARN")
+            .count()
+            > warnings_before_failure,
+        "the warning capture must observe the authoritative write failure: {:?}",
+        failure_trace.events()
+    );
+    assert_eq!(
+        process_reads.load(Ordering::SeqCst),
+        2,
+        "same-emitter Stop needs no liveness read even when that read would fail"
+    );
+}

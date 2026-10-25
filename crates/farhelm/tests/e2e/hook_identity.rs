@@ -1,5 +1,5 @@
-//! Agent-reported conversation identity: the `SessionStart` hook path, end
-//! to end against a real supervisor.
+//! Agent-reported conversation identity through SessionStart and Stop hooks,
+//! end to end against a real supervisor.
 //!
 //! The agent reports its own identity, including a conversation created by
 //! `/clear` or `/new` inside an existing process. These tests exercise that
@@ -14,8 +14,9 @@
 //! records its own process ancestry, and drops a real report file, which
 //! the supervisor attributes and applies on a real reconciliation pass.
 //! Only the TRIGGER is faked — `Script::HookReport` fires the hook when a
-//! test types `report <id>` instead of when a vendor decides a conversation
-//! started. The `#[ignore]`d tests in `real_agent_capture` are what keep
+//! test types `report <id>` or `stop-report <id>` instead of when a vendor
+//! starts a conversation or finishes a turn. The `#[ignore]`d tests in
+//! `real_agent_capture` are what keep
 //! that last step honest across vendor versions.
 //!
 //! ## When a report is applied
@@ -28,6 +29,7 @@
 //! sessions run under a supervisor that is serving the way production's
 //! does, ticker included.
 
+use crate::boot_id_durable_outcome::listed;
 use crate::harness::*;
 
 // ---------------------------------------------------------------------
@@ -396,9 +398,80 @@ async fn write_report_client(
     seen: &mut Vec<u8>,
     conversation: &str,
 ) {
+    write_hook_report_client(client, chan, rx, seen, "report", conversation).await;
+}
+
+/// Run this launch's injected Stop callback and judge its report before return.
+/// The fixture reads the command from its own settings and omits SessionStart's
+/// `source`, so this crosses injection and parsing as well as pin admission.
+async fn stop_report(
+    h: &Harness,
+    chan: u32,
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+    conversation: &str,
+) {
+    write_hook_report_client(&h.client, chan, rx, seen, "stop-report", conversation).await;
+    h.sup.reconcile_for_test().await;
+}
+
+/// Run one shelled-out child's SessionStart and judge it before returning.
+/// The shell witness distinguishes this child from the foreground's own hook
+/// trampoline, and silence does not imply admission: callers assert the stored
+/// identity or refusal after this boundary.
+async fn nested_report(
+    h: &Harness,
+    chan: u32,
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+    conversation: &str,
+) {
+    let from = seen.len();
+    h.client
+        .send_input(chan, format!("nested-report {conversation}\r").into_bytes())
+        .await;
+    wait_for_after_from(
+        rx,
+        seen,
+        from,
+        "NESTED-PARENT:",
+        &format!("NESTED-REPORT-DONE:{conversation}"),
+        30,
+    )
+    .await;
+    let text = String::from_utf8_lossy(&seen[from..]);
+    // `ps -o comm=` prints the bare name on Linux and argv[0] with its
+    // path on macOS (`/bin/sh`), so only the basename is compared.
+    let parent = marker_value(&seen[from..], "NESTED-PARENT:");
+    assert_eq!(
+        parent.rsplit('/').next(),
+        Some("sh"),
+        "a live shell must run the child (parent {parent:?}); transcript:\n{text}"
+    );
+    assert!(
+        text.contains(&format!("HOOK-REPORTED:{conversation}"))
+            && text.contains("HOOK-STDOUT-EMPTY")
+            && !text.contains("HOOK-STDOUT-DIRTY")
+            && !text.contains("HOOK-EXIT:"),
+        "the nested hook must finish silently; transcript:\n{text}"
+    );
+    h.sup.reconcile_for_test().await;
+}
+
+/// Observe one callback's own completion and silence markers before any drain.
+/// A transcript offset distinguishes a repeated callback from the same markers
+/// left by an earlier turn; both callback types have the same output contract.
+async fn write_hook_report_client(
+    client: &SupervisorClient,
+    chan: u32,
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+    command: &str,
+    conversation: &str,
+) {
     let from = seen.len();
     client
-        .send_input(chan, format!("report {conversation}\r").into_bytes())
+        .send_input(chan, format!("{command} {conversation}\r").into_bytes())
         .await;
     wait_for_after_from(
         rx,
@@ -626,6 +699,26 @@ fn assert_declares_session_start_hook(settings: &serde_json::Value) {
     assert!(
         command.contains("internal hook"),
         "the declared hook must run farhelm's own hook command: {command}"
+    );
+}
+
+/// A Stop must run the Claude reporter without the instructions announcement.
+/// Inspecting its own entry keeps a valid SessionStart command from disguising
+/// missing Stop injection before the fixture tries to run that callback.
+fn assert_declares_stop_hook(settings: &serde_json::Value) {
+    let command = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the injected settings must declare a Stop command: {settings}"));
+    let words = shell_words::split(command).expect("shell-safe injected Stop command");
+    assert!(
+        words
+            .windows(4)
+            .any(|words| words == ["internal", "hook", "--vendor", "claude"]),
+        "Stop must run the Claude reporter: {command}"
+    );
+    assert!(
+        !words.iter().any(|word| word == "--announce"),
+        "Stop must never announce instructions: {command}"
     );
 }
 
@@ -1001,38 +1094,7 @@ async fn a_shelled_out_child_cannot_replace_the_foreground_report() {
         hook_log(&h, &session.id)
     );
 
-    let from = seen.len();
-    h.client
-        .send_input(chan, b"nested-report conv-child\r".to_vec())
-        .await;
-    wait_for_after_from(
-        &mut rx,
-        &mut seen,
-        from,
-        "NESTED-PARENT:",
-        // The whole success marker, not a prefix: terminal output arrives
-        // in arbitrary chunks, and a wait satisfied mid-marker would fail
-        // the assertions below for a run that actually succeeded.
-        "NESTED-REPORT-DONE:conv-child",
-        30,
-    )
-    .await;
-    let text = String::from_utf8_lossy(&seen[from..]).into_owned();
-    // `ps -o comm=` prints the bare name on Linux and argv[0] with its
-    // path on macOS (`/bin/sh`), so only the basename is compared.
-    let parent = marker_value(&seen[from..], "NESTED-PARENT:");
-    assert_eq!(
-        parent.rsplit('/').next(),
-        Some("sh"),
-        "the child must have been run by a live shell below the pane, or the premise of the \
-         refusal is gone (parent {parent:?}); transcript:\n{text}"
-    );
-    assert!(
-        text.contains("HOOK-REPORTED:conv-child") && text.contains("HOOK-STDOUT-EMPTY"),
-        "a refused hook still finishes silently; transcript:\n{text}"
-    );
-
-    h.sup.reconcile_for_test().await;
+    nested_report(&h, chan, &mut rx, &mut seen, "conv-child").await;
     let log = hook_log_lines(&h, &session.id);
     let child = log
         .iter()
@@ -1059,6 +1121,125 @@ async fn a_shelled_out_child_cannot_replace_the_foreground_report() {
         hook_log(&h, &session.id)
     );
     assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
+    serving.stop().await;
+}
+
+/// A parent's Stop corrects a child-first capture and Restart uses the parent.
+/// This is the accepted outage/upgrade ordering: the parent has not reported
+/// when its child wins the pin. Observe that intermediate selection before
+/// sending Stop, since Claude's single report slot could otherwise discard the
+/// child's report and make a broken correction path appear to pass.
+///
+/// Both turns run the actual injected Stop command and assert silence. The
+/// restart's fresh argv and callback prove the replacement received Stop too,
+/// rather than testing only a command retained by the original process.
+#[farhelm_testtrace::test]
+async fn child_first_claude_capture_is_corrected_by_stop_and_resumes_parent() {
+    let (h, fixtures, serving) = hook_harness().await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = hook_session(&h, &fixtures, work.path()).await;
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    assert_declares_stop_hook(&injected_settings(&argv_marker(&seen)));
+    let initial = snapshot_of(&h, &session.id).await;
+    assert_eq!(
+        initial.captured_conversation, None,
+        "the foreground must not select before its child reports"
+    );
+    assert!(
+        listed(&h.client, &session.id)
+            .await
+            .notifications
+            .is_empty()
+    );
+
+    nested_report(&h, chan, &mut rx, &mut seen, "conv-child-first").await;
+    let child = snapshot_of(&h, &session.id).await;
+    assert_eq!(
+        child.captured_conversation.as_deref(),
+        Some("conv-child-first"),
+        "the child's selection must be applied before the parent's Stop; {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(child.restart_offer, farhelm_proto::RestartOffer::Resume);
+    assert_eq!(resumed_conversation(&child.resume_argv), "conv-child-first");
+    assert!(
+        listed(&h.client, &session.id)
+            .await
+            .notifications
+            .is_empty()
+    );
+
+    stop_report(&h, chan, &mut rx, &mut seen, "conv-parent-stop").await;
+    let parent = snapshot_of(&h, &session.id).await;
+    assert_eq!(
+        parent.captured_conversation.as_deref(),
+        Some("conv-parent-stop"),
+        "the ancestor's Stop must correct the child's pin; {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(parent.restart_offer, farhelm_proto::RestartOffer::Resume);
+    assert_eq!(
+        resumed_conversation(&parent.resume_argv),
+        "conv-parent-stop"
+    );
+    let notifications = listed(&h.client, &session.id).await.notifications;
+    assert_eq!(notifications.len(), 1, "{notifications:?}");
+    assert!(notifications[0].text.contains("A Restart before now"));
+    assert!(!notifications[0].resolved);
+
+    // A repeated end of turn is accepted from the corrected emitter, with
+    // no second correction notice for the same launch.
+    stop_report(&h, chan, &mut rx, &mut seen, "conv-parent-stop").await;
+    assert_eq!(
+        listed(&h.client, &session.id).await.notifications,
+        notifications
+    );
+    assert_eq!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .as_deref(),
+        Some("conv-parent-stop")
+    );
+
+    h.client
+        .restart_session(&session.id, true)
+        .await
+        .expect("resume the corrected foreground conversation");
+    drop(rx);
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    // Original READY is in replay. Only the replacement's argv can contain
+    // --resume, and its following READY establishes that it accepts input.
+    wait_for_after(
+        &mut rx,
+        &mut seen,
+        "--resume conv-parent-stop",
+        "FAKE-AGENT READY",
+        30,
+    )
+    .await;
+    let argv = argv_marker(&seen);
+    let words = shell_words::split(&argv).expect("replacement argv boundaries");
+    assert!(
+        words
+            .windows(2)
+            .any(|words| words == ["--resume", "conv-parent-stop"]),
+        "Restart must run the corrected parent's identity: {words:?}"
+    );
+    assert_declares_stop_hook(&injected_settings(&argv));
+    assert!(snapshot_of(&h, &session.id).await.generation > parent.generation);
+    stop_report(&h, chan, &mut rx, &mut seen, "conv-resumed-turn").await;
+    let resumed = snapshot_of(&h, &session.id).await;
+    assert_eq!(
+        resumed.captured_conversation.as_deref(),
+        Some("conv-resumed-turn"),
+        "the replacement's fresh Stop must select its current conversation; {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(
+        resumed_conversation(&resumed.resume_argv),
+        "conv-resumed-turn"
+    );
     serving.stop().await;
 }
 

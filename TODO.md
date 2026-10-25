@@ -48,10 +48,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   cargo-dist release build jobs honor the pin: they install Rust only when it is missing and otherwise use the runner's
   own. Once pinned, drop the newest-stable clippy step from `.agents/run-all-tests.md`.
 
-- **Consider matching Claude's conversation capture to Codex's.** Codex's conversation capture changed recently;
-  consider adjusting how Farhelm captures a Claude session's conversation to match. The maintainer knows which change
-  this refers to and what matching it would mean; ask before starting. Plan: `plans/queue/claude-wrapper-capture.md`.
-
 - **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
   narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
   that is already installed and waiting for a restart now needs manual recovery, and an ordinary relaunch may still open
