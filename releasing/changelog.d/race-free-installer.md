@@ -17,5 +17,7 @@ in a short window, and then fails to start, visibly; starting it again works); t
 keep any version something still runs from; an interrupted install no longer leaves a lock folder to remove by hand,
 and the next run finishes it; an update started by an older app's updater no longer reinstalls a removed app or goes
 back over a newer version installed from Terminal); installing an older release with the newest installer
-(`FARHELM_VERSION=...`) hands it to that release's own installer, checked against its checksums. Uninstall starts
-honoring the locks in a later PR of the same release.
+(`FARHELM_VERSION=...`) hands it to that release's own installer, checked against its checksums; the app's updater
+pausing (with a warning on the version number) when an install or uninstall was interrupted, quietly retrying when
+another install or uninstall is running, and the app reopening itself once when its version was replaced while it was
+starting. Uninstall starts honoring the locks in a later PR of the same release.

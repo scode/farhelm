@@ -42,6 +42,13 @@ update server, for example because your Mac is offline, it tries again the next 
 once that has kept failing for three days. A failure shown this way stays until a check succeeds, a newer version is
 installed, or you dismiss it.
 
+### If an install was interrupted
+
+If an install of Farhelm was interrupted or did not finish, for example because the terminal running the installer was
+closed or the disk filled up, Farhelm does not update itself until it is finished. The version number shows a warning;
+hover over it for the command that finishes the install, which is the same command you installed with. An uninstall you
+interrupted works the same way: run it again to finish removing Farhelm, or run the installer to keep it.
+
 ## Turn automatic updates off
 
 Select the gear at the top of the sidebar, choose **app**, and turn off **install updates automatically**. Farhelm then

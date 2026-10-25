@@ -52,11 +52,196 @@ pub(super) fn helm_payload_dir() -> Option<PathBuf> {
 /// start with no other diagnostic.
 pub(super) fn bundled_farhelm() -> anyhow::Result<PathBuf> {
     let current = std::env::current_exe().context("locating desktop executable")?;
-    supervisor_farhelm(
+    let version = env!("CARGO_PKG_VERSION");
+    // The installation this app belongs to, read through its own app folder
+    // as it starts (design, section 1, "The app reopens itself only when it
+    // should"): what a missing version is judged against below.
+    let bundle = farhelm_supervisor::app_bundle::bundle_contents_of_main_program(&current)
+        .and_then(|contents| contents.parent().map(Path::to_path_buf));
+    let own = bundle.as_deref().and_then(read_installation_at);
+    let own_id = own
+        .as_ref()
+        .and_then(|own| own.record.as_ref())
+        .and_then(|record| record.id.clone());
+    // A reopen names the installation it meant to open; an app that is not
+    // that installation (Finder put another one at the place while this
+    // app waited to be reopened) refuses rather than start as if asked to.
+    let reopened = std::env::var_os(REOPENED_ENV);
+    if let Some(expected) = &reopened
+        && own_id.as_deref().map(std::ffi::OsStr::new) != Some(expected.as_os_str())
+    {
+        anyhow::bail!(
+            "Farhelm.app was replaced by another installation while Farhelm was reopening; open \
+             Farhelm again"
+        );
+    }
+    let resolved = supervisor_farhelm(
         &current,
         std::env::var_os("FARHELM_DESKTOP_FARHELM").as_deref(),
-        env!("CARGO_PKG_VERSION"),
-    )
+        version,
+    );
+    let Err(error) = resolved else {
+        return resolved;
+    };
+    let (Some(missing), Some(bundle)) = (error.downcast_ref::<OwnVersionMissing>(), bundle) else {
+        return Err(error);
+    };
+    let now = read_installation_at(&bundle);
+    let outcome = missing_version_outcome(
+        own.as_ref(),
+        now.as_ref(),
+        &bundle,
+        version,
+        reopened.is_some(),
+    );
+    match outcome {
+        MissingVersion::Reopen => match reopen_command(
+            std::process::id(),
+            &bundle,
+            Path::new("/usr/bin/open"),
+            own_id.as_deref().unwrap_or_default(),
+            None,
+        )
+        .spawn()
+        {
+            Ok(_) => {
+                tracing::info!(
+                    "this app's version {version} is gone; opening the installed Farhelm instead"
+                );
+                std::process::exit(0)
+            }
+            Err(spawn_error) => {
+                tracing::warn!("reopening Farhelm: {spawn_error}");
+                Err(error)
+            }
+        },
+        MissingVersion::Uninstalled => Err(anyhow::anyhow!(
+            "Farhelm was uninstalled while it was starting ({} is gone); to use it again, \
+             install it by running this in a terminal: {INSTALL_COMMAND}",
+            missing.program.display()
+        )),
+        MissingVersion::UnfinishedInstall => Err(anyhow::anyhow!(
+            "an install of Farhelm was interrupted while it was starting ({} is gone); finish it \
+             by running this in a terminal, then open Farhelm again: {INSTALL_COMMAND}",
+            missing.program.display()
+        )),
+        MissingVersion::Refuse => Err(error),
+    }
+}
+
+/// The installer, as the readout and refusals tell the user to run it.
+const INSTALL_COMMAND: &str = "curl -fsSL https://get.farhelm.io/install.sh | sh";
+
+/// Set, through `open --env`, on the one reopen a missing version may cause,
+/// to the installation id the reopen means: the reopened app never reopens
+/// again, and refuses if it is not that installation.
+pub(super) const REOPENED_ENV: &str = "FARHELM_DESKTOP_REOPENED";
+
+/// The app at `bundle`, read through its folder (record and Installed).
+fn read_installation_at(bundle: &Path) -> Option<farhelm_supervisor::installation::Snapshot> {
+    let folder = std::fs::File::open(bundle).ok()?;
+    use std::os::fd::AsFd;
+    Some(farhelm_supervisor::installation::read_installation(
+        folder.as_fd(),
+    ))
+}
+
+/// What to do when this app's own version is gone as it starts.
+#[derive(Debug, PartialEq, Eq)]
+enum MissingVersion {
+    /// The same installation is at the same place on another version that
+    /// is there: open it once.
+    Reopen,
+    /// Farhelm is no longer installed at the place, or is being removed.
+    Uninstalled,
+    /// An install of the same place was interrupted.
+    UnfinishedInstall,
+    /// None of those: refuse with the plain "open Farhelm again" sentence.
+    Refuse,
+}
+
+/// Decide what a missing own version means (design, section 1). `own` is
+/// the installation this app read through its folder as it started, `now`
+/// what is at its place now. The app reopens itself only if the app now at
+/// the same place is the same installation (same id), on a different
+/// version whose folder is there, and only once (`reopened`): a reopen that
+/// finds the same thing again refuses instead of looping. A record that is
+/// gone, or says an uninstall is running, is "uninstalled"; one that says an
+/// install was interrupted is "unfinished install".
+fn missing_version_outcome(
+    own: Option<&farhelm_supervisor::installation::Snapshot>,
+    now: Option<&farhelm_supervisor::installation::Snapshot>,
+    bundle: &Path,
+    version: &str,
+    reopened: bool,
+) -> MissingVersion {
+    use farhelm_supervisor::installation::InstallState;
+    let Some(record) = now.and_then(|now| now.record.as_ref()) else {
+        return MissingVersion::Uninstalled;
+    };
+    match record.state {
+        InstallState::Removing => return MissingVersion::Uninstalled,
+        InstallState::Installing => return MissingVersion::UnfinishedInstall,
+        InstallState::Complete => {}
+    }
+    let own_id = own
+        .and_then(|own| own.record.as_ref())
+        .and_then(|own| own.id.as_deref());
+    let installed = now.and_then(|now| now.installed.as_deref());
+    let same_installation = own_id.is_some() && own_id == record.id.as_deref();
+    let other_version_there = installed.is_some_and(|installed| {
+        installed != version
+            && bundle
+                .join("Contents/Versions")
+                .join(installed)
+                .join("farhelm")
+                .is_file()
+    });
+    if !reopened && same_installation && other_version_there {
+        MissingVersion::Reopen
+    } else {
+        MissingVersion::Refuse
+    }
+}
+
+/// The command that reopens the app at `bundle` with `opener` (`/usr/bin/open`)
+/// once `pid` (this app) has exited, marked with the installation `id` it
+/// means, so the reopened app neither reopens again nor starts as a
+/// different installation. `open -n` starts a new instance even if Launch
+/// Services still lists this one, and `--env` is the only way to hand the
+/// new instance a variable.
+///
+/// `seen_alive` is for tests only (the app passes `None`): the helper
+/// creates that file each time it finds `pid` still alive, which tells a
+/// test the helper has reached its wait, so the test's check that nothing
+/// opens early is not passed by a helper that simply had not run yet.
+fn reopen_command(
+    pid: u32,
+    bundle: &Path,
+    opener: &Path,
+    id: &str,
+    seen_alive: Option<&Path>,
+) -> std::process::Command {
+    let mut command = std::process::Command::new("/bin/sh");
+    command
+        .arg("-c")
+        .arg(
+            "while kill -0 \"$1\" 2>/dev/null; do \
+               if [ -n \"$6\" ]; then : >\"$6\"; fi; sleep 0.1; \
+             done; \
+             exec \"$2\" -n --env \"$3=$4\" \"$5\"",
+        )
+        .arg("farhelm-reopen")
+        .arg(pid.to_string())
+        .arg(opener)
+        .arg(REOPENED_ENV)
+        .arg(id)
+        .arg(bundle)
+        .arg(seen_alive.unwrap_or(Path::new("")))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    command
 }
 
 /// Resolve the supervisor's `farhelm` and, when it is this app's own version
@@ -143,13 +328,35 @@ fn resolve_supervisor_farhelm(
 /// `the_installers_release_marker_is_in_this_refusal`), so the marker must
 /// stay one unbroken literal with no placeholder inside it.
 fn own_version_missing(version: &str, program: &Path) -> anyhow::Error {
-    anyhow::anyhow!(
-        "farhelm-desktop {version} needs its own version of the farhelm binary at {} \
-         and did not find one; an update or uninstall probably removed it, so open Farhelm \
-         again (if that does not help, reinstall Farhelm or set FARHELM_DESKTOP_FARHELM)",
-        program.display()
-    )
+    OwnVersionMissing {
+        version: version.to_string(),
+        program: program.to_path_buf(),
+    }
+    .into()
 }
+
+/// [`own_version_missing`]'s error, typed so [`bundled_farhelm`] can tell
+/// it from every other startup failure and decide whether to reopen.
+#[derive(Debug)]
+struct OwnVersionMissing {
+    version: String,
+    program: PathBuf,
+}
+
+impl std::fmt::Display for OwnVersionMissing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "farhelm-desktop {} needs its own version of the farhelm binary at {} \
+             and did not find one; an update or uninstall probably removed it, so open Farhelm \
+             again (if that does not help, reinstall Farhelm or set FARHELM_DESKTOP_FARHELM)",
+            self.version,
+            self.program.display()
+        )
+    }
+}
+
+impl std::error::Error for OwnVersionMissing {}
 
 /// Hold this app's own version for the app's whole life, before anything is
 /// started from it (see `farhelm_supervisor::version_lock`).
@@ -416,6 +623,175 @@ mod tests {
         let gone_before_hold = hold_supervisor_version(&chosen.path, "1.2.3")
             .expect_err("the version vanished before the hold");
         assert_eq!(gone_before_hold.to_string(), expected);
+    }
+
+    /// A snapshot of an installation with `id`, in `state`, whose Installed
+    /// record names `installed`.
+    fn installation(
+        id: Option<&str>,
+        state: farhelm_supervisor::installation::InstallState,
+        installed: &str,
+    ) -> farhelm_supervisor::installation::Snapshot {
+        use farhelm_supervisor::installation::{InstallState, OwnershipRecord};
+        farhelm_supervisor::installation::Snapshot {
+            record: Some(OwnershipRecord {
+                link: b"/u/.local/bin/farhelm".to_vec(),
+                id: id.map(str::to_string),
+                generation: if state == InstallState::Complete {
+                    2
+                } else {
+                    3
+                },
+                state,
+            }),
+            installed: Some(installed.to_string()),
+            record_problem: None,
+        }
+    }
+
+    /// When the app's own version is gone as it starts, it reopens itself
+    /// only for the one case a reopen fixes: the same installation (same id)
+    /// is at the same place on another version whose folder is there, and
+    /// it has not already reopened once. A missing app or record, or an
+    /// uninstall in progress, reads as uninstalled; an interrupted install
+    /// says so; anything else (another installation, the same version, a
+    /// version without its folder, a second reopen) refuses plainly. Each
+    /// of these is a reason a blind reopen would either loop or start the
+    /// wrong thing.
+    #[farhelm_testtrace::test]
+    fn a_missing_own_version_reopens_only_into_the_same_installation_once() {
+        use farhelm_supervisor::installation::InstallState::{Complete, Installing, Removing};
+        let dir = tempfile::tempdir().expect("temp dir");
+        let bundle = dir.path().join("Farhelm.app");
+        std::fs::create_dir_all(bundle.join("Contents/Versions/1.2.4")).unwrap();
+        std::fs::write(bundle.join("Contents/Versions/1.2.4/farhelm"), b"cli").unwrap();
+        let own = installation(Some("abc"), Complete, "1.2.3");
+        let outcome = |now: Option<farhelm_supervisor::installation::Snapshot>, reopened| {
+            missing_version_outcome(Some(&own), now.as_ref(), &bundle, "1.2.3", reopened)
+        };
+        assert_eq!(
+            outcome(Some(installation(Some("abc"), Complete, "1.2.4")), false),
+            MissingVersion::Reopen
+        );
+        assert_eq!(
+            outcome(Some(installation(Some("abc"), Complete, "1.2.4")), true),
+            MissingVersion::Refuse,
+            "only once"
+        );
+        assert_eq!(
+            outcome(Some(installation(Some("other"), Complete, "1.2.4")), false),
+            MissingVersion::Refuse,
+            "another installation at the same place"
+        );
+        assert_eq!(
+            outcome(Some(installation(Some("abc"), Complete, "1.2.5")), false),
+            MissingVersion::Refuse,
+            "the Installed version's folder is not there"
+        );
+        assert_eq!(
+            outcome(Some(installation(Some("abc"), Complete, "1.2.3")), false),
+            MissingVersion::Refuse,
+            "the same version"
+        );
+        assert_eq!(outcome(None, false), MissingVersion::Uninstalled);
+        assert_eq!(
+            outcome(Some(installation(Some("abc"), Removing, "1.2.4")), false),
+            MissingVersion::Uninstalled
+        );
+        assert_eq!(
+            outcome(Some(installation(Some("abc"), Installing, "1.2.4")), false),
+            MissingVersion::UnfinishedInstall
+        );
+        assert_eq!(
+            missing_version_outcome(
+                None,
+                Some(&installation(Some("abc"), Complete, "1.2.4")),
+                &bundle,
+                "1.2.3",
+                false
+            ),
+            MissingVersion::Refuse,
+            "no id read at start, so no proof it is the same installation"
+        );
+    }
+
+    /// The reopen waits for this process to exit, then runs the opener on a
+    /// new instance of the same bundle with the marker naming the
+    /// installation. Run for real against a stand-in process and a stand-in
+    /// opener that records its arguments: an opener that ran early, or with
+    /// another marker, would start a second app beside this one or let the
+    /// reopened app loop or start as the wrong installation. The check that
+    /// nothing opens early starts only once the helper has reported seeing
+    /// the stand-in alive, so a helper that was merely slow to start cannot
+    /// pass it.
+    #[farhelm_testtrace::test]
+    fn the_reopen_waits_for_this_app_and_marks_the_new_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let seen = dir.path().join("opened");
+        let opener = dir.path().join("opener");
+        // The arguments are written beside the file the test waits for and
+        // renamed into it, so the test never reads it half written (a plain
+        // redirect creates the file before writing it, which a busy machine
+        // exposes as an empty read).
+        std::fs::write(
+            &opener,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{seen}.partial' && mv '{seen}.partial' '{seen}'\n",
+                seen = seen.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o755)).unwrap();
+        struct Reap(std::process::Child);
+        impl Drop for Reap {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let mut app = Reap(
+            std::process::Command::new("sleep")
+                .arg("60")
+                .spawn()
+                .expect("a stand-in for this app"),
+        );
+        let bundle = dir.path().join("Farhelm.app");
+        let alive = dir.path().join("seen-alive");
+        let _helper = Reap(
+            reopen_command(app.0.id(), &bundle, &opener, "abc123", Some(&alive))
+                .spawn()
+                .expect("start the helper"),
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !alive.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the helper never checked the app"
+            );
+            // sleep-ok: polling interval for the helper's readiness file, bounded by the deadline above.
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            app.0.try_wait().unwrap().is_none(),
+            "fixture premise: the stand-in app is still running"
+        );
+        // sleep-ok: observation window; the opener must not run while the app it replaces is alive.
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(!seen.exists(), "the opener waited for the app to exit");
+        app.0.kill().unwrap();
+        app.0.wait().unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !seen.exists() {
+            assert!(std::time::Instant::now() < deadline, "the opener never ran");
+            // sleep-ok: polling interval for the stand-in opener's output, bounded by the deadline above.
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let args = std::fs::read_to_string(&seen).unwrap();
+        assert_eq!(
+            args,
+            format!("-n\n--env\n{REOPENED_ENV}=abc123\n{}\n", bundle.display())
+        );
     }
 
     /// A missing version folder refuses and names the path, rather than

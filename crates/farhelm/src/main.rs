@@ -1437,6 +1437,10 @@ struct InstallArgs {
     /// installer's (see `InstallRequest::replace_legacy_bundle`).
     #[arg(long)]
     replace_legacy_bundle: Option<u64>,
+    /// The app updater's expectation (`FARHELM_INSTALL_EXPECT`), in
+    /// `farhelm_supervisor::installation::Expectation`'s text form.
+    #[arg(long)]
+    expect: Option<String>,
 }
 
 /// Run the locked install and leave its outcome where `install.sh` reads
@@ -1444,7 +1448,9 @@ struct InstallArgs {
 /// the notes for the closing message as they are to be printed) on
 /// success, `install-failure` (the error
 /// line, then advice lines) on a refusal. A program that cannot even write
-/// those reports on stderr, which the script shows as is.
+/// those reports on stderr, which the script shows as is. A refusal exits
+/// with its own status (`STATE_CHANGED` when the updater's expectation no
+/// longer holds), which the script passes on.
 fn run_install(args: InstallArgs) -> anyhow::Result<()> {
     use farhelm_supervisor::installation::install::{InstallRequest, install};
     let request = InstallRequest {
@@ -1457,6 +1463,13 @@ fn run_install(args: InstallArgs) -> anyhow::Result<()> {
         update_only: args.update_only,
         replace_legacy_bundle: args.replace_legacy_bundle,
         lock_wait: farhelm_supervisor::installation::TERMINAL_LOCK_WAIT,
+        expect: match args.expect.as_deref() {
+            None => None,
+            Some(text) => Some(
+                farhelm_supervisor::installation::Expectation::parse(text)
+                    .ok_or_else(|| anyhow::anyhow!("--expect {text:?} is not an expectation"))?,
+            ),
+        },
     };
     match install(&request, &mut |_| Ok(())) {
         Ok(done) => {
@@ -1477,7 +1490,7 @@ fn run_install(args: InstallArgs) -> anyhow::Result<()> {
             }
             report.push('\n');
             std::fs::write(args.staging.join("install-failure"), report)?;
-            std::process::exit(1)
+            std::process::exit(refusal.status)
         }
     }
 }
