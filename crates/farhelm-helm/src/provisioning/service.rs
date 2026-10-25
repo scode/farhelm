@@ -1358,10 +1358,7 @@ impl ProvisioningService {
                         // whose sessions were checked, and uninstall removes
                         // files.
                         if host_identity != row.host_identity {
-                            return Err(refused(super::uninstall_refusal::changed_identity(
-                                row.host_identity.as_deref(),
-                                host_identity.as_deref(),
-                            )));
+                            return Err(refused(super::uninstall_refusal::changed_identity()));
                         }
                         (Some(dial_farhelm), dial_state_dir)
                     }

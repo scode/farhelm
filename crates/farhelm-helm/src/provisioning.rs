@@ -4750,33 +4750,40 @@ mod tests {
     ///
     /// Spec: a host frozen in identity mismatch is refused even when its
     /// unit file is absent, the case that otherwise lets an unconnected
-    /// host continue. The typed refusal offers Remove without acting on the host.
+    /// host continue. The typed refusal offers Remove without acting on the host
+    /// and points to the host list instead of quoting ambiguous identities.
     #[farhelm_testtrace::test]
     async fn uninstall_refuses_a_host_with_an_identity_problem() {
+        let recorded = "identity  old";
+        let reported = "identity new";
         let (builder, host) = FleetBuilder::new()
             .await
             .ssh(
                 "moved.example",
                 HostScript {
-                    identity: Some("identity-old".to_string()),
+                    identity: Some(recorded.to_string()),
                     ..HostScript::default()
                 },
             )
             .await;
         let harness = builder.start().await;
-        harness.await_refreshed_as(host, "identity-old", 0).await;
+        harness.await_refreshed_as(host, recorded, 0).await;
         let harness = harness
             .restart_with(|fleet| {
                 fleet.edit(host, |script| {
-                    script.identity = Some("identity-new".to_string());
+                    script.identity = Some(reported.to_string());
                 });
             })
             .await;
-        harness
+        let state = harness
             .await_state(host, |state| {
                 matches!(state, HostState::IdentityMismatch { .. })
             })
             .await;
+        assert!(
+            matches!(state, HostState::IdentityMismatch { recorded: old, reported: new }
+            if old == recorded && new == reported)
+        );
         let root = tempfile::tempdir().unwrap();
         let backend = FakeBackend::absent(root.path().to_path_buf());
         *backend.present.lock().unwrap() = Some(vec![root.path().join("lib")]);
@@ -4789,10 +4796,12 @@ mod tests {
         ));
         let refusal = refusal_text(error);
         assert!(refusal.contains("choose adopt"), "{refusal}");
-        assert!(
-            refusal.contains("identity-old") && refusal.contains("identity-new"),
-            "{refusal}"
-        );
+        for identity in [recorded, reported] {
+            assert!(!refusal.contains(identity), "{refusal}");
+            assert!(!refusal.contains(&format!("{identity:?}")), "{refusal}");
+        }
+        assert!(refusal.contains("host list shows the recorded and reported identities"));
+        assert!(refusal.contains("remove it from the list instead"));
         assert!(!refusal.contains("identity-mismatch"), "{refusal}");
         assert!(backend.operations.lock().unwrap().is_empty());
     }
@@ -4936,7 +4945,8 @@ mod tests {
     ///
     /// Spec: with a recorded identity, a probe reporting no identity is
     /// refused; a unit whose loaded fragment is not the planned unit file is
-    /// refused; neither acts on the host.
+    /// refused; neither acts on the host. The identity refusal points to Retry
+    /// and the host list, which can explain the state after reconnecting.
     #[farhelm_testtrace::test]
     async fn uninstall_refuses_an_unverified_peer_and_a_foreign_unit() {
         let (_harness, host, root, backend, service) = uninstall_fixture(Vec::new(), false).await;
@@ -4945,7 +4955,11 @@ mod tests {
             repeat.identity = None;
         }
         let unverified = refusal_text(service.plan_uninstall(host).await.unwrap_err());
-        assert!(unverified.contains("no identity"), "{unverified}");
+        assert!(
+            unverified.contains("Choose retry") && unverified.contains("host list"),
+            "{unverified}"
+        );
+        assert!(!unverified.contains("no identity"), "{unverified}");
         if let Some(repeat) = backend.repeat_probe.lock().unwrap().as_mut() {
             repeat.identity = Some(UNINSTALL_IDENTITY.to_string());
         }
@@ -4975,7 +4989,9 @@ mod tests {
     /// Spec (SPEC_impl.md): the probe must report exactly the recorded
     /// identity, a missing one included. A connected identityless host whose
     /// probe reports an identity is refused without acting on the host; the
-    /// same host whose probe also reports none plans as before.
+    /// same host whose probe also reports none plans as before. The refusal
+    /// points to Retry and the host list without quoting identities that the
+    /// dialog could render ambiguously.
     #[farhelm_testtrace::test]
     async fn uninstall_refuses_an_identity_reported_for_a_host_with_none_on_record() {
         let (builder, host) = FleetBuilder::new()
@@ -5006,15 +5022,20 @@ mod tests {
         let backend = FakeBackend::absent(root.path().to_path_buf());
         *backend.probe.lock().unwrap() = None;
         *backend.repeat_probe.lock().unwrap() = Some(RepeatProbe {
-            identity: Some("someone-else".to_string()),
+            identity: Some("someone  else".to_string()),
             dial_farhelm: root.path().join("lib/farhelm"),
             dial_state_dir: Some(root.path().join("state")),
         });
         let service = service(&harness, backend.clone(), root.path());
 
         let refused = refusal_text(service.plan_uninstall(host).await.unwrap_err());
-        assert!(refused.contains("no identity on record"), "{refused}");
-        assert!(refused.contains("someone-else"), "{refused}");
+        assert!(
+            refused.contains("Choose retry") && refused.contains("host list"),
+            "{refused}"
+        );
+        assert!(!refused.contains("no identity"), "{refused}");
+        assert!(!refused.contains("someone  else"), "{refused}");
+        assert!(!refused.contains(r#""someone  else""#), "{refused}");
         assert!(
             backend.operations.lock().unwrap().is_empty(),
             "the refusal comes before uninstall inspects or changes anything on the host"
