@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [complete] `restart-with-template-refusal.md` — Restart with and Replace with apply templates whose held fields repeat the session's own values, refusing only real changes
+- [landing ec2dcd] `restart-with-template-refusal.md` — Restart with and Replace with apply templates whose held fields repeat the session's own values, refusing only real changes
 - [complete] `codex-trust-hint.md` — The Codex trust hint also appears when Codex's folder dialog offers "Quit" instead of going back to its Agent Command Center
 - [complete] `emoji-streaming-corruption.md` — Emoji in terminals take two columns, as agents and tmux expect, so they stop being clipped while output streams
 - [complete] `claude-wrapper-capture.md` — Claude conversations are captured through wrappers at any depth with Codex's pin model, plus an end-of-turn hook so a parent corrects a wrong pin promptly
