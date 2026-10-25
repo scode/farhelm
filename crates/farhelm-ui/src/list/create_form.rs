@@ -584,11 +584,66 @@ fn launcher_snapshot(
     }
 }
 
-/// Validate a shortcut batch against one draft before any of its edits land.
+/// Remove assignments that repeat values this opening holds fixed.
+///
+/// These must be absent during both validation and replay: reselecting even
+/// the same agent reconciles permissions/model/effort, and reselecting a host
+/// resets placement state. Equality is deliberately textual except for folder
+/// trailing slashes; the browser cannot resolve remote paths or expand `~`.
+/// Search results and recents do not pass through this template-only rule.
+fn remove_matching_held_fields(
+    fields: &mut farhelm_proto::launcher::TemplateFields,
+    held: &farhelm_proto::launcher::LauncherState,
+    restart: bool,
+    host_fixed: bool,
+) {
+    use farhelm_proto::launcher::{LauncherKind, TemplateDestination};
+    if (restart || host_fixed) && fields.host.is_some() && fields.host == held.host {
+        fields.host = None;
+    }
+    if !restart {
+        return;
+    }
+    if fields.kind.is_some() && fields.kind == held.kind {
+        fields.kind = None;
+    }
+    let agent = match held.kind {
+        Some(LauncherKind::Command) => held.command_agent,
+        _ => held.harness,
+    };
+    if fields.agent.is_some() && fields.agent == agent {
+        fields.agent = None;
+    }
+    if let (Some(TemplateDestination::Folder(folder)), Some(TemplateDestination::Folder(current))) =
+        (&fields.destination, &held.destination)
+        && !folder.is_empty()
+        && folder.trim_end_matches('/') == current.trim_end_matches('/')
+    {
+        fields.destination = None;
+    }
+    if fields.name.is_some() && fields.name == held.name {
+        fields.name = None;
+        // A name kind without its name is invalid, and neither part of a
+        // repeated name may turn the session's raw title into a template base.
+        fields.name_kind = None;
+    }
+}
+
+/// Keep the projected state, parsed destinations and cleaned replay inputs
+/// together. Their vectors retain the input order, including empty entries.
+type ValidatedTemplateBatch = (
+    farhelm_proto::launcher::LauncherState,
+    Vec<Option<crate::github_checkout::GithubRepo>>,
+    Vec<farhelm_proto::launcher::LaunchTemplate>,
+);
+
+/// Validate a shortcut batch and return the exact templates safe to replay.
 /// The shared fold checks ordered applicability, while the launcher also has
 /// to parse GitHub destinations before replay can safely choose one. Ordinary
-/// `tl:` acceptance uses the same fold. Restart's held-field checks run inside
-/// it, so a later held assignment cannot hide an earlier ordinary refusal.
+/// `tl:` acceptance uses the same fold. Equal held assignments are removed
+/// against the opening snapshot; remaining held-field checks run in order, so
+/// a later held change cannot hide an earlier ordinary refusal. No edits land
+/// unless the whole batch succeeds.
 fn validated_template_batch(
     templates: &[farhelm_proto::launcher::LaunchTemplate],
     hosts: &[HostOption],
@@ -596,13 +651,7 @@ fn validated_template_batch(
     host_fixed: bool,
     draft: &LaunchDraft,
     chosen_host: Option<HostId>,
-) -> Result<
-    (
-        farhelm_proto::launcher::LauncherState,
-        Vec<Option<crate::github_checkout::GithubRepo>>,
-    ),
-    String,
-> {
+) -> Result<ValidatedTemplateBatch, String> {
     use farhelm_proto::launcher::TemplateDestination;
     let mut state = launcher_snapshot(draft, hosts, chosen_host);
     // A partial template may fill an agent later in this same batch. Preserve
@@ -625,6 +674,12 @@ fn validated_template_batch(
             // Historical trust values are inert, even on an agent that did
             // not support them when the template was saved.
             template.fields.workspace_trust = None;
+            remove_matching_held_fields(
+                &mut template.fields,
+                &state,
+                draft.is_restart(),
+                host_fixed,
+            );
             template
         })
         .collect::<Vec<_>>();
@@ -649,7 +704,7 @@ fn validated_template_batch(
             _ => None,
         });
     }
-    Ok((state, repositories))
+    Ok((state, repositories, normalized))
 }
 
 /// Keep UI-only interactions behind the live page token where they were gated.

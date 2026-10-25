@@ -213,9 +213,9 @@ stay in place unless a template switches tabs and removes that field; focus then
 
 A template whose choices do not fit what the launcher holds is refused as a whole, with a message saying which choice
 did not fit: a model the chosen agent does not offer, for example, or an older template with a model and no saved tab
-choice while the launcher is on its **command** tab. In **replace with**, where the host is fixed, a template
-that sets a host is refused the same way, and in **restart with** so is one that sets **switches launcher to**, the agent, host,
-directory, session name or first message, which the restarted session keeps.
+choice while the launcher is on its **command** tab. In **replace with**, a template can name the session's own host,
+but a different host is refused. In **restart with**, a template can repeat the current launcher tab, agent, host,
+directory or session name; changing one is refused. A first message is always refused when restarting.
 
 ## Templates and your agents
 

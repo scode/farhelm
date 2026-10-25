@@ -1846,21 +1846,25 @@ test("a template fills the command tab and the folder, and a reset clears a choi
 });
 
 /**
- * Spec: Replace with refuses a template that sets a host, because that
- * dialog keeps the session's host.
+ * Spec: Replace with accepts the session's own host as a no-op and refuses
+ * another installation's identity without applying accompanying edits.
  *
- * Why: SPEC.md names this as the case of a template setting a field the
- * dialog holds fixed; applying it would either move the replacement to
- * another machine or silently drop part of the template.
+ * Why: launcher snapshots can contain the current host. Reusing one must
+ * keep its other edits useful, while a different host still cannot move the
+ * replacement to another machine or leave a half-applied template.
  */
-test("Replace with refuses a template that sets a host", async ({ page, request }) => {
+test("Replace with accepts its own template host and refuses another host atomically", async ({ page, request }) => {
   const name = `e2e-host-${Date.now()}`;
+  const own = `${name}-own`;
   const hosts = await listHosts(request);
   const identity = hosts.find((host) => host.kind === "local")?.identity;
   expect(identity, "premise: the local host has a recorded install identity").toBeTruthy();
+  const otherIdentity = "11111111-2222-3333-4444-555555555555";
+  expect(identity, "premise: the refused template must name another installation").not.toBe(otherIdentity);
   const source = await createSession(request, { title: `templates-replace-${Date.now()}` });
   try {
-    await putTemplate(request, name, { host: identity });
+    await putTemplate(request, name, { host: otherIdentity, name: "must not apply" });
+    await putTemplate(request, own, { host: identity, name: "from own host" });
     await page.goto("/");
     const row = page.locator(`.session-row[data-session-id="${source.id}"]`);
     await expect(row).toBeVisible({ timeout: 20_000 });
@@ -1869,10 +1873,17 @@ test("Replace with refuses a template that sets a host", async ({ page, request 
     const form = page.locator('.create-session-form[role="dialog"]');
     await expect(form).toBeVisible();
     await expect(form.locator(".launch-composer-save-template")).toHaveCount(0);
+    const nameField = form.getByLabel("name (optional)");
+    const before = await nameField.inputValue();
     await applyTemplate(form, name);
     await expect(form.locator(".launch-composer-template-error")).toContainText("this dialog keeps the session's host");
+    await expect(nameField, "a different host refuses every edit in the template").toHaveValue(before);
+    await applyTemplate(form, own);
+    await expect(form.locator(".launch-composer-template-error")).toHaveCount(0);
+    await expect(nameField, "the own-host assignment leaves accompanying edits usable").toHaveValue("from own host");
   } finally {
     await deleteTemplate(request, name);
+    await deleteTemplate(request, own);
     await cleanupSession(request, source.id);
   }
 });

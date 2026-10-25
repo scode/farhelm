@@ -136,13 +136,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   reuse off, so a tunnel cannot steal another program's connections; nothing tests that, and on Linux every test would
   still pass if it regressed. Add a test. From the review of `tunnel-port-and-link-ranges` on 2026-10-23. Plan:
   `plans/queue/tunnel-bind-reuse-test.md`.
-- **Restart with refuses templates that merely re-assert held fields.** Applying a template in Restart with rejects it
-  whenever it sets a field the dialog keeps fixed — the host, the launch kind (agent vs command), and others — even when
-  the template sets the same value the session already has, so a template that names the current host or the session's
-  own kind is refused pointlessly. Only an actual change should be refused; a same-value assignment should apply as a
-  no-op. First step: compare the template's host identity and launch kind against the held values in
-  `restart_template_refusal` (crates/farhelm-ui/src/list/create_form/draft.rs) and the proto's `host_fixed` host check
-  (crates/farhelm-proto/src/launcher.rs). Plan: `plans/queue/restart-with-template-refusal.md`.
 
 - **Visual redesign: Steel.** Restyle the app as the "Steel" design the maintainer settled on 2026-10-25 from mockups:
   blue-gray and periwinkle colors with a light counterpart, Inter for the interface, a host rail with a hosts panel, the

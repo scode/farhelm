@@ -238,17 +238,19 @@ test("a number shortcut applies to Clone's draft", async ({ page, request }) => 
   }
 });
 
-/** Replace with fixes the source host. A later refusal must undo the whole
+/** Replace with fixes the source host. A different host must refuse the whole
  * sequence, leave a later press usable, and yield to a modal above the form. */
 test("Replace with refuses a whole sequence and yields to another modal", async ({ page, request }) => {
   const name = `launcher-replace-${Date.now()}`;
   const first = `${name}-first`;
   const local = (await listHosts(request)).find((host) => host.kind === "local")?.identity;
   expect(local, "premise: the local host has an install identity").toBeTruthy();
+  const otherIdentity = "11111111-2222-3333-4444-555555555555";
+  expect(local, "premise: the refused shortcut must change the installation identity").not.toBe(otherIdentity);
   const source = await createSession(request, { title: `${name}-source` });
   let bodyFailed = true;
   try {
-    await template(request, name, { host: local, name: "must not apply" });
+    await template(request, name, { host: otherIdentity, name: "must not apply" });
     await template(request, first, { name: "applied after refusal" });
     await patchPreferences(request, { template_shortcuts: { "1": name, "2": first } });
     expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": name, "2": first });
