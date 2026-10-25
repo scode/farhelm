@@ -29,7 +29,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   current behavior and restore the reminder where it should appear; this is already specified for Codex as well as
   Claude. The reported screen offers "1. Trust and continue", "2. Quit" and "enter continue · esc quit", but both 0.31.0
   and current main recognize only "2. Back to Agent Command Center" and "enter continue · esc back". Account for that
-  dialog variant and verify the managed-checkout, setting, dismissal and visible-agent-tab conditions too.
+  dialog variant and verify the managed-checkout, setting, dismissal and visible-agent-tab conditions too. Plan:
+  `plans/queue/codex-trust-hint.md`.
 
 - Initial version of agent2agent comms.
 
@@ -39,7 +40,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Fix emoji corruption while terminal output streams.** Emoji in agent output, such as status icons beside changed,
   unchanged, skipped, and failed counts, sometimes render as clipped or partial glyphs. Scrolling redraws them correctly
   until the agent emits more output, when they can break again. Diagnose the rendering or redraw path and keep the
-  glyphs intact as new output arrives.
+  glyphs intact as new output arrives. Plan: `plans/queue/emoji-streaming-corruption.md`.
 
 - **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
   sessions without a managed checkout too, by retaining their metadata.
@@ -84,7 +85,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Consider matching Claude's conversation capture to Codex's.** Codex's conversation capture changed recently;
   consider adjusting how Farhelm captures a Claude session's conversation to match. The maintainer knows which change
-  this refers to and what matching it would mean; ask before starting.
+  this refers to and what matching it would mean; ask before starting. Plan: `plans/queue/claude-wrapper-capture.md`.
 
 - **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
   narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
@@ -146,7 +147,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   by the maintainer on 2026-10-20 while planning the spare checkouts.
 
 - **Fix trash deletion silently blocking the UI.** Deleting a session to trash can silently block everything the user
-  does — including closing the window — while it progresses, sometimes slowly, with no progress indication.
+  does — including closing the window — while it progresses, sometimes slowly, with no progress indication. Plan:
+  `plans/queue/trash-delete-blocking.md`.
 
 - **Search sessions by content or action.** Let the user find a session by what happened in it — which session ran a
   certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
@@ -182,7 +184,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Test that localhost tunnels bind without address reuse.** Mac localhost tunnels bind their listener with address
   reuse off, so a tunnel cannot steal another program's connections; nothing tests that, and on Linux every test would
-  still pass if it regressed. Add a test. From the review of `tunnel-port-and-link-ranges` on 2026-10-23.
+  still pass if it regressed. Add a test. From the review of `tunnel-port-and-link-ranges` on 2026-10-23. Plan:
+  `plans/queue/tunnel-bind-reuse-test.md`.
 - **Settle on a standard link style.** The link color in settings is unreadable against its background (deep blue). Fix
   it, audit anything else affected, and settle on one standard visual for all links. Plan:
   `plans/queue/standard-link-style.md`.
