@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing 7c3607] `replace-yolo-cancel-race.md` — Cancel on a session's Replace YOLO question is refused while "don't ask again" saves, so the outcome follows the first answer and a failed save shows its reason
 - [complete] `report-failed-settings-saves.md` — Report and revert failed saves of frame colors, quick-launch naming, link-click choice, trust hints and the ⚡ mark; the welcome card's seen save joins the silent list
 - [complete] `standard-link-style.md` — One readable link style everywhere: a new link blue, always underlined, the same for link-styled buttons, with ↗ on links that leave the app
 - [complete] `restart-with-template-refusal.md` — Restart with and Replace with apply templates whose held fields repeat the session's own values, refusing only real changes
