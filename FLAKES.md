@@ -2741,3 +2741,43 @@ owned create reply must arrive: Elapsed(())
 Class: budget
 
 Cause: hypothesis
+
+## 2026-10-25 — scrollback wheel setup (e2e/tests/terminal-scroll-freeze.spec.ts)
+
+`a plain flood survives a sibling band repeatedly changing height mid-burst` failed its initial wheel setup in Chromium
+in recorded terminal regression run `1406a4ef-1ecc-49d6-ab16-9f23346b3f4f`; WebKit passed. The other 129 executed cases
+passed and nine WebKit clipboard cases skipped for unsupported permissions. The failed case took 26.635 s, including the
+ten-second wheel deadline, versus 23.908 s for its WebKit pass. The trace establishes a stale-baseline assertion: the
+initial viewport and live tail were both 1825, but the first effective wheel left viewport 1895 behind the new tail
+1934. All 26 post-wheel rendered snapshots matched the buffer, and the final viewport 1826 was 3133 lines behind the
+tail. The helper still demanded reaching 1805, twenty lines before its obsolete initial coordinate. It therefore
+rejected an already established scrollback premise before any resize or paint assertion. The exact original test rerun
+`13270595-cac1-4772-a3d4-59557da77f34` reproduced the same Chromium setup failure; WebKit passed again. The correction
+in #2723 requires an initial live-tail snapshot and then a real wheel gesture followed by a gap from the current tail.
+It retains the same deadline and paint assertions. Scheduling or tracing overhead may explain the delay before the first
+effective wheel, but that timing attribution is unproven. Corrected run `16467ed8-2c41-488c-8250-cad52b0f4960` passed
+all three helper callers on both engines (six executions, no skips), using the same runner policy on dirty base
+`ac20773b`; its complete source fingerprint is `1d147589d2a84a9881c7f99ffa7b2919d555c93dc25636ee3911da00c2039930`.
+
+Both runs tested dirty base `d5687fceaefd63a2589645ea7f67f20ca24adc12` with the emoji grapheme add-on, asset wiring, new
+Unicode browser spec, specification, fragment and TODO edits; the failing helper was unchanged. Complete source
+fingerprint: `67f7f920b345b258a78f2d0b6a2e1f3894c956e267c787e1327c5c49d7d04ae0`. The first selection was
+`npx playwright test` with `terminal-unicode`, `terminal-links`, `terminal-link-clicks`, `terminal-files`,
+`terminal-clipboard`, `terminal-scroll-freeze` and `terminal-font` spec patterns. The rerun selected only the exact
+sibling-band title in `terminal-scroll-freeze`. The worker limit was three with one owned stack per worker; the broad
+run used three workers and the isolated run used two, both engines and zero retries. The substrate was 18-CPU Linux
+x86_64, kernel 6.8.0-147-generic, Node 26.12.1 and Playwright 1.64.0. The recorded pinned tmux was 3.7c, executable
+SHA256 `7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`; locale was `C.UTF-8`. Ambient
+`FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and `FARHELM_TMUX` were
+scrubbed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. Browser
+build identities, load and memory at the failure instant are unavailable. The machine is shared with other agents; no
+added-load reproduction was attempted. The spec's last earlier change was `18880aaa`; no matching earlier flake entry
+was found. Full private records and traces remain in the local test-runs store until temporary-file cleanup.
+
+```
+Error: scrolling back at least 20 lines at "terminal" did not land within 10000ms; started at viewportY=1825, now at 1826
+```
+
+Class: fixture-premise
+
+Cause: established

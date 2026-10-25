@@ -1173,6 +1173,19 @@ declare_assets! {
     const VENDOR_XTERM_CSS: Asset = asset!("/assets/vendor/xterm.css");
     const VENDOR_XTERM_JS: Asset = asset!("/assets/vendor/xterm.js");
     const VENDOR_FIT_JS: Asset = asset!("/assets/vendor/addon-fit.js");
+    // Unmodified lib/addon-unicode-graphemes.js from the 0.4.0 npm package,
+    // the add-on paired with xterm 6.0.0 in its upstream release. Its Unicode
+    // 15 grapheme provider makes emoji widths agree with agent cursor updates
+    // and tmux replay. Registry integrity and the retained bundle's digest are
+    // recorded with the package and bundled third-party MIT notices below.
+    const VENDOR_UNICODE_GRAPHEMES_JS: Asset = asset!("/assets/vendor/addon-unicode-graphemes.js");
+    // Ship the notices alongside the browser and embedded desktop assets,
+    // using the same retained-asset mechanism as the other vendored add-ons.
+    #[used]
+    static UNICODE_GRAPHEMES_LICENSES: Asset = asset!(
+        "/assets/vendor/addon-unicode-graphemes-LICENSES.txt",
+        AssetOptions::builder().with_hash_suffix(false)
+    );
     // OSC 52 support: an agent TUI (Claude Code, Codex) that owns mouse
     // reporting handles its OWN text selection and reports what it copies via
     // the OSC 52 escape sequence rather than through any DOM selection this page
@@ -1753,6 +1766,7 @@ fn AppBody() -> Element {
         document::Link { rel: "stylesheet", href: APP_CSS }
         document::Script { src: VENDOR_XTERM_JS }
         document::Script { src: VENDOR_FIT_JS }
+        document::Script { src: VENDOR_UNICODE_GRAPHEMES_JS }
         document::Script { src: VENDOR_CLIPBOARD_JS }
         document::Script { src: VENDOR_WEB_LINKS_JS }
         document::Script { src: TERM_BYTES_JS }

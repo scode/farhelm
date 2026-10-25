@@ -29,11 +29,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
   indicates that one of those models is being used anyway.
 
-- **Fix emoji corruption while terminal output streams.** Emoji in agent output, such as status icons beside changed,
-  unchanged, skipped, and failed counts, sometimes render as clipped or partial glyphs. Scrolling redraws them correctly
-  until the agent emits more output, when they can break again. Diagnose the rendering or redraw path and keep the
-  glyphs intact as new output arrives. Plan: `plans/queue/emoji-streaming-corruption.md`.
-
 - **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
   sessions without a managed checkout too, by retaining their metadata.
 
