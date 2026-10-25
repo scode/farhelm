@@ -2713,3 +2713,31 @@ assertion failed: started.elapsed() >= Duration::from_millis(30)
 Class: product
 
 Cause: hypothesis
+
+## 2026-10-24 — agent create request fingerprint (crates/farhelm-supervisor/src/service/core.rs)
+
+`service::core::tests::an_agent_create_is_matched_by_its_request_fingerprint_not_its_launch` timed out after 10.048
+seconds waiting for its owned create reply in the x86_64 Linux job of release run `40161156323`, on clean commit
+`bb1bd73d90cfed4f84b0a98028cc2682e0cfb365` (`v0.32.0-rc.1`). It was the only failure among 3,744 selected tests; 3,743
+passed. The recorder selection was `workspace except farhelm and farhelm-desktop`, with four nextest slots across
+binaries and zero retries. The runner recorded Linux x86_64 kernel `6.17.0-1022-azure`, four CPUs, locale `C.UTF-8`, and
+pinned tmux 3.7c executable SHA256 `05858230f19bf74e014d44d9ae3c979db31edf6c18b28a26d2b6fa2464fee666`. No ambient
+`FARHELM_*` variables were present; only recorder-owned `FARHELM_TEST_TRACE_DIR` reached the child. Load, memory
+pressure and slot peers at failure were not recorded. The test and its ten-second reply helper were already in v0.31.0.
+One exact isolated run and a five-attempt exact-test hunt on the unchanged release tree all passed locally; the first
+test execution took 0.617 seconds. The test uses the real systemd availability probe before reaching its intended
+unwritable launch directory, and that probe allows fifteen seconds, exceeding the reply helper's ten-second deadline.
+The hosted trace contains only the initial boot-id event and does not prove which operation stalled. Disposition: #2720
+uses the existing disabled-scope fixture to remove that unrelated dependency while preserving the permission and retry
+assertions; attributing the observed timeout specifically to systemd remains a hypothesis. The retained hosted recorder
+run is `b7638d65-7495-4cbd-b388-85496b2debeb`, downloadable from the release run's failure artifact while GitHub retains
+it; local reproduction is `4baadc43-f812-4d45-9194-fe1544340466` and the five-attempt batch is
+`90ec8569-3008-421d-84d3-6ffe93732e95`. Private copies remain in the temporary evidence tree until machine cleanup.
+
+```
+owned create reply must arrive: Elapsed(())
+```
+
+Class: budget
+
+Cause: hypothesis
