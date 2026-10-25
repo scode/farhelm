@@ -473,3 +473,183 @@ test("Claude trust band repairs an idle read crossing a Settings dismissal save"
   }
 });
 
+/** A failed permanent dismissal must restore the still-relevant hint, not
+ * silently hide it for this page. An unreadable corrective trust state must
+ * preserve the save error without advertising the opt-in as off. The same
+ * failure belongs to no other session after navigation; a later visit gets
+ * a fresh hint without the old error. Only observed question/membership facts
+ * are seeded: terminal attachment, trust configuration and preferences stay real. */
+test("Claude trust hint reports refused dismissal only while its session is shown", async ({ page, request }) => {
+  const previous = await readPreferences(request);
+  const previousTrust = await request.get("/api/checkout-claude-trust");
+  expect(previousTrust.ok(), await previousTrust.text()).toBe(true);
+  const savedTrust = await previousTrust.json() as { enabled: boolean };
+  const build = requireHelmBuild(previousTrust, "trust hint dismissal refusals");
+  const created: string[] = [];
+  const firstReached = routeGate();
+  const firstRelease = routeGate();
+  const lateReached = routeGate();
+  const lateRelease = routeGate();
+  let stopSessionRoute = async () => {};
+  let stopPreferenceRoute = async () => {};
+  let stopTrustReadRoute = async () => {};
+  let refuseTrustReads = true;
+  let failedTrustReads = 0;
+  let writes = 0;
+  let bodyFailed = true;
+  try {
+    await patchPreferences(request, { welcome_seen: true, claude_trust_hint_dismissed: false });
+    expect((await readPreferences(request)).claude_trust_hint_dismissed).toBe(false);
+    expect((await request.put("/api/checkout-claude-trust", { data: { enabled: false } })).ok()).toBe(true);
+    expect((await (await request.get("/api/checkout-claude-trust")).json()).enabled).toBe(false);
+    const session = await createSession(request, { title: `trust-dismiss-refused-${Date.now()}` });
+    created.push(session.id);
+    const neighbor = await createSession(request, { title: `trust-dismiss-neighbor-${Date.now()}` });
+    created.push(neighbor.id);
+    // The sampled question and checkout membership are the same supported
+    // HTTP fixture as the existing lifecycle test. Real terminal readiness must
+    // still satisfy agent_visible; do not override that visibility gate.
+    stopSessionRoute = await drainedRoute(page, (url) => url.pathname === "/api/sessions"
+      || url.pathname === `/api/sessions/${encodeURIComponent(session.id)}`, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const reply = await route.fetch();
+      if (!reply.ok()) return route.fulfill({ response: reply });
+      const body = await reply.json();
+      const seed = (row: Record<string, unknown>) => row.id === session.id ? {
+        ...row,
+        claude_trust_prompt: true,
+        github_repo: null,
+        working_copy: {
+          id: `browser-checkout-${session.id}`, repo: { owner: "example", name: "project" }, canonical_path: "/tmp",
+          origin_session_id: neighbor.id,
+        },
+      } : row;
+      await route.fulfill({ response: reply, json: Array.isArray(body.sessions)
+        ? { ...body, sessions: body.sessions.map(seed) } : seed(body) });
+    });
+    stopPreferenceRoute = await drainedRoute(page, "**/api/preferences", async (route) => {
+      const outgoing = route.request();
+      if (outgoing.method() !== "PUT" || !("claude_trust_hint_dismissed" in outgoing.postDataJSON())) return route.fallback();
+      expect(outgoing.postDataJSON().claude_trust_hint_dismissed).toBe(true);
+      writes++;
+      if (writes === 2) return route.continue();
+      if (writes === 1) {
+        firstReached.release();
+        await firstRelease.wait();
+      } else {
+        expect(writes, "only the owned late dismissal remains").toBe(3);
+        lateReached.release();
+        await lateRelease.wait();
+      }
+      await route.fulfill({ status: 503, headers: { "x-farhelm-build": build }, body: "fixture hint dismissal refused" });
+    });
+    await page.goto("/");
+    await attachSession(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    const selected = (id: string) => page.locator(`.session-row[data-session-id="${id}"]`);
+    const surface = page.locator(".claude-trust-surface");
+    const band = page.locator(".claude-trust-band");
+    const error = surface.getByRole("alert");
+    await expect(selected(session.id)).toHaveAttribute("data-session-selected", "true");
+    await expect(page.locator(".app-main .layout")).toHaveAttribute("data-claude-trust-prompt", "true");
+    await expect(surface).toHaveAttribute("data-enabled", "false");
+    await expect(surface).toHaveAttribute("data-hint-dismissed", "false");
+    await expect(band).toBeVisible();
+    // Keep the initial explicit-off premise real, then make subsequent reads
+    // unavailable. The save error must survive that uncertainty, but the
+    // ordinary explanation/actions must not claim the opt-in is still off.
+    stopTrustReadRoute = await drainedRoute(page, "**/api/checkout-claude-trust", async (route) => {
+      if (route.request().method() !== "GET" || !refuseTrustReads) return route.fallback();
+      await route.fulfill({ status: 503, headers: { "x-farhelm-build": build }, body: "fixture corrective trust read refused" });
+      failedTrustReads++;
+    });
+    await band.getByRole("button", { name: "Don't show again", exact: true }).click();
+    await firstReached.wait();
+    await expect(band).toHaveCount(0);
+    await expect(selected(session.id)).toHaveAttribute("data-session-selected", "true");
+    expect((await readPreferences(request)).claude_trust_hint_dismissed, "held dismissal has not reached the helm").toBe(false);
+    firstRelease.release();
+    await expect.poll(() => failedTrustReads, { message: "the dismissal's corrective trust GET was actually refused" }).toBeGreaterThan(0);
+    await expect(band).toBeVisible();
+    await expect(error).toHaveText("Could not save hiding this trust hint. Try again.");
+    await expect(error).toBeVisible();
+    await expect(selected(session.id)).toHaveAttribute("data-session-selected", "true");
+    await expect(surface).toHaveAttribute("data-enabled", "");
+    await expect(band.locator(".claude-trust-band-copy")).toHaveCount(0);
+    await expect(band.getByRole("button", { name: "Settings and caveats", exact: true })).toHaveCount(0);
+    await expect(band.getByRole("button", { name: "Don't show again", exact: true })).toHaveCount(0);
+    expect((await readPreferences(request)).claude_trust_hint_dismissed).toBe(false);
+    await expect(page.locator(".build-skew")).toHaveCount(0);
+
+    refuseTrustReads = false;
+    expect((await request.put("/api/checkout-claude-trust", { data: { enabled: false } })).ok()).toBe(true);
+    await expect(surface).toHaveAttribute("data-enabled", "false");
+    await expect(surface).toHaveAttribute("data-hint-dismissed", "false");
+    await expect(band.locator(".claude-trust-band-copy")).toBeVisible();
+    await expect(band.getByRole("button", { name: "Settings and caveats", exact: true })).toBeVisible();
+    await expect(band.getByRole("button", { name: "Don't show again", exact: true })).toBeVisible();
+    await expect(error).toHaveText("Could not save hiding this trust hint. Try again.");
+    await expect(error).toBeVisible();
+
+    // The very next click succeeds through the real helm, proving recovery
+    // clears the warning instead of merely suppressing repeat failures.
+    await band.getByRole("button", { name: "Don't show again", exact: true }).click();
+    await expect.poll(async () => (await readPreferences(request)).claude_trust_hint_dismissed).toBe(true);
+    await expect(band).toHaveCount(0);
+    await expect(error).toHaveCount(0);
+
+    // Restore the shared hint through its real preference route and nudge
+    // the existing detail refresh. No remount or private callback supplies
+    // the next question; the still-current sampled question stays true.
+    await patchPreferences(request, { claude_trust_hint_dismissed: false });
+    expect((await readPreferences(request)).claude_trust_hint_dismissed).toBe(false);
+    expect((await request.put("/api/checkout-claude-trust", { data: { enabled: false } })).ok()).toBe(true);
+    await expect(surface).toHaveAttribute("data-hint-dismissed", "false");
+    await expect(band).toBeVisible();
+    const lateReply = page.waitForResponse((reply) => reply.request().method() === "PUT"
+      && new URL(reply.url()).pathname === "/api/preferences"
+      && reply.request().postDataJSON().claude_trust_hint_dismissed === true);
+    await band.getByRole("button", { name: "Don't show again", exact: true }).click();
+    await lateReached.wait();
+    await expect(band).toHaveCount(0);
+    await attachSession(page, neighbor.id);
+    await expect(selected(neighbor.id)).toHaveAttribute("data-session-selected", "true");
+    lateRelease.release();
+    const refused = await lateReply;
+    expect(refused.status()).toBe(503);
+    await refused.finished();
+    await expect(selected(neighbor.id)).toHaveAttribute("data-session-selected", "true");
+    await expect(page.locator(".app-main").getByRole("alert")).toHaveCount(0);
+    expect((await readPreferences(request)).claude_trust_hint_dismissed).toBe(false);
+    await attachSession(page, session.id);
+    await expect(page.locator(".app-main .layout")).toHaveAttribute("data-claude-trust-prompt", "true");
+    await expect(surface).toHaveAttribute("data-enabled", "false");
+    await expect(surface).toHaveAttribute("data-hint-dismissed", "false");
+    await expect(band).toBeVisible();
+    await expect(error).toHaveCount(0);
+    expect(writes).toBe(3);
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      // End this page's queue before releasing held writes. Drain our owned
+      // handlers before restoring shared state or deleting their sessions.
+      ["trust dismissal page", () => page.goto("about:blank")],
+      ["trust dismissal routes", async () => {
+        firstRelease.release();
+        lateRelease.release();
+        const results = await Promise.allSettled([stopPreferenceRoute(), stopSessionRoute(), stopTrustReadRoute()]);
+        const failures = results.filter((result) => result.status === "rejected");
+        expect(failures, "all owned route handlers must drain").toEqual([]);
+      }],
+      ["trust dismissal preferences", () => patchPreferences(request, {
+        welcome_seen: previous.welcome_seen ?? null,
+        claude_trust_hint_dismissed: previous.claude_trust_hint_dismissed ?? null,
+      })],
+      ["checkout trust", async () => {
+        expect((await request.put("/api/checkout-claude-trust", { data: { enabled: savedTrust.enabled } })).ok()).toBe(true);
+      }],
+      ...created.map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]),
+    ]);
+  }
+});
+

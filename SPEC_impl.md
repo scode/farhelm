@@ -688,20 +688,24 @@ click waiter owns only its local alert, which disappears on close; a corrective 
 rather than treating trust as off. Restart alone would retain the previous successful provisional value while that GET
 is pending, so the matching value is cleared first. Controlled native checks also synchronize their property from the
 currently rendered choice: a refusal that beats the optimistic render can otherwise leave the browser's changed property
-behind an unchanged virtual-DOM value. The dialog uses the host dialogs' framed header and footer, with a gear tile and
-a separately named × close control. Only the body scrolls, containing a section-button sidebar and the selected panel.
-The order is sessions, hosts, terminal, checkouts, agent trust, notifications and, when the updater is active, app.
-Terminal holds web-link choices and desktop tunnel consent and file types; checkouts holds the explicit-save folder and
-command; agent trust holds all four agents' blocks; notifications groups device sounds and helm-wide ntfy alerts.
-Inactive panels stay mounted with hidden, preserving field drafts, outcomes and pending saves. The sound asset's
-document-wide input query initializes even hidden inputs. No section choice is persisted. At 620px and below, a
-presentation-only signal reveals either the selected panel or the section list; the back button reads '‹ settings'.
-Section selection focuses its heading, while back focuses the selected section button after the rendering frame. Neither
-adds a normal Tab stop or overrides platform button navigation. Both close controls stay visible. It uses the shared
-focus/isolation helper with its own selector; gear opening selects sessions and focuses its first switch. Existing trust
-props instead select agent trust before mount, focus the agent's switch and scroll its block into view. Escape or either
-close control releases isolation and returns focus to the gear. The host setup and removal permanent answers each name
-that gear as the way to turn confirmation back on.
+behind an unchanged virtual-DOM value. A band's Don't show again waiter belongs to its mounted session and reports only
+the current dismissal's failure; navigation drops that alert without canceling the write. Normal hint copy and actions
+still require an explicitly disabled trust setting. An unreadable corrective GET can show the local save error alone,
+under the existing question, managed-checkout, agent-pane and occurrence-dismissal gates, without claiming trust is off.
+The dialog uses the host dialogs' framed header and footer, with a gear tile and a separately named × close control.
+Only the body scrolls, containing a section-button sidebar and the selected panel. The order is sessions, hosts,
+terminal, checkouts, agent trust, notifications and, when the updater is active, app. Terminal holds web-link choices
+and desktop tunnel consent and file types; checkouts holds the explicit-save folder and command; agent trust holds all
+four agents' blocks; notifications groups device sounds and helm-wide ntfy alerts. Inactive panels stay mounted with
+hidden, preserving field drafts, outcomes and pending saves. The sound asset's document-wide input query initializes
+even hidden inputs. No section choice is persisted. At 620px and below, a presentation-only signal reveals either the
+selected panel or the section list; the back button reads '‹ settings'. Section selection focuses its heading, while
+back focuses the selected section button after the rendering frame. Neither adds a normal Tab stop or overrides platform
+button navigation. Both close controls stay visible. It uses the shared focus/isolation helper with its own selector;
+gear opening selects sessions and focuses its first switch. Existing trust props instead select agent trust before
+mount, focus the agent's switch and scroll its block into view. Escape or either close control releases isolation and
+returns focus to the gear. The host setup and removal permanent answers each name that gear as the way to turn
+confirmation back on.
 
 The all-hosts checkout folder uses a shared explicit-save field rather than the preference queue: invalid path text must
 have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an ordinary protected route

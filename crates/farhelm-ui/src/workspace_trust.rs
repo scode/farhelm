@@ -283,6 +283,10 @@ pub(crate) fn WorkspaceTrustBand(session: ReadSignal<Session>, agent_visible: bo
 
 /// Keep the nonmodal band mounted while configuration loads. Its reads follow
 /// accepted session refreshes rather than adding subscriptions or polling.
+///
+/// The click waiter owns only its local error; marked resources reconcile
+/// independently. Unknown trust reads can retain that save error, never the
+/// normal opt-in explanation or its actions.
 #[component]
 fn AgentTrustBand(session: ReadSignal<Session>, agent_visible: bool, agent: TrustAgent) -> Element {
     let base = use_context::<ApiBase>().0;
@@ -295,6 +299,7 @@ fn AgentTrustBand(session: ReadSignal<Session>, agent_visible: bool, agent: Trus
     crate::claude_trust::use_hint_read_reconciliation(state);
     let mut occurrences = use_context::<OccurrenceDismissals>();
     let mut settings_open = use_signal(|| false);
+    let mut hint_error = use_signal(|| None::<api::PreferenceWrite>);
     let settings_dialog = crate::modal_dialog::DialogHandle::new(crate::settings::DIALOG_SELECTOR);
     let session = session.read();
     let value = state
@@ -303,43 +308,69 @@ fn AgentTrustBand(session: ReadSignal<Session>, agent_visible: bool, agent: Trus
         .and_then(|value| value.as_ref().ok())
         .cloned();
     let occurrence = (session.id.raw().to_owned(), agent);
+    let occurrence_closed = occurrences.0.read().contains(&occurrence);
     let visible = show_hint(
         session.workspace_trust_prompt,
         session.working_copy.is_some(),
         agent_visible,
         value.as_ref().map(|value| value.enabled),
         value.as_ref().is_some_and(|value| value.hint_dismissed),
-        occurrences.0.read().contains(&occurrence),
+        occurrence_closed,
     );
+    // This error claims only that the dismissal save failed. An unknown read
+    // cannot justify the normal hint, which still needs enabled == Some(false).
+    let error_visible = hint_error().is_some_and(|write| write.is_current())
+        && session.workspace_trust_prompt
+        && session.working_copy.is_some()
+        && agent_visible
+        && !occurrence_closed
+        && !value.as_ref().is_some_and(|value| value.enabled);
     let key = agent.key();
     let name = agent.name();
     rsx! {
         div { class: "workspace-trust-surface", style: "display: contents", "data-agent": key,
             "data-enabled": value.as_ref().map(|value| value.enabled.to_string()).unwrap_or_default(),
             "data-hint-dismissed": value.as_ref().map(|value| value.hint_dismissed.to_string()).unwrap_or_default(),
-            if visible {
+            if visible || error_visible {
                 div { class: "claude-trust-band workspace-trust-band", role: "status", aria_live: "polite",
-                    div { class: "claude-trust-band-copy",
-                        strong { "{name} asks about trust for this checkout. " }
-                        "Farhelm can answer it for managed checkouts through a command-line flag. It's off by default because repository hooks, settings and commands are then trusted."
+                    if visible {
+                        div { class: "claude-trust-band-copy",
+                            strong { "{name} asks about trust for this checkout. " }
+                            "Farhelm can answer it for managed checkouts through a command-line flag. It's off by default because repository hooks, settings and commands are then trusted."
+                        }
+                        div { class: "claude-trust-band-actions",
+                            button { r#type: "button", class: "btn btn-primary",
+                                "data-tooltip": "open Settings at the {name} managed-checkout trust switch",
+                                onclick: move |_| settings_open.set(true), "Settings" }
+                            button { r#type: "button", class: "btn btn-neutral",
+                                "data-tooltip": "stop showing this {name} note for every session; Settings can turn it back on",
+                                onclick: move |_| {
+                                    let (write, completion) = api::observe_preference(&base, agent.dismissal(true));
+                                    if let Some(Ok(value)) = state.write().as_mut() {
+                                        value.hint_dismissed = true;
+                                        value.pending_dismissal = Some(write);
+                                    }
+                                    hint_error.set(None);
+                                    state.restart();
+                                    // Scope lifetime drops the alert on navigation;
+                                    // the resource hook independently retires reads.
+                                    spawn(async move {
+                                        let saved = completion.await;
+                                        if !write.is_current() {
+                                            return;
+                                        }
+                                        hint_error.set((!saved).then_some(write));
+                                    });
+                                }, "Don't show again" }
+                            button { r#type: "button", class: "btn btn-neutral", aria_label: "hide this trust hint for this occurrence",
+                                "data-tooltip": "hide this note for this question only",
+                                onclick: move |_| { occurrences.0.write().insert(occurrence.clone()); }, "×" }
+                        }
                     }
-                    div { class: "claude-trust-band-actions",
-                        button { r#type: "button", class: "btn btn-primary",
-                            "data-tooltip": "open Settings at the {name} managed-checkout trust switch",
-                            onclick: move |_| settings_open.set(true), "Settings" }
-                        button { r#type: "button", class: "btn btn-neutral",
-                            "data-tooltip": "stop showing this {name} note for every session; Settings can turn it back on",
-                            onclick: move |_| {
-                                let (write, _) = api::observe_preference(&base, agent.dismissal(true));
-                                if let Some(Ok(value)) = state.write().as_mut() {
-                                    value.hint_dismissed = true;
-                                    value.pending_dismissal = Some(write);
-                                }
-                                state.restart();
-                            }, "Don't show again" }
-                        button { r#type: "button", class: "btn btn-neutral", aria_label: "hide this trust hint for this occurrence",
-                            "data-tooltip": "hide this note for this question only",
-                            onclick: move |_| { occurrences.0.write().insert(occurrence.clone()); }, "×" }
+                    if error_visible {
+                        p { class: "app-settings-error", role: "alert",
+                            "Could not save hiding this trust hint. Try again."
+                        }
                     }
                 }
             }
