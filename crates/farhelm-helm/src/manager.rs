@@ -3816,18 +3816,9 @@ impl HostActor {
                     };
                     return attempt_failure(row, error, progress, may_classify, Some(snapshot));
                 }
-                // Scripted transports and older callers may carry no process
-                // diagnostics. Preserve their existing generic annotation.
-                let error = match row.destination.as_deref() {
-                    Some(dest) if row.kind.annotates_ssh_handshake_eof() => {
-                        crate::ssh::annotate_ssh_handshake_eof(
-                            error,
-                            dest,
-                            row.remote_state_dir.as_deref(),
-                        )
-                    }
-                    _ => error,
-                };
+                // Without process evidence, an empty hello cannot distinguish a
+                // missing supervisor from a failed transport. Keep the original
+                // failure rather than guessing a remote start remedy.
                 return failure(row, error.context(progress.stage.failure_context()));
             }
         };
@@ -4969,7 +4960,7 @@ fn failure(row: &HostRow, error: anyhow::Error) -> AttemptOutcome {
     AttemptOutcome::Failed {
         cause,
         // Bounded and escaped: an anyhow chain from a dial can carry the
-        // peer's own words (an ssh channel's annotated EOF, a supervisor's
+        // peer's own words (SSH diagnostics, a supervisor's
         // refusal), and this string is both logged and RETAINED in the
         // unreachable state a UI renders. See `peer_text`.
         error: peer_text(&format!("{error:#}")),

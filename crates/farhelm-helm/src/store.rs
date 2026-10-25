@@ -664,15 +664,6 @@ impl HostKind {
             HostKind::Ssh => false,
         }
     }
-
-    /// Whether a handshake that closed before any protocol byte arrived is
-    /// explained as "no supervisor over there" through the ssh annotation.
-    pub fn annotates_ssh_handshake_eof(self) -> bool {
-        match self {
-            HostKind::Local => false,
-            HostKind::Ssh => true,
-        }
-    }
 }
 
 /// One `hosts` row, as read back by [`HelmStore::list_hosts`].

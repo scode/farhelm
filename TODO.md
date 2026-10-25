@@ -132,13 +132,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
   exposed are TBD.
 
-- **Quote the second suggested start command exactly.** When an SSH channel closes before the supervisor handshake, the
-  helm suggests a start command with the same double-escaping bug `start-remedy-quoting` fixed in the other one: for a
-  path with apostrophes, backslashes and similar characters, it is not exactly the command to paste and can start
-  Farhelm on the wrong folder. The plan's report suggests first checking whether real SSH connections can reach it.
-  Complexity gate: fix it only if the fix is simple; otherwise leave it. From the review of `start-remedy-quoting` on
-  2026-10-23. Plan: `plans/queue/ssh-close-start-quoting.md`.
-
 - **Cancel racing "don't ask again" on Replace's YOLO question.** Clicking Cancel in the same instant as "don't ask
   again" on a session's Replace YOLO question hides the question, but the Replace still proceeds with YOLO, and a failed
   save of that setting is shown nowhere. Complexity gate: fix it only if the fix is simple; otherwise leave it. From the
