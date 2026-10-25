@@ -40,6 +40,7 @@
 import { expect, newObservedContext, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator } from "@playwright/test";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { resolveToken } from "./helpers/color";
 import {
   createSession,
   forgetAutoSelect,
@@ -182,7 +183,7 @@ test("host-colored terminal frame follows local appearance and Settings", async 
     await expect(teal).toHaveAttribute("aria-pressed", "true");
     await hostDialog.locator(".host-settings-close").click();
     await expect.poll(() => terminal.evaluate((element) => getComputedStyle(element).boxShadow))
-      .toContain("rgb(79, 200, 192)");
+      .toContain(await resolveToken(page, "--host-icon-teal"));
     await expect(terminal).toHaveCSS("background-color", surface);
     await expect(viewport).toHaveCSS("background-color", surface);
     expect(await viewport.evaluate((element) => ({ width: element.clientWidth, height: element.clientHeight }))).toEqual(viewportSize);
@@ -4015,16 +4016,11 @@ test("compact rows retain distinct ended and harness glyphs within two character
       await expect(row.locator(".permission-glyph")).toHaveAttribute("data-glyph", item.permission);
       await expect(row.locator(".permission-glyph").locator("..")).toHaveAttribute("data-tooltip", item.description);
       await expect(row.locator(".session-agent .visually-hidden")).toHaveText(item.description);
-      // Let the browser resolve the token, including future non-hex palettes.
-      // This catches later CSS rules that override the intended mark color.
-      const expectedColor = await row.evaluate((el, token) => {
-        const probe = document.createElement("span");
-        probe.style.color = `var(${token})`;
-        el.appendChild(probe);
-        const color = getComputedStyle(probe).color;
-        probe.remove();
-        return color;
-      }, item.permission === "own-setting" ? "--fg-1" : item.permission === "shielded" ? "--ok" : "--warn");
+      // Permission keeps its role color on ordinary rows. A selected row
+      // retains the distinguishing shape with an inverse foreground.
+      const ordinaryRole = item.permission === "own-setting" ? "--fg-1" : item.permission === "shielded" ? "--ok" : "--warn";
+      const permissionRole = await row.getAttribute("data-session-selected") === "true" ? "--on-fill" : ordinaryRole;
+      const expectedColor = await resolveToken(page, permissionRole);
       await expect(row.locator(".permission-glyph")).toHaveCSS("color", expectedColor);
       if (["stopped", "exited", "interrupted", "error"].includes(item.id)) {
         await expect(row.locator(`.ended-status-glyph[data-glyph="${item.id}"]`)).toBeVisible();
@@ -4174,8 +4170,9 @@ test("a live session draws a dot with a hidden word and a relative age", async (
   });
   expect(mark.radius).toBe("50%");
   expect(mark.clip, "a running dot is a circle, not one of the cut shapes").toBe("none");
-  expect(mark.fill, "the mark must paint the badge's own status color").toBe(
-    await badge.evaluate((element) => getComputedStyle(element).color),
+  const runningRole = await row.getAttribute("data-session-selected") === "true" ? "--on-fill" : "--ok";
+  expect(mark.fill, "running keeps its shape and uses the readable foreground for its row surface").toBe(
+    await resolveToken(page, runningRole),
   );
 
   // The word is the invisible half: still in the DOM and still named above,
@@ -4236,7 +4233,7 @@ test("a live session draws a dot with a hidden word and a relative age", async (
 // only a real page can show whether the CSS rule that colour names actually
 // paints, and whether the class the row computes from `has_unseen_output`
 // is the one that reaches the DOM.
-test("an idle session already seen draws a grey dot with the plain word", async ({ page }) => {
+test("an idle session already seen uses its row's status foreground with the plain word", async ({ page }) => {
   const session = liveDotListing({
     status: { state: "idle" },
     // Seen at exactly the reported activity: SPEC.md's boundary reads this
@@ -4263,16 +4260,16 @@ test("an idle session already seen draws a grey dot with the plain word", async 
     "a seen idle session must not also carry the unseen modifier class",
   );
   await expect(badge).toHaveText("idle");
-  // `--fg-1` (#9199a7 = rgb(145, 153, 167)), the muted foreground `exited`
-  // also uses (`app.css`'s idle-seen rationale comment) — checked as the
-  // actual computed colour, not merely "not green", so a regression to the
-  // wrong quiet token still fails this.
+  // Seen idle uses the muted ordinary role; selection inverts the mark.
+  // Checking the named role catches a swap to another quiet foreground
+  // without pinning this test to one palette's numeric value.
+  const seenRole = await row.getAttribute("data-session-selected") === "true" ? "--on-fill" : "--fg-1";
   expect(
     await badge.locator(".status-dot").evaluate((element) => getComputedStyle(element).color),
-  ).toBe("rgb(145, 153, 167)");
+  ).toBe(await resolveToken(page, seenRole));
 });
 
-test("an idle session with unseen output draws a blue dot and reads idle — new output", async ({
+test("an idle session with unseen output uses its row's new-output foreground and accessible words", async ({
   page,
 }) => {
   const session = liveDotListing({
@@ -4300,12 +4297,12 @@ test("an idle session with unseen output draws a blue dot and reads idle — new
   // alone carries nothing to either.
   await expect(badge).toHaveText("idle — new output");
   await expect(row.locator(".session-row-open")).toHaveAccessibleName(/idle — new output/);
-  // `--info` (#6fb8f0 = rgb(111, 184, 240)) — the token waiting used to own,
-  // reused here since waiting's own colour moved to red (`app.css`'s own
-  // rationale comment for `.status-badge.idle.unseen`).
+  // New output uses the info role on ordinary rows and an inverse diamond
+  // on selection. The accessible words above preserve its meaning there.
+  const unseenRole = await row.getAttribute("data-session-selected") === "true" ? "--on-fill" : "--info";
   expect(
     await badge.locator(".status-dot").evaluate((element) => getComputedStyle(element).color),
-  ).toBe("rgb(111, 184, 240)");
+  ).toBe(await resolveToken(page, unseenRole));
 });
 
 // The pulse is a claim about RIGHT NOW, and a stale session cannot make it.
@@ -4322,7 +4319,11 @@ test("an idle session with unseen output draws a blue dot and reads idle — new
 // `.session-row.stale .status-badge.running .status-dot` in app.css), which
 // is exactly the kind of thing a later selector edit breaks silently.
 test("only a reachable running dot pulses", async ({ page }) => {
-  const reachable = liveDotListing();
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  // Preference seeding validates reference syntax even for a synthetic
+  // listing. This invented host-qualified id establishes selection honestly.
+  const reachable = liveDotListing({ id: "0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:selected-pulse" });
+  const ordinary = liveDotListing({ id: "synthetic-ordinary-dot", title: "synthetic-ordinary-dot" });
   const unreachable = liveDotListing({
     id: "synthetic-stale-dot",
     title: "synthetic-stale-dot",
@@ -4333,13 +4334,14 @@ test("only a reachable running dot pulses", async ({ page }) => {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        sessions: [reachable, unreachable],
-        total: 2,
+        sessions: [reachable, ordinary, unreachable],
+        total: 3,
         truncated: false,
       }),
     }),
   );
 
+  await pinAutoSelect(page, reachable.id);
   await page.goto("/");
   const dotOf = (id: string) =>
     page.locator(`[data-session-id="${id}"] .status-badge.running .status-dot`);
@@ -4347,10 +4349,23 @@ test("only a reachable running dot pulses", async ({ page }) => {
     dotOf(id).evaluate((element) => getComputedStyle(element).animationName);
 
   await expect(dotOf(reachable.id)).toHaveCount(1, { timeout: 10_000 });
+  await expect(dotOf(ordinary.id)).toHaveCount(1);
   await expect(dotOf(unreachable.id)).toHaveCount(1);
 
   expect(await animationOf(reachable.id)).toBe("farhelm-status-pulse");
+  expect(await animationOf(ordinary.id)).toBe("farhelm-status-pulse");
   expect(await animationOf(unreachable.id)).toBe("none");
+  await expect(page.locator(`[data-session-id="${reachable.id}"]`)).toHaveAttribute("data-session-selected", "true");
+  await expect(page.locator(`[data-session-id="${ordinary.id}"]`)).toHaveAttribute("data-session-selected", "false");
+  // Read the resolved animation keyframes: a declared minimum alone would
+  // miss a lost inherited override in the actual selected DOM.
+  for (const [id, minimum, role] of [[reachable.id, "0.85", "--on-fill"], [ordinary.id, "0.6", "--ok"]]) {
+    await expect(dotOf(id)).toHaveCSS("color", await resolveToken(page, role));
+    const opacities = await dotOf(id).evaluate((dot) =>
+      dot.getAnimations().flatMap((animation) => animation.effect?.getKeyframes().map((frame) => frame.opacity) ?? [])
+    );
+    expect(opacities).toContain(minimum);
+  }
 });
 
 test("truncation banner shows when the listing reports truncated", async ({

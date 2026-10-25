@@ -1,5 +1,6 @@
 import { type APIRequestContext, type Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
+import { resolveToken } from "./helpers/color";
 import { cleanupSession, createSession } from "./helpers/fleet";
 import { chooseLauncherHost, launcherHostOptions } from "./helpers/host-picker";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
@@ -43,10 +44,14 @@ test("host picker supports mouse, navigation, typeahead, cancellation, and focus
   await expect(options).toHaveCount(2);
   await expect(options.nth(0)).toHaveAttribute("data-host-id", String(local.id));
   await expect(options.nth(1)).toHaveAttribute("data-host-id", String(remote.id));
+  // The active option has a solid selected surface, so only that mark
+  // inverts. The other option still proves its configured identity color.
+  await expect(options.nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(options.nth(1)).toHaveAttribute("aria-selected", "false");
   await expect(options.nth(0).locator(".host-kind-icon")).toHaveAttribute("data-glyph", "laptop");
-  await expect(options.nth(0).locator(".host-kind-icon")).toHaveCSS("color", "rgb(224, 128, 128)");
+  await expect(options.nth(0).locator(".host-kind-icon")).toHaveCSS("color", await resolveToken(page, "--on-fill"));
   await expect(options.nth(1).locator(".host-kind-icon")).toHaveAttribute("data-glyph", "rocket");
-  await expect(options.nth(1).locator(".host-kind-icon")).toHaveCSS("color", "rgb(79, 200, 192)");
+  await expect(options.nth(1).locator(".host-kind-icon")).toHaveCSS("color", await resolveToken(page, "--host-icon-teal"));
   await test.info().attach("launcher-host-picker", { body: await form.screenshot(), contentType: "image/png" });
   await chooseLauncherHost(host, String(remote.id));
   await expect(host.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "rocket");
@@ -226,7 +231,8 @@ test("quick switcher draws a session's chosen host mark", async ({ page, request
     await expect(dialog).toBeVisible();
     const row = dialog.getByRole("option", { name: new RegExp(session.title) });
     await expect(row.locator(".quick-switcher-host .host-kind-icon")).toHaveAttribute("data-glyph", "rocket");
-    await expect(row.locator(".quick-switcher-host .host-kind-icon")).toHaveCSS("color", "rgb(79, 200, 192)");
+    const markRole = await row.getAttribute("aria-selected") === "true" ? "--on-fill" : "--host-icon-teal";
+    await expect(row.locator(".quick-switcher-host .host-kind-icon")).toHaveCSS("color", await resolveToken(page, markRole));
     await test.info().attach("quick-switcher-host-mark", { body: await dialog.screenshot(), contentType: "image/png" });
   } finally { await cleanupSession(request, session.id); }
 });

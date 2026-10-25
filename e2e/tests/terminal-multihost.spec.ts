@@ -35,6 +35,7 @@ import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipRetu
 
 import { expect, test, newObservedContext } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { resolveToken } from "./helpers/color";
 import { Page, APIRequestContext, Locator, Route } from "@playwright/test";
 import {
   createResumableSession,
@@ -1492,23 +1493,27 @@ test.describe("multi-host", () => {
       await expect(teal).toBeEnabled();
       await expect(teal).toBeFocused();
       await expect(dialog.locator(".host-settings-mark .host-kind-icon")).toHaveAttribute("data-glyph", "rocket");
-      await expect(dialog.locator(".host-appearance-preview .host-kind-icon")).toHaveCSS("color", "rgb(79, 200, 192)");
+      await expect(dialog.locator(".host-appearance-preview .host-kind-icon")).toHaveCSS("color", await resolveToken(page, "--host-icon-teal"));
       await test.info().attach("host-appearance-dialog", { body: await dialog.screenshot(), contentType: "image/png" });
       await dialog.locator(".host-settings-close").click();
       for (const client of [page, observer]) {
+        const sessionRow = client.locator(`[data-session-id="${session.id}"]`);
         const sessionMark = client.locator(`[data-session-id="${session.id}"] .session-locality-slot .host-kind-icon`);
         const hostMark = client.locator(`.host-row[data-host-id="${remote.id}"] .host-kind-icon`);
         await expect(sessionMark).toHaveAttribute("data-glyph", "rocket", { timeout: 20_000 });
-        await expect(sessionMark).toHaveCSS("color", "rgb(79, 200, 192)");
+        const markRole = await sessionRow.getAttribute("data-session-selected") === "true" ? "--on-fill" : "--host-icon-teal";
+        await expect(sessionMark).toHaveCSS("color", await resolveToken(client, markRole));
         await expect(hostMark).toHaveAttribute("data-glyph", "rocket");
-        await expect(hostMark).toHaveCSS("color", "rgb(79, 200, 192)");
+        await expect(hostMark).toHaveCSS("color", await resolveToken(client, "--host-icon-teal"));
       }
       // Selection supplies the surface this assertion measures. Both clients
       // may auto-attach this session, so the second client's last-attach-wins
-      // takeover is unrelated to whether the selected row keeps its tint.
+      // takeover is unrelated to whether its glyph remains legible on the
+      // selected fill. The saved identity color stays on the host row.
       await row.locator(".session-row-open").click();
       await expect(row).toHaveAttribute("data-session-selected", "true");
-      await expect(row.locator(".host-kind-icon")).toHaveCSS("color", "rgb(79, 200, 192)");
+      await expect(row.locator(".host-kind-icon")).toHaveCSS("color", await resolveToken(page, "--on-fill"));
+      await expect(row.locator(".host-kind-icon")).toHaveAttribute("data-host-color", "teal");
       await test.info().attach("host-appearance-selected-row", { body: await page.locator(".app-sidebar").screenshot(), contentType: "image/png" });
       await page.reload();
       await expect(page.locator(`.host-row[data-host-id="${remote.id}"] .host-kind-icon`)).toHaveAttribute("data-glyph", "rocket");
@@ -1533,13 +1538,15 @@ test.describe("multi-host", () => {
       await expect(localColors.getByRole("button", { name: "steel", exact: true })).toHaveAttribute("aria-pressed", "true");
       await dialog.locator(".host-settings-close").click();
       for (const client of [page, observer]) {
+        const sessionRow = client.locator(`[data-session-id="${localSession.id}"]`);
         const hostMark = client.locator(`.host-row[data-host-id="${local.id}"] .host-kind-icon`);
         const sessionMark = client.locator(`[data-session-id="${localSession.id}"] .session-locality-slot .host-kind-icon`);
         await expect(hostMark).toHaveAttribute("data-glyph", "house", { timeout: 20_000 });
-        await expect(hostMark).toHaveCSS("color", "rgb(147, 174, 196)");
+        await expect(hostMark).toHaveCSS("color", await resolveToken(client, "--host-icon-steel"));
         await expect(hostMark).toHaveAttribute("data-tooltip", "local: on this machine, where the helm runs");
         await expect(sessionMark).toHaveAttribute("data-glyph", "house");
-        await expect(sessionMark).toHaveCSS("color", "rgb(147, 174, 196)");
+        const markRole = await sessionRow.getAttribute("data-session-selected") === "true" ? "--on-fill" : "--host-icon-steel";
+        await expect(sessionMark).toHaveCSS("color", await resolveToken(client, markRole));
       }
       await page.reload();
       await expect(page.locator(`.host-row[data-host-id="${local.id}"] .host-kind-icon`)).toHaveAttribute("data-host-color", "steel");
@@ -2953,34 +2960,26 @@ test.describe("multi-host", () => {
       await expect(page.locator(".terminal-pane > .banner")).toBeHidden();
       await expect(page.locator("#term-connecting")).toBeHidden();
       await expect(row.locator(".stale-badge")).toHaveText("waiting for supervisor");
-      await expect(row.locator(".stale-badge")).toHaveCSS("color", await card.locator(".session-unavailable-explanation").evaluate((node) => getComputedStyle(node).color));
-      await expect(card.locator(".session-unavailable-heading")).toHaveCSS("color", await card.evaluate((node) => {
-        const probe = document.createElement("span");
-        probe.style.color = "var(--accent)";
-        node.appendChild(probe);
-        const color = getComputedStyle(probe).color;
-        probe.remove();
-        return color;
-      }));
+      await expect(row).toHaveAttribute("data-session-selected", "true");
+      // The selected stale row stays inverse; the ordinary notice keeps
+      // its secondary prose and accent heading on a neutral surface.
+      await expect(row.locator(".stale-badge")).toHaveCSS("color", await resolveToken(page, "--on-accent-dim"));
+      await expect(card.locator(".session-unavailable-explanation")).toHaveCSS("color", await resolveToken(page, "--fg-1"));
+      await expect(card.locator(".session-unavailable-heading")).toHaveCSS("color", await resolveToken(page, "--accent"));
       await page.getByRole("checkbox", { name: "compact", exact: true }).check();
       await expect(row.locator(".compact-qualifier")).toHaveText("waiting for supervisor");
       await expect(row.locator(".compact-qualifier")).toHaveAttribute("data-tooltip", /waiting for supervisor.*last-known/);
       await page.getByRole("checkbox", { name: "compact", exact: true }).uncheck();
       await expect(page.getByRole("checkbox", { name: "compact", exact: true })).toBeFocused();
       const dot = await row.locator(".status-dot").evaluate((node) => {
-        const probe = document.createElement("span");
-        probe.style.color = "var(--fg-2)";
-        node.appendChild(probe);
         const result = {
           animation: getComputedStyle(node).animationName,
           color: getComputedStyle(node).color,
-          expected: getComputedStyle(probe).color,
         };
-        probe.remove();
         return result;
       });
       expect(dot.animation).toBe("none");
-      expect(dot.color).toBe(dot.expected);
+      expect(dot.color).toBe(await resolveToken(page, "--on-fill"));
       await test.info().attach("supervisor-outage", { body: await page.screenshot(), contentType: "image/png" });
       await restoreRemoteSupervisor(request);
       await expect(card).toHaveCount(0, { timeout: 10_000 });

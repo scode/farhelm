@@ -3,15 +3,12 @@
 // no-literals STRUCTURE of the token layer but says nothing about whether
 // any given pair of tokens is actually legible together.
 //
-// The palette's own `:root` comments make specific, numeric promises: "Each
-// [foreground] clears WCAG AA (4.5:1) against every surface it actually
-// lands on", "--danger-strong ... [c]alibrated to clear WCAG AA (4.5:1) on
-// every row surface", "--accent ... spent on selection ... and
-// `:focus-visible`" (a non-text UI indicator, so its own floor is the 3:1
-// WCAG sets for those rather than 4.5:1), and "--accent ... the words of the
-// wait after a confirmed delete" (text, so 4.5:1 on every surface those
-// words land on). Nothing else in this repo's test suite checks that those
-// promises hold. `cargo fmt`/`clippy` and `dprint` have no notion of a
+// Ordinary text, host identity and status colors belong on neutral surfaces.
+// Solid selection instead needs inverse text, marks and keyboard focus; the
+// selected running pulse must remain visible even at its minimum opacity.
+// Bind both the numeric pairs and their actual shipped declarations so an
+// unused accessible token cannot hide an unreadable use site.
+// `cargo fmt`/`clippy` and `dprint` have no notion of a
 // contrast ratio; the Playwright suite reads rendered pixels and DOM state,
 // and a pair sitting at 4.3:1 instead of 4.5:1 looks identical in a
 // screenshot to anyone not running an actual contrast checker over it —
@@ -110,67 +107,25 @@ function contrastRatio(hexA, hexB) {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-// The bindings the palette's `:root` comments promise, as
-// [foreground token, background token, minimum ratio]. Text pairs use
-// WCAG AA's 4.5:1. `--accent` is mostly a non-text foreground, on `--bg-1`
-// and (further down) on `--accent-fill`: the selection bar and every
-// `:focus-visible` ring are graphical indicators, not text, so WCAG's lower
-// 3:1 floor for those applies instead of the text floor. Its one text use,
-// the delete-wait words ("Stopping agent…") on the session's row, in its
-// header and on the terminal overlay's card, is pinned at 4.5:1 on every row
-// surface: the row can be resting, have its "⋯" menu open (`--bg-2`), be
-// selected, or be selected with its menu open (`--accent-fill-hover`) while
-// the wait shows, and the card sits on `--bg-2`. Hover does not apply: the
-// row's open button is disabled for the whole wait. The tightest
-// of the four, `--accent-fill-hover`, measured about 4.6:1 when this was
-// added, so it is the pair a retune of either token is likeliest to break.
-const ROW_SURFACES = ["--bg-1", "--bg-2", "--accent-fill", "--accent-fill-hover"];
+// Text uses AA's 4.5:1 floor; focus and status shapes use 3:1. The ordinary
+// quiet-text binding is the brightest neutral fill, not the selected fill:
+// Steel deliberately uses a separate inverse vocabulary for selected objects.
+const NEUTRAL_SURFACES = ["--bg-0", "--bg-1", "--bg-2", "--control-hover-bg", "--chip-bg", "--well"];
+const SELECTED_SURFACES = ["--accent-fill", "--accent-fill-hover"];
 const REQUIRED_BINDINGS = [
-  // Settings help, the welcome card and Add host's inline help all sit on
-  // dialog bodies. The link role must remain readable as prose on that fill.
   ["--link", "--bg-2", 4.5],
-  // The centered sequence pill uses amber for its queue and Enter/Escape
-  // instructions; the attention fill must keep both readable as small text.
   ["--warn", "--warn-bg", 4.5],
-  // Decorative host colors must stay legible on the sidebar, selections,
-  // settings/header and picker rows. Binding each tint to every actual
-  // surface catches a later palette retune that screenshots cannot reveal.
   ...["lavender", "orchid", "teal", "steel", "sand", "copper", "red"].flatMap((name) =>
-    [...ROW_SURFACES, "--control-hover-bg", "--well"].map((bg) => [`--host-icon-${name}`, bg, 4.5])
+    NEUTRAL_SURFACES.map((bg) => [`--host-icon-${name}`, bg, 4.5])
   ),
-  ...["--bg-0", ...ROW_SURFACES].map((bg) => ["--fg-0", bg, 4.5]),
-  ...["--bg-0", ...ROW_SURFACES].map((bg) => ["--fg-1", bg, 4.5]),
-  ["--fg-2", "--bg-0", 4.5],
-  ...ROW_SURFACES.map((bg) => ["--danger-strong", bg, 4.5]),
-  ...ROW_SURFACES.map((bg) => ["--accent", bg, 4.5]),
-  ["--accent", "--bg-1", 3],
-  // `.btn`'s own text sits directly on this fill while hovered or
-  // keyboard-focused (app.css's `.btn:hover:not(:disabled),
-  // .btn:focus-visible:not(:disabled)` rule) — a pairing the palette's own
-  // `--control-hover-bg` comment now promises 4.5:1 on, and one the
-  // ROW_SURFACES list above cannot stand in for: it is a control-chrome
-  // fill, not a row surface, and shipped under the floor once already
-  // (4.405:1) with nothing here to catch it.
-  ["--fg-1", "--control-hover-bg", 4.5],
-  // `--well` is the inside of every input, select, and code box, so typed
-  // text (`--fg-0`) and the quieter text fields show at rest (`--fg-1`)
-  // both sit on it. It is darker than any row surface, so these pass with
-  // room to spare today; they are bound because a well is the surface most
-  // likely to be "lifted a little" in a later restyle, and nothing above
-  // would notice.
-  ["--fg-0", "--well", 4.5],
-  ["--fg-1", "--well", 4.5],
-  // The selection bar is drawn ON the selection fill (the composer's chosen
-  // chip, a selected tab), not only beside `--bg-1` as the row's is. The
-  // fill was deliberately made quiet and the bar is what announces the
-  // selection, so the bar losing its 3:1 against that fill would leave a
-  // selected control with nothing legible marking it.
-  ["--accent", "--accent-fill", 3],
-  // The launch button's destination text, on the launch button's fill. It is
-  // meant to be quieter than the verb beside it, which is exactly the kind of
-  // intent that erodes a pair below the floor: it sat at 4.05:1 until the
-  // pair was first computed.
-  ["--on-accent-dim", "--accent-edge", 4.5],
+  ...["--fg-0", "--fg-1", "--fg-2", "--danger-strong", "--accent"].flatMap((fg) =>
+    NEUTRAL_SURFACES.map((bg) => [fg, bg, 4.5])
+  ),
+  ...["--ok", "--danger", "--info"].flatMap((fg) => NEUTRAL_SURFACES.map((bg) => [fg, bg, 3])),
+  ...NEUTRAL_SURFACES.map((bg) => ["--accent", bg, 3]),
+  ...SELECTED_SURFACES.flatMap((bg) => [["--on-fill", bg, 4.5], ["--on-accent-dim", bg, 4.5]]),
+  ["--on-fill", "--danger-bg", 4.5],
+  ["--on-fill", "--danger-fill-hover", 4.5],
 ];
 
 /**
@@ -202,16 +157,239 @@ function checkContrastBindings(css, bindings) {
   return { ok: errors.length === 0, errors, ratios };
 }
 
-// ---- Real-file regression: the invariant this file exists to protect.
-// Everything below this point exercises the checker in isolation against
-// synthetic snippets, which pin the checker's OWN behavior; this is the
-// one test that pins app.css itself. ----
+/** Collect declarations for an exact selector in this sheet's flat rules.
+ * Grouped selectors count separately, and later declarations win. This is
+ * deliberately not a cascade engine: browser tests own specificity and DOM
+ * inheritance, while this check binds the named roles to shipped use sites. */
+function declarationsForSelector(css, selector) {
+  const declarations = new Map();
+  for (const match of stripComments(css).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!match[1].split(",").some((candidate) => candidate.trim() === selector)) continue;
+    for (const declaration of match[2].split(";")) {
+      const colon = declaration.indexOf(":");
+      if (colon < 0) continue;
+      declarations.set(declaration.slice(0, colon).trim(), declaration.slice(colon + 1).trim());
+    }
+  }
+  return declarations;
+}
+
+// These are rendered selection owners, rather than a list of new tokens.
+// Pinning their fills and inverse roles catches an accessible but unused
+// token, a forgotten metadata override and a resurrected accent edge stripe.
+const SELECTED_OWNERS = [
+  ".session-row.selected",
+  ".tab.selected",
+  ".templates-row[aria-pressed=\"true\"]",
+  ".templates-segments button[aria-pressed=\"true\"]",
+  ".app-settings-dialog[aria-label=\"settings\"] .app-settings-navigation button[aria-pressed=\"true\"]",
+  ".launch-kind-tab.selected",
+  ".launch-composer-folder-options button[aria-selected=\"true\"]",
+  ".launch-composer-repository-options > button[aria-selected=\"true\"]",
+  ".launch-composer-options > button.selected",
+  ".launch-composer-segmented > button.selected",
+  ".launch-composer-listbox > button.selected",
+  ".launch-composer-search-group > button.selected",
+  ".quick-switcher-row[aria-selected=\"true\"]",
+  ".launcher-host-option[aria-selected=\"true\"]",
+  ".host-icon-choice[aria-pressed=\"true\"]",
+];
+const SELECTED_PRIMARY = [
+  ".session-row.selected .session-title",
+  ".session-row.selected .session-repository",
+  ".session-row.selected .sidebar-glyph",
+  ".session-row.selected .status-badge",
+  ".session-row.selected .status-badge .status-dot",
+  ".session-row.selected .delete-progress",
+  ".session-row.selected .action-error",
+  ".session-row.selected .session-row-menu",
+  ".session-row.selected .session-row-bell",
+  ".session-row.selected .inline-link",
+  ".session-row.selected a:any-link",
+  ".quick-switcher-row[aria-selected=\"true\"] .status-badge",
+  ".quick-switcher-row[aria-selected=\"true\"] .status-dot",
+  ".quick-switcher-row[aria-selected=\"true\"] mark",
+  ".launch-composer-listbox > button.selected:last-child",
+  ".launch-composer-search-group > button.selected",
+];
+const SELECTED_SECONDARY = [
+  ".session-row.stale.selected .session-title",
+  ".session-row.selected .session-pin",
+  ".session-row.selected .session-host",
+  ".session-row.selected .session-host-separator",
+  ".session-row.selected .session-cwd",
+  ".session-row.selected .session-invocation",
+  ".session-row.selected .status-time",
+  ".session-row.selected .stale-badge",
+  ".session-row.selected .session-detail-copy",
+  ".session-row.selected .managed-checkout-mark",
+  ".session-row.selected .compact-qualifier",
+  ".quick-switcher-row[aria-selected=\"true\"] .quick-switcher-agent",
+  ".quick-switcher-row[aria-selected=\"true\"] .quick-switcher-host",
+  ".quick-switcher-row[aria-selected=\"true\"] .quick-switcher-cwd",
+  ".quick-switcher-row[aria-selected=\"true\"] .quick-switcher-template-summary",
+  ".quick-switcher-row[aria-selected=\"true\"] .quick-switcher-template-keys kbd",
+  ".templates-row[aria-pressed=\"true\"] .templates-row-summary",
+  ".launch-composer-folder-options button[aria-selected=\"true\"] .launch-composer-folder-meaning",
+  ".launch-composer-search-group > button.selected .launch-composer-search-recent-selection",
+];
+const SELECTED_HOST_MARKS = [
+  ".session-row.selected .host-kind-icon",
+  ".quick-switcher-row[aria-selected=\"true\"] .host-kind-icon",
+  ".launcher-host-option[aria-selected=\"true\"] .host-kind-icon",
+  ".host-icon-choice[aria-pressed=\"true\"] .host-kind-icon",
+];
+const HIGHLIGHTED_COMMANDS = ["session-row-menu-item", "host-row-menu-item"].flatMap((name) =>
+  ["hover", "focus"].map((state) => `.${name}:${state}:not([aria-disabled="true"])`)
+);
+const SHIPPED_ROLE_BINDINGS = [
+  ...SELECTED_OWNERS.map((selector) => [selector, "background", "var(--accent-fill)"]),
+  ...SELECTED_OWNERS.filter((selector) =>
+    ![".session-row.selected", ".host-icon-choice[aria-pressed=\"true\"]"].includes(selector)
+  )
+    .map((selector) => [selector, "color", "var(--on-fill)"]),
+  ...SELECTED_PRIMARY.map((selector) => [selector, "color", "var(--on-fill)"]),
+  ...SELECTED_SECONDARY.map((selector) => [selector, "color", "var(--on-accent-dim)"]),
+  ...SELECTED_HOST_MARKS.map((selector) => [selector, "color", "var(--on-fill) !important"]),
+  ...HIGHLIGHTED_COMMANDS.flatMap((selector) => [
+    [selector, "background", "var(--accent-fill)"],
+    [selector, "color", "var(--on-fill)"],
+    [`${selector} .session-row-menu-icon`, "color", "var(--on-fill)"],
+    [`${selector} .session-row-menu-description`, "color", "var(--on-accent-dim)"],
+    [
+      selector.replace(":hover:", ":focus-visible:").replace(":focus:", ":focus-visible:"),
+      "outline-color",
+      "var(--on-fill)",
+    ],
+  ]),
+  [".session-row.selected :focus-visible", "outline-color", "var(--on-fill)"],
+  [".session-row.selected .session-row-open:disabled", "opacity", "1"],
+  [".session-row.selected .session-row-open:disabled .session-title", "color", "var(--on-accent-dim)"],
+  [".tab.selected:focus-visible", "outline-color", "var(--on-fill)"],
+  [".btn-primary:not(.btn-outline):focus-visible", "outline-color", "var(--on-fill)"],
+  [".btn-danger:not(.btn-outline):focus-visible", "outline-color", "var(--on-fill)"],
+  [".btn-primary", "background", "var(--accent-fill)"],
+  [".btn-primary", "color", "var(--on-fill)"],
+  [".btn-primary:hover:not(:disabled)", "background", "var(--accent-fill-hover)"],
+  [".btn-danger", "background", "var(--danger-bg)"],
+  [".btn-danger", "color", "var(--on-fill)"],
+  [".btn-neutral:hover:not(:disabled)", "background", "var(--control-hover-bg)"],
+  [".launch-composer-actions .create-session-submit", "background", "var(--accent-fill)"],
+  [".launch-composer-actions .create-session-submit", "color", "var(--on-fill)"],
+  [".launch-composer-launch-context", "color", "var(--on-accent-dim)"],
+  [".claude-trust-band", "background", "var(--bg-2)"],
+  [".claude-trust-band-copy strong", "color", "var(--info)"],
+];
+
+/** Report missing or misrouted role declarations without trusting token names.
+ * This guards the source contract only; runtime tests still have to establish
+ * that the actual selected DOM receives these declarations after the cascade. */
+function checkShippedRoles(css) {
+  const errors = [];
+  for (const [selector, property, expected] of SHIPPED_ROLE_BINDINGS) {
+    const actual = declarationsForSelector(css, selector).get(property);
+    if (actual !== expected) errors.push(`${selector}: ${property} is ${actual}, expected ${expected}`);
+  }
+  for (const selector of SELECTED_OWNERS) {
+    const shadow = declarationsForSelector(css, selector).get("box-shadow") || "";
+    if (shadow.includes("--accent")) errors.push(`${selector}: obsolete selected accent stripe ${shadow}`);
+  }
+  return errors;
+}
+
+/** Composite opacity in encoded sRGB, as CSS paints an ordinary opacity layer.
+ * Contrast is computed after compositing, rather than multiplying the opaque
+ * contrast ratio: the latter would miss the selected pulse's old 0.45 trough. */
+function compositeHex(foreground, background, opacity) {
+  const fg = expandHex(foreground);
+  const bg = expandHex(background);
+  const channels = [1, 3, 5].map((offset) => {
+    const mixed = parseInt(fg.slice(offset, offset + 2), 16) * opacity +
+      parseInt(bg.slice(offset, offset + 2), 16) * (1 - opacity);
+    return Math.round(mixed).toString(16).padStart(2, "0");
+  });
+  return `#${channels.join("")}`;
+}
+
+// ---- Real-file regressions: arithmetic, use sites and selected motion.
+// Browser checks complement these by resolving the actual DOM cascade. ----
 
 test("the shipped app.css palette clears every AA/non-text binding its comments promise", () => {
   const css = fs.readFileSync(APP_CSS_PATH, "utf8");
   const result = checkContrastBindings(css, REQUIRED_BINDINGS);
   assert.deepEqual(result.errors, []);
   assert.equal(result.ok, true);
+});
+
+test("solid selection uses inverse roles at actual owners, metadata, marks and focus", () => {
+  const css = fs.readFileSync(APP_CSS_PATH, "utf8");
+  assert.deepEqual(checkShippedRoles(css), []);
+});
+
+test("selected running retains its shaped stepped pulse above the graphical floor", () => {
+  const css = fs.readFileSync(APP_CSS_PATH, "utf8");
+  const root = declarationsForSelector(css, ":root");
+  const tokens = extractRootHexTokens(css);
+  const minimum = Number(root.get("--selected-status-pulse-min"));
+  assert.equal(minimum, 0.85);
+  assert.equal(root.get("--status-pulse-min"), "0.60");
+  for (const selector of [".session-row.selected", ".quick-switcher-row[aria-selected=\"true\"]"]) {
+    assert.equal(declarationsForSelector(css, selector).get("--status-pulse-min"), "var(--selected-status-pulse-min)");
+  }
+  assert.equal(
+    declarationsForSelector(css, ".status-badge.running .status-dot").get("animation"),
+    "none",
+    "the final reduced-motion rule must still stop the pulse",
+  );
+  const stripped = stripComments(css);
+  assert.match(stripped, /\.status-badge\.running \.status-dot\s*\{\s*animation: farhelm-status-pulse 2s steps\(4\) infinite;/);
+  assert.match(stripped, /@keyframes farhelm-status-pulse\s*\{[\s\S]*?50%\s*\{\s*opacity: var\(--status-pulse-min\);/);
+  assert.equal(
+    declarationsForSelector(css, ".status-badge.waiting .status-dot::before").get("clip-path"),
+    "polygon(50% 0, 100% 100%, 0 100%)",
+  );
+  assert.equal(
+    declarationsForSelector(css, ".status-badge.idle .status-dot::before").get("border"),
+    "1.5px solid currentColor",
+  );
+  assert.equal(
+    declarationsForSelector(css, ".status-badge.idle.unseen .status-dot::before").get("clip-path"),
+    "polygon(50% 0, 100% 50%, 50% 100%, 0 50%)",
+  );
+  assert.equal(
+    declarationsForSelector(css, ".session-row.stale .status-badge.running .status-dot").get("animation"),
+    "none",
+  );
+  for (const surface of SELECTED_SURFACES) {
+    const background = tokens.get(surface);
+    const trough = compositeHex(tokens.get("--on-fill"), background, minimum);
+    assert.ok(contrastRatio(trough, background) >= 3, `${surface}: selected pulse trough fell below 3:1`);
+    assert.ok(
+      contrastRatio(compositeHex(tokens.get("--on-fill"), background, 0.45), background) < 3,
+      `${surface}: premise that the old pulse trough loses contrast no longer holds`,
+    );
+  }
+  // Ordinary green also needs the opacity calculation. The quick switcher's
+  // neutral hover is brighter than the sidebar/card, so it binds this floor.
+  for (const surface of ["--bg-1", "--bg-2", "--control-hover-bg"]) {
+    const background = tokens.get(surface);
+    const trough = compositeHex(tokens.get("--ok"), background, Number(root.get("--status-pulse-min")));
+    assert.ok(contrastRatio(trough, background) >= 3, `${surface}: ordinary running pulse trough fell below 3:1`);
+    assert.ok(contrastRatio(compositeHex(tokens.get("--ok"), background, 0.45), background) < 3);
+  }
+});
+
+test("an accessible unused inverse token cannot hide a selected inline host tint", () => {
+  const css = fs.readFileSync(APP_CSS_PATH, "utf8");
+  const broken = css.replace("color: var(--on-fill) !important;", "color: var(--host-icon-red) !important;");
+  assert.notEqual(broken, css, "the mutation must actually change the host override");
+  assert.ok(checkShippedRoles(broken).some((error) => error.includes(".host-kind-icon")));
+});
+
+test("opacity compositing preserves opaque, transparent and midpoint channels", () => {
+  assert.equal(compositeHex("#fff", "#000", 1), "#ffffff");
+  assert.equal(compositeHex("#fff", "#000", 0), "#000000");
+  assert.equal(compositeHex("#fff", "#000", 0.5), "#808080");
 });
 
 // ---- Synthetic cases: each pins one piece of the checker's own behavior,

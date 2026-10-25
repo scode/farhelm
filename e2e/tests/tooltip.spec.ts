@@ -24,6 +24,7 @@
  * run without starting a real agent.
  */
 import { expect, test } from "./helpers/evidence";
+import { resolveToken } from "./helpers/color";
 import { type Locator, type Page } from "@playwright/test";
 import { agentLaunchRow, localHostId, patchPreferences, resetPreferences, SESSION_LISTING } from "./helpers/fleet";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
@@ -134,7 +135,11 @@ test("a session's title and open area share its summary card", async ({ page, re
       const rowIcon = row.locator(".host-kind-icon");
       const cardIcon = card.locator(".host-kind-icon");
       await expect(cardIcon).toHaveAttribute("data-glyph", await rowIcon.getAttribute("data-glyph") ?? "");
-      await expect(cardIcon).toHaveCSS("color", await rowIcon.evaluate((icon) => getComputedStyle(icon).color));
+      // The neutral card keeps the local host's identity color even when
+      // selection inverts the sidebar's copy of the same glyph.
+      await expect(rowIcon).toHaveAttribute("data-host-color", "red");
+      await expect(cardIcon).toHaveAttribute("data-host-color", "red");
+      await expect(cardIcon).toHaveCSS("color", await resolveToken(page, "--host-icon-red"));
       // The relative age can tick between density changes without changing
       // what the card offers. Compare the rest of the rendered card exactly.
       const stableMarkup = async () => card.evaluate((element) => {
@@ -184,7 +189,7 @@ test("a stale card is dim while row marks keep their own hover", async ({ page }
   await expect(card).toHaveClass(/stale/);
   await expect(card.locator(".session-summary-label")).toHaveText(["directory", "last active"]);
   await expect(card.locator(".status-dot")).toHaveCSS("animation-name", "none");
-  const dimColor = await row.locator(".status-dot").evaluate((dot) => getComputedStyle(dot).color);
+  const dimColor = await resolveToken(page, "--fg-2");
   await expect(card.locator(".session-summary-status")).toHaveCSS("color", dimColor);
   for (const mark of [row.locator(".status-dot"), row.locator(".status-time")]) {
     await mark.hover();

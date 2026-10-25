@@ -339,28 +339,29 @@ an unknown command uses the neutral terminal glyph. A legacy row with no name le
 `list::shared::session_locality` decides among three answers rather than two — `Local` when the session's host id
 matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why), `Remote` when both
 ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a hosts read that has
-not landed). A confirmed local glyph uses the semantic red caution color, including selected, stale, and compact rows,
-to keep local execution conspicuous. The row draws the LOCAL glyph only for a confirmed `Local` verdict — an `Unknown`
-row draws no glyph at all, never the local one, because a glyph is a positive claim `session_locality` has no evidence
-to back. The 2026-08-23 rule's weaker promise survives underneath: unknown locality still never SUPPRESSES an available
-host label, it only ever leaves the row free to show one it already has, and the glyph rule adds a second promise on top
-rather than replacing the first. Legacy rows without a host name at all necessarily show none regardless — locality
-answers whether a name would be shown, not whether one exists to show. The agent track is rendered as glyphs: structured
-launch metadata decides the harness: an agent launch's agent type, a command launch's declared one, or a legacy
-session's stored kind, and the terminal glyph otherwise. The sidebar's YOLO mark and the helm's YOLO confirmation must
-agree on every launch by reading the same verdict, `SessionLaunch::yolo`: `farhelm_proto::yolo::selection_is_yolo` for
-an agent launch and the user's (or agent's) assertion for a command launch. Nothing reads a command line for it. A
-legacy session has no verdict and carries the unclassified mark; nothing that can create a launch holds one, so the
-guard never asks about it. An omitted Pi, OpenCode, OMP or Goose permission is rendered as YOLO for compatibility with
-older snapshots. The full invocation remains in its accessible text and tooltip. The working directory is tilde-folded
-against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is on the wire to fold against properly.
-The full invocation stays on the agent mark; the untouched directory and other row facts ride in a hidden summary card
-source beside the row. The open button names that source with `data-tooltip-card`; the shared tooltip clones its DOM
-children on hover or keyboard focus. The source is a sibling, not a row descendant, so row-scoped controls and locators
-cannot match a second, hidden copy. Rust renders the host's own mark, status classes and isolated peer text. The card
-gives the full title, host, managed checkout, directory and timestamps without changing the open button's accessible
-name; marks keep their nearer hover targets and the complete ended-status detail stays on the row. The source and cloned
-tooltip remain outside the accessibility tree.
+not landed). A confirmed local glyph uses the semantic red caution color on unselected rows, including stale and compact
+rows. On a selected row it uses the same inverse selection color as remote host marks; selection treats every host
+alike. The row draws the LOCAL glyph only for a confirmed `Local` verdict — an `Unknown` row draws no glyph at all,
+never the local one, because a glyph is a positive claim `session_locality` has no evidence to back. The 2026-08-23
+rule's weaker promise survives underneath: unknown locality still never SUPPRESSES an available host label, it only ever
+leaves the row free to show one it already has, and the glyph rule adds a second promise on top rather than replacing
+the first. Legacy rows without a host name at all necessarily show none regardless — locality answers whether a name
+would be shown, not whether one exists to show. The agent track is rendered as glyphs: structured launch metadata
+decides the harness: an agent launch's agent type, a command launch's declared one, or a legacy session's stored kind,
+and the terminal glyph otherwise. The sidebar's YOLO mark and the helm's YOLO confirmation must agree on every launch by
+reading the same verdict, `SessionLaunch::yolo`: `farhelm_proto::yolo::selection_is_yolo` for an agent launch and the
+user's (or agent's) assertion for a command launch. Nothing reads a command line for it. A legacy session has no verdict
+and carries the unclassified mark; nothing that can create a launch holds one, so the guard never asks about it. An
+omitted Pi, OpenCode, OMP or Goose permission is rendered as YOLO for compatibility with older snapshots. The full
+invocation remains in its accessible text and tooltip. The working directory is tilde-folded against the `/home/<user>`
+and `/Users/<user>` shapes, since no home directory is on the wire to fold against properly. The full invocation stays
+on the agent mark; the untouched directory and other row facts ride in a hidden summary card source beside the row. The
+open button names that source with `data-tooltip-card`; the shared tooltip clones its DOM children on hover or keyboard
+focus. The source is a sibling, not a row descendant, so row-scoped controls and locators cannot match a second, hidden
+copy. Rust renders the host's own mark, status classes and isolated peer text. The card gives the full title, host,
+managed checkout, directory and timestamps without changing the open button's accessible name; marks keep their nearer
+hover targets and the complete ended-status detail stays on the row. The source and cloned tooltip remain outside the
+accessibility tree.
 
 Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
 Permission marks use hand-drawn stroke silhouettes in the 12-unit viewBox: a slashed shield (`data-glyph="yolo"`) and a
@@ -418,8 +419,8 @@ where a corner has to stay square because it joins a neighboring control, names 
 tokens are named for the role a value plays — surface levels (`--bg-*`), foreground levels (`--fg-*`), one accent
 family, `--ok`/`--warn`/`--danger` with their fill and border variants, `--radius-*`, `--font-ui`/`--font-mono` — rather
 than for the color it happens to be, so a restyle is an edit to one block instead of to every rule that mentioned the
-same hex. The palette is dark-only today; a light theme lands as a second `:root` block redefining the same names, which
-is the arrangement the no-literals rule exists to protect.
+same hex. The dark palette is Steel: blue-gray surfaces and a periwinkle accent. A light theme lands as a second `:root`
+block redefining the same names, which is the arrangement the no-literals rule exists to protect.
 
 Two of those roles are design constraints and not merely names. The first is the surface ladder: exactly three levels
 are in use — the ground (the page), the chrome one step above it (sidebar, main header, tab strip), and the floating
@@ -441,7 +442,7 @@ is what an earlier indicator used, and it went unnoticed; and `--info`, the blue
 unseen output. It is the one entry that does not mean "this is where you are" (see below), so it is kept narrow enough
 not to compete with selection: it colors only the spinner or dot, the words, and the terminal overlay card's edge, and
 the deleting row takes no tint or edge of its own, which would look exactly like the selection it usually already is.
-Action buttons use three deliberate tiers on the shared ghost `.btn` base: `.btn-primary` is the normal blue
+Action buttons use three deliberate tiers on the shared ghost `.btn` base: `.btn-primary` is the normal periwinkle
 affirmative, `.btn-neutral` is the quiet secondary treatment, and `.btn-danger` is reserved for destructive
 confirmations. A permanent answer uses the outlined form of its one-off tier: the YOLO confirmation's "start, and don't
 ask again on this host" and host removal's "remove, don't ask again" keep the danger color, while host setup's "set up,
@@ -458,25 +459,29 @@ text, while their confirmation buttons use the danger tier. SPEC.md requires the
 row readably at a glance, so anything else joining that list has to be a place where the accent means "this is where you
 are" — the same thing every entry but the delete wait says — because an accent spread across ordinary decoration would
 leave nothing to make the selection readable. Both constraints have a contrast floor under them: the quiet foreground
-tokens are set so that metadata stays at WCAG AA against the brightest surface it lands on, which is what caps how light
-the selected row's fill may go.
+tokens are set so that metadata stays at WCAG AA against the brightest ordinary surface it lands on. Solid selected
+surfaces have separate inverse text roles, so their legibility does not depend on muted prose colors also surviving the
+selection fill.
 
-Links use their own `--link` role (`#78b7ff`), separate from the accent and from status colors. Every anchor and button
-styled as an inline link uses that color and stays underlined at rest, with no different visited or hover treatment. The
-underline matters because the link blue alone does not stand apart from the surrounding grey prose at the 3:1 contrast
-needed to identify a link by color alone. Keyboard focus keeps the shared accent ring. A link that opens a page outside
-the app ends in `↗`; an inline action inside the app does not.
+Links use their own `--link` role (`#9cb7ff` in Steel), separate from the accent and from status colors. Every anchor
+and button styled as an inline link uses that color and stays underlined at rest, with no different visited or hover
+treatment. The underline matters because the link blue alone does not stand apart from the surrounding grey prose at the
+3:1 contrast needed to identify a link by color alone. Keyboard focus keeps the shared accent ring. A link that opens a
+page outside the app ends in `↗`; an inline action inside the app does not.
 
-Selection is one construct wherever it appears — the sidebar's selected row, the selected tab, and the launch composer's
-chosen harness, segment, folder, and list option: the accent-tinted `--accent-fill`, an accent bar along one edge, and
-`--fg-bright` text. The bar takes the leading edge of a thing chosen from a vertical list and the underside of a thing
-chosen from a horizontal set. The fill is deliberately quiet, only as chromatic as it takes to stay apart from the
-neutral hover tint beside it, and the bar is what announces the selection. The reason is what else is on screen: status
-colors are meant to be the loudest thing in the sidebar, and each dot-only status has a shape of its own as well as a
-color (filled circle running, triangle waiting, diamond idle with unseen output, hollow ring idle), so the session that
-needs a person outranks the one already open, and the sidebar can be read without telling hues apart. The launch
-composer used to carry a palette, corner radii, and a periwinkle selection of its own, a second accent that the closed
-list above rules out; a dialog now uses the shared tokens and adds only what being modal needs (a veil, a panel edge one
+Selection is one construct wherever it appears — the sidebar's selected row, the selected tab, highlighted menu items,
+the open settings section and the launch composer's chosen harness, segment, folder and list option: a solid
+`--accent-fill` with inverse `--on-fill` text. The normal primary action uses that same fill. Selection needs no
+additional accent bar. Secondary selected metadata uses `--on-accent-dim`, an inverse role that still clears AA on the
+solid fill; `--fg-bright` remains ordinary emphatic text rather than carrying two incompatible foreground roles.
+
+Status shapes carry their meaning on a selected row: filled circle running, triangle waiting, diamond idle with unseen
+output, hollow ring idle. Their inverse foreground remains visible against the selection, and the running pulse keeps a
+higher minimum opacity there so its dim phase does not disappear into the fill. Unselected rows keep the status colors.
+Accessible labels, stale-state meaning and reduced-motion/inactive-window behavior are unchanged. Selected technical
+values, identity marks and delete-progress wording also use inverse foregrounds; keeping their ordinary colors would
+lose contrast on a solid selection. Focus on a selected control needs its own visible inverse indicator. Menus and
+dialogs use the shared surface and selection roles; a dialog adds only what being modal needs (a veil, a panel edge one
 step brighter than a control outline, a shadow), on the same one corner scale as everything else.
 
 Nothing on screen may redraw on its own more than 10 times per second. "On its own" means an indicator or decoration

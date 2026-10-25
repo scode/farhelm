@@ -124,9 +124,11 @@ calls `shot(page, "<page>/<shot>", [regions])`. The image is cropped to the regi
 
 `visual-review.spec.ts` is the development-review exception: it captures unannotated app surfaces in dark and light
 mode, at wide and constrained window widths, for the Steel plans' visual reviews. It may change the owned staged fleet's
-preferences to show the states under review. Its `visual-review/` shots are referenced by no docs page and are never
-published; the publisher selects only shots the docs pages reference. It shares the real fleet and machine-detail check
-with ordinary docs shots.
+preferences to show the states under review. To show a selected session's last-known status, it may temporarily retarget
+one of its own staged remotes to an invented unavailable destination, then restore the exact original destination and
+verify that the same host and install reconnect. Statuses remain real; no SSH configuration or installation changes. Its
+`visual-review/` shots are referenced by no docs page and are never published; the publisher selects only shots the docs
+pages reference. It shares the real fleet and machine-detail check with ordinary docs shots.
 
 - `scripts/docs-screenshots.sh --only <page>` captures that page's shots into `website/public/docs-shots-local/`, and
   the local docs preview shows them straight away, labelled as local captures. Look at every one: the arrow points at

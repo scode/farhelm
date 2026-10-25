@@ -2,6 +2,7 @@
 // prove the sidebar partition rather than a changed helm/quick-switcher sort.
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { resolveToken } from "./helpers/color";
 import { cleanupSession, createSession, listSessions, openRowMenu, resetPreferences } from "./helpers/fleet";
 
 /** Pin/unpin must survive a second client, and pinned rows move to the top once the pointer is off the list.
@@ -39,14 +40,9 @@ test("pin from the menu groups the sidebar and unpin restores title order", asyn
     await openRowMenu(z);
     await z.getByRole("menuitem", { name: "Pin to top", exact: true }).click();
     await expect(z.getByRole("img", { name: "pinned", exact: true })).toBeVisible();
-    await expect(z.locator(".session-pin")).toHaveCSS("color", await z.evaluate((element) => {
-      const probe = document.createElement("span");
-      probe.style.color = "var(--fg-1)";
-      element.append(probe);
-      const color = getComputedStyle(probe).color;
-      probe.remove();
-      return color;
-    }));
+    // A pin stays secondary metadata on either ordinary or selected rows.
+    const pinRole = await z.getAttribute("data-session-selected") === "true" ? "--on-accent-dim" : "--fg-1";
+    await expect(z.locator(".session-pin")).toHaveCSS("color", await resolveToken(page, pinRole));
     await expect(z.locator(".session-row-open")).toHaveAccessibleName(/pinned/);
     await page.mouse.move(0, 0);
     await expect.poll(async () => (await order()).indexOf(last.id) < (await order()).indexOf(first.id)).toBe(true);

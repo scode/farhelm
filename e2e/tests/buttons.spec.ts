@@ -16,6 +16,7 @@
  */
 import { expect, newObservedContext, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
+import { resolveToken } from "./helpers/color";
 import {
   cleanupSession,
   createSession,
@@ -27,25 +28,6 @@ import { addTab } from "./helpers/terminal-suite";
 
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
-}
-
-/**
- * Resolves a `:root` custom property to the RGB string a browser would
- * compute for any real element that used it, via a live probe element's
- * `getComputedStyle` — the same technique chrome.spec.ts's own
- * `resolveToken` uses, duplicated here rather than shared because the two
- * files otherwise have no coupling and a shared helper module would be the
- * only reason to import one from the other.
- */
-async function resolveToken(page: Page, token: string): Promise<string> {
-  return page.evaluate((name) => {
-    const probe = document.createElement("div");
-    probe.style.color = `var(${name})`;
-    document.body.appendChild(probe);
-    const value = getComputedStyle(probe).color;
-    probe.remove();
-    return value;
-  }, token);
 }
 
 // What a browser reports for `background: none` and for `border: 1px solid
@@ -76,11 +58,7 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
 
     const accentFill = await resolveToken(page, "--accent-fill");
     const accentEdge = await resolveToken(page, "--accent-edge");
-    // The composer's Launch is the one saturated fill in its dialog: the
-    // accent at border weight as its fill and the accent itself as its edge
-    // (see the `.launch-composer-actions .create-session-submit` rule).
-    const composerLaunchFill = await resolveToken(page, "--accent-edge");
-    const composerLaunchEdge = await resolveToken(page, "--accent");
+    const onFill = await resolveToken(page, "--on-fill");
     const danger = await resolveToken(page, "--danger");
 
     // `toHaveCSS` (polling) rather than a one-shot `getComputedStyle`
@@ -90,17 +68,18 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
     // `rgba(22, 41, 74, 0.016)` on one loaded CI run, the tail of its
     // selected fill draining away. The web-first assertion waits for the
     // value to settle instead of racing the transition.
-    async function expectPrimary(selector: string, fill = accentFill, edge = accentEdge) {
+    async function expectPrimary(selector: string) {
       const el = page.locator(selector);
       await expect(el, `${selector} must be visible to check its resting style`).toBeVisible();
       await expect(el, `${selector} must carry its surface's primary fill`).toHaveCSS(
         "background-color",
-        fill,
+        accentFill,
       );
       await expect(el, `${selector} must carry its surface's primary border`).toHaveCSS(
         "border-top-color",
-        edge,
+        accentEdge,
       );
+      await expect(el).toHaveCSS("color", onFill);
     }
 
     async function expectGhost(selector: string) {
@@ -139,6 +118,7 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
         { message: "the danger button must be at rest before sampling its fill" },
       ).toBe(false);
       await expect(el).toHaveCSS("background-color", await resolveToken(page, "--danger-bg"));
+      await expect(el).toHaveCSS("color", onFill);
     }
 
     // --- Normal primary: the sidebar's standing "new session" control. Checked
@@ -147,8 +127,8 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
     await expectPrimary(".new-session-button");
     await expectNeutral(".add-host-button");
 
-    // --- Composer exemption: Launch is deliberately brighter
-    // than the generic sidebar primary, per the maintainer's composer mockup.
+    // Launch shares the primary selection fill with the sidebar action;
+    // the dialog must not introduce another, brighter primary tier.
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
@@ -167,7 +147,7 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
       form.locator(".create-session-submit"),
       "Launch must be accepting before its resting fill can be judged",
     ).not.toHaveAttribute("aria-disabled", "true");
-    await expectPrimary(".create-session-submit", composerLaunchFill, composerLaunchEdge);
+    await expectPrimary(".create-session-submit");
     // Reset is the action row's secondary control. It was once bare grey
     // text with nothing to say it was clickable until hovered; the neutral
     // tier is what makes it read as a button at rest.

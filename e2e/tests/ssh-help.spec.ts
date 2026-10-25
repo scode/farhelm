@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
+import { resolveToken } from "./helpers/color";
 import { resetPreferences } from "./helpers/fleet";
 import { requireHelmBuild } from "./helpers/helm-build";
 import { routeGate } from "./helpers/route-gate";
@@ -98,7 +99,7 @@ test("add host opens ssh help for its draft without losing the form", async ({ p
   const input = form.locator(".add-host-ssh");
   const link = form.getByRole("button", { name: "Start its connections yourself first.", exact: true });
   await expect(input).toBeFocused();
-  await expect(link).toHaveCSS("color", "rgb(120, 183, 255)");
+  await expect(link).toHaveCSS("color", await resolveToken(page, "--link"));
   await expect(link).toHaveCSS("text-decoration-line", "underline");
   await link.click();
   let dialog = page.getByRole("dialog", { name: "ssh needs 2FA?", exact: true });
@@ -113,7 +114,7 @@ test("add host opens ssh help for its draft without losing the form", async ({ p
   await expect(form).toBeVisible();
   await expect(link).toBeFocused();
   await expect.poll(() => link.evaluate(element => element.matches(":focus-visible"))).toBe(true);
-  await expect(link).toHaveCSS("outline-color", "rgb(88, 150, 232)");
+  await expect(link).toHaveCSS("outline-color", await resolveToken(page, "--accent"));
   await expect(link).toHaveCSS("outline-style", "solid");
   await expect(link).toHaveCSS("outline-width", "2px");
   await expect.poll(() => page.locator('.app-help-toggle').evaluate((element) => element.closest('[inert]') !== null)).toBe(true);
