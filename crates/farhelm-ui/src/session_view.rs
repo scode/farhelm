@@ -2458,7 +2458,15 @@ pub(crate) fn SessionView(
                             }
                         }
                     },
-                    on_cancel: move |_| replace_controller.cancel_question(&question),
+                    on_cancel: move |_| {
+                        // A permanent answer keeps this question mounted through
+                        // the host save. Refuse a Cancel queued before the busy
+                        // render, or a failed save would have nowhere to show why.
+                        if *replacing.peek() {
+                            return;
+                        }
+                        replace_controller.cancel_question(&question);
+                    },
                 }
             }
             if let Some(err) = replace_error.read().clone() {

@@ -385,10 +385,10 @@ impl<K> ConfirmToken<K> {
 /// meanwhile. The fourth is a session's Replace YOLO question answered with
 /// "don't ask again" (`ReplaceController::answer_session` in `replace.rs`):
 /// it stays up while the host setting saves, and the save's success
-/// retires it. Unlike the other three, nothing yet refuses a second answer
-/// meanwhile, so a Cancel queued with that answer still matches, closes
-/// the question while the Replace carries on, and leaves a failed save's
-/// reason with no question to show it on. Every other prompt answers
+/// retires it. The surface's own `replacing` flag refuses Cancel while
+/// the Replace runs, including a Cancel queued before the disabled render,
+/// so a failed save still has a question to show its reason on. The page's
+/// operation claim refuses a second launch answer. Every other prompt answers
 /// through `take`.
 ///
 /// `Copy` because it is a handle to a signal, like [`OpLock`]. Render code

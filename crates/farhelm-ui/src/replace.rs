@@ -122,7 +122,8 @@ impl ReplaceController {
     /// Bind a session surface without changing its permanent-answer mount.
     /// Its handlers answer only the opening their render drew, and keep that
     /// question through a host-setting write, including a failed write's
-    /// busy-to-idle recovery.
+    /// busy-to-idle recovery. The surface's own `replacing` flag refuses
+    /// Cancel while that run is in flight, before the disabled render too.
     pub(crate) fn session(
         retry: Signal<Option<(String, Option<String>)>>,
         exclusions: Signal<HashSet<String>>,
@@ -328,9 +329,10 @@ impl ReplaceController {
     /// Answer the session question `question` names, after its lifecycle guard
     /// was obtained: `None`, changing nothing, unless that exact opening is
     /// still the open one. Permanent answers leave it mounted until the host
-    /// save succeeds. Its hostless permanent button is not offered, but
-    /// retains the old no-save continuation if invoked rather than adding a
-    /// new refusal here.
+    /// save succeeds; the surface must refuse Cancel while its Replace runs
+    /// so a failed save can still show its reason. Its hostless permanent
+    /// button is not offered, but retains the old no-save continuation if
+    /// invoked rather than adding a new refusal here.
     pub(crate) fn answer_session(
         mut self,
         question: &ReplaceYoloQuestion,
@@ -358,6 +360,8 @@ impl ReplaceController {
 
     /// Cancel the rendered question and only its exact retry key. Both
     /// surfaces' Cancel buttons use it; a stale Cancel changes nothing.
+    /// The session surface must first refuse Cancel while its own Replace
+    /// runs: permanent answers keep the question mounted for save errors.
     pub(crate) fn cancel_question(self, question: &ReplaceYoloQuestion) {
         if self.take_question(question) {
             let pending = question.key();

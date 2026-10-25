@@ -132,11 +132,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
   exposed are TBD.
 
-- **Cancel racing "don't ask again" on Replace's YOLO question.** Clicking Cancel in the same instant as "don't ask
-  again" on a session's Replace YOLO question hides the question, but the Replace still proceeds with YOLO, and a failed
-  save of that setting is shown nowhere. Complexity gate: fix it only if the fix is simple; otherwise leave it. From the
-  review of `bind-gui-answers` on 2026-10-23. Plan: `plans/queue/replace-yolo-cancel-race.md`.
-
 - **Report every failed settings save.** SPEC.md asks for every failed save to be reported, but several still fail
   silently: the welcome card seen, trust-hint dismissals, the terminal link-click choice, frame colors, naming sessions
   on quick launch, and toggling the ⚡ mark. The follow-up the maintainer chose to leave out of
