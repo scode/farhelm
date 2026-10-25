@@ -1232,8 +1232,8 @@ name, and removes a stale new-name key when retaining the old name's key would o
 Failed repoints keep both names. A failed number-key save from a key edit, or a failed repoint of either shortcut, is
 reported and its local pending value discarded, without retrying it. A key edit reports uncertainty and re-reads the
 helm's bindings, since a lost reply may follow a committed save. If that read fails too, it shows the previous read and
-says the current keys could not be read. A failed quick-launch mark toggle in the Templates dialog is discarded the same
-way but is not yet reported.
+says the current keys could not be read. A failed quick-launch mark toggle in the Templates dialog follows the same
+rollback and re-read; it reports uncertainty, and says when the current mark could not be read.
 
 Quick launch uses that shared capture listener and the same list-owned New-open callback, followed by the ordinary
 template search action and form requestSubmit. The mark is one nullable shared preference rather than template data, so

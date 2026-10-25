@@ -1636,7 +1636,8 @@ pub(super) fn TemplatesDialog(
         spawn(async move {
             match crate::api::fetch_preferences(&base).await {
                 Ok(fresh) => {
-                    let read = fresh.template_shortcuts.clone();
+                    let read_mark = fresh.quick_launch_template.clone();
+                    let read_keys = fresh.template_shortcuts.clone();
                     apply_template_bindings(
                         &mut preferences.0.write(),
                         crate::api::template_bindings_after_read(fresh),
@@ -1661,32 +1662,45 @@ pub(super) fn TemplatesDialog(
                         }
                     };
                     drop(current);
-                    match value {
-                        // A false acknowledgment also covers a lost reply after
-                        // the helm committed. Discard the optimistic map, then
-                        // read again; neither the old nor attempted map tells
-                        // us what the helm now holds. Keep the old observation
-                        // only if that read fails too, and say so.
-                        Some(value @ PreferenceValue::TemplateShortcuts(_)) => {
-                            if !crate::api::write_template_binding(&base, value).await {
-                                preferences.0.write().template_shortcuts = read;
-                                let detail = match crate::api::fetch_preferences(&base).await {
-                                    Ok(fresh) => {
-                                        apply_template_bindings(
-                                            &mut preferences.0.write(),
-                                            crate::api::template_bindings_after_read(fresh),
-                                        );
-                                        "showing the keys read from Farhelm"
-                                    }
-                                    Err(_) => "current keys could not be read",
-                                };
-                                error.set(Some(format!(
-                                    "the number key may not have been saved; {detail}"
-                                )));
+                    // Keep edits and departure disabled through reconciliation,
+                    // so neither can use a binding whose save just failed.
+                    // A false acknowledgment also covers a lost reply after
+                    // the helm committed. Discard the optimistic binding,
+                    // then read again; neither the old nor attempted value
+                    // tells us what the helm now holds. Keep the old
+                    // observation only if that read fails too, and say so.
+                    if let Some(value) = value {
+                        let number_key = matches!(&value, PreferenceValue::TemplateShortcuts(_));
+                        if !crate::api::write_template_binding(&base, value).await {
+                            if number_key {
+                                preferences.0.write().template_shortcuts = read_keys;
+                            } else {
+                                preferences.0.write().quick_launch_template = read_mark;
                             }
+                            let detail = match crate::api::fetch_preferences(&base).await {
+                                Ok(fresh) => {
+                                    apply_template_bindings(
+                                        &mut preferences.0.write(),
+                                        crate::api::template_bindings_after_read(fresh),
+                                    );
+                                    if number_key {
+                                        "showing the keys read from Farhelm"
+                                    } else {
+                                        "showing the mark read from Farhelm"
+                                    }
+                                }
+                                Err(_) if number_key => "current keys could not be read",
+                                Err(_) => "current mark could not be read",
+                            };
+                            let binding = if number_key {
+                                "number key"
+                            } else {
+                                "quick-launch mark"
+                            };
+                            error.set(Some(format!(
+                                "the {binding} may not have been saved; {detail}"
+                            )));
                         }
-                        Some(value) => crate::api::store_preference(&base, value),
-                        None => {}
                     }
                 }
                 Err(message) => error.set(Some(message)),

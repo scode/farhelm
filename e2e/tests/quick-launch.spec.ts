@@ -1035,40 +1035,30 @@ for (const recover of [false, true]) {
   );
 }
 
-/** A fresh shared read cannot undo this window's mark while its save is still
- * pending, but a refused save is discarded, never kept as the current state
- * (SPEC.md, "One GUI at a time"). Hold the PUT before it reaches the helm (or
- * refuse it), then close Templates and observe the actual create payload. A
- * held save also fences the shortcut's read until released, after which the
- * new mark launches; after a refusal the helm's own mark launches. */
+/** Templates waits for the mark save before allowing departure. A refusal
+ * restores the shared mark immediately, never keeping the attempted value as
+ * current state (SPEC.md, "One GUI at a time"). The actual create payload must
+ * use that old mark after refusal, and the newly stored mark after success.
+ * Holding success establishes the busy boundary without depending on timing. */
 for (const failed of [false, true]) {
   test(`quick launch ${failed ? "discards a failed" : "honors a held"} local mark against the shared read`, async ({ page, request }) => {
     const prefix = `quick-local-mark-${Date.now()}`;
     const [old, chosen] = ["old", "chosen"].map((suffix) => `${prefix}-${suffix}`);
+    const previous = (await readPreferences(request)).quick_launch_template;
     const gate = routeGate();
     let held = 0;
-    let settled = 0;
-    let preferenceReads = 0;
-    // Arrival order at the route: "read" for a preference read, "save-reply"
-    // when the held mark save starts answering the page.
-    const events: string[] = [];
+    let bodyFailed = false;
     const bodies: any[] = [];
     await page.route("**/api/preferences", async (route) => {
-      if (route.request().method() === "GET") {
-        preferenceReads++;
-        events.push("read");
-      }
       if (route.request().method() !== "PUT" || route.request().postDataJSON().quick_launch_template !== chosen) {
         return route.continue();
       }
       held++;
       if (failed) {
         await fulfillQuickFixture(route, request, 503, "local mark fixture refusal");
-        settled++;
       } else {
         await gate.wait();
         const response = await route.fetch();
-        events.push("save-reply");
         await route.fulfill({ response });
       }
     });
@@ -1084,37 +1074,30 @@ for (const failed of [false, true]) {
       await page.goto("/");
       await page.locator(".templates-button").click();
       const dialog = page.getByRole("dialog", { name: "templates", exact: true });
-      await expect(dialog.getByRole("button", { name: `quick launch ${old}`, exact: true })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
+      const oldMark = dialog.getByRole("button", { name: `quick launch ${old}`, exact: true });
+      await expect(oldMark).toHaveAttribute("aria-pressed", "true");
       const mark = dialog.getByRole("button", { name: `quick launch ${chosen}`, exact: true });
       await mark.click();
-      await expect(mark).toHaveAttribute("aria-pressed", "true");
       await expect.poll(() => held).toBe(1);
-      if (failed) await expect.poll(() => settled).toBe(1);
       expect((await readPreferences(request)).quick_launch_template).toBe(old);
+      if (failed) {
+        // An immediate refusal can roll back before click() returns. Waiting
+        // for an optimistic pressed state would require the bug to survive.
+        await expect(dialog.locator(".templates-error")).toHaveText(
+          "the quick-launch mark may not have been saved; showing the mark read from Farhelm",
+        );
+        await expect(mark).toHaveAttribute("aria-pressed", "false");
+        await expect(oldMark).toHaveAttribute("aria-pressed", "true");
+      } else {
+        await expect(mark).toHaveAttribute("aria-pressed", "true");
+        await expect(dialog.locator(".templates-close")).toBeDisabled();
+        gate.release();
+        await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(chosen);
+      }
+      await expect(dialog.locator(".templates-close")).toBeEnabled();
       await dialog.locator(".templates-close").click();
       await expect(dialog).toHaveCount(0);
-      const readsBeforeShortcut = preferenceReads;
-      const eventsBeforeShortcut = events.length;
-      const trigger = page.locator(".quick-launch-trigger");
-      const previousOpening = Number(await trigger.getAttribute("data-opening-generation"));
       await chord(page);
-      if (!failed) {
-        await expect.poll(async () => Number(await trigger.getAttribute("data-opening-generation"))).toBeGreaterThan(previousOpening);
-        // sleep-ok: observe whether a shortcut admitted during the held save dispatches its dependent read.
-        await page.waitForTimeout(150);
-        expect(preferenceReads, "the shortcut read cannot overtake the held mark save").toBe(readsBeforeShortcut);
-        expect(bodies).toHaveLength(0);
-        gate.release();
-        // The shortcut's read does happen, and only once the save is
-        // answering: without the ordering it would have been sent while the
-        // save was still held, ahead of "save-reply".
-        await expect.poll(() => events.slice(eventsBeforeShortcut)).toContain("read");
-        const after = events.slice(eventsBeforeShortcut);
-        expect(after[0], `the shortcut's read waited for the save: ${after}`).toBe("save-reply");
-      }
       const form = page.locator(".create-session-form");
       await expect(form).toBeVisible();
       await expect(form.locator(".create-session-error")).toContainText("local mark launch fixture refusal");
@@ -1122,10 +1105,20 @@ for (const failed of [false, true]) {
       expect(bodies).toHaveLength(1);
       expect(bodies[0].title).toBe(`${launched}-session`);
       await expect(page.locator(".templates-button")).toHaveAttribute("data-tooltip", new RegExp(launched));
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
     } finally {
-      gate.release();
-      await page.unrouteAll({ behavior: "wait" });
-      for (const name of [old, chosen]) await request.delete(`/api/templates/${name}`);
+      await cleanupOwnedSteps(bodyFailed, [
+        ["page writers", () => page.goto("about:blank")],
+        ["held mark", () => gate.release()],
+        ["mark and launch routes", () => page.unrouteAll({ behavior: "wait" })],
+        ["previous mark", () => patchPreferences(request, { quick_launch_template: previous ?? null })],
+        ...[old, chosen].map((name): [string, () => Promise<unknown>] => [
+          `template ${name}`,
+          () => request.delete(`/api/templates/${name}`),
+        ]),
+      ]);
     }
   });
 }
@@ -1860,11 +1853,13 @@ test("the template mark moves, survives rename, and stays cleared after undo", a
   }
 });
 
-/** A mark can commit while its response is still in flight. Deletion must
- * wait for that owned writer rather than racing it, then Undo restores only
- * fields. The held response and disabled Delete prove the unsettled boundary;
- * no delay or credential remount is used as a proxy for ordering. */
-test("deletion drains an in-flight quick mark before clearing it", async ({ page, request }) => {
+/** A mark can commit while its response is still in flight. Deletion must not
+ * race that owned writer: Templates stays busy until the mark settles, so
+ * Delete is unavailable and no DELETE leaves meanwhile. Once the reply lands,
+ * Delete clears the committed mark and Undo restores only fields. The held
+ * response proves the unsettled boundary; no delay or credential remount is
+ * used as a proxy for ordering. */
+test("deletion waits for an in-flight quick mark before clearing it", async ({ page, request }) => {
   const name = `quick-pending-delete-${Date.now()}`;
   const gate = routeGate();
   let held = 0;
@@ -1889,14 +1884,23 @@ test("deletion drains an in-flight quick mark before clearing it", async ({ page
     await page.locator(".templates-button").click();
     const dialog = page.getByRole("dialog", { name: "templates", exact: true });
     await dialog.getByText(name, { exact: true }).click();
-    await dialog.getByRole("button", { name: `quick launch ${name}`, exact: true }).click();
+    const remove = dialog.getByRole("button", { name: "delete", exact: true });
+    await expect(remove, "premise: an idle editor offers Delete").toBeEnabled();
+    const bolt = dialog.getByRole("button", { name: `quick launch ${name}`, exact: true });
+    await bolt.click();
     await expect.poll(() => held, { message: "the mark committed and its response is held" }).toBe(1);
     expect((await readPreferences(request)).quick_launch_template).toBe(name);
-    const remove = dialog.getByRole("button", { name: "delete", exact: true });
-    await remove.click();
-    await expect(remove).toBeDisabled();
+    // A list still loading also disables Delete; rule it out so the held
+    // mark is the only reason.
+    await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    await expect(remove, "the held mark keeps Templates busy, so Delete cannot start").toBeDisabled();
     expect(deletes, "DELETE cannot overtake the held preference response").toBe(0);
     gate.release();
+    await expect(remove).toBeEnabled();
+    // The final "no lit bolt after Undo" check means something only if the
+    // settled mark was lit before the delete.
+    await expect(bolt).toHaveAttribute("aria-pressed", "true");
+    await remove.click();
     await expect(dialog.getByText(name, { exact: true })).toHaveCount(0);
     expect(deletes).toBe(1);
     expect((await readPreferences(request)).quick_launch_template).toBeUndefined();
