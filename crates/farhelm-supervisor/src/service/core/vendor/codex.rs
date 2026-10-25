@@ -128,7 +128,7 @@ impl Supervisor {
         // of the child conversation we previously followed by mistake.
         let attribution = crate::procs::codex_corridor(&chain)
             .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
-        let stored_pin = self.store.codex_report_pin(id).await.map_err(|_| {
+        let stored_pin = self.store.report_pin(id).await.map_err(|_| {
             RequestError::new(
                 ErrorKind::Internal,
                 "could not read the Codex reporting-process pin",
@@ -136,7 +136,7 @@ impl Supervisor {
         })?;
         let pin = stored_pin
             .as_deref()
-            .map(serde_json::from_str::<crate::agent_kind::codex::CodexReportPin>)
+            .map(serde_json::from_str::<crate::agent_kind::report_pin::ReportPin>)
             .transpose()
             .map_err(|_| {
                 RequestError::new(
@@ -144,11 +144,11 @@ impl Supervisor {
                     "the Codex reporting-process pin is invalid",
                 )
             })?;
-        use crate::agent_kind::codex::PinDecision;
+        use crate::agent_kind::report_pin::PinDecision;
         let decision = match pin.as_ref() {
             None => PinDecision::Accept,
             Some(pin) => {
-                let initial = pin.judge(&attribution, true, &chain);
+                let initial = pin.judge(attribution.emitter, true, &chain);
                 if initial == PinDecision::Refuse {
                     // Unavailable evidence is not proof that the pin exited.
                     // Only a gone/reused/non-running process releases authority.
@@ -158,7 +158,7 @@ impl Supervisor {
                             start == pin.process.start
                                 && state == crate::procs::ProcessState::Running
                         });
-                    pin.judge(&attribution, live, &chain)
+                    pin.judge(attribution.emitter, live, &chain)
                 } else {
                     initial
                 }
@@ -262,9 +262,10 @@ impl Supervisor {
                 .clone()
                 .expect("the accepted pin was loaded from storage")
         } else {
-            serde_json::to_string(&crate::agent_kind::codex::CodexReportPin::from_attribution(
-                &attribution,
-            ))
+            serde_json::to_string(&crate::agent_kind::report_pin::ReportPin {
+                process: attribution.emitter,
+                ancestors: attribution.ancestors,
+            })
             .map_err(|error| RequestError::new(ErrorKind::Internal, error.to_string()))?
         };
         // Step 4: the atomic CAS over the COMPLETE prior binding —
@@ -289,11 +290,12 @@ impl Supervisor {
             // preserves the exact binding that authorized verification.
             _ => {
                 self.store
-                    .admit_codex_conversation(
+                    .admit_pinned_conversation(
                         &row,
                         stored_pin.as_deref(),
                         &conversation,
                         &replacement_pin,
+                        1,
                         correction.then_some((
                             crate::service::notifications::NotificationKind::CodexPinCorrected
                                 .as_str(),

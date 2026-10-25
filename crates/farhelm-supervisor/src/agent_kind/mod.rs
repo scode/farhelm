@@ -236,6 +236,7 @@ pub(crate) mod grok;
 pub(crate) mod omp;
 pub(crate) mod pi;
 mod records;
+pub(crate) mod report_pin;
 #[cfg(test)]
 mod screen_fixtures;
 pub(crate) mod screen_reader;

@@ -65,7 +65,7 @@ mod codex;
 mod grok;
 mod omp;
 pub(crate) use claude::claude_corridor;
-pub(crate) use codex::{CodexAttribution, codex_corridor};
+pub(crate) use codex::codex_corridor;
 pub(crate) use grok::grok_corridor;
 pub(crate) use omp::omp_corridor;
 
