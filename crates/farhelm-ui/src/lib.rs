@@ -2069,6 +2069,10 @@ fn PreferencesGate(children: Element) -> Element {
             welcome_on_load
                 .0
                 .set(read_succeeded && seed.welcome_seen != Some(true));
+            // These fallbacks belong to the same authenticated snapshot as the
+            // controls. Refresh idle fields on remount without replacing the
+            // baseline of a write that crossed this seed read.
+            api::seed_preference_rollbacks(&seed, read_succeeded);
             preferences.0.set(seed);
             loaded.set(true);
         }

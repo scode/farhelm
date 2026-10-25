@@ -28,10 +28,13 @@
 //! asset can initialize its device-owned inputs before their panel is visible.
 
 use dioxus::prelude::*;
+use std::cell::Cell;
+use std::rc::Rc;
 
 use crate::ApiBase;
 use crate::api::{
-    PreferenceValue, TerminalLinkClick, restore_session_confirmations, store_preference,
+    self, PreferenceValue, PreferenceWrite, TerminalLinkClick, restore_session_confirmations,
+    store_preference,
 };
 use crate::app_updater::use_app_updater;
 use crate::hosts::settings_dialog::HostDialogHeader;
@@ -90,11 +93,89 @@ fn restore_automatic_checkbox(in_force: bool) {
     ));
 }
 
+/// Repair native check state even when a refusal beats the optimistic render.
+///
+/// Dioxus does not rewrite an unchanged `checked` value. A checkbox or radio
+/// that the browser changed before its event can therefore retain an unsaved
+/// choice when the next render equals the previous one. Read the current DOM
+/// snapshot when this eval runs, rather than capturing an older choice that
+/// could overwrite another click while the renderer is catching up.
+pub(crate) fn sync_preference_checks() {
+    document::eval(&format!(
+        "document.querySelectorAll('{DIALOG_SELECTOR} input[data-preference-checked]').forEach(input => {{ input.checked = input.dataset.preferenceChecked === 'true'; }});"
+    ));
+}
+
+/// Change only the surviving shared field whose save this Settings control owns.
+///
+/// Rollback and corrective reads must not replace the whole preferences row:
+/// unrelated controls may have changed while this request was outstanding.
+fn apply_settings_preference(preferences: &mut api::Preferences, value: PreferenceValue) {
+    match value {
+        PreferenceValue::NameSessionOnQuickLaunch(value) => {
+            preferences.name_session_on_quick_launch = Some(value);
+        }
+        PreferenceValue::ColorTerminalFrames(value) => {
+            preferences.color_terminal_frames = Some(value);
+        }
+        PreferenceValue::TerminalLinkClick(value) => {
+            preferences.terminal_link_click = Some(value.key().into());
+        }
+        _ => unreachable!("only the three shared Settings choices use this rollback"),
+    }
+}
+
+/// Keep optimistic shared settings honest even after their dialog closes.
+///
+/// The queue retains the last observed or acknowledged value, rather than the
+/// previous click: that click may itself be an unsaved choice. Restore that
+/// fallback immediately on failure, then refine it with one fresh field read
+/// because a lost reply can follow a committed save. Neither path retries a PUT.
+/// Only the alert belongs to Settings. The shared signal belongs to the longer
+/// lived authenticated tree; a destroyed tree is left alone through try_write.
+fn save_settings_preference(
+    base: &str,
+    mut preferences: SharedPreferences,
+    value: PreferenceValue,
+    mut error: Signal<Option<PreferenceWrite>>,
+    mounted: Rc<Cell<bool>>,
+) {
+    let (write, completion) = api::observe_preference(base, value.clone());
+    apply_settings_preference(&mut preferences.0.write(), value);
+    error.set(None);
+    let base = base.to_owned();
+    dioxus::core::spawn_forever(async move {
+        if completion.await || !write.is_current() {
+            return;
+        }
+        let Some(fallback) = write.rollback_value() else {
+            return;
+        };
+        {
+            let Ok(mut shared) = preferences.0.try_write() else {
+                return;
+            };
+            apply_settings_preference(&mut shared, fallback);
+        }
+        if mounted.get() {
+            error.set(Some(write));
+        }
+        if let Ok(fetched) = api::fetch_preferences(&base).await
+            && let Ok(mut shared) = preferences.0.try_write()
+            && let Some(value) = write.reconcile(&fetched)
+        {
+            apply_settings_preference(&mut shared, value);
+        }
+    });
+}
+
 /// Group settings without giving a section change any save or discard semantics.
 ///
 /// Writes use the ordinary preference queue. Restoring session confirmations
 /// reports a failed save because a reload could otherwise silently restore the
-/// opt-out; other switch preferences keep their silent failure behavior.
+/// opt-out. Naming, frame colors and link clicks report and roll back a failed
+/// newest choice; only their alert is dropped when the dialog closes. The host
+/// confirmation choices retain their documented silent failure behavior.
 /// Controls stay enabled, and closing the dialog must not cancel a queued write.
 /// The checkout and ntfy fields are exceptions: their explicit saves expose validation
 /// refusals rather than treating arbitrary text like a switch preference.
@@ -115,6 +196,7 @@ pub(crate) fn SettingsDialog(
     let session_base = base.clone();
     let naming_base = base.clone();
     let frame_base = base.clone();
+    let link_base = base.clone();
     let mut preferences = use_context::<SharedPreferences>();
     let setup = preferences.0.read().skip_host_setup_confirmation == Some(true);
     let remove = preferences.0.read().skip_host_remove_confirmation == Some(true);
@@ -127,6 +209,29 @@ pub(crate) fn SettingsDialog(
     // its failure, including when an intervening click opted out again.
     let mut session_generation = use_signal(|| 0_u64);
     let mut session_error = use_signal(|| false);
+    let naming_error = use_signal(|| None::<PreferenceWrite>);
+    let frame_error = use_signal(|| None::<PreferenceWrite>);
+    let link_error = use_signal(|| None::<PreferenceWrite>);
+    let mounted = use_hook(|| Rc::new(Cell::new(true)));
+    let on_drop = mounted.clone();
+    use_drop(move || on_drop.set(false));
+    let naming_mounted = mounted.clone();
+    let frame_mounted = mounted.clone();
+    // The radio components share a field and one adjacent alert. Registering in
+    // their parent also gives every radio the same surviving rollback lifetime.
+    let link_change = use_callback(move |value: TerminalLinkClick| {
+        save_settings_preference(
+            &link_base,
+            preferences,
+            PreferenceValue::TerminalLinkClick(value),
+            link_error,
+            mounted.clone(),
+        );
+    });
+    use_effect(move || {
+        let _ = preferences.0.read();
+        sync_preference_checks();
+    });
     let updater = use_app_updater();
     // Read once when the dialog opens and then kept locally: the file is
     // this app's own, so nothing else changes it while the dialog is up.
@@ -287,12 +392,15 @@ pub(crate) fn SettingsDialog(
                                     r#type: "checkbox",
                                     class: "host-settings-switch",
                                     checked: name_quick_launches,
+                                    "data-preference-checked": name_quick_launches.to_string(),
                                     aria_describedby: "quick-launch-naming-help",
                                     onchange: move |event| {
-                                        preferences.0.write().name_session_on_quick_launch = Some(event.checked());
-                                        store_preference(
+                                        save_settings_preference(
                                             &naming_base,
+                                            preferences,
                                             PreferenceValue::NameSessionOnQuickLaunch(event.checked()),
+                                            naming_error,
+                                            naming_mounted.clone(),
                                         );
                                     },
                                 }
@@ -302,6 +410,11 @@ pub(crate) fn SettingsDialog(
                                 class: "host-settings-help",
                                 "Offer to name a quick-launched session while its agent starts. Enter keeps its default name. This choice applies to this helm; other open clients pick it up when they reload."
                             }
+                            if naming_error().is_some_and(|write| write.is_current()) {
+                                p { class: "host-settings-help app-settings-error", role: "alert",
+                                    "Could not save whether to name quick-launched sessions. Try again."
+                                }
+                            }
                             label {
                                 class: "app-settings-choice",
                                 "data-tooltip": "color each terminal's frame to match its host icon",
@@ -310,11 +423,13 @@ pub(crate) fn SettingsDialog(
                                     r#type: "checkbox",
                                     class: "host-settings-switch",
                                     checked: color_frames,
+                                    "data-preference-checked": color_frames.to_string(),
                                     aria_describedby: "terminal-frame-color-help",
                                     onchange: move |event| {
                                         let color = event.checked();
-                                        preferences.0.write().color_terminal_frames = Some(color);
-                                        store_preference(&frame_base, PreferenceValue::ColorTerminalFrames(color));
+                                        save_settings_preference(&frame_base, preferences,
+                                            PreferenceValue::ColorTerminalFrames(color), frame_error,
+                                            frame_mounted.clone());
                                     },
                                 }
                             }
@@ -322,6 +437,11 @@ pub(crate) fn SettingsDialog(
                                 id: "terminal-frame-color-help",
                                 class: "host-settings-help",
                                 "Match the thin frame around every session's terminal to its host icon color. The terminal background stays the same. This choice applies to this helm; other open clients pick it up when they reload."
+                            }
+                            if frame_error().is_some_and(|write| write.is_current()) {
+                                p { class: "host-settings-help app-settings-error", role: "alert",
+                                    "Could not save whether to color terminal frames. Try again."
+                                }
                             }
                         }
                         section {
@@ -413,16 +533,24 @@ pub(crate) fn SettingsDialog(
                                 value: TerminalLinkClick::Intercept,
                                 label: "open in Farhelm, don't pass the click on",
                                 help: "Farhelm opens the link once. The program does not receive that click or a drag starting there.",
+                                on_change: link_change,
                             }
                             TerminalLinkChoice {
                                 value: TerminalLinkClick::Both,
                                 label: "open in Farhelm and also pass the click on",
                                 help: "Use this when the program needs link clicks. A program that opens links itself may open a second tab.",
+                                on_change: link_change,
                             }
                             TerminalLinkChoice {
                                 value: TerminalLinkClick::Program,
                                 label: "pass the click on only",
                                 help: "Let the program handle links. Farhelm does not open them; without mouse reporting, clicking a link does nothing.",
+                                on_change: link_change,
+                            }
+                            if link_error().is_some_and(|write| write.is_current()) {
+                                p { class: "host-settings-help app-settings-error", role: "alert",
+                                    "Could not save how terminal links are clicked. Try again."
+                                }
                             }
                             NativeTunnelSettings {}
                             NativeOpenExtensionsSettings {}
@@ -827,9 +955,9 @@ fn TerminalLinkChoice(
     value: TerminalLinkClick,
     label: &'static str,
     help: &'static str,
+    on_change: EventHandler<TerminalLinkClick>,
 ) -> Element {
-    let base = use_context::<ApiBase>().0;
-    let mut preferences = use_context::<SharedPreferences>();
+    let preferences = use_context::<SharedPreferences>();
     let selected = TerminalLinkClick::from_key(preferences.0.read().terminal_link_click.as_deref());
     let help_id = format!("terminal-link-{}-help", value.key());
     rsx! {
@@ -841,10 +969,10 @@ fn TerminalLinkChoice(
                     name: "terminal-link-click",
                     value: value.key(),
                     checked: selected == value,
+                    "data-preference-checked": (selected == value).to_string(),
                     aria_describedby: help_id.clone(),
                     onchange: move |_| {
-                        preferences.0.write().terminal_link_click = Some(value.key().into());
-                        store_preference(&base, PreferenceValue::TerminalLinkClick(value));
+                        on_change.call(value);
                     },
                 }
             }

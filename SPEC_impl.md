@@ -226,11 +226,11 @@ nothing is visible; in the browser the first paint deliberately waits on that on
 valid credential used to paint its sidebar synchronously from localStorage — so the list never appears in an order that
 then changes. A write is a sparse patch naming only the field the user changed, merged per-field by the helm (an absent
 field is untouched, an explicit `null` clears one), so two clients changing different fields at nearly the same time
-cannot clobber each other; the signal in the page is updated before the request leaves, which is what keeps the choice
-in force when the write fails. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot
-land on the helm in reverse order. A write that fails, or whose writer is lost, is forgotten: the choice stays in effect
-only until the next read from the helm and is never resent. A failed write is logged; callers that must report it, such
-as the shortcut bindings, do so themselves (SPEC.md, "Errors and diagnostics"). The seed read runs under a seconds-scale
+cannot clobber each other; immediate controls update the signal in the page before the request leaves. Same-field writes
+are serialized latest-wins in the client, so a burst of changes cannot land on the helm in reverse order. A write that
+fails, or whose writer is lost, is forgotten: the choice stays in effect only until the next read from the helm for the
+explicitly silent preferences, and is never resent. A failed write is logged; callers that must report it discard their
+optimistic choice and report locally (SPEC.md, "Errors and diagnostics"). The seed read runs under a seconds-scale
 deadline of its own and expiry reads as "nothing remembered", so a stalled preference endpoint cannot blank the page for
 the funnel's full sixty seconds. Before each automatic session choice the list makes one more GET under that same short
 deadline. Only selection/history inputs refresh; unrelated settings retain their reload contract. A failed GET uses the
@@ -665,20 +665,43 @@ The session confirmation switch also updates locally immediately, but restoring 
 completion: a failed save shows an adjacent Settings error because a reload could restore the stored opt-out. Each click
 advances a component-local generation and clears the error; only the newest restoring click can show a failure. The
 enqueue happens before spawning its waiter so a later silent opt-out cannot overtake it. Closing Settings cancels the
-waiter, never the process-owned preference writer. The dialog uses the host dialogs' framed header and footer, with a
-gear tile and a separately named × close control. Only the body scrolls, containing a section-button sidebar and the
-selected panel. The order is sessions, hosts, terminal, checkouts, agent trust, notifications and, when the updater is
-active, app. Terminal holds web-link choices and desktop tunnel consent and file types; checkouts holds the
-explicit-save folder and command; agent trust holds all four agents' blocks; notifications groups device sounds and
-helm-wide ntfy alerts. Inactive panels stay mounted with hidden, preserving field drafts, outcomes and pending saves.
-The sound asset's document-wide input query initializes even hidden inputs. No section choice is persisted. At 620px and
-below, a presentation-only signal reveals either the selected panel or the section list; the back button reads '‹
-settings'. Section selection focuses its heading, while back focuses the selected section button after the rendering
-frame. Neither adds a normal Tab stop or overrides platform button navigation. Both close controls stay visible. It uses
-the shared focus/isolation helper with its own selector; gear opening selects sessions and focuses its first switch.
-Existing trust props instead select agent trust before mount, focus the agent's switch and scroll its block into view.
-Escape or either close control releases isolation and returns focus to the gear. The host setup and removal permanent
-answers each name that gear as the way to turn confirmation back on.
+waiter, never the process-owned preference writer. Quick-launch naming, frame colors and link-click choices observe the
+same queue with a retained per-field identity, so even an already delivered result loses authority after another click.
+On failure they immediately restore only their field from its last observed or acknowledged value, then refine it with
+one fresh read while that identity is still current. Every successful sent PUT advances this fallback, including a PUT
+whose observer was superseded; capturing the previous click could preserve another unsaved choice. These three bounded
+fallbacks are never pending overlays or replayed writes. The existing authenticated seed refreshes idle fallbacks,
+leaves pending ones intact, and initializes only missing defaults after a failed read. A failed corrective read retains
+the fallback and save error without claiming that the helm's current value is known. Rollback outlives Settings; its
+alert uses the dialog's mounted check, and a destroyed authenticated tree's signal is left alone. Trust reads capture
+the dismissal field's identity and pending bit before awaiting the GET. At completion a current pending dismissal wins
+and carries its identity; otherwise a read that began pending or crossed a new identity carries its start marker for
+immediate invalidation. Only an unchanged idle read is unmarked, so an old raw response cannot escape reconciliation
+just because its crossing save already settled. Every mounted Settings or band resource independently owns a cancellable
+one-shot invalidation waiter for that stamp, separate from the click's completion and any deletion barrier. New records,
+final settlement and writer loss release these waiters; late enrollment checks pending state and identity atomically. An
+invalidated resource clears and rereads only if it still carries that stamp, including after supersession. Local
+optimistic mutations stamp their new record before yielding, so an old invalidation cannot clear a newer choice. This
+uses one replaceable companion resource, not a trust cache, polling loop, mounted-resource registry or global HTTP
+ordering ticket. A copied overlay therefore cannot survive its failed save in a reopened dialog or another band. The
+click waiter owns only its local alert, which disappears on close; a corrective read failure leaves the resource unknown
+rather than treating trust as off. Restart alone would retain the previous successful provisional value while that GET
+is pending, so the matching value is cleared first. Controlled native checks also synchronize their property from the
+currently rendered choice: a refusal that beats the optimistic render can otherwise leave the browser's changed property
+behind an unchanged virtual-DOM value. The dialog uses the host dialogs' framed header and footer, with a gear tile and
+a separately named × close control. Only the body scrolls, containing a section-button sidebar and the selected panel.
+The order is sessions, hosts, terminal, checkouts, agent trust, notifications and, when the updater is active, app.
+Terminal holds web-link choices and desktop tunnel consent and file types; checkouts holds the explicit-save folder and
+command; agent trust holds all four agents' blocks; notifications groups device sounds and helm-wide ntfy alerts.
+Inactive panels stay mounted with hidden, preserving field drafts, outcomes and pending saves. The sound asset's
+document-wide input query initializes even hidden inputs. No section choice is persisted. At 620px and below, a
+presentation-only signal reveals either the selected panel or the section list; the back button reads '‹ settings'.
+Section selection focuses its heading, while back focuses the selected section button after the rendering frame. Neither
+adds a normal Tab stop or overrides platform button navigation. Both close controls stay visible. It uses the shared
+focus/isolation helper with its own selector; gear opening selects sessions and focuses its first switch. Existing trust
+props instead select agent trust before mount, focus the agent's switch and scroll its block into view. Escape or either
+close control releases isolation and returns focus to the gear. The host setup and removal permanent answers each name
+that gear as the way to turn confirmation back on.
 
 The all-hosts checkout folder uses a shared explicit-save field rather than the preference queue: invalid path text must
 have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an ordinary protected route

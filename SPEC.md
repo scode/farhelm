@@ -2883,6 +2883,13 @@ the agent creates it.
   the current client; if that save fails while Settings is still open, Settings shows an adjacent error saying
   confirmations may still be off for this helm and to try again. Closing Settings before the save settles drops that
   error, so the failure is then only logged. A newer switch choice clears the error and supersedes older save results.
+  Quick-launch naming, terminal-frame colors, terminal link-click behavior and trust-hint visibility instead put back
+  the saved choice and show an adjacent error when their newest save fails. For naming, frame colors and link clicks,
+  closing Settings drops only the alert: the shared choice still reverts, so mounted terminals and later actions cannot
+  keep using a failed save. Superseded results neither report nor revert a newer choice. A trust-hint choice copied by a
+  reopened Settings dialog or another mounted hint also stops being current when its save fails; reopening while that
+  save is pending does not keep the failed choice alive or inherit the closed dialog's alert. A failed corrective read
+  leaves trust settings unavailable rather than treating unknown trust as off.
 - Connection state per host is always visible in the host list; reconnection uses bounded retries followed by periodic
   low-frequency re-probing, so a host that comes back overnight resurfaces by itself. Actions stay in each row's menu,
   with the older-host update button also available inline, while the global details disclosure shows the evidence and
