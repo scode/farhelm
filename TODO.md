@@ -107,10 +107,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `docs/github-checkouts.md` and the docs page `website/src/content/docs/docs/using/stop-restart-resume.mdx`. Asked for
   by the maintainer on 2026-10-20 while planning the spare checkouts. Plan: `plans/queue/hidden-trash-folder.md`.
 
-- **Fix trash deletion silently blocking the UI.** Deleting a session to trash can silently block everything the user
-  does — including closing the window — while it progresses, sometimes slowly, with no progress indication. Plan:
-  `plans/queue/trash-delete-blocking.md`.
-
 - **Search sessions by content or action.** Let the user find a session by what happened in it — which session ran a
   certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
   exposed are TBD.

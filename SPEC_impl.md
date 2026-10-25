@@ -2714,12 +2714,20 @@ Confirmations freeze deduplicated IDs and observed host incarnations. Diagnostic
 forgetting, while every diagnostic remains visible, including several for one ID. Before dispatch the UI rechecks
 connection identity and takes the existing shared operation guard. An immediate single-entry delete freezes only that
 checkout's ID and its host incarnation at click time, requires the full host listing to be eligible, and uses the same
-dispatch and completion path without a confirmation. Separate host requests run concurrently; the guard lasts until all
-replies arrive. Successful record removals are folded into the displayed listing, all issues retained, and every
-completion refetches. A lost cleanup reply warns that some contents may already be deleted and refetches; it never
-claims that a folder is intact. The archive cue stores row geometry on the persistent trash button, consumes it on the
-local Delete reply, and uses finite Web Animations with reduced-motion refusal. No global geometry cache or new asset
-file is introduced.
+dispatch and completion path without a confirmation. Each host's frozen IDs are sent one at a time, with host queues
+running concurrently. Connection identity is rechecked before each dispatch, and only trash deletion uses a
+fifteen-minute request deadline; the ordinary mutation deadline stays sixty seconds. The guard lasts until every queue
+finishes. Confirmed removals immediately leave the listing and its count and size totals. Run state retains each host's
+frozen denominator, confirmed removal count, queue position and current request's monotonic start time. The current
+checkout shows the shared reduced-motion-aware spinner and a once-per-second elapsed display; queued checkouts say
+"waiting". Both trash icons turn upside down and bob with stepped timing within the looping-indicator cap, use the
+universal inactive-window pause, and stay upside down without animation under Reduce Motion. The mounted status region
+counts remaining checkouts, separately naming unchecked records. Per-record issues accumulate across replies. A lost
+cleanup reply stops that host's remaining queue and warns that some contents may already be deleted; it never claims
+that a folder is intact. Other hosts continue, and the UI refetches only after the whole run finishes. Close and Escape
+remain blocked, with Close's tooltip explaining when it becomes available. The archive cue stores row geometry on the
+persistent trash button, consumes it on the local Delete reply, and uses finite Web Animations with reduced-motion
+refusal. No global geometry cache or new asset file is introduced.
 
 ### Runtime state
 

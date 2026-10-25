@@ -3,7 +3,7 @@
  * file-only transport policy keep repository traffic inside the owned stack. */
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
-import type { APIRequestContext, Locator, Page } from "@playwright/test";
+import type { APIRequestContext, Locator, Page, Request } from "@playwright/test";
 import { request as independentRequest } from "@playwright/test";
 import { harnessAuthorizationHeaders } from "./helpers/device-auth";
 import { execFile } from "node:child_process";
@@ -1615,14 +1615,34 @@ test("trash global confirmation freezes archives and reports preserved recovery 
     await expect(dialog.locator(".trash-delete-all")).toBeEnabled();
     await dialog.locator(".trash-delete-all").click();
     await expect(dialog.locator(".checkout-trash-confirm")).toContainText("Delete 2 archived checkouts");
+    const selectedListing = await request.post("/api/checkout-trash/list", {data: {host, measure_sizes: false}});
+    expect(selectedListing.ok(), await selectedListing.text()).toBe(true);
+    const selectedIds = (await selectedListing.json()).checkouts.map((entry: {id: string}) => entry.id);
+    expect(selectedIds).toHaveLength(2);
     const later = await contextlessTrashSession(request, fixture, ids, "later");
     await expect.poll(async () => (await fs.readdir(archive)).length).toBe(4); // two confirmed, later, neighbour
-    const [deletion] = await Promise.all([
-      page.waitForResponse(r => new URL(r.url()).pathname === "/api/checkout-trash/delete"),
-      dialog.locator(".trash-confirm-submit").click(),
-    ]);
-    expect(deletion.request().postDataJSON().ids).toHaveLength(2);
-    expect(deletion.request().postDataJSON().host).toBe(host);
+    // The later archive was not in the confirmation. Observe every singleton
+    // request until the whole run settles, so a correct first request cannot
+    // hide a later deletion of work that was never selected.
+    const deletions: {host: number; ids: string[]}[] = [];
+    const observeDeletion = (outgoing: Request) => {
+      if (new URL(outgoing.url()).pathname === "/api/checkout-trash/delete") deletions.push(outgoing.postDataJSON());
+    };
+    page.on("request", observeDeletion);
+    try {
+      await dialog.locator(".trash-confirm-submit").click();
+      await expect.poll(() => deletions.length, {message: "both frozen checkout IDs are dispatched separately"}).toBe(2);
+      await expect(dialog.locator(".checkout-trash-progress")).toHaveText("");
+      await expect(dialog.locator(".trash-close")).toBeEnabled();
+    } finally {
+      page.off("request", observeDeletion);
+    }
+    expect(deletions).toHaveLength(2);
+    for (const deletion of deletions) {
+      expect(deletion.ids).toHaveLength(1);
+      expect(deletion.host).toBe(host);
+    }
+    expect(deletions.flatMap((deletion) => deletion.ids).sort()).toEqual(selectedIds.sort());
     await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(1);
     await expect(dialog.locator(".checkout-trash-entry")).toContainText("later");
     expect(await fs.readFile(path.join(later, "checkout-sentinel"), "utf8")).toBe(`${fixture.repo}\n`);

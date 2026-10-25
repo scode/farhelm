@@ -81,6 +81,10 @@ async function stubArchives(page: Page, request: APIRequestContext, names: strin
   // Successful deletion changes later listings too; final refresh must not
   // resurrect archives just because the route fixture forgot the mutation.
   const removed = new Map<number, Set<string>>();
+  // Keep read calls observable: progress must not obtain fresh listing bytes
+  // until all selected hosts have finished their queues.
+  const listings: number[] = [];
+  const issues = new Map<number, {id: string; path: string; message: string}[]>();
   const unavailable = new Set<number>();
   const registry = { fail: false };
   await page.route("**/api/hosts", async (route) => {
@@ -104,23 +108,25 @@ async function stubArchives(page: Page, request: APIRequestContext, names: strin
   });
   await page.route("**/api/checkout-trash/list", async (route) => {
     const { host } = route.request().postDataJSON();
+    listings.push(host);
     expect(ids, "only hosts supplied by the fixture are listed").toContain(host);
     expect(unavailable.has(host), "unreachable hosts must not be listed").toBe(false);
-    await fulfillAsHelm(route, { json: { issues: [], checkouts: Array.from({ length: count }, (_, i) => ({
+    await fulfillAsHelm(route, { json: { issues: issues.get(host) ?? [], checkouts: Array.from({ length: count }, (_, i) => ({
       id: `archive-${host}-${i}`, name: `archived-checkout-${i}`, repository: "example/repository",
       path: `/work/checkouts/farhelm-archived-working-copies/archive-${i}`,
       archived_at: 1_700_000_000 + i, bytes: 1024,
     })).filter((entry) => !removed.get(host)?.has(entry.id)) } });
   });
-  return { ids, removed, unavailable, registry };
+  return { ids, removed, unavailable, registry, listings, issues };
 }
 
 for (const fails of [false, true]) {
   /** A held single reply proves immediate selection and busy admission; later
    * listings must preserve neighbours on the same host and on another host. */
   test(`one trash entry deletes immediately and preserves neighbours after ${fails ? "failure" : "success"}`, async ({page, request}) => {
-    const {ids, removed, unavailable} = await stubArchives(page, request, ["single-local", "single-remote", "single-down"], 2);
+    const {ids, removed, unavailable, issues} = await stubArchives(page, request, ["single-local", "single-remote", "single-down"], 2);
     unavailable.add(ids[2]);
+    issues.set(ids[1], [{id: "unconfirmed-archive", path: "/work/trash/unconfirmed", message: "fixture archive identity unconfirmed"}]);
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
     const calls: {host: number; ids: string[]; expected_incarnation: number}[] = [];
@@ -146,6 +152,9 @@ for (const fails of [false, true]) {
       const down = dialog.locator(`.checkout-trash-host[data-host-id="${ids[2]}"]`);
       await expect(local.locator(".checkout-trash-entry")).toHaveCount(2);
       await expect(remote.locator(".checkout-trash-entry")).toHaveCount(2);
+      const diagnostic = remote.locator(".checkout-trash-issue");
+      await expect(diagnostic).toContainText("fixture archive identity unconfirmed");
+      const diagnosticBefore = await diagnostic.innerText();
       await expect(down).toContainText("not reachable");
       await expect(down.locator(".trash-entry-delete")).toHaveCount(0);
       const selected = local.getByRole("button", {name: "delete archived-checkout-0 permanently", exact: true});
@@ -158,8 +167,17 @@ for (const fails of [false, true]) {
       expect(calls[0].ids).toEqual([`archive-${ids[0]}-0`]);
       expect(calls[0].expected_incarnation).toBeGreaterThan(0);
       await expect(dialog.locator(".checkout-trash-confirm")).toHaveCount(0);
-      await expect(local.locator(".trash-host-progress")).toHaveText("deleting…");
-      await expect(dialog.locator(".checkout-trash-progress")).toHaveText("deleting…");
+      await expect(local.locator(".trash-host-progress")).toHaveText("0 of 1 deleted");
+      await expect(dialog.locator(".checkout-trash-progress")).toHaveText("deleting… 1 checkout left");
+      const current = local.locator(".checkout-trash-entry").filter({hasText: "archived-checkout-0"});
+      await expect(current.locator(".trash-entry-progress .delete-spinner")).toBeVisible();
+      await expect(local.locator(".trash-entry-waiting")).toHaveCount(0);
+      await expect(local.locator(".checkout-trash-entry").filter({hasText: "archived-checkout-1"})
+        .locator(".trash-entry-progress, .trash-entry-waiting")).toHaveCount(0);
+      await expect(remote.locator(".trash-entry-progress, .trash-entry-waiting")).toHaveCount(0);
+      await expect(diagnostic).toHaveText(diagnosticBefore, {useInnerText: true});
+      await expect(diagnostic.locator(".trash-entry-progress, .trash-entry-waiting")).toHaveCount(0);
+      await expect(dialog.locator(".trash-close-help")).toHaveAttribute("data-tooltip", "Available when deletion finishes.");
       for (const control of await dialog.locator(".trash-entry-delete, .trash-host-delete, .trash-delete-all, .trash-close").all()) {
         await expect(control).toBeDisabled();
       }
@@ -169,7 +187,7 @@ for (const fails of [false, true]) {
       await expect(dialog).toBeFocused();
       await page.keyboard.press("Escape");
       await expect(dialog).toBeVisible();
-      await expect(local.locator(".trash-host-progress")).toHaveText("deleting…");
+      await expect(local.locator(".trash-host-progress")).toHaveText("0 of 1 deleted");
       release();
       await expect(dialog.locator(".checkout-trash-progress")).toHaveText("");
       await expect(dialog.locator(".trash-close")).toBeFocused();
@@ -286,12 +304,277 @@ test("trash entry deletes pause after rows move under the pointer", async ({page
   expect(calls[1]).toMatchObject({host: ids[0], ids: [`archive-${ids[0]}-new`]});
 });
 
+/**
+ * Each gate owns one response boundary. Releasing every gate in teardown also
+ * admits requests queued after a failed assertion, while the page is still live.
+ */
+function deletionGate() {
+  let release!: () => void;
+  const ready = new Promise<void>((resolve) => { release = resolve; });
+  return {ready, release};
+}
+
+for (const action of ["global", "host"] as const) {
+  /**
+   * A bulk selection must expose real per-checkout progress, including a refusal
+   * between two successes. Counts reflect confirmed removals, not submitted IDs;
+   * an issue remains after the next success and the final listing refresh. The
+   * held first response crosses the old 60-second deadline under Clock, so the
+   * elapsed indicator and extended request wait have observable coverage.
+   */
+  test(`${action} trash cleanup advances one checkout at a time with ${action === "host" ? "reduced" : "normal"} motion`, async ({page, request}) => {
+    await page.clock.install();
+    const reduced = action === "host";
+    await page.emulateMedia({reducedMotion: reduced ? "reduce" : "no-preference"});
+    const {ids, removed, listings} = await stubArchives(page, request, ["sequence-local"], 3);
+    const host = ids[0];
+    const gates = Array.from({length: 3}, deletionGate);
+    const calls: {host: number; ids: string[]; expected_incarnation: number}[] = [];
+    const issue = {id: `archive-${host}-1`, path: "/work/trash/refused", message: "fixture archive remains in use"};
+    await page.route("**/api/checkout-trash/delete", async (route) => {
+      const selected = route.request().postDataJSON();
+      const index = calls.length;
+      calls.push(selected);
+      expect(selected.host).toBe(host);
+      expect(selected.ids, "every request contains one frozen checkout").toHaveLength(1);
+      expect(selected.expected_incarnation).toBeGreaterThan(0);
+      expect(index, "a three-checkout selection cannot dispatch a fourth request").toBeLessThan(3);
+      await gates[index].ready;
+      if (index === 1) {
+        await fulfillAsHelm(route, {json: {removed: [], issues: [{...issue, id: selected.ids[0]}]}});
+      } else {
+        removed.set(host, new Set([...(removed.get(host) ?? []), ...selected.ids]));
+        await fulfillAsHelm(route, {json: {removed: selected.ids, issues: []}});
+      }
+    });
+    try {
+      await page.goto("/");
+      const trigger = page.locator(".checkout-trash-button");
+      await expect(trigger).toHaveAttribute("data-count", "3");
+      await trigger.click();
+      const dialog = page.locator(".checkout-trash-dialog");
+      const section = dialog.locator(`.checkout-trash-host[data-host-id="${host}"]`);
+      const entries = section.locator(".checkout-trash-entry");
+      const close = dialog.locator(".trash-close");
+      const total = dialog.locator(".checkout-trash-total");
+      const status = dialog.locator(".checkout-trash-progress");
+      const start = action === "global" ? dialog.locator(".trash-delete-all") : section.locator(".trash-host-delete");
+      await expect(entries).toHaveCount(3);
+      await expect(start).toBeEnabled();
+      await expect(dialog).not.toContainText("measuring…");
+      await expect(total).toHaveText("3 checkouts · 3.0 KiB on reachable hosts");
+      await expect(status).toHaveText("");
+      await expect(status).toHaveAttribute("role", "status");
+      const mountedStatus = await status.elementHandle();
+      const icons = [trigger.locator(".trash-delete-icon"), dialog.locator(".checkout-trash-header .trash-delete-icon")];
+      for (const icon of icons) await expect(icon).not.toHaveClass(/\bdeleting\b/);
+      // Freeze only after measurement and focus have settled. The existing row
+      // movement pause must also expire before this controlled run starts.
+      await page.clock.pauseAt(new Date(Date.now() + 5_000));
+      await page.clock.runFor(700);
+      const readsBefore = listings.length;
+      await start.click();
+      await page.clock.runFor(100);
+      const confirm = dialog.locator(".checkout-trash-confirm");
+      await expect(confirm).toContainText("Delete 3 archived checkouts");
+      await expect(confirm.locator(".trash-confirm-submit")).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect.poll(() => calls.length, {message: "the first checkout response is held"}).toBe(1);
+      const firstName = calls[0].ids[0].split("-").at(-1)!;
+      const first = entries.filter({hasText: `archived-checkout-${firstName}`});
+      await expect(first.locator(".trash-entry-progress .delete-spinner")).toBeVisible();
+      await expect(first.locator(".trash-entry-elapsed")).toHaveText("0s");
+      await expect(section.locator(".trash-entry-waiting")).toHaveCount(2);
+      for (const waiting of await section.locator(".trash-entry-waiting").all()) await expect(waiting).toHaveText("waiting");
+      await expect(section.locator(".trash-host-progress")).toHaveText("0 of 3 deleted");
+      await expect(status).toHaveText("deleting… 3 checkouts left");
+      await expect(total).toHaveText("3 checkouts · 3.0 KiB on reachable hosts");
+      await expect(trigger).toHaveAttribute("data-count", "3");
+      await expect(close).toBeDisabled();
+      const closeHelp = dialog.locator(".trash-close-help");
+      await expect(closeHelp).toHaveAttribute("data-tooltip", "Available when deletion finishes.");
+      // The explanation must be reachable over a genuinely disabled control,
+      // including WebKit's native disabled-button pointer suppression.
+      await closeHelp.hover();
+      await page.clock.runFor(400);
+      await expect(page.locator("body > .farhelm-tooltip")).toHaveText("Available when deletion finishes.");
+      await expect(page.locator("body > .farhelm-tooltip")).toBeVisible();
+      await page.mouse.move(0, 0);
+      for (const icon of icons) {
+        await expect(icon).toHaveClass(/\bdeleting\b/);
+        await expect(icon).toHaveCSS("animation-name", reduced ? "none" : "trash-delete-bob");
+        if (!reduced) {
+          await expect(icon).toHaveCSS("animation-timing-function", /^(steps\(|step-start|step-end)/);
+          await expect(icon).toHaveCSS("animation-iteration-count", "infinite");
+          const offsets = await icon.evaluate((node) => {
+            const effect = node.getAnimations().find((animation) => animation instanceof CSSAnimation &&
+              animation.animationName === "trash-delete-bob")?.effect as KeyframeEffect | null;
+            return effect?.getKeyframes().map((frame) => new DOMMatrixReadOnly(String(frame.transform)).f) ?? [];
+          });
+          expect(new Set(offsets).size, "the active animation moves the flipped can vertically").toBeGreaterThan(1);
+        }
+        const upsideDown = await icon.evaluate((node) => {
+          const matrix = new DOMMatrixReadOnly(getComputedStyle(node).transform);
+          return [matrix.a, matrix.b, matrix.c, matrix.d];
+        });
+        expect(upsideDown[0]).toBeCloseTo(-1);
+        expect(upsideDown[1]).toBeCloseTo(0);
+        expect(upsideDown[2]).toBeCloseTo(0);
+        expect(upsideDown[3]).toBeCloseTo(-1);
+      }
+      await dialog.focus();
+      await expect(dialog).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeVisible();
+      await page.clock.fastForward(61_000);
+      await expect(first.locator(".trash-entry-elapsed")).toHaveText("61s");
+      await expect(first.locator(".delete-spinner")).toBeVisible();
+      expect(calls, "the held request neither times out at 60s nor starts its neighbour").toHaveLength(1);
+      expect(listings, "held deletes do not trigger speculative listing refreshes").toHaveLength(readsBefore);
+
+      gates[0].release();
+      await expect.poll(() => calls.length, {message: "the second request follows the first confirmed reply"}).toBe(2);
+      await expect(first).toHaveCount(0);
+      await expect(entries).toHaveCount(2);
+      await expect(section.locator(".trash-host-progress")).toHaveText("1 of 3 deleted");
+      await expect(section.locator(".checkout-trash-host-header")).toContainText("2 checkouts · 2.0 KiB");
+      await expect(total).toHaveText("2 checkouts · 2.0 KiB on reachable hosts");
+      await expect(trigger).toHaveAttribute("data-count", "2");
+      await expect(status).toHaveText("deleting… 2 checkouts left");
+      await expect(section.locator(".trash-entry-elapsed")).toHaveText("0s");
+      await expect(section.locator(".trash-entry-waiting")).toHaveText("waiting");
+      expect(new Set(calls.flatMap((call) => call.ids)).size, "success advances to a different selected checkout").toBe(2);
+      expect(listings).toHaveLength(readsBefore);
+
+      gates[1].release();
+      await expect.poll(() => calls.length, {message: "a per-record issue does not stop this host's queue"}).toBe(3);
+      await expect(section.locator(".checkout-trash-issue")).toContainText(issue.message);
+      await expect(section.locator(".trash-host-progress")).toHaveText("1 of 3 deleted");
+      await expect(status).toHaveText("deleting… 1 checkout left");
+      await expect(section.locator(".trash-entry-progress .delete-spinner")).toHaveCount(1);
+      await expect(section.locator(".trash-entry-waiting")).toHaveCount(0);
+      await expect(total).toHaveText("2 checkouts · 2.0 KiB on reachable hosts");
+      await expect(trigger).toHaveAttribute("data-count", "2");
+      expect(listings, "an issue reply still does not cause a mid-run refresh").toHaveLength(readsBefore);
+      gates[2].release();
+      await expect(status).toHaveText("");
+      await page.clock.runFor(100);
+      await expect(close).toBeFocused();
+      await expect(close).toBeEnabled();
+      await expect(closeHelp).not.toHaveAttribute("data-tooltip", "Available when deletion finishes.");
+      await expect(total).toHaveText("1 checkout · 1.0 KiB on reachable hosts");
+      await expect(trigger).toHaveAttribute("data-count", "1");
+      await expect(entries).toHaveCount(1);
+      await expect(section.locator(".checkout-trash-issue")).toContainText(issue.message);
+      await expect(dialog.locator(".trash-host-progress, .trash-entry-progress, .trash-entry-waiting")).toHaveCount(0);
+      for (const icon of icons) {
+        await expect(icon).not.toHaveClass(/\bdeleting\b/);
+        await expect(icon).toHaveCSS("animation-name", "none");
+      }
+      expect(calls.flatMap((call) => call.ids).sort()).toEqual([0, 1, 2].map((index) => `archive-${host}-${index}`));
+      await expect.poll(() => listings.length, {message: "one final listing refresh follows the whole run"}).toBe(readsBefore + 1);
+      expect(await mountedStatus!.evaluate((node) => node.isConnected), "the live region survives start and completion").toBe(true);
+    } finally {
+      for (const gate of gates) gate.release();
+      await page.unrouteAll({behavior: "wait"});
+    }
+  });
+}
+
+for (const failure of ["http", "transport"] as const) {
+  /**
+   * An unconfirmed reply cannot authorize later deletes on the same host. Other
+   * hosts keep progressing, and only the end of their run permits a refetch of
+   * both listings. A transport abort and an HTTP failure have the same safety
+   * consequence even though their browser/network failure paths differ.
+   */
+  test(`trash cleanup stops only its own host after ${failure} failure`, async ({page, request}) => {
+    const {ids, removed, listings} = await stubArchives(page, request, ["stopped-local", "continuing-remote"], 3);
+    const gates = ids.map(() => Array.from({length: 3}, deletionGate));
+    const calls = ids.map(() => [] as string[][]);
+    await page.route("**/api/checkout-trash/delete", async (route) => {
+      const selected = route.request().postDataJSON();
+      const index = ids.indexOf(selected.host);
+      expect(index).toBeGreaterThanOrEqual(0);
+      const attempt = calls[index].length;
+      calls[index].push(selected.ids);
+      expect(selected.ids).toHaveLength(1);
+      expect(attempt).toBeLessThan(3);
+      await gates[index][attempt].ready;
+      if (index === 0 && attempt === 0) {
+        if (failure === "transport") await route.abort("failed");
+        else await fulfillAsHelm(route, {status: 503, contentType: "text/plain", body: "fixture cleanup unavailable"});
+      } else {
+        removed.set(selected.host, new Set([...(removed.get(selected.host) ?? []), ...selected.ids]));
+        await fulfillAsHelm(route, {json: {removed: selected.ids, issues: []}});
+      }
+    });
+    try {
+      await page.goto("/");
+      const trigger = page.locator(".checkout-trash-button");
+      await expect(trigger).toHaveAttribute("data-count", "6");
+      await trigger.click();
+      const dialog = page.locator(".checkout-trash-dialog");
+      const sections = ids.map((id) => dialog.locator(`.checkout-trash-host[data-host-id="${id}"]`));
+      const status = dialog.locator(".checkout-trash-progress");
+      const close = dialog.locator(".trash-close");
+      await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(6);
+      await expect(dialog.locator(".trash-delete-all")).toBeEnabled();
+      await expect(dialog).not.toContainText("measuring…");
+      const readsBefore = listings.length;
+      await dialog.locator(".trash-delete-all").click();
+      await expect(dialog.locator(".trash-confirm-submit")).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect.poll(() => calls.map((host) => host.length), {message: "both hosts begin before either reply is released"}).toEqual([1, 1]);
+      for (const section of sections) {
+        await expect(section.locator(".trash-entry-progress .delete-spinner")).toHaveCount(1);
+        await expect(section.locator(".trash-entry-waiting")).toHaveCount(2);
+      }
+      await expect(status).toHaveText("deleting… 6 checkouts left");
+      await expect(trigger).toHaveAttribute("data-count", "6");
+      gates[0][0].release();
+      await expect(sections[0].locator(".checkout-trash-issue")).toContainText("cleanup reply could not be confirmed");
+      await expect(sections[0].locator(".checkout-trash-issue")).toContainText("may already");
+      await expect(sections[0].locator(".trash-entry-progress, .trash-entry-waiting")).toHaveCount(0);
+      await expect(sections[0].locator(".trash-host-progress")).toHaveText("0 of 3 deleted");
+      await expect(status).toHaveText("deleting… 3 checkouts left");
+      await expect(trigger).toHaveAttribute("data-count", "6");
+      expect(listings).toHaveLength(readsBefore);
+      for (let index = 0; index < 3; index++) {
+        expect(calls.map((host) => host.length), "neither host overlaps requests while the current remote reply is held").toEqual([1, index + 1]);
+        await expect(sections[1].locator(".trash-host-progress")).toHaveText(`${index} of 3 deleted`);
+        await expect(close).toBeDisabled();
+        gates[1][index].release();
+        if (index < 2) {
+          await expect.poll(() => calls[1].length, {message: "the healthy host advances after each confirmed deletion"}).toBe(index + 2);
+          await expect(trigger).toHaveAttribute("data-count", String(5 - index));
+          await expect(status).toHaveText(`deleting… ${2 - index} ${index === 0 ? "checkouts" : "checkout"} left`);
+          expect(listings, "completed requests do not refetch while another is pending").toHaveLength(readsBefore);
+        }
+      }
+      await expect(status).toHaveText("");
+      await expect(close).toBeEnabled();
+      await expect(close).toBeFocused();
+      await expect(trigger).toHaveAttribute("data-count", "3");
+      await expect(sections[0].locator(".checkout-trash-entry")).toHaveCount(3);
+      await expect(sections[0].locator(".checkout-trash-issue")).toContainText("cleanup reply could not be confirmed");
+      await expect(sections[1]).toHaveCount(0);
+      expect(calls[0]).toHaveLength(1);
+      expect(new Set(calls[1].flat()).size).toBe(3);
+      await expect.poll(() => listings.slice(readsBefore).sort(), {message: "each connected host is refetched once after both queues settle"}).toEqual([...ids].sort());
+    } finally {
+      for (const host of gates) for (const gate of host) gate.release();
+      await page.unrouteAll({behavior: "wait"});
+    }
+  });
+}
+
 for (const width of [1000, 360]) {
   for (const firstFails of [false, true]) {
     /**
-     * Host replies retire progress independently, including an uncertain
-     * cleanup result. Holding both requests exposes the busy admission guard;
-     * a later one-host retry must begin a fresh denominator.
+     * Completed hosts retain their result while another host is still working,
+     * including an uncertain cleanup result. Holding both requests exposes the
+     * busy admission guard; a later retry must begin a fresh denominator.
      */
     test(`trash deletion progress survives ${firstFails ? "failure" : "success"} at width ${width}`, async ({ page, request }) => {
       const previous = await readPreferences(request);
@@ -346,13 +629,17 @@ for (const width of [1000, 360]) {
           await expect(status).toHaveText("");
           await page.keyboard.press("Enter");
           await expect.poll(() => ids.map((id) => attempts.get(id) ?? 0), { message: "both host requests reached the held boundary" }).toEqual([1, 1]);
-          await expect(status).toHaveText("deleting on 2 of 2 hosts…");
-          for (const section of sections) await expect(section.locator(".trash-host-progress")).toHaveText("deleting…");
+          await expect(status).toHaveText("deleting… 2 checkouts left");
+          for (const section of sections) await expect(section.locator(".trash-host-progress")).toHaveText("0 of 1 deleted");
           await expect(close).toBeDisabled();
+          await expect(dialog.locator(".trash-close-help")).toHaveAttribute("data-tooltip", "Available when deletion finishes.");
           await expect(all).toBeDisabled();
           await expect(dialog.locator(".trash-host-delete:enabled")).toHaveCount(0);
           await page.mouse.move(0, 0);
-          for (const control of [status, all, close]) await expectExposed(control);
+          // Disabled Close hands pointer hits to its tooltip wrapper. Check
+          // that same painted area rather than demanding hits on the button.
+          const closeHelp = dialog.locator(".trash-close-help");
+          for (const control of [status, all, closeHelp]) await expectExposed(control);
           await test.info().attach("trash-deleting-two-hosts", { body: await page.screenshot(), contentType: "image/png" });
           // Submission removes the focused button; explicitly focus the dialog
           // before testing Escape so this input reaches its actual close guard.
@@ -360,21 +647,21 @@ for (const width of [1000, 360]) {
           await expect(dialog).toBeFocused();
           await page.keyboard.press("Escape");
           await expect(dialog).toBeVisible();
-          await expect(status).toHaveText("deleting on 2 of 2 hosts…");
+          await expect(status).toHaveText("deleting… 2 checkouts left");
 
           held[0].release();
-          await expect(status).toHaveText("deleting on 1 of 2 hosts…");
-          await expect(sections[0].locator(".trash-host-progress")).toHaveCount(0);
-          await expect(sections[1].locator(".trash-host-progress")).toHaveText("deleting…");
+          await expect(status).toHaveText("deleting… 1 checkout left");
+          await expect(sections[0].locator(".trash-host-progress")).toHaveText(firstFails ? "0 of 1 deleted" : "1 of 1 deleted");
+          await expect(sections[1].locator(".trash-host-progress")).toHaveText("0 of 1 deleted");
           if (firstFails) await expect(sections[0].locator(".checkout-trash-issue")).toContainText("fixture cleanup unavailable");
-          else await expect(sections[0]).toHaveCount(0);
+          else await expect(sections[0].locator(".checkout-trash-entry")).toHaveCount(0);
           await expect(close).toBeDisabled();
           await test.info().attach("trash-deleting-one-host", { body: await page.screenshot(), contentType: "image/png" });
           // Short windows can leave the host indicator below the description.
           // Capture its actual paint while also checking the pinned live count.
           await sections[1].locator(".trash-host-progress").scrollIntoViewIfNeeded();
           await expectExposed(sections[1].locator(".trash-host-progress"));
-          for (const control of [status, all, close]) await expectExposed(control);
+          for (const control of [status, all, closeHelp]) await expectExposed(control);
           await test.info().attach("trash-pending-host", { body: await page.screenshot(), contentType: "image/png" });
           held[1].release();
           await expect(status).toHaveText("");
@@ -392,8 +679,8 @@ for (const width of [1000, 360]) {
             await expect(confirmation.locator(".trash-confirm-submit")).toBeFocused();
             await page.keyboard.press("Enter");
             await expect.poll(() => attempts.get(ids[0]), { message: "one-host retry reached its held boundary" }).toBe(2);
-            await expect(status).toHaveText("deleting…");
-            await expect(sections[0].locator(".trash-host-progress")).toHaveText("deleting…");
+            await expect(status).toHaveText("deleting… 1 checkout left");
+            await expect(sections[0].locator(".trash-host-progress")).toHaveText("0 of 1 deleted");
             await expect(sections[1].locator(".trash-host-progress")).toHaveCount(0);
             releaseRetry();
             await expect(status).toHaveText("");
