@@ -45,12 +45,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
   sessions without a managed checkout too, by retaining their metadata.
 
-- **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
-  keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
-  the keyboard quick switcher. The nearest thing today is Stop followed later by Restart, which ends the agent but keeps
-  its terminal tabs running and shows the session as exited, the same as any other exit. Whether suspending also stops
-  terminal tabs, what bringing a session back does, and how it looks in the list are details TBD.
-
 - **Upgrade epochs.** Give every release an upgrade epoch, and only promise clean upgrades across one epoch: an
   installation on epoch N updates normally while the latest release is on N+1, and one whose latest release is N+2 is
   told to uninstall and reinstall. A change that needs new logic in the upgrade path itself ships that logic in a
@@ -128,7 +122,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   repository discovery's skip (`repository_discovery.rs`, which skips the archive folder by name); the path-length
   margin (`ARCHIVE_PATH_GROWTH`, 82 bytes, quoted in SPEC.md, changes with the name); and the text in SPEC.md,
   `docs/github-checkouts.md` and the docs page `website/src/content/docs/docs/using/stop-restart-resume.mdx`. Asked for
-  by the maintainer on 2026-10-20 while planning the spare checkouts.
+  by the maintainer on 2026-10-20 while planning the spare checkouts. Plan: `plans/queue/hidden-trash-folder.md`.
 
 - **Fix trash deletion silently blocking the UI.** Deleting a session to trash can silently block everything the user
   does — including closing the window — while it progresses, sometimes slowly, with no progress indication. Plan:
