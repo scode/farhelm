@@ -126,7 +126,7 @@ impl LaunchDraft {
     /// Prefill reconciliation copies Restart's stored baseline once per
     /// opening. Edits retain it, so its presence also names the draft's held
     /// mode without a second independently mutable flag.
-    fn is_restart(&self) -> bool {
+    pub(super) fn is_restart(&self) -> bool {
         self.restart_baseline.is_some()
     }
 
@@ -719,8 +719,10 @@ impl LaunchDraft {
             .is_none_or(|baseline| guarded.restart_edit().as_ref() != Some(baseline))
     }
 
-    /// Templates name fields explicitly, so even assigning the held value is
-    /// a refusal. Reject before the existing fold or any semantic publication.
+    /// Refuse held changes after validation removes matching assignments.
+    /// Initial prompts and clearing a command's resume choice have no matching
+    /// case. This runs before the shared fold or any semantic publication;
+    /// search results keep their separate presence-based refusal.
     pub(super) fn restart_template_refusal(
         &self,
         template: &farhelm_proto::launcher::LaunchTemplate,
@@ -2263,7 +2265,7 @@ impl LaunchDraftState {
     ) -> Result<(), String> {
         use crate::launch_composer::{ComposerPermission, ComposerSearchResult};
         use farhelm_proto::launcher::{LauncherKind, TemplateDestination};
-        let (applied, repositories) = super::validated_template_batch(
+        let (applied, repositories, templates) = super::validated_template_batch(
             std::slice::from_ref(template),
             inputs.hosts,
             inputs.catalog.unwrap_or_default(),
@@ -2273,7 +2275,13 @@ impl LaunchDraftState {
         )?;
         let repository = repositories.into_iter().next().flatten();
         targets.template_error.set(None);
-        let fields = template.fields.clone();
+        // Replay the same cleaned fields the fold accepted. Using the stored
+        // template here would reapply held choices after validation removed them.
+        let fields = templates
+            .into_iter()
+            .next()
+            .expect("one template validated")
+            .fields;
         let kind = applied.kind.unwrap_or(LauncherKind::Agent);
         // Kind precedes agent interpretation: the same agent field means
         // a structured choice or a command declaration depending on this step.
@@ -2995,17 +3003,17 @@ mod tests {
         );
     }
 
-    /// Held fields are assignments, even when they repeat the current value.
-    /// An earlier ordinary refusal must still win over a later held-field
+    /// A real held-field change still refuses the whole shortcut batch.
+    /// An earlier ordinary refusal must win over a later held-field
     /// refusal in a shortcut batch; validation never publishes partial edits.
     #[test]
     fn restart_templates_refuse_held_fields_in_batch_order() {
         use farhelm_proto::launcher::{LaunchTemplate, LauncherKind, TemplateFields};
         let draft = restart_draft(None);
         let held = LaunchTemplate {
-            name: "same kind".into(),
+            name: "different kind".into(),
             fields: TemplateFields {
-                kind: Some(LauncherKind::Agent),
+                kind: Some(LauncherKind::Command),
                 effort: Some(Some(LaunchEffort::High)),
                 ..Default::default()
             },
@@ -3034,6 +3042,316 @@ mod tests {
             draft.restart_baseline,
             "validation did not apply the later effort"
         );
+    }
+
+    /// Each held value may be repeated without losing an accompanying edit;
+    /// a different value must refuse the entire template and name the field.
+    /// Raw names must not compare equal through title/display normalization.
+    #[test]
+    fn restart_templates_compare_held_fields_before_validation() {
+        use farhelm_proto::launcher::{
+            LaunchTemplate, LauncherKind, TemplateDestination, TemplateFields, TemplateNameKind,
+        };
+        let mut draft = restart_draft(None);
+        draft.seed_folder("/work/project\u{202e}");
+        draft.seed_title("work \u{202e}", None);
+        let hosts = [crate::list::shared::tests::option(1, "host", true)];
+        let cases = [
+            (
+                "launch kind",
+                TemplateFields {
+                    kind: Some(LauncherKind::Agent),
+                    ..Default::default()
+                },
+                TemplateFields {
+                    kind: Some(LauncherKind::Command),
+                    ..Default::default()
+                },
+            ),
+            (
+                "agent type",
+                TemplateFields {
+                    agent: Some(LaunchHarness::Codex),
+                    ..Default::default()
+                },
+                TemplateFields {
+                    agent: Some(LaunchHarness::Claude),
+                    ..Default::default()
+                },
+            ),
+            (
+                "host",
+                TemplateFields {
+                    host: Some("install-1".into()),
+                    ..Default::default()
+                },
+                TemplateFields {
+                    host: Some("install-other".into()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "destination",
+                TemplateFields {
+                    destination: Some(TemplateDestination::Folder("/work/project\u{202e}/".into())),
+                    ..Default::default()
+                },
+                TemplateFields {
+                    destination: Some(TemplateDestination::Folder("~/project".into())),
+                    ..Default::default()
+                },
+            ),
+            (
+                "session name",
+                TemplateFields {
+                    name: Some("work \u{202e}".into()),
+                    name_kind: Some(TemplateNameKind::Fixed),
+                    ..Default::default()
+                },
+                TemplateFields {
+                    name: Some(draft.title()),
+                    ..Default::default()
+                },
+            ),
+        ];
+        for (field, equal, different) in cases {
+            let template = LaunchTemplate {
+                name: format!("matching {field}"),
+                fields: TemplateFields {
+                    effort: Some(Some(LaunchEffort::High)),
+                    ..equal
+                },
+            };
+            let (state, _, cleaned) = super::super::validated_template_batch(
+                &[template],
+                &hosts,
+                &[],
+                true,
+                &draft,
+                Some(1),
+            )
+            .unwrap();
+            assert_eq!(state.effort, Some(LaunchEffort::High), "{field}");
+            assert_eq!(
+                cleaned[0].fields,
+                TemplateFields {
+                    effort: Some(Some(LaunchEffort::High)),
+                    ..Default::default()
+                },
+                "only the editable field survives: {field}"
+            );
+            let template = LaunchTemplate {
+                name: format!("changed {field}"),
+                fields: TemplateFields {
+                    effort: Some(Some(LaunchEffort::High)),
+                    ..different
+                },
+            };
+            let refusal = super::super::validated_template_batch(
+                &[template],
+                &hosts,
+                &[],
+                true,
+                &draft,
+                Some(1),
+            )
+            .unwrap_err();
+            assert!(
+                refusal.contains(&format!("{field} cannot change here")),
+                "{refusal}"
+            );
+            assert_eq!(draft.restart_edit(), draft.restart_baseline);
+        }
+    }
+
+    /// Dropping an equal agent is essential: reselecting it would reconcile an
+    /// old unset permission to Guarded, turning a held-only template into an edit.
+    /// The cleaned template is the replay contract, not merely a validation aid.
+    #[test]
+    fn restart_matching_agent_keeps_historical_own_settings() {
+        use farhelm_proto::launcher::{LaunchTemplate, LauncherKind, TemplateFields};
+        let draft = restart_draft(None);
+        let before = super::super::launcher_snapshot(&draft, &[], None);
+        let template = LaunchTemplate {
+            name: "same launcher".into(),
+            fields: TemplateFields {
+                kind: Some(LauncherKind::Agent),
+                agent: Some(LaunchHarness::Codex),
+                ..Default::default()
+            },
+        };
+        let (after, _, cleaned) =
+            super::super::validated_template_batch(&[template], &[], &[], true, &draft, None)
+                .unwrap();
+        assert_eq!(after, before);
+        assert_eq!(cleaned[0].fields, TemplateFields::default());
+        assert_eq!(draft.restart_edit(), draft.restart_baseline);
+    }
+
+    /// Non-folder destinations have no equal-value escape, and an empty path
+    /// cannot match root. Prompt and command-resume removal remain refused.
+    #[test]
+    fn restart_templates_keep_nonmatching_boundaries() {
+        use farhelm_proto::launcher::{LaunchTemplate, TemplateDestination, TemplateFields};
+        let mut draft = restart_draft(None);
+        draft.seed_folder("/");
+        let cases = [
+            (
+                "destination",
+                TemplateFields {
+                    destination: Some(TemplateDestination::Github("owner/repo".into())),
+                    ..Default::default()
+                },
+            ),
+            (
+                "destination",
+                TemplateFields {
+                    destination: Some(TemplateDestination::Folder(String::new())),
+                    ..Default::default()
+                },
+            ),
+            (
+                "initial prompt",
+                TemplateFields {
+                    prompt: Some(String::new()),
+                    ..Default::default()
+                },
+            ),
+        ];
+        for (field, fields) in cases {
+            let template = LaunchTemplate {
+                name: field.into(),
+                fields,
+            };
+            let refusal =
+                super::super::validated_template_batch(&[template], &[], &[], true, &draft, None)
+                    .unwrap_err();
+            assert!(
+                refusal.contains(&format!("{field} cannot change here")),
+                "{refusal}"
+            );
+        }
+        let command = CommandLaunch {
+            command: "tool".into(),
+            resume: Some("tool {conversation}".into()),
+            yolo: false,
+            agent: None,
+        };
+        draft.restart_baseline = Some(api::RestartEdit::Command(command.clone()));
+        draft.seed_invocation(&command.command);
+        draft.seed_command_fields(Some(&command));
+        for (field, fields) in [
+            (
+                "agent type",
+                TemplateFields {
+                    agent: Some(LaunchHarness::Codex),
+                    ..Default::default()
+                },
+            ),
+            (
+                "resume choice",
+                TemplateFields {
+                    resume_command: Some(None),
+                    ..Default::default()
+                },
+            ),
+        ] {
+            let template = LaunchTemplate {
+                name: field.into(),
+                fields,
+            };
+            let refusal =
+                super::super::validated_template_batch(&[template], &[], &[], true, &draft, None)
+                    .unwrap_err();
+            assert!(
+                refusal.contains(&format!("{field} cannot change here")),
+                "{refusal}"
+            );
+        }
+        draft.command_agent = Some(LaunchHarness::Codex);
+        let template = LaunchTemplate {
+            name: "same command agent".into(),
+            fields: TemplateFields {
+                agent: Some(LaunchHarness::Codex),
+                yolo: Some(true),
+                ..Default::default()
+            },
+        };
+        let (state, _, cleaned) =
+            super::super::validated_template_batch(&[template], &[], &[], true, &draft, None)
+                .unwrap();
+        assert_eq!(cleaned[0].fields.agent, None);
+        assert_eq!(state.yolo, Some(true));
+    }
+
+    /// Replace may reuse its own host without replaying a host transition;
+    /// missing identity or mismatch cannot establish that equality in either mode.
+    /// New keeps ordinary host assignments, including an equal current host.
+    #[test]
+    fn held_template_hosts_require_a_usable_matching_installation() {
+        use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
+        let mut host = crate::list::shared::tests::option(1, "host", true);
+        let template = LaunchTemplate {
+            name: "host".into(),
+            fields: TemplateFields {
+                host: host.identity.clone(),
+                ..Default::default()
+            },
+        };
+        for restart in [false, true] {
+            let draft = if restart {
+                restart_draft(None)
+            } else {
+                LaunchDraft::new(None)
+            };
+            let (_, _, cleaned) = super::super::validated_template_batch(
+                std::slice::from_ref(&template),
+                std::slice::from_ref(&host),
+                &[],
+                true,
+                &draft,
+                Some(1),
+            )
+            .unwrap();
+            assert_eq!(cleaned[0].fields.host, None);
+            for unusable in [None, Some("other-install".into())] {
+                host.identity = unusable;
+                let refusal = super::super::validated_template_batch(
+                    std::slice::from_ref(&template),
+                    std::slice::from_ref(&host),
+                    &[],
+                    true,
+                    &draft,
+                    Some(1),
+                )
+                .unwrap_err();
+                assert!(refusal.contains("host cannot change here"), "{refusal}");
+            }
+            host.identity = template.fields.host.clone();
+            host.identity_mismatch = true;
+            assert!(
+                super::super::validated_template_batch(
+                    std::slice::from_ref(&template),
+                    std::slice::from_ref(&host),
+                    &[],
+                    true,
+                    &draft,
+                    Some(1)
+                )
+                .is_err()
+            );
+            host.identity_mismatch = false;
+        }
+        let (_, _, cleaned) = super::super::validated_template_batch(
+            std::slice::from_ref(&template),
+            &[host],
+            &[],
+            false,
+            &LaunchDraft::new(None),
+            Some(1),
+        )
+        .unwrap();
+        assert_eq!(cleaned[0].fields.host, template.fields.host);
     }
 
     /// Give deliberate choices distinguishable offered/fetched installation data.

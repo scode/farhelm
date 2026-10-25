@@ -739,9 +739,9 @@ agent choice is independent of that destination:
   prefix clears it. Quick launch applies those same edits before starting the agent. A template whose field does not
   apply to what the launcher holds when it is applied, such as a model while the launch kind is command or a model the
   chosen agent type does not offer, is refused with a message naming the field, and nothing from it is applied. So is a
-  template that sets a field the current launcher mode holds fixed, such as the host in Replace with or a field held by
-  Restart with (Lifecycle operations below). A template names its host by the host's recorded install identity, exactly
-  like the host default below, so a registry row retargeted to another install makes the template's host field
+  template that changes a field the current launcher mode holds fixed, such as the host in Replace with or a field held
+  by Restart with (Lifecycle operations below). A template names its host by the host's recorded install identity,
+  exactly like the host default below, so a registry row retargeted to another install makes the template's host field
   inapplicable rather than silently aiming at the successor. A launch made after applying templates is, for remembered
   defaults and recent setups, exactly the launch the same hand edits would have made; managed-checkout previews
   additionally apply a template base name's numbering policy. The resulting choices count as the user's explicit
@@ -1258,10 +1258,14 @@ submission and focus-return behavior.
 - **Restart with** opens the session launcher in restart mode before resuming the session's own or a user-named
   conversation. It edits model, effort, permissions, wrapper prefix and conversation for an agent launch, or command,
   resume command and YOLO assertion for a command launch. Launch kind, agent type, host, folder or destination, session
-  name and initial prompt are held: their editing controls are hidden, and templates, search results, recent setups and
-  template shortcuts that set one are refused without applying any edits, even when they name its current value. The
-  held agent type, host and folder remain visible. Replace with can change the harness or folder, and Clone can change
-  the host. The launcher shows the current settings and marks edited fields, and its primary action is inactive until a
+  name and initial prompt are held: their editing controls are hidden. Templates and template shortcuts may repeat a
+  held value as a no-op; an actual change is refused without applying any edits. Kind and agent compare with the active
+  launch kind and its agent, host with its usable recorded install identity, folder with the same text ignoring trailing
+  slashes, and name with the raw title byte for byte. Paths are not expanded or resolved. Initial prompts and clearing a
+  command's resume choice remain refused. Search results and recent setups that set a held field are still refused even
+  when they name its current value. A template containing only equal held values applies silently as nothing. The held
+  agent type, host and folder remain visible. Replace with can change the harness or folder, and Clone can change the
+  host. The launcher shows the current settings and marks edited fields, and its primary action is inactive until a
   setting changes or a conversation selector is entered. For an agent launch with a stored resume command, it is
   available even without a captured conversation; then its conversation field is required and explains why. Muse, Cursor
   and OpenCode still have no stored resume command, so they do not gain Restart with. The launcher's ordinary controls,

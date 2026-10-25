@@ -1867,19 +1867,59 @@ test("restart with applies an allowed partial command template", async ({ page }
   expect(bodies).toEqual([{ stop_if_running: false, with_command: { command, resume, yolo: true, agent: "claude" } }]);
 });
 
-for (const field of ["kind", "agent", "host", "destination", "name", "prompt"] as const) {
-  /** Even a matching immutable value is an attempted field assignment.
-   * Refusal must be atomic: the accompanying Low edit cannot leak through. */
-  test(`restart with refuses a template's held ${field} atomically`, async ({ page, request }) => {
+for (const field of ["kind", "agent", "host", "destination", "name"] as const) {
+  /** Repeating the session's held value must leave accompanying edits usable.
+   * The launcher-shaped kind case also repeats the agent, whose reconciliation
+   * would otherwise change the stored unset permission while applying Low.
+   * Folder equality ignores a trailing slash; an equal raw name must also drop
+   * its name kind so validation and replay cannot see an orphaned name kind. */
+  test(`restart with applies a template's matching held ${field}`, async ({ page, request }) => {
     await injectSession(page, BASELINE, "resume");
     await installEnterCatalog(page);
     const local = (await listHosts(request)).find(host => host.kind === "local");
     expect(local?.identity, "the host template must name a real installation").toBeTruthy();
     const held = {
-      kind: "agent", agent: "codex", host: local!.identity, destination: { folder: "/tmp" }, name: TITLE,
+      kind: "agent", agent: "codex", host: local!.identity, destination: { folder: "/tmp/" }, name: TITLE,
+    };
+    await offerRestartTemplates(page, [{ name: `matching-${field}`, fields: {
+      [field]: held[field], effort: "low",
+      ...(field === "kind" ? { agent: "codex" } : {}),
+      ...(field === "name" ? { name_kind: "fixed" } : {}),
+    } }]);
+    const bodies = await refuseEnterRestarts(page);
+    const dialog = await openInjectedDialog(page);
+    await expect(dialog.locator(".create-session-submit")).toBeDisabled();
+    await applyRestartTemplate(dialog, `matching-${field}`);
+    await expect(dialog.locator(".launch-composer-template-error")).toHaveCount(0);
+    await expect(dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.locator(".create-session-submit")).toBeEnabled();
+    await expectHeldContext(dialog, "codex");
+    expect(bodies, "applying the template leaves restart consent to the user").toHaveLength(0);
+    await dialog.locator(".create-session-submit").click();
+    await expect(dialog.locator(".launch-composer-refusal-alert")).toContainText("Enter fixture refused restart 1");
+    expect(bodies).toEqual([{ stop_if_running: false, with: {
+      harness: "codex", model: BASELINE.model, effort: "low", permissions: null,
+    } }]);
+  });
+}
+
+for (const field of ["kind", "agent", "host", "destination", "name", "prompt"] as const) {
+  /** Changing a held field must refuse the whole template. Initial prompts
+   * have no equal-value case; none can be sent while resuming a conversation.
+   * The accompanying Low edit makes a partial application observable. */
+  test(`restart with refuses a template's held ${field} atomically`, async ({ page, request }) => {
+    await injectSession(page, BASELINE, "resume");
+    await installEnterCatalog(page);
+    const local = (await listHosts(request)).find(host => host.kind === "local");
+    expect(local?.identity, "the host template must name a real installation").toBeTruthy();
+    const otherIdentity = "11111111-2222-3333-4444-555555555555";
+    expect(local!.identity, "the refusal fixture must change the installation identity").not.toBe(otherIdentity);
+    const changed = {
+      kind: "command", agent: "claude", host: otherIdentity, destination: { folder: "/other-folder" }, name: `${TITLE}-other`,
       prompt: "an initial message cannot be sent by restart",
     };
-    await offerRestartTemplates(page, [{ name: `held-${field}`, fields: { [field]: held[field], effort: "low" } }]);
+    await offerRestartTemplates(page, [{ name: `held-${field}`, fields: { [field]: changed[field], effort: "low" } }]);
     const bodies = await refuseEnterRestarts(page);
     const dialog = await openInjectedDialog(page);
     await applyRestartTemplate(dialog, `held-${field}`);
@@ -1949,7 +1989,7 @@ test("restart with refuses held composer actions and scopes model search", async
   } }]);
 });
 
-/** Template shortcut batches are one application. A later held assignment
+/** Template shortcut batches are one application. A later changed held value
  * must not leave an earlier allowed edit behind, and a direct bolt chord
  * must obey the same boundary instead of creating a fresh session. */
 test("restart with refuses held shortcut batches and bolt templates", async ({ page }) => {
@@ -1957,8 +1997,8 @@ test("restart with refuses held shortcut batches and bolt templates", async ({ p
   await installEnterCatalog(page);
   await offerRestartTemplates(page, [
     { name: "allowed-low", fields: { effort: "low" } },
-    { name: "held-name", fields: { name: TITLE } },
-    { name: "held-bolt", fields: { kind: "agent", agent: "codex", effort: "low" } },
+    { name: "held-name", fields: { name: `${TITLE}-other` } },
+    { name: "held-bolt", fields: { kind: "command", effort: "low" } },
   ]);
   await page.route("**/api/preferences", async route => {
     if (route.request().method() !== "GET") return route.continue();
@@ -1985,12 +2025,72 @@ test("restart with refuses held shortcut batches and bolt templates", async ({ p
     .toHaveAttribute("aria-pressed", "true");
   await expect(dialog.locator(".create-session-submit")).toBeDisabled();
   await cancel.focus();
+  await expect(cancel).toBeFocused();
   await page.keyboard.press("Control+Shift+KeyP");
   await expect(dialog.locator(".launch-composer-template-error")).toContainText("launch kind cannot change here");
   await expect(dialog.locator(".create-session-submit")).toBeDisabled();
   await expectHeldContext(dialog, "codex");
   expect(creates, "restart shortcuts cannot start New").toHaveLength(0);
   expect(bodies).toHaveLength(0);
+});
+
+/** Held-only templates apply silently without making an unchanged draft
+ * restartable. A bolt chord and a sequence may combine matching held values
+ * with edits, but neither owns the user's separate restart consent. */
+test("restart with applies matching bolt and shortcut templates without restarting", async ({ page, request }) => {
+  await injectSession(page, BASELINE, "resume");
+  await installEnterCatalog(page);
+  const local = (await listHosts(request)).find(host => host.kind === "local");
+  expect(local?.identity, "the matching host template must identify the current installation").toBeTruthy();
+  await offerRestartTemplates(page, [
+    { name: "matching-bolt", fields: { kind: "agent", agent: "codex", effort: "low" } },
+    { name: "matching-context", fields: { host: local!.identity, destination: { folder: "/tmp/" }, name: TITLE,
+      name_kind: "fixed" } },
+  ]);
+  await page.route("**/api/preferences", async route => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...await response.json(), quick_launch_template: "matching-bolt",
+      template_shortcuts: { "1": "matching-bolt", "2": "matching-context" } } });
+  });
+  const creates: unknown[] = [];
+  page.on("request", sent => {
+    if (sent.method() === "POST" && sent.url().endsWith("/api/sessions")) creates.push(sent.postDataJSON());
+  });
+  const bodies = await refuseEnterRestarts(page);
+  const dialog = await openInjectedDialog(page);
+  const cancel = dialog.locator(".launch-composer-cancel");
+  const efforts = dialog.locator(".launch-composer-effort-choice");
+  await expect(dialog.locator(".create-session-submit")).toBeDisabled();
+  await applyRestartTemplate(dialog, "matching-context");
+  await expect(dialog.locator(".launch-composer-template-error")).toHaveCount(0);
+  await expect(efforts.getByRole("button", { name: "high", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.locator(".create-session-submit")).toBeDisabled();
+  await cancel.focus();
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press("Control+Shift+KeyP");
+  await expect(efforts.getByRole("button", { name: "low", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.locator(".launch-composer-template-error")).toHaveCount(0);
+  await expect(dialog.locator(".create-session-submit")).toBeEnabled();
+  await expect(dialog).toBeVisible();
+  expect(bodies, "the bolt edits the draft without restarting").toHaveLength(0);
+
+  await efforts.getByRole("button", { name: "high", exact: true }).click();
+  await expect(dialog.locator(".create-session-submit")).toBeDisabled();
+  await cancel.focus();
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press("Control+Shift+KeyX");
+  await expect(page.locator(".launch-sequence-indicator")).toContainText("apply");
+  await page.keyboard.press("Digit1");
+  await page.keyboard.press("Digit2");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".launch-sequence-indicator")).toHaveCount(0);
+  await expect(efforts.getByRole("button", { name: "low", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.locator(".launch-composer-template-error")).toHaveCount(0);
+  await expect(dialog.locator(".create-session-submit")).toBeEnabled();
+  await expectHeldContext(dialog, "codex");
+  expect(creates, "matching restart shortcuts cannot start New").toHaveLength(0);
+  expect(bodies, "a matching sequence still leaves restart consent to the user").toHaveLength(0);
 });
 
 for (const editCommand of [false, true]) {

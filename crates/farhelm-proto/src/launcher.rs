@@ -553,8 +553,9 @@ pub struct TemplateContext<'a> {
     pub catalog: &'a [LaunchCatalogModel],
     /// The install identities of the hosts the launcher can target.
     pub known_hosts: &'a [String],
-    /// The dialog holds the host fixed (Replace with), so a template that
-    /// sets one is refused.
+    /// Refuse any remaining host assignment when the caller holds it fixed.
+    /// UI dialogs remove equal held assignments before calling this function;
+    /// callers such as `farhelm spawn` retain the strict presence-based rule.
     pub host_fixed: bool,
 }
 

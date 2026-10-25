@@ -5660,8 +5660,14 @@ change of agent type clears it, and with no agent type chosen a model only one a
 are compared in the agent type's own catalog spelling, as the launcher and the helm's compiler compare them. The
 function refuses a field that does not apply to the launch kind then active, an agent-launch choice with no agent type
 (other than that single-owner model), a model another agent type owns, an effort or permission the agent type does not
-offer, a host the dialog holds fixed (Replace with), and a host no known install has (a host row in the
-identity-mismatch phase does not count, exactly as for the create default); any refusal leaves the launcher unchanged.
+offer, a host the caller holds fixed, and a host no known install has (a host row in the identity-mismatch phase does
+not count, exactly as for the create default); any refusal leaves the launcher unchanged. Before that fold, the UI
+removes template assignments equal to the opening's held values: host in Replace with, and kind, active-kind agent,
+host, folder and raw title in Restart with. Host equality needs a usable recorded identity; folder equality ignores
+trailing slashes without expanding or resolving paths. Equal name and name kind are removed together. Remaining held
+assignments refuse in template order. An equal agent must never reach reconciliation, which can change historical unset
+permissions or clear model and effort. Prompt and command-resume removal remain refused; search results and recents
+retain their presence-based checks. The helm's `farhelm spawn` keeps the strict host flag.
 
 The launcher's "save as template" panel shares the snapshot reader used for application, including raw relayed text,
 destination and name. A pure mapping offers only the active tab's values and marks explicit choices separately from
@@ -5688,21 +5694,22 @@ the create key and fresh-checkout retry identity, re-read after asynchronous key
 builder for ordinary, named, fresh-checkout and Replace-with creates. It never enters `LaunchSelection`, `SessionLaunch`
 or recent history. Restart controls omit the prompt callback.
 
-In the launcher, `tl:name` offers templates (the only search scope that does). Accepting one first runs `apply_template`
-on a snapshot of the launcher, so a refusal applies nothing; then it replays the template as the launcher's own search
-actions (agent type, model, effort, permissions, host, folder, repository, name) and sets directly only what has no such
-action (the launch kind, the command fields and the command launch's declared agent type, the approve, smart approve and
-chat permissions, and a choice reset to its default). That replay is what makes remembered defaults, recent setups and a
-pending checkout preview react exactly as they do to the same edits by hand, with no provenance tracking for templates.
-The Templates dialog beside New has a bounded list column and a selected-template editor; at phone width only the list
-or editor is shown, with a back link. A draft holds the wire fields directly, so absence means no visible field, while
-explicit null resets and false approval assertions survive editing. Add/remove actions change presence; defaults are
-values inside the controls. The editor's agent/command/don't-switch selector writes the kind, with don't-switch offering
-only placement and name. A kindless stored template is inferred in the draft only, marked unsaved against its original
-baseline; saving explicitly stores that switch. Per-harness choices use the shared capability answers and release
-catalog, not another agent table. Model text is unrestricted and suggestions use the existing catalog filter; other
-incompatible choices stay visible and refuse save until corrected or removed. Fields need not form a complete launch,
-because another stacked template can supply what they omit.
+In the launcher, `tl:name` offers templates (the only search scope that does). Accepting one first removes matching held
+assignments and runs `apply_template` on a snapshot of the launcher, so a refusal applies nothing; then it replays the
+exact cleaned template returned by validation as the launcher's own search actions (agent type, model, effort,
+permissions, host, folder, repository, name) and sets directly only what has no such action (the launch kind, the
+command fields and the command launch's declared agent type, the approve, smart approve and chat permissions, and a
+choice reset to its default). That replay is what makes remembered defaults, recent setups and a pending checkout
+preview react exactly as they do to the same edits by hand, with no provenance tracking for templates. The Templates
+dialog beside New has a bounded list column and a selected-template editor; at phone width only the list or editor is
+shown, with a back link. A draft holds the wire fields directly, so absence means no visible field, while explicit null
+resets and false approval assertions survive editing. Add/remove actions change presence; defaults are values inside the
+controls. The editor's agent/command/don't-switch selector writes the kind, with don't-switch offering only placement
+and name. A kindless stored template is inferred in the draft only, marked unsaved against its original baseline; saving
+explicitly stores that switch. Per-harness choices use the shared capability answers and release catalog, not another
+agent table. Model text is unrestricted and suggestions use the existing catalog filter; other incompatible choices stay
+visible and refuse save until corrected or removed. Fields need not form a complete launch, because another stacked
+template can supply what they omit.
 
 Opening another row, new, duplicate, mobile back, close and Escape share a pending departure and the same inline
 save/discard/keep-editing prompt. Save keeps the selected editor and refreshes its baseline; duplicate opens an unsaved
