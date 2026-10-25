@@ -5,11 +5,11 @@
  * way it does every other asset — see the `url()` note below for the
  * fonts that need hard-coded paths). xterm.js's own look is a SEPARATE
  * vendored stylesheet, `vendor/xterm.css`, linked alongside this one
- * (also lib.rs) and out of scope here — nothing in this file targets the
- * terminal's internal DOM.
+ * (also lib.rs). The viewport background override below is the one bridge
+ * into its internal DOM: it keeps the gutter on the terminal's own theme.
  *
- * Every color, font stack, and NON-ZERO corner radius lives in the `:root`
- * token block further down and nowhere else — use sites carry
+ * Every color, font stack, and NON-ZERO corner radius lives in the root
+ * token blocks further down and nowhere else — use sites carry
  * `var(--token)`, never a literal. A bare `0` is exempt where it is
  * structural rather than a design choice — a corner that has to stay
  * square because it joins a neighboring control (the joined tab corners
@@ -21,7 +21,7 @@
  *
  * Three surface levels and one accent carry the whole layout, and both
  * are design constraints rather than accidents of what the sheet grew.
- * The page ground is a cool near-black, and the terminal paints its own
+ * The page ground is cool blue-gray, and the terminal paints its own
  * surface (`--terminal-bg`) on top of it; chrome (sidebar, main
  * header, tab strip) sits one step above the ground; panels that float over
  * chrome — menus, dialogs, forms, bands that interrupt a pane — sit one
@@ -40,10 +40,10 @@
  * launch composer once had a palette, radii, and a selection color of
  * its own, and read as a different application.
  *
- * The dark palette is the only one today. A light theme is a decision
- * already made, and it arrives as a SECOND `:root` block redefining the
- * same names — which only stays a one-block change for as long as no use
- * site holds a literal. */
+ * Steel is the default root palette. Steel Light overrides every color and
+ * elevation role on `:root[data-appearance="light"]`; geometry and fonts
+ * remain shared. This stays a two-block palette while use sites hold no
+ * literals. The terminal stays dark in both appearances. */
 
 /* Both font families are vendored: Inter for interface text, JetBrains Mono
  * Nerd Font for technical values and terminal cells. Their licenses ship as
@@ -154,15 +154,11 @@
      token, matching the xterm theme, so its 4px gutter and viewport do not
      frame the pane in the ground color. */
   --bg-0: #181c24; /* GROUND: the page behind everything */
-  --well: #1a2029; /* RECESSED: the inside of a control that holds a value
-                      or a choice: inputs, selects, code boxes, and in the
-                      launch composer the harness chips, segments, and the
-                      recent-setups list. Darker than any surface a control
-                      can sit on (chrome or floating), so it reads as cut
-                      INTO its panel, and lighter than the ground, so a
-                      field on a dialog does not read as a hole through to
-                      the page. Not a rung on the ladder: it is the inside
-                      of a control, never a surface other things sit on */
+  --well: #1a2029; /* RECESSED: inputs, selects, code boxes and composer
+                      choices. The fill distinguishes a field from its
+                      panel in both palettes; its outline still marks the
+                      boundary when light mode reverses the surface ladder.
+                      Not a rung: other content never sits on this fill. */
   --terminal-bg: #282c34; /* the terminal's surface: the xterm.js theme's
                              background (assets/terminal-theme.js), mirrored
                              here so the pane's gutter and viewport match; a
@@ -358,6 +354,69 @@
   --font-mono: "JetBrains Mono", monospace;
 }
 
+/* Steel Light replaces every color and elevation role independently. Layout,
+   fonts and shape stay shared; the terminal keeps its own dark theme. Quiet
+   text and accent prose are bound by the hover fill, not just white cards. */
+:root[data-appearance="light"] {
+  color-scheme: light;
+  --host-icon-lavender: #68529c;
+  --host-icon-orchid: #8c447d;
+  --host-icon-teal: #216b67;
+  --host-icon-steel: #4e657d;
+  --host-icon-sand: #75603b;
+  --host-icon-copper: #8b5233;
+  --host-icon-red: #a14646;
+  --bg-0: #f4f6fa;
+  --well: #f1f3f8;
+  --terminal-bg: #282c34;
+  --bg-1: #e9edf4;
+  --bg-2: #ffffff;
+  --control-hover-bg: #dde3ee;
+  --chip-bg: #dde3ee;
+  --fg-0: #1b2130;
+  --fg-dim: #414b5f;
+  --fg-1: #4f5a70;
+  --fg-2: #5a6579;
+  --fg-bright: #111827;
+  --on-fill: #ffffff;
+  --link: #3158bd;
+  /* The fill follows the design; short accent prose needs a darker tone to
+     remain AA on hover. Unseen-output prose has the same text constraint. */
+  --accent: #445acf;
+  --accent-fill: #4a63d8;
+  --accent-fill-hover: #4059c7;
+  --accent-edge: #4a63d8;
+  --border: #b8c2d3;
+  --border-dim: #d8deea;
+  --border-sidebar-edge: #cbd3e0;
+  --border-row: #d8deea;
+  --border-nested: #b8c2d3;
+  --ok: #276a43;
+  --warn: #79531b;
+  --warn-bright: #694719;
+  --warn-bg: #fff0d2;
+  --warn-bg-dim: #faf2e3;
+  --warn-border: #d6bc87;
+  --warn-fill-hover: #efdcba;
+  --danger: #a63e4d;
+  --danger-strong: #a13443;
+  --danger-soft: #f2c0c4;
+  --danger-bg: #a83e4d;
+  --danger-bg-dim: #fae9ec;
+  --danger-fill-hover: #983644;
+  --info: #445acf;
+  --scrim: rgba(0, 0, 0, 0.82);
+  --shadow-menu: 0 6px 18px rgba(27, 33, 48, 0.15);
+  --scrim-dialog: rgb(27 33 48 / 30%);
+  --border-dialog: #b8c2d3;
+  --shadow-dialog: 0 10px 24px rgb(27 33 48 / 20%);
+  --on-accent-dim: #f4f6ff;
+  /* Dark green fades into a light hover sooner than pale green on Steel.
+     Bind the painted trough rather than trusting the opaque status color. */
+  --status-pulse-min: 0.73;
+  --selected-status-pulse-min: 0.85;
+}
+
 /* ===== Shell and layout =========================================== */
 
 /* Preserve the definite-height chain through the window-level component. */
@@ -454,6 +513,9 @@ body,
 html {
   overflow: hidden;
   overscroll-behavior: none;
+  /* Native checkboxes and radios keep their interaction model while sharing
+     the same selection hue as the custom controls in either appearance. */
+  accent-color: var(--accent-fill);
 }
 
 /* Code and command blocks use the bundled mono face rather than the
@@ -779,6 +841,18 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   display: block;
   width: auto;
   height: 18px;
+}
+
+/* The supplied marks contain their own ink colors. Select the matching file
+   with the same resolved appearance as the page, rather than recoloring the
+   brand geometry or following the OS behind an explicit device override. */
+.app-wordmark-light,
+:root[data-appearance="light"] .app-wordmark-dark {
+  display: none;
+}
+
+:root[data-appearance="light"] .app-wordmark-light {
+  display: flex;
 }
 
 /* A reported helm stamp can be up to 64 characters (skew.rs's display cap),
@@ -4425,7 +4499,8 @@ a:any-link,
    that means something is happening RIGHT NOW, and a still dot cannot
    distinguish "working" from "alive but at rest" without asking the user
    to compare two greens. Slow (2s) and shallow (down to 60% opacity on
-   ordinary surfaces, 85% on selection, never off) so it reads as a heartbeat in peripheral vision rather than as a
+   ordinary Steel surfaces, 73% on Steel Light and 85% on selection, never
+   off) so it reads as a heartbeat in peripheral vision rather than as a
    blink demanding attention — this sits in a sidebar someone stares at all
    day. The host update dot and the delete header dot reuse it.
 
@@ -5377,9 +5452,19 @@ a:any-link,
 .provisioning-step[data-status="completed"] .provisioning-step-marker::before,
 .provisioning-step[data-status="skipped"] .provisioning-step-marker::before { content: "✓"; }
 .provisioning-step[data-status="running"] .provisioning-step-marker {
-  animation: farhelm-status-pulse 2s steps(4) infinite;
+  /* The ordinal is text, so keep it opaque while only its ring pulses.
+     Reserve the old border box: a pseudo-element must not change its size. */
+  position: relative;
   color: var(--warn);
-  border-color: var(--warn);
+  border-color: transparent;
+}
+.provisioning-step[data-status="running"] .provisioning-step-marker::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 1px solid currentColor;
+  border-radius: inherit;
+  animation: farhelm-status-pulse 2s steps(4) infinite;
 }
 .provisioning-step[data-status="degraded"] .provisioning-step-marker {
   color: var(--warn);
@@ -5393,7 +5478,7 @@ a:any-link,
 .provisioning-step[data-status="failed"] .provisioning-step-marker::before { content: "×"; }
 
 @media (prefers-reduced-motion: reduce) {
-  .provisioning-step[data-status="running"] .provisioning-step-marker { animation: none; }
+  .provisioning-step[data-status="running"] .provisioning-step-marker::after { animation: none; }
 }
 
 .provisioning-step-name {
@@ -7459,11 +7544,12 @@ a:any-link,
    hard-codes `#000` on `.xterm-viewport`. xterm's own theme background lands
    on the viewport's child scrollable node, not on the viewport itself, so
    without this override a black frame shows through around the rows. The
-   application owns the override so both clients paint the same surface
-   without modifying the third-party stylesheet; text color needs nothing
-   here because the DOM renderer injects the theme foreground onto
+   application owns the override so both clients paint the same surface.
+   Its root qualifier outranks the vendored rule even when a later document
+   link loads that sheet after this early application stylesheet. Text color
+   needs nothing here because the DOM renderer injects the theme foreground onto
    `.xterm-rows` itself. */
-.terminal .xterm-viewport {
+:root .terminal .xterm-viewport {
   background: var(--terminal-bg);
 }
 

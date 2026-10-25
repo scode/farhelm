@@ -1,8 +1,16 @@
 import { expect } from "./evidence";
 import type { Locator, Page } from "@playwright/test";
 
-/** App belongs to this set only where a desktop updater supplies its setting. */
-export type SettingsSection = "sessions" | "hosts" | "terminal" | "checkouts" | "agent trust" | "notifications" | "app";
+/** Names match accessible navigation and panel labels; App requires a desktop updater. */
+export type SettingsSection =
+  | "sessions"
+  | "Appearance"
+  | "hosts"
+  | "terminal"
+  | "checkouts"
+  | "agent trust"
+  | "notifications"
+  | "app";
 
 /** Select through the same navigation at desktop and phone widths.
  * Only visibility is awaited: callers also exercise locked initial reads and

@@ -26,7 +26,7 @@ import {
 } from "./helpers/fleet";
 
 /** The web fixture has no updater, so its navigation omits the app pane. */
-const webSettingsSections: SettingsSection[] = ["sessions", "hosts", "terminal", "checkouts", "agent trust", "notifications"];
+const webSettingsSections: SettingsSection[] = ["sessions", "Appearance", "hosts", "terminal", "checkouts", "agent trust", "notifications"];
 
 /** End the page's preference queue before releasing held replies or restoring
  * shared state. Otherwise a later queued click could overwrite cleanup after
@@ -875,13 +875,13 @@ test("settings navigation keeps mounted panes and follows the narrow list path",
   // skips buttons under its default Tab policy; no extra tab stops compensate.
   if (browserName !== "webkit") {
     const sessions = navigation.getByRole("button", { name: "sessions", exact: true });
-    const hosts = navigation.getByRole("button", { name: "hosts", exact: true });
+    const appearance = navigation.getByRole("button", { name: "Appearance", exact: true });
     await sessions.focus();
     await expect(sessions).toBeFocused();
     await page.keyboard.press("Tab");
-    await expect(hosts).toBeFocused();
+    await expect(appearance).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect(dialog.locator('section.app-settings-panel[aria-label="hosts"] > h3')).toBeFocused();
+    await expect(dialog.locator('section.app-settings-panel[aria-label="Appearance"] > h3')).toBeFocused();
   }
 
   await selectSettingsSection(page, "agent trust");

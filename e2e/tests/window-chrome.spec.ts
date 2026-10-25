@@ -347,7 +347,12 @@ test("the whole macOS title band drags except on controls and text", async ({ pa
     await expect(topRow.locator(".tab-agent")).toBeVisible();
     await expectBandDrags(page, "ordinary layout");
 
-    const wordmark = (await appBar.locator(".app-wordmark").boundingBox())!;
+    // Both palette variants stay mounted. Hit testing must use the painted
+    // mark, and exactly one variant must own that place in the title band.
+    const visibleWordmark = appBar.locator(".app-wordmark:visible");
+    await expect(visibleWordmark).toHaveCount(1);
+    await expect(visibleWordmark).toBeVisible();
+    const wordmark = (await visibleWordmark.boundingBox())!;
     const version = (await appBar.locator(".app-version").boundingBox())!;
     const agentTab = (await topRow.locator(".tab-agent").boundingBox())!;
     const actions = (await topRow.locator(".titlebar-actions").boundingBox())!;

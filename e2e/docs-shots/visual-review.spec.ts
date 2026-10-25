@@ -111,6 +111,7 @@ for (const colorScheme of ["dark", "light"] as const) {
       const { scenario } = await open(page, request, { checkoutTrash: true });
       const main = page.locator(".app-main");
       await expect(main).toBeVisible();
+      await expect(page.locator("html")).toHaveAttribute("data-appearance", colorScheme);
       if (width === "main-650") {
         const box = await main.boundingBox();
         expect(box, "the open main pane establishes the sidebar's occupied width").not.toBeNull();
@@ -153,6 +154,11 @@ for (const colorScheme of ["dark", "light"] as const) {
 
       const settings = await openSettings(page);
       await shot(page, `${name}-settings`, window, { pad: 0 });
+      // The device choice is a new surface. Show its real default rather than
+      // seeding a preference or substituting styled controls for the product.
+      await selectSettingsSection(page, "Appearance");
+      await expect(settings.getByRole("radio", { name: "System", exact: true })).toBeChecked();
+      await shot(page, `${name}-settings-appearance`, window, { pad: 0 });
       // Directory and command fields must keep their mono role beside Inter
       // labels. The ordinary sessions panel alone does not exercise that split.
       await selectSettingsSection(page, "checkouts");

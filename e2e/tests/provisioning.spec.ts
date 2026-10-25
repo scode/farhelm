@@ -2542,10 +2542,12 @@ function countUpdateRequests(page: Page, host: number): { plans: number; confirm
  * spells out what the narrow label truncates, and success returning the
  * ordinary status without ever touching the details checkbox.
  */
-test("single Update shows inline progress without opening its row", async ({
+for (const appearance of ["dark", "light"] as const) {
+test(`single Update shows inline progress without opening its row in ${appearance}`, async ({
   page,
   request,
 }, testInfo) => {
+  await page.emulateMedia({ colorScheme: appearance, reducedMotion: "no-preference" });
   const remote = destination(testInfo, "update");
   const bystander = destination(testInfo, "update-bystander");
   const accepted = await startAdd(request, remote);
@@ -2640,6 +2642,26 @@ test("single Update shows inline progress without opening its row", async ({
   await expect(popup.locator('.provisioning-step[data-current="true"]')).toHaveCount(1);
   await expect(popup.locator('.provisioning-step[data-current="true"]')).toHaveAttribute("data-step", "create-directories");
   await expect(popup.locator('.provisioning-step[data-current="true"]')).toHaveAttribute("data-status", "running");
+  const marker = popup.locator('.provisioning-step[data-current="true"] .provisioning-step-marker');
+  // Fading a whole numbered marker makes its text unreadable. Only the ring
+  // may pulse; its pseudo-element must retain the original outer diameter.
+  const markerPaint = await marker.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const number = getComputedStyle(element, "::before");
+    const ring = getComputedStyle(element, "::after");
+    return { textAnimation: style.animationName, textOpacity: style.opacity, numeralOpacity: number.opacity,
+      ringAnimation: ring.animationName, ringTiming: ring.animationTimingFunction, ringDuration: ring.animationDuration,
+      color: style.color, ringColor: ring.borderTopColor, width: style.width, height: style.height,
+      ringWidth: ring.width, ringHeight: ring.height, ringLeft: ring.left, ringTop: ring.top };
+  });
+  expect(markerPaint).toEqual({ textAnimation: "none", textOpacity: "1", numeralOpacity: "1",
+    ringAnimation: "farhelm-status-pulse", ringTiming: "steps(4)", ringDuration: "2s",
+    color: appearance === "dark" ? "rgb(229, 187, 110)" : "rgb(121, 83, 27)",
+    ringColor: appearance === "dark" ? "rgb(229, 187, 110)" : "rgb(121, 83, 27)",
+    width: "17px", height: "17px", ringWidth: "15px", ringHeight: "15px", ringLeft: "-1px", ringTop: "-1px" });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await marker.evaluate((element) => getComputedStyle(element, "::after").animationName)).toBe("none");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   expect(await popup.evaluate((node) => getComputedStyle(node).position)).toBe("fixed");
   expect(await popupTextVisible(popup), "the current step, count, and clock are readable").toEqual({
     current: true,
@@ -2739,6 +2761,7 @@ test("single Update shows inline progress without opening its row", async ({
   expect(updates.plans).toBe(1);
   expect(updates.confirms).toBe(1);
 });
+}
 
 /**
  * Setup's automatic expansion, failure reopening and success folding move

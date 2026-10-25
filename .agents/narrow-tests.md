@@ -150,8 +150,10 @@ selects by test name across files.
 - `scripts/test-install-sh.sh --farhelm target/debug/farhelm` — one monolithic pass over every install.sh scenario, no
   per-scenario selection, after `cargo build -p farhelm`. The locked install work it reaches has narrow Rust module
   tests (`cargo nextest run -p farhelm-supervisor -E 'test(/installation::/)'`); start there for a failure inside it.
-- `scripts/desktop-smoke.sh` — monolithic, ~5 minutes, and its legs share one built app and one Xvfb; there is no
-  supported way to run a single leg.
+- `scripts/desktop-smoke.sh` — ordinary transport legs share one built app and one Xvfb. Optional
+  `DESKTOP_SMOKE_APPEARANCE=1` runs four fresh/stored dark/light appearance cases; `no-initialize` runs its fixed
+  startup deadline fault. Both prepare the native app and owned display. Retain failures and choose another run only for
+  a concrete remaining question. These integration assertions complement ordinary appshot visual review.
 - `scripts/test-provision-centos.sh` — already narrow where it counts: the cargo part is a single named test
   (`provisioning_and_update_over_ssh_preserve_an_operable_session`); the cost is the docker container and the one-time
   musl/tmux payload builds, which cache across runs.

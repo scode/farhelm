@@ -53,12 +53,8 @@ pub(crate) fn WindowFrame(children: Element) -> Element {
     }
     let native = cfg!(all(native_desktop, target_os = "macos"));
     rsx! {
-        if native {
-            // Bootstrap failures must receive layout before AppBody mounts
-            // its ordinary stylesheets. The desktop asset handler is already
-            // registered by App before this child renders.
-            document::Link { rel: "stylesheet", href: crate::APP_CSS }
-        }
+        // The native custom head supplies the shared stylesheet before any
+        // bootstrap page. Window chrome therefore needs no runtime CSS fetch.
         div {
             class: if native { "window-root macos-root" } else { "window-root" },
             {children}

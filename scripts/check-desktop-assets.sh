@@ -134,16 +134,36 @@ trap 'rm -rf "$work"' EXIT
 # module `index.html` loads, and the `.wasm` that module fetches. Neither is an
 # `asset!()` and neither is ever requested over the desktop asset route, so
 # both are excluded rather than treated as a mismatch. They are identified by
-# what they ARE (referenced from index.html; a wasm module) instead of by a
-# name pattern, so a change to dx's naming does not quietly turn the exclusion
-# into a hole.
+# what they ARE (the body renderer module; a wasm module) instead of by a
+# name pattern. Head CSS and classic appearance JS are packaged product assets,
+# even though the web entry also references them before the renderer starts.
 #
 # Deliberately POSIX-portable — `sed` rather than `find -printf` — because
 # `scripts/build-desktop-binary.sh` calls this through `--compare` on a macOS
 # release runner, where find has no `-printf`.
 list_bundled_assets() {
   local dist=$1
-  grep -o 'assets/[A-Za-z0-9._-]*' "$dist/index.html" | sed 's#^#/#' | sort -u >"$work/glue"
+  # dx emits one external module in the body. Read that tag's src rather than
+  # subtracting every head reference: doing so would hide missing product CSS
+  # and JS from this bidirectional parity check. Fail if the entry changes to
+  # a shape this narrow scanner cannot identify, rather than guessing a name.
+  awk -v RS='<' '
+    /^body([[:space:]>])/ { body = 1 }
+    /^\/body>/ { body = 0 }
+    body && /^script[[:space:]]/ && /type="module"/ {
+      if (!match($0, /src="[^"]+"/)) next
+      src = substr($0, RSTART + 5, RLENGTH - 6)
+      if (!match(src, /assets\/[A-Za-z0-9._-]+\.js$/)) next
+      print "/" substr(src, RSTART, RLENGTH)
+      entries++
+    }
+    END {
+      if (entries != 1) {
+        print "cannot identify one body renderer module in web index" > "/dev/stderr"
+        exit 1
+      }
+    }
+  ' "$dist/index.html" >"$work/glue" || return 1
   find "$dist/assets" -maxdepth 1 -type f | sed 's#.*/#/assets/#' |
     grep -v '\.wasm$' | sort -u | comm -23 - "$work/glue"
 }
@@ -191,6 +211,26 @@ self_test() {
     echo "self-test: a requested-but-unbundled asset was accepted" >&2
     return 1
   fi
+  # The generated head now loads real product assets before the body module.
+  # Removing either must remain a mismatch, including when its name appears
+  # in index.html; only renderer glue and WASM are outside the declared set.
+  mkdir -p "$work/st-dist/assets" || return 1
+  printf '%s\n' '<html><head><script src="/assets/appearance.js"></script><link rel="stylesheet" href="/assets/app.css"></head><body><script type="module" async src="/./assets/renderer.js"></script></body></html>' >"$work/st-dist/index.html"
+  touch "$work/st-dist/assets/appearance.js" "$work/st-dist/assets/app.css" \
+    "$work/st-dist/assets/renderer.js" "$work/st-dist/assets/renderer_bg.wasm"
+  printf '/assets/app.css\n/assets/appearance.js\n' >"$work/st-head"
+  list_bundled_assets "$work/st-dist" >"$work/st-present" || return 1
+  compare_asset_sets "$work/st-present" "$work/st-head" >/dev/null || {
+    echo "self-test: head product assets were excluded from the bundle" >&2
+    return 1
+  }
+  for missing in app.css appearance.js; do
+    grep -v "/assets/$missing" "$work/st-head" >"$work/st-missing"
+    if compare_asset_sets "$work/st-present" "$work/st-missing" >/dev/null 2>&1; then
+      echo "self-test: missing head product asset was accepted: $missing" >&2
+      return 1
+    fi
+  done
   echo "== self-test ok: the comparison rejects a divergence in both directions"
 }
 
