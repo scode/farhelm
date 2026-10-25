@@ -5864,7 +5864,10 @@ pub(super) fn CreateSessionForm(
                     // preparation isolates without taking a field's focus.
                     hidden_now: composer_hidden_now,
                 },
-                escape_target: Some(".launch-composer-cancel, .launch-composer-loading-cancel".into()),
+                // querySelector uses document order, not selector order: omit
+                // the outer Cancel while the inline panel owns Escape. Its
+                // disabled Cancel also keeps a pending save uncancellable.
+                escape_target: Some(".save-template-cancel, .launch-composer-cancel:not([data-template-panel-open]), .launch-composer-loading-cancel".into()),
                 // Loading has no Launch button: the shared container Enter
                 // action must resolve the live control rather than submit early.
                 main_action: Some(".create-session-submit".into()),
@@ -6037,6 +6040,9 @@ pub(super) fn CreateSessionForm(
                 button {
                     r#type: "button",
                     class: "btn btn-neutral launch-composer-cancel",
+                    // Keep explicit launcher cancellation separate from the
+                    // isolation safety net's innermost-panel Escape target.
+                    "data-template-panel-open": template_panel().is_some().then_some("true"),
                     "data-tooltip": "cancel: close without starting anything",
                     disabled: busy || template_saving(),
                     onclick: move |_| {

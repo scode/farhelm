@@ -1898,7 +1898,8 @@ for (const kind of ["agent", "command"] as const) {
 
 /**
  * A collision is a refusal, not a replacement. Escape dismisses only the
- * inline panel and leaves the setup editable, including after a failed save.
+ * inline panel and leaves the setup editable, including after Enter disabled
+ * the name field during the failed save. Focus must recover without test help.
  */
 test("launcher template save refuses a taken name and Escape keeps the launcher", async ({ page, request }) => {
   const name = `e2e-launcher-taken-${Date.now()}`;
@@ -1910,10 +1911,10 @@ test("launcher template save refuses a taken name and Escape keeps the launcher"
     await form.locator(".launch-composer-save-template").click();
     const panel = form.locator(".save-template-panel");
     await panel.locator(".save-template-name").fill(name);
-    await panel.locator(".save-template-save").click();
+    await expect(panel.locator(".save-template-name")).toBeFocused();
+    await panel.locator(".save-template-name").press("Enter");
     await expect(panel.getByRole("alert")).toContainText("already exists");
     expect((await storedTemplate(request, name)).fields).toEqual(fields);
-    await panel.locator(".save-template-name").focus();
     await expect(panel.locator(".save-template-name")).toBeFocused();
     await panel.locator(".save-template-name").press("Escape");
     await expect(panel).toHaveCount(0);
@@ -1923,3 +1924,123 @@ test("launcher template save refuses a taken name and Escape keeps the launcher"
     await deleteTemplate(request, name);
   }
 });
+
+/** Body Escape must resolve the innermost Cancel even though the launcher's
+ * Cancel precedes it in the DOM. The next Escape may close the launcher. */
+test("save as template handles body Escape before the launcher", async ({ page }) => {
+  const form = await openNew(page);
+  const codex = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true });
+  await codex.click();
+  await form.locator(".launch-composer-save-template").click();
+  const panel = form.locator(".save-template-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.locator(".save-template-name")).toBeFocused();
+  await blurTemplateFocusToBody(page);
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(form).toBeVisible();
+  await expect(codex).toHaveAttribute("aria-pressed", "true");
+  await blurTemplateFocusToBody(page);
+  await page.keyboard.press("Escape");
+  await expect(form).toHaveCount(0);
+});
+
+/** Assert the lost-focus premise before exercising the isolation safety net.
+ * A key sent to a focused panel field would bypass the body routing bug. */
+async function blurTemplateFocusToBody(page: Page) {
+  expect(await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    return document.activeElement === document.body;
+  }), "premise: the next key starts on body outside the launcher").toBe(true);
+}
+
+/** Cross the refusal's deferred focus handoff before checking a surviving owner.
+ * A still-focused field can satisfy toBeFocused before recovery runs; two
+ * browser frames cross rendering and the queued recovery without a time delay. */
+async function afterTemplateFocusRecovery(page: Page) {
+  await page.evaluate(() => new Promise<void>(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+}
+
+for (const focusOwner of ["lost", "search", "launch", "approval"] as const) {
+  /** Hold a real save at its PUT so busy Escape and the eventual refusal
+   * are observed separately. Recovery must yield to a launcher field the
+   * user chose while saving, while lost focus returns to the template name.
+   * The exempt native button models an approval answer's focus ownership;
+   * this fixture does not exercise the separate agent approval protocol. */
+  test(`save as template refusal respects ${focusOwner} focus`, async ({ page, request }) => {
+    const name = `e2e-refused-save-${Date.now()}`;
+    const gate = routeGate();
+    let writes = 0;
+    let bodyFailed = true;
+    const build = requireHelmBuild(await request.get("/api/templates"), "refused launcher template save");
+    await page.route(`**/api/templates/${encodeURIComponent(name)}`, async route => {
+      if (route.request().method() !== "PUT") return route.continue();
+      writes++;
+      await gate.wait();
+      await route.fulfill({ status: 409, headers: { "x-farhelm-build": build }, contentType: "text/plain", body: "fixture refused the template save" });
+    });
+    try {
+      const form = await openNew(page);
+      await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+      await form.locator(".launch-composer-save-template").click();
+      const panel = form.locator(".save-template-panel");
+      const field = panel.locator(".save-template-name");
+      await field.fill(name);
+      await expect(field).toBeFocused();
+      await field.press("Enter");
+      await expect.poll(() => writes, { message: "one actual PUT remains held" }).toBe(1);
+      await expect(field).toBeDisabled();
+      await expect(panel.locator(".save-template-cancel")).toBeDisabled();
+      await blurTemplateFocusToBody(page);
+      await page.keyboard.press("Escape");
+      await expect(panel).toBeVisible();
+      await expect(form).toBeVisible();
+      if (focusOwner === "approval") {
+        await page.evaluate(() => {
+          const answer = document.createElement("button");
+          answer.className = "fixture-approval-answer";
+          answer.setAttribute("data-modal-exempt", "");
+          answer.textContent = "fixture approval answer";
+          document.body.append(answer);
+        });
+      }
+      const chosen = focusOwner === "search" ? form.locator(".launch-composer-search input")
+        : focusOwner === "launch" ? form.locator(".create-session-submit")
+        : focusOwner === "approval" ? page.locator(".fixture-approval-answer") : field;
+      if (focusOwner !== "lost") {
+        if (focusOwner === "launch") {
+          // ARIA unavailability does not remove native focus ownership.
+          // Playwright's enabled/click checks include ARIA, so use native
+          // focus directly after proving this is the intended unavailable action.
+          await expect(chosen).toHaveAttribute("aria-disabled", "true");
+          await expect(chosen).toHaveJSProperty("disabled", false);
+        } else {
+          await expect(chosen).toBeEnabled();
+          // Only search models a pointer choice. The synthetic approval
+          // answer has no real card's stacking above the scrim; this case
+          // measures native focus ownership, not approval hit testing.
+          if (focusOwner === "search") await chosen.click();
+        }
+        // WebKit does not focus a clicked button. Establish the chosen owner
+        // explicitly before releasing the response whose recovery we measure.
+        await chosen.focus();
+        await expect(chosen).toBeFocused();
+      }
+      gate.release();
+      await expect(panel.getByRole("alert")).toContainText("fixture refused the template save");
+      await expect(field).toBeEnabled();
+      await afterTemplateFocusRecovery(page);
+      await expect(chosen).toBeFocused();
+      await expect(field).toHaveValue(name);
+      expect(writes, "body Escape must not submit another save").toBe(1);
+      bodyFailed = false;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["held template PUT", () => gate.release()],
+        ["template write route", () => page.unrouteAll({ behavior: "wait" })],
+      ]);
+    }
+  });
+}

@@ -7,6 +7,7 @@
 use super::templates::{
     Field, NAME_KIND_HELP, NameKindControl, new_name_refusal, saved_fields_refusal, word,
 };
+use crate::modal_dialog::{RecoveryDelay, RecoveryFocus};
 use crate::{ApiBase, api, peer::display_peer};
 use dioxus::prelude::*;
 use farhelm_proto::launcher::{
@@ -170,6 +171,25 @@ fn choice_text(field: Field, fields: &TemplateFields, host_label: &str) -> Strin
     display_peer(value.as_deref().unwrap_or("default"))
 }
 
+/// Return a refused save's keyboard focus without taking it from another field.
+/// Disabling the name field during the request can drop focus to the page;
+/// the shared recovery policy preserves any usable owner, including an exempt
+/// approval answer. Capture this launcher before deferring past re-enablement
+/// so closing and reopening cannot hand focus to a replacement dialog.
+fn restore_name_focus() {
+    let recovery =
+        RecoveryFocus::new(".save-template-name", None, false, RecoveryDelay::OneFrame).script();
+    document::eval(&format!(
+        r#"(() => {{
+            const dialog = document.querySelector('.create-session-form[role="dialog"]');
+            requestAnimationFrame(() => {{
+                if (!dialog?.isConnected) return;
+                {recovery}
+            }});
+        }})()"#
+    ));
+}
+
 /// An inline save surface with its own keys and guarded asynchronous write.
 /// The parent holds `saving` too, preventing an accepted save from losing its
 /// future to launcher cancellation or a competing launch.
@@ -222,6 +242,7 @@ pub(super) fn SaveTemplatePanel(
             if let Some(refusal) = new_name_refusal(&template.name, listed.as_deref().ok()) {
                 error.set(Some(refusal));
                 saving.set(false);
+                restore_name_focus();
                 return;
             }
             match saving_request.await {
@@ -232,6 +253,7 @@ pub(super) fn SaveTemplatePanel(
                 Err(refusal) => {
                     error.set(Some(refusal));
                     saving.set(false);
+                    restore_name_focus();
                 }
             }
         });

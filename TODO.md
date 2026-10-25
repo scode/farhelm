@@ -132,11 +132,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
   exposed are TBD.
 
-- **Escape in the launcher's save-as-template panel.** With the panel open but keyboard focus lost (for example after a
-  refused save), Escape closes the whole launcher and discards its draft instead of closing just the panel. Complexity
-  gate: fix it only if the fix is simple; otherwise leave it. From the review of `modal-dialog-shell` on 2026-10-23.
-  Plan: `plans/queue/template-panel-escape.md`.
-
 - **Quote the second suggested start command exactly.** When an SSH channel closes before the supervisor handshake, the
   helm suggests a start command with the same double-escaping bug `start-remedy-quoting` fixed in the other one: for a
   path with apostrophes, backslashes and similar characters, it is not exactly the command to paste and can start
