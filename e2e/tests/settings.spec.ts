@@ -6,12 +6,17 @@ import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { clickDialogGap } from "./helpers/dialog-gap";
 import { routeGate } from "./helpers/route-gate";
+import { drainedRoute } from "./helpers/drained-route";
+import { requireHelmBuild } from "./helpers/helm-build";
+import { attachSession } from "./helpers/term";
 import { openSettings, selectSettingsSection, type SettingsSection } from "./helpers/settings";
-import type { APIRequestContext, Request, Route } from "@playwright/test";
+import type { APIRequestContext, Page, Request, Route } from "@playwright/test";
 import { request as independentRequest } from "@playwright/test";
 import { harnessAuthorizationHeaders } from "./helpers/device-auth";
 import { currentStackSlot } from "../stack-slots";
 import {
+  cleanupSession,
+  createSession,
   forceBuildSkew,
   hostRowByName,
   openHostMenu,
@@ -21,6 +26,519 @@ import {
 
 /** The web fixture has no updater, so its navigation omits the app pane. */
 const webSettingsSections: SettingsSection[] = ["sessions", "hosts", "terminal", "checkouts", "agent trust", "notifications"];
+
+/** End the page's preference queue before releasing held replies or restoring
+ * shared state. Otherwise a later queued click could overwrite cleanup after
+ * its route disappears and contaminate another spec using the same helm. */
+async function endPreferenceSaveTest(
+  page: Page,
+  stopRoute: () => Promise<void>,
+  release: () => void,
+  restore: () => Promise<void>,
+  bodyFailed: boolean,
+) {
+  await cleanupOwnedSteps(bodyFailed, [
+    ["preference page", () => page.goto("about:blank")],
+    ["preference route", async () => { release(); await stopRoute(); }],
+    ["shared preferences", restore],
+  ]);
+}
+
+// Claude and Codex cover the two hint implementations. Muse uses the same
+// workspace component as Codex; Pi has no question-hint switch.
+for (const choice of [
+  { field: "color_terminal_frames", saved: false, next: true, section: "sessions", role: "checkbox",
+    name: "color terminal frames by host", oldName: "color terminal frames by host", oldChecked: false,
+    error: "Could not save whether to color terminal frames. Try again." },
+  { field: "name_session_on_quick_launch", saved: true, next: false, section: "sessions", role: "checkbox",
+    name: "name sessions on quick launch", oldName: "name sessions on quick launch", oldChecked: true,
+    error: "Could not save whether to name quick-launched sessions. Try again." },
+  { field: "terminal_link_click", saved: "intercept", next: "program", section: "terminal", role: "radio",
+    name: "pass the click on only", oldName: "open in Farhelm, don't pass the click on", oldChecked: true,
+    error: "Could not save how terminal links are clicked. Try again." },
+  { field: "claude_trust_hint_dismissed", saved: false, next: true, section: "agent trust", role: "checkbox",
+    name: "show the hint when Claude asks about a managed checkout", oldName: "show the hint when Claude asks about a managed checkout", oldChecked: true,
+    error: "Could not save whether to show the Claude trust hint. Try again." },
+  { field: "codex_trust_hint_dismissed", saved: false, next: true, section: "agent trust", role: "checkbox",
+    name: "show the hint when Codex asks about a managed checkout", oldName: "show the hint when Codex asks about a managed checkout", oldChecked: true,
+    error: "Could not save whether to show the Codex trust hint. Try again." },
+] as const) {
+  /** A preference refusal must restore the helm's choice and report beside the
+   * control. Held replies establish that the clickable optimistic state is
+   * provisional; a later successful click must clear the warning and persist. */
+  test(`settings reports and reverts a refused ${choice.field} save`, async ({ page, request }) => {
+    const previous = await readPreferences(request);
+    const build = requireHelmBuild(await request.get("/api/preferences"), "settings preference refusals");
+    const reached = routeGate();
+    const release = routeGate();
+    let stopRoute = async () => {};
+    let refuse = true;
+    let writes = 0;
+    let bodyFailed = true;
+    try {
+      await patchPreferences(request, { [choice.field]: choice.saved });
+      expect((await readPreferences(request))[choice.field], "the helm holds the explicit fixture choice").toBe(choice.saved);
+      stopRoute = await drainedRoute(page, "**/api/preferences", async (route) => {
+        const outgoing = route.request();
+        if (outgoing.method() !== "PUT" || !(choice.field in outgoing.postDataJSON())) return route.fallback();
+        writes++;
+        expect(outgoing.postDataJSON()[choice.field]).toBe(choice.next);
+        if (!refuse) return route.continue();
+        reached.release();
+        await release.wait();
+        await route.fulfill({ status: 503, headers: { "x-farhelm-build": build }, body: "fixture preference save refused" });
+      });
+      await page.goto("/");
+      const dialog = await openSettings(page, choice.section);
+      const pane = dialog.locator(`section.app-settings-panel[aria-label="${choice.section}"]`);
+      const control = pane.getByRole(choice.role, { name: choice.name, exact: true });
+      const old = pane.getByRole(choice.role, { name: choice.oldName, exact: true });
+      await expect(old).toBeChecked({ checked: choice.oldChecked });
+      if (choice.role === "radio") await expect(control).not.toBeChecked();
+      await expect(control).toBeEnabled();
+      // click() permits the refused state to roll back before the action
+      // finishes; check()/uncheck() would demand that it remain changed.
+      await control.click();
+      await reached.wait();
+      await expect(control).toBeEnabled();
+      await expect(control).toBeChecked({ checked: choice.role === "radio" || !choice.oldChecked });
+      expect((await readPreferences(request))[choice.field], "the held PUT has not changed persistence").toBe(choice.saved);
+      release.release();
+      const error = pane.getByRole("alert");
+      await expect(error).toHaveText(choice.error);
+      await expect(old).toBeChecked({ checked: choice.oldChecked });
+      if (choice.role === "radio") await expect(control).not.toBeChecked();
+      expect((await readPreferences(request))[choice.field]).toBe(choice.saved);
+      expect(writes).toBe(1);
+      const controlBox = await control.boundingBox();
+      const errorBox = await error.boundingBox();
+      expect(controlBox, "the restored control is rendered beside its failure").not.toBeNull();
+      expect(errorBox, "the failure is rendered below the control").not.toBeNull();
+      expect(errorBox!.y).toBeGreaterThanOrEqual(controlBox!.y + controlBox!.height);
+      await expect(page.locator(".build-skew")).toHaveCount(0);
+      refuse = false;
+      await control.click();
+      await expect.poll(async () => (await readPreferences(request))[choice.field]).toBe(choice.next);
+      await expect(error).toHaveCount(0);
+      bodyFailed = false;
+    } finally {
+      await endPreferenceSaveTest(page, stopRoute, release.release,
+        () => patchPreferences(request, { [choice.field]: previous[choice.field] ?? null }), bodyFailed);
+    }
+  });
+}
+
+for (const hint of [
+  { name: "Claude", key: "claude", field: "claude_trust_hint_dismissed", endpoint: "/api/checkout-claude-trust" },
+  { name: "Codex", key: "codex", field: "codex_trust_hint_dismissed", endpoint: "/api/checkout-agent-trust/codex" },
+] as const) {
+  /** A pending hint read cannot undo the clicked native state. Both reads
+   * and writes stay held so a fast GET cannot hide a stale render: the next
+   * click must mean the opposite choice and supersede the refused save. */
+  test(`settings keeps the pending ${hint.name} hint choice clickable through a held read`, async ({ page, request }) => {
+    const previous = await readPreferences(request);
+    const build = requireHelmBuild(await request.get(hint.endpoint), "pending trust hint choices");
+    const readReached = routeGate();
+    const readRelease = routeGate();
+    const firstReached = routeGate();
+    const firstRelease = routeGate();
+    const latestReached = routeGate();
+    const latestRelease = routeGate();
+    let stopRead = async () => {};
+    let stopWrite = async () => {};
+    let latestRequest: Request | undefined;
+    const dismissals: boolean[] = [];
+    let bodyFailed = true;
+    try {
+      await patchPreferences(request, { [hint.field]: false });
+      expect((await readPreferences(request))[hint.field]).toBe(false);
+      await page.goto("/");
+      const dialog = await openSettings(page, "agent trust");
+      const field = dialog.locator(`#checkout-${hint.key}-trust`);
+      const toggle = field.getByRole("checkbox", { name: `show the hint when ${hint.name} asks about a managed checkout`, exact: true });
+      await expect(toggle).toBeEnabled();
+      await expect(toggle).toBeChecked();
+      // Install only after the successful mounted read above. A loading
+      // checkbox would not exercise synchronization of the previous value.
+      stopRead = await drainedRoute(page, (url) => url.pathname === hint.endpoint, async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        readReached.release();
+        await readRelease.wait();
+        await route.continue();
+      });
+      stopWrite = await drainedRoute(page, "**/api/preferences", async (route) => {
+        const outgoing = route.request();
+        if (outgoing.method() !== "PUT" || !(hint.field in outgoing.postDataJSON())) return route.fallback();
+        dismissals.push(outgoing.postDataJSON()[hint.field]);
+        if (dismissals.length === 1) {
+          firstReached.release();
+          await firstRelease.wait();
+          await route.fulfill({ status: 503, headers: { "x-farhelm-build": build }, body: "fixture superseded hint save refused" });
+        } else {
+          expect(dismissals, "the opposite native click must reach the serialized writer").toEqual([true, false]);
+          latestRequest = outgoing;
+          latestReached.release();
+          await latestRelease.wait();
+          await route.continue();
+        }
+      });
+      await toggle.click();
+      await Promise.all([firstReached.wait(), readReached.wait()]);
+      expect(dismissals).toEqual([true]);
+      await expect(toggle).not.toBeChecked();
+      await expect(toggle).toBeEnabled();
+      expect((await readPreferences(request))[hint.field], "both requests remain held before persistence").toBe(false);
+      await toggle.click();
+      await expect(toggle).toBeChecked();
+      await expect(toggle).toBeEnabled();
+      // The GET remains held through both clicks and the old refusal. The
+      // optimistic checkbox cannot depend on a replacement read completing.
+      firstRelease.release();
+      await latestReached.wait();
+      expect(dismissals).toEqual([true, false]);
+      await expect(toggle).toBeChecked();
+      await expect(toggle).toBeEnabled();
+      await expect(field.getByRole("alert")).toHaveCount(0);
+      latestRelease.release();
+      const saved = await latestRequest!.response();
+      expect(saved, "the newest choice receives its own acknowledgment").not.toBeNull();
+      expect(saved!.ok()).toBe(true);
+      await saved!.finished();
+      expect((await readPreferences(request))[hint.field]).toBe(false);
+      readRelease.release();
+      await stopRead();
+      await expect(toggle).toBeChecked();
+      await expect(toggle).toBeEnabled();
+      await expect(field.getByRole("alert")).toHaveCount(0);
+      await expect(page.locator(".build-skew")).toHaveCount(0);
+      bodyFailed = false;
+    } finally {
+      await endPreferenceSaveTest(page, async () => {
+        const results = await Promise.allSettled([stopRead(), stopWrite()]);
+        expect(results.filter((result) => result.status === "rejected"), "both hint handlers must drain").toEqual([]);
+      }, () => { readRelease.release(); firstRelease.release(); latestRelease.release(); },
+      () => patchPreferences(request, { [hint.field]: previous[hint.field] ?? null }), bodyFailed);
+    }
+  });
+
+  /** A successful old GET may cross the acknowledgment of a pending click.
+   * Capture its real old body before committing the PUT, then hold delivery
+   * across that commit. Automatic cancellation or invalidation may retire
+   * the old read; either way a fresh read must leave the saved choice current. */
+  test(`settings repairs a ${hint.name} trust read crossing a successful hint save`, async ({ page, request }) => {
+    const previous = await readPreferences(request);
+    const oldCaptured = routeGate();
+    const oldRelease = routeGate();
+    const oldFinished = routeGate();
+    const writeReached = routeGate();
+    const writeRelease = routeGate();
+    const currentRead = routeGate();
+    let stopRead = async () => {};
+    let stopWrite = async () => {};
+    let captureOld = true;
+    let submitted: Request | undefined;
+    let writes = 0;
+    let bodyFailed = true;
+    try {
+      await patchPreferences(request, { [hint.field]: false });
+      expect((await readPreferences(request))[hint.field]).toBe(false);
+      await page.goto("/");
+      const dialog = await openSettings(page, "agent trust");
+      const field = dialog.locator(`#checkout-${hint.key}-trust`);
+      const toggle = field.getByRole("checkbox", { name: `show the hint when ${hint.name} asks about a managed checkout`, exact: true });
+      await expect(toggle).toBeChecked();
+      await expect(toggle).toBeEnabled();
+      stopRead = await drainedRoute(page, (url) => url.pathname === hint.endpoint, async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        const raw = await response.json();
+        let held = false;
+        if (captureOld) {
+          captureOld = false;
+          held = true;
+          expect(raw.hint_dismissed, "the actual backend body precedes the held PUT's commit").toBe(false);
+          oldCaptured.release();
+          await oldRelease.wait();
+        }
+        // A resource may legitimately cancel this delivery after settlement.
+        // drainedRoute tolerates that lifecycle race; a fresh successful GET
+        // and the final UI, rather than acceptance of stale bytes, are required.
+        try {
+          await route.fulfill({ response });
+          if (raw.hint_dismissed === true) currentRead.release();
+        } finally {
+          if (held) oldFinished.release();
+        }
+      });
+      stopWrite = await drainedRoute(page, "**/api/preferences", async (route) => {
+        const outgoing = route.request();
+        if (outgoing.method() !== "PUT" || !(hint.field in outgoing.postDataJSON())) return route.fallback();
+        expect(outgoing.postDataJSON()[hint.field]).toBe(true);
+        writes++;
+        submitted = outgoing;
+        writeReached.release();
+        await writeRelease.wait();
+        const response = await route.fetch();
+        expect(response.status(), "the owned dismissal really commits").toBe(204);
+        await route.fulfill({ response });
+      });
+      await toggle.click();
+      await Promise.all([oldCaptured.wait(), writeReached.wait()]);
+      expect((await readPreferences(request))[hint.field]).toBe(false);
+      await expect(toggle).not.toBeChecked();
+      await expect(toggle).toBeEnabled();
+      writeRelease.release();
+      const saved = await submitted!.response();
+      expect(saved).not.toBeNull();
+      expect(saved!.status()).toBe(204);
+      await saved!.finished();
+      expect((await readPreferences(request))[hint.field]).toBe(true);
+      oldRelease.release();
+      await oldFinished.wait();
+      await currentRead.wait();
+      await expect(toggle).not.toBeChecked();
+      await expect(toggle).toBeEnabled();
+      await expect(field.getByRole("alert")).toHaveCount(0);
+      expect((await readPreferences(request))[hint.field]).toBe(true);
+      expect(writes).toBe(1);
+      bodyFailed = false;
+    } finally {
+      await endPreferenceSaveTest(page, async () => {
+        const results = await Promise.allSettled([stopRead(), stopWrite()]);
+        expect(results.filter((result) => result.status === "rejected"), "crossing-read routes must drain").toEqual([]);
+      }, () => { oldRelease.release(); writeRelease.release(); },
+      () => patchPreferences(request, { [hint.field]: previous[hint.field] ?? null }), bodyFailed);
+    }
+  });
+
+  for (const unreadable of hint.key === "claude" ? [false, true] : [false]) {
+  /** A reopened panel can read an optimistic dismissal while its original
+   * owner is gone. Failure must retire that overlay in the already-mounted
+   * replacement view; another click or reopen would conceal a stuck value.
+   * A refused corrective read leaves the existing disabled/read-error state,
+   * rather than retaining the failed choice or inventing a known old value.
+   * The old panel's save warning must not migrate into the new panel. */
+  test(`settings reverts a pending ${hint.name} hint save after reopening before refusal${unreadable ? " with an unreadable corrective read" : ""}`, async ({ page, request }) => {
+    const previous = await readPreferences(request);
+    const build = requireHelmBuild(await request.get(hint.endpoint), "reopened trust hint refusal");
+    const reached = routeGate();
+    const release = routeGate();
+    const failedRead = routeGate();
+    let stopRoute = async () => {};
+    let stopRead = async () => {};
+    let submitted: Request | undefined;
+    let writes = 0;
+    let bodyFailed = true;
+    try {
+      await patchPreferences(request, { [hint.field]: false });
+      expect((await readPreferences(request))[hint.field]).toBe(false);
+      stopRoute = await drainedRoute(page, "**/api/preferences", async (route) => {
+        const outgoing = route.request();
+        if (outgoing.method() !== "PUT" || !(hint.field in outgoing.postDataJSON())) return route.fallback();
+        expect(outgoing.postDataJSON()[hint.field]).toBe(true);
+        writes++;
+        submitted = outgoing;
+        reached.release();
+        await release.wait();
+        await route.fulfill({ status: 503, headers: { "x-farhelm-build": build }, body: "fixture reopened hint save refused" });
+      });
+      await page.goto("/");
+      const dialog = await openSettings(page, "agent trust");
+      const field = dialog.locator(`#checkout-${hint.key}-trust`);
+      const toggle = field.getByRole("checkbox", { name: `show the hint when ${hint.name} asks about a managed checkout`, exact: true });
+      await expect(toggle).toBeEnabled();
+      await expect(toggle).toBeChecked();
+      await toggle.click();
+      await reached.wait();
+      await expect(toggle).not.toBeChecked();
+      await expect(toggle).toBeEnabled();
+      await dialog.getByRole("button", { name: "close", exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+      const reopenedRead = page.waitForResponse((reply) => reply.request().method() === "GET"
+        && new URL(reply.url()).pathname === hint.endpoint);
+      await openSettings(page, "agent trust");
+      const fresh = await reopenedRead;
+      expect(fresh.ok(), "the replacement panel gets a successful trust read while the PUT remains held").toBe(true);
+      expect((await fresh.json()).hint_dismissed, "the helm still holds the original shown-hint choice").toBe(false);
+      await expect(toggle).toBeEnabled();
+      await expect(toggle).not.toBeChecked();
+      expect((await readPreferences(request))[hint.field]).toBe(false);
+      expect(writes).toBe(1);
+      if (unreadable) {
+        // Start refusing only after the replacement view has copied the
+        // pending choice from a successful raw read. Initial-load failure
+        // would never establish the provisional state that must be retired.
+        stopRead = await drainedRoute(page, (url) => url.pathname === hint.endpoint, async (route) => {
+          if (route.request().method() !== "GET") return route.fallback();
+          await route.fulfill({ status: 503, headers: { "x-farhelm-build": build }, body: "fixture corrective trust read refused" });
+          failedRead.release();
+        });
+      }
+      // Stay in this mounted replacement panel across the failure. A manual
+      // refresh, further click or second reopen would erase the lifetime bug.
+      release.release();
+      const refused = await submitted!.response();
+      expect(refused, "the owned pending write receives its refusal").not.toBeNull();
+      expect(refused!.status()).toBe(503);
+      await refused!.finished();
+      if (unreadable) {
+        await failedRead.wait();
+        await expect(toggle).toBeDisabled();
+        await expect(field.getByRole("alert")).toContainText("Could not save or read Claude trust settings:");
+        await expect(field.getByRole("alert")).toContainText("fixture corrective trust read refused");
+        await expect(field.getByRole("alert")).not.toContainText("Could not save whether to show the Claude trust hint.");
+      } else {
+        await expect(toggle).toBeChecked();
+        await expect(toggle).toBeEnabled();
+        await expect(field.getByRole("alert")).toHaveCount(0);
+      }
+      expect((await readPreferences(request))[hint.field]).toBe(false);
+      expect(writes).toBe(1);
+      await expect(page.locator(".build-skew")).toHaveCount(0);
+      bodyFailed = false;
+    } finally {
+      await endPreferenceSaveTest(page, async () => {
+        const results = await Promise.allSettled([stopRead(), stopRoute()]);
+        expect(results.filter((result) => result.status === "rejected"), "both reopened-hint handlers must drain").toEqual([]);
+      }, release.release,
+        () => patchPreferences(request, { [hint.field]: previous[hint.field] ?? null }), bodyFailed);
+    }
+  });
+  }
+}
+
+/** A newer link choice owns the field even while the old HTTP request is
+ * outstanding. The old refusal must neither flash an alert nor put back an
+ * older radio value before the newest choice reaches persistence. */
+test("settings ignores a superseded link-choice failure", async ({ page, request }) => {
+  const previous = await readPreferences(request);
+  const build = requireHelmBuild(await request.get("/api/preferences"), "superseded link preference");
+  const firstReached = routeGate();
+  const firstRelease = routeGate();
+  const newestReached = routeGate();
+  const newestRelease = routeGate();
+  let stopRoute = async () => {};
+  let writes = 0;
+  let bodyFailed = true;
+  try {
+    await patchPreferences(request, { terminal_link_click: "intercept" });
+    expect((await readPreferences(request)).terminal_link_click).toBe("intercept");
+    stopRoute = await drainedRoute(page, "**/api/preferences", async (route) => {
+      const outgoing = route.request();
+      if (outgoing.method() !== "PUT" || !("terminal_link_click" in outgoing.postDataJSON())) return route.fallback();
+      writes++;
+      if (writes === 1) {
+        expect(outgoing.postDataJSON().terminal_link_click).toBe("program");
+        firstReached.release();
+        await firstRelease.wait();
+        await route.fulfill({ status: 503, headers: { "x-farhelm-build": build }, body: "fixture older save refused" });
+      } else {
+        expect(outgoing.postDataJSON().terminal_link_click).toBe("both");
+        newestReached.release();
+        await newestRelease.wait();
+        await route.continue();
+      }
+    });
+    await page.goto("/");
+    const dialog = await openSettings(page, "terminal");
+    const program = dialog.getByRole("radio", { name: "pass the click on only", exact: true });
+    const both = dialog.getByRole("radio", { name: "open in Farhelm and also pass the click on", exact: true });
+    await expect(dialog.getByRole("radio", { name: "open in Farhelm, don't pass the click on", exact: true })).toBeChecked();
+    // Retain even a warning removed by the newer click: a final no-alert
+    // assertion alone could miss supersession incorrectly reporting failure.
+    const warnings = await dialog.evaluateHandle((element) => {
+      const seen: string[] = [];
+      const observer = new MutationObserver((records) => {
+        for (const record of records) for (const node of record.addedNodes) {
+          if (node instanceof Element && node.matches('[role="alert"]') && seen.length < 20) seen.push(node.textContent ?? "");
+        }
+      });
+      observer.observe(element, { childList: true, subtree: true });
+      return { seen, observer };
+    });
+    await program.click();
+    await firstReached.wait();
+    await expect(program).toBeChecked();
+    await expect(both).toBeEnabled();
+    await both.click();
+    await expect(both).toBeChecked();
+    firstRelease.release();
+    await newestReached.wait();
+    expect(writes).toBe(2);
+    expect((await readPreferences(request)).terminal_link_click).toBe("intercept");
+    await expect(both).toBeChecked();
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+    expect(await warnings.evaluate((state) => state.seen)).toEqual([]);
+    newestRelease.release();
+    await expect.poll(async () => (await readPreferences(request)).terminal_link_click).toBe("both");
+    await expect(both).toBeChecked();
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+    expect(await warnings.evaluate((state) => state.seen)).toEqual([]);
+    await warnings.evaluate((state) => state.observer.disconnect());
+    await warnings.dispose();
+    bodyFailed = false;
+  } finally {
+    await endPreferenceSaveTest(page, stopRoute, () => { firstRelease.release(); newestRelease.release(); },
+      () => patchPreferences(request, { terminal_link_click: previous.terminal_link_click ?? null }), bodyFailed);
+  }
+});
+
+/** Closing drops the panel's error, not its obligation to undo an unsaved
+ * shared choice. The terminal consumes frame colors outside Settings, so its
+ * attribute proves rollback before reopening can fetch or rebuild controls. */
+test("settings frame-color rollback survives closing before failure", async ({ page, request }) => {
+  const previous = await readPreferences(request);
+  const build = requireHelmBuild(await request.get("/api/preferences"), "closed settings rollback");
+  const reached = routeGate();
+  const release = routeGate();
+  let stopRoute = async () => {};
+  let owned: string | undefined;
+  let bodyFailed = true;
+  try {
+    await patchPreferences(request, { color_terminal_frames: false });
+    expect((await readPreferences(request)).color_terminal_frames).toBe(false);
+    owned = (await createSession(request, { title: `settings-frame-close-${Date.now()}` })).id;
+    stopRoute = await drainedRoute(page, "**/api/preferences", async (route) => {
+      const outgoing = route.request();
+      if (outgoing.method() !== "PUT" || !("color_terminal_frames" in outgoing.postDataJSON())) return route.fallback();
+      expect(outgoing.postDataJSON().color_terminal_frames).toBe(true);
+      reached.release();
+      await release.wait();
+      await route.fulfill({ status: 503, headers: { "x-farhelm-build": build }, body: "fixture closed settings save refused" });
+    });
+    await page.goto("/");
+    await attachSession(page, owned);
+    const panes = page.locator(".terminal-panes");
+    await expect(panes).toBeVisible();
+    await expect(panes).toHaveAttribute("data-colored-frame", "false");
+    const dialog = await openSettings(page);
+    const toggle = dialog.getByRole("checkbox", { name: "color terminal frames by host", exact: true });
+    await expect(toggle).not.toBeChecked();
+    await toggle.click();
+    await reached.wait();
+    await expect(toggle).toBeChecked();
+    await expect(toggle).toBeEnabled();
+    await expect(panes).toHaveAttribute("data-colored-frame", "true");
+    expect((await readPreferences(request)).color_terminal_frames).toBe(false);
+    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    release.release();
+    await expect(panes).toHaveAttribute("data-colored-frame", "false");
+    await expect(dialog).toHaveCount(0);
+    expect((await readPreferences(request)).color_terminal_frames).toBe(false);
+    await openSettings(page);
+    await expect(toggle).not.toBeChecked();
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["frame preference fixture", () => endPreferenceSaveTest(page, stopRoute, release.release,
+        () => patchPreferences(request, { color_terminal_frames: previous.color_terminal_frames ?? null }), bodyFailed)],
+      ["frame fixture session", async () => { if (owned) await cleanupSession(request, owned); }],
+    ]);
+  }
+});
 
 /** The prepared-checkout choice is explicit configuration. Unknown reads stay
  * locked, refusals restore the saved native checkbox, and a dismissed field's

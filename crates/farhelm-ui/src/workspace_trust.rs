@@ -139,6 +139,10 @@ fn show_hint(
 
 /// Save one explicit opt-in with visible failures. The pending write survives
 /// dialog dismissal, while its late completion cannot update an unmounted view.
+///
+/// Click errors stay in this scope. Each resource independently retires copied
+/// pending dismissals, so a reopened view cannot retain a failed choice after
+/// the original click waiter was destroyed. The preference writer continues.
 #[component]
 pub(crate) fn WorkspaceTrustSettings(agent: TrustAgent) -> Element {
     let base = use_context::<ApiBase>().0;
@@ -147,9 +151,13 @@ pub(crate) fn WorkspaceTrustSettings(agent: TrustAgent) -> Element {
         let base = read_base.clone();
         async move { api::fetch_agent_trust(&base, agent).await }
     });
+    crate::claude_trust::use_hint_read_reconciliation(state);
     let mut saving = use_signal(|| false);
     let mut pending_choice = use_signal(|| None::<bool>);
     let mut error = use_signal(|| None::<String>);
+    // Retain identity with the error so another entry point's newer choice
+    // also withdraws a failure whose completion was already consumed.
+    let mut hint_error = use_signal(|| None::<api::PreferenceWrite>);
     let mounted = use_hook(|| Rc::new(Cell::new(true)));
     let on_drop = mounted.clone();
     use_drop(move || on_drop.set(false));
@@ -170,6 +178,14 @@ pub(crate) fn WorkspaceTrustSettings(agent: TrustAgent) -> Element {
     let preference_base = base.clone();
     let key = agent.key();
     let name = agent.name();
+    // A fast refusal may leave the native box ahead of its virtual value.
+    // Follow resource changes as well as errors so pending overlays and the
+    // authoritative reread both reconcile the rendered property.
+    use_effect(move || {
+        let _ = state.read();
+        let _ = hint_error();
+        crate::settings::sync_preference_checks();
+    });
 
     rsx! {
         div { id: "checkout-{key}-trust", class: "checkout-claude-trust", tabindex: "-1",
@@ -213,10 +229,36 @@ pub(crate) fn WorkspaceTrustSettings(agent: TrustAgent) -> Element {
                     "data-tooltip": "show a note above the terminal when {name} asks about trust in a managed checkout",
                     span { "show the hint when {name} asks about a managed checkout" }
                     input { r#type: "checkbox", class: "host-settings-switch", checked: !dismissed, disabled: value.is_none(),
+                        "data-preference-checked": (!dismissed).to_string(),
                         onchange: move |event| {
-                            api::store_preference(&preference_base, agent.dismissal(!event.checked()));
+                            let dismissed = !event.checked();
+                            let (write, completion) = api::observe_preference(
+                                &preference_base,
+                                agent.dismissal(dismissed),
+                            );
+                            // Keep native synchronization on the clicked value
+                            // without waiting for a pending-overlay GET.
+                            if let Some(Ok(value)) = state.write().as_mut() {
+                                value.hint_dismissed = dismissed;
+                                value.pending_dismissal = Some(write);
+                            }
+                            hint_error.set(None);
                             state.restart();
+                            spawn(async move {
+                                let saved = completion.await;
+                                // Settings and the band share this field, so a
+                                // component-local click counter is insufficient.
+                                if !write.is_current() {
+                                    return;
+                                }
+                                hint_error.set((!saved).then_some(write));
+                            });
                         },
+                    }
+                }
+                if hint_error().is_some_and(|write| write.is_current()) {
+                    p { class: "app-settings-error", role: "alert",
+                        "Could not save whether to show the {name} trust hint. Try again."
                     }
                 }
             }
@@ -250,6 +292,7 @@ fn AgentTrustBand(session: ReadSignal<Session>, agent_visible: bool, agent: Trus
         let base = read_base.clone();
         async move { api::fetch_agent_trust(&base, agent).await }
     });
+    crate::claude_trust::use_hint_read_reconciliation(state);
     let mut occurrences = use_context::<OccurrenceDismissals>();
     let mut settings_open = use_signal(|| false);
     let settings_dialog = crate::modal_dialog::DialogHandle::new(crate::settings::DIALOG_SELECTOR);
@@ -287,8 +330,11 @@ fn AgentTrustBand(session: ReadSignal<Session>, agent_visible: bool, agent: Trus
                         button { r#type: "button", class: "btn btn-neutral",
                             "data-tooltip": "stop showing this {name} note for every session; Settings can turn it back on",
                             onclick: move |_| {
-                                api::store_preference(&base, agent.dismissal(true));
-                                if let Some(Ok(value)) = state.write().as_mut() { value.hint_dismissed = true; }
+                                let (write, _) = api::observe_preference(&base, agent.dismissal(true));
+                                if let Some(Ok(value)) = state.write().as_mut() {
+                                    value.hint_dismissed = true;
+                                    value.pending_dismissal = Some(write);
+                                }
                                 state.restart();
                             }, "Don't show again" }
                         button { r#type: "button", class: "btn btn-neutral", aria_label: "hide this trust hint for this occurrence",

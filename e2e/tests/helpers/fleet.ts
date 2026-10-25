@@ -1033,6 +1033,8 @@ export interface Preferences {
   welcome_seen?: boolean;
   /** Shared opt-out for the managed-checkout Claude trust hint. */
   claude_trust_hint_dismissed?: boolean;
+  /** Shared opt-out for Codex's managed-checkout question hint. */
+  codex_trust_hint_dismissed?: boolean;
   list_sort?: string;
   last_selected?: string;
   /** Helm-maintained visits, newest first; omitted when empty. */
@@ -1050,6 +1052,8 @@ export interface Preferences {
   skip_session_confirmations?: boolean;
   /** Unset enables naming after quick launch; only false opts out. */
   name_session_on_quick_launch?: boolean;
+  /** Unset leaves terminal frames uncolored; only true enables host colors. */
+  color_terminal_frames?: boolean;
   /** Sole shared shortcut template; template fields never contain this mark. */
   quick_launch_template?: string;
   /** Shared whole-map physical digit bindings, independent of the quick mark. */
@@ -1081,6 +1085,8 @@ export async function patchPreferences(
   request: APIRequestContext,
   patch: {
     welcome_seen?: boolean | null;
+    claude_trust_hint_dismissed?: boolean | null;
+    codex_trust_hint_dismissed?: boolean | null;
     list_sort?: string | null;
     last_selected?: string | null;
     compact?: boolean | null;
@@ -1089,6 +1095,7 @@ export async function patchPreferences(
     skip_host_setup_confirmation?: boolean | null;
     skip_session_confirmations?: boolean | null;
     name_session_on_quick_launch?: boolean | null;
+    color_terminal_frames?: boolean | null;
     quick_launch_template?: string | null;
     template_shortcuts?: Record<string, string> | null;
     feedback_contact?: string | null;
@@ -1118,6 +1125,7 @@ export async function resetPreferences(request: APIRequestContext): Promise<void
   await patchPreferences(request, {
     welcome_seen: true,
     claude_trust_hint_dismissed: null,
+    codex_trust_hint_dismissed: null,
     list_sort: null,
     last_selected: null,
     compact: null,

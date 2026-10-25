@@ -35,7 +35,7 @@
 //! One endpoint deliberately breaks the one-request-per-endpoint,
 //! error-as-displayable-string mold: the shared preference
 //! (`fetch_preferences`, `store_preference`, and the serialized write queue
-//! behind it). Most writes are fire-and-forget under SPEC.md's best-effort
+//! behind it). Best-effort writes are fire-and-forget under SPEC.md's explicit
 //! exception. Operations that need an acknowledgment, including restoring
 //! session confirmations, observe the same queue's completion and surface
 //! their own failures. Its reader is `lib.rs`'s `PreferencesGate` rather than
@@ -694,32 +694,36 @@ pub(crate) fn save_checkout_spare(
     }
 }
 
-/// Current shared trust setting and hint opt-out, including a dismissal whose
-/// write is still pending.
+/// Current shared trust setting and hint opt-out, with local provenance when
+/// the resource must reconcile a pending overlay or a read that crossed a write.
 #[derive(Clone, Deserialize)]
 pub(crate) struct CheckoutTrustState {
     pub enabled: bool,
     pub hint_dismissed: bool,
+    /// Local reconciliation provenance, never an HTTP field. This names either
+    /// the pending overlay's record or the read's start record after a crossing
+    /// write. Each resource owns its waiter, independently of the click's scope.
+    #[serde(skip)]
+    pub(crate) pending_dismissal: Option<PreferenceWrite>,
 }
 
 /// Re-read on invalidation, overlaying an unacknowledged local dismissal so
 /// an older GET cannot undo the user's click while its sparse PUT is queued.
+/// A resource that receives `pending_dismissal` must watch its invalidation,
+/// even when another component recorded the dismissal or it already settled
+/// while the GET was in flight.
 pub(crate) async fn fetch_claude_trust(base: &str) -> Result<CheckoutTrustState, String> {
+    let start = preference_writes().trust_read_start(PreferenceField::ClaudeTrustHintDismissed);
     let url = format!("{base}/api/checkout-claude-trust");
     let resp = send(client().get(&url)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
     }
-    let mut state = resp
+    let state = resp
         .json::<CheckoutTrustState>()
         .await
         .map_err(|error| error.to_string())?;
-    if let Some(PreferenceValue::ClaudeTrustHintDismissed(value)) =
-        preference_writes().pending(PreferenceField::ClaudeTrustHintDismissed)
-    {
-        state.hint_dismissed = value;
-    }
-    Ok(state)
+    Ok(preference_writes().trust_after_read(start, state))
 }
 
 /// Configuration saves register before spawn, like the checkout text fields.
@@ -745,28 +749,24 @@ pub(crate) fn save_claude_trust(
 
 /// Read a command-line trust switch without letting an older response undo
 /// this client's queued dismissal. Reads share the configuration-save fence.
+/// Pending overlays and crossing raw reads carry the same resource-owned
+/// reconciliation obligation as `fetch_claude_trust`; save completion alone
+/// cannot refresh another reader.
 pub(crate) async fn fetch_agent_trust(
     base: &str,
     agent: crate::workspace_trust::TrustAgent,
 ) -> Result<CheckoutTrustState, String> {
+    let start = preference_writes().trust_read_start(agent.dismissal(false).field());
     let url = format!("{base}/api/checkout-agent-trust/{}", agent.key());
     let resp = send(client().get(&url)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
     }
-    let mut state = resp
+    let state = resp
         .json::<CheckoutTrustState>()
         .await
         .map_err(|error| error.to_string())?;
-    if let Some(
-        PreferenceValue::CodexTrustHintDismissed(value)
-        | PreferenceValue::MuseTrustHintDismissed(value)
-        | PreferenceValue::PiTrustHintDismissed(value),
-    ) = preference_writes().pending(agent.dismissal(false).field())
-    {
-        state.hint_dismissed = value;
-    }
-    Ok(state)
+    Ok(preference_writes().trust_after_read(start, state))
 }
 
 /// Register the explicit configuration save before returning its future, so
@@ -820,6 +820,33 @@ pub(crate) enum PreferenceField {
 }
 
 impl PreferenceField {
+    /// These reported controls need rollback in the surviving shared snapshot.
+    /// Trust resources and template bindings retain their own read lifecycles;
+    /// silent shared choices keep their separate next-read behavior.
+    fn has_shared_rollback(self) -> bool {
+        matches!(
+            self,
+            Self::NameSessionOnQuickLaunch | Self::ColorTerminalFrames | Self::TerminalLinkClick
+        )
+    }
+
+    /// Decode a shared scalar's displayed value, including its unset default.
+    /// This normalized fallback is never an automatic preference patch.
+    fn rollback_from(self, preferences: &Preferences) -> PreferenceValue {
+        match self {
+            Self::NameSessionOnQuickLaunch => PreferenceValue::NameSessionOnQuickLaunch(
+                preferences.name_session_on_quick_launch != Some(false),
+            ),
+            Self::ColorTerminalFrames => PreferenceValue::ColorTerminalFrames(
+                preferences.color_terminal_frames == Some(true),
+            ),
+            Self::TerminalLinkClick => PreferenceValue::TerminalLinkClick(
+                TerminalLinkClick::from_key(preferences.terminal_link_click.as_deref()),
+            ),
+            _ => panic!("only shared optimistic scalars have rollback values"),
+        }
+    }
+
     /// Only launch bindings affect later reads/actions; ordinary view choices
     /// must not add a configuration round trip to session switching.
     fn orders_requests(self) -> bool {
@@ -933,20 +960,42 @@ impl PreferenceValue {
 ///
 /// `latest` is the newest locally chosen value while a write for it is still
 /// pending; a pending value also means a writer task owns the field. A write
-/// that settles, succeeded or failed, or whose writer is lost, forgets its
-/// value: a failed save is never kept or resent (SPEC.md, "One GUI at a time"
-/// and "Errors and diagnostics").
+/// that settles, succeeded or failed, or whose writer is lost, clears `latest`:
+/// a failed save is never kept or resent (SPEC.md, "One GUI at a time" and
+/// "Errors and diagnostics"). Identity and the scalar-only rollback fallback
+/// survive settlement without participating in pending overlays or later PUTs.
 #[derive(Default)]
 struct FieldWrite {
     latest: Option<PreferenceValue>,
+    /// Retained after settlement: a delivered outcome may still be waiting to
+    /// run when another component records its next click, even an equal one.
+    identity: u64,
+    /// One observed/acknowledged effective scalar value, never queued or overlaid
+    /// on reads. Keeping it while idle avoids capturing failed optimism as the
+    /// next click's baseline. Other preference fields leave this empty.
+    rollback: Option<PreferenceValue>,
     /// A fresh choice needs its own write even if it returns to the value
     /// already being sent: another client may have committed in between.
     recorded_since_send: bool,
     completion: Option<PreferenceCompletion>,
+    /// Passive readers copied this record's pending overlay. They neither own
+    /// its save completion nor add ordering tickets to the HTTP funnel.
+    read_waiters: Vec<futures_channel::oneshot::Sender<()>>,
     /// Tickets move with a batch into its actual PUT. Keeping later queued
     /// tickets separate lets an earlier reader resume despite a stream of edits.
     queued_saves: Vec<save_order::Ticket>,
     sending_saves: Vec<save_order::Ticket>,
+}
+
+impl FieldWrite {
+    /// A provisional read stops being valid on replacement or final settlement,
+    /// whatever the save's outcome. Drop cancelled readers without affecting
+    /// the writer or the operation waiting for its acknowledgment.
+    fn invalidate_reads(&mut self) {
+        for sender in self.read_waiters.drain(..) {
+            let _ = sender.send(());
+        }
+    }
 }
 
 /// One optional caller waiting for the field's newest choice to settle.
@@ -994,6 +1043,144 @@ struct PreferenceWrites {
 }
 
 impl PreferenceWrites {
+    /// Snapshot the dismissal identity and pending bit before any part of a GET
+    /// can await, including its existing configuration fence. Identity alone
+    /// misses settlement of the same record; the bit alone misses a whole write
+    /// that starts and ends during an initially idle read. No save is recorded.
+    fn trust_read_start(&mut self, field: PreferenceField) -> (PreferenceWrite, bool) {
+        let slot = self.field(field);
+        (
+            PreferenceWrite {
+                field,
+                identity: slot.identity,
+            },
+            slot.latest.is_some(),
+        )
+    }
+
+    /// Prefer the current pending overlay; otherwise mark raw data whose read
+    /// crossed a dismissal record. Its start receipt is already invalid, so the
+    /// resource's existing waiter requests reconciliation immediately. Only an
+    /// unchanged idle read is ordinary unmarked raw data.
+    fn trust_after_read(
+        &mut self,
+        (start, was_pending): (PreferenceWrite, bool),
+        mut fetched: CheckoutTrustState,
+    ) -> CheckoutTrustState {
+        let slot = self.field(start.field);
+        fetched.pending_dismissal = None;
+        if let Some(
+            PreferenceValue::ClaudeTrustHintDismissed(value)
+            | PreferenceValue::CodexTrustHintDismissed(value)
+            | PreferenceValue::MuseTrustHintDismissed(value)
+            | PreferenceValue::PiTrustHintDismissed(value),
+        ) = slot.latest.as_ref()
+        {
+            fetched.hint_dismissed = *value;
+            fetched.pending_dismissal = Some(PreferenceWrite {
+                field: start.field,
+                identity: slot.identity,
+            });
+        } else if was_pending || slot.identity != start.identity {
+            fetched.pending_dismissal = Some(start);
+        }
+        fetched
+    }
+
+    /// Enroll one passive read while its exact overlay record is still pending.
+    /// A record that ended during the GET or before enrollment is immediately
+    /// ready, closing crossing-read and missed-notification gaps without history.
+    fn read_invalidated(
+        &mut self,
+        write: PreferenceWrite,
+    ) -> futures_channel::oneshot::Receiver<()> {
+        let slot = self.field(write.field);
+        slot.read_waiters.retain(|sender| !sender.is_canceled());
+        let (sender, receiver) = futures_channel::oneshot::channel();
+        if slot.latest.is_some() && slot.identity == write.identity {
+            slot.read_waiters.push(sender);
+        } else {
+            let _ = sender.send(());
+        }
+        receiver
+    }
+
+    /// Seed the three shared fallbacks from the same snapshot the gate displays.
+    /// A crossing GET cannot replace an active field's established baseline;
+    /// defaults after a failed read only initialize a missing fallback.
+    fn seed_rollbacks(&mut self, seed: &Preferences, read_succeeded: bool) {
+        for field in [
+            PreferenceField::NameSessionOnQuickLaunch,
+            PreferenceField::ColorTerminalFrames,
+            PreferenceField::TerminalLinkClick,
+        ] {
+            let slot = self.field(field);
+            if slot.rollback.is_none() || (read_succeeded && slot.latest.is_none()) {
+                slot.rollback = Some(field.rollback_from(seed));
+            }
+        }
+    }
+
+    /// A receipt names a record, not its value or its completion observer.
+    /// Changing the observer for a deletion barrier must not change identity.
+    fn is_current(&mut self, write: PreferenceWrite) -> bool {
+        self.field(write.field).identity == write.identity
+    }
+
+    /// Return only the newest scalar record's last observed/acknowledged value.
+    /// A failed or coalesced choice never becomes this fallback.
+    fn rollback_value(&mut self, write: PreferenceWrite) -> Option<PreferenceValue> {
+        assert!(write.field.has_shared_rollback());
+        let slot = self.field(write.field);
+        (slot.identity == write.identity)
+            .then(|| slot.rollback.clone())
+            .flatten()
+    }
+
+    /// Accept one corrective read only while its failed record still owns the
+    /// field. Other fields in the row cannot replace unrelated local choices.
+    fn reconcile(
+        &mut self,
+        write: PreferenceWrite,
+        preferences: &Preferences,
+    ) -> Option<PreferenceValue> {
+        let value = write.field.rollback_from(preferences);
+        let slot = self.field(write.field);
+        if slot.identity != write.identity {
+            return None;
+        }
+        slot.rollback = Some(value.clone());
+        Some(value)
+    }
+
+    /// Register the observer and its receipt atomically, before any task polls.
+    /// For scalar and trust writes, the boolean distinguishes acknowledgment
+    /// from failure only after the caller checks that this receipt is current.
+    fn observe(
+        &mut self,
+        value: PreferenceValue,
+    ) -> (
+        PreferenceWrite,
+        futures_channel::oneshot::Receiver<bool>,
+        bool,
+    ) {
+        let field = value.field();
+        let (sender, receiver) = futures_channel::oneshot::channel();
+        let start = self.record_with_completion(
+            value,
+            Some(PreferenceCompletion {
+                sender,
+                deleting: false,
+            }),
+        );
+        let write = PreferenceWrite {
+            field,
+            identity: self.field(field).identity,
+        };
+        (write, receiver, start)
+    }
+
+    /// Select the fixed queue slot shared by recording, settlement and receipts.
     fn field(&mut self, field: PreferenceField) -> &mut FieldWrite {
         match field {
             PreferenceField::WelcomeSeen => &mut self.welcome_seen,
@@ -1032,6 +1219,11 @@ impl PreferenceWrites {
         let field = value.field();
         let ticket = field.orders_requests().then(|| self.saves.register());
         let slot = self.field(field);
+        slot.invalidate_reads();
+        slot.identity = slot
+            .identity
+            .checked_add(1)
+            .expect("preference identity exhausted");
         slot.queued_saves.extend(ticket);
         if let Some(previous) = slot.completion.take() {
             let _ = previous.sender.send(false);
@@ -1058,17 +1250,23 @@ impl PreferenceWrites {
     /// Returning to `sent` still counts as a newer choice: another client
     /// could have overwritten its earlier commit before this response arrived.
     ///
-    /// A FAILED write is neither retried nor kept: the choice stays on screen
-    /// only until the next read from the helm, and callers that report
-    /// failures do so through the completion (SPEC.md, "One GUI at a time"
+    /// A failed choice is never retried or kept in the queue. Shared scalar
+    /// controls use the completion to restore their fallback; silent choices
+    /// take their next value from the next read (SPEC.md, "One GUI at a time"
     /// and "Errors and diagnostics").
     fn finished(&mut self, field: PreferenceField, sent: &PreferenceValue, success: bool) -> bool {
         let slot = self.field(field);
         slot.sending_saves.clear();
+        // An older successful PUT still changed the helm, even when its observer
+        // was superseded. A queued value that never reached a PUT cannot do so.
+        if success && field.has_shared_rollback() {
+            slot.rollback = Some(sent.clone());
+        }
         if slot.recorded_since_send || slot.latest.as_ref() != Some(sent) {
             return true;
         }
         slot.latest = None;
+        slot.invalidate_reads();
         if let Some(completion) = slot.completion.take() {
             let _ = completion.sender.send(completion.deleting || success);
         }
@@ -1083,6 +1281,7 @@ impl PreferenceWrites {
         slot.sending_saves.clear();
         slot.queued_saves.clear();
         slot.latest = None;
+        slot.invalidate_reads();
         if let Some(completion) = slot.completion.take() {
             let _ = completion.sender.send(false);
         }
@@ -1160,6 +1359,70 @@ impl PreferenceWrites {
     }
 }
 
+/// A retained field identity for recorded choices and trust read provenance.
+///
+/// Completion delivery does not freeze ownership: a newer record can arrive
+/// before its predecessor's waiter runs, including through another component
+/// or the silent API. Check currentness immediately before changing UI state,
+/// and again after every await. Dropping this receipt never cancels the writer.
+/// A read can also snapshot the initial identity before any choice was recorded;
+/// its invalidation depends on pending state as well as identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PreferenceWrite {
+    field: PreferenceField,
+    identity: u64,
+}
+
+impl PreferenceWrite {
+    /// Wait until a trust read carrying this receipt needs reconciliation,
+    /// regardless of the save's outcome. Supersession (including equal or silent
+    /// records), final settlement and writer loss all invalidate it. Enrollment
+    /// is synchronous and immediately ready if that exact record is no longer
+    /// pending, including a raw response that crossed a write before returning.
+    ///
+    /// This is independent of the save observer and deletion barrier. Dropping
+    /// the waiter cancels only that reader. After waking, compare the resource's
+    /// marker with this receipt; `is_current` is not the guard here, because a
+    /// superseded overlay also needs replacement.
+    pub(crate) fn invalidated(self) -> impl Future<Output = ()> + use<> {
+        let waiting = preference_writes().read_invalidated(self);
+        async move {
+            let _ = waiting.await;
+        }
+    }
+
+    /// Whether no later choice of this field has been recorded, equal choices
+    /// included. Settlement and writer loss leave the identity intact.
+    pub(crate) fn is_current(self) -> bool {
+        preference_writes().is_current(self)
+    }
+
+    /// The current record's rollback fallback, absent after supersession.
+    ///
+    /// Only naming, frame colors and terminal link-click receipts support this
+    /// method; another field is a programmer error. The fallback is a displayed
+    /// effective value (unset values decode to defaults), not proof of the
+    /// helm's current value after an unknown write outcome. Never resubmit it.
+    pub(crate) fn rollback_value(self) -> Option<PreferenceValue> {
+        preference_writes().rollback_value(self)
+    }
+
+    /// Refine this scalar's fallback from one corrective GET while still current.
+    ///
+    /// The same three-field restriction as `rollback_value` applies. Apply only
+    /// the returned field to the shared snapshot, with no await before doing so;
+    /// a superseded read returns None and must not change state or show an error.
+    pub(crate) fn reconcile(self, preferences: &Preferences) -> Option<PreferenceValue> {
+        preference_writes().reconcile(self, preferences)
+    }
+}
+
+/// Refresh scalar rollback metadata when the existing authenticated gate seeds
+/// its shared snapshot. This adds no read, queue entry or preference overlay.
+pub(crate) fn seed_preference_rollbacks(seed: &Preferences, read_succeeded: bool) {
+    preference_writes().seed_rollbacks(seed, read_succeeded);
+}
+
 /// The process-wide write queue. A static, not component state, on
 /// purpose: writes outlive the component that recorded them (see
 /// [`spawn_preference_writer`]).
@@ -1208,9 +1471,9 @@ impl Drop for WriterGuard {
 /// client's stale copy of the other field over whatever another client
 /// wrote since. Same-field writes are serialized latest-wins through
 /// [`PreferenceWrites`] so a burst of changes cannot land on the helm in
-/// reverse order. Restoring session confirmations uses
-/// [`restore_session_confirmations`] instead, since losing that save can
-/// restore an older opt-out on reload.
+/// reverse order. Callers required to report a failed save instead observe the
+/// queue through [`observe_preference`] or its existing specialized wrappers.
+/// They own the local error and any rollback of their optimistic state.
 pub(crate) fn store_preference(base: &str, value: PreferenceValue) {
     let field = value.field();
     if preference_writes().record(value) {
@@ -1304,19 +1567,27 @@ fn preference_write_completion(
     base: &str,
     value: PreferenceValue,
 ) -> impl Future<Output = bool> + use<> {
-    let field = value.field();
-    let (sender, receiver) = futures_channel::oneshot::channel();
-    let start = preference_writes().record_with_completion(
-        value,
-        Some(PreferenceCompletion {
-            sender,
-            deleting: false,
-        }),
-    );
+    observe_preference(base, value).1
+}
+
+/// Record a choice now and return its identity and owned acknowledgment waiter.
+///
+/// True means the helm acknowledged this record; false also covers supersession
+/// and writer loss. Replacing a template observer with the existing deletion
+/// barrier also resolves it false without recording a new choice. Inspect the
+/// receipt before reporting or reverting either outcome, since an already-
+/// delivered result can precede a newer click. The writer outlives the caller;
+/// the waiter need not outlive a component unless
+/// its optimistic state does (the three shared Settings scalars do).
+pub(crate) fn observe_preference(
+    base: &str,
+    value: PreferenceValue,
+) -> (PreferenceWrite, impl Future<Output = bool> + use<>) {
+    let (write, receiver, start) = preference_writes().observe(value);
     if start {
-        spawn_preference_writer(base.to_string(), field);
+        spawn_preference_writer(base.to_string(), write.field);
     }
-    async move { receiver.await.unwrap_or(false) }
+    (write, async move { receiver.await.unwrap_or(false) })
 }
 
 /// Refresh shortcut bindings without rolling back a write still pending. Only
@@ -6336,7 +6607,7 @@ mod tests {
 #[cfg(test)]
 mod preference_write_tests {
     use super::{
-        PeerText, PreferenceCompletion, PreferenceField, PreferenceValue, PreferenceWrites,
+        CheckoutTrustState, PeerText, PreferenceField, PreferenceValue, PreferenceWrites,
         Preferences, TerminalLinkClick,
     };
 
@@ -6554,15 +6825,551 @@ mod preference_write_tests {
         queue: &mut PreferenceWrites,
         value: PreferenceValue,
     ) -> futures_channel::oneshot::Receiver<bool> {
-        let (sender, receiver) = futures_channel::oneshot::channel();
-        queue.record_with_completion(
-            value,
-            Some(PreferenceCompletion {
-                sender,
-                deleting: false,
-            }),
+        queue.observe(value).1
+    }
+
+    /// Several resources can copy one pending dismissal without stealing its
+    /// adjacent error observer. Both acknowledgment and refusal invalidate the
+    /// provisional reads while retaining their distinct save outcomes.
+    #[farhelm_testtrace::test]
+    fn provisional_readers_coexist_with_the_save_observer() {
+        let value = PreferenceValue::ClaudeTrustHintDismissed(true);
+        for success in [false, true] {
+            let mut queue = PreferenceWrites::default();
+            let (write, mut saving, _) = queue.observe(value.clone());
+            let mut settings = queue.read_invalidated(write);
+            let mut band = queue.read_invalidated(write);
+            assert_eq!(queue.next_to_send(write.field), Some(value.clone()));
+            assert_eq!(settings.try_recv(), Ok(None));
+            assert_eq!(band.try_recv(), Ok(None));
+            assert_eq!(saving.try_recv(), Ok(None));
+            assert!(!queue.finished(write.field, &value, success));
+            assert_eq!(settings.try_recv(), Ok(Some(())));
+            assert_eq!(band.try_recv(), Ok(Some(())));
+            assert_eq!(saving.try_recv(), Ok(Some(success)));
+            assert!(queue.field(write.field).read_waiters.is_empty());
+        }
+    }
+
+    /// A replacement invalidates the copied record even if it is silent or
+    /// equal. An independent preference field cannot invalidate this read, and
+    /// enrollment for the replacement must keep waiting until it ends.
+    #[farhelm_testtrace::test]
+    fn provisional_reads_are_invalidated_by_equal_and_silent_replacements() {
+        for replacement in [false, true] {
+            for silent in [false, true] {
+                let mut queue = PreferenceWrites::default();
+                let (write, mut saving, _) =
+                    queue.observe(PreferenceValue::ClaudeTrustHintDismissed(true));
+                let mut reading = queue.read_invalidated(write);
+                assert!(queue.record(PreferenceValue::CodexTrustHintDismissed(true)));
+                assert_eq!(reading.try_recv(), Ok(None));
+                let next = PreferenceValue::ClaudeTrustHintDismissed(replacement);
+                if silent {
+                    assert!(!queue.record(next));
+                } else {
+                    let (_, _, start) = queue.observe(next);
+                    assert!(!start);
+                }
+                assert_eq!(reading.try_recv(), Ok(Some(())));
+                assert_eq!(saving.try_recv(), Ok(Some(false)));
+                let start = queue.trust_read_start(write.field);
+                let pending = queue.trust_after_read(
+                    start,
+                    CheckoutTrustState {
+                        enabled: true,
+                        hint_dismissed: !replacement,
+                        pending_dismissal: None,
+                    },
+                );
+                assert_eq!(pending.hint_dismissed, replacement);
+                let newest = pending.pending_dismissal.unwrap();
+                assert_ne!(newest, write);
+                let mut replacement_read = queue.read_invalidated(newest);
+                assert_eq!(replacement_read.try_recv(), Ok(None));
+                queue.writer_lost(write.field);
+                assert_eq!(replacement_read.try_recv(), Ok(Some(())));
+            }
+        }
+    }
+
+    /// An older PUT ending does not settle the newer queued record. A resource
+    /// that copied the newer overlay must remain enrolled until that record's
+    /// actual final outcome, after either result from the older PUT.
+    #[farhelm_testtrace::test]
+    fn older_put_settlement_does_not_invalidate_a_newer_overlay() {
+        let first = PreferenceValue::ClaudeTrustHintDismissed(true);
+        let latest = PreferenceValue::ClaudeTrustHintDismissed(false);
+        for older_success in [false, true] {
+            let mut queue = PreferenceWrites::default();
+            let (older, _, _) = queue.observe(first.clone());
+            assert_eq!(queue.next_to_send(older.field), Some(first.clone()));
+            let (newest, mut saving, _) = queue.observe(latest.clone());
+            let mut reading = queue.read_invalidated(newest);
+            assert!(queue.finished(older.field, &first, older_success));
+            assert_eq!(reading.try_recv(), Ok(None));
+            assert_eq!(saving.try_recv(), Ok(None));
+            assert_eq!(queue.next_to_send(newest.field), Some(latest.clone()));
+            assert!(!queue.finished(newest.field, &latest, false));
+            assert_eq!(reading.try_recv(), Ok(Some(())));
+            assert_eq!(saving.try_recv(), Ok(Some(false)));
+        }
+    }
+
+    /// The record may end after a GET copied its identity but before the
+    /// resource enrolls. Late enrollment must already be ready after final
+    /// success, refusal, writer loss or replacement, with no retained history.
+    #[farhelm_testtrace::test]
+    fn provisional_read_enrollment_after_invalidation_is_immediately_ready() {
+        let value = PreferenceValue::ClaudeTrustHintDismissed(true);
+        for ending in 0..4 {
+            let mut queue = PreferenceWrites::default();
+            let (write, _, _) = queue.observe(value.clone());
+            assert_eq!(queue.next_to_send(write.field), Some(value.clone()));
+            match ending {
+                0 | 1 => assert!(!queue.finished(write.field, &value, ending == 1)),
+                2 => queue.writer_lost(write.field),
+                3 => assert!(!queue.record(value.clone())),
+                _ => unreachable!(),
+            }
+            let mut reading = queue.read_invalidated(write);
+            assert_eq!(reading.try_recv(), Ok(Some(())));
+            assert!(queue.field(write.field).read_waiters.is_empty());
+        }
+    }
+
+    /// Cancelling read resources must neither cancel the pending writer nor
+    /// replace its save observer. Later enrollment prunes abandoned receivers
+    /// so a long pending write does not accumulate dead resource waiters.
+    #[farhelm_testtrace::test]
+    fn cancelled_provisional_readers_are_pruned_without_cancelling_the_save() {
+        let mut queue = PreferenceWrites::default();
+        let value = PreferenceValue::ClaudeTrustHintDismissed(true);
+        let (write, mut saving, _) = queue.observe(value.clone());
+        let first = queue.read_invalidated(write);
+        let second = queue.read_invalidated(write);
+        assert_eq!(queue.field(write.field).read_waiters.len(), 2);
+        drop(first);
+        drop(second);
+        let mut current = queue.read_invalidated(write);
+        assert_eq!(queue.field(write.field).read_waiters.len(), 1);
+        assert_eq!(queue.pending(write.field), Some(value.clone()));
+        assert_eq!(saving.try_recv(), Ok(None));
+        assert_eq!(queue.next_to_send(write.field), Some(value));
+        queue.writer_lost(write.field);
+        assert_eq!(current.try_recv(), Ok(Some(())));
+        assert_eq!(saving.try_recv(), Ok(Some(false)));
+    }
+
+    /// The overlay value and identity come from the same slot snapshot for
+    /// every trust field. Unchanged idle reads have no reconciliation marker,
+    /// and the marker is never accepted from the HTTP body.
+    #[farhelm_testtrace::test]
+    fn trust_read_overlay_stamps_the_exact_pending_record() {
+        for value in [
+            PreferenceValue::ClaudeTrustHintDismissed(true),
+            PreferenceValue::CodexTrustHintDismissed(true),
+            PreferenceValue::MuseTrustHintDismissed(true),
+            PreferenceValue::PiTrustHintDismissed(true),
+        ] {
+            let mut queue = PreferenceWrites::default();
+            let raw: CheckoutTrustState = serde_json::from_value(serde_json::json!({
+                "enabled": true,
+                "hint_dismissed": false,
+                "pending_dismissal": { "field": "ignored", "identity": 42 }
+            }))
+            .unwrap();
+            assert!(raw.pending_dismissal.is_none());
+            let field = value.field();
+            let start = queue.trust_read_start(field);
+            assert!(
+                queue
+                    .trust_after_read(start, raw.clone())
+                    .pending_dismissal
+                    .is_none()
+            );
+            let (write, _, _) = queue.observe(value.clone());
+            let start = queue.trust_read_start(field);
+            let pending = queue.trust_after_read(start, raw.clone());
+            assert!(pending.enabled);
+            assert!(pending.hint_dismissed);
+            assert_eq!(pending.pending_dismissal, Some(write));
+            assert_eq!(queue.next_to_send(field), Some(value.clone()));
+            assert!(!queue.finished(field, &value, false));
+            let start = queue.trust_read_start(field);
+            let settled = queue.trust_after_read(start, raw);
+            assert!(!settled.hint_dismissed);
+            assert!(settled.pending_dismissal.is_none());
+        }
+    }
+
+    /// The original record can settle without changing its retained identity.
+    /// A GET that began pending still needs repair when its captured raw body
+    /// arrives after acknowledgment; the start pending bit establishes this.
+    #[farhelm_testtrace::test]
+    fn trust_read_crossing_pending_settlement_is_immediately_reconciled() {
+        let mut queue = PreferenceWrites::default();
+        let value = PreferenceValue::ClaudeTrustHintDismissed(true);
+        let (write, _, _) = queue.observe(value.clone());
+        assert_eq!(queue.next_to_send(write.field), Some(value.clone()));
+        let start = queue.trust_read_start(write.field);
+        assert!(start.1);
+        assert!(!queue.finished(write.field, &value, true));
+        assert!(
+            queue.is_current(start.0),
+            "settlement did not advance identity"
         );
-        receiver
+        let crossed = queue.trust_after_read(
+            start,
+            CheckoutTrustState {
+                enabled: true,
+                hint_dismissed: false,
+                pending_dismissal: None,
+            },
+        );
+        assert!(
+            !crossed.hint_dismissed,
+            "raw data is not replaced by a cache"
+        );
+        assert_eq!(crossed.pending_dismissal, Some(write));
+        let mut reading = queue.read_invalidated(crossed.pending_dismissal.unwrap());
+        assert_eq!(reading.try_recv(), Ok(Some(())));
+    }
+
+    /// A whole write can start and end during an idle GET, leaving no pending
+    /// value at either read boundary. Its changed identity must still mark the
+    /// old response, including for a silent write with no click observer.
+    #[farhelm_testtrace::test]
+    fn trust_read_crossing_a_complete_write_is_immediately_reconciled() {
+        let mut queue = PreferenceWrites::default();
+        let field = PreferenceField::CodexTrustHintDismissed;
+        let start = queue.trust_read_start(field);
+        assert!(!start.1);
+        let value = PreferenceValue::CodexTrustHintDismissed(true);
+        assert!(queue.record(value.clone()));
+        assert_eq!(queue.next_to_send(field), Some(value.clone()));
+        assert!(!queue.finished(field, &value, true));
+        assert!(
+            !queue.is_current(start.0),
+            "the idle read's identity is now older"
+        );
+        let crossed = queue.trust_after_read(
+            start,
+            CheckoutTrustState {
+                enabled: true,
+                hint_dismissed: false,
+                pending_dismissal: None,
+            },
+        );
+        assert!(!crossed.hint_dismissed);
+        assert_eq!(crossed.pending_dismissal, Some(start.0));
+        let mut reading = queue.read_invalidated(crossed.pending_dismissal.unwrap());
+        assert_eq!(reading.try_recv(), Ok(Some(())));
+    }
+
+    /// A current pending choice outranks both an idle start and a superseded
+    /// pending start. Neither crossing form may discard that newer optimistic
+    /// choice or start an immediate refetch loop while its PUT is held.
+    #[farhelm_testtrace::test]
+    fn current_pending_trust_overlay_takes_precedence_over_crossing_starts() {
+        let mut queue = PreferenceWrites::default();
+        let field = PreferenceField::ClaudeTrustHintDismissed;
+        let idle_start = queue.trust_read_start(field);
+        let first = PreferenceValue::ClaudeTrustHintDismissed(true);
+        let (older, _, _) = queue.observe(first.clone());
+        assert_eq!(queue.next_to_send(field), Some(first.clone()));
+        let pending_start = queue.trust_read_start(field);
+        assert_eq!(pending_start.0, older);
+        assert!(pending_start.1);
+        let latest = PreferenceValue::ClaudeTrustHintDismissed(false);
+        let (newest, _, _) = queue.observe(latest);
+        assert!(queue.finished(field, &first, true));
+        for start in [idle_start, pending_start] {
+            let pending = queue.trust_after_read(
+                start,
+                CheckoutTrustState {
+                    enabled: true,
+                    hint_dismissed: true,
+                    pending_dismissal: None,
+                },
+            );
+            assert!(!pending.hint_dismissed);
+            assert_eq!(pending.pending_dismissal, Some(newest));
+            let mut reading = queue.read_invalidated(pending.pending_dismissal.unwrap());
+            assert_eq!(reading.try_recv(), Ok(None));
+        }
+    }
+
+    /// An independent field's completed write cannot make a stable idle trust
+    /// response provisional. Read provenance follows the same per-field scope
+    /// as save ordering, without expanding the global configuration fence.
+    #[farhelm_testtrace::test]
+    fn unchanged_idle_trust_reads_ignore_unrelated_writes() {
+        let mut queue = PreferenceWrites::default();
+        let start = queue.trust_read_start(PreferenceField::ClaudeTrustHintDismissed);
+        let unrelated = PreferenceValue::CodexTrustHintDismissed(true);
+        assert!(queue.record(unrelated.clone()));
+        assert_eq!(
+            queue.next_to_send(unrelated.field()),
+            Some(unrelated.clone())
+        );
+        assert!(!queue.finished(unrelated.field(), &unrelated, true));
+        let fetched = queue.trust_after_read(
+            start,
+            CheckoutTrustState {
+                enabled: true,
+                hint_dismissed: false,
+                pending_dismissal: None,
+            },
+        );
+        assert!(!fetched.hint_dismissed);
+        assert!(fetched.pending_dismissal.is_none());
+    }
+
+    /// Overlapping optimistic edits cannot use another failed click as their
+    /// baseline. Conversely, an older acknowledged PUT really changed the helm
+    /// even though a newer observer superseded it before its reply arrived.
+    #[farhelm_testtrace::test]
+    fn scalar_rollback_tracks_acknowledged_puts_not_optimistic_clicks() {
+        let field = PreferenceField::TerminalLinkClick;
+        let first = PreferenceValue::TerminalLinkClick(TerminalLinkClick::Both);
+        let latest = PreferenceValue::TerminalLinkClick(TerminalLinkClick::Program);
+        for older_acknowledged in [false, true] {
+            let mut queue = PreferenceWrites::default();
+            queue.seed_rollbacks(&Preferences::default(), true);
+            let (older, mut older_waiting, start) = queue.observe(first.clone());
+            assert!(start);
+            assert_eq!(queue.next_to_send(field), Some(first.clone()));
+            let (newest, mut newest_waiting, start) = queue.observe(latest.clone());
+            assert!(!start);
+            assert_eq!(older_waiting.try_recv(), Ok(Some(false)));
+            assert!(!queue.is_current(older));
+            assert!(queue.finished(field, &first, older_acknowledged));
+            assert_eq!(newest_waiting.try_recv(), Ok(None));
+            assert_eq!(queue.next_to_send(field), Some(latest.clone()));
+            assert!(!queue.finished(field, &latest, false));
+            assert_eq!(newest_waiting.try_recv(), Ok(Some(false)));
+            assert!(queue.is_current(newest));
+            assert_eq!(queue.pending(field), None);
+            assert_eq!(
+                queue.rollback_value(newest),
+                Some(PreferenceValue::TerminalLinkClick(if older_acknowledged {
+                    TerminalLinkClick::Both
+                } else {
+                    TerminalLinkClick::Intercept
+                }))
+            );
+        }
+    }
+
+    /// Coalescing is not an acknowledgment: a choice replaced before the writer
+    /// polls never reached the helm and cannot become a rollback fallback.
+    #[farhelm_testtrace::test]
+    fn scalar_rollback_does_not_promote_a_coalesced_value() {
+        let mut queue = PreferenceWrites::default();
+        queue.seed_rollbacks(&Preferences::default(), true);
+        let field = PreferenceField::TerminalLinkClick;
+        let (older, mut waiting, _) =
+            queue.observe(PreferenceValue::TerminalLinkClick(TerminalLinkClick::Both));
+        let latest = PreferenceValue::TerminalLinkClick(TerminalLinkClick::Program);
+        let (newest, _, start) = queue.observe(latest.clone());
+        assert!(!start);
+        assert_eq!(waiting.try_recv(), Ok(Some(false)));
+        assert_eq!(queue.next_to_send(field), Some(latest.clone()));
+        assert!(!queue.finished(field, &latest, false));
+        assert_eq!(queue.rollback_value(older), None);
+        assert_eq!(
+            queue.rollback_value(newest),
+            Some(PreferenceValue::TerminalLinkClick(
+                TerminalLinkClick::Intercept
+            ))
+        );
+    }
+
+    /// A delivered failure is still stale if another click arrives before its
+    /// waiter runs. Keeping the idle fallback also prevents that new click from
+    /// adopting the failed value still displayed during the delivery gap.
+    #[farhelm_testtrace::test]
+    fn preference_receipt_rejects_a_delivered_outcome_after_a_new_record() {
+        let mut queue = PreferenceWrites::default();
+        queue.seed_rollbacks(&Preferences::default(), true);
+        let first = PreferenceValue::TerminalLinkClick(TerminalLinkClick::Both);
+        let (older, mut waiting, _) = queue.observe(first.clone());
+        assert_eq!(queue.next_to_send(older.field), Some(first.clone()));
+        assert!(!queue.finished(older.field, &first, false));
+        assert!(queue.is_current(older));
+        let latest = PreferenceValue::TerminalLinkClick(TerminalLinkClick::Program);
+        let (newest, _, start) = queue.observe(latest.clone());
+        assert!(start, "the previous writer already released the field");
+        assert_eq!(waiting.try_recv(), Ok(Some(false)));
+        assert!(!queue.is_current(older));
+        assert_eq!(queue.rollback_value(older), None);
+        assert_eq!(queue.next_to_send(newest.field), Some(latest.clone()));
+        assert!(!queue.finished(newest.field, &latest, false));
+        assert_eq!(
+            queue.rollback_value(newest),
+            Some(PreferenceValue::TerminalLinkClick(
+                TerminalLinkClick::Intercept
+            ))
+        );
+    }
+
+    /// Silent and equal records must invalidate an observed receipt too. A local
+    /// component generation would miss this cross-component supersession, while
+    /// an unrelated field must leave the original receipt current.
+    #[farhelm_testtrace::test]
+    fn preference_receipts_include_silent_and_equal_records_per_field() {
+        let mut queue = PreferenceWrites::default();
+        let value = PreferenceValue::ClaudeTrustHintDismissed(true);
+        let (write, mut waiting, _) = queue.observe(value.clone());
+        assert!(queue.record(PreferenceValue::ColorTerminalFrames(true)));
+        assert!(queue.is_current(write));
+        assert!(!queue.record(value));
+        assert_eq!(waiting.try_recv(), Ok(Some(false)));
+        assert!(!queue.is_current(write));
+    }
+
+    /// Losing the writer discards its pending choice without promoting it into
+    /// rollback state; the newest waiter can still report that current failure.
+    #[farhelm_testtrace::test]
+    fn scalar_rollback_survives_writer_loss_without_accepting_the_choice() {
+        let mut queue = PreferenceWrites::default();
+        queue.seed_rollbacks(
+            &Preferences {
+                color_terminal_frames: Some(true),
+                ..Default::default()
+            },
+            true,
+        );
+        let value = PreferenceValue::ColorTerminalFrames(false);
+        let (write, mut waiting, _) = queue.observe(value.clone());
+        assert_eq!(queue.next_to_send(write.field), Some(value));
+        queue.writer_lost(write.field);
+        assert_eq!(waiting.try_recv(), Ok(Some(false)));
+        assert!(queue.is_current(write));
+        assert_eq!(queue.pending(write.field), None);
+        assert_eq!(
+            queue.rollback_value(write),
+            Some(PreferenceValue::ColorTerminalFrames(true))
+        );
+    }
+
+    /// A gate remount refreshes idle baselines from its authoritative seed but
+    /// must not overwrite the established fallback of a crossing pending PUT.
+    /// A failed seed cannot erase either kind of previously observed value.
+    #[farhelm_testtrace::test]
+    fn scalar_rollback_seed_refreshes_idle_fields_and_preserves_pending_ones() {
+        let mut queue = PreferenceWrites::default();
+        queue.seed_rollbacks(&Preferences::default(), true);
+        let (write, _, _) =
+            queue.observe(PreferenceValue::TerminalLinkClick(TerminalLinkClick::Both));
+        let seed = Preferences {
+            name_session_on_quick_launch: Some(false),
+            color_terminal_frames: Some(true),
+            terminal_link_click: Some("program".into()),
+            ..Default::default()
+        };
+        queue.seed_rollbacks(&seed, true);
+        assert_eq!(
+            queue.rollback_value(write),
+            Some(PreferenceValue::TerminalLinkClick(
+                TerminalLinkClick::Intercept
+            ))
+        );
+        assert_eq!(
+            queue.name_session_on_quick_launch.rollback,
+            Some(PreferenceValue::NameSessionOnQuickLaunch(false))
+        );
+        assert_eq!(
+            queue.color_terminal_frames.rollback,
+            Some(PreferenceValue::ColorTerminalFrames(true))
+        );
+        queue.seed_rollbacks(&Preferences::default(), false);
+        assert_eq!(
+            queue.rollback_value(write),
+            Some(PreferenceValue::TerminalLinkClick(
+                TerminalLinkClick::Intercept
+            ))
+        );
+        assert_eq!(
+            queue.color_terminal_frames.rollback,
+            Some(PreferenceValue::ColorTerminalFrames(true))
+        );
+        queue.writer_lost(write.field);
+        queue.seed_rollbacks(&seed, true);
+        assert_eq!(
+            queue.rollback_value(write),
+            Some(PreferenceValue::TerminalLinkClick(
+                TerminalLinkClick::Program
+            ))
+        );
+    }
+
+    /// A failed startup read can initialize displayed defaults, not manufacture
+    /// an acknowledged value. Unset and unknown link words keep interception;
+    /// naming and frame colors deliberately have different boolean defaults.
+    #[farhelm_testtrace::test]
+    fn scalar_rollback_seed_normalizes_displayed_defaults() {
+        let mut queue = PreferenceWrites::default();
+        queue.seed_rollbacks(&Preferences::default(), false);
+        assert_eq!(
+            queue.name_session_on_quick_launch.rollback,
+            Some(PreferenceValue::NameSessionOnQuickLaunch(true))
+        );
+        assert_eq!(
+            queue.color_terminal_frames.rollback,
+            Some(PreferenceValue::ColorTerminalFrames(false))
+        );
+        queue.seed_rollbacks(
+            &Preferences {
+                terminal_link_click: Some("future-mode".into()),
+                ..Default::default()
+            },
+            true,
+        );
+        assert_eq!(
+            queue.terminal_link_click.rollback,
+            Some(PreferenceValue::TerminalLinkClick(
+                TerminalLinkClick::Intercept
+            ))
+        );
+        assert!(queue.quick_launch_template.rollback.is_none());
+    }
+
+    /// A corrective GET refines only its own scalar fallback while its receipt
+    /// remains current. A newer click rejects the whole stale correction, even
+    /// when the fetched row contains an apparently authoritative different value.
+    #[farhelm_testtrace::test]
+    fn scalar_reconciliation_is_field_local_and_rejects_superseded_reads() {
+        let mut queue = PreferenceWrites::default();
+        queue.seed_rollbacks(&Preferences::default(), true);
+        let value = PreferenceValue::TerminalLinkClick(TerminalLinkClick::Both);
+        let (write, _, _) = queue.observe(value.clone());
+        assert_eq!(queue.next_to_send(write.field), Some(value.clone()));
+        assert!(!queue.finished(write.field, &value, false));
+        let fetched = Preferences {
+            terminal_link_click: Some("program".into()),
+            color_terminal_frames: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(
+            queue.reconcile(write, &fetched),
+            Some(PreferenceValue::TerminalLinkClick(
+                TerminalLinkClick::Program
+            ))
+        );
+        assert_eq!(
+            queue.color_terminal_frames.rollback,
+            Some(PreferenceValue::ColorTerminalFrames(false))
+        );
+        let (newest, _, _) = queue.observe(value);
+        assert_eq!(queue.reconcile(write, &Preferences::default()), None);
+        assert_eq!(
+            queue.rollback_value(newest),
+            Some(PreferenceValue::TerminalLinkClick(
+                TerminalLinkClick::Program
+            ))
+        );
     }
 
     /// Rename's refresh keeps a mark of ours only while its write is
@@ -6664,9 +7471,12 @@ mod preference_write_tests {
         let value = PreferenceValue::QuickLaunchTemplate(Some("deleted".into()));
         for success in [false, true] {
             let mut queue = PreferenceWrites::default();
-            assert!(queue.record(value.clone()));
+            let (write, mut saving, start) = queue.observe(value.clone());
+            assert!(start);
             assert_eq!(queue.next_to_send(field), Some(value.clone()));
             let mut deleting = queue.before_template_delete(field).unwrap();
+            assert!(queue.is_current(write), "a barrier is not a new choice");
+            assert_eq!(saving.try_recv(), Ok(Some(false)));
             assert_eq!(deleting.try_recv(), Ok(None));
             assert!(!queue.finished(field, &value, success));
             assert_eq!(queue.pending(field), None);
