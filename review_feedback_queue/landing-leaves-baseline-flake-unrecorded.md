@@ -57,3 +57,37 @@ recurrence repeated later in that report.
 Confidence and bucket remain **confirmed committed omission, other**. Private runs and diagnosis were not authenticated;
 verify them before recording a cause. No product bug or flake was reproduced. No exact coverage or filter match was
 found. Provenance: run `4fae501c-3686-4822-aa6c-037266637632`, `g010/f1`. Proposed drop: none.
+
+### Further committed recurrence reports
+
+At `a03d6baa7bf2a320ab738c51dffa7247a944a594`, `plans/reports/sign-in-preservation-sweep.report.md:53–56` reports
+intermittent Chromium failure of “templates busy root stays keyboard-scrollable,” including one of four attempts on
+unchanged main, and defers recording. The landing addition at `aa2078cbb622a543147eec79abb3d00003a8661c:187–190` reports
+a recurring wrong-host Update acceptance failure during ten repeats and likewise defers shared records.
+
+At `45e0bedbc29f0be890eb0a3480accac5d978458c`, `plans/reports/session-view-fixes-oct22.report.md:204–210` reports
+WebKit's “remove-and-re-add-host: removal forgets, re-adding rediscovers” failing seven of ten stack attempts and five
+of ten unchanged-main attempts. It defers FLAKES/TODO tracking to a separate draft. Later approval removes the report
+but supplies no corresponding shared record or exception.
+
+Chromium's “accepted ADD registers before execution and releases the page lock while running” is one recurrence repeated
+by three reports: `52ccb64c5a497adb359e9ce1e3a4210e96933450`,
+`plans/reports/update-refuses-newer-host-schema.report.md:143–153`; `9b9b554eacabf4570aa4437eefba198849e74af3`,
+`plans/reports/dialog-saves-oct22.report.md:152–162`; and `ad01c7122d24952c7d589a02d36b9eab08c7fb9e`,
+`plans/reports/build-and-tooling-oct22.report.md:150–160`. All cite two of twenty failures in the same main run and
+defer recording. Count it once.
+
+There is a narrower historical sidebar Replace omission. The report introduced at
+`7e7255845c94d0c2a07b3c2c051bd74779063901`, `plans/reports/session-details-bottom.report.md:157–161,184–188`, reports
+WebKit's “plain Replace keeps a newer same-source key after old sidebar YOLO cancellation” failing three of six plan
+attempts and two of six main attempts. Existing header pointer-race records partly cover the shared menu transition, but
+omit this exact sidebar title and its disposition. The machine exclusion matches a complete test title, so its header
+entry does not exclude sidebar. Later commit `d6abf445783e49711b5ad71c1a84e11fbed29d32` adds an explicit menu-close step
+to both variants. This is **not** a claim that the old fixture still fails or a recommendation to add a new current
+exclusion without verifying its disposition.
+
+Pinned-tip tracking searches found no matching entries for these additional observations. Confidence remains **confirmed
+committed reporting/tracking discrepancy, other**. Private runs, causes and possible external draft fixes were not
+authenticated. No test or bug was reproduced. Preserve the historical observations and later source changes when
+deciding what to record. Provenance: run `ef6e18fa-8ac0-4850-a557-d59b8af5efb9`, `g138/f1`, `g141/f2`, `g144/f1`,
+`g145/f1`, `g146/f1`.

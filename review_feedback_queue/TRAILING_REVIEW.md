@@ -6,6 +6,109 @@ This is the exclusive starting point for the next trailing code review of `main`
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
 
+## Incomplete review toward 463cac15
+
+Pinned range: `5c6e49937b1e779be2a5445059637aadf3757356..463cac1528b5c5e259404975380d321a3fff0412`, 661 commits. The
+review is **incomplete**. `Last reviewed commit` remains unchanged; merging this result does not advance it.
+
+The first 341 commits explicitly reuse private run `4fae501c-3686-4822-aa6c-037266637632` and its referenced earlier
+runs. All 1,551 prior individual commit/file patch parts were compared exactly with immutable Git history, and all 305
+mandatory delivery audits were rerun successfully. The 293 previously completed identities did not perform new searches.
+Twelve incomplete identities continued on their original threads. Exact newer decisions settle the old selector,
+permanent-answer Cancel and loading-Cancel recording blockers without proving their disputed input routes impossible.
+The pending-mint cleanup investigation now establishes an additional instance; the startup-whitespace investigation adds
+no new queue instance after inspecting the identified Rust formatting tables.
+
+The additional 320 commits contain 1,357 patch parts assigned to 318 bounded functional groups. Together the inventories
+account for all 2,908 individual patch parts, including intermediate changes and deleted text. Mandatory manifests stay
+within 2,000 lines and 64 KiB; new groups include the complete 661-commit list, and reused manifests retain their
+original scope versions. Surrounding source and coverage sections were inspected selectively. Complete mandatory
+delivery does not close these substantive source or causal gaps:
+
+- Launcher source supersession still lacks a complete shipped input sequence and harmful admitted action after redraw.
+  The earlier high duplicate-launch claim was withdrawn after tracing server reconciliation; the remaining single
+  uncertainty marker concern lacks a compatible pre-admission ordering sequence.
+- Restart with retains an edited conversation after source reseeding, but a shipped post-edit source-switch action and
+  harmful resulting restart remain unestablished. The older Clone/Replace disposition does not cover this new surface.
+- Trash alias publication can bypass movement detection, but supported font, viewport and scroll geometry transferring
+  an enabled Delete under the old pointer remains unestablished. Narrow outage-card reachability has a separate sizing
+  and geometry gap.
+- Uninstall's post-scan mount change, newline-transformed identity and stopped-supervisor/live-tmux concerns lack their
+  respective supported topology, complete guard-defeating layout or systemd/session history. Stable-layout repairs do
+  not settle those remainders. The older unrelated-filesystem removal allegation also lacks a supported history.
+- Older direct-Bun OMP, Bun option-value classification and wholly renamed Grok concerns lack supported vendor parsing,
+  reporter or ancestry premises. The repeated SSH-marker parser concern lacks the incidental unrelated stanza and
+  stale-selection history needed for configuration loss.
+- A retained shortcut sequence after authentication/build remount lacks a compatible surviving execution gesture;
+  ordinary credential input cancels or consumes arming. A retained refusal weakening Restart's Delete protection lacks a
+  compatible supported validation-failure trigger.
+- Legacy local-page rebinding lacks supported browser admission and an actual confidential served page. Omitted IPv6
+  forms lack a supported route from their public classification to a local resource. No payload or translator was
+  invented to fill those gaps.
+- Surviving-tab startup adoption and alternative live-clone-pane protection lack ordinary supported producers. Equal
+  schema-number concerns lack a concrete incompatible migration pair and harmful decoder route; whole-record removal
+  remains a separate disposition ambiguity.
+- Hidden-Unicode removal-copy warnings have an unresolved contract and harmful-paste premise. The native release-test
+  app binding lacks exact provider-version launch-on-missing semantics. Claude's future capture plan has unresolved
+  vendor callback ordering and native unmarked Stop prerequisites; its abort-related pin concern remains conditional.
+- The earlier retained-menu publication and complete-row font-metric leads remain unresolved. Other stopped private
+  leads concern same-row deferred dismissal, host-dialog deferred close and cached-document gesture preservation. They
+  produced no independently actionable queue defect; their empty logs are not clean verdicts.
+
+These are missing premises rather than skipped patches or merely unmeasured occurrence rates. Affected groups stop under
+the stuck-investigation rule. Nominal empty searches are not used to claim completion. Other progressing groups received
+later synthesis and separate discovery on the same identities; verified new findings received another search. Fresh
+auditors checked possibly-highest proposed exclusions, including withdrawals and candidates mentioned only in prose.
+Agreements remain limited to their exact source mechanisms, decisions and partial coverage. Ambiguous whole exclusions
+remain recorded.
+
+There are 70 new queue records: seven highest, three high and 60 other. These are records for triage, with conditional
+mechanisms and unresolved leads distinguished in each file. The highest records concern live template Delete targets, an
+undisclosed permanent Delete after Retry, lost-reply deletion without Undo, a concealed session Delete warning, custom
+browser-origin credential reuse, replacement-folder workspace trust and a successful named restart retaining the
+previous conversation. Their inputs, scope and recovery limits remain explicit; no reproduction or loss-frequency
+measurement was performed. The high records concern older development archive displacement and two conditional
+development-build authentication gaps. Maintainer-tooling harm is not promoted to catastrophic harm.
+
+Three existing items are extended. Catalog cleanup gains the destination-authority test's pending-mint interval:
+version-matched Playwright 1.64 source establishes live renderer work for a failure screenshot after route removal and
+before fixture disposal. No successful allocation or adverse schedule was measured. The size-decision item corrects its
+mixed-spelling plan/report attribution and adds approximate-size cases, preserving later approvals and authorization
+uncertainty. The baseline-flake item adds committed template, host-action and sidebar Replace observations, retaining
+the distinction between historical omission and the later pointer-race repair. Private runtime evidence and maintainer
+conversations were not authenticated. No FLAKES, TODO, known-flakes or triage entry was changed.
+
+Evidence remains private under run `ef6e18fa-8ac0-4850-a557-d59b8af5efb9`. `completion.md` is the compact record;
+`completion.json` retains stable assignments, manifests, session identities, actual turn and attempt counts, delivery
+audits, synthesis/discovery passes and exact stop reasons. `dispositions.json` preserves finding revisions and
+withdrawals, queue mappings, scoped independent evidence and final-reply candidate references, including the reused
+dispositions. Every group retains its append-only findings, progress, actual replies and audits. Reviewers used Codex
+`gpt-6.1-sol`, high reasoning, with at most 19 concurrent children. Across reused and new evidence there are 704
+distinct identities: 532 primary groups and 172 auditors. Of these, 648 meet the protocol and 56 remain incomplete. The
+current continuation has 318 new primary groups, 81 fresh auditors and 12 resumed identities; 355 of those 411 groups
+complete and 56 remain incomplete, with none pending. It contains 1,238 completed actual turns, including 438 synthesis
+turns and 401 discovery passes. Current logs preserve 621 reviewer-local finding identities: 279 latest open and 342
+withdrawn, including audit verdicts and duplicates; those raw counts are not counts of distinct open bugs.
+
+Failed and superseded attempts remain preserved; a concurrent-resume writer conflict completed no reviewer turn and was
+retried on the same identity after the writer ended. A separate interrupted discovery exited zero without a final reply
+or completed turn; it earned no completion credit and finished on the same identity in a later pass. Delivery
+establishes neither attention nor understanding, correctness or exhaustiveness.
+
+Recording-time main is `11ce27e971f0892fe6d3e1840a1ca8a2b9bb42d4`. Its checkpoint, queue, filters, known bugs and ledger
+were unchanged from the pinned tip. Later specification, plan and relevant source changes were checked selectively for
+recording coverage. In particular, later commit `9a82acb9b536ed471027eb4d455f6063b9cb7074` repairs the proposed
+failed-settings rollback baseline, so that concern is not recorded open. Generic UI redesign plans do not explicitly
+remove the retained causes. The working copy moved to recording-time main before writing these records. Later commits
+are outside the review and are not claimed reviewed.
+
+The user explicitly prohibited bug reproduction. Reviewer prompts preserve that constraint: source inspection only; no
+product/runtime tests, browser or vendor launches, servers, SSH, filesystem/process experiments or live-installation
+actions. No such action ran, and no historical runtime result was reused as a current pass. The result changes only
+queue records, their index and this incomplete-review note. Validation covers changed Markdown, whitespace, queue/index
+consistency, required fields, bounded assignments and instruction pointers. The PR stays a draft for separate manual
+review and merging; no fixes, triage or checkpoint advancement are proposed.
+
 ## Incomplete review toward 616d79f4
 
 Pinned range: `5c6e49937b1e779be2a5445059637aadf3757356..616d79f45d6a1d817833291429d144a5c686bb4b`, 341 commits. The

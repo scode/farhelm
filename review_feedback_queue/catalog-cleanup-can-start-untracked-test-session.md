@@ -54,3 +54,25 @@ mode; this is not evidence of vendor turns or user-owned work loss. Existing cle
 exact other coverage found; proposed drop: none. Provenance: trailing review through
 `616d79f45d6a1d817833291429d144a5c686bb4b`, run `4fae501c-3686-4822-aa6c-037266637632`, `g037/f1`. No runtime
 reproduction.
+
+### Destination-authority cleanup has a live screenshot interval
+
+Additional reviewed commit: `c06589136a40e0a5223bb97f3fad7b58188268d7`,
+`e2e/tests/destination-authority.spec.ts:551,635–639` (route removal is `:649` at pinned tip
+`463cac1528b5c5e259404975380d321a3fff0412`). The refusal assertion can fail while the separately spawned create still
+awaits key minting. Finally removes interception without disposing the launcher; no create callback has entered yet for
+route removal to drain.
+
+The previously missing teardown premise is established from exact locked Playwright 1.64.0 source. Its package archives
+match the lockfile's SHA-512 values. `playwright/lib/worker/workerProcessEntry.js:1652–1677` finishes the test function
+and registered finish callbacks before fixture teardown. `playwright/lib/index.js:645–649,688–689` invokes failure
+screenshots, enabled by `e2e/playwright.config.ts:85`. Screenshot preparation executes in live frames and awaits fonts
+(`playwright-core/lib/coreBundle.js:22897–22918,22944–22962`). This supplies live renderer work after unrouting even
+without another await in the test's finally. Mint completion can pass unchanged-draft checks and start an unobserved
+session before disposal.
+
+Confidence: **confirmed conditional source path**, with actual scheduling and successful allocation unmeasured.
+Suggested bucket stays **other**: these are fake Codex sessions owned by the test stack, including in real-Claude mode.
+This extends the pre-POST cleanup defect, without claiming every route-removal/page-close ordering is unsafe or
+authenticating historical runtime results. Possible cover and the eight-block repair boundary remain as above.
+Provenance: run `ef6e18fa-8ac0-4850-a557-d59b8af5efb9`, `legacy-g036/f1`. No reproduction was performed.
