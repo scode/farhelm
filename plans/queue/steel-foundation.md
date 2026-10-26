@@ -495,69 +495,101 @@ entry must also be satisfied. Then close the plan per `plans/.agents/executing.m
 12): deliver its report through the queue script, write a closing entry in its log, and stop the watchdog. Never edit
 `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked while landing on 2026-10-25 (claim cf92b7).
+### 2026-10-26: answer to a blocked question
 
-### Landing stopped: the Steel foundation breaks part of the browser test suite
+The question, as the executor put it:
 
-The landing monitor did not merge this plan. None of its five PRs (#2728 to #2732) has merged, and main holds nothing of
-it.
+> Blocked while landing on 2026-10-25 (claim cf92b7).
+>
+> ### Landing stopped: the Steel foundation breaks part of the browser test suite
+>
+> The landing monitor did not merge this plan. None of its five PRs (#2728 to #2732) has merged, and main holds nothing
+> of it.
+>
+> This plan restyles the whole app for the Steel redesign you chose on 2026-10-25: Inter for interface text, the
+> blue-gray palette with filled selections, a System/Dark/Light appearance setting, and shared styling for buttons,
+> switches, menus and dialogs. Its executor ran a selection of browser tests. At landing, the whole browser suite
+> (`npx playwright test`, Chromium and WebKit, no retries) ran against this plan on current main, with nothing else
+> landing, in run `9a3c0404-de1e-4a81-8af2-dc4bad149e19`: 2646 passed and 36 failed. Of the 36, 30 are 15 tests that
+> failed on both engines, and 3 are cases of the session-header popover spec that fail the same check about how the
+> header's copy rewraps; all of these passed in the previous landing round's full run on main just before this plan (run
+> `e1283879-7e6b-4fcd-99ab-c94dfb2b139d`). The other 3 are tests known to fail occasionally under load.
+>
+> What the failures show, in product terms:
+>
+> - The terminal's background is computed as pure black instead of the dark grey of its theme (`#282c34`), both in an
+>   ordinary session and when Settings colors the terminal's frame by host. The plan says the terminal keeps its
+>   existing background and colors, so this looks like a regression; a likely cause is that a stylesheet change lets the
+>   terminal library's own black win over Farhelm's terminal theme.
+> - Four dialog tests (the host setup questions at phone width, the Remove host prompt, the uninstall prompt, and a
+>   confirmation for a session with a very long title) expect the destructive button above Cancel. The plan deliberately
+>   puts Cancel first, so these tests look out of date rather than the dialogs broken.
+> - In the session launcher, five tests (word search, custom permissions, guarded permissions, Goose and Pi permissions,
+>   and editing in Replace with) fail. The permission choices are now also a group named "permissions", the same name as
+>   the permissions section of the launcher's search results, so the tests find two matches; the failures show how
+>   screen readers and tests find these controls, not whether anything looks different, and some effort choices are no
+>   longer buttons (the plan turns long effort lists into a dropdown). This is probably the tests not following an
+>   intended change, but it is not established for each test.
+> - The plan's own new check that template summaries render in Inter fails on both engines; whether the font or the test
+>   is at fault is not established.
+> - Smaller checks fail, and the failures do not show whether users see anything wrong: the position of the terminal's
+>   notice after a mouse drag that a program handled without copying, the Farhelm wordmark in the window's title band
+>   (the light and dark versions are both in the page where the test expects one), turning on the switch for the
+>   terminal link-click setting, and the session header popover check above, about how the header's text rewraps.
+>
+> Each of these needs a judgment between "the test was not updated for an intended Steel change" and "the restyle broke
+> something", across a change that touches most of the app. That is the plan's own work rather than a landing fix, and
+> at least the terminal background is visible to every user.
+>
+> The landing also found three smaller things for the executor to fix on the way:
+>
+> - The interface's build file (`crates/farhelm-ui/Cargo.toml`) is not in the repository's formatting (two over-long
+>   lines, one of them from this plan), so the repository-wide formatting check fails; formatting that file fixes it.
+> - SPEC_impl.md still says the local-host mark stays red on a selected session row, while the code and this plan's
+>   SPEC.md text now draw it in the selection's inverse color there. That removes the red local-host warning from the
+>   selected row, which is your call (see the question below); SPEC_impl.md then needs to say whichever you choose.
+> - SPEC.md's list of launcher controls on which Enter launches does not include the new effort dropdown, although a
+>   browser test confirms Enter launches from it.
+>
+> ### What should happen to this plan?
+>
+> - **Send it back to its executor (recommended).** Answer this block with: run the whole browser suite on both engines
+>   against the stack; restore the terminal's theme background; for every other failure, fix the product or update the
+>   test to the intended Steel behavior, saying which in the report; and fix the three small items above. Say in the
+>   answer whether the local-host mark should stay red on a selected session row, and whether two launcher controls may
+>   share the name "permissions". The executor resumes on its existing five PRs and delivers again; the monitor lands it
+>   then. The later Steel plans wait until this one lands.
+> - **Land it now and fix the failures afterwards.** Main would carry the black terminal background and 18 failing
+>   browser tests (33 failures across the two engines) until a follow-up lands, and every other plan's landing checks
+>   would have to work around those failures in the meantime.
+> - **Abandon it and re-plan the foundation.** Only worth it if the approach itself is wrong; nothing here suggests
+>   that.
 
-This plan restyles the whole app for the Steel redesign you chose on 2026-10-25: Inter for interface text, the blue-gray
-palette with filled selections, a System/Dark/Light appearance setting, and shared styling for buttons, switches, menus
-and dialogs. Its executor ran a selection of browser tests. At landing, the whole browser suite (`npx playwright test`,
-Chromium and WebKit, no retries) ran against this plan on current main, with nothing else landing, in run
-`9a3c0404-de1e-4a81-8af2-dc4bad149e19`: 2646 passed and 36 failed. Of the 36, 30 are 15 tests that failed on both
-engines, and 3 are cases of the session-header popover spec that fail the same check about how the header's copy
-rewraps; all of these passed in the previous landing round's full run on main just before this plan (run
-`e1283879-7e6b-4fcd-99ab-c94dfb2b139d`). The other 3 are tests known to fail occasionally under load.
+The maintainer's answer:
 
-What the failures show, in product terms:
+The maintainer's words, verbatim:
 
-- The terminal's background is computed as pure black instead of the dark grey of its theme (`#282c34`), both in an
-  ordinary session and when Settings colors the terminal's frame by host. The plan says the terminal keeps its existing
-  background and colors, so this looks like a regression; a likely cause is that a stylesheet change lets the terminal
-  library's own black win over Farhelm's terminal theme.
-- Four dialog tests (the host setup questions at phone width, the Remove host prompt, the uninstall prompt, and a
-  confirmation for a session with a very long title) expect the destructive button above Cancel. The plan deliberately
-  puts Cancel first, so these tests look out of date rather than the dialogs broken.
-- In the session launcher, five tests (word search, custom permissions, guarded permissions, Goose and Pi permissions,
-  and editing in Replace with) fail. The permission choices are now also a group named "permissions", the same name as
-  the permissions section of the launcher's search results, so the tests find two matches; the failures show how screen
-  readers and tests find these controls, not whether anything looks different, and some effort choices are no longer
-  buttons (the plan turns long effort lists into a dropdown). This is probably the tests not following an intended
-  change, but it is not established for each test.
-- The plan's own new check that template summaries render in Inter fails on both engines; whether the font or the test
-  is at fault is not established.
-- Smaller checks fail, and the failures do not show whether users see anything wrong: the position of the terminal's
-  notice after a mouse drag that a program handled without copying, the Farhelm wordmark in the window's title band (the
-  light and dark versions are both in the page where the test expects one), turning on the switch for the terminal
-  link-click setting, and the session header popover check above, about how the header's text rewraps.
+> yeah send it back
+>
+> - host colors always are the same when selected local is no different from remote
 
-Each of these needs a judgment between "the test was not updated for an intended Steel change" and "the restyle broke
-something", across a change that touches most of the app. That is the plan's own work rather than a landing fix, and at
-least the terminal background is visible to every user.
+and, after the launcher naming was explained:
 
-The landing also found three smaller things for the executor to fix on the way:
+> sure rename, whatever you think is better, then send it back
 
-- The interface's build file (`crates/farhelm-ui/Cargo.toml`) is not in the repository's formatting (two over-long
-  lines, one of them from this plan), so the repository-wide formatting check fails; formatting that file fixes it.
-- SPEC_impl.md still says the local-host mark stays red on a selected session row, while the code and this plan's
-  SPEC.md text now draw it in the selection's inverse color there. That removes the red local-host warning from the
-  selected row, which is your call (see the question below); SPEC_impl.md then needs to say whichever you choose.
-- SPEC.md's list of launcher controls on which Enter launches does not include the new effort dropdown, although a
-  browser test confirms Enter launches from it.
+Agreed restatement:
 
-### What should happen to this plan?
-
-- **Send it back to its executor (recommended).** Answer this block with: run the whole browser suite on both engines
-  against the stack; restore the terminal's theme background; for every other failure, fix the product or update the
-  test to the intended Steel behavior, saying which in the report; and fix the three small items above. Say in the
-  answer whether the local-host mark should stay red on a selected session row, and whether two launcher controls may
-  share the name "permissions". The executor resumes on its existing five PRs and delivers again; the monitor lands it
-  then. The later Steel plans wait until this one lands.
-- **Land it now and fix the failures afterwards.** Main would carry the black terminal background and 18 failing browser
-  tests (33 failures across the two engines) until a follow-up lands, and every other plan's landing checks would have
-  to work around those failures in the meantime.
-- **Abandon it and re-plan the foundation.** Only worth it if the approach itself is wrong; nothing here suggests that.
+- Send the plan back to its executor. Run the whole browser suite on both engines against the stack. Restore the
+  terminal's theme background (`#282c34`) so it no longer renders black. For every other failure, fix the product or
+  update the test to the intended Steel behavior, and say in the report which it was for each. Also fix the three
+  smaller items in the Blocked question: format `crates/farhelm-ui/Cargo.toml`, correct SPEC_impl.md about the
+  local-host mark (next item), and add the effort dropdown to SPEC.md's list of launcher controls on which Enter
+  launches.
+- On a selected session row, host marks look the same whichever host they name: the local host is no different from a
+  remote one. Keep the plan's inverse selection color for the local-host mark, and make SPEC_impl.md say so instead of
+  "stays red".
+- Rename one of the two launcher parts that screen readers both announce as "permissions". Chosen at the maintainer's
+  request: the permission button row's group is announced as "permission mode"; its visible "permissions" label and the
+  search results' "Permissions" section stay as they are. Update the tests that look these up by name.
