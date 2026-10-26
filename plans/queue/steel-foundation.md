@@ -594,58 +594,76 @@ Agreed restatement:
   request: the permission button row's group is announced as "permission mode"; its visible "permissions" label and the
   search results' "Permissions" section stay as they are. Update the tests that look these up by name.
 
-## Blocked
+### 2026-10-26: answer to a blocked question
 
-Blocked while landing on 2026-10-26 (claim 030b5d).
+The question, as the executor put it:
 
-### Landing stopped again: one session-list test file became intermittent
+> Blocked while landing on 2026-10-26 (claim 030b5d).
+>
+> ### Landing stopped again: one session-list test file became intermittent
+>
+> The landing monitor did not merge this plan, the Steel restyle (the Inter font, the blue-gray palette, the appearance
+> setting and shared controls). None of its five PRs (#2728 to #2732) has merged, and main holds nothing of it.
+>
+> The redelivered plan carries out everything your previous answer asked for: the terminal's dark-grey background is
+> back, the out-of-date tests were updated, the permission button row is announced as "permission mode", selected host
+> marks look the same for local and remote hosts, and the formatting and spec fixes are in. An independent review found
+> every instruction done and no test weakened. All other checks passed: the interface's Rust tests and desktop-only
+> tests, the interface's JavaScript tests, the desktop asset check and the source checks. The desktop smoke tests from
+> the previous round still apply, because no desktop code changed since then.
+>
+> The whole browser suite (`npx playwright test`, Chromium and WebKit, no retries, run
+> `d00d80ec-381b-4ba3-9684-1619781fa98e`) passed 2678 tests and failed 4. Two of those passed when repeated alone: the
+> known open flake about a browser tab opened unaware of a takeover (already in TODO.md's Deflake list), and a test of
+> the window's title band that passed 3 of 3. The other two failures are in one test file about the session list. Its
+> tests open a session row's actions menu and check that the menu closes or stays open correctly when rows above it
+> change. Before measuring anything, each of them requires that the whole sidebar fits on the test's 1800-pixel-tall
+> page without scrolling. With the restyle, that requirement sometimes does not hold. What makes the sidebar
+> occasionally taller in this test is not established.
+>
+> The numbers. With the plan: every full browser run so far failed this file, this one with 2 failures and the previous
+> landing's run (on the blocked version) with 3, one on Chromium and two on WebKit; WebKit passed the file this time.
+> Repeated alone on Chromium, the two failing tests failed once in 6 test runs (each test 3 times, run
+> `b31c6a07-16b9-4b74-8bfd-bb7f4e4e8ecf`), and five runs of the whole nine-test file failed once in 45 test runs (run
+> `85ec7662-61f7-4e76-b486-d54cdb2ced8d`). Without the plan: five runs of the whole file on main passed all 45 (run
+> `ec19f3d3-03e3-4ced-8ebd-a8d81eb96b05`), and the full runs of the two landing rounds before this plan never failed it.
+> Run alone the difference is small; the full runs, 2 of 2 failing with the plan and 0 of 2 without, are what make the
+> plan very likely the cause.
+>
+> Your previous answer already covered these tests (the Blocked question listed how the session header's text rewraps
+> among the smaller failures). The executor's fix was to make them wait for fonts, which did not cure it. Nobody has
+> found why the sidebar is sometimes taller with the same content and page size. It may only be the test's starting
+> condition, or it may be a layout shift users would see, such as text reflowing when a font finishes loading. Nothing
+> here rules that out.
+>
+> ### What should happen to this plan?
+>
+> - **Send it back to its executor with a narrow instruction (recommended).** Find why the sidebar's height varies in
+>   this file's tests; if users would see it, fix the product, otherwise fix the tests' starting condition; then run
+>   this file at least 20 times on both engines plus the whole browser suite. Main stays as it is, and the four later
+>   Steel plans wait one more executor round and landing run.
+> - **Land it now and record an open flake.** The later Steel plans keep moving. The flake log is meant for failures
+>   whose cause was not obvious, and this one is known to come with the restyle, so the entry would be an exception you
+>   approve, with a Deflake entry in TODO.md. Until it is fixed, full browser runs (for later plans' landings and for
+>   releases) will likely fail this file, landings would treat that as the known flake, and a real regression in the
+>   same tests could hide behind it. If there is a user-visible layout shift, it would ship.
+> - **The landing monitor makes the test page taller, then lands.** The monitor would raise the test's page height so
+>   the sidebar has room, have the change reviewed independently as for any landing fix, and run the file 20 times on
+>   both engines before merging. Because the cause is unknown, this may hide the variation, including a real layout
+>   shift, rather than explain it.
 
-The landing monitor did not merge this plan, the Steel restyle (the Inter font, the blue-gray palette, the appearance
-setting and shared controls). None of its five PRs (#2728 to #2732) has merged, and main holds nothing of it.
+The maintainer's answer:
 
-The redelivered plan carries out everything your previous answer asked for: the terminal's dark-grey background is back,
-the out-of-date tests were updated, the permission button row is announced as "permission mode", selected host marks
-look the same for local and remote hosts, and the formatting and spec fixes are in. An independent review found every
-instruction done and no test weakened. All other checks passed: the interface's Rust tests and desktop-only tests, the
-interface's JavaScript tests, the desktop asset check and the source checks. The desktop smoke tests from the previous
-round still apply, because no desktop code changed since then.
+The maintainer's words, verbatim:
 
-The whole browser suite (`npx playwright test`, Chromium and WebKit, no retries, run
-`d00d80ec-381b-4ba3-9684-1619781fa98e`) passed 2678 tests and failed 4. Two of those passed when repeated alone: the
-known open flake about a browser tab opened unaware of a takeover (already in TODO.md's Deflake list), and a test of the
-window's title band that passed 3 of 3. The other two failures are in one test file about the session list. Its tests
-open a session row's actions menu and check that the menu closes or stays open correctly when rows above it change.
-Before measuring anything, each of them requires that the whole sidebar fits on the test's 1800-pixel-tall page without
-scrolling. With the restyle, that requirement sometimes does not hold. What makes the sidebar occasionally taller in
-this test is not established.
+> send it back as recommended. tell the executor that if it cannot reasonably easily figure it out, get a consult from
+> an opus sub agent to assist.
 
-The numbers. With the plan: every full browser run so far failed this file, this one with 2 failures and the previous
-landing's run (on the blocked version) with 3, one on Chromium and two on WebKit; WebKit passed the file this time.
-Repeated alone on Chromium, the two failing tests failed once in 6 test runs (each test 3 times, run
-`b31c6a07-16b9-4b74-8bfd-bb7f4e4e8ecf`), and five runs of the whole nine-test file failed once in 45 test runs (run
-`85ec7662-61f7-4e76-b486-d54cdb2ced8d`). Without the plan: five runs of the whole file on main passed all 45 (run
-`ec19f3d3-03e3-4ced-8ebd-a8d81eb96b05`), and the full runs of the two landing rounds before this plan never failed it.
-Run alone the difference is small; the full runs, 2 of 2 failing with the plan and 0 of 2 without, are what make the
-plan very likely the cause.
+Agreed restatement:
 
-Your previous answer already covered these tests (the Blocked question listed how the session header's text rewraps
-among the smaller failures). The executor's fix was to make them wait for fonts, which did not cure it. Nobody has found
-why the sidebar is sometimes taller with the same content and page size. It may only be the test's starting condition,
-or it may be a layout shift users would see, such as text reflowing when a font finishes loading. Nothing here rules
-that out.
-
-### What should happen to this plan?
-
-- **Send it back to its executor with a narrow instruction (recommended).** Find why the sidebar's height varies in this
-  file's tests; if users would see it, fix the product, otherwise fix the tests' starting condition; then run this file
-  at least 20 times on both engines plus the whole browser suite. Main stays as it is, and the four later Steel plans
-  wait one more executor round and landing run.
-- **Land it now and record an open flake.** The later Steel plans keep moving. The flake log is meant for failures whose
-  cause was not obvious, and this one is known to come with the restyle, so the entry would be an exception you approve,
-  with a Deflake entry in TODO.md. Until it is fixed, full browser runs (for later plans' landings and for releases)
-  will likely fail this file, landings would treat that as the known flake, and a real regression in the same tests
-  could hide behind it. If there is a user-visible layout shift, it would ship.
-- **The landing monitor makes the test page taller, then lands.** The monitor would raise the test's page height so the
-  sidebar has room, have the change reviewed independently as for any landing fix, and run the file 20 times on both
-  engines before merging. Because the cause is unknown, this may hide the variation, including a real layout shift,
-  rather than explain it.
+- Send the plan back with the recommended narrow instruction. Find why the sidebar's height varies in the session-list
+  test file whose tests open a row's actions menu and first require the whole sidebar to fit on the page without
+  scrolling. If users would see the variation (for example text reflowing when a font finishes loading), fix the
+  product; otherwise fix the tests' starting condition. Then run that file at least 20 times on both engines, plus the
+  whole browser suite, and report the cause found and which fix was made.
+- If the cause cannot be found reasonably easily, consult an Opus sub-agent to help investigate.
