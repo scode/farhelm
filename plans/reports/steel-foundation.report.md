@@ -190,3 +190,108 @@ The previous required code reviews of the five original units and the preceding 
 unchanged source. The preceding Opus 5.5/high visual gate inspected eight ordinary images across dark/light and
 wide/650px main-pane layouts, with host-colored-frame details judged from code and browser behavior. This round changes
 no visible product behavior and requires no new visual gate.
+
+### Landing
+
+Landed as built, on the third delivery, at your request before this landing's full browser run had finished (what it had
+and had not covered is under Checks). The Steel foundation is now on main: Inter for interface text, the blue-gray dark
+palette with solid selections, the Light counterpart with a per-device System/Dark/Light choice in Settings, and shared
+styling for buttons, switches, menus and dialogs. The later Steel plans that waited on it can start.
+
+- #2728: screenshots of the app's screens for visual review, captured locally and never published.
+- #2729: Inter interface typography.
+- #2730: Steel dark palette and solid selection.
+- #2731: device appearance choice and Steel Light.
+- #2732: shared controls, menus and dialogs.
+
+#### A correction to the previous Blocked question
+
+The second Blocked question, written by the landing monitor, said that the session-list tests failed because the whole
+sidebar sometimes did not fit on the test's page, and your answer asked the executor to find why the sidebar's height
+varied. That was a misreading of the failure. In every retained failure, including the monitor's own full run
+`d00d80ec-381b-4ba3-9684-1619781fa98e`, the check that the sidebar fits passed, and the check after it failed: the
+test's requirement that every font the page has asked for has finished loading. Nothing showed the sidebar's height
+varying. The executor found the cause: these tests park the mouse over a session row, which after a short delay opens
+that row's hover card, and the card's bold title asks for Inter Bold after the test's earlier font wait has already
+finished. The card floats above the page, so it cannot change the sidebar's layout. What a user can see of this is that
+the first time a hover card appears, its title may show in a fallback font for a moment until Inter Bold arrives. The
+executor fixed the tests (they now load every font the app declares before moving the mouse) and changed no product
+code. A fresh-context reviewer and the monitor both checked this cause against the test code and the retained failures,
+and agree with it.
+
+#### What landed since the stack was based, and whether it interacted
+
+No other plan landed in this round. While the stack waited, main gained review findings in the review queue (#2733,
+#2734); while it was being merged, main gained triage records, a TODO entry about safe automatic tunneling, and small
+edits to the review queue's instructions (#2735 to #2737). All of them are documentation, and none touches what this
+plan changes. One queued finding is about this plan and stays true after landing: the plan asked for screenshots of
+every changed screen and state, but the report offers a representative set, and nothing records that you waived the
+rest. It is in the review queue, untriaged.
+
+A fresh-context reviewer read this delivery's changes and what landed on main against each other before the merge, and
+found nothing to fix.
+
+#### Fixes made at landing
+
+None.
+
+#### Possible follow-ups
+
+- In the window's title band, double-clicking the version number is meant to select it. A test of that failed on
+  Chromium in this landing's full run and in the previous landing round's, both times because the double-click selected
+  no text. It passed in the two other full runs that included this plan, in 3 of 3 runs of that test by itself in the
+  previous round, and in the full runs on main before this plan. It is not a known flake, and so far it has failed only
+  with this plan. You knew of the earlier failure when you told the monitor to assume it is not caused by this plan;
+  whether the restyled title band makes the selection unreliable has not been checked. A narrow repeat run of that test
+  on main would settle it: a fault in the plan if it never fails there, a flake entry if it does.
+- The first time a hover card appears, its title may show in a fallback font for a moment until Inter Bold arrives.
+  Whether a card's title did the same before the restyle was not checked. If it bothers you, loading the bold weight
+  early would remove it.
+- The flake-log entry this plan adds concerns the session-list test that a long working directory shows its end, not its
+  start, when it does not fit. WebKit once put that end exactly one pixel past the row's visible edge, and the test
+  required less than one pixel. The test now accepts up to one pixel, the same allowance as the row-alignment checks
+  next to it, and still fails if the wrong end of the path is cut off. Its failures so far were all in runs that
+  included this plan, so the font change may be the cause rather than a latent flake; whether it fails on main without
+  the plan was not checked.
+- The queued finding about the missing screenshots, above, is yours to triage.
+- The rest of this landing's full browser run (below) was not part of this record; the monitor reports its final result
+  to you separately.
+
+#### Checks
+
+Since the version blocked in the previous landing round, the plan changed only two browser tests and added that one
+flake-log entry; the app's code, styles and build are identical. This landing ran, on the stack as rebased onto main:
+
+- The check that every test delay states its reason, `dprint check` across the repository,
+  `python3 scripts/check-agents-md.py`, the workspace debug build and the UI's release web build: all passed.
+- `npx playwright test` in `e2e/`, the whole browser suite on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `c38a7f5a-6337-4d22-8005-a555c351cb80`. At the time of landing it had run about 2450
+  of 2696 tests, with two failures, both on Chromium: the open flake about a browser tab opened unaware of a takeover
+  (already on TODO.md's Deflake list), and the title band test in the follow-ups above. Neither was rerun. Every one of
+  the nine session-list movement tests and the long-path test had passed on both engines. The WebKit runs not yet
+  started were those of the terminal specs (restart, scrolling, tabs, Unicode and the main terminal spec), the tooltip
+  specs, the Trash dialog, the welcome screen, the window title band, start order, workspace trust, the yolo guard, the
+  update readout's stylesheet and a set of earlier UI regressions. WebKit stands in for the engine of the Mac app, which
+  was not run.
+
+Reused from the previous landing round, which tested this plan at the same product code (it differed from this landing's
+version only in the two browser tests and the flake log): the formatting and lint checks (`cargo fmt --all -- --check`,
+`cargo clippy --all-targets -- -D warnings`, the web-target and binary lints,
+`cargo check -p farhelm-ui --features desktop` and `cargo check -p farhelm-desktop`) and
+`scripts/check-desktop-assets.sh`; the UI's Rust tests, `cargo nextest run -p farhelm-ui`, run
+`d57e3d3c-4fe6-4c6c-9c57-958fba8c8c34` (784 passed); its desktop-only Rust tests,
+`cargo nextest run -p farhelm-ui --features desktop`, run `f13a6a17-99e8-4f55-aca2-1dc1c7cf60b8` (964 passed); and the
+UI's JavaScript tests, `node --test` in `crates/farhelm-ui/js-tests`, run `22b29beb-c20f-4a9e-83b9-d82050a9922d` (358
+passed). Reused from the round before that: the desktop smoke test, run `0fc437d2-8041-448d-b6b9-b9b7b45d5de1`, and the
+executor's desktop smoke with appearance switching (startup, saved appearance, fonts and embedded assets in the desktop
+app), run `c772ca7a-6aec-4dff-89ac-9bbeb2e024fe`. Since those runs the UI changed in one stylesheet rule (the terminal's
+background) and one accessible name (permission mode), with the same set of embedded files, which the asset check above
+confirmed; the smoke tests check that the desktop app starts, serves its files and keeps its settings, which those two
+changes do not touch, but they did not see the restored terminal background. Also relied on: the executor's run of the
+session-list movement test file 20 times on each engine, on the final version of its font fix, run
+`84ed17c8-f465-4dae-a62c-2fa85a120f9d` (all 360 passed). Skipped: the Rust workspace beyond the UI crate (this plan
+changes only the UI), and the native Mac app (not runnable here).
+
+The report's "Since the last review" says the full browser suite was not rerun after the long-path test change; this
+landing's run is that rerun, unfinished at landing as described above. Nothing else in the report became untrue at
+landing.
