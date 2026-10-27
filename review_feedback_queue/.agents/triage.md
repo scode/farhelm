@@ -74,8 +74,10 @@ then continue to the next undecided item. This is an exception to the per-item d
 By default, triage undecided items on one page using the `interactive-artifact` skill; load and follow it by name.
 Prepare every item first ("Preparing each item" in this file, including the immediate removal of covered, filtered and
 already-fixed items), then write one page holding every item still undecided, serve it, and give the maintainer its URL.
-Walk through items one at a time in conversation only when the maintainer asks for it. Do not publish the page as a
-snippet or anywhere else unless the maintainer asks.
+Walk through items in conversation only when the maintainer explicitly asks for the conversation instead of a page. A
+request to be asked, or to be asked as few questions as possible ("ask me", "ask me the smallest number of questions
+that settle them"), is not that request: those questions go on the page (maintainer, 2026-10-26). Do not publish the
+page as a snippet or anywhere else unless the maintainer asks.
 
 Write the body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent scratch
 space"). Follow the skill for styling, serving, sharing the URL and any tunnel instructions, waiting for submissions,
@@ -90,7 +92,9 @@ remains unverified; the bucket and why; and the recommendation with its reason. 
 one picker choice per plausible outcome. Use the feedback filename as the stable picker id. Each choice has a short
 label, its outcome value (`discard`, `fix spec`, `fix code`, `fix spec+code`, `other`), and a line on what it would
 change and roughly how much work it is. The recommended option comes first and is marked, a "leave for later" option
-comes last, and a free-text comment field follows, using the skill's picker markup. Nothing is preselected. Use the
+comes last, and a free-text comment field follows, using the skill's picker markup. Nothing is preselected. When the
+maintainer asks for the fewest questions, one shared question may settle several items: it carries each item's context
+as above, its picker id joins those items' filenames, and each choice names the outcome it gives each item. Use the
 skill's Submit and wait mechanism to collect answers; the skill preserves picks and text across page updates.
 
 Act on each submission item by item:
