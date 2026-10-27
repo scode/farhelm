@@ -18905,7 +18905,12 @@
   prepared. The reporter is prepared before the relaunch transaction decides whether to clear the capture, and a failure
   clears it there, reusing the existing clear-and-restore path (a definitive pre-spawn abort restores it). A test makes
   preparation fail and expects plain Restart to say it cannot resume. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/named-restart-reporter-clear.md`.
+- Execution: implemented in jj change `qvksznmsyxpqmtxxxzwurxkvwpyyrrou`, bookmark
+  `plan/named-restart-reporter-clear/01-clear-on-reporter-failure`; draft PR
+  [#2742](https://github.com/scode/farhelm/pull/2742/changes). Named Pi/OMP restart now checks reporter preparation
+  before the existing transactional clear decision, keeping definitive-abort restoration. The regression covers healthy
+  reporter retention, a mismatched reporter artifact, rollback, successful clearing and a subsequent plain Restart
+  refusal. Specification and changelog match; the feedback file and index entry are removed.
 
 ## template-delete-lost-reply-loses-undo.md
 

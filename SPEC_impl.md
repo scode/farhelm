@@ -5601,10 +5601,12 @@ and transient serialized inputs count toward the existing request bounds.
 Reporting harnesses retain old capture until an accepted report replaces it. Goose's named restart clears capture,
 source and ownership version in the generation-opening transaction because its resume has no reporter. The same clear
 applies to any kind `AgentHooks::silences` reports as having no reporter under the supervisor's opt-out, decided from
-the seam value the spawn uses. `PriorRun` retains those columns only for the existing definitive-abort restoration,
-fenced by the new generation. Success and ambiguous failures publish a cleared mirror; an abort restores that mirror
-only if its durable restoration succeeded. No capture is seeded from request data and no new report admission rule or
-database schema is needed.
+the seam value the spawn uses, or when the named start's reporter asset cannot be prepared. Asset-backed reporters are
+materialized or verified before deciding whether to retain the old capture; spawn still verifies the artifact for
+injection through its ordinary path. `PriorRun` retains those columns only for the existing definitive-abort
+restoration, fenced by the new generation. Success and ambiguous failures publish a cleared mirror; an abort restores
+that mirror only if its durable restoration succeeded. No capture is seeded from request data and no new report
+admission rule or database schema is needed.
 
 ### Launch kinds: one resolved launch
 
