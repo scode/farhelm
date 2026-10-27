@@ -6,6 +6,13 @@ const SORT_LABELS = {
   title: "Title A–Z",
 } as const;
 
+/** Pointer users click the painted label; clipped native radios keep checked state and keyboard focus. */
+export async function chooseStatus(page: Page, choice: "All" | "Running" | "Waiting" | "Idle"): Promise<void> {
+  const group = page.getByRole("radiogroup", { name: "Session status" });
+  await group.locator("label").filter({ hasText: new RegExp(`^${choice}$`) }).locator("span").click();
+  await expect(group.getByRole("radio", { name: choice, exact: true })).toBeChecked();
+}
+
 /** Choose through the public menu so request and preference tests exercise the real control. */
 export async function chooseSort(page: Page, sort: keyof typeof SORT_LABELS): Promise<void> {
   await page.locator(".sort-title").click();

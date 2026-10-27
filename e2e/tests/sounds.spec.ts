@@ -3,6 +3,7 @@
 // without depending on hardware, vendor agents or heuristic status timing.
 import { expect, newObservedContext, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { chooseStatus } from "./helpers/list-header";
 import { openSettings, selectSettingsSection } from "./helpers/settings";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import { cleanupSession, createSession, listHosts, localHostId, observeFeedReaders, pinAutoSelect, readFeedReaders, resetPreferences, stubFeed, waitForFeedReadersSettled } from "./helpers/fleet";
@@ -103,6 +104,34 @@ test.describe("device sounds", () => {
       ]),
       ["preferences", () => resetPreferences(request)],
     ]);
+  });
+
+  /** A real status query changes the sound scope silently, while approvals stay fleet-wide.
+   * Keep the fixture's status equal to the supervisor's actual idle result so
+   * rewriting the All reply cannot contradict membership in narrowed replies.
+   */
+  test("status segments seed sounds silently and do not filter approval bells", async ({ page, request }) => {
+    const f = await fixture(page, request, created);
+    await expect.poll(async () => (await request.get("/api/sessions")).json().then((body) =>
+      body.sessions.find((row: any) => row.id === f.session.id)?.status.state),
+      { timeout: 20_000, message: "the controlled status must agree with real helm membership" }).toBe("idle");
+    f.data.status = "idle";
+    await page.goto("/");
+    await f.feed.waitForConnection(1);
+    await applied(page, f.session.id, "idle");
+    expect(await starts(page)).toEqual([]);
+    await chooseStatus(page, "Waiting");
+    await expect(page.locator(`[data-session-id="${f.session.id}"]`)).toHaveCount(0);
+    await applied(page, f.session.id, null);
+    expect(await starts(page)).toEqual([]);
+    f.data.approvals = [f.ask("status-hidden-approval")];
+    f.feed.notify(2);
+    await applied(page, f.session.id, null, "status-hidden-approval");
+    const approval = [880, 1760, 2640, 698, 1396, 2094];
+    expect(await starts(page)).toEqual(approval);
+    await chooseStatus(page, "All");
+    await applied(page, f.session.id, "idle", "status-hidden-approval");
+    expect(await starts(page)).toEqual(approval);
   });
 
   /** A hidden session stays quiet, revealing it seeds history, and approvals

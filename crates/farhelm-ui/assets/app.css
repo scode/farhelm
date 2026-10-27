@@ -1218,6 +1218,20 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   background: var(--bg-1);
 }
 
+/* Status is a single server query. Keep the shared native radio anatomy
+   and fit all four words inside the existing 240px content-column floor. */
+.session-status-filter {
+  padding: 6px 8px;
+}
+.session-status-filter .segmented-control { display: flex; }
+.session-status-filter .segment-radio { min-width: 0; flex: 1 1 0; }
+.session-status-filter .segmented-control > .segment-radio > span {
+  width: 100%;
+  min-height: 28px;
+  padding-inline: 5px;
+  font-size: 12px;
+}
+
 /* The host choice stays visible even for a failed list read. Its registry
    label can be long, so it must not impose its
    intrinsic width on a narrow sidebar. */
