@@ -1,120 +1,213 @@
+## Since the last review
+
+PRs #2747 and #2750 were revised; #2749 keeps the same change. No PR was added or dropped, and none has merged. This
+round follows the maintainer's decision to repair the browser failures and show failed or uncertain setup and Update
+outcomes on the host icon while Hosts is closed.
+
+The product addition is the host warning. The other repairs update tests for the intended sidebar layout and names,
+restore a missing session-start premise in a delete test, and correct SPEC.md's header order. The required code and
+visual gates cleared the final changes. Broad browser coverage ran on both engines; one later focus failure was repaired
+and checked narrowly, as detailed below. No wholly green final broad command is claimed.
+
 ## What this was about
 
-The sidebar now follows the approved Steel design: the chosen sort order is its title, a status filter sits below it,
-and a permanent strip of host icons replaces the host dropdown. Hosts at the strip's foot opens the existing host
-management controls in place of the session list. The work uses the Steel foundation's colors, fonts and shared
-controls.
+The sidebar follows Steel: its sort order is the list title, a status filter sits below it, and a permanent strip of
+host icons replaces the host dropdown. Hosts at the strip's foot opens management in place of the session list. The
+existing Steel colors, fonts and controls are reused.
 
-Filtering keeps the open session and terminal. Choosing a hidden session from the quick switcher clears the host and
-status filters when needed; visible choices preserve them. Status sounds continue to follow both filters. Host actions,
-their confirmations and running work keep the same owners when switching between Sessions and Hosts.
+Filters preserve the open session and terminal. Choosing a hidden session through the quick switcher resets the host and
+status choices when needed. Sounds follow both filters. Host actions, confirmations and running work retain their
+existing owners when switching between Sessions and Hosts.
 
 ## Things you should know
 
-The three PRs below replace the outline's four: the unpublished host strip and management panel were combined after a
-scope review because their menu origins and presentation depend on each other. This avoids adding a temporary focus
-interface and removing it in the following PR. No planned feature was dropped.
+When setup or Update fails or becomes uncertain with Hosts closed, an independent amber mark appears on that host's
+icon. It stays alongside connection state, the update badge and a running retry's ring. Opening Hosts acknowledges the
+mark without deleting the diagnostic. A later successful run of the same action can also clear it; starting a retry, an
+unrelated success, Connected or a current version cannot. Hosts never opens by itself. An initial Add whose reply is
+lost marks only the matching registered host; if none has appeared, the existing Add notice remains. A destination or
+installation change that leaves an Update uncertain warns the same logical host entry.
 
-The host strip is 56 pixels wide. Sidebar limits are now 296–656 pixels, default 396, preserving the session column's
-previous 240–600 pixels and default 340. Stored widths keep their old meaning. At the minimum, header controls may wrap
-as groups and remain reachable. Running setup or update progress gets a line below the host's name so it cannot squeeze
-the name away. Host identifiers use the technical font but may wrap at narrow widths to stay contained.
+Most landing failures were test premises left behind by the intentional design change: capitalized New and Templates
+names, host controls now inside Hosts, session controls hidden while Hosts is shown, footer controls measured at their
+old positions, and a terminal-width fixture that needed a wider window after the sidebar grew. Those repairs preserve
+their behavior, geometry, focus and request assertions. The header-specific test corrections now belong to #2747, so
+that PR is checked independently of later host-panel changes. SPEC.md now states Trash, Templates, New in that order.
 
-Hosts opens on demand; Sessions is the initial view. The toggle keeps keyboard focus on either transition. Host icons,
-All, and accepted session navigation return to Sessions. A refused action preserves the current view. The remembered
-host filter gets a quieter outline while management is shown; its filter choice does not change. A context menu does not
-choose that host. Async refusals remember whether the accepted action came from the host icon or management row and
-return focus to a currently visible control.
+The retained delete-refusal failure happened before the browser opened: the session was stopped before its agent was
+known to have started, then reported a startup error instead of exited. The test now establishes a live agent before
+stopping it and retains the full status if that premise fails. The old evidence cannot distinguish an early-stop race
+from the systemd user manager refusing the scope; no product startup change is claimed.
 
-Renaming a host or changing its phase preserves focus on its stationary icon. Reordering the host list can make a moved
-icon lose focus; arbitrary focus retention across that structural change was not added as a new facility.
+The retained WebKit late-Settings-refusal case exhausted its overall time budget during its last checks. Its trace shows
+the refusal arriving, the lower menu moving and closing, and the menu reopening correctly; some final displacement
+probes completed after the timeout. It passed the later focused selection without a product or timeout change. The old
+multi-host failure left an invented unreachable host registered when its page timed out; contamination of later tests is
+plausible, but individual downstream causes were not proved.
 
-The selected session can be stale while its host is actively reconnecting. The icon reports that connecting phase; the
-distinct unreachable phase is dimmed and uses a warning dot. Captures do not reclassify a failed attempt as an
-unreachable host just to demonstrate that look.
+The new full browser run exposed ten remaining fixture failures. Two assumed a particular remembered sort title. Seven
+WebKit checks searched physical terminal rows for fresh output that actually crossed row boundaries, including the
+wrapped-link test's marker before any resize. They now use shorter fresh markers while retaining real output, resize,
+wrap and full-link activation assertions. A busy Templates test intermittently saw no scroll from PageDown immediately
+after Home reached zero; it now proves a positive native offset and checks keyboard Home returning the real region to
+zero, without an immediate reverse gesture. The exact timing cause remains a hypothesis. All twenty repaired cases
+passed on both engines; the Chromium Templates reproduction also passed ten consecutive attempts. These are test
+corrections, with no product terminal or keyboard change. The latent scroll observation and repair are recorded in
+FLAKES.md.
+
+The second complete-coverage batch then found one WebKit Templates focus failure. Save-and-leave publishes the new
+template before its scheduled focus handoff completes. The test now waits for the intended name-field focus before
+moving to the button whose Enter action it tests. The unmodified case failed three of ten exact attempts; the corrected
+case passed ten WebKit attempts and a strict check on both engines. The race's exact native timing remains a hypothesis.
+Enter, unsaved-draft, stored-data and close-focus assertions remain. This is another fixture repair, recorded in
+FLAKES.md, with no product keyboard change.
+
+The host strip is 56 pixels wide. Sidebar limits are 296–656 pixels, default 396, preserving the session column's old
+240–600 pixels and default 340. Stored widths keep their old meaning. At the minimum, header groups can wrap while
+remaining reachable. Running host progress occupies its own line. Hosts retains the chosen filter, sort, session and
+details setting, and its toggle retains keyboard focus. Host icons, All and accepted session navigation return to
+Sessions; a refused handoff keeps the current view. Context-menu opening does not select that host.
 
 ## Open questions and possible follow-ups
 
-No maintainer decision is needed for this delivery. The remaining Steel plans own the session toolbar, dialogs and
-sentence case. In particular, inherited host/help menu wording was left for the sentence-case plan; the 650-pixel
-toolbar still has the pre-existing cramped text-size action that the session-chrome plan addresses.
+The remaining Steel plans own the session toolbar, dialogs and inherited sentence case. Structural host reordering can
+lose focus on a moved icon; this work does not add arbitrary focus retention for that operation. The prior visual review
+left two optional spacing nits: a small running-host name offset and a wide Details gap at the maximum width. Both
+remain readable and reachable.
 
-The visual reviewer noted two nonblocking spacing nits: the running host's name starts about 3–4 pixels to the right of
-the other names, and Details has a wide gap beside it at the maximum sidebar width. Both remain readable and reachable.
-These were left within the mockup's approximate geometry instead of starting another cosmetic capture round.
-
-Normal web appshots cover the layout forced into the macOS title-band shape. Native traffic lights and AppKit drag/zoom
-were checked from code, not run on a Mac. The current staged hosts do not show an update-available badge or a remote
-with a custom color; source and focused state tests cover those roles. No install, SSH configuration or live Farhelm
-state was changed. The setup pictures use the existing simulated host-action backend with real helm progress.
+Normal web captures cover the forced macOS title-band layout. Native traffic lights and AppKit drag/zoom are assessed
+from code, without a Mac runtime claim. Setup and warning pictures use the existing simulated action backend and real
+helm progress. Warning and update-badge coexistence was assessed from their separate CSS corners, not from a captured
+simultaneous state. Inherited text-size-control clipping at a 650-pixel main pane belongs to the session-toolbar plan.
+No live Farhelm installation or SSH configuration was changed.
 
 ## The PRs
 
 - [#2747](https://github.com/scode/farhelm/pull/2747/changes): sort title, count and compact icon actions.
 - [#2749](https://github.com/scode/farhelm/pull/2749/changes): status filtering and quick-switcher behavior.
-- [#2750](https://github.com/scode/farhelm/pull/2750/changes): host strip, management panel, widths and title-band
-  layout.
+- [#2750](https://github.com/scode/farhelm/pull/2750/changes): host strip, management panel, widths, title band and host
+  warnings.
 
-All remain drafts. The landing monitor owns their merge.
+All remain drafts. Final heads are respectively `9b2c8cdc72d9c7f435fcf05523922a47d552bd80`,
+`98aa71a3c6db62f8305b6ba8c7a064490c09165c` and `6d94cc8b44143450bc7871090fea7f5bf4a74382`, in one linear stack on main
+`98bb15850f5f5ba1df6ed66873338261c45ff948`. The landing monitor owns their merge.
 
 ## Checks run, reused and skipped
 
-All runtime commands used the recorder. Browser commands used Chromium and WebKit, three workers with one owned stack
-each, pinned tmux, zero retries. No full browser or workspace battery was run as a finishing ritual.
+Every runtime command uses the recorder. Strict browser checks use Chromium and WebKit, three workers with one owned
+stack each, pinned tmux and zero retries; generic single-engine repetitions are identified separately. Final folding
+preserved the reviewed and tested file contents exactly. The rebase adds only four unrelated trailing-review
+instruction/checkpoint changes; it changes no product, test, specification or goal behavior. This comparison supports
+reuse of the individual successful commands below, not treating failed commands as passes.
 
-The header run group covers PR #2747 as it developed through pre-rebase head `c4765fbf6d3a2391b34e1360606d3de0579b11c0`;
-its final reviewed head is `08b93af1c7370bcdb1e47e03394b591cb6f6b161`. The status group covers PR #2749 through
-pre-rebase head `f90b7a72ff31391ca57c6e8f3aa77e48848087e7`; its final head is
-`451963c369e8c8be92f6ca82830d8e8f2c3f5193`. The host group covers the final pre-rebase working-copy revision
-`7b1abd06f0f990f3b283f6bc289eacf76817d8cb`; PR #2750's final head is `c71a79493377f6061d7763b5fc9d611b80fe499f`. All
-three were rebased onto main `a46397c85637096e56898aecb914d1f8f3ce7d74`.
+`cargo nextest run -p farhelm-ui` passed 801 tests in `9b42a126-d1d5-444b-85d4-bc83f01ae89e`, complete source
+fingerprint `1a72aa15370039ceecfb943dc8c107230bd4c98a7b1490d7b9beb169482136b2`. After the final recovery-order
+correction, `cargo nextest run -p farhelm-ui --lib -E 'test(/hosts::attention::|hosts::tests::initial_add_/)'` passed
+sixteen in `8f398229-8bf6-4f5b-96bf-1146bf5ec3fb`; 789 cases were outside that selection. Reuse of the full run is
+limited to its unchanged tests, not an 805-test pass in one command. Final
+`cargo clippy -p farhelm-ui --all-targets -- -D warnings` passed in `a589069f-cfb5-4fe2-85aa-903ef31bc418`. Both latest
+commands bind `937b582ecde27e091280983144cac450a8af6abe05dcb9ce2d74b3671a31d467`; later CSS and browser-fixture edits
+leave Rust behavior unchanged. The first attempt failed compilation on a visibility-handle type and remains retained as
+`b1f2b4e3-3c2b-41d5-bae0-3f29b1cc65bb`; it is not passing evidence.
 
-Individual commands ran while those revisions were being developed, so their retained source fingerprints identify the
-actual dirty working copies rather than treating Git HEAD alone as the tested tree. For example, the final 18-case
-browser command, final Clippy command and final capture all bind source fingerprint
-`56dfd5bde1a92a3c1e1a1e773a47510686e58bd8a9326efb7548ab249fd540f8`. Earlier commands are reused only for the unchanged
-behavior named below, with later affected behavior covered by the narrower runs.
+The requested unfiltered `npx playwright test` ran in `63d3564d-44ed-4b38-9b1f-f1c4da69fb7f` and failed. Raw output
+reported 2,742 passed, ten failed and fourteen skipped, but its 18.4 MB JSON report exceeded the recorder's 16 MiB
+inspection cap. Those are raw, not recorder-validated totals. The whole failed run and traces remain retained.
 
-- Header: `cargo nextest run -p farhelm-ui --lib` passed 784 tests, run `d5d3c10b-3a88-4730-9745-ace4c3e3c337`; the UI's
-  `node --test` passed 358, run `c030afe6-17d9-4391-acc8-161be1b00cb9`. Sort/filter browser specs passed 56, run
-  `f723fdd2-3328-47d9-86f5-498176931ae5`; selected compact/count/wrapping cases passed 16, run
-  `1c8c569a-0bf0-4996-8c6d-cae458082cc2`. Reused for the unchanged header behavior above those revisions.
-- Status: selected status/quick-switcher/sound browser cases passed 16, run `72039ee1-912c-43c6-9f65-0beed4156359`;
-  focused current-list membership units passed, including final run `12edf6e3-8575-4c4e-9555-be9292fa31ae`. Reused
-  because subsequent host presentation changes preserve their query and admission paths.
-- Hosts: width/token JavaScript tests passed 19, run `4f826f1e-d4af-46ba-a975-49eecc1204b9`; phase/progress units passed
-  2, run `58649fe2-f648-4445-b96e-6b7eb3c69e95`. Selected browser cases passed 80, run
-  `ee4e5565-f943-4b44-8df9-582a28bc43b2`. After visual corrections, the affected menu, panel, running-progress,
-  keyboard-focus and movement checks passed 18, run `0fd5f8cd-d39f-4020-86c8-a2cc9a9b14c1`. The earlier 80-case command
-  is reused where those local styling corrections leave its behavior intact.
-- Final `cargo clippy -p farhelm-ui --all-targets -- -D warnings` passed, run `32050de7-53a4-4e83-adab-834f418c1b23`;
-  the matching release web build passed, run `4329d3af-cf02-491a-a967-b2a7d9728702`. Rust formatting, changed Markdown
-  formatting, changelog format and the test delay checker passed; the delay checker inspected 322 annotated delays with
-  none missing a rationale.
-- Ordinary appshots: the header's 32 views and status filter's 48 views passed their capture commands. The final host
-  capture produced 84 views in dark/light at wide and 650-pixel main widths, including minimum/maximum sidebar widths,
-  compact rows, menus, settings, setup progress, retained stale state and the Hosts panel. Final capture run
-  `f5ee040a-0449-4a7d-93e6-ef902556d2e7` passed all five capture cases.
-- Earlier fixture failures and stale-build mistakes were retained and corrected before narrow reruns. An additional
-  14-case command, `6cfd18c2-2210-4461-8025-0c7bcf14cb78`, was externally interrupted after 13 passes; it is not a pass.
-  Its interrupted progress case passed in the final 18-case command. Failed or interrupted whole commands were never
-  reused as passing evidence.
-- Rebased all three PRs onto current main after reading its complete intervening diff. The change for each PR is
-  identical before and after rebase; no conflict resolution was needed. The installer, Restart trust/reporting and
-  hidden-trash backend changes are independent of sidebar presentation. The link-refusal layer and template deletion
-  changes use different UI owners and stylesheet sections. The trash fixture's path rename does not change the
-  header-count geometry it measures. The commands above are therefore reused across the rebase; no extra runtime battery
-  or appshot capture was needed for it.
-- Skipped: full Rust/browser batteries, native desktop runtime, installer/provisioning distribution tests and real
-  vendor agents. The change is local UI presentation/query selection; focused tests cover the changed contracts, and the
-  host action backend, install and vendor launch behavior are unchanged. No helm filtering change was needed.
+Final complete coverage uses two complementary file-pattern batches with the unchanged cap, zero retries and no overall
+execution deadline:
+
+- `npx playwright test 'tests/[a-r][^/]*\.spec\.ts$'`, `94504147-0bc1-47bd-b14c-1bd1d9d511bf`: 1,339 passed, three
+  skipped, zero failures. Chromium: 670 passed and one skipped; WebKit: 669 passed and two skipped. Its complete report
+  is 8,383,358 bytes. Two skips require the manual real-Claude credential/network gate; the other is the deliberately
+  Chromium-only pixel matrix's WebKit case. No real-Claude coverage is claimed.
+- `npx playwright test 'tests/[s-z][^/]*\.spec\.ts$'`, `ea779e79-d750-4bb6-bb4e-9ed32faee243`: failed, with 1,412
+  passed, one failed and eleven skipped. Chromium: 711 passed and one skipped; WebKit: 701 passed, one failed and ten
+  skipped. The sole failure was the Templates focus premise described above. The complete report is 10,551,100 bytes.
+  Skips were two gated real-Claude spawn cases and nine WebKit clipboard cases, which Playwright cannot grant the
+  required clipboard permissions. Their retained skip diagnostics were read. No WebKit clipboard coverage is claimed.
+
+Both bind complete source fingerprint `3b3218f3e0097bda3f1eb3f847d24702e45ff2427f9bad470e55769a2de0c93a`, a dirty tree
+above `76e935dc7d2c5a1574b49a5a6f44aa35060683a0`, not that commit alone. Discovery proves exactly 2,766 cases, 1,383 per
+engine. Both actual completed reports were checked against that list: no overlap, missing or extra case, with matching
+case metadata. Both have complete source identity, output EOF, untruncated retained output and completed cleanup. This
+proves complete selection coverage, not a passing second batch or a passing unfiltered command. Actual pinned tmux was
+3.7c, binary SHA256 `7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`.
+
+The targeted formerly failing twenty cases passed, ten per engine, in `071eb913-c29e-4240-9342-02aa4304ca18` on source
+`3b3218f3`. Generic recorded Chromium repetition `79b2c58e-ebbe-4d87-82d7-456456a559d8` passed ten busy Templates
+attempts on source `c70aa64b6b35f086ec3831fc41c9a266402b81eccf0950544b6a2fd89784f902`; generic mode does not provide
+strict runner-validated counts. Its preceding `24cba0e9-9ef9-42bf-b98d-60c26d7689db` recorded three failures and seven
+passes and remains retained. A mistaken anchored selection found no tests in `5498b274-03c5-4b24-ad77-9fade3f309b9`,
+which supplies no assertion evidence.
+
+For the second batch's focus failure, generic
+`npx playwright test --project=webkit-templates -g 'unsaved departures support keep editing, discard and save before leaving' --repeat-each=10 --retries=0`
+recorded three failures and seven passes in `c631be9f-ffaa-45ac-994c-d91ca6971230`, source `3b3218f3`. The same
+selection after adding the navigation-focus premise passed ten in `3904d54b-caf7-4924-a2c1-d417060346eb`, complete
+source fingerprint `249c6d1dbb9c9cc657c2b9bfaea6aaf4dcc473042ec7e7647db8ec7d5d1b9b95`. Strict
+`npx playwright test 'templates.spec.ts' -g 'unsaved departures support keep editing, discard and save before leaving'`
+then passed two cases, one per engine, in `9aa0a9a6-acb7-4050-a140-fed84df3c1b3`, source
+`f3e36418995793c9b3980019c863ca04f406de9ec5903b2f331cecebe3119d41`, with complete report, output and cleanup. These
+dirty sources differ only by the test premise and ledger text. No full batch was repeated for that four-line fixture
+change: the narrow runs cover its keyboard contract. The failed broad command remains failed, and all its artifacts
+remain retained.
+
+`dx build --package farhelm-ui --platform web --release` passed in `76e6d0fd-8f0d-41d4-8217-ed3b8337c9ff`, source
+`7aa5fa19acbcf9af194723f0b3bfd099389c8ebc2783633e4879c699ba6633d4`. Later fixture and ledger edits do not change the
+built UI. Ordinary `scripts/docs-screenshots.sh --only visual-review --no-build` produced twenty warning-state images in
+`1cf315b8-1c09-49e4-8749-36427453480b`, source `3b3218f3`, covering both palettes and wide/650-pixel-main-pane states,
+including selected and unselected retries. The executor inspected all twenty. These successful runtime commands have
+complete source evidence, untruncated retained output, observed EOF and completed cleanup.
+
+The actual header-only boundary passed its web build and 16 button/tooltip checks, eight per engine,
+`a6bb63b7-a6d5-4acc-aebd-3093b0f74b36` and `14493625-50ae-4a65-ae13-f6af459349ae`. The repaired seven selector specs
+passed 238 cases, `d4e2c7da-2512-4597-aa2d-e68f5fc86051`; the formerly failing multi-host selection passed 22,
+`9fdb5fbb-19e6-4125-b501-fd5163f490d8`. Their covered fingerprints were respectively
+`91e83c09541f0f4a64cf4aeab7626082e67f59f9895793cb4f7c8d817ec46b45`,
+`ef12474cc1220a08e4f71554737e022ac7e2f69ff23ee035c91d3f2ebb60c031` and
+`4d27e6043b4eca15f39c87133f131aa8cb589c486cf8b453394b82201fce98ff`. These checks retain their narrower repair and
+header-boundary claims; the later broad commands supply integration observations, not a retroactive passing command. A
+focused command that passed only twenty of twenty-six cases remains failed, followed by repaired six-case pass
+`27380917-5fdb-422e-b009-47e3ea21cc26`. Those two earlier attempts are historical context only and supply no reused
+passing evidence in this report; the identified later selector, host and complete-coverage runs describe the subsequent
+checks instead.
+
+Reused from the prior execution: the UI JavaScript harness (`node --test` in its test directory) passed 358 cases in
+`c030afe6-17d9-4391-acc8-161be1b00cb9`, source `6834c730d792e2a846eccec8bbed327cc33df7c7a13428a76708d99a7cefee2e`; the
+later width/token selection passed nineteen in `4f826f1e-d4af-46ba-a975-49eecc1204b9`, source
+`761e76a014e23e5912f4dda2880778b4d06ed314c160cdfe3d88cb0734841632`. Those assets and checks did not change in this
+returned round. Status integration passed sixteen cases in `72039ee1-912c-43c6-9f65-0beed4156359`, source
+`1a18638b6ba3ae32609e9213899130e47811d0ad9f45624df1af14c30b1e3f7b`; status logic is unchanged. Backend
+`cargo build -p farhelm` passed in `fb2117d7-29da-4fb9-80ec-c1fbca97fe9e`, source
+`5b51d34a804c58a15d1d23efb98f4c0116cc9d140a89f2eef5059058d486f7ab`; no backend code changed afterwards.
+
+Final source checks passed: `cargo fmt --all -- --check`, dprint on changed configured Markdown, changelog-fragment
+format, `git diff --check`, and the pinned-interpreter sleep checker (322 files, no missing rationale). The
+agent-instructions checker reported zero errors and two pre-existing unrelated citation warnings. Dprint does not format
+TypeScript in this checkout, so no TypeScript formatting pass is claimed.
+
+No full workspace/backend, distribution, installer or native desktop runtime battery was run: this changes the UI, not
+those implementations, and focused UI state tests, real-helm browser checks and forced title-band checks cover the
+changed contracts. Hosted CI is manual, its browser job is disabled, and no CI run was requested. No failed, interrupted
+or poorly identified command counts as a pass.
 
 ## Review gate's outcome
 
-Each PR received the required fresh gpt-6.1-sol/high code review and claude-opus-5-5/high multimodal visual review. Code
-findings were fixed and rechecked; no code finding remains. Opus inspected the header's 32 views, the status filter's 48
-views and the host interface's 84 views against the rendered references. After fixes, it inspected all 36 changed host
-views again; the other 48 reused the initial inspection. Actual image delivery was verified. It cleared the final views
-with the two cosmetic nits recorded above. The phase distinction, minimum-width wrapping, narrow identity wrapping and
-deferred inherited menu case were explicit decisions, rather than silent omissions. Commit/PR wording passed its
-independent cold reads.
+The exact gpt-6.1-sol/high header review `8b520021-3238-4d6b-953e-84950099e57d` cleared the original header change and
+its independently validated supplement. The unchanged status change retains its exact gpt-6.1-sol/high gate
+`e6fa8634-6d53-4d68-baa0-6a0ea9883ff5`. The complete host change and subsequent state, paint and fixture deltas cleared
+gpt-6.1-sol/high review `c8560aa0-b604-4f9e-b64a-6a1cc80c6564`. Fresh own-model scope review
+`8627d1df-7324-410d-ae97-57dc236035d4` accepted the bounded warning state without an additional authority or persistence
+system. The final four-line focus fixture and its ledger entry also cleared the same exact code reviewer. A private
+replay of the original reviewed host tree plus every cleared delta produced exactly the final pre-rebase tree; after
+folding, the only differences are the four unrelated upstream instruction/checkpoint files. The header tree and the host
+change's parent were checked against their independently reviewed boundaries too. No substantive unreviewed delta
+remains.
+
+Unchanged header, status and host visuals retain exact Opus 5.5/high gates `fe5ebaf6-be97-4e61-bb24-131962727cc8`,
+`f6838e47-65fb-4537-9484-087da35e08a1` and `2fce86dc-fe9d-4282-ba00-1667cfaf8f1d`. The warning gate is exact Opus
+5.5/high session `509c4971-5568-459e-aa34-6ae6186cc81e`. It found a ring crossing the dots and an unreadable neutral dot
+on light selection. Both were corrected; its follow-up inspected all twenty new images plus three rendered references
+and reported no remaining owned defect. Actual successful image reads and terminal success were verified. Optional
+spacing and later-plan limitations are disclosed above.
