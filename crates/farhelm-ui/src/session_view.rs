@@ -2102,6 +2102,9 @@ pub(crate) fn SessionView(
                     }
                 }
                 }
+                // Local listeners belong to the selected session even when it
+                // has no terminal or its tabs are inert after a disconnect.
+                NativeTunnelStrip { session: shown.clone() }
                 // While a delete of this session is in flight the actions give
                 // way to its progress, the same label the sidebar row shows.
                 // They are hidden rather than unmounted: every action is
@@ -2729,9 +2732,6 @@ pub(crate) fn SessionView(
                     div { class: "lease-error", "{err}" }
                 }
             }
-            // Conditional notices precede tunnels; approvals follow the terminal
-            // area rather than assuming the tabs are still its immediate sibling.
-            NativeTunnelStrip { session: shown.clone() }
             if keep_terminal_surface(&shown, relaunched(), had_terminal()) {
                 // Every terminal is mounted at once and stacked; only the
                 // selected one is visible. The agent's pane is a fixed node

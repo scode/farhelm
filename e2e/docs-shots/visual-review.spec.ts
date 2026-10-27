@@ -25,6 +25,7 @@ import { shot as captureShot, type CropOptions } from "./shot";
 import { readFleet } from "./stage-docs";
 import { chooseStatus } from "../tests/helpers/list-header";
 import { chooseHost, hostChoice } from "../tests/helpers/host-rail";
+import { mountNativeTunnelPreview } from "../tests/helpers/native-tunnel-preview";
 
 // A sidebar-only PR needs its changed states, rather than every unchanged
 // foundation dialog. The same script, fleet, shot helper and cleanup still run.
@@ -33,6 +34,77 @@ const sidebarStatusOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-s
 const sidebarRailOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-rail";
 const sidebarWarningOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-warning";
 const toolbarOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "session-toolbar";
+const tunnelOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "session-tunnels";
+
+/** Photograph native-only chrome with the goal's explicit CSS-only fallback.
+ * The ordinary staged web app supplies the surrounding frame and terminals.
+ * Only invented listener markup is inserted, matching tunnels.rs; these presentation
+ * fixtures prove geometry/contrast, never native callbacks, requests or consent.
+ * Native Rust tests and review own that evidence. No API reply is rewritten.
+ */
+async function tunnelShots(page: Page, name: string) {
+  const topbar = page.locator(".session-topbar");
+  const original = (await topbar.boundingBox())!;
+  const terminal = (await page.locator(".terminal-panes").boundingBox())!;
+  for (const state of ["one", "one-list", "many", "many-list", "closing", "error", "error-list"] as const) {
+    await mountNativeTunnelPreview(page, state);
+    expect((await topbar.boundingBox())!.height, "the preview preserves the desktop top-row height").toBe(original.height);
+    expect(await page.locator(".terminal-panes").boundingBox(), "the native preview adds no terminal row").toEqual(terminal);
+    const pane = (await page.locator(".app-main").boundingBox())!;
+    const actions = page.locator(".titlebar-actions");
+    for (const control of await actions.locator("button:visible").all()) {
+      const box = (await control.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(pane.x);
+      expect(box.x + box.width).toBeLessThanOrEqual(pane.x + pane.width);
+    }
+    if (state !== "error") {
+      const toggle = page.locator(".session-tunnel-toggle");
+      const pill = (await toggle.boundingBox())!;
+      const tabs = (await page.locator(".tab-strip").boundingBox())!;
+      expect(pill.x).toBeGreaterThanOrEqual(tabs.x + tabs.width);
+      expect(pill.x + pill.width).toBeLessThanOrEqual((await actions.boundingBox())!.x);
+      expect(pill.width).toBeLessThanOrEqual(280);
+      const selected = (await page.locator(".tab.selected").boundingBox())!;
+      expect(selected.x, "the selected tab starts inside its scrollport").toBeGreaterThanOrEqual(tabs.x - 1);
+      expect(selected.x + selected.width, "the selected tab remains readable beside the pill").toBeLessThanOrEqual(tabs.x + tabs.width + 1);
+      if (state === "one" || state === "one-list") {
+        const fixed = toggle.locator(".session-tunnel-mapping > span:not(.session-tunnel-host)");
+        await expect(fixed).toHaveText([":57779 → ", ":44227"]);
+        for (const port of await fixed.all()) {
+          expect(await port.evaluate((element) => element.scrollWidth <= element.clientWidth), "both ports remain readable").toBe(true);
+        }
+      }
+    }
+    const panel = page.locator(".session-tunnel-panel");
+    if (await panel.count()) {
+      await insideViewport(page, panel);
+      // Native keyboard focus is real; no fixture click pretends to close a
+      // listener. The callback and offline contracts are native-only evidence.
+      const close = panel.locator(".session-tunnel-close-all");
+      await keyboardFocusControl(page, page.locator("body"), close);
+      await focusedShot(page, `${name}-tunnel-${state}`, close);
+    } else if (state === "error") {
+      await insideViewport(page, page.locator(".session-tunnel-error"));
+      await shot(page, `${name}-tunnel-${state}`, [page.locator("body")], { pad: 0 });
+    } else {
+      await shot(page, `${name}-tunnel-${state}`, [page.locator("body")], { pad: 0 });
+      if (state === "one") {
+        const toggle = page.locator(".session-tunnel-toggle");
+        // Approach from the next toolbar stop. Visiting Add first would
+        // deliberately scroll the tab strip to that other control.
+        await toggle.focus();
+        await page.keyboard.press("Tab");
+        await page.keyboard.press("Shift+Tab");
+        await expect(toggle).toBeFocused();
+        expect(await toggle.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+        await focusedShot(page, `${name}-tunnel-one-focused`, toggle);
+        await page.keyboard.press("Escape");
+        await expect(page.locator(".farhelm-tooltip")).toBeHidden();
+      }
+    }
+  }
+  await page.evaluate(() => document.querySelectorAll("[data-tunnel-preview]").forEach((element) => element.remove()));
+}
 
 /** Park before observing tooltip state, not only at the screenshot's last step.
  * Pointer departure cancels pending hover help. Focus captures establish their
@@ -541,6 +613,14 @@ for (const colorScheme of ["dark", "light"] as const) {
         expect(Math.abs(hostGap), "the short host and colon have no empty width floor").toBeLessThan(1);
         const name = `visual-review/${colorScheme}-${width}`;
         const window = [page.locator("body")];
+        if (tunnelOnly) {
+          // Matches the established window-chrome fixture. The native title
+          // band itself remains a source-only review on this Linux web build.
+          await page.locator(".app-shell").evaluate((element) => element.classList.add("macos-window"));
+          await shot(page, `${name}-tunnel-zero`, window, { pad: 0 });
+          await tunnelShots(page, name);
+          return;
+        }
         await shot(page, `${name}-main`, window, { pad: 0 });
         if (toolbarOnly) {
           // The fixed actions must fit the measured main pane. A nominal

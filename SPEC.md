@@ -1959,38 +1959,39 @@ whatever the agent renders is what you see. There is no composer, no message abs
   interacting with is readable at a glance rather than only from the bottom bar's session name. A filter that excludes
   the selected session leaves no row to mark — the bottom bar's session name remains the identifier in that state, and
   the main pane deliberately stays put (filtering the list is not deselecting).
-- The typical session view has one top row, with terminal tabs on the left and text size (A−, A+), Restart ▾, Replace ▾,
-  Clone and Delete on the right, followed by the terminal and a slim details bar below it. Restart and Replace are split
-  buttons: the main part performs the ordinary action, including its existing confirmation; the caret opens a menu
-  offering that action and Restart with… or Replace with…. The icon-and-label controls keep their compact height. Text
-  size, both parts of each split button, Clone and Delete remain fully visible and keyboard reachable from a 650px main
-  pane; only the tab strip takes the remaining width and scrolls horizontally when needed. Narrower panes may clip the
-  row, which never wraps. The bottom bar is about one tab-strip row high and shows, in order, status, session name,
-  host, age, the managed-checkout branch mark when present, directory, and command line. The host's icon and name follow
-  the session list's rules, with the host prominent beside the session name; a missing host name omits the host rather
-  than inventing one. Directory display still abbreviates the home directory to `~`. Keyboard order follows the top row,
-  terminal, then bottom bar. The terminal loses no height in the steady state. Conditional notices and the desktop
-  tunnel strip stay between the top row and terminal, notices first; a stale session's status appears only in its stale
-  notice, not again in the bottom bar. Restart and its menu's matching entries are greyed out when the session cannot
-  resume its conversation (see Lifecycle operations); their tooltips and accessible descriptions explain the specific
-  reason, such as an agent type without conversation reporting, a command launch that declared no agent type or did not
-  opt into Resume, or a conversation not captured yet. For an agent that reports conversations, a running session's
-  explanation says, naming the agent, when Restart normally becomes available for it (Codex, for instance, once the
-  first prompt is submitted), and an ended session's says its conversation was never captured; both invite the user to
-  send feedback if that is not what happened, since Farhelm cannot tell a report still to come from one that never will.
-  The supervisor's refusal of such a restart and the agent instructions state the same timing, without the invitation.
-  Directory and command line are muted click-to-copy buttons that take the width their values need and ellipsize before
-  the session name or host when the bar runs out of room; a click confirms locally for about 1.5 seconds. A
-  hidden-characters copy warning opens upward from the bar and stays within the window. Clipboard writes use the native
-  bridge first and `navigator.clipboard` second, with JSON serialization and silent failures. Replace has its own
-  anchored danger confirmation and neutral cancellation. Delete is styled as the danger action and asks first in the
-  same anchored way, even for a session that has ended, with the same consequence text the row's delete prompt shows.
-  Restart's confirmation is likewise anchored under its top-row button; Escape cancels these questions and returns focus
-  to the terminal. The session-confirmation setting skips the top row's Delete, Replace and Restart questions, the
-  interrupted-card Replace question, and tab Close, using the screen's consent and existing guards. Split menus follow
-  the app's shared keyboard rules: arrows and Home/End move between choices, Escape or Tab closes the menu and returns
-  focus to its caret. Cancelling Restart with returns to that persistent caret. An unavailable plain Restart does not
-  hide an independently available Restart with; the menu remains available to inspect reasons.
+- The typical session view has one top row, with terminal tabs and the desktop tunnel pill on the left and text size
+  (A−, A+), Restart ▾, Replace ▾, Clone and Delete on the right, followed by the terminal and a slim details bar below
+  it. Restart and Replace are split buttons: the main part performs the ordinary action, including its existing
+  confirmation; the caret opens a menu offering that action and Restart with… or Replace with…. The icon-and-label
+  controls keep their compact height. Text size, both parts of each split button, Clone, Delete and the tunnel pill
+  remain fully visible and keyboard reachable from a 650px main pane; only the tab strip takes the remaining width and
+  scrolls horizontally when needed. Narrower panes may clip the row, which never wraps. The bottom bar is about one
+  tab-strip row high and shows, in order, status, session name, host, age, the managed-checkout branch mark when
+  present, directory, and command line. The host's icon and name follow the session list's rules, with the host
+  prominent beside the session name; a missing host name omits the host rather than inventing one. Directory display
+  still abbreviates the home directory to `~`. Keyboard order follows the top row, terminal, then bottom bar. The
+  terminal loses no height in the steady state. Conditional notices stay between the top row and terminal; a stale
+  session's status appears only in its stale notice, not again in the bottom bar. Restart and its menu's matching
+  entries are greyed out when the session cannot resume its conversation (see Lifecycle operations); their tooltips and
+  accessible descriptions explain the specific reason, such as an agent type without conversation reporting, a command
+  launch that declared no agent type or did not opt into Resume, or a conversation not captured yet. For an agent that
+  reports conversations, a running session's explanation says, naming the agent, when Restart normally becomes available
+  for it (Codex, for instance, once the first prompt is submitted), and an ended session's says its conversation was
+  never captured; both invite the user to send feedback if that is not what happened, since Farhelm cannot tell a report
+  still to come from one that never will. The supervisor's refusal of such a restart and the agent instructions state
+  the same timing, without the invitation. Directory and command line are muted click-to-copy buttons that take the
+  width their values need and ellipsize before the session name or host when the bar runs out of room; a click confirms
+  locally for about 1.5 seconds. A hidden-characters copy warning opens upward from the bar and stays within the window.
+  Clipboard writes use the native bridge first and `navigator.clipboard` second, with JSON serialization and silent
+  failures. Replace has its own anchored danger confirmation and neutral cancellation. Delete is styled as the danger
+  action and asks first in the same anchored way, even for a session that has ended, with the same consequence text the
+  row's delete prompt shows. Restart's confirmation is likewise anchored under its top-row button; Escape cancels these
+  questions and returns focus to the terminal. The session-confirmation setting skips the top row's Delete, Replace and
+  Restart questions, the interrupted-card Replace question, and tab Close, using the screen's consent and existing
+  guards. Split menus follow the app's shared keyboard rules: arrows and Home/End move between choices, Escape or Tab
+  closes the menu and returns focus to its caret. Cancelling Restart with returns to that persistent caret. An
+  unavailable plain Restart does not hide an independently available Restart with; the menu remains available to inspect
+  reasons.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a
@@ -2084,9 +2085,16 @@ whatever the agent renders is what you see. There is no composer, no message abs
   tunnels. A later tunnel request then needs the warning again. Each tunnel is kept only in helm memory until the
   session is deleted, Farhelm quits, or the user closes it. Restarting or stopping the agent does not close it.
   Reopening a link for the same session and loopback target reuses its tunnel. A host disconnect fails new connections
-  until the host returns; an existing TCP stream is never replayed. A strip under the top row shows one local-port →
-  host-port chip per tunnel, with a close button. The list and close actions stay available while the host is
-  disconnected. This feature does not forward login callbacks.
+  until the host returns; an existing TCP stream is never replayed. A distinctively colored pill beside the terminal
+  tabs shows the local-port → host-port mapping for one listener, or a count for several. Both ports remain visible; a
+  long host name ellipsizes, with the full mapping in its tooltip and accessible name. Opening the pill shows a list of
+  mappings with a close button for each listener and Close all. Close all attempts the listeners shown at activation in
+  order, continuing after failures and retaining failed listeners with their reasons. The list and close actions stay
+  available while the host is disconnected. No pill appears when no listeners remain. Read and close failures appear in
+  a dismissible notice below the top row without adding a permanent row, including when no pill is present; refreshing
+  the list does not dismiss a close failure. Escape closes the list and returns focus to the pill; Tab follows its
+  ordinary controls and leaving the list closes it without reclaiming focus. This feature does not forward login
+  callbacks.
 
 - File paths in terminal output can be downloaded from the session's host, including the local host. Absolute and `~/`
   paths, relative paths containing a slash or a file extension, and `file://` hyperlinks emitted by a program count;

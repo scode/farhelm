@@ -337,6 +337,10 @@
   --radius-sm: 3px; /* controls and inputs */
   --radius-md: 4px; /* panels, cards, and dialogs */
   --radius-lg: 8px; /* pill-ish badges */
+  /* Native local listeners have their own disclosure role, not host status. */
+  --tunnel-fg: #a0d8cf;
+  --tunnel-bg: #213b3b;
+  --tunnel-border: #436b68;
   --radius-pill: 999px; /* transient launch-sequence echo area */
 
   /* The session row's two fixed leading tracks (status dot, locality glyph)
@@ -360,6 +364,9 @@
    fonts and shape stay shared; the terminal keeps its own dark theme. Quiet
    text and accent prose are bound by the hover fill, not just white cards. */
 :root[data-appearance="light"] {
+  --tunnel-fg: #1c6865;
+  --tunnel-bg: #d4eeeb;
+  --tunnel-border: #81bdb4;
   color-scheme: light;
   --host-icon-lavender: #68529c;
   --host-icon-orchid: #8c447d;
@@ -1373,7 +1380,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   align-items: center;
   flex-shrink: 0;
 }
-.session-topbar { padding-top: 0; padding-bottom: 0; }
+.session-topbar { position: relative; padding-top: 0; padding-bottom: 0; }
 .session-topbar .tab-strip {
   flex: 1 1 0;
   min-width: 0;
@@ -1958,6 +1965,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
         dialog
      45 `.tunnel-error-notice` — link cover. A persistent tunnel failure,
         above link previews (40) but below their refusal explanation (51)
+     45 `.session-tunnel-error` — link cover. The tunnel pill's floating
+        failure, like the notice above; drops to 25 while a header question
+        is open, so the question's consequence text is never covered
      50 `.launch-sequence-indicator` — link cover. The quick-launch pill,
         centered over the terminal and transparent to the pointer
      50 `.farhelm-tooltip` — link cover. Hover help, above every panel and
@@ -8489,31 +8499,110 @@ a:any-link,
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
-/* Local listener controls remain outside the offline terminal's inert area. */
-.session-tunnels {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 6px 12px;
-  background: var(--bg-1);
-  color: var(--fg-1);
-  font-size: 12px;
-}
-.session-tunnel-chip {
+/* The native owner stays mounted at zero listeners, but its pill spends width
+   only when needed. Ports never shrink; an unbounded peer host yields first. */
+/* A present pill follows actual tab content, not the expanding empty track.
+   Keep enough scrollport for an ordinary shell tab; the actions own the
+   remaining auto margin. Intrinsic shrinking budgets the pill's host text
+   after readable tabs and actions, without viewport breakpoints or a new
+   containment boundary around existing confirmations. */
+.session-topbar:has(> .session-tunnel-pill) { gap: 6px; }
+.session-topbar:has(> .session-tunnel-pill) .tab-strip { flex: 0 1 auto; min-width: 112px; }
+.session-topbar:has(> .session-tunnel-pill) .titlebar-actions { gap: 4px; }
+.session-topbar:has(> .session-tunnel-pill) .titlebar-actions .btn { padding: 2px; }
+.session-topbar:has(> .session-tunnel-pill) .titlebar-actions .header-action-menu .menu-item { padding: 6px 7px; }
+.session-tunnel-pill { position: relative; flex: 0 1 auto; min-width: 0; max-width: 280px; }
+.session-tunnel-pill:has(> .session-tunnel-toggle > .session-tunnel-mapping) { min-width: 154px; }
+.session-tunnel-toggle {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
+  width: max-content;
+  max-width: 100%;
+  padding: 2px 4px;
+  font-size: 11px;
+  line-height: 1.4;
   border-radius: var(--radius-lg);
-  padding: 1px 4px 1px 9px;
-  background: var(--bg-2);
-}
-.session-tunnel-close {
-  background: transparent;
-  border: none;
-  color: inherit;
-  padding: 2px 6px;
+  border: 1px solid var(--tunnel-border);
+  background: var(--tunnel-bg);
+  color: var(--tunnel-fg);
   cursor: pointer;
+}
+/* The open fill must win over the shared button hover and focus fills;
+   its inverse text is readable only on the accent surface. */
+.session-tunnel-pill .session-tunnel-toggle[aria-expanded="true"] {
+  color: var(--on-fill);
+  background: var(--accent-fill-hover);
+  border-color: var(--accent-fill-hover);
+}
+.session-tunnel-toggle .action-glyph { width: 12px; height: 12px; flex: 0 0 12px; }
+.session-tunnel-count { font: 11px var(--font-mono); }
+.session-tunnel-mapping { display: inline-flex; align-items: baseline; min-width: 0; font: 11px var(--font-mono); white-space: nowrap; }
+/* Flex items collapse trailing spaces independently. Preserve the separator
+   after the arrow without adding a gap before the remote port. */
+.session-tunnel-mapping > :not(.session-tunnel-host) { flex: 0 0 auto; white-space: pre; }
+.session-tunnel-host { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A clipped letter without an ellipsis looks like a complete host name.
+   Reserve both glyphs inside the collapsed pill's fixed width budget. */
+.session-tunnel-toggle .session-tunnel-host { min-width: 2ch; }
+.session-tunnel-panel {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 5px);
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 88px);
+  overflow-y: auto;
+}
+.session-tunnel-list { list-style: none; margin: 0; padding: 0; }
+.session-tunnel-row { display: flex; align-items: center; gap: 8px; padding: 5px 7px; }
+.session-tunnel-row > .session-tunnel-mapping { flex: 1 1 auto; }
+.session-tunnel-close { flex: 0 0 auto; padding: 4px; }
+.session-tunnel-panel button[aria-disabled="true"] { color: var(--fg-2); cursor: default; }
+.session-tunnel-close[aria-disabled="true"] { opacity: .5; }
+/* Keep the busy label readable; only the decorative unavailable crosses fade. */
+.session-tunnel-panel .session-tunnel-close-all[aria-disabled="true"] { opacity: 1; }
+/* A conditional alert costs no steady-state row. The floating form uses the
+   existing notice layer; both forms declare terminal-link coverage. */
+.session-tunnel-error {
+  position: absolute;
+  z-index: 45;
+  top: calc(100% + 6px);
+  right: 10px;
+  display: flex;
+  align-items: start;
+  gap: 10px;
+  box-sizing: border-box;
+  max-width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 88px);
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--danger-bg-dim);
+  border: 1px solid var(--danger);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  color: var(--fg-0);
+  font-size: 12px;
+}
+.session-tunnel-error p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.session-tunnel-error > div { flex: 1; min-width: 0; font: 11px var(--font-mono); }
+.session-tunnel-error > .action-glyph { flex: 0 0 14px; margin-top: 2px; color: var(--danger); }
+.session-tunnel-error p + p { margin-top: 6px; }
+.session-tunnel-error > button { flex: 0 0 auto; }
+/* A header question's consequence text is never covered (see the ladder at
+   `.header-confirm`). Like the link refusal, an open question lowers a floating
+   tunnel error below it until the question closes. */
+.layout:has(> .session-topbar .header-confirm) .session-tunnel-error { z-index: 25; }
+/* While the list is open, its one error copy belongs in that scrollport:
+   overlapping two below-toolbar surfaces would conceal one another. */
+.session-tunnel-panel .session-tunnel-inline-error {
+  position: static;
+  margin: 4px 7px;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+  box-shadow: none;
 }
 .tunnel-consent-dialog {
   display: flex;
@@ -8546,7 +8635,6 @@ a:any-link,
   color: var(--fg-0);
   border: 1px solid currentColor;
 }
-.session-tunnel-error { color: var(--fg-0); padding: 4px 12px; }
 
 /* ===== Inverse roles on solid selection ============================
    These are the existing selection owners, not a second state mechanism.
