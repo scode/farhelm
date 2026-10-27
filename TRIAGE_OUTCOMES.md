@@ -18949,7 +18949,9 @@
   moved aside and identity-checked rather than removed by path. A test places a file after the check. Complexity gate:
   if this is non-trivial (well beyond the estimated 20–40 lines plus a test), block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/installer-link-noreplace.md`.
+- Execution: implemented in change `lroulnvrxztzopvkwunpqrsymzkkkvss`, bookmark
+  `plan/installer-link-noreplace/01-terminal-link-noreplace`; draft PR
+  [#2739](https://github.com/scode/farhelm/pull/2739/changes).
 
 ## older-installer-rebuild-deletes-late-foreign-app.md
 

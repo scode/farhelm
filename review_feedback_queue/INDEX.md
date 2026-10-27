@@ -43,10 +43,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Installing an older release can delete an unrelated app moved into Farhelm's usual location after the installer's
   initial ownership check. This conditional path needs neither an interruption nor failed restoration.
 
-- [`installer-terminal-link-overwrites-new-foreign-file.md`](installer-terminal-link-overwrites-new-foreign-file.md) —
-  Installation can overwrite a file another tool places at Farhelm's public Terminal-command location after the
-  installer checked or preserved its earlier contents.
-
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
