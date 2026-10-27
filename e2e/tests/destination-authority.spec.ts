@@ -1,3 +1,4 @@
+import { chooseHost, hostChoice } from "./helpers/host-rail";
 import { chooseLauncherHost } from "./helpers/host-picker";
 // Destination snapshots must survive sidebar projection changes without
 // letting a remembered path follow a registry row onto another installation.
@@ -74,7 +75,7 @@ for (const replace of [false, true]) {
       await waitForSessionRevealed(page, active.id);
       const terminal = await page.locator("#terminal").elementHandle();
       expect(terminal).toBeTruthy();
-      await page.locator(".filter-host").selectOption(String(fixture.local));
+      await chooseHost(page, String(fixture.local));
       await expect(row, "the server-backed filter must actually remove the selected row").toHaveCount(0);
       await expect(page.locator(".session-details .title")).toHaveText(active.title);
       expect(await terminal!.evaluate((node) => node === document.querySelector("#terminal")), "filtering must preserve the same terminal element").toBe(true);
@@ -82,7 +83,7 @@ for (const replace of [false, true]) {
         replacement = true;
         expect(feed.openSockets(), "replacement notification requires a live feed peer").toBe(1);
         feed.notify(1);
-        await expect(page.locator(`.filter-host option[value="${fixture.remote.id}"]`), "the replacement registry must be rendered before opening New").toContainText("replacement destination");
+        await expect(hostChoice(page, fixture.remote.id), "the replacement registry must be rendered before opening New").toHaveAttribute("aria-label", /replacement destination/);
       }
       await page.locator(".new-session-button").click();
       const form = page.locator(".create-session-form");

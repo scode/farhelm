@@ -1,3 +1,4 @@
+import { chooseHost, hostChoice } from "./helpers/host-rail";
 /** Keyboard navigation must cross the modal boundary before terminal focus. */
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
@@ -144,14 +145,14 @@ for (const mac of [false, true]) {
       await expect(page.locator(`[data-session-id="${first.id}"]`)).toHaveAttribute("data-session-selected", "true");
       await expect(terminal).toBeFocused();
 
-      // A select survives navigation; restoring it would veto terminal reveal.
-      await page.locator(".filter-host").focus();
-      await expect(page.locator(".filter-host")).toBeFocused();
+      // The All button survives navigation; restoring it would veto terminal reveal.
+      await hostChoice(page).focus();
+      await expect(hostChoice(page)).toBeFocused();
       dialog = await openSwitcher(page, mac);
       await dialog.getByRole("combobox").fill(second.title);
       await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(1);
       if (!mac) {
-        releaseObservation = await observeModalRelease(dialog, ".filter-host", ".filter-host, #terminal .xterm-helper-textarea");
+        releaseObservation = await observeModalRelease(dialog, ".host-rail-all", ".host-rail-all, #terminal .xterm-helper-textarea");
       }
       await page.keyboard.press("Enter");
       await expect(dialog).toHaveCount(0);
@@ -163,8 +164,8 @@ for (const mac of [false, true]) {
         expect(events.findIndex((event) => event.kind === "focus"), JSON.stringify(events))
           .toBeGreaterThan(events.findIndex((event) => event.kind === "removed"));
         expect(events.some((event) => event.kind === "focus" && event.backgroundFocused),
-          "a different-session handoff must not restore the captured select").toBe(false);
-        expect(await page.locator(".filter-host").evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
+          "a different-session handoff must not restore the captured rail button").toBe(false);
+        expect(await hostChoice(page).evaluate((node) => node.closest("[inert]") !== null)).toBe(false);
         await disposeRelease(releaseObservation);
         releaseObservation = undefined;
       }
@@ -209,14 +210,14 @@ test("a jump to a hidden host resets the selector to ALL", async ({ page, reques
     await pinAutoSelect(page, first.id);
     await page.goto("/");
     await attachSession(page, first.id);
-    await page.locator(".filter-host").selectOption(String(local));
+    await chooseHost(page, String(local));
     await expect(page.locator(`[data-session-id="${other.id}"]`)).toHaveCount(0);
     const dialog = await openSwitcher(page);
     await dialog.getByRole("combobox").fill(other.title);
     await expect(dialog.locator(".quick-switcher-results").getByRole("option")).toHaveCount(1);
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
-    await expect(page.locator(".filter-host")).toHaveValue("");
+    await expect(hostChoice(page, "")).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator(`[data-session-id="${other.id}"]`)).toHaveAttribute("data-session-selected", "true");
     await waitForSessionReady(page, other.id);
   } finally {
@@ -243,7 +244,7 @@ test("a busy pick leaves navigation and the host filter untouched", async ({ pag
     await page.goto("/");
     await attachSession(page, first.id);
     await waitForTermText(page, "FAKE-AGENT READY");
-    await page.locator(".filter-host").selectOption(String(local));
+    await chooseHost(page, String(local));
     await expect.poll(async () => (await listSessions(request)).sessions.find((s) => s.id === first.id)?.status?.state,
       { timeout: 20_000, message: "the busy-navigation origin must match the live-only segment" }).toBe("idle");
     await chooseStatus(page, "Idle");
@@ -267,7 +268,7 @@ test("a busy pick leaves navigation and the host filter untouched", async ({ pag
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
     await expect(terminal).toBeFocused();
-    await expect(page.locator(".filter-host")).toHaveValue(String(local));
+    await expect(hostChoice(page, String(local))).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("radio", { name: "Idle", exact: true })).toBeChecked();
     await expect(row).toHaveAttribute("data-session-selected", "true");
     gate.release();

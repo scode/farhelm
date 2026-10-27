@@ -120,7 +120,9 @@
 :root {
   color-scheme: dark;
   /* A fresh profile keeps the old geometry before the width asset loads. */
-  --sidebar-width: 340px;
+  --sidebar-width: 396px;
+  --host-rail-width: 56px;
+  --sidebar-title-height: 40px;
   /* Modal backdrops and cards share this vertical budget. Dynamic viewport
      units follow browser chrome; the minimum keeps short windows visibly
      separated from their dialogs rather than shrinking the gap to nothing. */
@@ -558,8 +560,9 @@ samp {
 }
 
 /* The two-pane shell holds the session list and selected session.
- * sidebar-width.js owns the per-device width, bounded to 240–600px with
- * a 340px default. A shell-level separator survives sidebar scrolling.
+ * sidebar-width.js owns the total per-device width, bounded to 296–656px
+ * with a 396px default; its 56px rail preserves the old content widths.
+ * A shell-level separator survives sidebar scrolling.
  * Rows carry aligned status/locality,
  * title, agent, and activity columns above a host/directory line. Every ancestor of
  * .terminal-panes must keep a definite
@@ -577,44 +580,15 @@ samp {
 }
 
 .app-sidebar {
+  display: flex;
+  flex-direction: column;
   width: var(--sidebar-width);
   flex-shrink: 0;
-  /* x is clipped, y scrolls (shorthand order: x then y). Session and host
-   * rows stack and ellipsize per line; their fixed menus escape this
-   * clipping context. */
-  overflow: hidden auto;
-  /* This scroller must also be the CONTAINING BLOCK for every absolutely
-   * positioned box it scrolls: the `.visually-hidden` labels the host rows
-   * (`.hosts-panel`, in flow above the list) carry for screen readers
-   * directly, and the session rows' through `.session-list`'s own rule
-   * below. An overflow scroller only clips descendants whose containing
-   * block sits inside it; with no positioned ancestor those 1px spans
-   * resolved against the initial containing block instead, so the rows
-   * scrolled away below the fold still parked a span at their document
-   * position, the DOCUMENT grew to reach the last of them, and a wheel
-   * that no scroller consumed (over the header, over the sidebar edge)
-   * scrolled the whole app off its ground. Many sessions in a short
-   * window is all it took. `position: fixed` panels
-   * (`.session-row-menu-panel` and friends) are unaffected: their
-   * containing block is the viewport regardless of this rule, so the
-   * "menus escape the clip" contract above still holds. */
+  /* Only the inner content and avatar areas scroll. The positioned shell
+   * keeps the rail/footer independent of session and host list length;
+   * fixed menus still measure against viewport coordinates. */
+  overflow: hidden;
   position: relative;
-  /* The sidebar scrolls without a scrollbar. On macOS the overlay scrollbar
-   * painted itself over the column's right edge and covered the row menu
-   * toggles and controls that live there (seen on 0.5.0-rc.1), and a
-   * classic always-visible scrollbar, which the OS can force on, would
-   * instead reserve a gutter the narrow column cannot spare. Hiding it
-   * touches nothing about scrollability: wheel, trackpad, touch, and
-   * keyboard scrolling, and the browser's own scroll-on-focus when Tab
-   * lands on a row's control below the fold, all work on a scroller with
-   * no scrollbar. Two declarations because two engine generations:
-   * `scrollbar-width: none` is the standard property (Chromium 121+,
-   * Safari 18.2+ and the WebKit of that generation, Firefox), and the
-   * `::-webkit-scrollbar` rule below is for WebKit builds that predate it,
-   * including the desktop app's embedded engine on older systems.
-   * `.app-shell`'s horizontal scrollbar is deliberately left alone: it
-   * only appears when the window is too narrow for both panes, and then
-   * it is the honest signal. */
   scrollbar-width: none;
   /* The sidebar is CHROME, not content: it sits one level above the
      page ground, which is the single biggest reason this shell no
@@ -631,6 +605,116 @@ samp {
   border-right: 1px solid var(--border-sidebar-edge);
   background: var(--bg-1);
 }
+
+/* The content and avatars scroll independently, without overlay scrollbars
+   covering their narrow right-hand controls. Both standard and older WebKit
+   scrollbar rules below leave wheel, touch and keyboard scrolling intact.
+   The rail is absolutely
+   anchored to the sidebar, outside the content's positioned containing
+   blocks, so its footer remains reachable with a long list or many hosts. */
+.sidebar-content {
+  flex: 1 1 0;
+  min-height: 0;
+  margin-left: var(--host-rail-width);
+  overflow: hidden auto;
+  scrollbar-width: none;
+}
+.host-rail {
+  position: absolute;
+  top: var(--sidebar-title-height);
+  left: 0;
+  bottom: 128px;
+  width: var(--host-rail-width);
+  box-sizing: border-box;
+  padding: 8px 6px;
+  overflow: hidden auto;
+  scrollbar-width: none;
+  border-right: 1px solid var(--border-row);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.host-rail-entry { position: relative; flex: 0 0 auto; }
+.host-rail .btn, .host-rail-footer .btn {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg-1);
+  background: transparent;
+}
+.host-rail .btn:hover:not(:disabled), .host-rail-footer .btn:hover:not(:disabled) { background: var(--bg-2); }
+.host-rail .btn[aria-pressed="true"], .host-rail-footer .btn[aria-pressed="true"] {
+  background: var(--accent-fill);
+  color: var(--on-fill);
+}
+.host-rail .btn[aria-pressed="true"]:focus-visible { outline-color: var(--on-fill); outline-offset: -4px; }
+.host-rail-avatar .host-kind-icon { width: 24px; height: 24px; flex: 0 0 24px; }
+.host-rail .btn.host-rail-avatar { padding: 0; margin: 0; }
+.host-rail-avatar[data-host-dimmed="true"] .host-kind-icon { opacity: 0.45; }
+/* The progress pseudo-element paints after the avatar's contents. Lift the
+   corner marks so their backing circles interrupt the ring, keeping each
+   state readable while work runs. The neutral dot uses its own foreground
+   on that backing, even when selection makes the avatar's text white. */
+.host-rail-state, .host-rail-attention, .host-rail-update { z-index: 1; }
+.host-rail-state { position: absolute; right: 1px; bottom: 1px; display: flex; padding: 2px; border-radius: 50%; background: var(--bg-1); color: var(--fg-1); }
+.host-rail-state.connected { color: var(--ok); }
+.host-rail-state.old-version, .host-rail-state.too-new, .host-rail-state.unreachable { color: var(--warn); }
+.host-rail-state.needs-attention { color: var(--danger-strong); }
+/* Attention is independent of the connection dot, update badge and running
+   ring. Keeping its own corner lets a retry remain visibly busy without
+   acknowledging the failure that prompted it. */
+.host-rail-attention { position: absolute; left: 1px; bottom: 1px; display: flex; padding: 2px; border-radius: 50%; background: var(--bg-1); color: var(--warn); }
+.host-rail-update { position: absolute; top: -2px; right: 0; padding: 0 3px; border-radius: var(--radius-md); background: var(--bg-2); color: var(--warn); font-weight: 600; }
+/* A dashed operation ring remains distinct from the solid keyboard outline. */
+.host-rail-avatar[data-host-progress="true"]::after { content: ""; position: absolute; inset: 1px; border: 2px dashed var(--accent); border-radius: 50%; pointer-events: none; }
+.host-rail-avatar[aria-pressed="true"][data-host-progress="true"]::after { border-color: var(--on-fill); }
+.host-rail-footer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: var(--host-rail-width);
+  height: 128px;
+  box-sizing: border-box;
+  padding: 0 6px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border-row);
+  z-index: 5;
+}
+.host-rail-footer .app-bar-menu { display: flex; }
+/* The filter remains selected while management is shown, but its quieter
+   outline leaves the filled footer toggle as the current view's landmark. */
+.app-sidebar:has(.hosts-panel-toggle[aria-pressed="true"]) .host-rail .btn[aria-pressed="true"] {
+  background: var(--control-hover-bg);
+  color: var(--fg-0);
+  border-color: var(--accent);
+}
+.app-sidebar:has(.hosts-panel-toggle[aria-pressed="true"]) .host-rail .btn[aria-pressed="true"]:focus-visible {
+  outline-color: var(--accent);
+}
+.app-sidebar:has(.hosts-panel-toggle[aria-pressed="true"]) .host-rail-avatar[data-host-progress="true"]::after { border-color: var(--accent); }
+.host-rail-footer .app-help-toggle[aria-expanded="true"] {
+  background: var(--accent-fill-hover);
+  color: var(--on-fill);
+}
+.host-rail-unavailable { text-align: center; color: var(--warn); }
+/* Component owners also contain floating surfaces, so only their ordinary
+   fragments use hidden. Preserve native hiding against flex/grid display. */
+.sidebar-content [hidden] { display: none !important; }
+.host-row[data-panel-visible="false"], .hosts-panel[data-panel-visible="false"] { border: 0; }
+.sidebar-content::-webkit-scrollbar, .host-rail::-webkit-scrollbar { display: none; }
+.macos-window { --sidebar-title-height: 48px; }
+.sidebar-narrow-window .macos-window { --sidebar-title-height: 0px; }
 
 /* The border retains its old geometry. The five-pixel hit strip starts at
  * that border, keeping the row menu toggles inside the sidebar untouched.
@@ -736,14 +820,13 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 
 /* ===== Sidebar chrome ============================================= */
 
-/* The app-level identity readout stays in the sidebar's existing chrome
-   surface. Sticky, because `.app-sidebar` is the scroll
-   container for the whole session list and an ordinary first child would
-   scroll away with the rows — the point of the readout is that it is always
-   there. Sticky content paints over what scrolls under it, so the bar carries
-   the sidebar's own background explicitly (same token, so the two still read
-   as one surface) and sits above the rows in stacking order. */
+/* The app-level identity band spans the whole sidebar, above the rail and
+   outside the content scroller. Its chrome background and stacking level
+   preserve the same visual band as the session's top row on macOS. */
 .app-bar {
+  min-height: var(--sidebar-title-height);
+  box-sizing: border-box;
+  flex-shrink: 0;
   position: sticky;
   top: 0;
   z-index: 5;
@@ -938,16 +1021,15 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   color: var(--danger);
 }
 
-/* The gear owns fixed space; a long version gives way before either icon.
-   As a control, a press on it never drags the macOS window, and the bar
-   retains one row. */
-.app-bar .app-settings-toggle,
-.app-bar .app-help-toggle {
+/* Footer controls retain fixed icon-sized targets independently of version
+   length. They remain outside the macOS title band's drag surface. */
+.host-rail-footer .app-settings-toggle,
+.host-rail-footer .app-help-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  margin-left: 6px;
+  margin-left: 0;
   padding: 2px;
 }
 /* A bar menu's wrapper (the help menu's, the update menu's) holds its
@@ -1064,17 +1146,15 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   padding: 0;
 }
 
-/* Composer section labels and the host heading keep their small tracked
-   treatment. The session list instead names its chosen ordering as its title. */
-.launch-composer-section-label,
-.hosts-heading .host-count {
+/* Composer labels stay subordinate to the list titles. */
+.launch-composer-section-label {
   color: var(--fg-1);
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
-/* The host count reads as a heading, label first: "HOSTS 3".
+/* The host count reads as a heading, label first: "Hosts 3".
    The markup keeps the number FIRST (`.heading-count` then
    `.heading-label`, the label carrying its own leading space) so the
    element's text content is still "3 hosts": that is the
@@ -1092,7 +1172,13 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   justify-content: flex-end;
   align-items: baseline;
   gap: 1ch;
+  color: var(--fg-0);
+  font: 600 13px var(--font-ui);
+  letter-spacing: normal;
+  text-transform: none;
 }
+.hosts-heading .heading-label { text-transform: capitalize; }
+.hosts-heading .heading-count { color: var(--fg-1); font-size: 12px; font-weight: 400; }
 
 .heading-count {
   letter-spacing: 0;
@@ -1206,9 +1292,15 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 /* The two host actions share the header's trailing edge. Only the first
    action absorbs spare width, so the pair stays together as counts change. */
 .hosts-heading .add-host-button {
-  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 3px;
   font-size: 12px;
 }
+.hosts-heading-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 
 .list-header-controls {
   display: flex;
@@ -4299,6 +4391,8 @@ a:any-link,
   overflow-wrap: anywhere;
   padding: 0;
 }
+/* Status detail shares the title's text edge, including retained stale copy. */
+.session-row-detail .stale-badge { padding: 0; }
 
 /* The rendered host name leads the optional second line beside the cwd.
    `flex: 0 1 auto` differs from `.session-cwd`'s `1 1 auto` only in
@@ -4742,10 +4836,12 @@ a:any-link,
 
 /* ===== Hosts panel ================================================ */
 
-/* One permanent host list, directly above the session list. Count, details
-   and add share one heading; per-row evidence stays behind one global
-   disclosure without unmounting any async owner. */
+/* The management surface swaps with session content. Count, details and add
+   share one heading; hiding ordinary DOM never unmounts an async owner. */
 .hosts-panel {
+  /* Keep clipped accessible labels inside the actual content scroller's
+     containing blocks, without making the sibling rail scroll with them. */
+  position: relative;
   /* Same story as `.session-row`'s separator: the panel and the sidebar
      around it share --bg-1, so the foot has to be drawn with a rule. */
   border-bottom: 1px solid var(--border-row);
@@ -4758,9 +4854,7 @@ a:any-link,
   font-size: 12px;
 }
 
-.host-details-control {
-  padding: 2px 8px;
-}
+.host-details-control { padding: 2px 0; margin-left: auto; }
 
 .hosts-status {
   font-size: 12px;
@@ -4797,9 +4891,22 @@ a:any-link,
      is supposed to absorb any width pressure. Host removal now lives in
      the modal layer, so this row never wraps to make room for dialog content;
      the fixed menu remains anchored to the toggle's measured rect even when
-     a long phase label is present. */
+     a long phase label is present. Active progress alone uses the explicit
+     second-line grid below so the host name keeps its identifying space. */
   flex-wrap: nowrap;
 }
+
+/* Running progress gets a second line so an operation cannot consume the
+   host's identifying name. The real menu anchor stays on the first line. */
+.host-row-main:has(.host-status.updating) {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  row-gap: 2px;
+}
+.host-row-main:has(.host-status.updating) > .host-name { grid-column: 2; grid-row: 1; }
+.host-row-main:has(.host-status.updating) > .host-row-menu { grid-column: 3; grid-row: 1; }
+.host-row-main > .host-status.updating { grid-column: 2; grid-row: 2; }
+.host-status.updating > .status-dot { display: none; }
 
 /* Same shrink discipline as the session row's fields: an ssh destination
    is user data of unbounded length, and without a floor plus ellipsis it
@@ -4909,14 +5016,8 @@ a:any-link,
   color: var(--warn);
 }
 
-/* An update's inline status is far wider than any phase label (e.g.
-   `updating: 0/9 create-directories 0:00`, about 250px at this size), and
-   the 340px sidebar cannot fit it beside even `.host-name`'s 4em floor and
-   the "⋯" toggle. Like the phase labels, this status group may shrink;
-   `min-width: 0` is what lets a flex item go below its content width. The
-   row stays `nowrap` (see `.host-row-main` for why wrapping is ruled out),
-   so the width has to come from inside the status, and the step name below
-   is the one part allowed to give it up. */
+/* Progress has its own line, but a long step still yields inside the
+   supported minimum width rather than widening the whole sidebar. */
 .host-status.updating {
   flex: 0 1 auto;
   min-width: 0;
@@ -5274,11 +5375,19 @@ a:any-link,
      when the two surfaces converged. */
   border-left: 2px solid var(--border-nested);
   margin: 5px 0 1px 10px;
-  padding: 3px 0 3px 10px;
+  padding: 3px 10px;
 }
 
 .provisioning-panel:empty {
   display: none;
+}
+
+/* Keep confirmation descendants renderable from the rail while removing
+   only the concealed inline block's spacing and decoration. */
+.provisioning-panel[data-inline-visible="false"] {
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
 .provisioning-confirm-actions,

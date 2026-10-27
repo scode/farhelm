@@ -343,7 +343,9 @@ test("the whole macOS title band drags except on controls and text", async ({ pa
     expect(rowBox.y).toBeCloseTo(0, 0);
     expect(barBox.height).toBe(48);
     expect(rowBox.height).toBe(48);
-    await expect(appBar.locator(".app-settings-toggle")).toBeVisible();
+    const settings = page.locator(".host-rail-footer .app-settings-toggle");
+    await expect(settings).toBeVisible();
+    expect((await settings.boundingBox())!.y, "rail controls start below the native title band").toBeGreaterThanOrEqual(48);
     await expect(topRow.locator(".tab-agent")).toBeVisible();
     await expectBandDrags(page, "ordinary layout");
 

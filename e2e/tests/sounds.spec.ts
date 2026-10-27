@@ -1,3 +1,4 @@
+import { chooseHost } from "./helpers/host-rail";
 // Use real sessions and stamped helm replies, but control status/approval data
 // and record actual Web Audio oscillator starts. This proves the UI wiring
 // without depending on hardware, vendor agents or heuristic status timing.
@@ -148,7 +149,7 @@ test.describe("device sounds", () => {
     await applied(page, f.session.id, "waiting");
     const bell = [784, 1568, 2352, 1047, 2094, 3141];
     expect(await starts(page)).toEqual(bell);
-    await page.locator(".filter-host").selectOption(String(f.remote.id));
+    await chooseHost(page, String(f.remote.id));
     await expect(page.locator(`[data-session-id="${f.other.id}"]`)).toBeVisible();
     await expect(page.locator(`[data-session-id="${f.session.id}"]`)).toHaveCount(0);
     await applied(page, f.session.id, null);
@@ -157,7 +158,7 @@ test.describe("device sounds", () => {
     f.data.status = "waiting"; f.feed.notify(4);
     await waitForFeedReadersSettled(page);
     expect(await starts(page)).toEqual(bell);
-    await page.locator(".filter-host").selectOption("");
+    await chooseHost(page, "");
     await expect(page.locator(`[data-session-id="${f.session.id}"]`)).toBeVisible();
     await applied(page, f.session.id, "waiting");
     expect(await starts(page)).toEqual(bell);
@@ -182,12 +183,12 @@ test.describe("device sounds", () => {
     await expect(dialog.getByRole("checkbox", { name: "session waiting", exact: true })).not.toBeChecked();
     await expect(dialog.getByRole("checkbox", { name: "turn finished", exact: true })).toBeChecked();
     await dialog.getByRole("button", { name: "close", exact: true }).click();
-    await page.locator(".filter-host").selectOption(String(f.remote.id));
+    await chooseHost(page, String(f.remote.id));
     await applied(page, f.session.id, null);
     f.data.approvals = [f.ask("sound-approval")]; f.feed.notify(7);
     await applied(page, f.session.id, null, "sound-approval");
     expect(await starts(page)).toEqual([...bell, ...bell, 880, 1760, 2640, 698, 1396, 2094]);
-    await page.locator(".filter-host").selectOption("");
+    await chooseHost(page, "");
     await applied(page, f.session.id, "waiting", "sound-approval");
     f.data.status = "running"; f.feed.notify(8);
     await applied(page, f.session.id, "running");
@@ -274,7 +275,7 @@ test.describe("device sounds", () => {
           return sounds?.readers[0].running;
         }, { message: "the sound reader itself must span both view changes" }).toBe(true);
         const local = await localHostId(request);
-        await page.locator(".filter-host").selectOption(String(returning ? f.remote.id : local));
+        await chooseHost(page, String(returning ? f.remote.id : local));
         if (returning) {
           await expect(page.locator(`[data-session-id="${f.session.id}"]`)).toHaveCount(0);
           await expect(page.locator(`[data-session-id="${f.other.id}"]`)).toBeVisible();
@@ -283,7 +284,7 @@ test.describe("device sounds", () => {
           await expect(page.locator(`[data-session-id="${f.other.id}"]`)).toHaveCount(0);
         }
         f.data.status = "waiting";
-        if (returning) await page.locator(".filter-host").selectOption("");
+        if (returning) await chooseHost(page, "");
         else f.feed.notify(5);
         await expect(page.locator(`[data-session-id="${f.session.id}"] .status-badge.waiting`)).toHaveText("waiting");
         release();

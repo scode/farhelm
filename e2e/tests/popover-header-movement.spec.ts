@@ -138,7 +138,7 @@ async function prepare(page: Page, request: APIRequestContext, options: { lowerC
   await page.goto("/");
   await waitForSessionReady(page, selected);
   await feed.waitForConnection(1);
-  await expect(page.locator(".host-row").first()).toBeVisible();
+  await expect(page.locator(".host-rail-avatar").first()).toBeVisible();
   await settle(page);
   await expect(page.locator(".session-row").first()).toHaveAttribute("data-session-id", target);
   await expect(page.locator(".session-row")).toHaveCount(rows.length);
@@ -146,7 +146,7 @@ async function prepare(page: Page, request: APIRequestContext, options: { lowerC
   await expectCompactRows(page, true);
   await expect(page.locator(".checkout-trash-button")).toHaveAttribute("data-count", "0");
   await expect(page.locator(".delete-notice")).toHaveCount(0);
-  expect(await page.locator(".app-sidebar").evaluate((node) => node.scrollHeight <= node.clientHeight),
+  expect(await page.locator(".sidebar-content").evaluate((node) => node.scrollHeight <= node.clientHeight),
     "all controlled compact rows must fit without scrolling").toBe(true);
   let revision = 1;
   const notify = () => feed.notify(++revision);
@@ -204,7 +204,7 @@ async function geometry(target: Locator) {
   return target.evaluate((node) => {
     const hosts = document.querySelector(".hosts-panel")!;
     const heading = document.querySelector(".session-heading")!;
-    const sidebar = document.querySelector(".app-sidebar")!;
+    const sidebar = document.querySelector(".sidebar-content")!;
     const shell = document.querySelector(".app-shell")!;
     return {
       y: node.getBoundingClientRect().y,
@@ -290,8 +290,8 @@ async function heldLowerDelete(page: Page, request: APIRequestContext, fixture: 
 
 /** Resize through the actual separator before measuring/opening any popup. */
 async function sidebarWidth(page: Page, desired: number) {
-  expect(desired).toBeGreaterThanOrEqual(240);
-  expect(desired).toBeLessThanOrEqual(600);
+  expect(desired).toBeGreaterThanOrEqual(296);
+  expect(desired).toBeLessThanOrEqual(656);
   const current = await page.locator(".app-sidebar").evaluate((node) => parseFloat(getComputedStyle(node).width));
   const handle = page.getByRole("separator", { name: "Sidebar width" });
   await expect(handle).toHaveAttribute("data-sidebar-bound", "true");
@@ -406,7 +406,7 @@ for (const kind of ["menu", "bell"] as const) {
    */
   test(`a wrapping count banner moves the anchor and closes an open ${kind}`, async ({ page, request }) => {
     const fixture = await prepare(page, request, { fillerCount: 7 });
-    await sidebarWidth(page, 600);
+    await sidebarWidth(page, 656);
     const nine = await headerMetrics(page);
     const tenth = fixture.filler(7);
     expect(fixture.rows.some((session) => session.id === tenth.id), "the appended row must have a unique routing identity").toBe(false);
@@ -419,7 +419,7 @@ for (const kind of ["menu", "bell"] as const) {
     // The fit interval can straddle the supported minimum even when its
     // midpoint falls below it. Try that boundary; both fit assertions below
     // still have to prove that nine fits and ten really wraps.
-    const desired = Math.max(240, Math.round(nine.sidebar + (nine.total + ten.total) / 2 - nine.available));
+    const desired = Math.max(296, Math.round(nine.sidebar + (nine.total + ten.total) / 2 - nine.available));
     await sidebarWidth(page, desired);
     const fitted = await headerMetrics(page);
     expect(fitted.height, "nine sessions must still fit the original single header line").toBe(nine.height);

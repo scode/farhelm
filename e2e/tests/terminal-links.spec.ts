@@ -616,10 +616,12 @@ test("a wrapped URL still activates after a resize reflows it", async ({
   const dialogs = recordDialogs(page);
 
   const stamp = Date.now();
-  // Distinctive tail segment, per the wrapped-URL test above: a bare
-  // filler slice would match the filler's start, not the last row.
-  const url = `https://example.com/reflow-${stamp}/${"b".repeat(225)}end-${stamp}`;
-  const tail = `end-${stamp}`;
+  // Keep the unique stamp in the URL's prefix. The short distinctive tail
+  // must fit inside one physical row at both widths for the hover target;
+  // repeating the full timestamp here can split that witness across rows.
+  const tail = "reflow-end";
+  const url = `https://example.com/reflow-${stamp}/${"b".repeat(225)}${tail}`;
+  const head = url.slice(0, 20);
   const invocation = gatedShellInvocation(`printf "REFLOW-${stamp} ${url}\\n"`);
   const session = await createSession(request, {
     title: `reflow-link-${stamp}`,
@@ -633,7 +635,19 @@ test("a wrapped URL still activates after a resize reflows it", async ({
     await page.locator("#terminal").click();
     await page.keyboard.press("Enter");
     await waitForTermText(page, tail);
-    const colsBefore = await page.evaluate(() => (window as any).__farhelmTerm.cols as number);
+    /** A complete tail below the URL head proves wrapping while keeping
+     * the actual click away from the cell used to clear hover decoration. */
+    const wrappedTail = async () => {
+      const headRow = await findViewportRow(page, head);
+      const tailRow = await findViewportRow(page, tail);
+      expect(tailRow.rowIndex, "the URL tail must wrap below its head").toBeGreaterThan(headRow.rowIndex);
+      expect(
+        tailRow.rowText.indexOf(tail) + tail.length,
+        "the target stays away from the last cell",
+      ).toBeLessThan(tailRow.cols);
+      return tailRow.cols;
+    };
+    const colsBefore = await wrappedTail();
 
     // Shrink hard: the terminal must refit to FEWER columns, so tmux
     // reflows the pane and the URL's row split changes under it. The
@@ -645,7 +659,13 @@ test("a wrapped URL still activates after a resize reflows it", async ({
         timeout: 15_000,
         message: "waiting for xterm to refit after the viewport shrank",
       })
-      .not.toBe(colsBefore);
+      .toBeLessThan(colsBefore);
+
+    const colsAfter = await wrappedTail();
+    await test.info().attach("reflow geometry", {
+      body: JSON.stringify({ colsBefore, colsAfter }),
+      contentType: "application/json",
+    });
 
     // Rows may still be shifting while tmux's reflow lands, so the hover
     // re-derives its coordinates and retries rather than aiming once at

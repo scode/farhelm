@@ -2899,3 +2899,74 @@ Received:   1
 Class: ambiguous-observable
 
 Cause: hypothesis
+
+## 2026-10-27 — Templates busy-root keyboard scroll (e2e/tests/templates.spec.ts)
+
+The pre-existing `templates busy root stays keyboard-scrollable at width 1100` failed on Chromium in full browser run
+`63d3564d-44ed-4b38-9b1f-f1c4da69fb7f`, then failed 3 of 10 narrow repetitions in
+`24cba0e9-9ef9-42bf-b98d-60c26d7689db`. The full run also had nine failures involving a remembered sort title or wrapped
+terminal markers; its oversized runner report was not recorder-validated. The narrow run selected only this test with
+`npx playwright test --project=chromium-templates -g 'templates busy root stays keyboard-scrollable at width 1100' --repeat-each=10`,
+three configured workers and zero retries. It tested dirty head `76e935dc7d2c5a1574b49a5a6f44aa35060683a0`, source
+fingerprint `7aa5fa19acbcf9af194723f0b3bfd099389c8ebc2783633e4879c699ba6633d4`: the sidebar restyle, host warnings and
+fixture updates, but this scroll sequence was unchanged. Linux x86-64, kernel 6.8.0-147-generic, Playwright 1.64.0;
+compiler, Node and browser build identities were not retained for this generic repetition. Actual tmux was 3.7c,
+executable SHA256 `7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`. Locale was C.UTF-8 throughout. The
+recorder removed `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and
+`FARHELM_TMUX`; only its owned `FARHELM_TEST_TRACE_DIR` reached the child. No other owned harness ran concurrently;
+machine load and unrelated work were not measured. Failures exhausted the five-second PageDown poll; passing cases took
+roughly four to five seconds. The full-run trace shows the dialog retaining focus, its controls disabled and one held
+write, while Home moved the real root from 611 to zero. PageDown followed the zero observation in under a millisecond
+and did not move it. Native scroll completion or reconciliation is a hypothesis, not an established cause. PR #2750
+replaces the unsupported immediate reversal with a measured positive offset followed by Home to zero, preserving the
+keyboard-scroll, busy and refused-draft guarantees. The corrected exact Chromium selection passed 10 repetitions in
+`79b2c58e-ebbe-4d87-82d7-456456a559d8`; that does not prove flake absence. The failed UUID directories and traces remain
+private local evidence under the recorder's temporary retention policy. No earlier entry for this test was found.
+
+```text
+Error: expect(received).toBeGreaterThan(expected)
+Expected: > 0
+Received:   0
+Call Log:
+- Timeout 5000ms exceeded while waiting on the predicate
+```
+
+Class: fixture-premise
+
+Cause: hypothesis
+
+## 2026-10-27 — Templates departure keyboard ownership (e2e/tests/templates.spec.ts)
+
+The pre-existing `unsaved departures support keep editing, discard and save before leaving` failed alone on WebKit in
+browser batch `ea779e79-d750-4bb6-bb4e-9ed32faee243`: 1,412 passed, one failed and eleven skipped, with a complete
+runner report. It then failed 3 of 10 exact WebKit repetitions in `c631be9f-ffaa-45ac-994c-d91ca6971230`, selecting
+`npx playwright test --project=webkit-templates -g 'unsaved departures support keep editing, discard and save before leaving' --repeat-each=10 --retries=0`
+with three workers, one stack each. Both tested dirty head `76e935dc7d2c5a1574b49a5a6f44aa35060683a0`, source
+fingerprint `3b3218f3e0097bda3f1eb3f847d24702e45ff2427f9bad470e55769a2de0c93a`: the sidebar restyle, host warnings and
+fixture repairs, without changes to this focus sequence or the template editor. The failed assertion was the focus
+premise before pressing Enter on the command template's YOLO button. The new template name was already visible, but
+navigation also schedules focus to that name on an animation frame; the test did not wait for this handoff before
+choosing its next keyboard target. A race with that handoff is the suspected cause, not proof that native Enter fails.
+Narrow passes took six to nine seconds and failures eleven to fourteen seconds, including the five-second focus
+expectation. PR #2750 adds an assertion that navigation has focused the new template's name before moving focus to YOLO,
+preserving the Enter, unsaved-draft, saved-data and close-focus assertions. The corrected exact selection passed ten
+repetitions in `3904d54b-caf7-4924-a2c1-d417060346eb`, source
+`249c6d1dbb9c9cc657c2b9bfaea6aaf4dcc473042ec7e7647db8ec7d5d1b9b95`; this does not prove flake absence. The broad run
+used Node 26.12.1 and Playwright 1.64.0 on Linux x86-64, kernel 6.8.0-147-generic. Compiler and browser-build identities
+were not retained for the generic repetitions. Actual tmux was 3.7c, executable SHA256
+`7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`; locale was C.UTF-8 throughout. The recorder removed
+`FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and `FARHELM_TMUX`; the
+repetitions retained only its owned `FARHELM_TEST_TRACE_DIR`. No other owned harness ran concurrently; machine load and
+unrelated work were not measured. The whole failed UUID directories and copied repetition traces remain private local
+evidence under temporary retention. No earlier entry for this test was found.
+
+```text
+Error: expect(locator).toBeFocused() failed
+Expected: focused
+Received: inactive
+Timeout:  5000ms
+```
+
+Class: pointer-focus
+
+Cause: hypothesis

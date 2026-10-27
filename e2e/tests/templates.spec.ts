@@ -868,12 +868,13 @@ for (const width of [1100, 390]) {
       await expect(dialog.locator('[role="region"], form')).toHaveCount(0);
       await page.keyboard.press("Tab");
       await expect(dialog).toBeFocused();
-      // Save can scroll the editor to its bottom before disabling. Home and
-      // PageDown must move the real root without a test assigning its offset.
+      // Save scrolls the editor before disabling. Prove that positive native
+      // offset, then use Home to measure real keyboard scrolling to the top.
+      // A zero offset does not prove a native gesture has finished. One
+      // measured scroll suffices here without an immediate reverse gesture.
+      await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
       await page.keyboard.press("Home");
       await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBe(0);
-      await page.keyboard.press("PageDown");
-      await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
       for (const control of await visibleControls.all()) await expect(control).toBeDisabled();
       expect(submitted).toHaveLength(1);
       gate.release();
@@ -1612,6 +1613,10 @@ test("unsaved departures support keep editing, discard and save before leaving",
     await dialog.locator(".templates-row").filter({ has: page.getByText(other, { exact: true }) }).click();
     await dialog.locator(".templates-save-leave").click();
     await expect(dialog.locator(".templates-name")).toHaveValue(other);
+    // Navigation publishes the new draft before its animation-frame focus
+    // handoff. Finish that handoff before testing another control's Enter;
+    // seeing the new name alone does not establish keyboard ownership.
+    await expect(dialog.locator(".templates-name")).toBeFocused();
     expect((await storedTemplate(request, copy)).fields.name).toBe("saved-before-leaving");
     // This is the command template's statement, not the launcher's YOLO
     // question. Native button Enter edits only the unsaved template draft.

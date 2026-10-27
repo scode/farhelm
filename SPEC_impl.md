@@ -667,24 +667,34 @@ selected terminal (as when the selected tab exits and the view falls back to the
 dialog is mounted, and during a request the primary action stays focusable (unavailable through `aria-disabled`) while
 the other controls are disabled, because a focused control that is natively disabled or unmounted drops focus to `body`.
 
-Hosts use one permanently mounted list beside the session list, not a compact summary plus a second management panel.
-Its one-row header gives the known host count, an unpersisted global details checkbox, and the secondary add control.
-Every row always shows its name, phase dot, and a muted actions toggle that appears on hover, keyboard focus, or a
-coarse pointer, in the same narrow trailing gutter as the session-row actions toggle; connected spends no visible word
+Hosts use one permanently mounted management owner, with its ordinary content swapped for session content by a
+page-local presentation signal. The rail's Hosts toggle belongs to ListView and renders in AppBar's existing footer
+above Settings and Help; it keeps focus and names the management region. Neither list owner nor any keyed HostRow or
+ProvisioningPanel unmounts during a swap. Only ordinary headers, rows, notices and inline provisioning fragments are
+hidden. Add, agent Add, Settings, Remove, refusals and setup/uninstall confirmations remain outside those concealed
+fragments. Listing reads, sounds, operation identities and the page lock keep their existing lifetime. Height-driven
+movement reports are gated while management is concealed; membership/order and the actual rail's scroll still invalidate
+its existing anchors. Dialog focus uses the remembered menu origin and the currently visible presentation: rail avatars
+while present, visible panel rows for panel openings, the visible Add control for Add, and the persistent Hosts toggle
+after removal. Asynchronous retirement uses the existing document-focus guard so a newer approval or control retains
+focus. Its header gives the known host count, an unpersisted global details switch, Update all and the secondary add
+control. Every row always shows its name and a muted actions toggle that appears on hover, keyboard focus, or a coarse
+pointer, in the same narrow trailing gutter as the session-row actions toggle, and shows its phase dot except while a
+setup, update or uninstall runs, when the progress line below the name takes its place; connected reads `Connected`
 unless the helm marks a compatible older build, in which case the amber `old version` advisory is shown, or a newer one
 (`newer_version`), in which case the amber `too new` advisory is shown. A skew whose peer protocol is the higher one
 also reads `too new`, but keeps the red styling of every skew, since that host cannot be used until one side is updated.
 Either way the `too new` label's hover names both versions, and Update (and a rerun of a failed Update) is not offered.
 Other phases use humanized prose and retain the stable wire token in their data attribute. A protocol-incompatible
 supervisor remains the red `needs update` case; an unparseable build leaves a connected host's age unknown and keeps the
-ordinary connected label. When an older SSH host has Update available, a compact outlined `↑ update` button replaces
-`old version` or `needs update`, amber for the former and red for a lower-protocol peer. It shares the fleet update
-eligibility predicate (remote kind, not newer, menu offer present, no live provisioning work) and sends the same bound
-Update request as the menu. The button sits outside the status region; that region retains its phase words through an
-accessible label. Its hover uses escaped peer builds and explains urgency and installing the helm's version. Current,
+ordinary connected label. When an older SSH host has Update available, a compact outlined `↑ update` button appears
+alongside `old version` or `needs update`, amber for the former and red for a lower-protocol peer. It shares the fleet
+update eligibility predicate (remote kind, not newer, menu offer present, no live provisioning work) and sends the same
+bound Update request as the menu. The button sits outside the status region; that region retains its phase words through
+an accessible label. Its hover uses escaped peer builds and explains urgency and installing the helm's version. Current,
 newer, local, busy, and not-yet-loaded rows keep their existing presentation. Each row's effective disclosure is the
-global checkbox OR that row's automatic provisioning disclosure: the checkbox is the user's preference and no run writes
-it. Update stays folded during planning and execution, shows a pending status until a snapshot is available, and then
+global switch OR that row's automatic provisioning disclosure: the switch is the user's preference and no run writes it.
+Update stays folded during planning and execution, shows a pending status until a snapshot is available, and then
 publishes compact step/count/elapsed progress beside the row status. Setup and uninstall show their own pending verbs;
 their first running snapshot opens the row once, with a fold choice kept for that run id. Failure opens the row for its
 diagnostic, and completion clears the one-off expansion. A failed Update or unresolved diagnostic also opens its row;
@@ -694,7 +704,7 @@ lifecycle owns more context than a floating menu can safely hold. Setup and unin
 independently of row details, while a failed retained run leaves one short trace when details are closed. A run whose
 status is showing inline leaves that trace out because it would only repeat the progress.
 
-The app bar's gear opens a modal `settings` dialog as a sibling of the sticky bar, so the bar's stacking context cannot
+The rail footer's gear opens a modal `settings` dialog owned by AppBar outside its top band; that band's context cannot
 cap the backdrop below main-pane surfaces. Its sessions section holds session confirmations, quick-launch naming and
 terminal-frame coloring; hosts holds the two app-wide host-confirmation choices, with state-specific help and an
 explanation that other open clients see changes on reload, and, only in a desktop app whose updater is active, the app
@@ -1165,12 +1175,13 @@ ordinary interface text uses Inter. A terminal mounts only once both bundled mon
 bundled scripts, with no fallback font. Inter is not a terminal-mount prerequisite.
 
 Sidebar width lives in `sidebar-width.js`, shared by web and desktop. It reads localStorage once at script load
-(`farhelm.sidebar-width`): plain digits only, clamped to 240–600px, with 340px for absent, malformed or unreadable
-storage. The root's `--sidebar-width` survives authenticated-tree remounts. A shell-level separator owns pointer
-capture, double-click reset and 10px arrow steps; completed gestures store the width. Width-derived root classes replace
-the fixed narrow-window and row-menu-pointer media cutoffs. The existing terminal ResizeObserver sends each resulting
-grid change without debounce. A focused separator prevents terminal reveal from taking keyboard focus. Desktop
-persistence has the same webview-localStorage assumptions as terminal text size below.
+(`farhelm.sidebar-width`): plain content-width digits only, clamped to 240–600px, with 340px for absent, malformed or
+unreadable storage. Adding the 56px rail gives a 296–656px total width and 396px default without migrating the existing
+key. The root's `--sidebar-width` stores that total and survives authenticated-tree remounts. A shell-level separator
+owns pointer capture, double-click reset and 10px arrow steps; completed gestures store total minus the rail.
+Width-derived root classes replace the fixed narrow-window and row-menu-pointer media cutoffs. The existing terminal
+ResizeObserver sends each resulting grid change without debounce. A focused separator prevents terminal reveal from
+taking keyboard focus. Desktop persistence has the same webview-localStorage assumptions as terminal text size below.
 
 Terminal reveal also yields keyboard focus to an open menu, including its expanded toggle while the menu is mounting.
 Those controls remain the destination for menu keys even if the selected terminal finishes its initial replay at the
@@ -5389,16 +5400,19 @@ working. The sidebar's app bar shows the helm's build at all times: the client's
 stamp is reported (agreement means the two are the same string), and the reported stamp from then on. The bar leads with
 the Farhelm wordmark, inlined at compile time from `packaging/farhelm-desktop/wordmark-dark.svg` (the brand file every
 use of the name as a mark shares) rather than served as an asset, so both the web bundle and the desktop build carry it
-without a desktop asset-parity entry. A nonshrinking settings gear follows the version, outside the macOS drag region;
-long versions ellipsize before it or the wordmark shrinks. In a desktop app whose updater is active, the version is also
-the update marker: grey as always, or red with a one-character up-arrow before it while Installed is newer than the
-running version, and then a button that opens the update menu (Restart to update, What's new). Otherwise the active
-updater's readout is a native keyboard-reachable check button calling the same `check_now` as the help menu and host
-row. Its dim refresh glyph brightens with the version and turns a quarter on hover or keyboard focus; during a visible
-check that glyph owns the spin, so the inline status suppresses its separate ring. The web/no-updater branch stays a
-plain span. A verification warning keeps its leading mark and check action. Its hover text carries the updater's state,
-so a check the user started ends visibly there. The update menu and the `?` menu are one bar-menu component given
-different items.
+without a desktop asset-parity entry. Settings and help live at the host rail's foot, while AppBar retains their state
+and dialogs. The top band spans the full sidebar and preserves macOS traffic-light clearance and drag handling; the rail
+starts below it. Its avatars read the existing retained host snapshot and provisioning progress, and send context
+requests with the actual opener to the existing keyed HostRow menu. No second action set or host reader is mounted. The
+content column scrolls independently of the rail and footer. Long versions ellipsize before the wordmark shrinks. In a
+desktop app whose updater is active, the version is also the update marker: grey as always, or red with a one-character
+up-arrow before it while Installed is newer than the running version, and then a button that opens the update menu
+(Restart to update, What's new). Otherwise the active updater's readout is a native keyboard-reachable check button
+calling the same `check_now` as the help menu and host row. Its dim refresh glyph brightens with the version and turns a
+quarter on hover or keyboard focus; during a visible check that glyph owns the spin, so the inline status suppresses its
+separate ring. The web/no-updater branch stays a plain span. A verification warning keeps its leading mark and check
+action. Its hover text carries the updater's state, so a check the user started ends visibly there. The update menu and
+the `?` menu are one bar-menu component given different items.
 
 The bar's hover is selected by a pure function of the window build, any reported helm build and the updater's readout. A
 mismatch names both builds; a development window identifies itself as a development build rather than a release. Without

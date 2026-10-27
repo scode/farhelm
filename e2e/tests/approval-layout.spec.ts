@@ -245,7 +245,7 @@ test("host add admission keeps a manual draft and rechecks live focus", async ({
   await page.goto("/");
   await page.bringToFront();
   await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
-  await page.getByRole("button", { name: "add host", exact: true }).click();
+  await page.locator(".host-rail-add").click();
   const form = page.locator(".add-host-form");
   await form.locator(".add-host-ssh").fill("user@manual-draft.invalid");
   await form.locator(".add-host-alias").fill("manual alias");

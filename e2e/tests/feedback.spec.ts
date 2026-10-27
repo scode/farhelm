@@ -150,22 +150,23 @@ async function interceptFeedback(page: Page, answer: (route: Route) => Promise<v
 }
 
 /**
- * The help menu lives in the bar to the right of the gear and behaves like
+ * The help menu lives below the gear in the host rail and behaves like
  * the other sidebar menus. A pointer opens and closes it from its toggle.
  * From the keyboard, ArrowDown on the toggle opens it with focus on its
- * first item, arrow keys and Home/End reach all four items, and Escape closes it
+ * first item, arrow keys and Home/End reach all five items, and Escape closes it
  * and gives focus back to the toggle (focus is asserted on the keyboard
  * path, as the row menus' own tests do, because a pointer open does not
  * move focus the same way in every engine). A pointer press outside closes
  * it.
  */
-test("the help menu sits right of the gear and follows the menu conventions", async ({ page }) => {
+test("the help menu sits below the gear and follows the menu conventions", async ({ page }) => {
   await page.goto("/");
   const gear = page.getByRole("button", { name: "settings", exact: true });
   const { toggle, menu } = await openHelpMenu(page);
   const gearBox = await gear.boundingBox();
   const toggleBox = await toggle.boundingBox();
-  expect(toggleBox!.x).toBeGreaterThan(gearBox!.x);
+  expect(toggleBox!.y).toBeGreaterThanOrEqual(gearBox!.y + gearBox!.height);
+  expect(Math.abs(toggleBox!.x - gearBox!.x)).toBeLessThanOrEqual(1);
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   const items = menu.getByRole("menuitem");
   await expect(items).toHaveCount(5);

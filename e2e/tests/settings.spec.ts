@@ -23,6 +23,7 @@ import {
   openHostMenu,
   patchPreferences,
   readPreferences,
+  showHostsPanel,
 } from "./helpers/fleet";
 
 /** The web fixture has no updater, so its navigation omits the app pane. */
@@ -801,6 +802,7 @@ test("host removal container Enter confirms once and respects the disabled butto
     await page.route(`**/api/hosts/${host.id}`, intercept);
     await page.goto("/");
     const row = hostRowByName(page, name);
+    await showHostsPanel(page);
     await expect(row).toBeVisible();
     await openHostMenu(row);
     await row.locator(".host-remove").click();
@@ -1062,6 +1064,7 @@ test("host browser permissions persist independently through the settings switch
     expect(await read()).toMatchObject({ links_without_asking: false, local_links_without_asking: false, commands_without_asking: false, yolo_without_asking: false });
     await page.goto("/");
     const row = hostRowByName(page, name);
+    await showHostsPanel(page);
     await expect(row).toBeVisible();
     await openHostMenu(row);
     await row.locator(".host-settings").click();
@@ -1674,6 +1677,7 @@ test("settings reverses a permanent removal answer without reloading", async ({ 
     }
     await page.goto("/");
     const first = hostRowByName(page, names[0]);
+    await showHostsPanel(page);
     await expect(first).toBeVisible();
     await openHostMenu(first);
     await first.locator(".host-remove").click();
@@ -1805,6 +1809,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
     await patchPreferences(request, { skip_host_setup_confirmation: null, skip_host_remove_confirmation: false });
     await page.goto("/");
     const row = page.locator(".host-row").first();
+    await showHostsPanel(page);
     await expect(row).toBeVisible();
     await openHostMenu(row);
     await expect(row.locator('[role="menu"]')).toBeVisible();
@@ -1891,10 +1896,11 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
   }
 });
 
-/** A long reported version yields to the gear in both normal and macOS
- * header layouts. This exercises real hit testing, not AppKit dragging.
+/** The rail keeps Settings reachable independently of a long version readout
+ * in both normal and macOS chrome. This exercises real hit testing, not
+ * AppKit dragging, while retaining the title band's height and drag fences.
  */
-test("settings gear stays clickable beside a long version in narrow headers", async ({ page }, testInfo) => {
+test("settings gear stays clickable in the rail beside a long version in narrow windows", async ({ page }, testInfo) => {
   await forceBuildSkew(page, "9.9.9-" + "long-version-".repeat(4));
   await page.goto("/");
   const version = page.locator(".app-version");
@@ -1906,16 +1912,18 @@ test("settings gear stays clickable beside a long version in narrow headers", as
     for (const width of [900, 400]) {
       await page.setViewportSize({ width, height: 600 });
       const bar = (await page.locator(".app-bar").boundingBox())!;
-      const stamp = (await version.boundingBox())!;
+      // The footer is a separate fixed sibling of the scrolling avatars.
+      // Settings must stay inside that footer even when host overflow scrolls.
+      const rail = (await page.locator(".host-rail-footer").boundingBox())!;
       const button = (await gear.boundingBox())!;
       expect(button.width).toBeGreaterThan(0);
-      expect(button.x).toBeGreaterThanOrEqual(stamp.x + stamp.width);
-      expect(button.x + button.width).toBeLessThanOrEqual(bar.x + bar.width);
+      expect(button.x).toBeGreaterThanOrEqual(rail.x);
+      expect(button.x + button.width).toBeLessThanOrEqual(rail.x + rail.width);
       // One 22px button row plus padding/border fits below 40px; macOS
       // reserves its existing 48px band for the native titlebar controls.
       expect(bar.height).toBeLessThanOrEqual(macos ? 48 : 40);
-      expect(button.y).toBeGreaterThanOrEqual(bar.y);
-      expect(button.y + button.height).toBeLessThanOrEqual(bar.y + bar.height);
+      expect(button.y).toBeGreaterThanOrEqual(bar.y + bar.height);
+      expect(button.y + button.height).toBeLessThanOrEqual(rail.y + rail.height);
       expect(await gear.evaluate((el) => Boolean(el.closest(".window-drag-region")))).toBe(false);
       await gear.click();
       const dialog = page.getByRole("dialog", { name: "settings", exact: true });

@@ -1,3 +1,4 @@
+import { chooseHost, hostChoice } from "./helpers/host-rail";
 /**
  * The session list's ORDER: the sidebar's sort control, the one preference
  * the HELM remembers for every client at once, and what re-sorting does
@@ -600,10 +601,10 @@ test.describe("session list ordering", () => {
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.a, ids.m, ids.z]);
 
-    const host = page.locator(".filter-host");
+    const host = hostChoice(page);
     await host.focus();
     await expect(host).toBeFocused();
-    await host.selectOption(String(local));
+    await chooseHost(page, String(local));
     await expect(page.locator(".session-count")).toHaveText(
       new RegExp(`^${localListing.sessions.length} of \\d+$`),
     );
@@ -632,7 +633,7 @@ test.describe("session list ordering", () => {
     ).toBe(String(local));
 
     // Returning to ALL widens the list and leaves the order alone.
-    await host.selectOption("");
+    await chooseHost(page, "");
     await expect(page.locator(".session-count")).toHaveText(/^\d+$/);
     await expect(row(page, decoy.id)).toBeVisible({ timeout: 20_000 });
     await expect(page.locator(".sort-title")).toHaveAttribute("data-sort", "created");

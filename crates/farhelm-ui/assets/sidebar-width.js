@@ -3,19 +3,21 @@
 // desktop builds use the same localStorage contract. The document-root value
 // survives authenticated-tree remounts; nothing is sent to the helm.
 (function () {
-  const MIN = 240;
-  const MAX = 600;
-  const DEFAULT = 340;
+  const RAIL = 56;
+  const MIN = 296;
+  const MAX = 656;
+  const DEFAULT = 396;
   const KEY = "farhelm.sidebar-width";
 
-  /** Accept only the stored decimal form, and bound even oversized values. */
+  /** Storage keeps the old content width; adding the rail preserves every
+   * existing device choice without a new key or migration marker. */
   function storedWidth(raw) {
     return typeof raw === "string" && /^\d+$/.test(raw)
-      ? clampWidth(Number(raw))
+      ? clampWidth(Number(raw) + RAIL)
       : DEFAULT;
   }
 
-  /** All gestures and stored values share the same supported interval. */
+  /** Gestures use total width; storage retains the pre-rail content width. */
   function clampWidth(width) {
     return Math.min(MAX, Math.max(MIN, width));
   }
@@ -46,7 +48,7 @@
   /** Persist completed gestures, never every pointer sample in a drag. */
   function remember() {
     try {
-      window.localStorage.setItem(KEY, String(width));
+      window.localStorage.setItem(KEY, String(width - RAIL));
     } catch (_) {
       // A storage refusal must not turn a layout preference into an error.
     }

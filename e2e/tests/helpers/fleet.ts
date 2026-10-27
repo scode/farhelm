@@ -1177,14 +1177,35 @@ export async function forgetAutoSelect(page: Page): Promise<void> {
 }
 
 /**
- * Ensure the permanent host list's global details disclosure is open.
+ * Reveal ordinary host management without changing the details preference.
+ *
+ * Use this only when a test needs panel controls. Default-Sessions and rail
+ * tests must keep their presentation premise explicit.
+ */
+export async function showHostsPanel(page: Page): Promise<void> {
+  const toggle = page.locator(".hosts-panel-toggle");
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
+  await expect(page.locator(".hosts-heading")).toBeVisible();
+}
+
+/** Return to session controls without changing any filter or selection. */
+export async function showSessionsPanel(page: Page): Promise<void> {
+  const toggle = page.locator(".hosts-panel-toggle");
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  if ((await toggle.getAttribute("aria-pressed")) === "true") await toggle.click();
+  await expect(page.locator(".session-heading")).toBeVisible();
+}
+
+/**
+ * Ensure the mounted host list's global details disclosure is open.
  *
  * The list itself is always mounted, so this helper preserves the useful
  * contract older call sites relied on: after it returns, evidence, remedies,
  * and provisioning state are available for inspection.
  */
 export async function openHostsPanel(page: Page): Promise<void> {
-  await expect(page.locator(".hosts-panel")).toBeVisible();
+  await showHostsPanel(page);
   const toggle = page.locator(".host-details-toggle");
   // Polled rather than a single read-then-click: the page opens details on
   // its own when automatic local setup needs a person (a plan, a manual
@@ -1355,6 +1376,7 @@ async function openMenuPanel(
  * hover-before-click, and measured-vs-unmeasured mechanics this drives.
  */
 export async function openRowMenu(row: Locator): Promise<void> {
+  await showSessionsPanel(row.page());
   await openMenuPanel(
     row,
     ".session-row-menu",
@@ -1381,6 +1403,7 @@ export async function openRowMenu(row: Locator): Promise<void> {
  * already imposes for the session row.
  */
 export async function openHostMenu(row: Locator): Promise<void> {
+  await showHostsPanel(row.page());
   await openMenuPanel(
     row,
     ".host-row-menu",

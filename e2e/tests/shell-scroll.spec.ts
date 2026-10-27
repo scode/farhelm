@@ -67,7 +67,7 @@ test("a wheel over the header or the sidebar edge never scrolls the document", a
     await expect(page.locator(".app-main .session-topbar")).toBeVisible({ timeout: 20_000 });
     await expect(page.locator(".app-main .session-details")).toBeVisible();
 
-    const sidebar = page.locator(".app-sidebar");
+    const sidebar = page.locator(".sidebar-content");
     const sidebarOverflow = await sidebar.evaluate((el) => el.scrollHeight - el.clientHeight);
     expect(sidebarOverflow, "the sidebar must overflow for this test to mean anything").toBeGreaterThan(400);
 

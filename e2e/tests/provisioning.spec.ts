@@ -20,6 +20,7 @@ import {
   hostRowByName,
   openHostMenu,
   openHostsPanel,
+  showHostsPanel,
   patchPreferences,
   pinAutoSelect,
   readPreferences,
@@ -313,7 +314,7 @@ async function waitForProgress(
  */
 async function probeRemote(page: Page, destination: string): Promise<void> {
   await openHostsPanel(page);
-  await page.getByRole("button", { name: "add host" }).click();
+  await page.locator(".host-rail-add").click();
   await page.locator(".add-host-ssh").fill(destination);
   await page.locator(".add-host-submit").click();
 }
@@ -371,6 +372,130 @@ test.beforeAll(async ({ request }) => {
 test.beforeEach(async () => {
   await configureBackend();
 });
+
+/** Rail actions keep their existing modal owner visible while management is
+ * concealed. A real registered fixture and a live menu establish the origin
+ * before each request; cancelling must return to that actual avatar.
+ */
+for (const action of ["setup", "uninstall", "refusal"] as const) {
+  test(`rail ${action} modal stays visible over Sessions and returns to its avatar`, async ({ page, request }, testInfo) => {
+    const remote = destination(testInfo, `hidden-${action}`);
+    if (action === "setup") {
+      await configureBackend({ targets: { [target(remote)]: { fail_action: "attach-supervisor" } } });
+    }
+    const accepted = await startAdd(request, remote);
+    await waitForProgress(request, accepted.host_id, action === "setup" ? "failed" : "completed");
+    await configureBackend();
+    if (action !== "setup") {
+      await page.route(`**/api/hosts/${accepted.host_id}/${action === "uninstall" ? "uninstall" : "update"}`, async (route) => {
+        await route.fulfill(action === "refusal"
+          ? { status: 409, headers: { "x-farhelm-build": HELM_BUILD }, body: "rail update refusal" }
+          : { headers: { "x-farhelm-build": HELM_BUILD }, json: {
+            probe_id: "rail-uninstall-plan", confirmation: "remove the fixture installation",
+            plan: { state_dir: "/tmp/fixture-retained-state" },
+          } });
+      });
+    }
+    try {
+      await page.goto("/");
+      const avatar = page.locator(`.host-rail-avatar[data-rail-host-id="${accepted.host_id}"]`);
+      await expect(avatar).toBeVisible();
+      await expect(page.locator(".hosts-heading")).not.toBeVisible();
+      await avatar.focus();
+      await expect(avatar).toBeFocused();
+      await page.keyboard.press("Shift+F10");
+      const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+      const menu = row.locator(".host-row-menu-panel");
+      await expect(menu).toBeVisible();
+      await expect(row.locator(".host-row-main")).not.toBeVisible();
+      await menu.locator(action === "setup" ? ".provisioning-rerun" : action === "uninstall" ? ".provisioning-uninstall" : ".provisioning-update").click();
+      const modal = action === "refusal" ? page.locator(".host-refusal-dialog") : page.getByRole("dialog", {
+        name: action === "setup" ? "host setup" : "uninstall Farhelm from this host", exact: true,
+      });
+      await expect(modal).toBeVisible();
+      await expect(page.locator(".hosts-heading")).not.toBeVisible();
+      if (action === "refusal") await expect(modal).toContainText("rail update refusal");
+      await modal.getByRole("button", { name: action === "refusal" ? "close" : "cancel", exact: true }).click();
+      await expect(modal).toHaveCount(0);
+      await expect(avatar).toBeFocused();
+      await expect(page.locator(".hosts-panel-toggle")).toHaveAttribute("aria-pressed", "false");
+    } finally {
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  });
+}
+
+/** Removing a rail host destroys its avatar; the persistent panel toggle is
+ * the useful keyboard recovery, while cancelling keeps the originating host.
+ */
+test("rail removal returns to its avatar on cancel and Hosts on success", async ({ page, request }, testInfo) => {
+  await patchPreferences(request, { skip_host_remove_confirmation: false });
+  const accepted = await startAdd(request, destination(testInfo, "rail-remove"));
+  await waitForProgress(request, accepted.host_id, "completed");
+  await page.goto("/");
+  const avatar = page.locator(`.host-rail-avatar[data-rail-host-id="${accepted.host_id}"]`);
+  const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+  for (const confirm of [false, true]) {
+    await expect(avatar).toBeVisible();
+    await avatar.click({ button: "right" });
+    await expect(row.locator(".host-row-menu-panel")).toBeVisible();
+    await row.locator(".host-remove").click();
+    const modal = page.locator(".host-remove-dialog");
+    await expect(modal).toBeVisible();
+    await modal.locator(confirm ? ".host-remove-confirm" : ".host-settings-close").click();
+    await expect(modal).toHaveCount(0);
+    if (confirm) {
+      await expect(avatar).toHaveCount(0);
+      await expect(page.locator(".hosts-panel-toggle")).toBeFocused();
+    } else {
+      await expect(avatar).toBeFocused();
+    }
+  }
+});
+
+/** A later menu opening can change both host and surface while an earlier
+ * planning reply is held. The eventual refusal belongs to the accepted
+ * action's origin, rather than the latest menu's trigger.
+ */
+for (const alternate of ["same host", "another host"] as const) {
+  test(`held rail Update refusal keeps its avatar after ${alternate} panel menu opens`, async ({ page, request }, testInfo) => {
+    const accepted = await startAdd(request, destination(testInfo, `origin-${alternate.replaceAll(" ", "-")}`));
+    await waitForProgress(request, accepted.host_id, "completed");
+    const gate = routeGate();
+    let arrived = false;
+    await page.route(`**/api/hosts/${accepted.host_id}/update`, async (route) => {
+      arrived = true;
+      await gate.wait();
+      await route.fulfill({ status: 409, headers: { "x-farhelm-build": HELM_BUILD }, body: "held origin refusal" });
+    });
+    try {
+      await page.goto("/");
+      const avatar = page.locator(`.host-rail-avatar[data-rail-host-id="${accepted.host_id}"]`);
+      await expect(avatar).toBeVisible();
+      await avatar.click({ button: "right" });
+      const source = page.locator(`[data-host-id="${accepted.host_id}"]`);
+      await expect(source.locator(".host-row-menu-panel")).toBeVisible();
+      await source.locator(".provisioning-update").click();
+      await expect.poll(() => arrived, { message: "the planning route is held before opening another trigger" }).toBe(true);
+      expect((await progress(request, accepted.host_id)).status).toBe("completed");
+      await showHostsPanel(page);
+      const other = alternate === "same host" ? source : page.locator('.host-row[data-host-kind="local"]');
+      await openHostMenu(other);
+      await expect(other.locator(".host-row-menu-panel")).toBeVisible();
+      expect(arrived, "the held route remains the source of the upcoming refusal").toBe(true);
+      gate.release();
+      const refusal = page.locator(".host-refusal-dialog");
+      await expect(refusal).toBeVisible();
+      await expect(refusal).toContainText("held origin refusal");
+      await refusal.locator(".host-refusal-close").click();
+      await expect(refusal).toHaveCount(0);
+      await expect(avatar).toBeFocused();
+    } finally {
+      gate.release();
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  });
+}
 
 /** A planning request owns no mutation lock, but its eventual confirmation
  * will isolate the page. Settings must remain refused until that request
@@ -453,6 +578,7 @@ for (const mode of ["plan", "refusal", "two plans"]) {
     feed.notifyOnConnect(1);
     try {
       await page.goto("/");
+      await showHostsPanel(page);
       await feed.waitForConnection(1);
       await openHostsPanel(page);
       for (const id of ids) {
@@ -523,6 +649,7 @@ for (const admission of ["visible", "waiting behind another host"] as const) {
     }
     try {
       await page.goto("/");
+      await showHostsPanel(page);
       await feed.waitForConnection(1);
       await openHostsPanel(page);
       const source = page.locator(`[data-provisioning-host="${one.host_id}"]`);
@@ -643,6 +770,7 @@ for (const reason of ["Remove success", "authoritative Settings disappearance"] 
       }
       await pinAutoSelect(page, requester.id);
       await page.goto("/");
+      await showHostsPanel(page);
       await feed.waitForConnection(1);
       await openHostsPanel(page);
       const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
@@ -806,6 +934,7 @@ test("queued Update refusals retain modal focus and isolation", async ({ page, r
     });
   }
   await page.goto("/");
+  await showHostsPanel(page);
   await page.getByRole("button", { name: "update all" }).click();
   await expect.poll(() => refused.size).toBe(2);
   const refusal = page.locator(".host-refusal-dialog");
@@ -853,6 +982,7 @@ test("confirmed uninstall refusal reopens its dialog", async ({ page, request },
     }
   });
   await page.goto("/");
+  await showHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
   await row.locator(".provisioning-uninstall").click();
@@ -908,6 +1038,7 @@ test("confirmed uninstall refusal survives a vanished host row", async ({ page, 
   });
   try {
     await page.goto("/");
+    await showHostsPanel(page);
     await feed.waitForConnection(1);
     const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
     await expect(row, "the host exists before confirmation").toBeVisible();
@@ -941,6 +1072,7 @@ test("an open Update popup follows the new current step in a short viewport", as
   await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
   const feed = await stubFeed(page);
   await page.goto("/");
+  await showHostsPanel(page);
   await feed.waitForConnection(1);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
@@ -1115,6 +1247,7 @@ for (const operation of ["setup", "uninstall"] as const) {
       await patchPreferences(request, { skip_host_setup_confirmation: null });
       await page.setViewportSize({ width: 390, height: 420 });
       await page.goto("/");
+      await showHostsPanel(page);
       if (operation === "setup") await probeRemote(page, remote);
       else {
         await openHostsPanel(page);
@@ -1164,7 +1297,7 @@ for (const phone of [false, true]) {
     await page.setViewportSize({ width: phone ? 390 : 1100, height: 850 });
     await page.goto("/");
     await openHostsPanel(page);
-    await page.getByRole("button", { name: "add host", exact: true }).click();
+    await page.locator(".host-rail-add").click();
     const dialog = page.getByRole("dialog", { name: "add host", exact: true });
     await expect(dialog.getByRole("heading", { name: "add host", exact: true })).toBeVisible();
     await expectHostAnswers(dialog, ["cancel", "add"], phone);
@@ -1228,8 +1361,9 @@ test("confirmed setup expands its row once and can be folded", async ({ page, re
   await configureBackend({ targets: { [target(remote)]: { action_delay_ms: 1_500 } } });
   await patchPreferences(request, { skip_host_setup_confirmation: null });
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".hosts-panel")).toBeVisible();
-  await page.getByRole("button", { name: "add host" }).click();
+  await page.locator(".host-rail-add").click();
   await page.locator(".add-host-ssh").fill(remote);
   await page.locator(".add-host-submit").click();
   const dialog = page.getByRole("dialog", { name: "add host", exact: true });
@@ -1338,6 +1472,8 @@ test("agent host add asks before setup despite preference and after refusal reop
   await page.bringToFront();
   await expect.poll(() => page.evaluate(() => document.hasFocus() && document.visibilityState !== "hidden")).toBe(true);
   await expect.poll(() => feed.openSockets()).toBe(1);
+  await expect(page.locator(".hosts-panel-toggle")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".hosts-heading")).not.toBeVisible();
   waiting = true; feed.notify(2);
   let form = page.locator(".add-host-form");
   await expect(form).toBeVisible();
@@ -1364,6 +1500,8 @@ test("agent host add asks before setup despite preference and after refusal reop
   await form.getByRole("button", { name: "cancel", exact: true }).click();
   await expect(form).toHaveCount(0);
   expect(answers, "post-acceptance cancel is not Deny").toHaveLength(1);
+  await expect(page.locator(".hosts-panel-toggle")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".host-rail-add")).toBeFocused();
   expect((await hosts(request)).some((host) => host.destination === edited)).toBe(false);
 });
 
@@ -1388,7 +1526,7 @@ test("a permanent setup answer is reversible through settings after the next add
   await page.goto("/");
   await openHostsPanel(page);
 
-  await page.getByRole("button", { name: "add host" }).click();
+  await page.locator(".host-rail-add").click();
   await page.locator(".add-host-ssh").fill(first);
   await page.locator(".add-host-submit").click();
   await expect(page.locator(".provisioning-plan")).toBeVisible();
@@ -1396,7 +1534,7 @@ test("a permanent setup answer is reversible through settings after the next add
   await expect(hostRowByName(page, first)).toBeVisible();
   await expect.poll(async () => (await readPreferences(request)).skip_host_setup_confirmation).toBe(true);
 
-  await page.getByRole("button", { name: "add host" }).click();
+  await page.locator(".host-rail-add").click();
   await page.locator(".add-host-ssh").fill(second);
   await page.locator(".add-host-submit").click();
   await expect(hostRowByName(page, second)).toBeVisible();
@@ -1420,7 +1558,7 @@ test("a permanent setup answer is reversible through settings after the next add
   await toggle.check();
   await expect.poll(async () => (await readPreferences(request)).skip_host_setup_confirmation).toBe(true);
   await settings.getByRole("button", { name: "close", exact: true }).click();
-  await page.getByRole("button", { name: "add host" }).click();
+  await page.locator(".host-rail-add").click();
   await page.locator(".add-host-ssh").fill(third);
   await page.locator(".add-host-submit").click();
   await expect(hostRowByName(page, third)).toBeVisible();
@@ -1481,6 +1619,7 @@ test("cancel and a setup answer in one burst add nothing and change no preferenc
     }
   });
   await page.goto("/");
+  await showHostsPanel(page);
 
   for (const answer of ["set up", "set up, don't ask again"]) {
     await probeRemote(page, remote);
@@ -1499,7 +1638,7 @@ test("cancel and a setup answer in one burst add nothing and change no preferenc
     await expect(page.locator(".add-host-form"), "cancel closes the dialog").toHaveCount(0);
     // The panel's add button is usable again only once nothing holds the
     // page; an admitted setup would hold it while it posts.
-    await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+    await expect(page.locator(".host-rail-add")).toBeEnabled();
   }
   expect(provisions, "no setup request after a cancelled question").toHaveLength(0);
   expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
@@ -1722,7 +1861,7 @@ test("the add dialog adds a host under its alias and refuses the same destinatio
   await page.goto("/");
   await openHostsPanel(page);
   const addHost = async () => {
-    await page.getByRole("button", { name: "add host" }).click();
+    await page.locator(".host-rail-add").click();
     await page.locator(".add-host-ssh").fill(remote);
     await page.locator(".add-host-alias").fill(alias);
     await page.locator(".add-host-submit").click();
@@ -1769,7 +1908,7 @@ test("the add dialog refuses a taken or malformed alias before contacting the ho
   });
   await page.goto("/");
   await openHostsPanel(page);
-  await page.getByRole("button", { name: "add host" }).click();
+  await page.locator(".host-rail-add").click();
   const form = page.locator(".add-host-form");
   await form.locator(".add-host-ssh").fill(remote);
   await form.locator(".add-host-alias").fill(existing);
@@ -1800,7 +1939,7 @@ test("the add dialog's alias survives the setup question", async ({ page }, test
   await configureBackend({ targets: { [target(remote)]: { probe: "absent" } } });
   await page.goto("/");
   await openHostsPanel(page);
-  await page.getByRole("button", { name: "add host" }).click();
+  await page.locator(".host-rail-add").click();
   await page.locator(".add-host-ssh").fill(remote);
   await page.locator(".add-host-alias").fill(alias);
   await page.locator(".add-host-submit").click();
@@ -1832,7 +1971,7 @@ test("the add dialog's probe sends no install paths, and a doubled submit produc
   });
   await page.goto("/");
   await openHostsPanel(page);
-  await page.getByRole("button", { name: "add host" }).click();
+  await page.locator(".host-rail-add").click();
   await page.locator(".add-host-ssh").fill(remote);
   await page.evaluate(() => {
     const form = document.querySelector(".add-host-form")!;
@@ -1889,6 +2028,7 @@ test("the add dialog's cancel stays live while discovery is pending", async ({
     },
   );
   await page.goto("/");
+  await showHostsPanel(page);
   await probeRemote(page, remote);
   await arrived;
   await expect(page.locator(".add-host-submit")).toHaveText("checking…");
@@ -1897,7 +2037,7 @@ test("the add dialog's cancel stays live while discovery is pending", async ({
   await expect(cancel).toBeEnabled();
   await cancel.click();
   await expect(page.locator(".host-add-dialog")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+  await expect(page.locator(".host-rail-add")).toBeEnabled();
 
   release();
   await handled;
@@ -1931,7 +2071,7 @@ test("accepted ADD registers before execution and releases the page lock while r
     "data-provisioning-status",
     "running",
   );
-  await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+  await expect(page.locator(".host-rail-add")).toBeEnabled();
   // `.host-settings` lives inside the row's own "⋯" menu now, and it is
   // `aria-disabled` there rather than natively `disabled` (see `HostRow`'s
   // own doc — the menu leaves busy items focusable, like the session row's
@@ -1947,8 +2087,32 @@ test("accepted ADD registers before execution and releases the page lock while r
   );
   await expect.poll(async () => (await backendEvents()).some((event) => event.event === "create-directories")).toBe(true);
 
+  // The executor is demonstrably held in its first live step before hiding
+  // management. Completion while concealed must reach the same mounted owner.
+  const running = await progress(request, registered.id);
+  expect(running.status).toBe("running");
+  expect(running.run_id).toBeTruthy();
+  await page.locator(".hosts-panel-toggle").click();
+  await expect(page.locator(".hosts-heading")).not.toBeVisible();
+  await expect(registeredRow.locator(".provisioning-run")).not.toBeVisible();
+  const avatar = page.locator(`.host-rail-avatar[data-rail-host-id="${registered.id}"]`);
+  await expect(avatar).toHaveAttribute("data-host-progress", "true");
+  const local = (await hosts(request)).find((host) => host.kind === "local");
+  expect(local?.state.phase, "the independent rail anchor must be a connected local host").toBe("connected");
+  const localAvatar = page.locator(`.host-rail-avatar[data-rail-host-id="${local!.id}"]`);
+  await localAvatar.focus();
+  await expect(localAvatar).toBeFocused();
+  await page.keyboard.press("Shift+F10");
+  const localMenu = page.locator(`[data-host-id="${local!.id}"] .host-row-menu-panel`);
+  await expect(localMenu).toBeVisible();
+
   await configureBackend();
   await waitForProgress(request, registered.id, "completed");
+  await expect(avatar).toHaveAttribute("data-host-progress", "false");
+  await expect(localMenu, "concealed remote progress cannot move the local rail anchor").toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(localMenu).toHaveCount(0);
+  await showHostsPanel(page);
   await expect(page.locator(`[data-host-id="${registered.id}"] .provisioning-run`)).toHaveAttribute(
     "data-provisioning-status",
     "completed",
@@ -1983,10 +2147,10 @@ test("a refused ADD attempt reopens the form and refreshes committed state", asy
   await expect(form.locator(".add-host-error")).toContainText("already been used");
   await expect(form.locator(".add-host-ssh")).toHaveValue(remote);
   await expect(form.locator(".provisioning-plan")).toHaveCount(0);
-  await expect(page.locator(".hosts-panel > .add-host-error")).toHaveCount(0);
+  await expect(page.locator(".hosts-notices > .add-host-error")).toHaveCount(0);
   await form.locator(".add-host-cancel").click();
   await expect(form).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+  await expect(page.locator(".host-rail-add")).toBeEnabled();
   await expect(page.locator(`.host-row:has-text("${remote}")`)).toBeVisible();
 });
 
@@ -2094,6 +2258,7 @@ test("a transient local probe error can be retried into the run-setup answer", a
     await route.continue();
   });
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   release();
   const local = page.locator('[data-host-kind="local"]');
@@ -2155,6 +2320,7 @@ test("manual-only local setup leaves the manual command primary", async ({ page 
     await route.continue();
   });
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   release();
   const local = page.locator('[data-host-kind="local"]');
@@ -2198,6 +2364,7 @@ test("an unvalidated automatic local probe reveals its feedback", async ({ page 
   });
 
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   release();
   await expect(page.locator('[data-host-kind="local"] .provisioning-error')).toContainText(
@@ -2234,6 +2401,7 @@ test("a held local plan opens its confirmation while details stay folded", async
   });
 
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   release();
   await expect(page.locator('[data-host-kind="local"] .provisioning-plan')).toContainText(
@@ -2274,6 +2442,7 @@ test("a local setup phase transition republishes provisioning commands", async (
   });
 
   await page.goto("/");
+  await showHostsPanel(page);
   const local = page.locator('[data-host-kind="local"]');
   await openHostMenu(local);
   await expect(local.locator(".provisioning-update")).toBeVisible();
@@ -2314,6 +2483,7 @@ test("the local row's update is greyed out, points at the installer, and sends n
   });
 
   await page.goto("/");
+  await showHostsPanel(page);
   const local = page.locator('[data-host-kind="local"]');
   await expect(local).toBeVisible();
   const localId = Number(await local.getAttribute("data-host-id"));
@@ -2472,7 +2642,7 @@ async function holdLockWithAdd(
       }
     },
   );
-  const addHost = page.getByRole("button", { name: "add host" });
+  const addHost = page.locator(".host-rail-add");
   await addHost.click();
   await page.locator(".add-host-ssh").fill(destination);
   await page.locator(".add-host-submit").click();
@@ -2567,6 +2737,7 @@ test(`single Update shows inline progress without opening its row in ${appearanc
   await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
   const updates = countUpdateRequests(page, accepted.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".hosts-panel")).toBeVisible();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   const idle = page.locator(`[data-host-id="${other.host_id}"]`);
@@ -2605,15 +2776,24 @@ test(`single Update shows inline progress without opening its row in ${appearanc
     const sidebarBox = sidebar.getBoundingClientRect();
     const toggleBox = node.querySelector(".host-row-menu")!.getBoundingClientRect();
     const clockBox = node.querySelector(".host-update-elapsed")!.getBoundingClientRect();
+    const nameBox = node.querySelector(".host-name")!.getBoundingClientRect();
+    const statusBox = node.querySelector(".host-status")!.getBoundingClientRect();
     return {
       visibleRight: sidebarBox.left + sidebar.clientLeft + sidebar.clientWidth,
       toggleLeft: toggleBox.left,
       toggleRight: toggleBox.right,
       clockRight: clockBox.right,
+      nameWidth: nameBox.width,
+      nameBottom: nameBox.bottom,
+      statusTop: statusBox.top,
     };
   });
   expect(geometry.toggleRight).toBeLessThanOrEqual(geometry.visibleRight);
   expect(geometry.clockRight).toBeLessThanOrEqual(geometry.toggleLeft);
+  // Progress yields its own line so the host remains identifiable while
+  // the operation runs, without opening the detailed run panel.
+  expect(geometry.nameWidth).toBeGreaterThan(150);
+  expect(geometry.statusTop).toBeGreaterThanOrEqual(geometry.nameBottom);
 
   // Hovering anywhere on the label spells out the whole status. The popup is
   // fixed-position so the sidebar's clipping cannot cut off the step name the
@@ -2743,7 +2923,7 @@ test(`single Update shows inline progress without opening its row in ${appearanc
 
   // Acceptance releases the page lock while the run continues: unrelated
   // controls stay usable, while this row's own edit waits for its run.
-  await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+  await expect(page.locator(".host-rail-add")).toBeEnabled();
   // `.host-settings` lives inside the row's own "⋯" menu now — see the
   // earlier ADD case's comment for why `toBeDisabled()` still applies.
   await openHostMenu(row);
@@ -2803,6 +2983,7 @@ test("setup disclosure transitions invalidate fixed-surface geometry", async ({
   });
 
   await page.goto("/");
+  await showHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
 
@@ -2868,6 +3049,7 @@ test("a retarget and a foreign run each invalidate an unsubmitted update", async
   });
   try {
     await page.goto("/");
+    await showHostsPanel(page);
     await expect(page.locator(".host-details-toggle")).not.toBeChecked();
     const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
 
@@ -2983,6 +3165,7 @@ test("UPDATE planning refusal shows the concrete reason in a dialog", async ({
   });
   const updates = countUpdateRequests(page, accepted.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   const refusal = page.waitForResponse((response) =>
@@ -3038,6 +3221,7 @@ test("a Busy-refused UPDATE consumes its plan and leaves unrelated controls usab
   });
   const updates = countUpdateRequests(page, accepted.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const lock = await holdLockWithAdd(page, lockHost);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
@@ -3063,7 +3247,7 @@ test("a Busy-refused UPDATE consumes its plan and leaves unrelated controls usab
   await expect(row.locator(".provisioning-confirm")).toHaveCount(0);
   await expect(row.locator(".host-detail")).toBeVisible();
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
-  await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+  await expect(page.locator(".host-rail-add")).toBeEnabled();
   expect(updates.plans).toBe(1);
   expect(updates.confirms).toBe(1);
 });
@@ -3105,6 +3289,7 @@ test("a wrong-host UPDATE acceptance warns on its source row and claims nothing"
   });
   const updates = countUpdateRequests(page, from.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${from.host_id}"]`);
   await expect(row).toHaveAttribute("data-host-phase", "connected");
@@ -3165,6 +3350,7 @@ test("a malformed accepted UPDATE warns, survives old success, and never replays
   });
   const updates = countUpdateRequests(page, accepted.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
@@ -3174,7 +3360,7 @@ test("a malformed accepted UPDATE warns, survives old success, and never replays
   await expect(row.locator(".provisioning-warning")).toContainText("accepted");
   await expect(row.locator(".host-detail")).toBeVisible();
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
-  await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+  await expect(page.locator(".host-rail-add")).toBeEnabled();
   // The stale older-run success lands and changes the snapshot, but the
   // lost acceptance stays unresolved and the row stays expanded.
   await expect(row.locator(".provisioning-run-message")).toContainText("stale success marker");
@@ -3261,6 +3447,7 @@ test("a lost submission reply survives a failed retry plan, a refused retry subm
   });
   const updates = countUpdateRequests(page, accepted.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
 
@@ -3425,6 +3612,7 @@ test("a progress read failure during an update recovers on retry demand alone", 
     }
   });
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
@@ -3470,7 +3658,7 @@ test("expanded setup failure closes the menu below it", async ({ page, request }
   await expect(rowOne.locator(".provisioning-run")).toHaveAttribute("data-provisioning-status", "running");
   await expect(rowOne.locator(".host-detail")).toBeVisible();
   const panel = page.locator(".hosts-panel");
-  const sidebar = page.locator(".app-sidebar");
+  const sidebar = page.locator(".sidebar-content");
   const scrollTop = await sidebar.evaluate((node) => node.scrollTop);
   const height = await panel.evaluate((node) => node.getBoundingClientRect().height);
   await openHostMenu(rowTwo);
@@ -3538,7 +3726,7 @@ test("two provisioning-busy rows reconcile independently", async ({
   await expect(running(rowTwo), "premise: row two's setup is running on the page").not.toHaveCount(0);
   await settingsReads(rowOne, false);
   await settingsReads(rowTwo, false);
-  await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+  await expect(page.locator(".host-rail-add")).toBeEnabled();
 
   await configureBackend({ targets: { [target(second)]: { hold_actions: true } } });
   await waitForProgress(request, one.host_id, "completed");
@@ -3575,6 +3763,7 @@ test("failed ADD rerun probes the registered destination and discovery resolves 
     },
   });
   await page.goto("/");
+  await showHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await expect(row.locator(".provisioning-run")).toHaveAttribute("data-provisioning-status", "failed");
   await expect(row.locator(".host-detail")).toBeVisible();
@@ -3639,6 +3828,7 @@ test("failed UPDATE rerun submits automatically through the host update route", 
     }
   });
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${added.host_id}"]`);
   // The retained failed UPDATE keeps its own row expanded from mount, with
@@ -3700,6 +3890,7 @@ test("update all dispatches remote hosts and keeps their results independent", a
     counts: countUpdateRequests(page, id),
   }));
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const local = page.locator('.host-row[data-host-kind="local"]');
   await expect(local).toHaveCount(1);
@@ -3782,6 +3973,7 @@ test("update all skips a host already busy with setup", async ({ page, request }
   const busyUpdates = countUpdateRequests(page, busyHost.host_id);
 
   await page.goto("/");
+  await showHostsPanel(page);
   const busyRow = page.locator(`[data-host-id="${busyHost.host_id}"]`);
   // Observing an accepted ADD opens that run's rail even in a new window.
   // Its compact status remains the same authority that suppresses Update.
@@ -3816,6 +4008,7 @@ test("a plan held under a held OpLock submits exactly once on release", async ({
   await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
   const updates = countUpdateRequests(page, accepted.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const lock = await holdLockWithAdd(page, lockHost);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
@@ -3858,6 +4051,7 @@ test("a retarget and a removal before the claim each submit nothing", async ({
   feed.notifyOnConnect(1);
   const updates = countUpdateRequests(page, accepted.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const hold = await holdLockWithAdd(page, lockHost);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
@@ -3886,7 +4080,7 @@ test("a retarget and a removal before the claim each submit nothing", async ({
   );
   hold.release();
   await claimRelease;
-  await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+  await expect(page.locator(".host-rail-add")).toBeEnabled();
   expect(updates.plans).toBe(1);
   expect(updates.confirms).toBe(0);
 
@@ -3909,7 +4103,7 @@ test("a retarget and a removal before the claim each submit nothing", async ({
   );
   holdAgain.release();
   await claimReleaseAgain;
-  await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+  await expect(page.locator(".host-rail-add")).toBeEnabled();
   expect(updates.plans).toBe(2);
   expect(updates.confirms).toBe(0);
 });
@@ -3949,6 +4143,7 @@ test("removal before plan completion submits nothing", async ({
   });
   const updates = countUpdateRequests(page, accepted.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
@@ -4041,6 +4236,7 @@ test("a stale Completed around submission settles nothing and replays nothing", 
   });
   const updates = countUpdateRequests(page, accepted.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
@@ -4051,7 +4247,7 @@ test("a stale Completed around submission settles nothing and replays nothing", 
   // release below needs. Request counts here prove dispatch, nothing more.
   await submissionAdmitted;
   await expect(pendingUpdate(row, "submitting")).toBeVisible();
-  await expect(page.getByRole("button", { name: "add host" })).toBeDisabled();
+  await expect(page.locator(".host-rail-add")).toBeDisabled();
   expect(updates.plans).toBe(1);
   expect(updates.confirms).toBe(1);
 
@@ -4069,7 +4265,7 @@ test("a stale Completed around submission settles nothing and replays nothing", 
   expect(submitResponse.status(), await responseBody(submitResponse)).toBe(202);
   const submittedRun = ((await submitResponse.json()) as Accepted).run_id;
   await expect(pendingUpdate(row, "submitting")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+  await expect(page.locator(".host-rail-add")).toBeEnabled();
   // The acceptance's own reread observes held running A, so the accepted
   // run is reconciled before the stale detour begins: only the tracked
   // run's own running view produces full inline progress.
@@ -4180,6 +4376,7 @@ test("an update shows pending status from acceptance and settles on immediate co
   });
   const updates = countUpdateRequests(page, accepted.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
@@ -4240,6 +4437,7 @@ test("global details alone control disclosure while update progress stays inline
   await waitForProgress(request, other.host_id, "completed");
   await configureBackend({ targets: { [target(remote)]: { hold_actions: true } } });
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   const idle = page.locator(`[data-host-id="${other.host_id}"]`);
@@ -4344,6 +4542,7 @@ for (const boundary of ["following", "submitting"] as const) {
       try {
         const initialRead = registryRead("unknown");
         await page.goto("/");
+        await showHostsPanel(page);
         const initialResponse = await initialRead;
         expect(initialResponse.ok()).toBe(true);
         const initialHost = (await initialResponse.json()).hosts.find((host: Host) => host.id === added.host_id);
@@ -4518,6 +4717,7 @@ for (const boundary of ["following", "submitting", "submitting-current"] as cons
       };
       try {
         await page.goto("/");
+        await showHostsPanel(page);
         await expect(row.locator(".host-name")).toHaveText(`initial-${change}-advice-marker`);
         await expect(row).toHaveAttribute("data-host-phase", "unreachable-reprobing");
         await expect(page.locator(".host-details-toggle")).not.toBeChecked();
@@ -4544,7 +4744,7 @@ for (const boundary of ["following", "submitting", "submitting-current"] as cons
           expect((await reply).status()).toBe(202);
           // No host change follows the acceptance. Its own warning signal
           // must wake the clearing effect against the already-rendered facts.
-          await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+          await expect(page.locator(".host-rail-add")).toBeEnabled();
           await expect(row.locator(".host-detail")).toHaveCount(0);
           await expect(row.locator(".provisioning-warning")).toHaveCount(0);
         } else {
@@ -4637,6 +4837,7 @@ for (const boundary of ["following", "submitting"] as const) {
     const updates = countUpdateRequests(page, added.host_id);
     try {
       await page.goto("/");
+      await showHostsPanel(page);
       const row = page.locator(`[data-host-id="${added.host_id}"]`);
       await expect(page.locator(".host-details-toggle")).not.toBeChecked();
       await expect(row.locator(".host-update-running")).toBeVisible();
@@ -4673,7 +4874,7 @@ for (const boundary of ["following", "submitting"] as const) {
         );
         acceptance.release();
         expect((await reply).status()).toBe(202);
-        await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
+        await expect(page.locator(".host-rail-add")).toBeEnabled();
       }
       await expect(warning).toHaveText(original!);
       await expect(row.locator(".host-detail")).toBeVisible();
@@ -4719,6 +4920,7 @@ test("incarnation churn keeps a followed run while a target change detaches it",
   });
   const updates = countUpdateRequests(page, accepted.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
@@ -4827,6 +5029,7 @@ test("a progress read racing submission commits nothing; the delayed acceptance 
   });
   const updates = countUpdateRequests(page, accepted.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
@@ -4991,6 +5194,7 @@ test("a held acceptance across a target change retires the old run instead of ad
     isProvisioningGet(response.url(), response.request().method())
   );
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   // The mount read's response arrived before the click — its commit follows
@@ -5155,6 +5359,7 @@ test("a progress read across a held acceptance and target change cannot adopt th
     isProvisioningGet(response.url(), response.request().method())
   );
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   // The mount read's response arrived before the click — its commit follows
@@ -5389,6 +5594,7 @@ test("a competing run during retry planning preserves the sticky update warning"
   });
   const updates = countUpdateRequests(page, accepted.host_id);
   await page.goto("/");
+  await showHostsPanel(page);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
 

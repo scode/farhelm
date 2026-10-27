@@ -130,6 +130,17 @@ verify that the same host and install reconnect. Statuses remain real; no SSH co
 `visual-review/` shots are referenced by no docs page and are never published; the publisher selects only shots the docs
 pages reference. It shares the real fleet and machine-detail check with ordinary docs shots.
 
+For setup-progress review, this spec may also confirm the scenario's invented add-host plan against that same E2E-only
+backend. Its actions are simulated, as in the provisioning browser tests; no installation or SSH configuration changes.
+The capture holds an action through the backend's existing control file, photographs the real helm's running progress,
+then restores the exact control file, waits for the run to release its host and removes only that newly registered host.
+Connection and session statuses are still never rewritten.
+
+The same simulated setup action may fail at a controlled step for host-warning review. With Hosts closed, the capture
+photographs the warning on an ordinary and selected avatar, then holds a retry to show its progress ring beside the
+unacknowledged warning. The failure and progress come from the real helm's retained run; cleanup restores the backend
+control file and removes only the invented host as above.
+
 - `scripts/docs-screenshots.sh --only <page>` captures that page's shots into `website/public/docs-shots-local/`, and
   the local docs preview shows them straight away, labelled as local captures. Look at every one: the arrow points at
   what the label says, the label covers nothing the reader needs, and nothing from the capturing machine shows. A

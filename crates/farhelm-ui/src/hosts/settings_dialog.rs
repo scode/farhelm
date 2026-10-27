@@ -138,6 +138,29 @@ pub(crate) fn row_focus(id: HostId) -> FocusTarget {
     )
 }
 
+/// Pick a visible return before the shared helper schedules focus.
+///
+/// Its null-coalescing fallback does not reject hidden elements. A hidden
+/// management row therefore cannot be the first selector; a removed host
+/// has only the persistent Hosts control left to return to.
+pub(crate) fn visible_host_focus(
+    id: HostId,
+    return_to_rail: bool,
+    panel_visible: bool,
+    registered: bool,
+) -> FocusTarget {
+    let selector = if !registered {
+        ".hosts-panel-toggle".to_owned()
+    } else if return_to_rail {
+        format!(r#".host-rail-avatar[data-rail-host-id="{id}"]"#)
+    } else if panel_visible {
+        format!(r#"[data-host-id="{id}"] .host-row-main .host-row-menu"#)
+    } else {
+        ".hosts-panel-toggle".to_owned()
+    };
+    FocusTarget::new(selector, Some(".hosts-panel-toggle"), false)
+}
+
 /// A refused Remove leaves its confirmation mounted. Focus its safe exit
 /// after the busy controls re-enable so the refusal can be dismissed with
 /// Enter or Escape without reaching the page behind the dialog.

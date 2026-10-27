@@ -56,6 +56,16 @@
 //! connected at this helm's reported build, its advice to check the version
 //! is satisfied. Clearing that warning proves nothing about the detached
 //! update and does not settle any other uncertainty.
+//!
+//! ## Attention and diagnostics have separate acknowledgement
+//!
+//! Setup and Update failures publish attention through the host owner's
+//! existing row map. Opening Hosts acknowledges that mark, not the retained
+//! error or run. Outcome callbacks and applicable reads supply occurrences;
+//! observing diagnostic strings would relatch every retained failure and
+//! miss a new attempt that happened to return the same text. Recovery carries
+//! only the attention revision it can supersede; the intent, read gate and
+//! tracked run still decide which action outcomes are applicable.
 
 use std::collections::{HashMap, HashSet};
 use web_time::Instant;
@@ -221,6 +231,8 @@ pub(crate) struct UninstallNotice {
 pub(crate) struct ActionRequest {
     pub(crate) operation: ProvisioningOperation,
     pub(crate) binding: HostBinding,
+    /// The actual menu origin; inline and fleet requests use false.
+    pub(crate) return_to_rail: bool,
 }
 
 /// What consuming one queued menu request does.
@@ -968,6 +980,8 @@ fn update_owned(intent: Option<&UpdateIntent>, tracked: Option<&TrackedRun>) -> 
 struct PendingPlan {
     operation: ProvisioningOperation,
     binding: HostBinding,
+    /// The accepted request's source survives confirmation and submission.
+    return_to_rail: bool,
     probe_id: String,
     confirmation: String,
     steps: Option<PlanSteps>,
@@ -1555,6 +1569,7 @@ async fn prepare(
         ProvisioningOperation::Update => {
             let planned = plan_host_update(base, host.id).await?;
             Ok(Preparation::Plan(Box::new(PendingPlan {
+                return_to_rail: false,
                 operation,
                 binding,
                 probe_id: planned.probe_id,
@@ -1566,6 +1581,7 @@ async fn prepare(
         ProvisioningOperation::Uninstall => {
             let planned = plan_host_uninstall(base, host.id).await?;
             Ok(Preparation::Plan(Box::new(PendingPlan {
+                return_to_rail: false,
                 operation,
                 binding,
                 probe_id: planned.probe_id,
@@ -1615,6 +1631,7 @@ async fn prepare(
                     confirmation,
                     steps,
                 } => Preparation::Plan(Box::new(PendingPlan {
+                    return_to_rail: false,
                     operation,
                     binding,
                     probe_id,
@@ -1645,6 +1662,10 @@ struct Submission<R> {
     /// The submitting update intent's epoch, or `None` for an explicit ADD
     /// confirmation. Correlates the outcome with the intent it ends.
     submitted_epoch: Option<u64>,
+    /// Presentation recovery is captured before the POST, independently of
+    /// the update epoch that owns diagnostic settlement.
+    attention: crate::hosts::AttentionOwner,
+    attention_revision: u64,
     claim: OpGuard,
     current_binding: Memo<HostBinding>,
     intent: Signal<Option<UpdateIntent>>,
@@ -1726,6 +1747,8 @@ where
         host_id,
         host_snapshot,
         submitted_epoch,
+        attention,
+        attention_revision,
         claim,
         current_binding,
         mut intent,
@@ -1773,9 +1796,11 @@ where
             if let Err(error) = result
                 && let Some(refusal) = confirmed_submission_refusal(&plan, &error)
             {
-                refusals
-                    .write()
-                    .insert(host_id, HostRefusalEntry::new(&host_snapshot, refusal));
+                refusals.write().insert(
+                    host_id,
+                    HostRefusalEntry::new(&host_snapshot, refusal)
+                        .with_return_to_rail(plan.return_to_rail),
+                );
             }
             on_changed.call(());
             return;
@@ -1783,6 +1808,34 @@ where
         // Reads overlapping submission describe the pre-submission world.
         // Reject them before installing anything, then read fresh.
         read_gate.write().fence();
+        // A late result grants no run authority on a replacement target.
+        // Keep the pinned submitted binding even after its intent is gone;
+        // explicit uncertainty below still belongs to this logical entry.
+        let submitted_binding = submitted_epoch
+            .and_then(|epoch| {
+                outstanding
+                    .peek()
+                    .as_ref()
+                    .filter(|submission| submission.epoch == epoch)
+                    .map(|submission| submission.binding.clone())
+            })
+            .unwrap_or_else(|| plan.binding.clone());
+        let attention_applies = same_update_target(&submitted_binding, &current_binding.peek());
+        // A lost/malformed Update reply still leaves this logical entry with
+        // an unknown outcome after its target changes. Report that uncertainty
+        // without adopting the old target's run. Definite old-target refusals
+        // remain behind the pinned-binding guard.
+        let changed_target_uncertainty = !attention_applies
+            && submitted_epoch.is_some()
+            && matches!(
+                &result,
+                Ok(ProvisioningSubmission::Unvalidated(_)) | Err(SubmissionError::Ambiguous(_))
+            );
+        if attention_applies && !matches!(&result, Ok(ProvisioningSubmission::Accepted(_)))
+            || changed_target_uncertainty
+        {
+            attention.failed(plan.operation);
+        }
         match result {
             Ok(ProvisioningSubmission::Accepted(accepted)) => {
                 submit_accepted(
@@ -1790,6 +1843,8 @@ where
                     host_id,
                     &plan,
                     submitted_epoch,
+                    attention,
+                    attention_revision,
                     accepted,
                     current_binding,
                     &mut intent,
@@ -1891,9 +1946,11 @@ where
                             local_auto_retry.set(true);
                         }
                         if let Some(refusal) = confirmed_submission_refusal(&plan, &error) {
-                            refusals
-                                .write()
-                                .insert(host_id, HostRefusalEntry::new(&host_snapshot, refusal));
+                            refusals.write().insert(
+                                host_id,
+                                HostRefusalEntry::new(&host_snapshot, refusal)
+                                    .with_return_to_rail(plan.return_to_rail),
+                            );
                         } else {
                             action_error.set(Some(error.into_text()));
                         }
@@ -1920,6 +1977,8 @@ async fn submit_accepted<R>(
     host_id: HostId,
     plan: &PendingPlan,
     submitted_epoch: Option<u64>,
+    attention: crate::hosts::AttentionOwner,
+    attention_revision: u64,
     accepted: ProvisioningAccepted,
     current_binding: Memo<HostBinding>,
     intent: &mut Signal<Option<UpdateIntent>>,
@@ -1942,6 +2001,13 @@ async fn submit_accepted<R>(
         // panel that happened to submit it.
         on_changed.call(());
         if accepted.host_id == host_id {
+            if same_update_target(&plan.binding, &current_binding.peek()) {
+                if accepted.run_id.is_empty() {
+                    attention.failed(plan.operation);
+                    action_warning.set(Some("the helm accepted setup but returned no run identity, so its outcome is unknown".into()));
+                }
+                attention.accepted(plan.operation, &accepted.run_id, attention_revision);
+            }
             accepted_run_waiting.set(true);
             on_running.call(true);
             reread(Trigger::Explicit);
@@ -1953,6 +2019,9 @@ async fn submit_accepted<R>(
             if let Err(error) = fetch_provisioning(base, accepted.host_id).await
                 && current_binding.try_peek().is_ok()
             {
+                if same_update_target(&plan.binding, &current_binding.peek()) {
+                    attention.routed(accepted.host_id).failed(plan.operation);
+                }
                 action_warning.set(Some(format!(
                     "the helm accepted run {} for host {}, but its progress could not yet be read: {}",
                     accepted.run_id, accepted.host_id, error
@@ -2017,12 +2086,16 @@ async fn submit_accepted<R>(
         if let Some(warning) = warning {
             update_warning.set(Some(warning));
         }
+        // The entry owns the uncertain result, while the old run remains
+        // retired. Current connection/version advice may clear independently.
+        attention.failed(ProvisioningOperation::Update);
         release_outstanding(outstanding, epoch);
         reread(Trigger::Explicit);
         on_changed.call(());
         return;
     }
     if accepted.host_id != host_id {
+        attention.failed(ProvisioningOperation::Update);
         update_warning.set(Some(UpdateDiagnostic {
             epoch,
             sticky: true,
@@ -2039,6 +2112,7 @@ async fn submit_accepted<R>(
         return;
     }
     if accepted.run_id.is_empty() {
+        attention.failed(ProvisioningOperation::Update);
         update_warning.set(Some(UpdateDiagnostic {
             epoch,
             sticky: true,
@@ -2064,6 +2138,7 @@ async fn submit_accepted<R>(
             Some(ProvisioningStatus::Completed | ProvisioningStatus::Failed)
         )
     {
+        attention.unreadable();
         update_warning.set(Some(UpdateDiagnostic {
             epoch,
             sticky: true,
@@ -2074,6 +2149,11 @@ async fn submit_accepted<R>(
             ),
         }));
     }
+    attention.accepted(
+        ProvisioningOperation::Update,
+        &accepted.run_id,
+        attention_revision,
+    );
     tracked.set(Some(TrackedRun {
         host: host_id,
         run_id: accepted.run_id,
@@ -2102,6 +2182,7 @@ struct ProgressCommit<'a> {
     binding: HostBinding,
     epoch_now: u64,
     retired: HashSet<String>,
+    attention: crate::hosts::AttentionOwner,
     intent: &'a mut Signal<Option<UpdateIntent>>,
     epoch: &'a mut Signal<u64>,
     tracked: &'a mut Signal<Option<TrackedRun>>,
@@ -2248,6 +2329,7 @@ fn reconcile_progress(view: ProvisioningView, commit: ProgressCommit<'_>) {
         binding,
         epoch_now,
         retired,
+        attention,
         intent,
         epoch,
         tracked,
@@ -2259,6 +2341,13 @@ fn reconcile_progress(view: ProvisioningView, commit: ProgressCommit<'_>) {
         progress_error,
         on_running,
     } = commit;
+    if view
+        .run_id
+        .as_ref()
+        .is_none_or(|run| !retired.contains(run))
+    {
+        attention.observe(&view);
+    }
     let running = view.run_id.is_some() && view.status == ProvisioningStatus::Running;
 
     // A competing run while this client's plan is still unsubmitted.
@@ -2761,6 +2850,14 @@ fn use_provisioning_flow_movement(
 #[component]
 pub(crate) fn ProvisioningPanel(
     host: Host,
+    /// Inline presentation is independent of disclosure and operation state.
+    /// Confirmation modals remain visible for actions opened from the rail.
+    #[props(default = true)]
+    show_inline: bool,
+    /// The parent remembers menu origin and current visible presentation.
+    /// Renderer-free callers retain the historical row return.
+    #[props(default)]
+    return_focus: Option<Callback<(HostId, bool), FocusTarget>>,
     mut ops: OpLock,
     /// Whether this row shows full details: the global checkbox OR this
     /// row's automatic disclosure, computed by the parent. The checkbox is
@@ -2788,6 +2885,9 @@ pub(crate) fn ProvisioningPanel(
     mut auto_details: Signal<HashSet<HostId>>,
     /// Compact row status published beside the automatic-disclosure set.
     mut row_update_progress: Signal<HashMap<HostId, HostUpdateProgress>>,
+    /// Only the presentation warning is shared with the initial Add owner.
+    /// Existing intent, read gate and tracked run remain authoritative.
+    attention: crate::hosts::AttentionOwner,
     /// Reveal global details for the local ADD handoff's hidden diagnostic.
     /// Remote confirmations stay visible even when every row is folded.
     on_reveal_details: EventHandler<()>,
@@ -2885,6 +2985,7 @@ pub(crate) fn ProvisioningPanel(
         trace_shapes.write().remove(&host_id);
         auto_details.write().remove(&host_id);
         row_update_progress.write().remove(&host_id);
+        attention.remove();
     });
 
     // One reader per row. A feed bump says only that something changed, so
@@ -2948,6 +3049,7 @@ pub(crate) fn ProvisioningPanel(
                             binding: binding_now,
                             epoch_now,
                             retired: retired_now,
+                            attention,
                             intent: &mut view_intent,
                             epoch: &mut view_epoch,
                             tracked: &mut view_tracked,
@@ -2965,6 +3067,9 @@ pub(crate) fn ProvisioningPanel(
                 Err(error) => {
                     if !gate.peek().accept_failure(generation) {
                         return true;
+                    }
+                    if view_outstanding.peek().is_none() {
+                        attention.unreadable();
                     }
                     view_error.set(Some(error));
                     false
@@ -3002,7 +3107,9 @@ pub(crate) fn ProvisioningPanel(
     // UNINSTALL plans through the same path: it, too, shows the helm's plan
     // and submits only on an explicit confirmation. Only ADD carries the
     // local-setup retry and the remembered "don't ask again" answer.
-    let begin_confirmed_plan = move |operation: ProvisioningOperation| -> bool {
+    let begin_confirmed_plan = move |operation: ProvisioningOperation,
+                                     return_to_rail: bool|
+          -> bool {
         if planning.peek().is_some() || ops.busy_now() {
             return false;
         }
@@ -3017,6 +3124,18 @@ pub(crate) fn ProvisioningPanel(
         let is_local_add = host.kind.sets_up_locally() && operation == ProvisioningOperation::Add;
         let remembered_answer = operation == ProvisioningOperation::Add
             && preferences.0.peek().skip_host_setup_confirmation == Some(true);
+        // Discovery can complete this exact failed setup without a new run.
+        // Capture before awaiting: a later failure must not inherit recovery
+        // merely because this older discovery reply finally arrives.
+        let attention_revision = attention.revision(operation);
+        let discovery_run = progress
+            .peek()
+            .as_ref()
+            .filter(|view| {
+                view.operation == Some(ProvisioningOperation::Add)
+                    && view.status == ProvisioningStatus::Failed
+            })
+            .and_then(|view| view.run_id.clone());
         let reread = plan_progress.clone();
         spawn(async move {
             let prepared = prepare(&base, &host, operation).await;
@@ -3025,7 +3144,8 @@ pub(crate) fn ProvisioningPanel(
                 return;
             }
             match prepared {
-                Ok(Preparation::Plan(plan)) => {
+                Ok(Preparation::Plan(mut plan)) => {
+                    plan.return_to_rail = return_to_rail;
                     if is_local_add {
                         local_auto_retry.set(true);
                     }
@@ -3038,12 +3158,20 @@ pub(crate) fn ProvisioningPanel(
                     if is_local_add {
                         local_auto_retry.set(false);
                     }
+                    if operation == ProvisioningOperation::Add
+                        && let Some(run) = discovery_run.as_deref()
+                    {
+                        attention.accepted(operation, run, attention_revision);
+                    }
                     reread(Trigger::Explicit);
                     on_changed.call(());
                 }
                 Ok(Preparation::Manual(reason)) => {
                     if is_local_add {
                         local_auto_retry.set(false);
+                    }
+                    if !is_local_add {
+                        attention.failed(operation);
                     }
                     if is_local_add {
                         action_error.set(Some(reason));
@@ -3053,7 +3181,8 @@ pub(crate) fn ProvisioningPanel(
                             HostRefusalEntry::new(
                                 &host,
                                 planning_refusal(operation, reason.into()),
-                            ),
+                            )
+                            .with_return_to_rail(return_to_rail),
                         );
                     }
                     if is_local_add {
@@ -3061,6 +3190,7 @@ pub(crate) fn ProvisioningPanel(
                     }
                 }
                 Ok(Preparation::Unvalidated(problem)) => {
+                    attention.failed(operation);
                     if is_local_add {
                         local_auto_retry.set(true);
                     }
@@ -3071,6 +3201,7 @@ pub(crate) fn ProvisioningPanel(
                     }
                 }
                 Err(error) => {
+                    attention.failed(operation);
                     if is_local_add {
                         local_auto_retry.set(true);
                     }
@@ -3079,7 +3210,8 @@ pub(crate) fn ProvisioningPanel(
                     } else {
                         refusals.write().insert(
                             host_id,
-                            HostRefusalEntry::new(&host, planning_refusal(operation, error)),
+                            HostRefusalEntry::new(&host, planning_refusal(operation, error))
+                                .with_return_to_rail(return_to_rail),
                         );
                     }
                     if is_local_add {
@@ -3100,7 +3232,7 @@ pub(crate) fn ProvisioningPanel(
     let update_base = base.clone();
     let update_host = host.clone();
     let update_progress = request_progress.clone();
-    let begin_update = move || {
+    let begin_update = move |return_to_rail: bool| {
         let epoch_now = *intent_epoch.peek() + 1;
         intent_epoch.set(epoch_now);
         read_gate.write().fence();
@@ -3152,7 +3284,8 @@ pub(crate) fn ProvisioningPanel(
                 return;
             }
             match prepared {
-                Ok(Preparation::Plan(plan)) => {
+                Ok(Preparation::Plan(mut plan)) => {
+                    plan.return_to_rail = return_to_rail;
                     if automatic_update(plan.operation, &plan.binding) {
                         // Store the one-use plan, enter WaitingForClaim,
                         // and let the claim effect attempt submission.
@@ -3183,16 +3316,19 @@ pub(crate) fn ProvisioningPanel(
                 }
                 Ok(Preparation::Manual(reason)) => {
                     intent.set(None);
+                    attention.failed(ProvisioningOperation::Update);
                     refusals.write().insert(
                         host_id,
                         HostRefusalEntry::new(
                             &host,
                             planning_refusal(ProvisioningOperation::Update, reason.into()),
-                        ),
+                        )
+                        .with_return_to_rail(return_to_rail),
                     );
                 }
                 Ok(Preparation::Unvalidated(problem)) => {
                     intent.set(None);
+                    attention.failed(ProvisioningOperation::Update);
                     set_planning_diagnostic(&mut update_error, epoch_now, problem);
                     on_changed.call(());
                 }
@@ -3201,12 +3337,14 @@ pub(crate) fn ProvisioningPanel(
                     // from any sticky uncertainty an earlier submission left
                     // in the row.
                     intent.set(None);
+                    attention.failed(ProvisioningOperation::Update);
                     refusals.write().insert(
                         host_id,
                         HostRefusalEntry::new(
                             &host,
                             planning_refusal(ProvisioningOperation::Update, error),
-                        ),
+                        )
+                        .with_return_to_rail(return_to_rail),
                     );
                 }
             }
@@ -3237,11 +3375,11 @@ pub(crate) fn ProvisioningPanel(
                 RequestDecision::Stale | RequestDecision::Coalesce => true,
                 RequestDecision::Plan => match request.operation {
                     ProvisioningOperation::Update => {
-                        begin_auto();
+                        begin_auto(request.return_to_rail);
                         true
                     }
                     operation @ (ProvisioningOperation::Add | ProvisioningOperation::Uninstall) => {
-                        begin_confirmed(operation)
+                        begin_confirmed(operation, request.return_to_rail)
                     }
                 },
             }
@@ -3348,6 +3486,8 @@ pub(crate) fn ProvisioningPanel(
                 host_id,
                 host_snapshot: update_submission_host.clone(),
                 submitted_epoch: Some(epoch),
+                attention,
+                attention_revision: attention.revision(plan.operation),
                 claim,
                 current_binding,
                 intent,
@@ -3433,6 +3573,12 @@ pub(crate) fn ProvisioningPanel(
             );
             if let Some(warning) = warning {
                 update_warning.set(Some(warning));
+            }
+            // Detaching happens once for this followed run. A retained older
+            // diagnostic can outrank its text, but cannot hide this new
+            // continuity loss from a closed Hosts panel.
+            if let Some(operation) = followed.operation {
+                attention.failed(operation);
             }
         } else if let Some(mut followed) = followed
             && followed.binding.identity.is_none()
@@ -3575,7 +3721,7 @@ pub(crate) fn ProvisioningPanel(
                 && !*local_probe_started.peek()
             {
                 local_probe_started.set(true);
-                auto_plan(ProvisioningOperation::Add);
+                auto_plan(ProvisioningOperation::Add, false);
             }
             if !local_setup && *was_local_setup.peek() {
                 local_probe_started.set(false);
@@ -3671,9 +3817,16 @@ pub(crate) fn ProvisioningPanel(
     let confirmed_submission_host = host.clone();
     let preference_base = base.clone();
     let host_dialog = settings_dialog::DIALOG;
-    // Both explicit cancellations return to this row; confirmation and
-    // lifecycle retirement intentionally leave focus to the next surface.
-    let row_focus = move || settings_dialog::row_focus(host_id).script();
+    // Explicit cancellation returns to the visible origin chosen by the
+    // surviving parent. Confirmation and retirement keep their handoff policy.
+    let row_focus = move |return_to_rail| {
+        return_focus
+            .map_or_else(
+                || settings_dialog::row_focus(host_id),
+                |focus| focus.call((host_id, return_to_rail)),
+            )
+            .script()
+    };
     // Confirm `shown`, the showing the answer's render drew; the plan it
     // submits is the one that token names (see `take_plan_offer`).
     // `skip_future` is setup's permanent answer ("don't ask in the future"),
@@ -3739,6 +3892,8 @@ pub(crate) fn ProvisioningPanel(
                 host_id,
                 host_snapshot: confirmed_submission_host.clone(),
                 submitted_epoch: None,
+                attention,
+                attention_revision: attention.revision(plan.operation),
                 claim,
                 current_binding,
                 intent,
@@ -3884,7 +4039,7 @@ pub(crate) fn ProvisioningPanel(
                 return;
             }
             if close_dialog {
-                host_dialog.close(&row_focus());
+                host_dialog.close(&row_focus(shown.key().return_to_rail));
             }
             action_error.set(None);
             action_warning.set(None);
@@ -3896,6 +4051,7 @@ pub(crate) fn ProvisioningPanel(
     rsx! {
         div {
             class: "provisioning-panel",
+            "data-inline-visible": show_inline,
             "data-provisioning-host": "{host_id}",
             // Confirmation modals live outside row disclosure: opening one
             // must not switch on the global details checkbox.
@@ -3904,6 +4060,7 @@ pub(crate) fn ProvisioningPanel(
             if let Some(run) = body.run {
                 div {
                         class: "provisioning-run",
+                        hidden: !show_inline,
                         "data-provisioning-status": "{run.status}",
                         "data-provisioning-operation": "{run.operation}",
                         div { class: "provisioning-run-header",
@@ -4061,6 +4218,7 @@ pub(crate) fn ProvisioningPanel(
                     }
                     }
                 } else if let Some(inline_plan) = body.inline_plan {
+                    div { hidden: !show_inline,
                     PlanConfirmation {
                         confirmation: shown.key().confirmation.clone(),
                         body: inline_plan,
@@ -4077,14 +4235,17 @@ pub(crate) fn ProvisioningPanel(
                             move |_| dismiss(&shown, false, true)
                         },
                     }
+                    }
                 }
             } else if let Some(pending_line) = body.pending {
                 div {
                     class: pending_line.class(),
+                    hidden: !show_inline,
                     "{pending_line.text()}"
                 }
             }
 
+            div { class: "provisioning-diagnostics", hidden: !show_inline,
             if let Some(error) = body.error {
                 PeerLine {
                     class: "action-error provisioning-error",
@@ -4114,9 +4275,11 @@ pub(crate) fn ProvisioningPanel(
                 }
             }
             }
+            }
             } else if let ProvisioningFlow::Trace(shape) = flow {
                 div {
                     class: "provisioning-trace",
+                    hidden: !show_inline,
                     "data-provisioning-status": "{status_label(shape.status)}",
                     "{operation_label(Some(shape.operation))} provisioning {status_label(shape.status)}"
                 }
@@ -4174,6 +4337,7 @@ mod tests {
     /// request, runtime scope, page lock or mutable process environment.
     fn flow_plan(operation: ProvisioningOperation) -> PendingPlan {
         PendingPlan {
+            return_to_rail: false,
             operation,
             binding: HostBinding {
                 id: 1,
@@ -5093,6 +5257,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn confirmed_submission_routing_separates_refusals_from_uncertainty() {
         let plan = |operation, kind| PendingPlan {
+            return_to_rail: false,
             operation,
             binding: HostBinding {
                 id: 1,
@@ -5275,6 +5440,7 @@ mod tests {
     fn an_uninstall_request_waits_like_setup_and_then_plans() {
         let host_id = 7;
         let request = ActionRequest {
+            return_to_rail: false,
             operation: ProvisioningOperation::Uninstall,
             binding: ssh_binding(host_id),
         };
@@ -5335,6 +5501,7 @@ mod tests {
     fn refused_menu_request_remains_queued_until_a_later_pass_accepts_it() {
         let host_id = 7;
         let request = ActionRequest {
+            return_to_rail: false,
             operation: ProvisioningOperation::Update,
             binding: ssh_binding(host_id),
         };
@@ -5370,6 +5537,7 @@ mod tests {
         moved.destination = Some("moved@example.invalid".to_string());
         for operation in [ProvisioningOperation::Add, ProvisioningOperation::Update] {
             let request = ActionRequest {
+                return_to_rail: false,
                 operation,
                 binding: moved.clone(),
             };
@@ -5390,10 +5558,12 @@ mod tests {
         let host_id = 7;
         let binding = ssh_binding(host_id);
         let update = ActionRequest {
+            return_to_rail: false,
             operation: ProvisioningOperation::Update,
             binding: binding.clone(),
         };
         let add = ActionRequest {
+            return_to_rail: false,
             operation: ProvisioningOperation::Add,
             binding,
         };
@@ -5416,10 +5586,12 @@ mod tests {
         let host_id = 7;
         let binding = ssh_binding(host_id);
         let update = ActionRequest {
+            return_to_rail: false,
             operation: ProvisioningOperation::Update,
             binding: binding.clone(),
         };
         let add = ActionRequest {
+            return_to_rail: false,
             operation: ProvisioningOperation::Add,
             binding,
         };

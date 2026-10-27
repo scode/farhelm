@@ -148,12 +148,12 @@ test("keyboard focus uses accent on ordinary controls and inverse on selection; 
     const accentRgb = await resolveToken(page, "--accent");
     const selectedRing = await resolveToken(page, "--on-fill");
     await expect(target).toHaveAttribute("data-session-selected", "true");
-    // A native checkbox with no contextual focus override of its own —
+    // A persistent rail button with no contextual focus override of its own —
     // unlike `.session-row-open` below, which restates its own ring for
     // a documented reason (see that class's `:focus-visible` comment in
     // app.css) — so this half of the test exercises the sheet-wide rule
     // declared once near the top of the file.
-    const btn = page.locator(".host-details-toggle");
+    const btn = page.locator(".hosts-panel-toggle");
     const openButton = target.locator(".session-row-open");
 
     // `.focus()` rather than a real `page.keyboard.press("Tab")` crawl:
@@ -212,6 +212,10 @@ test("keyboard focus uses accent on ordinary controls and inverse on selection; 
     await btn.click();
     expect(await btn.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("none");
 
+    // The toggle replaces the row list with Hosts. Return through that same
+    // control before exercising pointer focus on the selected session row.
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-pressed", "false");
     await openButton.click();
     expect(await openButton.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("none");
   } finally {

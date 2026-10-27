@@ -1,5 +1,5 @@
 //! The hosts surface (PLAN_M6.md item 6): `HostsPanel` — one row per
-//! registered host with its connection state always visible — plus the
+//! registered host in management and an always-visible rail avatar — plus the
 //! renderer-free wording this UI derives from a `HostPhase`, and the
 //! read-state model both this panel and the stale session view are drawn
 //! from.
@@ -13,14 +13,14 @@
 //! red dot and no idea whether to wait (`connecting`), do nothing
 //! (`unreachable-reprobing` re-probes forever), upgrade a binary
 //! (`version-skew`), make a decision (`identity-mismatch`), or press retry
-//! (`retired`). Each row therefore keeps a phase-colored dot in the trailing
-//! gutter. Connected is deliberately quiet; every other phase adds a
-//! humanized word, while the stable wire token remains on `data-host-phase`
+//! (`retired`). Each avatar therefore keeps a phase-colored dot and names
+//! its host and phase on hover. Management rows also show the phase words,
+//! including Connected, while the stable wire token remains on `data-host-phase`
 //! for automation and machine-authored diagnostics. A compatible peer with
 //! an older parseable build is still connected, but gets the advisory
 //! `old version` label and amber status class. On an older remote host with
-//! Update available, the inline action replaces the visible words while the
-//! accessible status retains them; progress takes that action's place.
+//! Update available, the inline action accompanies those words;
+//! active progress takes that action's place.
 //!
 //! ## Peer-supplied text is displayed, never trusted to lay itself out
 //!
@@ -88,7 +88,71 @@ use crate::provisioning::{
 };
 use crate::{ApiBase, ConnectionStage, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
+pub(crate) mod attention;
 pub(crate) mod settings_dialog;
+
+use attention::HostAttention;
+
+/// A row's presentation-only warning handle. Existing lifecycle owners must
+/// validate their callback before using it. A late callback cannot recreate a
+/// removed row, and visibility is read live rather than captured at dispatch.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct AttentionOwner {
+    host: HostId,
+    rows: Signal<HashMap<HostId, HostAttention>>,
+    open: ReadSignal<bool>,
+}
+
+impl AttentionOwner {
+    /// Snapshot the occurrence a submitted recovery may acknowledge later.
+    pub(crate) fn revision(self, operation: ProvisioningOperation) -> u64 {
+        self.rows
+            .peek()
+            .get(&self.host)
+            .map_or(0, |row| row.revision(operation))
+    }
+
+    /// Apply one outcome without ever admitting a host or changing its state.
+    fn change(mut self, apply: impl FnOnce(&mut HostAttention, bool)) {
+        let open = *self.open.peek();
+        if let Some(row) = self.rows.write().get_mut(&self.host) {
+            apply(row, open);
+        }
+    }
+
+    /// Record one guarded planning or submission failure, even when its text
+    /// equals the previous attempt's text.
+    pub(crate) fn failed(self, operation: ProvisioningOperation) {
+        self.change(|row, open| row.failed_attempt(operation, open));
+    }
+
+    /// A validated run can recover only its captured occurrence, with an
+    /// authoritative matching Completed view. Discovery uses the same ticket.
+    pub(crate) fn accepted(self, operation: ProvisioningOperation, run: &str, revision: u64) {
+        self.change(|row, _| row.accepted(operation, run, revision));
+    }
+
+    /// A failed read matters only when this row already knows an action/run.
+    pub(crate) fn unreadable(self) {
+        self.change(|row, open| row.unreadable(open));
+    }
+
+    /// Called only after the provisioning reader's gate and retirement checks.
+    pub(crate) fn observe(self, view: &crate::api::ProvisioningView) {
+        self.change(|row, open| row.observe(view, open));
+    }
+
+    /// Row disposal retires its presentation state with its other projections.
+    pub(crate) fn remove(mut self) {
+        self.rows.write().remove(&self.host);
+    }
+
+    /// ADD alone may return another registered row as its authoritative
+    /// route. This still cannot create an entry absent from the registry.
+    pub(crate) fn routed(self, host: HostId) -> Self {
+        Self { host, ..self }
+    }
+}
 
 use settings_dialog::SettingsField;
 
@@ -114,6 +178,8 @@ pub(crate) struct HostRefusal {
 pub(crate) struct HostRefusalEntry {
     pub(crate) host: Host,
     pub(crate) refusal: HostRefusal,
+    /// Frozen with the accepted action, independently of later menu openings.
+    pub(crate) return_to_rail: bool,
 }
 
 impl HostRefusalEntry {
@@ -123,7 +189,14 @@ impl HostRefusalEntry {
         Self {
             host: host.clone(),
             refusal,
+            return_to_rail: false,
         }
+    }
+
+    /// Preserve an accepted action's origin through a delayed refusal.
+    pub(crate) fn with_return_to_rail(mut self, return_to_rail: bool) -> Self {
+        self.return_to_rail = return_to_rail;
+        self
     }
 }
 
@@ -525,6 +598,146 @@ pub(crate) fn phase_class(state: &HostPhase) -> &'static str {
     }
 }
 
+/// The rail separates host identity from connection and operation state.
+/// Progress never turns an unavailable peer into a connected one, and an
+/// update badge is only a cue; the existing action still revalidates it.
+#[derive(Debug, PartialEq, Eq)]
+struct RailPresentation {
+    phase: &'static str,
+    dimmed: bool,
+    updating: bool,
+    update_available: bool,
+    words: String,
+}
+
+/// Keep the compact avatar honest for every phase and provisioning stage.
+/// Refusal phases keep their own wording rather than being collapsed into
+/// offline, while a tracked operation contributes its actual verb.
+fn rail_presentation(
+    state: &HostPhase,
+    progress: Option<&HostUpdateProgress>,
+    update_available: bool,
+) -> RailPresentation {
+    let operation = match progress {
+        Some(HostUpdateProgress::Pending(_)) => Some("updating"),
+        Some(HostUpdateProgress::PendingConfirmed(operation)) => Some(match operation {
+            ProvisioningOperation::Add => "setting up",
+            ProvisioningOperation::Update => "updating",
+            ProvisioningOperation::Uninstall => "uninstalling",
+        }),
+        Some(HostUpdateProgress::Running(summary)) => Some(summary.verb()),
+        None => None,
+    };
+    let phase_words = phase_display_label(state);
+    RailPresentation {
+        phase: phase_class(state),
+        dimmed: matches!(state, HostPhase::Unreachable { .. }),
+        updating: operation.is_some(),
+        update_available: update_available && operation.is_none() && !runs_newer_version(state),
+        words: match operation {
+            Some(operation) => format!("{phase_words}; {operation}"),
+            None if update_available && !runs_newer_version(state) => {
+                format!("{phase_words}; update available")
+            }
+            None => phase_words.to_string(),
+        },
+    }
+}
+
+/// A mounted row publishes its ordinary menu opener to the sibling rail.
+/// Calling synchronously seeds focus intent before the menu items mount;
+/// the row's existing measurement generation owns repeated openings.
+type RailMenuOpener = Callback<(Rc<MountedData>, MenuOpenIntent)>;
+
+/// One native rail button owns its mounted trigger; actions stay in HostRow.
+/// Selection and context activation are separate gestures, so opening host
+/// actions never changes which sessions the list is showing.
+/// Unseen provisioning outcomes add an independent mark and explanation;
+/// they never replace the connection phase or the current operation's ring.
+#[component]
+fn HostRailAvatar(
+    host: Host,
+    selected: bool,
+    menu_open: bool,
+    progress: Option<HostUpdateProgress>,
+    update_available: bool,
+    last_read: bool,
+    attention: bool,
+    on_choose: EventHandler<Option<HostId>>,
+    on_context: EventHandler<(HostId, Rc<MountedData>, MenuOpenIntent)>,
+) -> Element {
+    let id = host.id;
+    let mut handle = use_signal(|| None::<Rc<MountedData>>);
+    let presentation = rail_presentation(&host.state, progress.as_ref(), update_available);
+    let name = if host.kind.is_this_machine() {
+        "This machine".to_owned()
+    } else {
+        gui_host_name(host.name.raw(), false)
+    };
+    let explanation = too_new_title(&host.state).unwrap_or_default();
+    let tooltip = format!(
+        "{name}: {}{}{}{}",
+        presentation.words,
+        if explanation.is_empty() {
+            String::new()
+        } else {
+            format!("; {explanation}")
+        },
+        if last_read {
+            "; last state read, host list refresh failed"
+        } else {
+            ""
+        },
+        if attention {
+            "; setup or update needs attention; open Hosts for details"
+        } else {
+            ""
+        }
+    );
+    let request = move || {
+        if let Some(trigger) = handle.peek().clone() {
+            on_context.call((id, trigger, MenuOpenIntent::First));
+        }
+    };
+    rsx! {
+        div { class: "host-rail-entry", "data-rail-host-id": "{id}",
+            button {
+                r#type: "button", class: "btn host-rail-avatar host-row-menu",
+                "data-rail-host-id": "{id}", "data-host-phase": phase_label(&host.state),
+                "data-host-dimmed": presentation.dimmed,
+                "data-host-progress": presentation.updating,
+                "data-host-update": presentation.update_available,
+                "data-host-attention": attention,
+                aria_label: tooltip.clone(), "data-tooltip": tooltip.clone(),
+                aria_pressed: selected, aria_haspopup: "menu", aria_expanded: menu_open,
+                onmounted: move |event| handle.set(Some(event.data())),
+                onclick: move |_| on_choose.call(Some(id)),
+                oncontextmenu: move |event| { event.prevent_default(); request(); },
+                onkeydown: move |event| {
+                    if !event.is_composing() &&
+                        (event.key() == Key::ContextMenu || (event.key() == Key::F10 && event.modifiers().contains(Modifiers::SHIFT))) {
+                        event.prevent_default();
+                        event.stop_propagation();
+                        request();
+                    }
+                },
+                HostMark { icon: host.icon, color: host.color, local: host.kind.is_this_machine(), tooltip: tooltip.clone() }
+                span { class: "host-rail-state {presentation.phase}", "aria-hidden": "true",
+                    span { class: "status-dot" }
+                }
+                if presentation.update_available {
+                    span { class: "host-rail-update", "aria-hidden": "true", "↑" }
+                }
+                if attention {
+                    span { class: "host-rail-attention", "aria-hidden": "true",
+                        span { class: "status-dot" }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// A fingerprint of this host's current INCARNATION — everything about it
 /// that decides where a session would actually be created.
 ///
@@ -600,6 +813,7 @@ fn available_remote_updates(
             (
                 host.id,
                 ActionRequest {
+                    return_to_rail: false,
                     operation: ProvisioningOperation::Update,
                     binding: HostBinding::from(host),
                 },
@@ -730,7 +944,7 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
                     parts.push(DetailPart::text("; identity "));
                     // Connected evidence keeps ordinary peer presentation.
                     // Identity comparison prompts below use the stricter form.
-                    parts.push(DetailPart::peer(identity));
+                    parts.push(DetailPart::mono_peer(identity));
                 }
                 None => parts.push(DetailPart::text("; no identity reported")),
             }
@@ -1424,6 +1638,12 @@ enum HostRequestDisplay {
 #[component]
 pub(crate) fn HostsPanel(
     hosts: Signal<HostsRead>,
+    /// Only ordinary management DOM is concealed. Async owners and floating
+    /// surfaces stay mounted independently of this presentation choice.
+    panel_open: ReadSignal<bool>,
+    /// The list owns filtering; this surface publishes only a host choice.
+    selected_host: Option<HostId>,
+    on_host_choice: EventHandler<Option<HostId>>,
     /// The existing root slot; rows bind only their current measurement scope.
     host_registration: Registration,
     /// The one page-local global disclosure. ListView holds the handle so its
@@ -1446,9 +1666,8 @@ pub(crate) fn HostsPanel(
     /// The session list's own open-menu signal — written (never read) here,
     /// purely to close a session row's menu when a host row's opens.
     mut session_menu_open: Signal<Option<String>>,
-    /// Invalidate fixed sidebar menus when optional host-row text changes
-    /// the panel's size. The observer belongs on this section: resize
-    /// events do not bubble from it to the list that owns those menus.
+    /// Visible management growth and rail scrolling share the existing
+    /// invalidation path. Concealed ordinary content cannot move an anchor.
     on_resize: EventHandler<()>,
     on_changed: EventHandler<()>,
     /// Publish confirmed identity before releasing the write token. The
@@ -1463,10 +1682,74 @@ pub(crate) fn HostsPanel(
     let mut agent_add = use_context::<crate::approvals::AgentAddBridge>();
     let mut preferences = use_context::<crate::list::SharedPreferences>();
     let popovers = use_context::<crate::anchored_popovers::MovementOwner>();
-    let capture_lower_hosts = use_lower_host_capture(hosts, popovers.clone());
+    let capture_visible_hosts = use_lower_host_capture(hosts, popovers.clone());
+    let capture_owner = popovers.clone();
+    let capture_lower_hosts = use_callback(move |id| {
+        if *panel_open.peek() {
+            capture_visible_hosts.call(id)
+        } else {
+            capture_owner
+                .capture_affected(&MovedRows::new(AnchorRegion::Hosts, Vec::<String>::new()))
+        }
+    });
     // The parent owns one compact update status per row and passes it to both
     // the renderer and the provisioning child that publishes it.
     let row_update_progress = use_signal(HashMap::<HostId, HostUpdateProgress>::new);
+    // Both provisioning rows and the initial Add receipt feed this small
+    // presentation state. Opening Hosts acknowledges even a receipt whose
+    // registered row has not reached the registry reader yet.
+    let mut row_attention = use_signal(HashMap::<HostId, HostAttention>::new);
+    let mut add_attention = use_signal(Vec::<AddAttentionReceipt>::new);
+    use_effect(move || {
+        let open = panel_open();
+        let registry = hosts.read();
+        let mut rows = row_attention.peek().clone();
+        let mut pending = add_attention();
+        reconcile_attention(&mut rows, &mut pending, registry.hosts(), open);
+        if *row_attention.peek() != rows {
+            row_attention.set(rows);
+        }
+        if *add_attention.peek() != pending {
+            add_attention.set(pending);
+        }
+    });
+    let rail_menu_openers = use_signal(HashMap::<HostId, RailMenuOpener>::new);
+    // Current menu sources are per host. Ordinary writes and modal openings
+    // freeze this bit when accepted; provisioning carries its row-owned bit
+    // in ActionRequest instead. Later menu activity cannot retarget a result.
+    let mut rail_dialog_hosts = use_signal(HashSet::<HostId>::new);
+    use_effect(move || {
+        if let Some(registered) = hosts.read().hosts() {
+            rail_dialog_hosts
+                .write()
+                .retain(|id| registered.iter().any(|host| host.id == *id));
+        }
+    });
+    let mut rail_add_origin = use_signal(|| false);
+    use_effect(move || {
+        if agent_add.opening.read().is_some() && *rail_add_origin.peek() {
+            rail_add_origin.set(false);
+        }
+    });
+    let return_focus = use_callback(move |(id, return_to_rail)| {
+        settings_dialog::visible_host_focus(
+            id,
+            return_to_rail,
+            *panel_open.peek(),
+            host_is_displayed(&hosts.peek(), id),
+        )
+    });
+    let add_focus = use_callback(move |_| {
+        FocusTarget::new(
+            if *panel_open.peek() && !*rail_add_origin.peek() {
+                ".add-host-button:enabled"
+            } else {
+                ".host-rail-add:enabled"
+            },
+            Some(".hosts-panel-toggle"),
+            false,
+        )
+    });
     // Settings write refusals remain per host so a write to one host cannot
     // replace another host's field outcome when its settings dialog reopens.
     // Menu-action refusals have their own host-keyed modal map below.
@@ -1497,6 +1780,9 @@ pub(crate) fn HostsPanel(
     // The host whose settings dialog is open, if any. One at a time: the
     // dialog is modal.
     let mut settings_open = use_signal(|| None::<HostId>);
+    // These modal openings retain their source while menus can change later.
+    let mut settings_return_to_rail = use_signal(|| false);
+    let mut remove_return_to_rail = use_signal(|| false);
     // Per host, which setting the dialog last wrote, so that write's outcome
     // renders under that setting instead of on the row. `errors` and
     // `warnings` are per host, not per field, and one of them can be left
@@ -1609,12 +1895,39 @@ pub(crate) fn HostsPanel(
         // so a menu action never has its outcome shown under a
         // setting the user did not touch.
         dialog_write.write().remove(&host);
+        let return_to_rail = if matches!(
+            display,
+            HostRequestDisplay::RemoveDialog
+                | HostRequestDisplay::Refusal {
+                    action: HostRefusalAction::Remove,
+                    ..
+                }
+        ) {
+            *remove_return_to_rail.peek()
+        } else {
+            rail_dialog_hosts.peek().contains(&host)
+        };
         spawn(async move {
             match request.await {
                 Ok(Commit::Confirmed) => {
                     if matches!(display, HostRequestDisplay::RemoveDialog) {
                         REMOVE_DIALOG.release();
                         remove_slot.clear();
+                    }
+                    if matches!(
+                        display,
+                        HostRequestDisplay::RemoveDialog
+                            | HostRequestDisplay::Refusal {
+                                action: HostRefusalAction::Remove,
+                                ..
+                            }
+                    ) {
+                        spawn(async move {
+                            REMOVE_DIALOG.close_and_wait().await;
+                            REMOVE_DIALOG.close_immediately_if_document_focused(
+                                &FocusTarget::new(".hosts-panel-toggle", None, false).script(),
+                            );
+                        });
                     }
                     on_changed.call(());
                 }
@@ -1646,7 +1959,8 @@ pub(crate) fn HostsPanel(
                                     reason: error,
                                     remove_instead: false,
                                 },
-                            ),
+                            )
+                            .with_return_to_rail(return_to_rail),
                         );
                     }
                     HostRequestDisplay::RemoveDialog => {
@@ -1796,6 +2110,7 @@ pub(crate) fn HostsPanel(
             return;
         };
         remove_error.set(None);
+        remove_return_to_rail.set(rail_dialog_hosts.peek().contains(&id));
         let opened = remove_slot.open(snapshot, ());
         // No render runs between this open and the answer, so the token
         // `open` returned is the showing this answer is for.
@@ -1987,17 +2302,19 @@ pub(crate) fn HostsPanel(
         editing.set(Some((id, field)));
     };
     let on_edit_cancel = move |_: ()| editing.set(None);
-    // Closing the dialog abandons an open field edit with it: the draft is
-    // not a setting until it is saved. Focus goes back to the host row's "⋯"
-    // toggle, the control the dialog was opened from, once the dialog's
-    // isolation has released it (the toggle is inert until then; see
-    // `modal_isolation`).
+    // Closing abandons an unsaved field edit. The existing dialog releases
+    // isolation before returning to the originating rail avatar or the visible
+    // panel row; a hidden row is never a valid destination.
     let host_dialog = settings_dialog::DIALOG;
     let on_settings_close = move |_: ()| {
         let Some(id) = *settings_open.peek() else {
             return;
         };
-        host_dialog.close(&settings_dialog::row_focus(id).script());
+        host_dialog.close(
+            &return_focus
+                .call((id, *settings_return_to_rail.peek()))
+                .script(),
+        );
         editing.set(None);
         settings_open.set(None);
     };
@@ -2018,6 +2335,9 @@ pub(crate) fn HostsPanel(
         if gone {
             editing.set(None);
             settings_open.set(None);
+            SETTINGS_DIALOG.close_immediately_if_document_focused(
+                &FocusTarget::new(".hosts-panel-toggle", None, false).script(),
+            );
         }
     });
 
@@ -2090,8 +2410,10 @@ pub(crate) fn HostsPanel(
             claim,
             from_agent_request,
         } = submission;
-        settings_dialog::ADD_DIALOG
-            .close(&FocusTarget::new(".add-host-button", None, false).script());
+        if from_agent_request {
+            rail_add_origin.set(false);
+        }
+        settings_dialog::ADD_DIALOG.close(&add_focus.call(()).script());
         adding.set(false);
         add_submission_pending.set(true);
         agent_add.opening.set(None);
@@ -2099,11 +2421,64 @@ pub(crate) fn HostsPanel(
         add_error.set(None);
         add_warning.set(None);
         let base = add_submit_base.clone();
+        let previous_host = hosts
+            .peek()
+            .hosts()
+            .and_then(|registered| unique_add_destination(registered, &binding.destination));
+        let row_revision = previous_host
+            .and_then(|id| {
+                row_attention
+                    .peek()
+                    .get(&id)
+                    .map(|row| row.revision(ProvisioningOperation::Add))
+            })
+            .unwrap_or(0);
+        // Earlier uncertain Adds may still have no row. Account for those
+        // already-installed occurrences before admitting this retry, so its
+        // later exact success can recover them after registration catches up.
+        let revision = row_revision
+            + add_attention
+                .peek()
+                .iter()
+                .filter(|receipt| {
+                    receipt.failed && receipt.binding.destination == binding.destination
+                })
+                .count() as u64;
         spawn(async move {
             let result = provision_host(&base, &probe_id).await;
             drop(claim);
+            let accepted = match &result {
+                Ok(ProvisioningSubmission::Accepted(accepted)) => Some(accepted.clone()),
+                _ => None,
+            };
+            // The receipt retains the inspected binding, not the mutable alias
+            // or whichever row happens to be last after registration refresh.
+            let receipt = AddAttentionReceipt {
+                probe_id: probe_id.clone(),
+                binding: binding.clone(),
+                accepted,
+                existing_host: previous_host,
+                only_existing: matches!(&result, Err(crate::api::SubmissionError::Refused(_))),
+                revision,
+                failed: !matches!(&result, Ok(ProvisioningSubmission::Accepted(accepted)) if !accepted.run_id.is_empty()),
+                unseen: !*panel_open.peek(),
+            };
+            // One one-use probe describes one outcome even if the owner is
+            // handed the same still-pending receipt again. A new probe with
+            // the same diagnostic remains a distinct occurrence.
+            if !add_attention
+                .peek()
+                .iter()
+                .any(|held| held.probe_id == receipt.probe_id)
+            {
+                add_attention.write().push(receipt);
+            }
             match result {
-                Ok(ProvisioningSubmission::Accepted(_)) => {}
+                Ok(ProvisioningSubmission::Accepted(accepted)) => {
+                    if accepted.run_id.is_empty() {
+                        add_warning.set(Some("the helm accepted setup but returned no run identity, so its outcome is unknown".into()));
+                    }
+                }
                 Ok(ProvisioningSubmission::Unvalidated(warning)) => add_warning.set(Some(warning)),
                 Err(crate::api::SubmissionError::Refused(reason)) => {
                     // A definite answer can return to the form with the
@@ -2132,12 +2507,87 @@ pub(crate) fn HostsPanel(
     } else {
         "fresh"
     };
+    // Both Add controls enter the same owner and synchronous operation guard.
+    let open_add = use_callback(move |from_rail| {
+        if ops.busy_now() {
+            return;
+        }
+        rail_add_origin.set(from_rail);
+        if adding() {
+            settings_dialog::ADD_DIALOG.release();
+        } else {
+            add_error.set(None);
+            add_reopen.set(None);
+        }
+        adding.set(!adding());
+    });
+    let choose_host = use_callback(move |choice| {
+        // An avatar is also a context opener; its primary activation must
+        // dismiss that menu even when choosing the already-selected host.
+        host_menu_open.set(None);
+        session_menu_open.set(None);
+        on_host_choice.call(choice);
+    });
     rsx! {
+        nav { class: "host-rail", aria_label: "Hosts",
+            onscroll: move |_| on_resize.call(()),
+            button { r#type: "button", class: "btn host-rail-all",
+                aria_label: "All hosts", aria_pressed: selected_host.is_none(),
+                "data-tooltip": "All hosts: show sessions from every host",
+                onclick: move |_| choose_host.call(None),
+                "All"
+            }
+            if let Some(list) = read.hosts() {
+                for host in list {
+                    HostRailAvatar { key: "{host.id}", host: host.clone(),
+                        selected: selected_host == Some(host.id),
+                        menu_open: *host_menu_open.read() == Some(host.id)
+                            && rail_dialog_hosts.read().contains(&host.id),
+                        progress: row_update_progress.read().get(&host.id).cloned(),
+                        update_available: remote_update_available(host,
+                            provisioning_menu_states.read().get(&host.id),
+                            provisioning_busy_hosts.read().contains(&host.id))
+                            && host_update_kind(&host.state).is_some(),
+                        last_read: read.refresh_error().is_some(),
+                        attention: row_attention.read().get(&host.id).is_some_and(HostAttention::unseen),
+                        on_choose: choose_host,
+                        on_context: {
+                            let registration = host_registration.clone();
+                            move |(host, trigger, intent)| {
+                                let Some(opener) = rail_menu_openers.peek().get(&host).copied() else { return; };
+                                registration.forget_anchor();
+                                session_menu_open.set(None);
+                                host_menu_open.set(Some(host));
+                                rail_dialog_hosts.write().insert(host);
+                                opener.call((trigger, intent));
+                            }
+                        },
+                    }
+                }
+                if let Some(missing) = selected_host.filter(|id| !list.iter().any(|host| host.id == *id)) {
+                    button { r#type: "button", class: "btn host-rail-tombstone",
+                        "data-rail-host-id": "{missing}", disabled: true, aria_pressed: "true",
+                        aria_label: "host {missing} (no longer registered)",
+                        "data-tooltip": "host {missing} is no longer registered; choose All or another host",
+                        "?"
+                    }
+                }
+            } else if !read.is_loading() {
+                span { class: "host-rail-unavailable", role: "status", aria_label: "The host list could not be loaded", "data-tooltip": "The host list could not be loaded", "?" }
+            }
+            button { r#type: "button", class: "btn host-rail-add",
+                aria_label: "Add host", "data-tooltip": "Add host: connect a machine over ssh",
+                disabled: busy, onclick: move |_| open_add.call(true),
+                crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Add }
+            }
+        }
         section { class: "hosts-panel",
-            onresize: move |_| on_resize.call(()),
-            div { class: "hosts-heading",
+            id: "host-management-panel", aria_label: "Host management",
+            "data-panel-visible": panel_open(),
+            onresize: move |_| { if *panel_open.peek() { on_resize.call(()); } },
+            div { class: "hosts-heading", hidden: !panel_open(),
                 // Number and label in separate spans so the stylesheet can
-                // draw this as a section heading, label first ("HOSTS 3"),
+                // draw this as a section heading, label first ("Hosts 3"),
                 // the same way the session list's count is drawn. Number
                 // first in the DOM and the space kept inside the label: the
                 // element's text content stays "3 hosts", which is what a
@@ -2156,7 +2606,7 @@ pub(crate) fn HostsPanel(
                     "data-tooltip": "details: show every host's version, identity, sessions and diagnostics",
                     input {
                     r#type: "checkbox",
-                    class: "host-details-toggle",
+                    class: "host-details-toggle control-switch",
                     checked: details_open(),
                     onchange: {
                         let popovers = popovers.clone();
@@ -2171,11 +2621,13 @@ pub(crate) fn HostsPanel(
                         }
                     },
                     }
-                    "details"
+                    "Details"
                 }
+                div { class: "hosts-heading-actions",
                 button {
                     r#type: "button",
                     class: "btn btn-neutral update-all-button",
+                    aria_label: "update all",
                     "data-tooltip": "update all: update every remote host that has an update available",
                     disabled: !update_all_available,
                     onclick: move |_| {
@@ -2199,16 +2651,14 @@ pub(crate) fn HostsPanel(
                         session_menu_open.set(None);
                         provisioning_action_requests.write().extend(requests);
                     },
-                    "update all"
+                    "Update all"
                 }
                 button {
                     r#type: "button",
                     class: "btn btn-neutral add-host-button",
                     "data-tooltip": "add host: connect a machine over ssh",
-                    // The compact heading spends only the visible word
-                    // "add"; assistive technology keeps the object that
-                    // action adds, matching the form and existing callers.
-                    aria_label: "add host",
+                    // The icon keeps the same compact action anatomy as New.
+                    aria_label: "Add host",
                     // Opening the add dialog waits out any live MUTATION,
                     // including the previous add's setup POST, which this
                     // panel runs after that dialog closed (`on_add_submit`):
@@ -2222,20 +2672,9 @@ pub(crate) fn HostsPanel(
                     // other guard here is — the attribute is one render
                     // behind.
                     disabled: busy,
-                    onclick: move |_| {
-                        if ops.busy_now() {
-                            return;
-                        }
-                        let open = adding();
-                        if !open {
-                            add_error.set(None);
-                            add_reopen.set(None);
-                        } else {
-                            settings_dialog::ADD_DIALOG.release();
-                        }
-                        adding.set(!open);
-                    },
-                    "add"
+                    onclick: move |_| open_add.call(false),
+                    crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Add }
+                }
                 }
             }
             if adding() {
@@ -2247,12 +2686,12 @@ pub(crate) fn HostsPanel(
                     on_refresh: on_changed,
                     on_submit: on_add_submit,
                     on_cancel: move |_| {
-                        settings_dialog::ADD_DIALOG.close(&FocusTarget::new(".add-host-button", None, false).script());
+                        settings_dialog::ADD_DIALOG.close(&add_focus.call(()).script());
                         adding.set(false);
                         add_reopen.set(None);
                     },
                     on_added: move |unvalidated: Option<String>| {
-                        settings_dialog::ADD_DIALOG.close(&FocusTarget::new(".add-host-button", None, false).script());
+                        settings_dialog::ADD_DIALOG.close(&add_focus.call(()).script());
                         adding.set(false);
                         add_reopen.set(None);
                         // A committed-but-unreadable add has no row id to
@@ -2296,7 +2735,7 @@ pub(crate) fn HostsPanel(
                                     if !agent_add.answering.write().insert(id.clone()) { return; }
                                     if opening.accepted {
                                         agent_add.answering.write().remove(&id);
-                                        settings_dialog::ADD_DIALOG.close(&FocusTarget::new(".add-host-button", None, false).script());
+                                        settings_dialog::ADD_DIALOG.close(&add_focus.call(()).script());
                                         agent_add.opening.set(None);
                                         return;
                                     }
@@ -2308,7 +2747,7 @@ pub(crate) fn HostsPanel(
                                         agent_add.answering.write().remove(&id);
                                         match result {
                                             Ok(_) => {
-                                                settings_dialog::ADD_DIALOG.close(&FocusTarget::new(".add-host-button", None, false).script());
+                                                settings_dialog::ADD_DIALOG.close(&add_focus.call(()).script());
                                                 agent_add.opening.set(None);
                                             }
                                             Err(reason) => {
@@ -2321,7 +2760,7 @@ pub(crate) fn HostsPanel(
                                 }
                             },
                             on_added: move |warning| {
-                                settings_dialog::ADD_DIALOG.close(&FocusTarget::new(".add-host-button", None, false).script());
+                                settings_dialog::ADD_DIALOG.close(&add_focus.call(()).script());
                                 agent_add.opening.set(None);
                                 add_warning.set(warning);
                                 on_changed.call(());
@@ -2330,6 +2769,7 @@ pub(crate) fn HostsPanel(
                     }
                 }
             }
+            div { class: "hosts-notices", hidden: !panel_open(),
             if let Some(warning) = add_warning() {
                 PeerLine {
                     class: "host-warning add-host-warning",
@@ -2403,11 +2843,14 @@ pub(crate) fn HostsPanel(
             if read.is_loading() {
                 div { class: "status hosts-status", "loading hosts…" }
             }
+            }
             if let Some(list) = rendered_hosts {
                 div { class: "host-list",
                     for (host, local_setup) in list {
                         HostRow {
                             key: "{host.id}",
+                            rail_menu_openers: Some(rail_menu_openers),
+                            panel_visible: panel_open(),
                             host_registration: host_registration.clone(),
                             capture_lower_hosts,
                             controls: HostRowControls {
@@ -2449,6 +2892,8 @@ pub(crate) fn HostsPanel(
                             local_setup,
                             provisioning_section: rsx! {
                                 ProvisioningPanel {
+                                    show_inline: panel_open(),
+                                    return_focus: Some(return_focus),
                                     host: host.clone(),
                                     capture_lower_hosts,
                                     ops,
@@ -2462,6 +2907,7 @@ pub(crate) fn HostsPanel(
                                     trace_shapes: provisioning_trace_shapes,
                                     auto_details: provisioning_auto_details,
                                     row_update_progress,
+                                    attention: AttentionOwner { host: host.id, rows: row_attention, open: panel_open },
                                     on_reveal_details: {
                                         let popovers = popovers.clone();
                                         move |_| {
@@ -2508,6 +2954,7 @@ pub(crate) fn HostsPanel(
                                 // leaves the menu exactly as it was.
                                 editing.set(None);
                                 host_menu_open.set(None);
+                                settings_return_to_rail.set(rail_dialog_hosts.peek().contains(&id));
                                 settings_open.set(Some(id));
                             },
                             on_remove_start: move |id: HostId| on_remove_start.call(id),
@@ -2532,6 +2979,7 @@ pub(crate) fn HostsPanel(
                                 move |id: HostId| {
                                     let currently = *host_menu_open.peek() == Some(id);
                                     if !currently {
+                                        rail_dialog_hosts.write().remove(&id);
                                         host_registration.forget_anchor();
                                     }
                                     host_menu_open.set(if currently { None } else { Some(id) });
@@ -2599,7 +3047,7 @@ pub(crate) fn HostsPanel(
                         // the live request guard is read here, not the prop.
                         let request_running = mutation_busy_hosts.peek().contains(&id);
                         if cancel_remove(&mut remove_slot, &shown, request_running) {
-                            host_dialog.close(&settings_dialog::row_focus(id).script());
+                            host_dialog.close(&return_focus.call((id, *remove_return_to_rail.peek())).script());
                             remove_error.set(None);
                         }
                     },
@@ -2613,6 +3061,7 @@ pub(crate) fn HostsPanel(
                     refusal: entry.refusal,
                     on_close: {
                         let id = entry.host.id;
+                        let return_to_rail = entry.return_to_rail;
                         move |_| {
                             // A queued refusal gets a freshly mounted modal
                             // and its own focus installation. Only the last
@@ -2620,16 +3069,19 @@ pub(crate) fn HostsPanel(
                             if refusals.read().len() > 1 {
                                 host_dialog.release();
                             } else {
-                                host_dialog.close(&settings_dialog::row_focus(id).script());
+                                host_dialog.close(&return_focus.call((id, return_to_rail)).script());
                             }
                             refusals.write().remove(&id);
                         }
                     },
                     on_remove: {
                         let id = entry.host.id;
+                        let return_to_rail = entry.return_to_rail;
                         move |_| {
                             host_dialog.release();
                             refusals.write().remove(&id);
+                            if return_to_rail { rail_dialog_hosts.write().insert(id); }
+                            else { rail_dialog_hosts.write().remove(&id); }
                             on_remove_start.call(id);
                         }
                     },
@@ -3453,6 +3905,14 @@ fn format_elapsed(seconds: u64) -> String {
 #[component]
 fn HostRow(
     host: Host,
+    /// Conceal only ordinary row DOM; the shared menu and provisioning owner
+    /// can still serve a rail action while management is hidden.
+    #[props(default = true)]
+    panel_visible: bool,
+    /// A rail avatar requests this same menu with its real mounted anchor.
+    /// Renderer-free row callers may omit the additional presentation.
+    #[props(default)]
+    rail_menu_openers: Option<Signal<HashMap<HostId, RailMenuOpener>>>,
     /// Bind the root open slot to this row's existing measurement lifetime.
     host_registration: Registration,
     /// Capture current lower hosts once for each actual retained-line change.
@@ -3468,7 +3928,7 @@ fn HostRow(
     /// This row's effective details disclosure: the global checkbox OR the
     /// row's automatic update disclosure, ORed by the parent.
     details_open: bool,
-    /// The provisioning panel's compact status for a running update, if any.
+    /// The provisioning panel's compact status for a running host operation.
     update_progress: Option<HostUpdateProgress>,
     /// Provisioning commands currently offered in this row's menu.
     provisioning_menu: ProvisioningMenuState,
@@ -3599,6 +4059,8 @@ fn HostRow(
     // its panel is measured to be or which of its items currently has
     // keyboard focus.
     let mut toggle_handle = use_signal(|| None::<Rc<MountedData>>);
+    let mut rail_trigger = use_signal(|| None::<Rc<MountedData>>);
+    let mut return_to_rail = use_signal(|| false);
     let placement = use_signal(|| PanelPlacement::Unmeasured);
     let mut item_handles: HostMenuItemHandles = use_signal(HashMap::new);
     let menu_instance = menu_panel::use_menu_instance();
@@ -3632,7 +4094,11 @@ fn HostRow(
     };
     let open_generation = use_signal(|| 0_u64);
     let spawn_measurement = move || {
-        let handle = toggle_handle;
+        let handle = if return_to_rail() {
+            rail_trigger
+        } else {
+            toggle_handle
+        };
         let mut placement = placement;
         let generation = open_generation();
         bind_anchor.call(());
@@ -3664,6 +4130,24 @@ fn HostRow(
         open_intent.set(Some(intent));
         spawn_measurement();
     };
+    let open_from_rail = use_callback(move |(trigger, intent)| {
+        rail_trigger.set(Some(trigger));
+        return_to_rail.set(true);
+        begin_open(intent);
+    });
+    // Register only while this stable keyed row is mounted. The sibling
+    // avatar invokes this callback in the original input handler, before
+    // mounted menu items consume their one-shot focus intent.
+    use_effect(move || {
+        if let Some(mut openers) = rail_menu_openers {
+            openers.write().insert(id, open_from_rail);
+        }
+    });
+    use_drop(move || {
+        if let Some(mut openers) = rail_menu_openers {
+            openers.write().remove(&id);
+        }
+    });
     let menu_tab_stop = menu_focus()
         .and_then(|position| menu_order.get(position))
         .or_else(|| menu_order.get(0));
@@ -3755,7 +4239,19 @@ fn HostRow(
         open_intent.set(None);
         item_handles.write().clear();
         if was_inside {
-            focus_menu_toggle("data-host-id", &dismiss_id.to_string(), ".host-row-menu");
+            focus_menu_toggle(
+                if *return_to_rail.peek() {
+                    "data-rail-host-id"
+                } else {
+                    "data-host-id"
+                },
+                &dismiss_id.to_string(),
+                if *return_to_rail.peek() {
+                    ".host-rail-avatar"
+                } else {
+                    ".host-row-main .host-row-menu"
+                },
+            );
         }
     }));
 
@@ -3766,10 +4262,11 @@ fn HostRow(
     rsx! {
         div {
             class: host_row_class(menu_open),
+            "data-panel-visible": panel_visible,
             "data-host-id": "{id}",
             "data-host-phase": "{phase_label(&host.state)}",
             "data-host-kind": "{kind_attribute}",
-            div { class: "host-row-main",
+            div { class: "host-row-main", hidden: !panel_visible,
                 // The same locality glyph the session row draws
                 // (2026-09-03) — not asked for by the TODO entry that
                 // introduced it, but two renderings of "this is a remote
@@ -3843,13 +4340,14 @@ fn HostRow(
                             UpdateProgressLabel { key: "{summary.run_id}", summary }
                         },
                         None => rsx! {
-                            if inline_update.is_none() && (!is_connected(&host.state)
-                                || matches!(&host.state, HostPhase::Connected { old_version: true, .. })
-                                || runs_newer_version(&host.state))
-                            {
-                                span {
-                                    class: "host-status-label",
-                                    "data-tooltip": too_new_title(&host.state).unwrap_or_else(|| phase_display_label(&host.state).to_string()),
+                            span {
+                                class: "host-status-label",
+                                "data-tooltip": too_new_title(&host.state).unwrap_or_else(|| phase_display_label(&host.state).to_string()),
+                                if is_connected(&host.state) && inline_update.is_none()
+                                    && !matches!(&host.state, HostPhase::Connected { old_version: true, .. })
+                                    && !runs_newer_version(&host.state) {
+                                    "Connected"
+                                } else {
                                     "{phase_display_label(&host.state)}"
                                 }
                             }
@@ -3872,6 +4370,7 @@ fn HostRow(
                             let binding = click_binding.clone();
                             move |_| {
                                 on_provisioning.call((id, ActionRequest {
+                                    return_to_rail: false,
                                     operation: ProvisioningOperation::Update,
                                     binding: binding.clone(),
                                 }));
@@ -3897,8 +4396,8 @@ fn HostRow(
                     }
                 }
                 // The toggle stays mounted while a modal dialog takes over.
-                // `nowrap` remains load-bearing for the fixed-position panel
-                // (F2/COR-HOST-MENU-OFFSCREEN).
+                // Ordinary phases keep this on the name's single line;
+                // active progress takes a separate line below that anchor.
                     button {
                         r#type: "button",
                         class: "btn host-row-menu",
@@ -3913,6 +4412,7 @@ fn HostRow(
                                 };
                                 evt.prevent_default();
                                 on_menu_toggle.call(id);
+                                return_to_rail.set(false);
                                 begin_open(intent);
                                 return;
                             }
@@ -3938,10 +4438,12 @@ fn HostRow(
                             if !opening {
                                 return;
                             }
+                            return_to_rail.set(false);
                             begin_open(MenuOpenIntent::First);
                         },
                         "⋯"
                     }
+            }
                     if menu_open {
                         div {
                             class: "host-row-menu-flyout",
@@ -4079,6 +4581,7 @@ fn HostRow(
                                                     return;
                                                 }
                                                 on_provisioning.call((id, ActionRequest {
+                                                    return_to_rail: *return_to_rail.peek(),
                                                     operation,
                                                     binding: binding.clone(),
                                                 }));
@@ -4133,6 +4636,7 @@ fn HostRow(
                                                     return;
                                                 }
                                                 on_provisioning.call((id, ActionRequest {
+                                                    return_to_rail: *return_to_rail.peek(),
                                                     operation: ProvisioningOperation::Add,
                                                     binding: binding.clone(),
                                                 }));
@@ -4188,6 +4692,7 @@ fn HostRow(
                                                     return;
                                                 }
                                                 on_provisioning.call((id, ActionRequest {
+                                                    return_to_rail: *return_to_rail.peek(),
                                                     operation: ProvisioningOperation::Update,
                                                     binding: binding.clone(),
                                                 }));
@@ -4275,6 +4780,7 @@ fn HostRow(
                                                     // confirmation dialog, and nothing on the
                                                     // host changes until the user confirms it.
                                                     on_provisioning.call((id, ActionRequest {
+                                                        return_to_rail: *return_to_rail.peek(),
                                                         operation: ProvisioningOperation::Uninstall,
                                                         binding: binding.clone(),
                                                     }));
@@ -4333,10 +4839,10 @@ fn HostRow(
                         }
                     }
             }
-            }
             // These shared inputs are also the accepted host read's causal
             // contribution. Keep the three PeerLine containers independent:
             // their displayed text can exchange rows without moving a prefix.
+            div { class: "host-row-details", hidden: !panel_visible,
             if let Some(destination) = lines.destination {
                 PeerLine { class: "host-destination-detail", parts: destination }
             }
@@ -4366,6 +4872,7 @@ fn HostRow(
                     class: "host-warning",
                     parts: vec![DetailPart::peer(warning)],
                 }
+            }
             }
             {provisioning_section}
         }
@@ -4491,6 +4998,118 @@ fn HostDestinationForm(
 struct AddBinding {
     destination: String,
     alias: String,
+}
+
+/// One initial Add outcome waiting for its authoritative registry row. The
+/// inspected destination and decoded receipt survive the closed dialog; names
+/// and aliases never route the warning. A receipt is consumed on transfer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AddAttentionReceipt {
+    /// The one-use authority distinguishes this outcome from an identical
+    /// failure returned by a later Add attempt.
+    probe_id: String,
+    binding: AddBinding,
+    accepted: Option<crate::api::ProvisioningAccepted>,
+    /// A definite refusal cannot create a row; any warning belongs only to
+    /// the exact matching entry present when the request was admitted.
+    existing_host: Option<HostId>,
+    only_existing: bool,
+    revision: u64,
+    failed: bool,
+    unseen: bool,
+}
+
+impl AddAttentionReceipt {
+    /// An accepted host id is authoritative only for its inspected target.
+    /// Without one, require a unique literal SSH destination match. No
+    /// normalization or alias fallback may warn a different avatar.
+    fn matching_host(&self, hosts: &[Host]) -> Option<HostId> {
+        let host = if let Some(accepted) = &self.accepted {
+            hosts
+                .iter()
+                .find(|host| {
+                    host.id == accepted.host_id
+                        && host.kind == HostKind::Ssh
+                        && host.destination.as_ref().is_some_and(|destination| {
+                            destination.raw() == self.binding.destination
+                        })
+                })?
+                .id
+        } else {
+            unique_add_destination(hosts, &self.binding.destination)?
+        };
+        self.existing_host
+            .is_none_or(|id| id == host)
+            .then_some(host)
+    }
+}
+
+/// An undecoded Add receipt has no host id to trust. Exact destination
+/// equality is its only supported registry association, and ambiguity leaves
+/// the existing Add notice in place instead of choosing an arbitrary avatar.
+fn unique_add_destination(hosts: &[Host], destination: &str) -> Option<HostId> {
+    let mut matches = hosts.iter().filter(|host| {
+        host.kind == HostKind::Ssh
+            && host
+                .destination
+                .as_ref()
+                .is_some_and(|target| target.raw() == destination)
+    });
+    let host = matches.next()?.id;
+    matches.next().is_none().then_some(host)
+}
+
+/// Transfer initial Add receipts only through an authoritative registry view.
+/// Acknowledgement applies before association, including a failed first host
+/// read. Consuming a receipt prevents destination reuse after removal from
+/// resurrecting it; a known old entry can never hand its outcome to a new id.
+fn reconcile_attention(
+    rows: &mut HashMap<HostId, HostAttention>,
+    pending: &mut Vec<AddAttentionReceipt>,
+    registered: Option<&[Host]>,
+    open: bool,
+) {
+    if open {
+        for row in rows.values_mut() {
+            row.acknowledge();
+        }
+        for receipt in pending.iter_mut() {
+            receipt.unseen = false;
+        }
+    }
+    let Some(registered) = registered else {
+        return;
+    };
+    rows.retain(|id, _| registered.iter().any(|host| host.id == *id));
+    for host in registered {
+        rows.entry(host.id).or_default();
+    }
+    pending.retain(|receipt| {
+        if receipt.only_existing && receipt.existing_host.is_none()
+            || receipt
+                .existing_host
+                .is_some_and(|id| !registered.iter().any(|host| host.id == id))
+        {
+            return false;
+        }
+        let Some(host) = receipt.matching_host(registered) else {
+            return true;
+        };
+        let row = rows
+            .get_mut(&host)
+            .expect("matching registered host has attention state");
+        if receipt.failed {
+            row.failed_attempt(ProvisioningOperation::Add, !receipt.unseen || open);
+        }
+        if let Some(accepted) = &receipt.accepted {
+            row.accepted(
+                ProvisioningOperation::Add,
+                &accepted.run_id,
+                receipt.revision,
+            );
+        }
+        false
+    });
 }
 
 /// What confirming the add dialog's setup question may do; see
@@ -5302,6 +5921,139 @@ mod tests {
         }
     }
 
+    /// An unreadable initial Add may register a row after its warning was
+    /// acknowledged. Transfer must preserve that acknowledgement and consume
+    /// the receipt so destination reuse cannot resurrect the old outcome.
+    #[test]
+    fn initial_add_acknowledgement_survives_late_registration_and_removal() {
+        let mut rows = HashMap::new();
+        let mut pending = vec![AddAttentionReceipt {
+            probe_id: "one-use-plan".into(),
+            binding: AddBinding {
+                destination: "user@box".into(),
+                alias: "draft".into(),
+            },
+            accepted: None,
+            existing_host: None,
+            only_existing: false,
+            revision: 0,
+            failed: true,
+            unseen: true,
+        }];
+        reconcile_attention(&mut rows, &mut pending, None, true);
+        assert!(!pending[0].unseen);
+        let registered = vec![host(HostPhase::Unrecognized)];
+        reconcile_attention(&mut rows, &mut pending, Some(&registered), false);
+        assert!(pending.is_empty());
+        assert!(!rows[&1].unseen());
+        rows.get_mut(&1)
+            .unwrap()
+            .failed_attempt(ProvisioningOperation::Add, false);
+        assert!(rows[&1].unseen());
+        reconcile_attention(&mut rows, &mut pending, Some(&[]), false);
+        assert!(rows.is_empty());
+        reconcile_attention(&mut rows, &mut pending, Some(&registered), false);
+        assert!(!rows[&1].unseen());
+    }
+
+    /// Aliases are mutable display text. A lost acceptance can use only its
+    /// exact inspected destination, and an ambiguous registry match stays a
+    /// notice rather than choosing whichever row happens to come first.
+    #[test]
+    fn initial_add_association_requires_exact_unambiguous_target() {
+        let mut first = host(HostPhase::Unrecognized);
+        first.alias = Some(Some("same alias".into()));
+        let mut different = first.clone();
+        different.id = 2;
+        different.destination = Some("user@elsewhere".into());
+        let mut receipt = AddAttentionReceipt {
+            probe_id: "probe".into(),
+            binding: AddBinding {
+                destination: "user@box".into(),
+                alias: "same alias".into(),
+            },
+            accepted: None,
+            existing_host: None,
+            only_existing: false,
+            revision: 0,
+            failed: true,
+            unseen: true,
+        };
+        assert_eq!(
+            receipt.matching_host(&[different.clone(), first.clone()]),
+            Some(1)
+        );
+        assert_eq!(receipt.matching_host(&[different.clone()]), None);
+        let mut duplicate = first.clone();
+        duplicate.id = 3;
+        assert_eq!(receipt.matching_host(&[first.clone(), duplicate]), None);
+        receipt.accepted = Some(crate::api::ProvisioningAccepted {
+            host_id: 2,
+            run_id: "run".into(),
+        });
+        assert_eq!(receipt.matching_host(&[first, different]), None);
+    }
+
+    /// A retry admitted while an older uncertain Add has no avatar must still
+    /// recover that older occurrence once both receipts reach the registered
+    /// row. A progress result may outrun the retry's acceptance reply.
+    #[test]
+    fn initial_add_retry_recovers_earlier_deferred_failure() {
+        let mut earlier = AddAttentionReceipt {
+            probe_id: "earlier".into(),
+            binding: AddBinding {
+                destination: "user@box".into(),
+                alias: String::new(),
+            },
+            accepted: None,
+            existing_host: None,
+            only_existing: false,
+            revision: 0,
+            failed: true,
+            unseen: true,
+        };
+        let mut retry = earlier.clone();
+        retry.probe_id = "retry".into();
+        retry.accepted = Some(crate::api::ProvisioningAccepted {
+            host_id: 1,
+            run_id: "retry-run".into(),
+        });
+        // One pending failed receipt already existed at retry admission.
+        retry.revision = 1;
+        retry.failed = false;
+        let mut row = HostAttention::default();
+        row.observe(
+            &crate::api::ProvisioningView {
+                run_id: Some("retry-run".into()),
+                operation: Some(ProvisioningOperation::Add),
+                status: crate::api::ProvisioningStatus::Completed,
+                steps: Vec::new(),
+                message: None,
+            },
+            false,
+        );
+        let mut rows = HashMap::from([(1, row)]);
+        let mut pending = vec![earlier.clone(), retry.clone()];
+        reconcile_attention(
+            &mut rows,
+            &mut pending,
+            Some(&[host(HostPhase::Unrecognized)]),
+            false,
+        );
+        assert!(pending.is_empty());
+        assert!(!rows[&1].unseen());
+        // A failure delivered after retry admission is a newer occurrence.
+        earlier.probe_id = "newer".into();
+        let mut pending = vec![earlier, retry];
+        reconcile_attention(
+            &mut rows,
+            &mut pending,
+            Some(&[host(HostPhase::Unrecognized)]),
+            false,
+        );
+        assert!(rows[&1].unseen());
+    }
+
     /// Exercise the production comparison with one live disclosure on both
     /// sides, as an accepted host read does; this helper adds no selection rule.
     fn moved_host_rows(
@@ -5767,6 +6519,97 @@ mod tests {
             },
             HostPhase::Unrecognized,
         ]
+    }
+
+    /// Avatars retain every refusal's meaning and keep progress separate
+    /// from connection state; a ring must not imply a successful connection.
+    #[farhelm_testtrace::test]
+    fn rail_phases_and_progress_keep_distinct_meanings() {
+        let expected = [
+            ("connecting", "connecting", false),
+            ("unreachable", "unreachable, retrying", true),
+            ("connected", "connected", false),
+            ("needs-attention", "too new", false),
+            ("needs-attention", "identity mismatch", false),
+            ("needs-attention", "identity unverified", false),
+            ("needs-attention", "duplicate", false),
+            ("needs-attention", "retired", false),
+            ("needs-attention", "unrecognized", false),
+        ];
+        for (state, (phase, words, dimmed)) in every_phase().into_iter().zip(expected) {
+            let ordinary = rail_presentation(&state, None, false);
+            assert_eq!(ordinary.phase, phase);
+            assert_eq!(ordinary.words, words);
+            assert_eq!(ordinary.dimmed, dimmed);
+            assert!(!ordinary.updating && !ordinary.update_available);
+            for (operation, verb) in [
+                (ProvisioningOperation::Add, "setting up"),
+                (ProvisioningOperation::Update, "updating"),
+                (ProvisioningOperation::Uninstall, "uninstalling"),
+            ] {
+                let pending = HostUpdateProgress::PendingConfirmed(operation);
+                let running = HostUpdateProgress::Running(UpdateProgressSummary {
+                    run_id: "rail-run".to_string(),
+                    operation,
+                    current_step: None,
+                    steps: vec![],
+                    done: 0,
+                    total: 1,
+                    started_at: web_time::Instant::now(),
+                });
+                for progress in [pending, running] {
+                    let shown = rail_presentation(&state, Some(&progress), true);
+                    assert_eq!(shown.words, format!("{words}; {verb}"));
+                    assert_eq!(shown.phase, phase);
+                    assert_eq!(shown.dimmed, dimmed);
+                    assert!(shown.updating);
+                    assert!(!shown.update_available);
+                }
+            }
+            for phase in [
+                crate::provisioning::UpdatePendingPhase::Planning,
+                crate::provisioning::UpdatePendingPhase::WaitingForClaim,
+                crate::provisioning::UpdatePendingPhase::Submitting,
+                crate::provisioning::UpdatePendingPhase::AwaitingProgress,
+            ] {
+                let progress = HostUpdateProgress::Pending(phase);
+                assert_eq!(
+                    rail_presentation(&state, Some(&progress), true).words,
+                    format!("{words}; updating")
+                );
+            }
+        }
+    }
+
+    /// A cue can advertise an available upgrade, never a downgrade or a
+    /// competing operation; actual eligibility remains the existing action's.
+    #[farhelm_testtrace::test]
+    fn rail_update_badges_respect_newer_peers_and_progress() {
+        let mut state = every_phase().remove(2);
+        assert!(!rail_presentation(&state, None, false).update_available);
+        if let HostPhase::Connected { old_version, .. } = &mut state {
+            *old_version = true;
+        }
+        let old = rail_presentation(&state, None, true);
+        assert!(old.update_available);
+        assert_eq!(old.phase, "old-version");
+        assert_eq!(old.words, "old version; update available");
+        if let HostPhase::Connected { newer_version, .. } = &mut state {
+            *newer_version = true;
+        }
+        let newer = rail_presentation(&state, None, true);
+        assert!(!newer.update_available);
+        assert_eq!(newer.words, "too new");
+        let skew = HostPhase::VersionSkew {
+            peer_protocol: 7,
+            peer_build: "old".into(),
+            our_protocol: 8,
+            our_build: "current".into(),
+            remediation: "update".into(),
+        };
+        let required = rail_presentation(&skew, None, true);
+        assert!(required.update_available);
+        assert_eq!(required.words, "needs update; update available");
     }
 
     /// Every phase keeps a stable wire token for data attributes and

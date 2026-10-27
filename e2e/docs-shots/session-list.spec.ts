@@ -60,7 +60,7 @@ test("statuses", async ({ page, request }) => {
 
 test("list controls", async ({ page, request }) => {
   const { director } = await open(page, request);
-  const filter = page.locator("select.filter-host");
+  const filter = page.locator(".host-rail-avatar").first();
   const sort = page.locator(".sort-title");
   await sort.click();
   const menu = page.getByRole("menu", { name: "Sort", exact: true });
