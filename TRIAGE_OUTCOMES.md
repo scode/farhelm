@@ -18808,7 +18808,7 @@
   same path. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over it, block and bring it back, keeping the 2026-10-18 complexity gate. Remove the feedback
   file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/restart-with-trust-identity.md`.
 
 ## template-retry-installs-unseen-permanent-delete.md
 
@@ -18831,7 +18831,7 @@
   disabled button while the list reloads, or refusing a click whose kind differs from what was last painted) is
   execution's choice. A test covers the failed-reload, Retry, kind-change sequence. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/template-delete-guards.md`.
 
 ## template-delete-reads-new-selection.md
 
@@ -18845,7 +18845,7 @@
   Q1): outside the guards the spec names, a click within that gap is carried out as delivered, under SPEC.md's
   2026-10-10 sub-second allowance.
 - Completion criteria: remove the feedback file and its index entry; no code or spec change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/template-delete-guards.md`.
 
 ## link-refusal-conceals-delete-warning.md
 
@@ -18862,11 +18862,11 @@
   text (the recommended shape: opening one lowers the refusal beneath it). The layer-ladder comment is updated. A test
   opens the Delete confirmation by its shortcut while a raised refusal is up. Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/link-refusal-confirm-layer.md`.
 
 ## tunnel-reuses-custom-helm-credential-origin.md
 
-- Outcome: `fix code`.
+- Outcome: `discard` (revised 2026-10-26 from `fix code`; see Decision).
 - Assessment: partly confirmed by code reading on main 2977e6c9 (not run). A desktop tunnel binds `127.0.0.1:0` and
   rejects only the remote port number, then opens `http://127.0.0.1:<local port>` in the system browser. A standalone
   helm signed into from that browser keeps its device secret in that origin's localStorage, with no expiry or port
@@ -18877,11 +18877,13 @@
   route is the open tab driving a standalone helm later restarted on that port. SPEC.md: "A remote host must not gain
   unauthorized execution or access to secrets on the helm's machine or another host through Farhelm." The 2026-10-22
   `tunnel-can-take-standalone-helm-port.md` outcome fixed only the remote-number collision.
-- Decision: the user picked "Tunnels avoid ports a helm has served on" (2026-10-26 highest-bucket triage page, Q4).
-- Completion criteria: the standalone helm durably records each local port it serves on, and tunnel port allocation
-  skips recorded ports the way it already skips the remote number. Ports used before the change are not covered, as the
-  page said. A test drives allocation onto a recorded port and expects a different one. Remove the feedback file and its
-  index entry.
+- Decision: the user first picked "Tunnels avoid ports a helm has served on" (2026-10-26 highest-bucket triage page,
+  Q4). Superseded the same day while planning it: once planning review showed the fix needs a new durable record of
+  served ports (a database table with no downgrade path, or a separate file) and still misses helms run with another
+  state directory, the user answered on the planning page: "what, no, this is too much complexity. drop the whole thing,
+  discard".
+- Completion criteria: remove the feedback file and its index entry; no code or spec change. (The superseded criteria
+  were: the standalone helm durably records each port it serves on, and tunnel port allocation skips recorded ports.)
 - Execution: `pending`.
 
 ## named-restart-reporter-failure-keeps-old-resume.md
@@ -18899,7 +18901,7 @@
   prepared. The reporter is prepared before the relaunch transaction decides whether to clear the capture, and a failure
   clears it there, reusing the existing clear-and-restore path (a definitive pre-spawn abort restores it). A test makes
   preparation fail and expects plain Restart to say it cannot resume. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/named-restart-reporter-clear.md`.
 
 ## template-delete-lost-reply-loses-undo.md
 
@@ -18926,7 +18928,7 @@
   refusals keep today's error. A test loses the reply of a committed delete. The follow-up the user asked for is already
   in TODO.md's "Near term" bucket as "Treat the GUI–helm connection as infallible" (added during triage on their
   request); this outcome does not carry it out. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/template-delete-guards.md`.
 
 ## installer-terminal-link-overwrites-new-foreign-file.md
 
@@ -18947,7 +18949,7 @@
   moved aside and identity-checked rather than removed by path. A test places a file after the check. Complexity gate:
   if this is non-trivial (well beyond the estimated 20–40 lines plus a test), block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/installer-link-noreplace.md`.
 
 ## older-installer-rebuild-deletes-late-foreign-app.md
 
@@ -18964,4 +18966,4 @@
 - Completion criteria: SPEC.md (installation) states that installing a release older than the handoff floor runs that
   release's own installer, with the protections it had then, which include no protection against something put at the
   app location while it builds. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/installer-link-noreplace.md`.
