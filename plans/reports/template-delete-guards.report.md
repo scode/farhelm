@@ -77,3 +77,76 @@ Each PR passed its required single fresh-context gpt-6.1-sol reviewer at high ef
 PR1 reviewer also checked the fixture attribute-group correction. Commit/PR wording passed cold reads. A separate
 read-only audit checked all upstream changes against the stack before rebase; it found no semantic correction or extra
 runtime validation needed.
+
+### Landing
+
+Landed as built. Template deletion in the Templates dialog could break its promises in two ways: after Retry, the
+desktop app could delete permanently while the button still read plain "delete" and promised Undo, and a deletion whose
+reply was lost could leave the deleted template in the list beside a raw connection error. The dialog now keeps two
+separate buttons, "delete" (with Undo) and "delete permanently", and shows the permanent one only for a template that
+fails the current save rules (Undo would have to save it again), so a Retry that re-reads the template can no longer
+turn the visible "delete" into a permanent one; and a lost reply now says the deletion may have happened and reloads the
+list, without Undo. The third finding, that selecting another template and clicking Delete at once can delete the newly
+selected one while the editor still shows the old one, you decided is acceptable; only its review-queue entry was
+removed.
+
+- #2745: keep the painted delete button's Undo offer through Retry.
+- #2746: close the accepted selection-race finding, with no code change.
+- #2748: report an uncertain template deletion and reload the list.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the plan was based, main gained only hidden checkout Trash (#2744), which touches nothing in the Templates dialog.
+A fresh-context reviewer and I read this plan against it and against earlier template work already on main (the Steel
+restyle, quick launch marks, the template panel's Escape handling, Restart with's template refusal) and found nothing
+that interacts. The second, always-hidden delete button is safe for every other test: they find the button by its name
+or only look at the visible one.
+
+#### Fixes made at landing
+
+None.
+
+#### Things you should know
+
+The report already says that a lost reply clears an earlier Undo notice in the same dialog and does not update quick
+launch marks. The landing review found a few more consequences of the lost-reply path, all rare:
+
+- After a lost reply, the editor stays open on the template that may have been deleted. Saving re-creates it, and Delete
+  then shows a message asking to reload the template list.
+- SPEC.md, which this plan did not change, says a click on plain "delete" always offers Undo. The lost-reply path offers
+  none; that exception rests on SPEC.md's general rule that an operation whose outcome is unknown reports that, and on
+  your triage decision. A possible follow-up is to name the exception in that sentence; the existing TODO entry about
+  treating the connection between the app and the helm as infallible would remove the stopgap instead.
+- When a reload changes whether the selected template passes the save rules (it was edited elsewhere, say), the visible
+  delete button swaps, and keyboard focus on the old one is lost.
+- #2748 rewrote a shared comment in the UI's request code and dropped two details about provisioning from it; restoring
+  them is optional cleanup.
+
+#### Checks
+
+This round landed only this plan, on main after hidden checkout Trash:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the check that every
+  test delay states its reason, `dprint check` across the repository, `python3 releasing/check-changelog.py format`,
+  `python3 scripts/check-agents-md.py` (two warnings, both about citations main already had), the workspace debug build
+  and the UI's release web build: all passed. The desktop build's all-targets lint was not run; the report says it fails
+  on an existing warning in code this plan does not touch.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, with the pinned test runner, run
+  `8ad1ff47-c4aa-4b34-b73d-7f889990460a`: all 784 passed. Its desktop-build tests, which include the plan's Retry test
+  (that fix is desktop-only), `cargo nextest run -p farhelm-ui --features desktop`, run
+  `c059a870-fc64-43f8-a371-1228e218ca8b`: 964 passed and 1 failed, "a hung save releases waiters at their deadline", an
+  open flake already on TODO.md's Deflake list (a waiter released a moment before its deadline), in save-ordering code
+  this plan does not touch. The UI's JavaScript and stylesheet tests (`node --test` in `crates/farhelm-ui/js-tests`),
+  run `9a77c0c3-15d6-44f3-9e91-5d8d64086a26`: 358 passed.
+- `npx playwright test` in `e2e/` with `tests/templates.spec.ts`, `tests/quick-launch.spec.ts`,
+  `tests/template-list-shortcut.spec.ts` and `tests/popover-template-movement.spec.ts`, on Chromium and WebKit, three
+  workers each with its own helm and supervisors, no retries, run `8bbc6de3-211c-4954-88e6-626cc0e501d6`: all 232
+  passed.
+- Reused: none. Skipped: the rest of the Rust workspace (nothing outside the UI changed, and only the desktop app
+  depends on it), the full browser suite (the four specs cover the template list), and running the desktop app itself
+  (its Retry fix is covered by the desktop-build test above).
+
+The report's browser run covered the templates spec; this landing also ran the specs that share the template list.
+Nothing in the executor's report became untrue at landing.
