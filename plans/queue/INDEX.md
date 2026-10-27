@@ -9,7 +9,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `steel-dialogs.md` — Steel redesign, dialogs: settings with section icons and switches, the launcher's labeled rows and pinned footer, every confirmation and menu on one anatomy (after `steel-foundation.md`, `report-failed-settings-saves.md`, `template-panel-escape.md`, `restart-with-template-refusal.md`)
 - [pending] `steel-sentence-case.md` — Steel redesign, last part: sentence case for every label in the app, SPEC.md, tests and the docs website's text (after `steel-sidebar.md`, `steel-session-chrome.md`, `steel-dialogs.md`)
 - [pending] `template-delete-guards.md` — Template Delete keeps its promises: Retry can no longer permanently delete behind a plain "delete", and a lost reply says the delete may have happened (three triage outcomes)
-- [pending] `installer-link-noreplace.md` — The installer never overwrites a file that appears at the Terminal command's location mid-install, and the spec accepts older releases' own installers (two triage outcomes)
+- [in-flight 5e699e] `installer-link-noreplace.md` — The installer never overwrites a file that appears at the Terminal command's location mid-install, and the spec accepts older releases' own installers (two triage outcomes)
 - [pending] `restart-with-trust-identity.md` — Restart with checks the checkout folder's identity before trusting a Codex or Pi agent automatically (triage outcome)
 - [pending] `link-refusal-confirm-layer.md` — A refused-link explanation never covers an open session confirmation's warning (triage outcome)
 - [pending] `named-restart-reporter-clear.md` — Restart with into another Pi or OMP conversation clears the old one when the conversation reporter cannot be prepared (triage outcome)
