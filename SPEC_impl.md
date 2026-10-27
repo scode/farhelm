@@ -4701,8 +4701,11 @@ flush. Clearing a killed run's staging, trash and marked lock folder at the next
 the installation lock, is the kind of start-up sweep "Cleanup on quit" says needs the maintainer's approval for the
 specific case; it was approved as part of the race-free installer design (2026-10-11), because an install that is killed
 or loses power has no quit path to clean up on. A Farhelm running with an overridden state directory is protected by its
-version lock for as long as it runs. The Terminal link is placed last, with the same checks as before for files the
-installer did not put there, and its folder flushed. The script then touches the bundle and re-registers it with
+version lock for as long as it runs. The Terminal link is placed last by creating a symlink at the public name, which
+refuses an entry that arrived after inspection. The refusal leaves the app installed, names the untouched entry and asks
+for another installer run; it also reports any earlier foreign file kept aside. Both recorded old-layout command copies
+move to visible replaced names before hashing: only matching contents are deleted, while a replacement stays under its
+visible name and is reported. The link's folder is flushed. The script then touches the bundle and re-registers it with
 `lsregister -f`, because Spotlight and Launch Services otherwise keep showing the old version.
 
 An app at the usual place without `Versions/`, or no app at all, is instead built whole under a temporary name beside

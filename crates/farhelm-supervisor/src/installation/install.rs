@@ -162,6 +162,9 @@ pub enum Step {
     /// A rebuild's whole app is staged and flushed beside its place.
     BundleBuilt,
     BundlePlaced,
+    /// One of the two public command names has been inspected, before any
+    /// move or deletion based on that inspection. Reached once per name.
+    LinkChecked,
     Link,
 }
 
@@ -983,20 +986,27 @@ impl Context<'_> {
 
     // -- the Terminal link -------------------------------------------------
 
-    /// Point `~/.local/bin/farhelm` at the forwarder, keeping today's checks
-    /// and notes about files this installer did not put there, then flush
-    /// the folder. Outside the app these are public names and keep their
-    /// path-based checks (design, section 3).
+    /// Claim the public Terminal command only while its name is empty.
+    /// Old-layout copies move to visible names before their contents decide
+    /// whether they may be deleted; a replacement never inherits permission
+    /// from the file previously at that path. A late arrival refuses link
+    /// placement, with any earlier preservation notes kept in the refusal.
     fn place_link(&self, hook: StepHook<'_>) -> Result<Vec<String>, Refusal> {
         let bin = &self.request.bin_dir;
         let forwarder = self.app_path.join("Contents/MacOS/farhelm");
         let mut notes = Vec::new();
+        let with_notes = |mut refusal: Refusal, notes: &[String]| {
+            refusal.advice.extend_from_slice(notes);
+            refusal
+        };
         let flat = FlatRecord::read(&bin.join(".farhelm-installation"));
         let stamp = utc_stamp();
         for name in ["farhelm", "farhelm-desktop"] {
             let dest = bin.join(name);
             let meta = std::fs::symlink_metadata(&dest);
-            match meta {
+            step(hook, Step::LinkChecked)
+                .map_err(|e| with_notes(self.fail("stopping", &e), &notes))?;
+            let recorded = match meta {
                 Err(_) => continue,
                 Ok(meta) if meta.file_type().is_symlink() => {
                     if name == "farhelm"
@@ -1004,30 +1014,25 @@ impl Context<'_> {
                     {
                         continue;
                     }
+                    None
                 }
-                Ok(meta) if meta.is_file() => {
-                    if let Some(recorded) = flat.as_ref().and_then(|flat| flat.digest(name))
-                        && sha256_of(&dest).as_deref() == Some(recorded.as_str())
-                    {
-                        if name == "farhelm-desktop" {
-                            let _ = std::fs::remove_file(&dest);
-                        }
-                        continue;
-                    }
-                }
-                Ok(_) => {}
-            }
-            if name != "farhelm" {
+                Ok(meta) if meta.is_file() => flat.as_ref().and_then(|flat| flat.digest(name)),
+                Ok(_) => None,
+            };
+            if name != "farhelm" && recorded.is_none() {
                 continue;
             }
             if std::fs::symlink_metadata(&dest).is_ok_and(|meta| meta.is_dir()) {
-                return Err(Refusal::new(
-                    format!(
-                        "{} is a directory; the app is installed, but the Terminal link was not \
+                return Err(with_notes(
+                    Refusal::new(
+                        format!(
+                            "{} is a directory; the app is installed, but the Terminal link was not \
                          created; move it aside and re-run",
-                        dest.display()
+                            dest.display()
+                        ),
+                        &[],
                     ),
-                    &[],
+                    &notes,
                 ));
             }
             let mut kept = bin.join(format!("{name}.replaced-{stamp}"));
@@ -1035,15 +1040,24 @@ impl Context<'_> {
                 kept = bin.join(format!("{name}.replaced-{stamp}-{}", std::process::id()));
             }
             std::fs::rename(&dest, &kept).map_err(|_| {
-                Refusal::new(
+                with_notes(Refusal::new(
                     format!(
                         "could not keep the existing {} as {}; move it aside and re-run the installer",
                         dest.display(),
                         kept.display()
                     ),
                     &[],
-                )
+                ), &notes)
             })?;
+            if recorded.is_some_and(|digest| sha256_of(&kept).as_deref() == Some(digest.as_str())) {
+                std::fs::remove_file(&kept).map_err(|e| {
+                    with_notes(
+                        self.fail("removing the recorded old-layout copy", &e),
+                        &notes,
+                    )
+                })?;
+                continue;
+            }
             let kept_name = kept.file_name().unwrap_or_default().to_string_lossy();
             notes.push(format!(
                 "ℹ️  ~/.local/bin/{name} was not installed by this installer, so it was renamed\n   to \
@@ -1052,17 +1066,24 @@ impl Context<'_> {
         }
         let link = bin.join("farhelm");
         if std::fs::read_link(&link).ok().as_deref() != Some(&forwarder) {
-            let stage = bin.join(format!(".farhelm-link.{}", std::process::id()));
-            let _ = std::fs::remove_file(&stage);
-            std::os::unix::fs::symlink(&forwarder, &stage)
-                .map_err(|e| self.fail("creating the Terminal link", &e))?;
-            if let Err(error) = std::fs::rename(&stage, &link) {
-                let _ = std::fs::remove_file(&stage);
-                return Err(self.fail(
-                    &format!("installing the Terminal link {}", link.display()),
-                    &error,
-                ));
-            }
+            // Creating the link itself refuses an occupied name on every
+            // filesystem, without a staged rename or a volume-specific fallback.
+            std::os::unix::fs::symlink(&forwarder, &link).map_err(|error| {
+                let refusal = if error.kind() == io::ErrorKind::AlreadyExists {
+                    Refusal::new(
+                        format!(
+                            "could not create the Terminal link {}: {error}; the app is installed, \
+                         but the Terminal link was not created; its existing entry was left untouched; \
+                         re-run the installer",
+                            link.display()
+                        ),
+                        &[],
+                    )
+                } else {
+                    self.fail("creating the Terminal link", &error)
+                };
+                with_notes(refusal, &notes)
+            })?;
         }
         let flat_record = bin.join(".farhelm-installation");
         if std::fs::symlink_metadata(&flat_record).is_ok_and(|meta| meta.is_file())
@@ -1075,8 +1096,8 @@ impl Context<'_> {
         }
         File::open(bin)
             .and_then(|folder| full_sync(folder.as_fd()))
-            .map_err(|e| self.fail("flushing ~/.local/bin", &e))?;
-        step(hook, Step::Link).map_err(|e| self.fail("stopping", &e))?;
+            .map_err(|e| with_notes(self.fail("flushing ~/.local/bin", &e), &notes))?;
+        step(hook, Step::Link).map_err(|e| with_notes(self.fail("stopping", &e), &notes))?;
         Ok(notes)
     }
 }

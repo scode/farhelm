@@ -163,6 +163,212 @@ fn a_fresh_install_builds_the_app_with_a_new_installation_id() {
     assert!(home.no_leftovers_beside_the_app());
 }
 
+/// A public command arriving after inspection belongs to its writer. Refusal
+/// must preserve it and report an earlier foreign file already moved aside;
+/// retrying then follows the ordinary visible-preservation path.
+#[farhelm_testtrace::test]
+fn a_late_terminal_command_is_kept_and_the_refusal_retains_preservation_notes() {
+    for earlier_foreign in [false, true] {
+        let home = Home::new();
+        let request = home.request("1.2.3");
+        if earlier_foreign {
+            std::fs::write(&request.link, "earlier foreign command").unwrap();
+        }
+        let mut inspected = 0;
+        let refusal = install(&request, &mut |at| {
+            if at == Step::LinkChecked {
+                inspected += 1;
+                // Both public names have been inspected; the first is now
+                // empty, including after preserving the earlier foreign file.
+                if inspected == 2 {
+                    assert!(!request.link.exists(), "premise: the name is free");
+                    std::fs::write(&request.link, "late foreign command")?;
+                }
+            }
+            Ok(())
+        })
+        .expect_err("the late arrival refuses final placement");
+        assert_eq!(inspected, 2);
+        assert_eq!(
+            std::fs::read_to_string(&request.link).unwrap(),
+            "late foreign command"
+        );
+        assert!(home.launchable(), "the completed app remains installed");
+        assert!(
+            refusal
+                .message
+                .contains(&request.link.display().to_string())
+        );
+        assert!(refusal.message.contains("left untouched"));
+        assert!(refusal.message.contains("re-run the installer"));
+        assert_eq!(refusal.advice.len(), usize::from(earlier_foreign));
+        if earlier_foreign {
+            let kept = std::fs::read_dir(&request.bin_dir)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .find(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with("farhelm.replaced-")
+                })
+                .expect("the earlier command has a visible backup");
+            assert_eq!(
+                std::fs::read_to_string(&kept).unwrap(),
+                "earlier foreign command"
+            );
+            assert!(
+                refusal.advice[0]
+                    .contains(&kept.file_name().unwrap().to_string_lossy().to_string())
+            );
+        }
+        home.install("1.2.3")
+            .expect("retry preserves the arrival and places the link");
+        assert_eq!(
+            std::fs::read_link(&request.link).unwrap(),
+            home.app().join("Contents/MacOS/farhelm")
+        );
+    }
+}
+
+/// A later migration refusal must still locate an earlier preserved command.
+/// Replacing the recorded desktop copy with a directory or removing it after
+/// inspection exercises both refusals without depending on permissions.
+#[farhelm_testtrace::test]
+fn a_migration_refusal_reports_the_foreign_command_already_kept() {
+    for directory in [false, true] {
+        let home = Home::new();
+        let request = home.request("1.2.3");
+        let desktop = request.bin_dir.join("farhelm-desktop");
+        std::fs::write(&request.link, "foreign command").unwrap();
+        std::fs::write(&desktop, "old desktop").unwrap();
+        std::fs::write(
+            request.bin_dir.join(".farhelm-installation"),
+            format!(
+                "farhelm-standalone\0unused\0not-the-foreign-command\0{}\0",
+                sha256_of(&desktop).unwrap()
+            ),
+        )
+        .unwrap();
+        let mut inspected = 0;
+        let refusal = install(&request, &mut |at| {
+            if at == Step::LinkChecked {
+                inspected += 1;
+                if inspected == 2 {
+                    assert!(
+                        !request.link.exists(),
+                        "the earlier command has left its name"
+                    );
+                    assert_eq!(std::fs::read_to_string(&desktop)?, "old desktop");
+                    std::fs::remove_file(&desktop)?;
+                    if directory {
+                        std::fs::create_dir(&desktop)?;
+                        std::fs::write(desktop.join("foreign"), "foreign directory contents")?;
+                    }
+                }
+            }
+            Ok(())
+        })
+        .expect_err("the changed desktop name refuses migration");
+        assert_eq!(inspected, 2);
+        assert!(home.launchable());
+        assert!(refusal.message.contains(&desktop.display().to_string()));
+        assert_eq!(refusal.advice.len(), 1);
+        let kept = std::fs::read_dir(&request.bin_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("farhelm.replaced-")
+            })
+            .expect("the earlier command remains visibly preserved");
+        assert_eq!(std::fs::read_to_string(&kept).unwrap(), "foreign command");
+        assert!(
+            refusal.advice[0].contains(&kept.file_name().unwrap().to_string_lossy().to_string())
+        );
+        if directory {
+            assert_eq!(
+                std::fs::read_to_string(desktop.join("foreign")).unwrap(),
+                "foreign directory contents"
+            );
+        } else {
+            assert!(!desktop.exists());
+        }
+    }
+}
+
+/// The old layout authorizes deleting contents, never a public pathname.
+/// Swap either recorded copy after inspection: only matching moved contents
+/// disappear, while a replacement stays under its visible backup name.
+#[farhelm_testtrace::test]
+fn old_layout_copies_are_checked_only_after_they_leave_the_public_names() {
+    for replaced in [None, Some("farhelm"), Some("farhelm-desktop")] {
+        let home = Home::new();
+        let request = home.request("1.2.3");
+        for name in ["farhelm", "farhelm-desktop"] {
+            std::fs::write(request.bin_dir.join(name), format!("old {name}")).unwrap();
+        }
+        std::fs::write(
+            request.bin_dir.join(".farhelm-installation"),
+            format!(
+                "farhelm-standalone\0unused\0{}\0{}\0",
+                sha256_of(&request.link).unwrap(),
+                sha256_of(&request.bin_dir.join("farhelm-desktop")).unwrap()
+            ),
+        )
+        .unwrap();
+        let mut inspected = 0;
+        let done = install(&request, &mut |at| {
+            if at == Step::LinkChecked {
+                let name = ["farhelm", "farhelm-desktop"][inspected];
+                inspected += 1;
+                if replaced == Some(name) {
+                    let path = request.bin_dir.join(name);
+                    assert_eq!(std::fs::read_to_string(&path)?, format!("old {name}"));
+                    std::fs::remove_file(&path)?;
+                    std::fs::write(path, "replacement command")?;
+                }
+            }
+            Ok(())
+        })
+        .expect("migration keeps a foreign replacement visibly");
+        assert_eq!(inspected, 2);
+        assert!(home.launchable());
+        assert_eq!(
+            std::fs::read_link(&request.link).unwrap(),
+            home.app().join("Contents/MacOS/farhelm")
+        );
+        assert!(!request.bin_dir.join("farhelm-desktop").exists());
+        let kept: Vec<_> = std::fs::read_dir(&request.bin_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .contains(".replaced-")
+            })
+            .collect();
+        assert_eq!(kept.len(), usize::from(replaced.is_some()));
+        assert_eq!(done.notes.len(), kept.len());
+        if let Some(name) = replaced {
+            assert!(
+                kept[0]
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(&format!("{name}.replaced-"))
+            );
+            assert_eq!(
+                std::fs::read_to_string(&kept[0]).unwrap(),
+                "replacement command"
+            );
+        }
+    }
+}
+
 /// Updates keep the installation's id and move the generation on; pruning
 /// keeps the target and the previously Installed version, and removes the
 /// rest once nothing holds them.
@@ -236,6 +442,7 @@ fn an_update_stopped_after_each_step_starts_and_a_rerun_finishes_it() {
         Step::InfoPlist,
         Step::RecordComplete,
         Step::Pruned,
+        Step::LinkChecked,
         Step::Link,
     ] {
         let home = Home::new();
@@ -266,7 +473,10 @@ fn an_update_stopped_after_each_step_starts_and_a_rerun_finishes_it() {
             );
         }
         let state = home.record().state;
-        let finished = matches!(stop, Step::RecordComplete | Step::Pruned | Step::Link);
+        let finished = matches!(
+            stop,
+            Step::RecordComplete | Step::Pruned | Step::LinkChecked | Step::Link
+        );
         assert_eq!(
             state == InstallState::Complete,
             finished,
