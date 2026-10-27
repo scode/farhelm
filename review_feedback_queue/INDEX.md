@@ -21,10 +21,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can commit but offer no Undo when its success reply is lost. Manual recovery from the mounted editor remains possible
   until it closes; the unknown-outcome exception's scope is ambiguous.
 
-- [`link-refusal-conceals-delete-warning.md`](link-refusal-conceals-delete-warning.md) — A raised link refusal can hide
-  a session's destructive Delete warning while keyboard opening and a fresh affirmative Enter still work. The complete
-  source path is established; actual overlap pixels and loss were not measured.
-
 - [`tunnel-reuses-custom-helm-credential-origin.md`](tunnel-reuses-custom-helm-credential-origin.md) — A desktop tunnel
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.

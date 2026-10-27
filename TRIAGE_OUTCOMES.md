@@ -18865,7 +18865,8 @@
   text (the recommended shape: opening one lowers the refusal beneath it). The layer-ladder comment is updated. A test
   opens the Delete confirmation by its shortcut while a raised refusal is up. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/link-refusal-confirm-layer.md`.
+- Execution: change `zmmpnppy`, bookmark `plan/link-refusal-confirm-layer/01-lower-refusal-under-confirm`;
+  [draft PR #2740](https://github.com/scode/farhelm/pull/2740/changes).
 
 ## tunnel-reuses-custom-helm-credential-origin.md
 
