@@ -1,10 +1,22 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `5c6e49937b1e779be2a5445059637aadf3757356`
+Last reviewed commit: `a2c2f8861418f8222eca096c797b9f31585ecc1a`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
+
+## Explicit checkpoint advance through a2c2f886
+
+On 2026-10-27 the maintainer explicitly requested advancing the marker to the previous review session's pinned tip,
+`a2c2f8861418f8222eca096c797b9f31585ecc1a`, and merging that advance. The next trailing review starts after that commit.
+This is an authorized checkpoint advance despite an incomplete review, not a claim that the unresolved investigations
+below completed. No additional review was performed for this advance, and no later commit is claimed reviewed.
+
+The previous result, merged in PR #2734, recorded findings and complete mandatory patch delivery but left 90 reviewer
+identities incomplete on source or causal premises. Its findings, uncertainty and retained evidence remain as recorded.
+The historical notes below describe the checkpoint status when those results were written; they do not undo this
+explicit advance.
 
 ## Incomplete review toward a2c2f886
 

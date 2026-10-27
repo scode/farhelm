@@ -57,11 +57,31 @@ Report the exact range reviewed, any coverage gaps, the findings recorded or ext
 is pending in a draft PR or has reached `main`. Include the compact completion record required by `persistent-review`,
 with references to the retained evidence.
 
-End the final response with the total number of new queue items and a summary grouped by priority bucket, in order:
+Close the findings report with the total number of new queue items and a summary grouped by priority bucket, in order:
 `highest`, `high`, `other`. Show each bucket's count, including zero, and give a short user-facing TLDR for every new
 item under its bucket. Count only newly recorded items; describe extensions to existing items separately before this
 summary. Preserve material uncertainty in each TLDR so a conditional lead does not read as a confirmed bug.
 
-Put the review-result draft PR's diff link immediately after the grouped summary, as the final element of the response.
-If no draft PR was created, end with that fact and the reason instead; do not imply that an interrupted review completed
-or create a PR when there were no new commits to review.
+Put the review-result draft PR's diff link immediately after the grouped summary. If no draft PR was created, put that
+fact and the reason there instead; do not imply that an interrupted review completed or create a PR when there were no
+new commits to review. The closing status banner below, when required, comes after the link or explanation.
+
+## Closing status banner
+
+Every final trailing-review result and subsequent merge report must end with a loud Markdown banner unless both the
+review fully completed and the saved checkpoint on main reached the pinned review tip. A draft PR proposing an advance
+does not meet the second condition. Merging findings without advancing the checkpoint does not meet it either. If the
+checkpoint already equals the tip and there is nothing new to review, no banner is needed.
+
+Use this standalone level-two heading, followed by bold status text, as the final block of the response:
+
+```markdown
+## TRAILING REVIEW NOT FULLY COMPLETE
+
+**Review: <complete or incomplete, with the remaining gap>. Checkpoint on main: <actual hash and whether the advance is
+unchanged, pending, or explicitly authorized despite an incomplete review>. Next review starts after <actual hash>.**
+```
+
+State the actual review and checkpoint status separately. An explicitly authorized checkpoint advance does not turn an
+incomplete review into a completed one. Keep the banner outside code fences in the actual response, and put nothing
+after it: no PR link, validation note, or sign-off. An ordinary sentence elsewhere in the response is not a substitute.
