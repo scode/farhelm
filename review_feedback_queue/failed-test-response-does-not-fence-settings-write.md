@@ -51,3 +51,37 @@ alleged.
 
 Provenance: `g202/f1`. These are reviewer-local identities, not additional findings. Proposed drop: none for the
 retained remainder.
+
+## Additional forwarded-save and retry instances
+
+Additional reviewed commits: `9a82acb9b536ed471027eb4d455f6063b9cb7074`, `1e68fa9d1f7cbca7842900e8872092a3cb58704e`, and
+`b260f8a14ebaad9a3cd333582dac49a26b596237`.
+
+The first two add cases where cleanup drains route callbacks without awaiting the forwarded save's HTTP response:
+`e2e/tests/settings.spec.ts:86,119–126,440,473–483` at the first commit and
+`e2e/tests/claude-trust.spec.ts:535,596–597,632–647` at the second. Official Playwright 1.64.0 source, checked against
+the reviewed lockfile, shows `route.continue()` ends at browser-protocol acknowledgement rather than server response
+(`coreBundle.js:14385–14438,37838–37885,56420–56480,61290–61355`). Draining the callback is therefore not a mutation
+completion boundary.
+
+The third instance removes its refusal route before the real retry (`e2e/tests/templates.spec.ts:433–435`), so no retry
+handler remains for cleanup at `445–450` to join. The verified runner's default poll deadline is five seconds
+(`package/lib/matchers/expect.js:13178,13328–13349,13385–13414`); its worker awaits the test function, including
+`finally`, before fixture teardown (`workerProcessEntry.js:1652–1677`). This supplies an assertion-failure path with
+cleanup time inside the repository's sixty-second test budget.
+
+These conditional server schedules are source-established: admit the valid old PUT but delay its blocking worker before
+the database mutex; let other workers serve unchanged values until the poll fails; commit cleanup restoration and, where
+applicable, template deletion; then let the delayed write apply. The mutex provides exclusion, not request admission
+order (`crates/farhelm-supervisor/src/db.rs:128–142`). Admitted writes survive disconnect, and preference updates apply
+their field unconditionally (`crates/farhelm-helm/src/preferences.rs:238–255`, `store.rs:5241,5296` at the third
+revision; `store.rs:5244,5278–5279,5296` at the second). The late quick-launch write can name a now-deleted test
+template.
+
+Suggested bucket remains **other**: private test-stack contamination only. Confidence: confirmed conditional source
+mechanisms; sufficiently adverse scheduling, actual occurrence and frequency remain unmeasured. No tests, browser
+launches or experiments ran. Trust-hint dismissal is separate from granting workspace trust. These instances preserve
+the original ledger-authorized response-wait repair while adding sites that never await the real retry response.
+Possible cover remains the existing item and its explicit scope, rather than a second queue item or accepted
+contamination. Provenance: `g067/f1`, `g069/f1`, `g068/f2`; earlier blanket cleanup refutations and overconfident
+missing matcher claims were corrected under those same identities.
