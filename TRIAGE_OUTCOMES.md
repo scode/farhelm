@@ -18849,7 +18849,9 @@
   Q1): outside the guards the spec names, a click within that gap is carried out as delivered, under SPEC.md's
   2026-10-10 sub-second allowance.
 - Completion criteria: remove the feedback file and its index entry; no code or spec change.
-- Execution: planned in `plans/queue/template-delete-guards.md`.
+- Execution: discarded in change `nwuwysuyupnyoosmosrrqywxustqlomv`, bookmark
+  `plan/template-delete-guards/02-discard-selection-race`; draft PR https://github.com/scode/farhelm/pull/2746/changes.
+  No code or spec change.
 
 ## link-refusal-conceals-delete-warning.md
 
