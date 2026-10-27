@@ -1251,6 +1251,99 @@ test.describe("covered terminal disclosures", () => {
     }
   });
 
+  for (const first of ["refusal", "confirmation"] as const) {
+    /**
+     * A destructive answer is meaningful only while its consequence is readable.
+     * Keep a real covered-link refusal and keyboard-opened Delete prompt together,
+     * in both opening orders: an on-open dismissal alone misses a later refusal.
+     * The overlap premise and hit test distinguish painted protection from a
+     * z-index assertion across unrelated stacking contexts. No delete is confirmed.
+     */
+    test(`header confirmation stays above a link refusal with ${first} first`, async ({ page, request }) => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      const previous = await readPreferences(request);
+      const opens = await probeDisclosureOpens(page);
+      let sessionId: string | undefined;
+      let bodyFailed = false;
+      try {
+        await patchPreferences(request, { terminal_link_click: null, skip_session_confirmations: false });
+        const session = await createSession(request, { title: `confirm-refusal-${Date.now()}`, cwd: "/tmp", invocation });
+        sessionId = session.id;
+        await stageCoveringApproval(page);
+        await page.goto("/");
+        await attachSession(page, session.id);
+        await waitForTermText(page, "FAKE-AGENT READY");
+        await cue(page, "links");
+        await expect(page.locator(".approval-card .approval-allow")).toBeEnabled();
+        const prompt = page.locator(".header-delete-confirm");
+        const refusal = page.locator('#terminal .terminal-file-message[data-outcome="disclosure-refusal"]');
+        if (first === "confirmation") {
+          await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+          await page.keyboard.press("Control+Shift+Backspace");
+          await expect(prompt.locator(".header-delete-confirm-submit")).toBeFocused();
+        }
+        const target = "https://example.test/confirmation-covered";
+        const point = await besideCover(page, "CONFIRM-WEB", target, true);
+        await expect(page.locator("#terminal .terminal-link-target:not(.terminal-file-target)")).toContainText(target);
+        await assertDisclosureGeometry(page, "#terminal .terminal-link-target:not(.terminal-file-target)", point, true);
+        await expectLinkUnderPointer(page, point, "CONFIRM-WEB");
+        await page.mouse.click(point.x, point.y);
+        await expect(refusal).toContainText("covered by another Farhelm surface");
+        expect(await opens()).toEqual([]);
+        if (first === "refusal") {
+          await expect(refusal).toHaveCSS("z-index", "51");
+          await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+          await page.keyboard.press("Control+Shift+Backspace");
+          await expect(prompt.locator(".header-delete-confirm-submit")).toBeFocused();
+        }
+        await expect(prompt.locator(".confirm-consequence").first()).toBeVisible();
+        await expectLinkUnderPointer(page, point, "CONFIRM-WEB");
+        await expect.poll(() => refusal.evaluate((notice) => {
+          const warning = document.querySelector(".header-delete-confirm .confirm-consequence")!;
+          const r = notice.getBoundingClientRect();
+          const w = warning.getBoundingClientRect();
+          const left = Math.max(r.left, w.left);
+          const right = Math.min(r.right, w.right);
+          const top = Math.max(r.top, w.top);
+          const bottom = Math.min(r.bottom, w.bottom);
+          if (right <= left || bottom <= top) return { overlaps: false, warningAbove: false };
+          // The refusal ignores pointer events in production. Include it in this
+          // paint-order probe so an occluded warning cannot win by default. The
+          // staged approval can overlap both, so compare their relative order
+          // rather than requiring the confirmation to be the topmost surface.
+          const style = (notice as HTMLElement).style;
+          const previous = style.getPropertyValue("pointer-events");
+          const priority = style.getPropertyPriority("pointer-events");
+          try {
+            style.setProperty("pointer-events", "auto");
+            const painted = document.elementsFromPoint((left + right) / 2, (top + bottom) / 2);
+            const warningIndex = painted.findIndex(element => element.closest(".header-delete-confirm"));
+            const refusalIndex = painted.indexOf(notice);
+            return {
+              overlaps: true,
+              warningAbove: warningIndex >= 0 && refusalIndex >= 0 && warningIndex < refusalIndex,
+            };
+          } finally {
+            if (previous) style.setProperty("pointer-events", previous, priority);
+            else style.removeProperty("pointer-events");
+          }
+        }), { message: "the warning intersects the refusal and paints above it" }).toEqual({ overlaps: true, warningAbove: true });
+        await expect(refusal).toHaveCSS("z-index", "12");
+      } catch (error) {
+        bodyFailed = true;
+        throw error;
+      } finally {
+        await cleanupOwnedSteps(bodyFailed, [
+          ["session", () => sessionId && cleanupSession(request, sessionId)],
+          ["preferences", () => patchPreferences(request, {
+            terminal_link_click: previous.terminal_link_click ?? null,
+            skip_session_confirmations: previous.skip_session_confirmations ?? null,
+          })],
+        ]);
+      }
+    });
+  }
+
   /** The refusal explanation must draw above every link cover, because it
    * says why a covered click did nothing.
    * The test enumerates whatever carries the marker instead of naming covers,

@@ -1432,6 +1432,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    dialog above it. */
 [inert] .terminal-file-message[data-outcome="disclosure-refusal"],
 .terminal-file-message[data-outcome="disclosure-refusal"][inert] { z-index: 12; }
+/* Header confirmations are not modal, so they do not make the terminal inert.
+   Their consequence text still outranks a refusal, in either opening order. */
+.layout:has(> .session-topbar .header-confirm) .terminal-file-message[data-outcome="disclosure-refusal"] { z-index: 12; }
 @media (prefers-reduced-motion: reduce) {
   .terminal-file-message { transition: none; }
 }
@@ -1811,13 +1814,11 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
      50 `.tunnel-consent-backdrop` — the tunnel consent dialog's backdrop
      51 `.terminal-file-message[data-outcome="disclosure-refusal"]` — a clipped
         or covered link preview's refusal, above that preview (40) and every
-        link cover but the trash flight; reverts to 12 when modal isolation
-        makes its terminal inert, and drops to the ordinary failure layer once
-        its file or web hover leaves, so it never covers a later disclosure.
-        While raised it CAN overlap an open header confirmation's consequence
-        text: the confirmation (30) hangs over the terminal's top right, and
-        the refusal spans the terminal's top. That gap predates link covers
-        (the refusal was already 46) and is a known follow-up
+        link cover but the trash flight; reverts to 12 while a header
+        confirmation is open or modal isolation makes its terminal inert.
+        These questions must keep their consequence text above the refusal,
+        whichever opened first. It also drops to the ordinary failure layer
+        once its file or web hover leaves, so it never covers a later disclosure
      10000 `.checkout-trash-flight` — link cover, and the one exempt from the
         refusal outranking it: the short, unfilled outline of a session flying
         to the sidebar's trash button, which a preview clamped against the
