@@ -117,11 +117,15 @@ retains it inside your checkout folders. The
 ## What deletion does
 
 A checkout stays in place while any retained session uses it or one of its subdirectories. Stopped, exited, and errored
-sessions all count. Deleting the final session moves the entire checkout into `farhelm-archived-working-copies` under
-its original root, with a timestamped name. This includes untracked files and Git metadata; it frees no disk space. The
-trash button beside New opens these archives grouped by host, newest first, with their repository, archive time, disk
-usage and on-disk directory. Copy anything you want to recover out of that directory before cleanup. Size totals are
-partial when a directory cannot be measured; an unreachable host cannot be checked or emptied.
+sessions all count. Deleting the final session moves the entire checkout into `.farhelm-trash` under its original root,
+with a timestamped name. This includes untracked files and Git metadata; it frees no disk space. The trash button beside
+New opens these archives grouped by host, newest first, with their repository, archive time, disk usage and on-disk
+directory. Copy anything you want to recover out of that directory before cleanup. Size totals are partial when a
+directory cannot be measured; an unreachable host cannot be checked or emptied.
+
+Existing trash moves into this hidden directory automatically when Farhelm next uses it. A session started inside an old
+trash directory keeps its old working-directory path, so restarting it can fail after the move; it still prevents
+Farhelm from permanently deleting that checkout.
 
 Delete all on a host, or across reachable hosts, asks once before removing the selected archived checkouts permanently.
 Uncommitted or unpushed work in them is lost. Farhelm verifies its recorded ownership again before deleting: unrelated

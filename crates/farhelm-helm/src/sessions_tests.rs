@@ -10872,20 +10872,23 @@ async fn checkout_trash_routes_pass_host_results_and_fence_stale_deletion() {
         else {
             panic!("expected size listing, got {request:?}");
         };
-        writer.write_control(&ControlMsg::CheckoutTrashListed {
-            req_id,
-            listing: farhelm_proto::CheckoutTrashListing {
-                checkouts: vec![farhelm_proto::ArchivedCheckout {
-                    id: "recorded".into(),
-                    name: "project-1-20260101T000000Z".into(),
-                    repository: "acme/project".into(),
-                    path: "/remote/checkouts/farhelm-archived-working-copies/project-1-20260101T000000Z".into(),
-                    archived_at: Some(1767225600),
-                    bytes: Some(4096),
-                }],
-                issues: vec![],
-            },
-        }).await.unwrap();
+        writer
+            .write_control(&ControlMsg::CheckoutTrashListed {
+                req_id,
+                listing: farhelm_proto::CheckoutTrashListing {
+                    checkouts: vec![farhelm_proto::ArchivedCheckout {
+                        id: "recorded".into(),
+                        name: "project-1-20260101T000000Z".into(),
+                        repository: "acme/project".into(),
+                        path: "/remote/checkouts/.farhelm-trash/project-1-20260101T000000Z".into(),
+                        archived_at: Some(1767225600),
+                        bytes: Some(4096),
+                    }],
+                    issues: vec![],
+                },
+            })
+            .await
+            .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::DeleteCheckoutTrash { req_id, ids } = request else {
             panic!("expected deletion, got {request:?}");

@@ -96,7 +96,7 @@ export interface ScenarioTemplate {
  * and only for a shot that asks for it; every other shot keeps the fleet's
  * real, empty trash. `root` is the invented directory the host's checkouts go
  * into, and the archive's path and name are built from it the way Farhelm
- * names an archive: `<root>/farhelm-archived-working-copies/<checkout>-<time>`.
+ * names an archive: `<root>/.farhelm-trash/<checkout>-<time>`.
  */
 export interface ScenarioTrashedCheckout {
   host: string;

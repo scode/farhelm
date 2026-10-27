@@ -105,11 +105,20 @@ pub(crate) fn open_child_dir(
     }
 }
 
-/// Select only a recorded archive beneath its verified opened root. Missing
-/// children are positive absence; a root error remains uncertainty on reads.
-fn open_archive(row: &WorkingCopyRow, confined: bool) -> anyhow::Result<Option<OpenArchive>> {
+/// Migrate before selecting a recorded archive beneath its verified opened root.
+/// A missing new name proves absence only after legacy trash has been resolved;
+/// migration and root errors remain uncertainty, so reads retain the record.
+fn open_archive(
+    db: &Db,
+    row: &WorkingCopyRow,
+    confined: bool,
+) -> anyhow::Result<Option<OpenArchive>> {
     let name = CString::new(archive_name(row)?)?;
     let root = working_copies::verified_root_dir(row)?;
+    // Allocation uses this same lock through mkdir and registry commit. Keep
+    // its overlap check atomic with migration, then release it before opening
+    // individual archives or measuring their contents.
+    working_copies::migrate_legacy_archive(&db.lock(), row, &root)?;
     let path = Path::new(&row.canonical_root)
         .join(working_copies::ARCHIVE_DIR_NAME)
         .join(archive_name(row)?);
@@ -321,7 +330,8 @@ pub(crate) fn list(db: &Db, measure_sizes: bool) -> anyhow::Result<CheckoutTrash
             });
             continue;
         }
-        match open_archive(&row, false) {
+        let opened = open_archive(db, &row, false);
+        match opened {
             Ok(None) => working_copies::forget_retired(&db.lock(), &row.id)?,
             Ok(Some(archive)) => {
                 let path = archive.path.clone();
@@ -413,13 +423,20 @@ fn delete_with(
             continue;
         }
         let mut removal_started = false;
-        let outcome = open_archive(row, true).and_then(|archive| {
+        let opened = open_archive(db, row, true);
+        let outcome = opened.and_then(|archive| {
             let Some(archive) = archive else {
                 return Ok(());
             };
             let current_path = fs::canonicalize(&archive.path).ok();
+            let legacy_path = Path::new(&row.canonical_root)
+                .join(working_copies::LEGACY_ARCHIVE_DIR_NAME)
+                .join(archive_name(row)?);
+            // Migration moves the trash without rewriting sessions' recorded
+            // working directories. Their old spelling still protects this tree.
             if session_directories.iter().any(|cwd| {
                 cwd.starts_with(&archive.path)
+                    || cwd.starts_with(&legacy_path)
                     || current_path
                         .as_ref()
                         .is_some_and(|current| cwd.starts_with(current))
@@ -699,6 +716,188 @@ mod tests {
                 id,
             }
         }
+
+        /// Reproduce the old namespace without inventing ownership evidence.
+        /// The same archived inode and bare destination survive the simulated
+        /// upgrade, so the first list/delete must migrate before checking absence.
+        async fn legacy() -> Self {
+            let mut fixture = Self::new().await;
+            let name = fixture.archive.file_name().unwrap().to_owned();
+            let legacy = fixture.root.join(working_copies::LEGACY_ARCHIVE_DIR_NAME);
+            fs::rename(fixture.root.join(working_copies::ARCHIVE_DIR_NAME), &legacy).unwrap();
+            fixture.archive = legacy.join(name);
+            assert!(fixture.archive.join("work").is_file());
+            assert!(!fixture.root.join(working_copies::ARCHIVE_DIR_NAME).exists());
+            fixture
+        }
+    }
+
+    /// A root unavailable at startup must not lose legacy trash to a later
+    /// passive read's missing-archive prune. Its first successful read migrates.
+    #[farhelm_testtrace::test]
+    async fn listing_migrates_legacy_trash_when_an_unreachable_root_returns() {
+        let fixture = Fixture::legacy().await;
+        let unavailable = fixture.root.with_extension("unavailable");
+        fs::rename(&fixture.root, &unavailable).unwrap();
+        let failed = list(&fixture.db, false).unwrap();
+        assert!(failed.checkouts.is_empty());
+        assert_eq!(failed.issues.len(), 1);
+        assert!(
+            working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
+                .unwrap()
+                .is_some()
+        );
+        fs::rename(&unavailable, &fixture.root).unwrap();
+        let listing = list(&fixture.db, true).unwrap();
+        assert!(listing.issues.is_empty());
+        assert_eq!(listing.checkouts.len(), 1);
+        assert_eq!(listing.checkouts[0].id, fixture.id);
+        let migrated = fixture
+            .root
+            .join(working_copies::ARCHIVE_DIR_NAME)
+            .join(fixture.archive.file_name().unwrap());
+        assert_eq!(listing.checkouts[0].path, migrated.to_str().unwrap());
+        assert_eq!(
+            fs::read(migrated.join("work")).unwrap(),
+            b"uncommitted work"
+        );
+        assert!(
+            !fixture
+                .root
+                .join(working_copies::LEGACY_ARCHIVE_DIR_NAME)
+                .exists()
+        );
+    }
+
+    /// Delete can be the first post-upgrade operation; migration must precede
+    /// its absence check rather than forgetting a still-present legacy archive.
+    #[farhelm_testtrace::test]
+    async fn deletion_migrates_legacy_trash_before_removing_the_selected_archive() {
+        let fixture = Fixture::legacy().await;
+        let deleted = delete(&fixture.db, std::slice::from_ref(&fixture.id), &[]).unwrap();
+        assert!(deleted.issues.is_empty());
+        assert_eq!(
+            deleted.removed.as_slice(),
+            std::slice::from_ref(&fixture.id)
+        );
+        assert!(
+            !fixture
+                .root
+                .join(working_copies::LEGACY_ARCHIVE_DIR_NAME)
+                .exists()
+        );
+        assert!(
+            fs::read_dir(fixture.root.join(working_copies::ARCHIVE_DIR_NAME))
+                .unwrap()
+                .next()
+                .is_none()
+        );
+        assert!(
+            working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// A passive read never creates an empty trash directory, including when
+    /// it legitimately prunes a recorded archive absent from both namespaces.
+    #[farhelm_testtrace::test]
+    async fn listing_missing_trash_does_not_create_a_new_namespace() {
+        let fixture = Fixture::new().await;
+        fs::remove_dir_all(fixture.root.join(working_copies::ARCHIVE_DIR_NAME)).unwrap();
+        let listing = list(&fixture.db, false).unwrap();
+        assert!(listing.checkouts.is_empty() && listing.issues.is_empty());
+        assert!(!fixture.root.join(working_copies::ARCHIVE_DIR_NAME).exists());
+        assert!(
+            !fixture
+                .root
+                .join(working_copies::LEGACY_ARCHIVE_DIR_NAME)
+                .exists()
+        );
+    }
+
+    /// Migration does not rewrite retained sessions. Their old exact directory
+    /// and subdirectory spellings must still prevent permanent deletion.
+    #[farhelm_testtrace::test]
+    async fn legacy_spelled_session_directories_protect_a_migrated_archive() {
+        for subdirectory in [false, true] {
+            let fixture = Fixture::legacy().await;
+            let cwd = if subdirectory {
+                fixture.archive.join("retained")
+            } else {
+                fixture.archive.clone()
+            };
+            fs::create_dir_all(&cwd).unwrap();
+            let deleted = delete(&fixture.db, std::slice::from_ref(&fixture.id), &[cwd]).unwrap();
+            assert!(deleted.removed.is_empty());
+            assert_eq!(deleted.issues.len(), 1);
+            assert!(
+                deleted.issues[0]
+                    .message
+                    .contains("a session uses this archive")
+            );
+            let listing = list(&fixture.db, false).unwrap();
+            assert_eq!(listing.checkouts.len(), 1);
+            assert_eq!(
+                fs::read(Path::new(&listing.checkouts[0].path).join("work")).unwrap(),
+                b"uncommitted work"
+            );
+            assert!(!fixture.archive.exists());
+        }
+    }
+
+    /// A historical active checkout at the legacy container must never move.
+    /// Neither listing nor Delete may mistake its blocked migration for absence
+    /// and forget a separately recorded archive still inside that directory.
+    #[farhelm_testtrace::test]
+    async fn blocked_legacy_migration_retains_the_archive_record_and_active_checkout() {
+        let fixture = Fixture::new().await;
+        let legacy = fixture.root.join(working_copies::LEGACY_ARCHIVE_DIR_NAME);
+        let active = "historical-legacy-checkout";
+        {
+            let conn = fixture.db.lock();
+            working_copies::record_planned(
+                &conn,
+                &PlannedWorkingCopy {
+                    id: active.into(),
+                    canonical_root: fixture.root.to_str().unwrap().into(),
+                    repo_owner: "acme".into(),
+                    repo_name: "old".into(),
+                    original_basename: working_copies::LEGACY_ARCHIVE_DIR_NAME.into(),
+                    origin_session_id: "retained-origin".into(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                },
+            )
+            .unwrap();
+            working_copies::allocate(&conn, active, None).unwrap();
+        }
+        fs::write(legacy.join("retained-work"), b"active checkout").unwrap();
+        let archived = legacy.join(fixture.archive.file_name().unwrap());
+        fs::rename(&fixture.archive, &archived).unwrap();
+        fs::remove_dir(fixture.root.join(working_copies::ARCHIVE_DIR_NAME)).unwrap();
+        let before = fs::metadata(&legacy).unwrap().ino();
+        let listing = list(&fixture.db, false).unwrap();
+        assert!(listing.checkouts.is_empty());
+        assert_eq!(listing.issues.len(), 1);
+        let deleted = delete(&fixture.db, std::slice::from_ref(&fixture.id), &[]).unwrap();
+        assert!(deleted.removed.is_empty());
+        assert_eq!(deleted.issues.len(), 1);
+        assert!(
+            working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(fs::metadata(&legacy).unwrap().ino(), before);
+        assert_eq!(
+            fs::read(legacy.join("retained-work")).unwrap(),
+            b"active checkout"
+        );
+        assert_eq!(
+            fs::read(archived.join("work")).unwrap(),
+            b"uncommitted work"
+        );
+        assert!(!fixture.root.join(working_copies::ARCHIVE_DIR_NAME).exists());
     }
 
     /// A count is ownership-backed rather than a scan of arbitrary neighbours.
@@ -939,7 +1138,7 @@ mod tests {
         let row = working_copies::get_working_copy(&fixture.db.lock(), &fixture.id)
             .unwrap()
             .unwrap();
-        let archive = open_archive(&row, true).unwrap().unwrap();
+        let archive = open_archive(&fixture.db, &row, true).unwrap().unwrap();
         let old_root = fixture.root.with_extension("opened-original");
         fs::rename(&fixture.root, &old_root).unwrap();
         fs::create_dir(&fixture.root).unwrap();

@@ -2696,6 +2696,16 @@ evidence, but cannot authorize another directory move.
 
 ### Archived-checkout trash
 
+The archive namespace is `.farhelm-trash`; the legacy `farhelm-archived-working-copies` remains reserved alongside it
+and `.farhelm-spares`. Before archive creation/recovery or a trash read/delete can use a root, the supervisor renames
+the whole legacy directory without replacement and fsyncs the verified opened root. Registry destinations are bare names
+and require no migration. An absent legacy directory or an occupied new name is a no-op; other failures propagate
+without creating an empty destination. A non-retired checkout overlapping the legacy path refuses migration and leaves
+trash records retained for retry. Passive reads need no directory admission for the one-winner rename. Migration holds
+the shared database lock through its overlap check and rename, preventing allocation from committing an overlapping
+checkout between them; ordinary archive opens and sizing hold no database lock. The permanent delete guard also compares
+session working directories with the legacy spelling after migration.
+
 The trash is built for archive collections well below the 10,000-archive cleanup limit, with ordinary path lengths. A
 host beyond that scale may be unlistable in the app; supporting such collections is not a goal.
 

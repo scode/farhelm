@@ -1006,7 +1006,7 @@ test("borrowers retain the checkout until the final stopped session is deleted",
     expect(await contents(origin.cwd)).toEqual(before);
     await deleteSession(request, nested.id);
     await expect(fs.stat(origin.cwd)).rejects.toMatchObject({ code: "ENOENT" });
-    const archive = path.join(fixture.root, "farhelm-archived-working-copies");
+    const archive = path.join(fixture.root, ".farhelm-trash");
     const moved = await fs.readdir(archive);
     expect(moved).toHaveLength(1);
     const destination = path.join(archive, moved[0]);
@@ -1104,7 +1104,7 @@ test("replacement preserves borrowers and archives only the released checkout", 
     await assertLive(page, borrower.id);
     await deleteSession(request, borrower.id);
     await expect(fs.stat(origin.cwd)).rejects.toMatchObject({ code: "ENOENT" });
-    const archive = path.join(fixture.root, "farhelm-archived-working-copies");
+    const archive = path.join(fixture.root, ".farhelm-trash");
     const firstArchive = await fs.readdir(archive);
     expect(firstArchive).toHaveLength(1);
     expect(await contents(path.join(archive, firstArchive[0]))).toEqual(before);
@@ -1535,7 +1535,7 @@ test("trash count and cue follow the final reference, including another client",
     await expect(band.locator(".trash-host-delete")).toBeEnabled();
     await expect(band.locator(".checkout-trash-entry-meta")).toContainText(fixture.repo);
     await expect(band.locator(".checkout-trash-entry-meta")).toContainText(/archived .* UTC/);
-    await expect(band.locator(".checkout-trash-path")).toContainText(path.join(fixture.root, "farhelm-archived-working-copies"));
+    await expect(band.locator(".checkout-trash-path")).toContainText(path.join(fixture.root, ".farhelm-trash"));
     await expect(band.locator(".checkout-trash-host-header")).toContainText(/KiB|MiB/);
     await band.locator(".trash-host-delete").click();
     await expect(band.locator(".checkout-trash-confirm")).toContainText("never committed or pushed is lost permanently");
@@ -1548,7 +1548,7 @@ test("trash count and cue follow the final reference, including another client",
     await page.screenshot({path: info.outputPath("trash-confirmation.png")});
     await band.locator(".trash-confirm-submit").click();
     await expect(band).toHaveCount(0);
-    expect(await fs.readdir(path.join(fixture.root, "farhelm-archived-working-copies"))).toEqual([]);
+    expect(await fs.readdir(path.join(fixture.root, ".farhelm-trash"))).toEqual([]);
     await dialog.locator(".trash-close").click();
     await expect(page.locator(".checkout-trash-button")).toBeFocused();
   } finally {
@@ -1570,7 +1570,7 @@ test("trash global confirmation freezes archives and reports preserved recovery 
     const host = await localHostId(request);
     const first = await trashSession(page, request, fixture, ids, "first");
     await deleteSession(request, first.id);
-    const archive = path.join(fixture.root, "farhelm-archived-working-copies");
+    const archive = path.join(fixture.root, ".farhelm-trash");
     const destinations = await fs.readdir(archive);
     expect(destinations).toHaveLength(1);
     const recovered = path.join(archive, destinations[0]);
@@ -1738,8 +1738,8 @@ async function contextlessTrashSession(request: APIRequestContext,
     {timeout: 20_000}).toBe("once\n");
   expect((await sessionState(request, session.id)).working_copy).toBeTruthy();
   await deleteSession(request, session.id);
-  const destinations = await fs.readdir(path.join(fixture.root, "farhelm-archived-working-copies"));
+  const destinations = await fs.readdir(path.join(fixture.root, ".farhelm-trash"));
   const name = destinations.find(name => name.startsWith(path.basename(session.cwd) + "-"));
   expect(name).toBeTruthy();
-  return path.join(fixture.root, "farhelm-archived-working-copies", name!);
+  return path.join(fixture.root, ".farhelm-trash", name!);
 }

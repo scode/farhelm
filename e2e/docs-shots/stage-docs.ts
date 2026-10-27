@@ -226,7 +226,7 @@ async function installCheckoutTrash(page: Page, request: APIRequestContext, scen
           id: `docs-${key}-${checkout.checkout}`,
           name,
           repository: checkout.repository,
-          path: `${checkout.root}/farhelm-archived-working-copies/${name}`,
+          path: `${checkout.root}/.farhelm-trash/${name}`,
           archived_at: archivedAt,
           bytes: checkout.bytes,
         };

@@ -93,20 +93,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   agent instructions and docs, un-ignoring the end-to-end delivery tests, and writing a new changelog fragment. SPEC.md,
   Agent-spawned sessions, keeps the design.
 
-- **Move the trash into a hidden folder.** Deleting a managed checkout's last session moves the checkout into
-  `farhelm-archived-working-copies` inside the checkout folder (`ARCHIVE_DIR_NAME` in
-  `crates/farhelm-supervisor/src/working_copies.rs`; SPEC.md, Managed checkouts, and the ownership statement that names
-  it), a visible folder beside the user's own checkouts. Move it into a hidden folder named in the same style as the
-  spare checkouts' `.farhelm-spares` (planned in `plans/queue/spare-launch-checkout.md`), for example `.farhelm-trash`;
-  settle the exact name with that plan's. Needs: migrating existing trash folders on every host (archived checkouts are
-  recorded by path in the registry's `archive_destination`, so the move updates those records, and a same-filesystem
-  rename keeps the identity checks intact); the reserved-name handling in the occupancy scan
-  (`occupied_related_names_from_entries`) and the nesting and overlap guards that compare against the archive path;
-  repository discovery's skip (`repository_discovery.rs`, which skips the archive folder by name); the path-length
-  margin (`ARCHIVE_PATH_GROWTH`, 82 bytes, quoted in SPEC.md, changes with the name); and the text in SPEC.md,
-  `docs/github-checkouts.md` and the docs page `website/src/content/docs/docs/using/stop-restart-resume.mdx`. Asked for
-  by the maintainer on 2026-10-20 while planning the spare checkouts. Plan: `plans/queue/hidden-trash-folder.md`.
-
 - **Search sessions by content or action.** Let the user find a session by what happened in it — which session ran a
   certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
   exposed are TBD.

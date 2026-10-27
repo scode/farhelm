@@ -2331,8 +2331,8 @@ fn checkout_path_too_long() -> String {
 /// Design E's first-version nesting constraint, evaluated against the
 /// CURRENT registry: a fresh checkout at `planned_cwd` may not sit equal
 /// to or inside any active managed checkout's directory, nor inside one's
-/// reserved archive directory (`<canonical_root>/farhelm-archived-
-/// working-copies`). Nested managed moves are what last-reference
+/// reserved archive directory (`<canonical_root>/.farhelm-trash`).
+/// Nested managed moves are what last-reference
 /// archival cannot do safely, so this is refused with a clear validation
 /// error at preview AND re-checked under directory admission before an
 /// allocation is recorded. Retired rows carry no claim. A registry that
@@ -5002,8 +5002,8 @@ impl Supervisor {
         let rows = sup.store.working_copy_rows().await?;
         let claimed = registry_claimed_basenames(&canonical_root, &rows);
         let name = checkout_basename(&repo, title, &|candidate| {
-            // The archive namespace is reserved even before the root exists.
-            candidate == crate::working_copies::ARCHIVE_DIR_NAME
+            // Infrastructure stays reserved before it exists and after migration.
+            crate::working_copies::reserved_checkout_name(std::ffi::OsStr::new(candidate))
                 || occupied.contains(candidate)
                 || claimed.contains(candidate)
         })
@@ -5087,8 +5087,9 @@ impl Supervisor {
     }
 
     /// Read this host's trash without blocking the async connection loop.
-    /// Retired archive rows no longer move. Idempotent pruning needs no
-    /// directory admission, so a hung passive read cannot freeze lifecycle work.
+    /// Legacy trash migrates before lookup; missing archives can then be pruned.
+    /// Neither step needs directory admission. Migration holds the database
+    /// lock against allocation; individual archive opens and sizing do not.
     pub(crate) async fn list_checkout_trash(
         &self,
         measure_sizes: bool,
@@ -33826,10 +33827,12 @@ exit 0
             "{message}"
         );
         let future = home.path().join("future");
+        // The legacy title produces the exact reserved basename. A leading dot
+        // is removed by title slugging, so the hidden name cannot test this gate.
         let error = Supervisor::github_checkout_preview(
             &sup,
             "acme/farhelm",
-            Some(crate::working_copies::ARCHIVE_DIR_NAME),
+            Some(crate::working_copies::LEGACY_ARCHIVE_DIR_NAME),
             Some(future.to_str().unwrap().into()),
             Some(1),
         )
@@ -37964,7 +37967,7 @@ exit 0
             let conn = rusqlite::Connection::open(state.path().join("supervisor.db")).unwrap();
             assert_eq!(conn.execute(
                 "UPDATE working_copies SET allocation_state = 'archive_pending', archive_destination = ?2 WHERE id = ?1",
-                rusqlite::params![planned[0].id, root.join("farhelm-archived-working-copies/pending").to_str().unwrap()],
+                rusqlite::params![planned[0].id, root.join(".farhelm-trash/pending").to_str().unwrap()],
             ).unwrap(), 1);
         }
         assert_eq!(
