@@ -96,3 +96,67 @@ name, two comments needed the current path and migration contract, and a propose
 allocation race. The final implementation keeps the fresh overlap check and rename under the allocation database lock,
 then releases it before individual archive opens and sizing. The same reviewer inspected that replacement, the sorted
 expectation and the clone removal, and reported no remaining findings. The cold commit/PR wording reader also completed.
+
+### Landing
+
+Landed as built. Deleting a managed checkout's last session keeps its work in Trash, which used to be a visible
+`farhelm-archived-working-copies` folder next to the user's checkouts. Trash is now the hidden `.farhelm-trash`, like
+the spare checkouts' hidden folder, and an existing old Trash folder moves there automatically the next time Farhelm
+archives, recovers, lists or permanently deletes on that checkout root. The GitHub-checkout guide and the docs page
+"Stop, restart and resume" describe the new location.
+
+- #2744: hide checkout Trash and move the old folder automatically.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the plan was based, main gained four plans from the previous landing round and review-queue triage records. Two of
+those plans change code next to this one. "Restart with" now asks the supervisor whether a session's folder is a managed
+checkout before trusting it automatically; a folder in Trash, under the old or the new name, was never a managed
+checkout and still is not, so this plan changes no trust decision. The other changed how a named restart treats the
+saved conversation, which shares nothing with Trash. A fresh-context reviewer and I read this plan against everything
+main gained and found nothing that needs fixing.
+
+#### Fixes made at landing
+
+None.
+
+#### Things you should know
+
+- While Trash is being listed, the one-time move of the old folder (a check that no live checkout overlaps it, then the
+  rename) runs while the supervisor holds its database lock; the lock is released before each trashed checkout is opened
+  and measured. The plan's reviewer chose this to avoid a race with a checkout being created at the same moment. On a
+  network disk that hangs during that move, other supervisor work that needs the database would wait with it. It happens
+  once per checkout root; I would accept it unless you use checkout roots on network disks, in which case it is a
+  candidate follow-up.
+- Both folder names stay reserved: neither can be the name of a new checkout. But the check that stops a new checkout
+  being placed inside a Trash folder now knows only `.farhelm-trash`, not an old `farhelm-archived-working-copies`
+  folder that has not moved yet. Reaching that takes choosing a checkout root inside another root's old Trash. While
+  that checkout exists, the outer root's old Trash cannot move: listing and permanent deletion there report the refusal
+  and keep the Trash records, and deleting a last session there leaves its checkout in place, with a notice, instead of
+  moving it to Trash. No work is deleted. It is an unlikely setup; a follow-up only if you think anyone would do it.
+- The queued review finding "hidden-trash-overlap-migration-result-source-gap" asked what happens when the move is
+  refused; this plan settles it (the refusal is reported and the Trash records are kept), so it can be closed when you
+  triage it.
+
+#### Checks
+
+This round landed only this plan, on main after the previous round's four plans:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the check that every test delay states its reason, `dprint check`
+  across the repository, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (two
+  warnings, both about citations main already had), the docs website build (for the edited page), the workspace debug
+  build and the UI's release web build: all passed.
+- The four browser specs the plan changed, `npx playwright test` in `e2e/` with `tests/github-checkouts.spec.ts`,
+  `tests/modal-layout.spec.ts`, `tests/popover-width-movement.spec.ts` and `tests/trash-dialog.spec.ts`, on Chromium and
+  WebKit, three workers each with its own helm and supervisors, no retries, run `0ad0d661-cb34-477c-805a-2dbdfa795f82`:
+  all 134 passed. They include creating a real Trash on disk, listing it and deleting from it.
+- The whole Rust workspace, `cargo nextest run --workspace --exclude farhelm-desktop`, with the pinned test runner and
+  tmux, four tests at a time, no retries, run `c90cdc02-009a-43b7-abed-45744177a404`: all 4466 passed; 40 more were
+  skipped by design (helper entries that only run as child processes of other tests, and tests that need a real
+  signed-in Claude or Codex); the retained output has no in-test `SKIPPED` message.
+- Reused: none. Skipped: the full browser suite (the changed specs cover the Trash surfaces), the desktop app checks (no
+  desktop code changed) and a real Mac (not runnable here).
+
+The report skipped the whole Rust workspace and the website build; this landing ran both. Nothing in the executor's
+report became untrue at landing.

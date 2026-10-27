@@ -22,3 +22,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`restart-with-trust-identity`](reports/restart-with-trust-identity.report.md) landed 2026-10-27 in #2738: Restart with checks the checkout folder's identity before trusting a Codex or Pi agent automatically (triage outcome)
 - [`link-refusal-confirm-layer`](reports/link-refusal-confirm-layer.report.md) landed 2026-10-27 in #2740: A refused-link explanation never covers an open session confirmation's warning (triage outcome)
 - [`named-restart-reporter-clear`](reports/named-restart-reporter-clear.report.md) landed 2026-10-27 in #2742: Restart with into another Pi or OMP conversation clears the old one when the conversation reporter cannot be prepared (triage outcome)
+- [`hidden-trash-folder`](reports/hidden-trash-folder.report.md) landed 2026-10-27 in #2744: Deleted managed checkouts go into a hidden `.farhelm-trash` folder, and each host's existing trash moves there on its own
