@@ -3315,6 +3315,9 @@ a:any-link,
 .templates-editor-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border-dialog); }
 .templates-actions { flex-wrap: wrap; }
 .templates-actions .templates-save { margin-left: auto; }
+/* Each delete kind keeps its own native listener. Author display rules on
+   .btn must not make the other, hidden control visible or focusable. */
+.templates-delete[hidden] { display: none; }
 .templates-departure { display: grid; gap: 10px; }
 .templates-error { color: var(--warn); font-size: 12px; overflow-wrap: anywhere; }
 .templates-empty { color: var(--fg-1); align-self: center; margin: auto !important; }

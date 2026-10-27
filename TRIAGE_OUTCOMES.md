@@ -18834,7 +18834,8 @@
   disabled button while the list reloads, or refusing a click whose kind differs from what was last painted) is
   execution's choice. A test covers the failed-reload, Retry, kind-change sequence. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/template-delete-guards.md`.
+- Execution: implemented in change `rmqlvyzqknnoqyltownzxlvwkrokltvu`, bookmark
+  `plan/template-delete-guards/01-retry-permanent-label`; draft PR https://github.com/scode/farhelm/pull/2745/changes.
 
 ## template-delete-reads-new-selection.md
 

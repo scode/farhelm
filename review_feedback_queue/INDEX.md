@@ -12,11 +12,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   for one template can delete a newly selected template. Its temporary Undo does not restore shortcut bindings; event
   frequency is unmeasured.
 
-- [`template-retry-installs-unseen-permanent-delete.md`](template-retry-installs-unseen-permanent-delete.md) — After
-  partial failures involving an invalid older template, desktop Retry can leave ordinary Delete visible while its click
-  permanently deletes the template without the promised warning or Undo. Release-upgrade filtering covers at most part
-  of this conditional route.
-
 - [`template-delete-lost-reply-loses-undo.md`](template-delete-lost-reply-loses-undo.md) — An ordinary template deletion
   can commit but offer no Undo when its success reply is lost. Manual recovery from the mounted editor remains possible
   until it closes; the unknown-outcome exception's scope is ambiguous.
