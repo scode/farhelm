@@ -1,3 +1,4 @@
+import { expectCompactRows } from "./helpers/list-header";
 import { randomUUID } from "node:crypto";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
@@ -72,8 +73,11 @@ async function prepare(page: Page, request: APIRequestContext, options: { lowerC
   for (let i = 0; i < (options.lowerCount ?? 0); i++) {
     lower.push(await ownedSession(request, `zzz-delete-${i}-${stamp}`));
   }
+  // Recently active no longer reaches the wrap threshold at a supported
+  // width. Try Newest created; the explicit fit premise below still governs.
+  // Row order comes from the controlled listing, not this preference.
   await patchPreferences(request, {
-    welcome_seen: true, compact: true, list_sort: "title", skip_session_confirmations: true,
+    welcome_seen: true, compact: true, list_sort: "created", skip_session_confirmations: true,
   });
   await pinAutoSelect(page, selected);
   const response = await request.get("/api/sessions");
@@ -138,8 +142,8 @@ async function prepare(page: Page, request: APIRequestContext, options: { lowerC
   await settle(page);
   await expect(page.locator(".session-row").first()).toHaveAttribute("data-session-id", target);
   await expect(page.locator(".session-row")).toHaveCount(rows.length);
-  await expect(page.locator(".session-heading .heading-count")).toHaveText(String(rows.length));
-  await expect(page.locator(".compact-toggle input")).toBeChecked();
+  await expect(page.locator(".session-heading .session-count")).toHaveText(String(rows.length));
+  await expectCompactRows(page, true);
   await expect(page.locator(".checkout-trash-button")).toHaveAttribute("data-count", "0");
   await expect(page.locator(".delete-notice")).toHaveCount(0);
   expect(await page.locator(".app-sidebar").evaluate((node) => node.scrollHeight <= node.clientHeight),
@@ -169,7 +173,7 @@ async function prepare(page: Page, request: APIRequestContext, options: { lowerC
       expect(await response.finished()).toBeNull();
       await settle(page);
       await expect(page.locator(".session-row")).toHaveCount(rows.length);
-      await expect(page.locator(".session-heading .heading-count")).toHaveText(String(rows.length));
+      await expect(page.locator(".session-heading .session-count")).toHaveText(String(rows.length));
     },
   };
 }
@@ -279,7 +283,7 @@ async function heldLowerDelete(page: Page, request: APIRequestContext, fixture: 
       expect(response.headers()["x-farhelm-build"]).toBe(fixture.build);
       expect(await response.finished()).toBeNull();
       await settle(page);
-      await expect(page.locator(".session-heading .heading-count")).toHaveText(String(fixture.rows.length));
+      await expect(page.locator(".session-heading .session-count")).toHaveText(String(fixture.rows.length));
     },
   };
 }
@@ -308,16 +312,16 @@ async function headerMetrics(page: Page) {
     const box = node.getBoundingClientRect();
     const style = getComputedStyle(node);
     const count = node.querySelector(".session-count")!.getBoundingClientRect();
-    const compact = node.querySelector(".compact-toggle")!.getBoundingClientRect();
+    const title = node.querySelector(".sort-title-owner")!.getBoundingClientRect();
     const actions = node.querySelector(".session-heading-actions")!.getBoundingClientRect();
     return {
       height: box.height,
       available: box.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
-      total: count.width + compact.width + actions.width + 2 * parseFloat(style.columnGap),
+      total: count.width + title.width + actions.width + 2 * parseFloat(style.columnGap),
       actionsY: actions.y,
       actionsX: actions.x,
-      compactBottom: compact.bottom,
-      compactRight: compact.right,
+      titleBottom: title.bottom,
+      titleRight: title.right,
       sidebar: parseFloat(getComputedStyle(document.querySelector(".app-sidebar")!).width),
     };
   });
@@ -412,11 +416,14 @@ for (const kind of ["menu", "bell"] as const) {
     expect(ten.total, "the extra decimal digit must increase the real header's natural width").toBeGreaterThan(nine.total);
     fixture.rows.pop();
     await fixture.refresh();
-    const desired = Math.round(nine.sidebar + (nine.total + ten.total) / 2 - nine.available);
+    // The fit interval can straddle the supported minimum even when its
+    // midpoint falls below it. Try that boundary; both fit assertions below
+    // still have to prove that nine fits and ten really wraps.
+    const desired = Math.max(240, Math.round(nine.sidebar + (nine.total + ten.total) / 2 - nine.available));
     await sidebarWidth(page, desired);
     const fitted = await headerMetrics(page);
     expect(fitted.height, "nine sessions must still fit the original single header line").toBe(nine.height);
-    expect(fitted.actionsX).toBeGreaterThanOrEqual(fitted.compactRight);
+    expect(fitted.actionsX).toBeGreaterThanOrEqual(fitted.titleRight);
     expect(fitted.available).toBeGreaterThanOrEqual(nine.total);
     expect(fitted.available).toBeLessThan(ten.total);
     const target = row(page, fixture.target);
@@ -438,7 +445,7 @@ for (const kind of ["menu", "bell"] as const) {
     );
     fixture.notify();
     await expect.poll(fixture.reads, { message: "the tenth-row response must be held before publication" }).toBeGreaterThan(reads);
-    await expect(page.locator(".session-heading .heading-count")).toHaveText("9");
+    await expect(page.locator(".session-heading .session-count")).toHaveText("9");
     await expect(panel).toBeVisible();
     await expect(focus).toBeFocused();
     expect(await geometry(target)).toEqual(initial);
@@ -448,14 +455,14 @@ for (const kind of ["menu", "bell"] as const) {
     expect(response.headers()["x-farhelm-build"]).toBe(fixture.build);
     expect(await response.finished()).toBeNull();
     await settle(page);
-    await expect(page.locator(".session-heading .heading-count")).toHaveText("10");
+    await expect(page.locator(".session-heading .session-count")).toHaveText("10");
     const { y: beforeY, headingHeight: beforeHeight, ...before } = initial;
     const { y: afterY, headingHeight: afterHeight, ...after } = await geometry(target);
     expect(afterHeight, "the actions must wrap onto a second header line").toBeGreaterThan(beforeHeight);
     expect(afterY, "header growth must move the unchanged first row").toBeGreaterThan(beforeY);
     expect(after, "the banner must not rely on scroll, host or viewport movement").toEqual(before);
     const wrapped = await headerMetrics(page);
-    expect(wrapped.actionsY).toBeGreaterThan(wrapped.compactBottom);
+    expect(wrapped.actionsY).toBeGreaterThan(wrapped.titleBottom);
     const shown = await page.locator(".session-row").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-session-id")));
     expect(shown.slice(0, prefix.length)).toEqual(prefix);
     expect(shown.at(-1)).toBe(tenth.id);

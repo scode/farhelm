@@ -43,7 +43,8 @@ async function withTemplates(
     await patchPreferences(request, { welcome_seen: true, quick_launch_template: null, template_shortcuts: {} });
     await page.setViewportSize({ width: 1100, height: 1100 });
     await page.goto("/");
-    await page.getByRole("button", { name: "templates", exact: true }).click();
+    // The sidebar icon and the dialog keep distinct accessible names.
+    await page.getByRole("button", { name: "Templates", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "templates", exact: true });
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
     for (const name of names) await expect(numberToggle(dialog, name)).toBeEnabled();
@@ -167,7 +168,7 @@ for (const scenario of transfers) {
       await expect(dialog).toHaveCount(0);
       await patchPreferences(request, { quick_launch_template: from });
       await page.reload();
-      await page.getByRole("button", { name: "templates", exact: true }).click();
+      await page.getByRole("button", { name: "Templates", exact: true }).click();
       await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
       await expect(dialog.getByRole("button", { name: `quick launch ${from}`, exact: true })).toHaveAttribute("aria-pressed", "true");
       await expect(templateRow(dialog, from).locator(".templates-quick-chord")).toHaveCount(1);

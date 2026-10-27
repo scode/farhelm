@@ -1,3 +1,4 @@
+import { expectCompactRows } from "./helpers/list-header";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { expect, test } from "./helpers/evidence";
@@ -243,7 +244,7 @@ async function prepare(page: Page, request: APIRequestContext, options: {
   });
   await waitForFeedReadersSettled(page);
   await expect(page.locator(".session-row")).toHaveCount(3);
-  await expect(page.locator(".compact-toggle input")).toBeChecked({ checked: !!options.compact });
+  await expectCompactRows(page, !!options.compact);
   const source = page.locator(`.session-row[data-session-id="${a}"]`);
   const target = page.locator(`.session-row[data-session-id="${b}"]`);
   await expect(source.locator(".session-title")).toHaveText(`${LONG_TITLE}${stamp}`);

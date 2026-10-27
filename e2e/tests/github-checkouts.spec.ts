@@ -1,6 +1,7 @@
 /** Real checkout acceptance: every API, clone, hook and terminal is live.
  * Only the vendor agent is fake. An exact private Git URL rewrite and a
  * file-only transport policy keep repository traffic inside the owned stack. */
+import { setCompact } from "./helpers/list-header";
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import type { APIRequestContext, Locator, Page, Request } from "@playwright/test";
@@ -735,8 +736,7 @@ async function assertCheckout(
  * subdirectory must remain distinguishable from its checkout root. */
 async function assertManagedMark(page: Page, id: string, repo: string, root: string, cwd = root) {
   const row = page.locator(`.session-row[data-session-id="${id}"]`);
-  const compact = page.getByRole("checkbox", { name: "compact", exact: true });
-  await compact.uncheck();
+  await setCompact(page, false);
   await expect(row.locator(".session-repository")).toHaveText(repo);
   const mark = row.locator(".managed-checkout-mark");
   await expect(mark.locator('svg[data-glyph="branch"]')).toHaveAttribute("aria-hidden", "true");
@@ -749,13 +749,13 @@ async function assertManagedMark(page: Page, id: string, repo: string, root: str
   await expect(row.locator(".session-row-open")).toHaveAccessibleName(directory);
   await expect(row.locator(".session-row-open")).toHaveAccessibleName(/When the last session using it is deleted, the checkout moves to the trash\./);
   await expect(page.locator(".session-details .managed-checkout-mark")).toHaveAttribute("data-tooltip", await mark.getAttribute("data-tooltip") as string);
-  await compact.check();
+  await setCompact(page, true);
   await expect(row.locator(".session-identity-copy .managed-checkout-mark")).toBeVisible();
   await expect(row.locator(".session-repository")).toHaveCount(0);
   await expect(mark.locator(".managed-checkout-description")).toHaveText(description);
   await expect(row.locator(".session-row-open")).toHaveAccessibleName(directory);
   await expect(row.locator(".session-row-open")).toHaveAccessibleName(/When the last session using it is deleted, the checkout moves to the trash\./);
-  await compact.uncheck();
+  await setCompact(page, false);
 }
 
 /** Lose a real, durably refused response after a late path collision. The

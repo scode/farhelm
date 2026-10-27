@@ -1,6 +1,7 @@
 // Browser evidence for the permanent, server-backed sidebar host selector.
 // Rendering fewer rows alone cannot distinguish a real helm query from a
 // client-side pass over a previously fetched page.
+import { chooseSort } from "./helpers/list-header";
 import { expect, test } from "./helpers/evidence";
 import { Page, Route } from "@playwright/test";
 import { cleanupSession, createSession, holdReads, listHosts, listSessions, localHostId, observeFeedReaders, SessionPage, stubFeed, waitForFeedReadersSettled } from "./helpers/fleet";
@@ -65,14 +66,14 @@ test.describe("permanent host filtering", () => {
     await selectHost(page, local);
     await expect(row(page, localSession.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, remoteSession.id)).toHaveCount(0);
-    await expect(page.locator(".session-count")).toHaveText(/^\d+ matching of \d+ sessions$/);
+    await expect(page.locator(".session-count")).toHaveText(/^\d+ of \d+$/);
     await selectHost(page, remote!.id);
     await expect(row(page, remoteSession.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, localSession.id)).toHaveCount(0);
     await selectHost(page, undefined);
     await expect(row(page, localSession.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, remoteSession.id)).toBeVisible();
-    await expect(page.locator(".session-count")).toHaveText(/^\d+ sessions$/);
+    await expect(page.locator(".session-count")).toHaveText(/^\d+$/);
     const localReads = reads.filter((read) => read.url.searchParams.get("host") === String(local));
     const remoteReads = reads.filter((read) => read.url.searchParams.get("host") === String(remote!.id));
     const allReads = reads.filter((read) => !read.url.searchParams.has("host"));
@@ -89,7 +90,7 @@ test.describe("permanent host filtering", () => {
     expect((await listSessions(request, `host=${remote!.id}`)).sessions, "the empty fixture must be asserted before selection").toHaveLength(0);
     await openList(page); await selectHost(page, remote!.id);
     await expect(page.locator(".filter-empty")).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator(".session-count")).toHaveText(/^0 matching of \d+ sessions$/);
+    await expect(page.locator(".session-count")).toHaveText(/^0 of \d+$/);
   });
 
   /** A removed selected host remains a disabled tombstone so its query cannot silently widen to ALL. */
@@ -249,7 +250,7 @@ test.describe("permanent host filtering", () => {
     await expect(select).toBeFocused();
   });
 
-  /** Both native controls remain recovery tools while a listing is held or its queued replacement fails. */
+  /** Host and sort choices remain recovery tools while a listing is held or its queued replacement fails. */
   test("host selector and sort stay usable during held and failed listings", async ({ page, request }) => {
     const local = await localHostId(request);
     const listings = await holdReads(page, (url) => url.pathname === "/api/sessions");
@@ -257,15 +258,15 @@ test.describe("permanent host filtering", () => {
       await page.goto("/");
       await listings.waitForCaptures(1);
       const host = page.locator(".filter-host");
-      const sort = page.locator(".sort-select");
+      const sort = page.locator(".sort-title");
       await expect(host).toBeVisible({ timeout: 20_000 });
       await expect(sort).toBeVisible();
       await host.focus();
       await expect(host).toBeFocused();
       await host.selectOption(String(local));
-      await sort.selectOption("title");
+      await chooseSort(page, "title");
       await expect(host).toHaveValue(String(local));
-      await expect(sort).toHaveValue("title");
+      await expect(sort).toHaveAttribute("data-sort", "title");
 
       listings.release(1);
       await listings.waitForCaptures(2);
@@ -278,9 +279,9 @@ test.describe("permanent host filtering", () => {
       await expect(host).toBeVisible({ timeout: 20_000 });
       await expect(sort).toBeVisible();
       await host.selectOption("");
-      await sort.selectOption("created");
+      await chooseSort(page, "created");
       await expect(host).toHaveValue("");
-      await expect(sort).toHaveValue("created");
+      await expect(sort).toHaveAttribute("data-sort", "created");
     } finally {
       listings.releaseAll();
     }

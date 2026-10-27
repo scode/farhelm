@@ -1,3 +1,4 @@
+import { chooseSort } from "./helpers/list-header";
 // A real menu write and a second client prove shared pins; DOM positions
 // prove the sidebar partition rather than a changed helm/quick-switcher sort.
 import { expect, test } from "./helpers/evidence";
@@ -25,7 +26,7 @@ test("pin from the menu groups the sidebar and unpin restores title order", asyn
     const last = await createSession(request, { title: `z-pin-${stamp}` });
     created.push(last.id);
     await page.goto("/");
-    await page.locator(".sort-select").selectOption("title");
+    await chooseSort(page, "title");
     const a = page.locator(`.session-row[data-session-id="${first.id}"]`);
     const z = page.locator(`.session-row[data-session-id="${last.id}"]`);
     await expect(a).toBeVisible({ timeout: 20_000 });

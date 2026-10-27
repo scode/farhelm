@@ -84,7 +84,7 @@ async function openTallDialog(page: Page, family: string): Promise<Locator> {
     return dialog;
   }
   if (family === "templates") {
-    await page.getByRole("button", { name: "templates", exact: true }).click();
+    await page.getByRole("button", { name: "Templates", exact: true }).click();
     const dialog = page.locator(".templates-dialog");
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
     await dialog.locator(".templates-new").click();

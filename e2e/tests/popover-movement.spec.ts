@@ -1,3 +1,4 @@
+import { expectCompactRows, setCompact } from "./helpers/list-header";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { expect, test } from "./helpers/evidence";
@@ -113,7 +114,7 @@ async function prepare(page: Page, request: APIRequestContext, extraAbove = fals
   await expect(page.locator(".session-row").nth(0)).toHaveAttribute("data-session-id", above);
   await expect(page.locator(".session-row").nth(extraAbove ? 2 : 1)).toHaveAttribute("data-session-id", target);
   await expect(row(page, target)).toHaveAttribute("data-session-selected", "false");
-  await expect(page.locator(".compact-toggle input")).not.toBeChecked();
+  await expectCompactRows(page, false);
   expect(await page.locator(".app-sidebar").evaluate((node) => node.scrollHeight <= node.clientHeight),
     "fixture rows must fit without scrolling").toBe(true);
   await waitForFeedReadersSettled(page);
@@ -190,49 +191,35 @@ async function geometry(target: Locator) {
 }
 
 for (const kind of ["menu", "bell"] as const) {
-  /** Compact changes remove metadata above the anchor. Keyboard activation
-   * avoids outside-pointer dismissal for menus. A bell intentionally closes
-   * when focus leaves its panel, so its leg activates the actual checkbox with
-   * HTMLElement.click(): native checking/change behavior, with no pointerdown
-   * or focus transfer that could dismiss the bell before its row moves.
+  /** Opening Sort dismisses the row popup before Compact can be chosen.
+   * Prove the input boundary leaves row geometry alone, then prove Compact
+   * removes metadata and moves the anchor. Dismissal alone would conflate
+   * outside input with the later density change.
    */
-  test(`compact rows move the anchor and close an open ${kind}`, async ({ page, request }) => {
+  test(`Sort dismisses an open ${kind} before Compact moves its anchor`, async ({ page, request }) => {
     const fixture = await prepare(page, request);
     const target = row(page, fixture.target);
     await expect(row(page, fixture.above).locator(".session-row-meta")).toBeVisible();
     const { toggle, panel } = await openPopup(page, target, kind);
-    const compact = page.locator(".compact-toggle input");
-    if (kind === "menu") {
-      await compact.focus();
-      await expect(compact).toBeFocused();
-      await expect(panel, "focus transfer alone must leave the actions menu open").toBeVisible();
-      await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    }
     const { y: beforeY, ...before } = await geometry(target);
-    if (kind === "menu") {
-      await page.keyboard.press("Space");
-    } else {
-      await expect(panel).toBeFocused();
-      const activation = await compact.evaluate((node: HTMLInputElement) => {
-        const focused = document.activeElement;
-        const panelOwnedFocus = focused?.classList.contains("session-bell-panel") === true;
-        node.click();
-        return {
-          panelOwnedFocus,
-          checked: node.checked,
-          focusUnchangedOrPanelRemoved: document.activeElement === focused || focused?.isConnected === false,
-        };
-      });
-      expect(activation).toEqual({ panelOwnedFocus: true, checked: true, focusUnchangedOrPanelRemoved: true });
-    }
-    await expect(compact).toBeChecked();
+    const originalFocus = kind === "menu" ? target.locator(".session-row-rename") : panel;
+    await expect(originalFocus).toBeFocused();
+    await page.locator(".sort-title").click();
+    const compact = page.getByRole("menu", { name: "Sort", exact: true })
+      .getByRole("menuitemcheckbox", { name: /^Compact(?:$|\s)/ });
+    await expect(compact).toHaveAttribute("aria-checked", "false");
+    await expect(panel, "opening Sort dismisses the old popup before changing density").toHaveCount(0);
+    await expect(row(page, fixture.above).locator(".session-row-meta")).toBeVisible();
+    expect(await geometry(target), "opening Sort must leave expanded row geometry alone").toEqual({ y: beforeY, ...before });
+    await compact.click();
+    await expectCompactRows(page, true);
     await expect(row(page, fixture.above).locator(".session-row-meta")).toHaveCount(0);
     await expect.poll(async () => (await geometry(target)).y, {
       message: "removing the preceding row's metadata must move the target upward",
     }).toBeLessThan(beforeY);
     const { y: afterY, ...after } = await geometry(target);
     expect(afterY).toBeLessThan(beforeY);
-    expect(after, "compact dismissal must not depend on scrolling, host shape, viewport or row reordering").toEqual(before);
+    expect(after, "compact movement must not depend on scrolling, host shape, viewport or row reordering").toEqual(before);
     await expect(panel).toHaveCount(0);
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     // Complete the real preference write before cleanup resets its shared row.
@@ -414,9 +401,8 @@ for (const kind of ["menu", "bell"] as const) {
    */
   test(`a compact-hidden detail change preserves an open ${kind}`, async ({ page, request }) => {
     const fixture = await prepare(page, request);
-    const compact = page.locator(".compact-toggle input");
-    await compact.check();
-    await expect(compact).toBeChecked();
+    await setCompact(page, true);
+    await expectCompactRows(page, true);
     await expect.poll(async () => (await readPreferences(request)).compact).toBe(true);
     const changed = fixture.sessions.find((session) => session.id === fixture.above)!;
     changed.status = { state: "exited", exit_code: 0 };

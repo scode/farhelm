@@ -352,7 +352,7 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await expect(page.locator(".app-settings-dialog")).toHaveCount(0);
   if (settingsViewport) await page.setViewportSize(settingsViewport);
 
-  await page.getByRole("button", { name: "templates", exact: true }).click();
+  await page.getByRole("button", { name: "Templates", exact: true }).click();
   const templates = page.locator('.templates-dialog[role="dialog"]');
   await expect(templates).toBeVisible();
   await expectCovered(page, "templates dialog", ".templates-dialog", 2);

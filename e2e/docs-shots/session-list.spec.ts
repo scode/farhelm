@@ -61,8 +61,11 @@ test("statuses", async ({ page, request }) => {
 test("list controls", async ({ page, request }) => {
   const { director } = await open(page, request);
   const filter = page.locator("select.filter-host");
-  const sort = page.locator("select.sort-select");
-  const compact = page.locator(".compact-toggle");
+  const sort = page.locator(".sort-title");
+  await sort.click();
+  const menu = page.getByRole("menu", { name: "Sort", exact: true });
+  const compact = menu.getByRole("menuitemcheckbox", { name: /^Compact(?:$|\s)/ });
+  await expect(compact).toBeVisible();
   // Pushed right past the list so no callout covers the other controls.
   await director.callout(compact, "One line per session, for a long list.", { side: "right", dx: 200, dy: -80 });
   await director.callout(filter, "Show only one host's sessions.", { side: "right", dx: 200, dy: 10 });
@@ -71,7 +74,7 @@ test("list controls", async ({ page, request }) => {
     dx: 40,
     dy: 110,
   });
-  await shot(page, `${PAGE}/controls`, [filter, sort, compact], { maxWidth: 930 });
+  await shot(page, `${PAGE}/controls`, [filter, sort, menu], { maxWidth: 930 });
 });
 
 test("row menu", async ({ page, request }) => {

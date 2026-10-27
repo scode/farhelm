@@ -677,7 +677,7 @@ test("the launcher's folder follows each host's last launch until the user types
     : route.fallback());
   await patchPreferences(request, { last_selected: null });
   await page.goto("/");
-  await expect(page.locator(".session-count")).toHaveText("0 sessions");
+  await expect(page.locator(".session-count")).toHaveText("0");
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   const host = form.locator(".create-session-host");

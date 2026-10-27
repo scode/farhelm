@@ -1,3 +1,4 @@
+import { setCompact } from "./helpers/list-header";
 import { chooseLauncherHost } from "./helpers/host-picker";
 import { expectKeyboardScroll, expectKeyboardScrollFromControl } from "./helpers/keyboard-scroll";
 import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
@@ -2976,11 +2977,11 @@ test.describe("multi-host", () => {
       await expect(row.locator(".stale-badge")).toHaveCSS("color", await resolveToken(page, "--on-accent-dim"));
       await expect(card.locator(".session-unavailable-explanation")).toHaveCSS("color", await resolveToken(page, "--fg-1"));
       await expect(card.locator(".session-unavailable-heading")).toHaveCSS("color", await resolveToken(page, "--accent"));
-      await page.getByRole("checkbox", { name: "compact", exact: true }).check();
+      await setCompact(page, true);
       await expect(row.locator(".compact-qualifier")).toHaveText("waiting for supervisor");
       await expect(row.locator(".compact-qualifier")).toHaveAttribute("data-tooltip", /waiting for supervisor.*last-known/);
-      await page.getByRole("checkbox", { name: "compact", exact: true }).uncheck();
-      await expect(page.getByRole("checkbox", { name: "compact", exact: true })).toBeFocused();
+      await setCompact(page, false);
+      await expect(page.locator(".sort-title")).toBeFocused();
       const dot = await row.locator(".status-dot").evaluate((node) => {
         const result = {
           animation: getComputedStyle(node).animationName,
@@ -2996,9 +2997,9 @@ test.describe("multi-host", () => {
       await waitForSessionRevealed(page, session.id, { timeout: 10_000 });
       await waitForTermText(page, "FAKE-AGENT READY", 10_000);
       await expect(page.locator(".terminal-snapshot")).toHaveCount(0);
-      // The compact checks deliberately left focus on that input. Recovery
+      // The Compact choices deliberately left focus on the title button. Recovery
       // must respect it; typing into the terminal is a new user action here.
-      await expect(page.getByRole("checkbox", { name: "compact", exact: true })).toBeFocused();
+      await expect(page.locator(".sort-title")).toBeFocused();
       await page.locator("#terminal").click();
       const marker = `after-outage-${Date.now()}`;
       await page.keyboard.type(marker);

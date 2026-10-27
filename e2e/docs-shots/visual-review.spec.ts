@@ -20,6 +20,10 @@ import { DOCS_SHOTS_DIR } from "./paths";
 import { shot as captureShot, type CropOptions } from "./shot";
 import { readFleet } from "./stage-docs";
 
+// A sidebar-only PR needs its changed states, rather than every unchanged
+// foundation dialog. The same script, fleet, shot helper and cleanup still run.
+const sidebarHeaderOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-header";
+
 /** Park before observing tooltip state, not only at the screenshot's last step.
  * Pointer departure cancels pending hover help. Focus captures establish their
  * own dismissal or tooltip premise without changing the photographed surface.
@@ -428,6 +432,63 @@ for (const colorScheme of ["dark", "light"] as const) {
         const name = `visual-review/${colorScheme}-${width}`;
         const window = [page.locator("body")];
         await shot(page, `${name}-main`, window, { pad: 0 });
+        // The title menu and the supported width bounds are the changed
+        // sidebar surface. Use its real resize control, not a CSS override.
+        const sortTitle = page.locator(".sort-title");
+        await sortTitle.click();
+        const sortMenu = page.getByRole("menu", { name: "Sort", exact: true });
+        await expect(sortMenu).toBeVisible();
+        await expect(sortMenu.getByRole("menuitemradio")).toHaveCount(3);
+        await expect(sortMenu.getByRole("menuitemcheckbox", { name: /^Compact/ })).toHaveAttribute("aria-checked", "false");
+        await insideViewport(page, page.locator(".sort-menu-panel"));
+        await shot(page, `${name}-sort-menu`, window, { pad: 0 });
+        await sortMenu.getByRole("menuitemradio").first().press("Escape");
+        await expect(sortMenu).toBeHidden();
+        const resize = page.locator(".sidebar-resize-handle");
+        await expect(resize).toHaveAttribute("aria-valuenow", "340");
+        const widthShots = async (density = "") => {
+          for (const [size, key, steps] of [["minimum", "ArrowLeft", 10], ["maximum", "ArrowRight", 36]] as const) {
+            await resize.focus();
+            for (let step = 0; step < steps; step++) await resize.press(key);
+            await expect(resize).toHaveAttribute("aria-valuenow", size === "minimum" ? "240" : "600");
+            if (width === "main-650") {
+              const mainBox = (await main.boundingBox())!;
+              await page.setViewportSize({ width: Math.round(mainBox.x + 650), height: 1000 });
+              await expect.poll(async () => (await main.boundingBox())?.width).toBeCloseTo(650, 0);
+            }
+            await page.mouse.click(0, 0);
+            await shot(page, `${name}${density}-sidebar-${size}`, window, { pad: 0 });
+          }
+          await resize.dblclick();
+          await expect(resize).toHaveAttribute("aria-valuenow", "340");
+          if (width === "main-650") {
+            const mainBox = (await main.boundingBox())!;
+            await page.setViewportSize({ width: Math.round(mainBox.x + 650), height: 1000 });
+            await expect.poll(async () => (await main.boundingBox())?.width).toBeCloseTo(650, 0);
+          }
+        };
+        await widthShots();
+        if (sidebarHeaderOnly) {
+          // Seed through the same awaited API path as the full capture.
+          // An optimistic menu write could otherwise race the final restore.
+          await patchPreferences(request, { compact: true });
+          await page.reload();
+          const opened = scenario.sessions.find((session) => session.open);
+          expect(opened, "the staged fleet names its open terminal").toBeDefined();
+          await showSession(page, opened!);
+          await expect(row.locator(".session-identity-copy")).toHaveClass(/\bcompact\b/);
+          await expect(row.locator(".session-row-meta")).toHaveCount(0);
+          await page.mouse.click(0, 0);
+          await shot(page, `${name}-compact`, window, { pad: 0 });
+          await sortTitle.click();
+          const density = sortMenu.getByRole("menuitemcheckbox", { name: /^Compact/ });
+          await expect(density).toHaveAttribute("aria-checked", "true");
+          await shot(page, `${name}-compact-sort-menu`, window, { pad: 0 });
+          await density.press("Escape");
+          await expect(sortMenu).toBeHidden();
+          await widthShots("-compact");
+          return;
+        }
         const unavailableRestart = page.locator(".restart-primary");
         await expect(unavailableRestart).toHaveAttribute("aria-disabled", "true");
         await keyboardFocusControl(page, page.locator("body"), unavailableRestart);
@@ -819,6 +880,12 @@ for (const colorScheme of ["dark", "light"] as const) {
           await expect(page.locator(".session-details")).toBeVisible();
           await expect(page.locator(".build-skew")).toHaveCount(0);
           await shot(page, `${name}-compact-pinned`, window, { pad: 0 });
+          await page.locator(".sort-title").click();
+          const density = page.getByRole("menuitemcheckbox", { name: /^Compact/ });
+          await expect(density).toHaveAttribute("aria-checked", "true");
+          await shot(page, `${name}-compact-sort-menu`, window, { pad: 0 });
+          await density.press("Escape");
+          await expect(page.locator(".sort-menu-panel")).toBeHidden();
         } finally {
           const unpin = await request.put(pinUrl, { data: { pinned: wasPinned === "true" } });
           expect(unpin.ok()).toBe(true);

@@ -1,3 +1,4 @@
+import { setCompact } from "./helpers/list-header";
 // The browser-level M1 acceptance suite (PLAN_M1.md criterion 5), grown by
 // PLAN_M2.md step 7 to cover the list view and navigation and by step 8 to
 // cover the create dialog and per-row stop/delete actions. The remaining
@@ -336,7 +337,7 @@ test("the create form prefills the working directory with ~ when no session is s
     body: JSON.stringify({ launches: [], folders: [] }),
   }));
   await page.goto("/");
-  await expect(page.locator(".session-count")).toHaveText("0 sessions");
+  await expect(page.locator(".session-count")).toHaveText("0");
   await expect(page.locator("#terminal")).toHaveCount(0);
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
@@ -3968,7 +3969,7 @@ test("a long error detail wraps completely and compact ended rows stay one line"
   expect(viewport).not.toBeNull();
   expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
   await row.locator(".session-row-menu").click();
-  await page.getByRole("checkbox", { name: "compact", exact: true }).check();
+  await setCompact(page, true);
   await expect(row.locator(".session-row-detail")).toHaveCount(0);
   await expect(row.locator('.ended-status-glyph[data-glyph="error"]')).toBeVisible();
   await expect(row.locator(".compact-ended-status")).toHaveAttribute("data-tooltip", `error — ${detail}`);
