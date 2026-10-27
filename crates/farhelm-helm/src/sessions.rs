@@ -2820,7 +2820,7 @@ async fn resolve_and_restart_session(
         launches::named_start(launch, value.clone()).map_err(invalid_request)?;
     }
     let (claim, client) = route_session(state, key).await?;
-    // Only the trust-capable branch reads Settings or live membership. Plain
+    // Only the trust-capable branch reads Settings or checkout identity. Plain
     // restart carries no replacement launch, and literal commands stay intact.
     let with = if let Some(launch) = with {
         Some(match try_without_workspace_trust(launch) {
@@ -2831,10 +2831,7 @@ async fn resolve_and_restart_session(
                     launches::workspace_trust_enabled(selection.harness, &config)
                 });
                 let managed = if enabled {
-                    // Restart with cannot change cwd. Its owner's live
-                    // membership projection answers exactly this question,
-                    // without inferring anything about another directory.
-                    manager::drain_sessions(&client, claim.host)
+                    let session = manager::drain_sessions(&client, claim.host)
                         .await?
                         .sessions
                         .into_iter()
@@ -2842,9 +2839,12 @@ async fn resolve_and_restart_session(
                         .find(|session| session.id == id)
                         .ok_or_else(|| {
                             invalid_request("the session to restart no longer exists".into())
-                        })?
-                        .working_copy
-                        .is_some()
+                        })?;
+                    // Live membership can outlast a replaced checkout, including
+                    // for a borrower. Use the same identity-checked read as New.
+                    // Restart cannot change cwd; the supervisor's recorded-cwd
+                    // check pins its launch to the canonical path independently.
+                    client.managed_checkout_for_cwd(&session.cwd).await?.1
                 } else {
                     false
                 };

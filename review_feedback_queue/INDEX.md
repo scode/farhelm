@@ -29,11 +29,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
 
-- [`restart-trust-follows-stale-checkout-membership.md`](restart-trust-follows-stale-checkout-membership.md) — With
-  automatic workspace trust enabled, Restart with can trust a replacement folder because a resumable Codex or Pi session
-  still belongs to the old managed checkout. Borrowing sessions skip the origin's folder-identity checks; no vendor
-  execution was attempted.
-
 - [`named-restart-reporter-failure-keeps-old-resume.md`](named-restart-reporter-failure-keeps-old-resume.md) — A
   successful named Pi or OMP restart can keep the previous conversation when preparing its reporter fails. A later
   ordinary Restart can then resume that previous conversation. The conditional source route is established; occurrence

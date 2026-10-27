@@ -4956,8 +4956,9 @@ enum TrustComposeSurface {
 /// Exercise the real route against a pinned peer, asserting both reusable
 /// and named-start argv. The splice serves live session reads itself, so
 /// the peer sees only ownership lookup and the mutation under test. Returning
-/// a different canonical path proves that granted trust pins its destination,
-/// while an unmanaged reply leaves the caller's spelling alone.
+/// a different canonical path proves that granted trust pins a new destination,
+/// while an unmanaged reply leaves the caller's spelling alone. Restart keeps
+/// its recorded cwd, but must still consult the identity-checked ownership read.
 async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, LaunchHarness, LaunchPermission, LaunchSelection};
@@ -4988,16 +4989,20 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
             "/destination"
         };
         let mut source = rest_harness::session("source", 1);
+        source.cwd = "/source".into();
         source.launch = crate::launches::compile(selection.clone()).unwrap();
         source.invocation = source.launch.display_command();
         source.agent_kind = farhelm_proto::AgentKind::Codex;
         source.restart_offer = farhelm_proto::RestartOffer::Resume;
-        if managed {
+        // Restart borrowers retain membership even when a replacement folder
+        // makes the identity-checked read return false. The wire reply below
+        // models that supervisor observation without a second identity mechanism.
+        if managed || matches!(surface, TrustComposeSurface::RestartWith) {
             source.working_copy = Some(farhelm_proto::WorkingCopyInfo {
                 id: "managed-root".into(),
                 repo: farhelm_proto::parse_github_repo("acme/repo").unwrap(),
                 canonical_path: source.cwd.clone(),
-                origin_session_id: source.id.clone(),
+                origin_session_id: "checkout-origin".into(),
             });
         }
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
@@ -5010,7 +5015,7 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
             handshake(&mut reader, &mut writer, "supervisor")
                 .await
                 .unwrap();
-            if enabled && !matches!(surface, TrustComposeSurface::RestartWith) {
+            if enabled {
                 let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
                 let ControlMsg::BrowseDirectory {
                     req_id,
@@ -5020,7 +5025,14 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
                 else {
                     panic!("enabled setting must resolve destination ownership first: {message:?}");
                 };
-                assert_eq!(cwd, "/destination");
+                assert_eq!(
+                    cwd,
+                    if matches!(surface, TrustComposeSurface::RestartWith) {
+                        "/source"
+                    } else {
+                        "/destination"
+                    }
+                );
                 assert!(
                     membership_only,
                     "composition must request ownership without enumeration"
@@ -5028,7 +5040,9 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
                 writer
                     .write_control(&ControlMsg::DirectoryListing {
                         req_id,
-                        cwd: if managed {
+                        cwd: if matches!(surface, TrustComposeSurface::RestartWith) {
+                            "/source"
+                        } else if managed {
                             "/managed-canonical"
                         } else {
                             "/ordinary-canonical"
@@ -5176,7 +5190,8 @@ async fn create_normalizes_workspace_trust_at_destination_dispatch() {
 }
 
 /// Restart with composes fresh choices for the source's fixed folder.
-/// Its live membership, not the edited client's trust bit, controls trust.
+/// A borrower's stale membership after folder replacement must not grant trust:
+/// the identity-checked reply, not membership or the client's bit, decides.
 #[farhelm_testtrace::test]
 async fn restart_with_normalizes_workspace_trust_before_named_resume() {
     assert_codex_trust_dispatch(TrustComposeSurface::RestartWith).await;
