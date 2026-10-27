@@ -289,6 +289,10 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
   // form was even submitted).
   let created = false;
   try {
+    // The Steel rail reserves another 56px. Keep this transport fixture's
+    // high-byte click column inside the real terminal rather than lowering
+    // the column premise that distinguishes binary fidelity from ASCII.
+    await page.setViewportSize({ width: 1400, height: 800 });
     await page.goto("/");
     const form = await fillCreateForm(page, {
       cwd: "/tmp",

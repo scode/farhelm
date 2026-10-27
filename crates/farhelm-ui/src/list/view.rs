@@ -1151,21 +1151,24 @@ pub(crate) fn ListView(
     use_context_provider(|| super::templates::TemplatesRevision(templates_revision));
     let provisioning_trace_shapes = use_signal(HashMap::<HostId, ProvisioningTraceShape>::new);
     let provisioning_auto_details = use_signal(HashSet::<HostId>::new);
-    // One client-local checkbox for every host row, reset on page mount.
+    // Presentation never owns the list reader, selection, or disclosure.
+    // Both surfaces stay mounted so hidden host work can finish normally.
+    let mut hosts_panel_open = use_signal(|| false);
+    // One client-local details choice for every host row, reset on page mount.
     // HostsPanel remains permanently mounted below and owns every write;
     // this shared handle lets accepted reads compare its actual visible
     // lines synchronously. Automatic per-row disclosure never writes it.
     let host_details_open = use_signal(|| false);
-    // The panel can grow without changing its rows' logical shape: an
-    // expanded setup failure adds text in place. Observe its rendered size
-    // so fixed menus cannot remain beside a different row after that reflow.
+    // Visible management growth can move a lower host's fixed menu. Its
+    // resize callback is gated at the presentation boundary; hidden progress
+    // cannot move session or rail anchors. Actual scrolls remain invalidators.
     let mut hosts_panel_layout_epoch = use_signal(|| 0_u64);
     // A shape signature for the always-mounted host list. A memo prevents
     // ordinary phase-only polls and progress-step churn from closing fixed
     // surfaces while still catching every rendered trace transition, every
     // automatic-disclosure transition (an update expanding or collapsing
     // its own row moves the rows below it exactly like a trace does), and
-    // the count or read-state changes that move rows below the host list.
+    // the count or read-state changes that move visible management rows.
     let hosts_list_shape = use_memo(move || {
         let read = hosts.read();
         let mut traces = provisioning_trace_shapes
@@ -1188,55 +1191,23 @@ pub(crate) fn ListView(
             auto,
         )
     });
-    // Closes any open actions-menu panel — a SESSION row's or a HOST row's,
-    // whichever is open — the instant something above `.session-list` (or
-    // above `.host-list`, for the host row's own panel) could have moved
-    // the row it was measured against: a `position: fixed` panel's
-    // coordinates are a one-time snapshot (see `menu_panel_style`), so
-    // anything that shifts the sidebar's layout above the rows leaves it
-    // visibly detached from its toggle unless something notices and closes
-    // it. Two different KINDS of cause feed this one effect:
+    // A fixed menu uses one coordinate snapshot. External layout changes and
+    // real content/rail scrolling still close existing openings. Management
+    // shape participates only while Hosts is visible: retained progress and
+    // automatic disclosure continue while concealed but move no visible row.
+    // The panel transition itself closes menus before changing presentation.
     //
-    // - EXTERNAL layout shifts — a scroll on `.app-sidebar`/`.app-shell`,
-    //   or (where the renderer supports it) a window resize — arrive as
-    //   `layout_epoch`, a counter `AppBody` owns and bumps from listeners
-    //   this component cannot host itself (see that prop's own doc for
-    //   why).
-    // - INTERNAL layout shifts this component causes directly: the create
-    //   form and host-list read state can change the content above the
-    //   session rows. None of these go
-    //   through `layout_epoch` — they are this component's own renders, not
-    //   an ancestor's scroll or resize — so each is read directly here
-    //   instead. The permanent host selector does not create a floating
-    //   surface or move a row, so it needs no participation here.
-    //
-    // The dependencies are deliberate: `layout_epoch` aggregates
-    // ancestor scroll and resize events, `show_create` covers the create
-    // form, and `hosts_list_shape` covers host count/read-state, collapsed
-    // provisioning-trace transitions, and automatic-disclosure transitions.
-    // `hosts_panel_layout_epoch` catches rendered host-row growth as well.
-    // The initial run is a no-op because all registered slots start empty.
-    // Registration and open-state reads are untracked, so opening alone
-    // cannot rerun this effect or receive a past layout invalidation.
-    //
-    // Other session-row causes report at their own publication boundary:
-    // listing commit compares displayed detail/refusal prefixes, including
-    // rewrapping text and unchanged refusals crossing an anchor; accepted
-    // host reads compare changed stale wording before publishing it. Error
-    // map edits retain the effect beside `order_hold`. The actual rendered
-    // identity snapshot also covers pin/copy changes within held positions.
-    // These are causal
-    // reports, not measurements, and this broad effect is not exhaustive.
-    //
-    // Accepted host reads also compare displayed host prefix membership and
-    // disclosed lines before publication. That catches same-size reorders
-    // and balanced text changes that leave this whole-panel observer quiet;
-    // it supplements rather than narrows this existing broad layout rule.
+    // Registration reads remain untracked, so a fresh opening cannot receive
+    // a past invalidation. Per-row text and prefix changes retain their causal
+    // MovementOwner reports at the accepted listing/host publication boundary;
+    // this aggregate path supplements those reports rather than replacing them.
     let layout_popovers = popovers.clone();
     use_effect(move || {
         layout_epoch();
         show_create();
-        hosts_list_shape();
+        if hosts_panel_open() {
+            hosts_list_shape();
+        }
         hosts_panel_layout_epoch();
         layout_popovers.close_open_in(&[AnchorRegion::Hosts, AnchorRegion::Sessions]);
     });
@@ -1830,18 +1801,27 @@ pub(crate) fn ListView(
                     let before = hosts.peek();
                     let mut after = before.clone();
                     after.record(outcome.clone());
-                    let details_open = *host_details_open.peek();
+                    // Hidden management lines cannot move a rail anchor.
+                    // Membership/order still matters in either presentation.
+                    let panel_visible = *hosts_panel_open.peek();
+                    let details_open = panel_visible && *host_details_open.peek();
                     let auto_details = provisioning_auto_details.peek();
+                    let no_auto_details = HashSet::new();
+                    let visible_auto_details = if panel_visible {
+                        &*auto_details
+                    } else {
+                        &no_auto_details
+                    };
                     let host_moved = host_rows_moved(
                         before.hosts().map(|shown| HostFlow {
                             shown,
                             details_open,
-                            auto_details: &auto_details,
+                            auto_details: visible_auto_details,
                         }),
                         HostFlow {
                             shown: after.hosts().unwrap_or_default(),
                             details_open,
-                            auto_details: &auto_details,
+                            auto_details: visible_auto_details,
                         },
                     );
                     let current_listing = listing.peek();
@@ -2824,6 +2804,10 @@ pub(crate) fn ListView(
         initial_create_action.set(None);
         clone_prefill.set(Some(prefill));
         menu_open.set(None);
+        // Main-pane actions can enter while Hosts is visible. Reveal the
+        // launcher's ordinary return control only after admission succeeds.
+        host_menu_open.set(None);
+        hosts_panel_open.set(false);
         show_create.set(true);
         prefill_request.set(None);
     });
@@ -3463,17 +3447,6 @@ pub(crate) fn ListView(
     // nothing else is happening (see `activity`).
     let now_secs = *ACTIVITY_NOW.read();
 
-    // The selector's own copy: the create form takes ownership of
-    // `host_options` further down, and both surfaces want the same list —
-    // the same hosts, called the same things, with the same phase labels.
-    let filter_hosts = host_options.clone();
-    // The host this filter names that the registry no longer carries, if
-    // any — a host removed from another client while a filter on it remains
-    // applied. Only derive it once a registry read has landed: an empty list
-    // before the first read would make every id look removed.
-    let removed_filter_host = filter.read().host.filter(|id| {
-        hosts.read().hosts().is_some() && !filter_hosts.iter().any(|host| host.id == *id)
-    });
     let request_host_filter = request_host_filter.clone();
     // The create form's own copy of the API base, for recording a created
     // session as the selection (see `remember_selection`).
@@ -3554,6 +3527,10 @@ pub(crate) fn ListView(
             if ops.busy_now() {
                 return false;
             }
+            // An admitted launcher handoff exposes its ordinary return
+            // controls too. A refused shortcut leaves presentation alone.
+            host_menu_open.set(None);
+            hosts_panel_open.set(false);
             opening_generation += 1;
             quick_launch_pending.set(false);
             let current_hosts = new_hosts.clone();
@@ -3836,6 +3813,7 @@ pub(crate) fn ListView(
                         switcher_pick_hidden(&current_filter, &session, current)
                     };
                     if guarded_open.call(*session) {
+                        hosts_panel_open.set(false);
                         restore = same;
                         if hidden {
                             // Reveal a hidden fleet pick with one widening read.
@@ -4088,12 +4066,46 @@ pub(crate) fn ListView(
                 },
             }
         }
-        AppBar { layout_epoch }
+        AppBar { layout_epoch,
+        hosts_toggle: rsx! {
+            button {
+                r#type: "button", class: "btn btn-neutral hosts-panel-toggle",
+                aria_label: "Hosts", "data-tooltip": "Hosts: show host management",
+                aria_pressed: hosts_panel_open(), aria_expanded: hosts_panel_open(),
+                aria_controls: "host-management-panel",
+                onclick: {
+                    let popovers = popovers.clone();
+                    move |_| {
+                        popovers.close_open_in(&[AnchorRegion::Hosts, AnchorRegion::Sessions]);
+                        host_menu_open.set(None);
+                        menu_open.set(None);
+                        hosts_panel_open.toggle();
+                        FocusTarget::new(".hosts-panel-toggle", None, false).focus();
+                    }
+                },
+                crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Hosts }
+            }
+        },
+        // The rail and footer remain reachable while this content scrolls.
+        // Owners below stay mounted; filtering never deselects a session.
+        div { class: "sidebar-content",
+        onscroll: move |_| hosts_panel_layout_epoch += 1,
         // The host list is one permanent surface. Keeping the component
         // mounted is a lifecycle requirement, not only a layout choice:
         // discovery, planning, and mutation replies must retain their owner.
         HostsPanel {
             hosts,
+            panel_open: hosts_panel_open,
+            selected_host: filter.read().host,
+            on_host_choice: move |host| {
+                host_menu_open.set(None);
+                menu_open.set(None);
+                hosts_panel_open.set(false);
+                if filter.peek().host != host {
+                    filter.write().host = host;
+                    request_host_filter(Trigger::Explicit);
+                }
+            },
             host_registration,
             details_open: host_details_open,
             ops,
@@ -4117,7 +4129,7 @@ pub(crate) fn ListView(
         // The ordering is the list's title; count and icon actions share its
         // band. At minimum width the action group wraps as a whole.
         div { class: "list-header",
-            div { class: "session-heading",
+            div { class: "session-heading", hidden: hosts_panel_open(),
                 super::sort_menu::SortMenu {
                     sort: sort(), compact, layout_epoch,
                     on_sort: apply_sort,
@@ -4309,6 +4321,7 @@ pub(crate) fn ListView(
                         templates_open.set(true);
                     },
                     on_created: move |created: CreatedSession| {
+                        hosts_panel_open.set(false);
                         let CreatedSession {
                             session,
                             submitted_launch,
@@ -4374,9 +4387,9 @@ pub(crate) fn ListView(
                     },
                 }
             }
-        // Host choice remains available while a listing is loading or failed,
-        // including when the selected host has become a tombstone.
-            div { class: "session-status-filter",
+        // Status remains available while a listing is loading or failed;
+        // the rail independently keeps the current host choice reachable.
+            div { class: "session-status-filter", hidden: hosts_panel_open(),
                 div { class: "segmented-control", role: "radiogroup", aria_label: "Session status",
                     for (value, label, help) in [
                         ("", "All", "Show every session, including ended sessions"),
@@ -4395,45 +4408,9 @@ pub(crate) fn ListView(
                     }
                 }
             }
-            div { class: "list-header-controls",
-                select {
-                    class: "filter-host",
-                    aria_label: "filter by host",
-                    "data-tooltip": "show only the sessions on one host",
-                    value: filter.read().host.map(|id| id.to_string()).unwrap_or_default(),
-                    onchange: move |evt| {
-                        // Only the empty ALL value clears the query. The
-                        // unavailable placeholder has its own value and is
-                        // disabled, so it can never manufacture that change.
-                        if evt.value().is_empty() {
-                            filter.write().host = None;
-                            request_host_filter(Trigger::Explicit);
-                        } else if let Ok(host) = evt.value().parse::<HostId>() {
-                            filter.write().host = Some(host);
-                            request_host_filter(Trigger::Explicit);
-                        }
-                    },
-                    // Keep both forms of selection: Dioxus can otherwise
-                    // lose the visible selection when registry options mutate
-                    // while the Rust query value remains unchanged.
-                    option { value: "", selected: filter.read().host.is_none(), "ALL" }
-                    if hosts.read().hosts().is_none() {
-                        option { value: "registry-unavailable", disabled: true, selected: false, "This machine (registry unavailable)" }
-                    }
-                    for host in filter_hosts.iter().filter(|host| host.local) {
-                        option { key: "{host.id}", value: "{host.id}", selected: filter.read().host == Some(host.id), "This machine" }
-                    }
-                    for host in filter_hosts.iter().filter(|host| !host.local) {
-                        option { key: "{host.id}", value: "{host.id}", selected: filter.read().host == Some(host.id), "{host.label()}" }
-                    }
-                    if let Some(missing) = removed_filter_host {
-                        option { value: "{missing}", disabled: true, selected: true, "host {missing} (no longer registered)" }
-                    }
-                }
-            }
         }
         if let Some(notice) = delete_notice.0() {
-            div { class: "delete-notice",
+            div { class: "delete-notice", hidden: hosts_panel_open(),
                 crate::peer::PeerLine {
                     class: "status".to_string(),
                     parts: vec![crate::peer::DetailPart::peer(notice)],
@@ -4450,16 +4427,18 @@ pub(crate) fn ListView(
             }
         }
         match &*listing.read() {
-            None => rsx! { div { class: "status", "loading sessions…" } },
+            None => rsx! { div { class: "status", hidden: hosts_panel_open(), "loading sessions…" } },
             // The helm's refusal text, rendered as the peer text it may
             // quote (see `api::refusal_text`).
             Some(Err(e)) => rsx! {
+                div { hidden: hosts_panel_open(),
                 crate::peer::PeerLine {
                     class: "status error".to_string(),
                     parts: vec![
                         crate::peer::DetailPart::text("failed to load sessions: "),
                         crate::peer::DetailPart::peer(e.clone()),
                     ],
+                }
                 }
             },
             Some(Ok(listing)) => rsx! {
@@ -4468,7 +4447,7 @@ pub(crate) fn ListView(
                 // `rows::is_empty_fleet` for why the request has to be
                 // consulted and what taking this branch would suppress.
                 if rows::is_empty_fleet(listing) {
-                    div { class: "status", "no sessions" }
+                    div { class: "status", hidden: hosts_panel_open(), "no sessions" }
                 } else {
                     // A filter that matched nothing says so in words, beside
                     // the banner's numbers. Without it the page is a count
@@ -4479,7 +4458,7 @@ pub(crate) fn ListView(
                     // complete listing, scoped to "the sessions that could
                     // be read" under a cut one.
                     if let Some(line) = rows::no_match_line(listing) {
-                        div { class: "status filter-empty", "{line}" }
+                        div { class: "status filter-empty", hidden: hosts_panel_open(), "{line}" }
                     }
                     if let Some(question) = replace_controller.question() {
                         // Keyed by the source row, so another row's question
@@ -4545,7 +4524,7 @@ pub(crate) fn ListView(
                             },
                         }
                     }
-                    div { class: "session-list",
+                    div { class: "session-list", hidden: hosts_panel_open(),
                         onpointerenter: {
                             let mut note = note_list_pointer.clone();
                             move |_| note()
@@ -4686,6 +4665,8 @@ pub(crate) fn ListView(
                 on_submit: on_rename_submit,
                 on_cancel: on_rename_cancel,
             }
+        }
+        }
         }
     }
 }

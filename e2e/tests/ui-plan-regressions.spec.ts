@@ -3,7 +3,7 @@
  * real, and injected responses carry the build of that same helm. */
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
-import { cleanupSession, createResumableSession, createSession, forceBuildSkew, listSessions, openHostMenu, openRowMenu, stopSession, stubFeed } from "./helpers/fleet";
+import { cleanupSession, createResumableSession, createSession, forceBuildSkew, listSessions, openHostMenu, openRowMenu, showHostsPanel, stopSession, stubFeed } from "./helpers/fleet";
 import { waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { FAKE_AGENT_INVOCATION, runInShell, shellMarker } from "./helpers/terminal-suite";
@@ -149,6 +149,7 @@ test("an unreachable host keeps its menu inside the minimum sidebar", async ({ p
   });
   await page.goto("/");
   const host = page.locator(`[data-host-id="${remote.id}"]`);
+  await showHostsPanel(page);
   await expect(host.locator(".host-status-label")).toHaveText("unreachable, retrying");
   const handle = page.getByRole("separator", { name: "Sidebar width" });
   await expect(handle).toHaveAttribute("data-sidebar-bound", "true");
@@ -157,7 +158,7 @@ test("an unreachable host keeps its menu inside the minimum sidebar", async ({ p
   // The separator supports ten-pixel arrow steps. Reach the minimum through
   // that public gesture before checking the host row's actual geometry.
   for (let step = 0; step < 10; step++) await page.keyboard.press("ArrowLeft");
-  await expect(handle).toHaveAttribute("aria-valuenow", "240");
+  await expect(handle).toHaveAttribute("aria-valuenow", "296");
   await expect(host.locator(".host-status-label")).toHaveAttribute("data-tooltip", "unreachable, retrying");
   const sidebar = (await page.locator(".app-sidebar").boundingBox())!;
   const button = host.locator(".host-row-menu");

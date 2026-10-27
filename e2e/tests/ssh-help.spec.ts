@@ -94,7 +94,7 @@ test("ssh help names the empty state and remains dismissible during a failed rea
  */
 test("add host opens ssh help for its draft without losing the form", async ({ page, request }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "add host", exact: true }).click();
+  await page.locator(".host-rail-add").click();
   const form = page.getByRole("dialog", { name: "add host", exact: true });
   const input = form.locator(".add-host-ssh");
   const link = form.getByRole("button", { name: "Start its connections yourself first.", exact: true });
@@ -154,7 +154,7 @@ test("ssh help returns focus when a setup offer replaced its opener", async ({ p
   });
   try {
     await page.goto("/");
-    await page.getByRole("button", { name: "add host", exact: true }).click();
+    await page.locator(".host-rail-add").click();
     const form = page.locator(".host-add-dialog");
     await form.locator(".add-host-ssh").fill(`help-${randomUUID()}.invalid`);
     await form.locator(".add-host-submit").click();

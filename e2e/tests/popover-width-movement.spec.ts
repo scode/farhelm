@@ -170,7 +170,7 @@ async function prepare(page: Page, request: APIRequestContext, clock = false) {
   await expect(page.locator(".session-row")).toHaveCount(3);
   expect(await page.locator(".session-row").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-session-id"))))
     .toEqual([target, stable, selected]);
-  expect(await page.locator(".app-sidebar").evaluate((node) => node.scrollHeight <= node.clientHeight),
+  expect(await page.locator(".sidebar-content").evaluate((node) => node.scrollHeight <= node.clientHeight),
     "the entire compact fixture must fit without scrolling").toBe(true);
   let revision = 1;
   return {
@@ -278,7 +278,7 @@ async function geometry(target: Locator) {
       return { x: box.x, y: box.y, width: box.width, height: box.height };
     };
     const bell = rect(node.querySelector(".session-row-bell")!);
-    const sidebar = document.querySelector(".app-sidebar")!;
+    const sidebar = document.querySelector(".sidebar-content")!;
     const shell = document.querySelector(".app-shell")!;
     const hosts = document.querySelector(".hosts-panel")!;
     const heading = document.querySelector(".session-heading")!;
@@ -407,8 +407,8 @@ test("a row's growing bell age does not close its own actions menu", async ({ pa
 
 /** Use the supported real separator before any target popup is measured. */
 async function sidebarWidth(page: Page, desired: number) {
-  expect(desired).toBeGreaterThanOrEqual(240);
-  expect(desired).toBeLessThanOrEqual(600);
+  expect(desired).toBeGreaterThanOrEqual(296);
+  expect(desired).toBeLessThanOrEqual(656);
   const current = await page.locator(".app-sidebar").evaluate((node) => parseFloat(getComputedStyle(node).width));
   const handle = page.getByRole("separator", { name: "Sidebar width" });
   await expect(handle).toHaveAttribute("data-sidebar-bound", "true");
@@ -451,7 +451,7 @@ for (const kind of ["menu", "bell"] as const) {
    */
   test(`trash count appearance wraps the header and closes an open ${kind}`, async ({ page, request }) => {
     const fixture = await prepare(page, request);
-    await sidebarWidth(page, 600);
+    await sidebarWidth(page, 656);
     const empty = await headerMetrics(page);
     await (await fixture.holdTrash(1))();
     const one = await headerMetrics(page);

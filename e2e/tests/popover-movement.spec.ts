@@ -109,13 +109,13 @@ async function prepare(page: Page, request: APIRequestContext, extraAbove = fals
   await waitForSessionReady(page, selected);
   await feed.waitForConnection(1);
   await expect(page.locator(".hosts-status", { hasText: "loading hosts" })).toHaveCount(0);
-  await expect(page.locator(".host-row").first()).toBeVisible();
+  await expect(page.locator(".host-rail-avatar").first()).toBeVisible();
   await expect(page.locator(".session-row")).toHaveCount(sessions.length);
   await expect(page.locator(".session-row").nth(0)).toHaveAttribute("data-session-id", above);
   await expect(page.locator(".session-row").nth(extraAbove ? 2 : 1)).toHaveAttribute("data-session-id", target);
   await expect(row(page, target)).toHaveAttribute("data-session-selected", "false");
   await expectCompactRows(page, false);
-  expect(await page.locator(".app-sidebar").evaluate((node) => node.scrollHeight <= node.clientHeight),
+  expect(await page.locator(".sidebar-content").evaluate((node) => node.scrollHeight <= node.clientHeight),
     "fixture rows must fit without scrolling").toBe(true);
   await waitForFeedReadersSettled(page);
   let revision = 1;
@@ -172,7 +172,7 @@ async function openPopup(page: Page, target: Locator, kind: PopupKind) {
  */
 async function geometry(target: Locator) {
   return target.evaluate((node) => {
-    const sidebar = document.querySelector(".app-sidebar")!;
+    const sidebar = document.querySelector(".sidebar-content")!;
     const shell = document.querySelector(".app-shell")!;
     const hosts = document.querySelector(".hosts-panel")!;
     return {
@@ -643,8 +643,8 @@ async function fitStalePair(page: Page, detail: Locator, longerCapsuleWidth: num
   expect(longerCapsuleWidth, "the replacement cause must be wider than the baseline cause").toBeGreaterThan(measured.stale);
   const available = measured.ended + measured.gap + (measured.stale + longerCapsuleWidth) / 2;
   const desired = Math.round(measured.sidebar + available - measured.available);
-  expect(desired, "the wrapping premise must fit the supported sidebar range").toBeGreaterThanOrEqual(240);
-  expect(desired).toBeLessThanOrEqual(600);
+  expect(desired, "the wrapping premise must fit the supported sidebar range").toBeGreaterThanOrEqual(296);
+  expect(desired).toBeLessThanOrEqual(656);
   const handle = page.getByRole("separator", { name: "Sidebar width" });
   await expect(handle).toHaveAttribute("data-sidebar-bound", "true");
   const box = (await handle.boundingBox())!;

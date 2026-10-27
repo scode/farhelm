@@ -38,7 +38,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
-import { localHostId, openHostMenu, openRowMenu, patchPreferences, resetPreferences } from "./helpers/fleet";
+import { localHostId, openHostMenu, openRowMenu, patchPreferences, resetPreferences, showSessionsPanel } from "./helpers/fleet";
 import { addTab, installTerminalSuiteHooks, openTerminal, sharedSessionRow } from "./helpers/terminal-suite";
 import { openSettings, selectSettingsSection, type SettingsSection } from "./helpers/settings";
 
@@ -352,6 +352,9 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await expect(page.locator(".app-settings-dialog")).toHaveCount(0);
   if (settingsViewport) await page.setViewportSize(settingsViewport);
 
+  // Host management remains open after its dialogs close. Reveal the actual
+  // session header before auditing Templates and its dialog controls.
+  await showSessionsPanel(page);
   await page.getByRole("button", { name: "Templates", exact: true }).click();
   const templates = page.locator('.templates-dialog[role="dialog"]');
   await expect(templates).toBeVisible();

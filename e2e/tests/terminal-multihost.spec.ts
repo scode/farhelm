@@ -44,6 +44,8 @@ import {
   hostRowByName,
   openHostMenu,
   openHostsPanel,
+  showHostsPanel,
+  showSessionsPanel,
   patchPreferences,
   readPreferences,
   openRowMenu,
@@ -853,7 +855,7 @@ test.describe("multi-host", () => {
     await expect(local.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "laptop");
     await expect(local.locator(".host-kind-icon + .visually-hidden")).toHaveText("local");
     await expect(local.locator(".host-status .status-dot")).toBeVisible();
-    await expect(local.locator(".host-status-label")).toHaveCount(0);
+    await expect(local.locator(".host-status-label")).toHaveText("Connected");
     // The local row menu contains Retry and whichever provisioning command
     // its current setup state permits, but never destination management.
     await openHostMenu(local);
@@ -1221,8 +1223,7 @@ test.describe("multi-host", () => {
   });
 
   /**
-   * The Add host form sits above session rows as well as host rows. Its mount
-   * must therefore dismiss a session menu measured against the old layout.
+   * Rail Add opens the same modal over Sessions and dismisses its row menu.
    */
   test("add-host-form-closes-a-stray-session-menu", async ({ page, request }) => {
     const session = await createSession(request, {
@@ -1236,7 +1237,7 @@ test.describe("multi-host", () => {
       await expect(sessionRow).toBeVisible();
       await openRowMenu(sessionRow);
 
-      await page.locator(".add-host-button").click();
+      await page.locator(".host-rail-add").click();
       await expect(page.locator(".add-host-form")).toBeVisible();
       await expect(sessionRow.locator(".session-row-menu-panel")).toHaveCount(0);
       await expect(sessionRow.locator(".session-row-menu")).toHaveAttribute(
@@ -1502,11 +1503,17 @@ test.describe("multi-host", () => {
         const sessionRow = client.locator(`[data-session-id="${session.id}"]`);
         const sessionMark = client.locator(`[data-session-id="${session.id}"] .session-locality-slot .host-kind-icon`);
         const hostMark = client.locator(`.host-row[data-host-id="${remote.id}"] .host-kind-icon`);
+        // Hosts and Sessions occupy the same sidebar surface. Inspect both
+        // visible presentations in each client rather than hidden mounted rows.
+        await showHostsPanel(client);
+        await expect(hostMark).toBeVisible();
+        await expect(hostMark).toHaveAttribute("data-glyph", "rocket", { timeout: 20_000 });
+        await expect(hostMark).toHaveCSS("color", await resolveToken(client, "--host-icon-teal"));
+        await showSessionsPanel(client);
+        await expect(sessionMark).toBeVisible();
         await expect(sessionMark).toHaveAttribute("data-glyph", "rocket", { timeout: 20_000 });
         const markRole = await sessionRow.getAttribute("data-session-selected") === "true" ? "--on-fill" : "--host-icon-teal";
         await expect(sessionMark).toHaveCSS("color", await resolveToken(client, markRole));
-        await expect(hostMark).toHaveAttribute("data-glyph", "rocket");
-        await expect(hostMark).toHaveCSS("color", await resolveToken(client, "--host-icon-teal"));
       }
       // Selection supplies the surface this assertion measures. Both clients
       // may auto-attach this session, so the second client's last-attach-wins
@@ -1518,6 +1525,7 @@ test.describe("multi-host", () => {
       await expect(row.locator(".host-kind-icon")).toHaveAttribute("data-host-color", "teal");
       await test.info().attach("host-appearance-selected-row", { body: await page.locator(".app-sidebar").screenshot(), contentType: "image/png" });
       await page.reload();
+      await showHostsPanel(page);
       await expect(page.locator(`.host-row[data-host-id="${remote.id}"] .host-kind-icon`)).toHaveAttribute("data-glyph", "rocket");
       await expect(page.locator(`.host-row[data-host-id="${remote.id}"] .host-kind-icon`)).toHaveAttribute("data-host-color", "teal");
       const refused = await request.post(route, { data: { icon: "spaceship", color: "teal" } });
@@ -1543,14 +1551,19 @@ test.describe("multi-host", () => {
         const sessionRow = client.locator(`[data-session-id="${localSession.id}"]`);
         const hostMark = client.locator(`.host-row[data-host-id="${local.id}"] .host-kind-icon`);
         const sessionMark = client.locator(`[data-session-id="${localSession.id}"] .session-locality-slot .host-kind-icon`);
+        await showHostsPanel(client);
+        await expect(hostMark).toBeVisible();
         await expect(hostMark).toHaveAttribute("data-glyph", "house", { timeout: 20_000 });
         await expect(hostMark).toHaveCSS("color", await resolveToken(client, "--host-icon-steel"));
         await expect(hostMark).toHaveAttribute("data-tooltip", "local: on this machine, where the helm runs");
+        await showSessionsPanel(client);
+        await expect(sessionMark).toBeVisible();
         await expect(sessionMark).toHaveAttribute("data-glyph", "house");
         const markRole = await sessionRow.getAttribute("data-session-selected") === "true" ? "--on-fill" : "--host-icon-steel";
         await expect(sessionMark).toHaveCSS("color", await resolveToken(client, markRole));
       }
       await page.reload();
+      await showHostsPanel(page);
       await expect(page.locator(`.host-row[data-host-id="${local.id}"] .host-kind-icon`)).toHaveAttribute("data-host-color", "steel");
     } catch (error) {
       bodyFailed = true;
@@ -2683,6 +2696,8 @@ test.describe("multi-host", () => {
         "connected",
       );
 
+      // New belongs to the session header, which Hosts replaces.
+      await showSessionsPanel(page);
       const form = await fillCreateForm(page, {
         cwd: "/tmp",
         invocation: FAKE_AGENT_INVOCATION,
@@ -2701,6 +2716,7 @@ test.describe("multi-host", () => {
         timeout: 30_000,
       });
       const row = rowByTitle(page, title);
+      await expect(row).toBeVisible({ timeout: 30_000 });
       await expect(row.locator(".session-host")).toHaveText(info.remote_ssh, {
         timeout: 30_000,
       });
@@ -3172,7 +3188,6 @@ test.describe("multi-host", () => {
       const info = stackInfo();
 
       await page.goto("/");
-      await openHostsPanel(page);
       // Staleness arrives FIRST and does not wait for the retry ladder: a
       // host stops being connected the moment its connection drops, and
       // every one of its rows is last-known knowledge from that instant.
@@ -3183,6 +3198,9 @@ test.describe("multi-host", () => {
       await expect(row.locator(".session-title")).toHaveText(staleTitle);
 
       await waitForRemotePhase(request, "unreachable-reprobing", 180_000);
+      // The stale rows were visible in Sessions; host transport evidence
+      // lives in the alternate Hosts panel with Details expanded.
+      await openHostsPanel(page);
       await expect(hostRowByName(page, info.remote_ssh)).toHaveAttribute(
         "data-host-phase",
         "unreachable-reprobing",
@@ -3613,7 +3631,6 @@ test.describe("multi-host", () => {
       id = (await created.json()).id;
 
       await page.goto("/");
-      await openHostsPanel(page);
       // Explicitly bounded rather than left on the 5s default: the row
       // appears only after the client's next listing poll (a three-second
       // cadence, and a walk is several round trips), so the default is
@@ -3622,6 +3639,7 @@ test.describe("multi-host", () => {
         info.remote_ssh,
         { timeout: 30_000 },
       );
+      await expect(rowByTitle(page, title)).toBeVisible();
 
       // Remove through the modal confirmation — wry has no native dialogs,
       // so the Dioxus dialog is the same flow on both renderers.
@@ -3652,6 +3670,9 @@ test.describe("multi-host", () => {
         "connected",
         { timeout: 60_000 },
       );
+      // Registration leaves Hosts open. Rediscovery must be visible in the
+      // actual session list, not merely present in its mounted hidden tree.
+      await showSessionsPanel(page);
       // The session the removal forgot is back, live rather than stale,
       // because it never stopped running.
       const rediscovered = rowByTitle(page, title);
@@ -3885,19 +3906,32 @@ test.describe("multi-host", () => {
       const row = page.locator(`[data-host-id="${entry.id}"]`);
       await expect(row).toBeVisible();
       await expect(row).toHaveAttribute("data-host-phase", entry.phase);
+      await expect(page.locator(`.host-rail-avatar[data-rail-host-id="${entry.id}"]`))
+        .toHaveAttribute("data-host-phase", entry.phase);
       const status = row.locator(".host-status");
-      await expect(status.locator(".status-dot")).toBeVisible();
       const updateKind = "updateKind" in entry ? entry.updateKind : undefined;
       const label = "label" in entry ? entry.label : undefined;
       if (entry.id === 8015) {
+        // Active setup replaces the ordinary row dot with progress. The
+        // rail above retains the connection phase while this slot is busy.
+        await expect(status.locator(".status-dot")).toBeHidden();
+        await expect(status.locator(".host-update-dot")).toBeVisible();
         await expect(
           row.locator(
             '.provisioning-run[data-provisioning-operation="setup"][data-provisioning-status="running"]',
           ),
         ).toBeVisible();
-        await expect(status.locator(".host-update-verb")).toHaveText("setting up");
-        await expect(status.locator(".host-update-count")).toHaveText("0/1");
-        await expect(status.locator(".host-update-step")).toHaveText("connect to the supervisor");
+        const verb = status.locator(".host-update-verb");
+        const count = status.locator(".host-update-count");
+        const step = status.locator(".host-update-step");
+        await expect(verb).toBeVisible();
+        await expect(verb).toHaveText("setting up");
+        await expect(count).toBeVisible();
+        await expect(count).toHaveText("0/1");
+        await expect(step).toBeVisible();
+        await expect(step).toHaveText("connect to the supervisor");
+      } else {
+        await expect(status.locator(".status-dot")).toBeVisible();
       }
       if (updateKind) {
         const button = row.getByRole("button", { name: /^update / });
@@ -3918,11 +3952,11 @@ test.describe("multi-host", () => {
           );
         }
         await expect(row.getByRole("status", { name: label })).toHaveCount(1);
-        await expect(status.locator(".host-status-label")).toHaveCount(0);
+        await expect(status.locator(".host-status-label")).toHaveText(label!);
         await expect(status.getByRole("button")).toHaveCount(0);
       } else if (entry.phase === "connected" && label === undefined) {
         await expect(row.getByRole("status", { name: "connected" })).toHaveCount(1);
-        await expect(status.locator(".host-status-label")).toHaveCount(0);
+        await expect(status.locator(".host-status-label")).toHaveText("Connected");
       } else {
         await expect(status.locator(".host-status-label")).toBeVisible();
       }
@@ -3957,6 +3991,8 @@ test.describe("multi-host", () => {
    * toggle. Holding planning establishes that progress precedes any reply;
    * the menu update tests cover automatic submission after a successful plan.
    * A truncated long name checks the width budget beside both action targets.
+   * Once progress takes over, it gets its own contained line beneath the
+   * name and menu so a busy host keeps its identifying name readable.
    */
   for (const activation of ["pointer", "keyboard"] as const) {
     test(`host-inline-update: ${activation} starts progress and keeps the header on one line`, async ({
@@ -4017,6 +4053,7 @@ test.describe("multi-host", () => {
       });
       try {
         await page.goto("/");
+        await showHostsPanel(page);
         const row = page.locator(`[data-host-id="${hostId}"]`);
         const button = row.getByRole("button", { name: `update ${name}`, exact: true });
         await expect(button).toBeVisible();
@@ -4053,12 +4090,34 @@ test.describe("multi-host", () => {
         await expect
           .poll(() => requests)
           .toEqual([{ method: "POST", body: null, path: `/api/hosts/${hostId}/update` }]);
-        await expect(row.locator('.host-update-pending[data-update-phase="planning"]')).toHaveText(
-          "updating…",
-        );
+        const progress = row.locator('.host-update-pending[data-update-phase="planning"]');
+        await expect(progress).toBeVisible();
+        await expect(progress).toHaveText("updating…");
+        await expect(progress.locator(".host-update-dot")).toBeVisible();
         await expect(button).toHaveCount(0);
         await expect(toggle).toBeFocused();
         await assertFullyPaintedAndHitTestable(page, toggle);
+        // Progress deliberately leaves the first line. Keep both lines
+        // inside the header while preserving the name/menu alignment and
+        // identifying name budget after the layout changes to a grid.
+        const activeBoxes = await Promise.all(
+          [row.locator(".host-row-main"), row.locator(".host-name"), toggle, progress]
+            .map((element) => element.boundingBox()),
+        );
+        expect(activeBoxes.every(Boolean)).toBe(true);
+        const [headerBox, nameBox, toggleBox, progressBox] = activeBoxes.map((box) => box!);
+        expect(Math.min(nameBox.y + nameBox.height, toggleBox.y + toggleBox.height) -
+          Math.max(nameBox.y, toggleBox.y)).toBeGreaterThan(0);
+        expect(nameBox.width).toBeGreaterThanOrEqual(nameFloor);
+        expect(progressBox.y).toBeGreaterThanOrEqual(
+          Math.max(nameBox.y + nameBox.height, toggleBox.y + toggleBox.height),
+        );
+        for (const box of [nameBox, toggleBox, progressBox]) {
+          expect(box.x).toBeGreaterThanOrEqual(headerBox.x);
+          expect(box.x + box.width).toBeLessThanOrEqual(headerBox.x + headerBox.width);
+          expect(box.y).toBeGreaterThanOrEqual(headerBox.y);
+          expect(box.y + box.height).toBeLessThanOrEqual(headerBox.y + headerBox.height);
+        }
       } finally {
         release();
         await page.unrouteAll({ behavior: "wait" });
@@ -4577,6 +4636,8 @@ test.describe("multi-host", () => {
       });
 
       await page.goto("/");
+      // Keep Details collapsed: progress must expose itself without it.
+      await showHostsPanel(page);
       await expect(page.locator(".hosts-panel")).toBeVisible();
       const row = hostRowByName(page, info.remote_ssh);
       const planningHeld = new Promise<void>((resolve) => { releasePlan = resolve; });
@@ -4640,6 +4701,8 @@ test.describe("multi-host", () => {
       };
       writeProbeTarget(info.remote_ssh, target);
       await page.goto("/");
+      // A failed run must remain exposed independently of Details.
+      await showHostsPanel(page);
       await expect(page.locator(".hosts-panel")).toBeVisible();
       const row = hostRowByName(page, info.remote_ssh);
       await openHostMenu(row);
@@ -4805,6 +4868,8 @@ test.describe("multi-host", () => {
       const row = page.locator(`[data-host-id="${down}"]`);
       await expect(row).toBeVisible();
 
+      // Checking an unavailable host does not make New part of Hosts.
+      await showSessionsPanel(page);
       await page.locator(".new-session-button").click();
       const form = page.locator(".create-session-form");
       await form.getByRole("tab", { name: "command", exact: true }).click();
@@ -5004,6 +5069,9 @@ test.describe("multi-host", () => {
     try {
       await page.goto("/");
       await openHostsPanel(page);
+      // Expand the mounted details oracle before opening the composer from
+      // Sessions; both attempts must use this same composer instance.
+      await showSessionsPanel(page);
       await feed.waitForConnection(1);
       feed.notify(1);
       // A directory that does not exist, so both attempts fail and the
@@ -5021,6 +5089,8 @@ test.describe("multi-host", () => {
       // to send the page looking, since nothing else will.
       moved = true;
       feed.notify(2);
+      // This is a refresh oracle, not a visibility assertion: Hosts remains
+      // mounted while the original composer stays open over Sessions.
       await expect(page.locator(`[data-host-id="${local.id}"] .host-name`)).toHaveText(
         "local (this machine)",
         { timeout: 15_000 },

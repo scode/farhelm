@@ -2,29 +2,36 @@
  * Review the real app across palettes and useful window widths on the docs fleet.
  * These unannotated pictures belong to development review, never to a docs page
  * or publication. Later Steel changes extend this set when they add a surface.
- * Setup stops at the approved invented host's check-only plan, Remove at
- * Cancel, and uninstall at a live-session refusal before installation probes.
+ * Setup uses only the approved invented host and its simulated backend;
+ * Remove stops at Cancel, and uninstall at a live-session refusal before probes.
  * Native updater/App controls, loaded SSH-help commands, successful uninstall
- * plans and operating/busy progress remain uncaptured under the current SPEC.
+ * plans remain uncaptured. Setup progress uses the existing owned backend's
+ * held action, with the real helm publishing progress and controlled failures.
  */
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
-import { hostRowByName, openHostMenu, openRowMenu, patchPreferences, readPreferences } from "../tests/helpers/fleet";
+import { hostRowByName, openHostMenu, openRowMenu, patchPreferences, readPreferences, showHostsPanel, showSessionsPanel } from "../tests/helpers/fleet";
 import { openSettings, selectSettingsSection } from "../tests/helpers/settings";
 import { attachSession, waitForTermText } from "../tests/helpers/term";
 import { waitForSessionRevealed } from "../tests/helpers/terminal-readiness";
 import { clickDialogGap } from "../tests/helpers/dialog-gap";
-import { lastTranscriptLine } from "../readme-hero/stage";
+import { lastTranscriptLine, readStackInfo } from "../readme-hero/stage";
+import { readFile, writeFile, rename } from "node:fs/promises";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 import type { Scenario, ScenarioSession } from "../readme-hero/scenario";
 import { open, openLauncher, rowOf } from "./open";
-import { DOCS_SHOTS_DIR } from "./paths";
+import { DOCS_SHOTS_DIR, DOCS_STACK_INFO_PATH } from "./paths";
 import { shot as captureShot, type CropOptions } from "./shot";
 import { readFleet } from "./stage-docs";
 import { chooseStatus } from "../tests/helpers/list-header";
+import { chooseHost, hostChoice } from "../tests/helpers/host-rail";
 
 // A sidebar-only PR needs its changed states, rather than every unchanged
 // foundation dialog. The same script, fleet, shot helper and cleanup still run.
 const sidebarHeaderOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-header";
 const sidebarStatusOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-status";
+const sidebarRailOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-rail";
+const sidebarWarningOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-warning";
 
 /** Park before observing tooltip state, not only at the screenshot's last step.
  * Pointer departure cancels pending hover help. Focus captures establish their
@@ -360,6 +367,106 @@ async function showUnavailable(page: Page, request: APIRequestContext, scenario:
   }
 }
 
+/** Photograph actual setup progress using the docs stack's existing stand-in.
+ * Only its approved invented destination is registered. Restoring the control
+ * file releases held work even when a screenshot fails; only the new host is
+ * removed, after its ordinary busy guard lets go. Warning review releases the
+ * same simulated action to failure, then holds a retry to show that starting
+ * work does not acknowledge an unseen failure. No installation runs. */
+async function showRailSetup(page: Page, request: APIRequestContext, scenario: Scenario, name: string, warningOnly = false) {
+  const destination = scenario.add_host?.ssh;
+  if (!destination) throw new Error("setup review needs the approved invented destination");
+  const configPath = path.join(readStackInfo(DOCS_STACK_INFO_PATH).state, "provisioning-backend", "config.json");
+  const original = await readFile(configPath, "utf8");
+  const config = JSON.parse(original);
+  const behavior = config.targets?.[`ssh:${destination}`];
+  expect(behavior, "the docs backend must explicitly own this invented target").toBeDefined();
+  expect((await realHosts(request)).some((host) => host.destination === destination)).toBe(false);
+  const publish = async (contents: string) => {
+    const temporary = `${configPath}.${randomUUID()}`;
+    await writeFile(temporary, contents);
+    await rename(temporary, configPath);
+  };
+  try {
+    await publish(JSON.stringify({ ...config, targets: { ...config.targets, [`ssh:${destination}`]: { ...behavior, hold_actions: true } } }));
+    const probe = await request.post("/api/hosts/probe", { data: { target: { kind: "ssh", destination } } });
+    expect(probe.ok()).toBe(true);
+    const plan = await probe.json();
+    expect(plan.result).toBe("provisionable");
+    const accepted = await request.post("/api/hosts/provision", { data: { probe_id: plan.probe_id } });
+    expect(accepted.ok()).toBe(true);
+    const { host_id: id } = await accepted.json();
+    await expect.poll(async () => {
+      const progress = await request.get(`/api/hosts/${id}/provisioning`);
+      expect(progress.ok()).toBe(true);
+      return (await progress.json()).status;
+    }).toBe("running");
+    const avatar = hostChoice(page, id);
+    await expect(avatar).toHaveAttribute("data-host-progress", "true");
+    await expect(avatar).toHaveAttribute("aria-label", /setting up/);
+    if (warningOnly) {
+      await publish(JSON.stringify({ ...config, targets: { ...config.targets, [`ssh:${destination}`]: {
+        ...behavior, hold_actions: false, fail_action: "attach-supervisor", message: "Setup could not finish",
+      } } }));
+      await expect.poll(async () => {
+        const progress = await request.get(`/api/hosts/${id}/provisioning`);
+        expect(progress.ok()).toBe(true);
+        return (await progress.json()).status;
+      }).toBe("failed");
+      await expect(avatar).toHaveAttribute("data-host-attention", "true");
+      await expect(avatar).toHaveAttribute("data-host-progress", "false");
+      await expect(avatar.locator(".host-rail-attention")).toBeVisible();
+      await expect(page.locator(".hosts-panel")).toBeHidden();
+      await expect(page.locator(".session-list")).toBeVisible();
+      await shot(page, `${name}-rail-warning`, [page.locator("body")], { pad: 0 });
+      await chooseHost(page, id);
+      await expect(avatar).toHaveAttribute("aria-pressed", "true");
+      await shot(page, `${name}-rail-warning-selected`, [page.locator("body")], { pad: 0 });
+
+      // A later running action shares the real helm's retained progress path.
+      // Keep Hosts closed so the warning's coexistence with its ring is real.
+      await publish(JSON.stringify({ ...config, targets: { ...config.targets, [`ssh:${destination}`]: {
+        ...behavior, hold_actions: true,
+      } } }));
+      const retryProbe = await request.post("/api/hosts/probe", { data: { target: { kind: "ssh", destination } } });
+      expect(retryProbe.ok()).toBe(true);
+      const retryPlan = await retryProbe.json();
+      expect(retryPlan.result).toBe("provisionable");
+      const retry = await request.post("/api/hosts/provision", { data: { probe_id: retryPlan.probe_id } });
+      expect(retry.status()).toBe(202);
+      expect((await retry.json()).host_id).toBe(id);
+      await expect(avatar).toHaveAttribute("data-host-progress", "true");
+      await expect(avatar).toHaveAttribute("data-host-attention", "true");
+      await expect(avatar.locator(".host-rail-attention")).toBeVisible();
+      await shot(page, `${name}-rail-warning-retry`, [page.locator("body")], { pad: 0 });
+      await chooseHost(page);
+      await expect(avatar).toHaveAttribute("aria-pressed", "false");
+      await expect(avatar).toHaveAttribute("data-host-attention", "true");
+      await shot(page, `${name}-rail-warning-retry-unselected`, [page.locator("body")], { pad: 0 });
+      return;
+    }
+    await shot(page, `${name}-rail-setup`, [page.locator("body")], { pad: 0 });
+    await showHostsPanel(page);
+    await expect(page.locator(`[data-host-id="${id}"] .provisioning-run`)).toBeVisible();
+    await page.mouse.click(0, 0);
+    await shot(page, `${name}-hosts-panel-setup`, [page.locator("body")], { pad: 0 });
+    await showSessionsPanel(page);
+  } finally {
+    await publish(original);
+    const added = (await realHosts(request)).find((host) => host.destination === destination);
+    if (added) {
+      await expect.poll(async () => {
+        const removed = await request.delete(`/api/hosts/${added.id}`);
+        if (removed.ok()) return true;
+        expect(removed.status()).toBe(409);
+        expect(await removed.text()).toContain("busy with a setup, update or uninstall");
+        return false;
+      }, { timeout: 30_000, message: "the released setup lets go of its owned host" }).toBe(true);
+      await expect(hostChoice(page, added.id)).toHaveCount(0);
+    }
+  }
+}
+
 for (const colorScheme of ["dark", "light"] as const) {
   for (const width of ["wide", "main-650"] as const) {
     /**
@@ -434,6 +541,10 @@ for (const colorScheme of ["dark", "light"] as const) {
         const name = `visual-review/${colorScheme}-${width}`;
         const window = [page.locator("body")];
         await shot(page, `${name}-main`, window, { pad: 0 });
+        if (sidebarWarningOnly) {
+          await showRailSetup(page, request, scenario, name, true);
+          return;
+        }
         // The title menu and the supported width bounds are the changed
         // sidebar surface. Use its real resize control, not a CSS override.
         const sortTitle = page.locator(".sort-title");
@@ -447,12 +558,12 @@ for (const colorScheme of ["dark", "light"] as const) {
         await sortMenu.getByRole("menuitemradio").first().press("Escape");
         await expect(sortMenu).toBeHidden();
         const resize = page.locator(".sidebar-resize-handle");
-        await expect(resize).toHaveAttribute("aria-valuenow", "340");
+        await expect(resize).toHaveAttribute("aria-valuenow", "396");
         const widthShots = async (density = "") => {
           for (const [size, key, steps] of [["minimum", "ArrowLeft", 10], ["maximum", "ArrowRight", 36]] as const) {
             await resize.focus();
             for (let step = 0; step < steps; step++) await resize.press(key);
-            await expect(resize).toHaveAttribute("aria-valuenow", size === "minimum" ? "240" : "600");
+            await expect(resize).toHaveAttribute("aria-valuenow", size === "minimum" ? "296" : "656");
             if (width === "main-650") {
               const mainBox = (await main.boundingBox())!;
               await page.setViewportSize({ width: Math.round(mainBox.x + 650), height: 1000 });
@@ -462,7 +573,7 @@ for (const colorScheme of ["dark", "light"] as const) {
             await shot(page, `${name}${density}-sidebar-${size}`, window, { pad: 0 });
           }
           await resize.dblclick();
-          await expect(resize).toHaveAttribute("aria-valuenow", "340");
+          await expect(resize).toHaveAttribute("aria-valuenow", "396");
           if (width === "main-650") {
             const mainBox = (await main.boundingBox())!;
             await page.setViewportSize({ width: Math.round(mainBox.x + 650), height: 1000 });
@@ -481,16 +592,73 @@ for (const colorScheme of ["dark", "light"] as const) {
           await widthShots("-status-waiting");
           const local = (await realHosts(request)).find((host) => host.kind === "local");
           expect(local, "the staged registry identifies its local host").toBeDefined();
-          await page.locator(".filter-host").selectOption(String(local!.id));
+          await chooseHost(page, local!.id);
           await expect(page.locator(".filter-empty")).toBeVisible();
           await expect(page.locator(".session-count")).toHaveText(/^0 of \d+$/);
           await page.mouse.click(0, 0);
           await shot(page, `${name}-status-empty`, window, { pad: 0 });
-          await page.locator(".filter-host").selectOption("");
+          await chooseHost(page);
           await chooseStatus(page, "All");
           await expect(row).toBeVisible();
         }
-        if (sidebarHeaderOnly || sidebarStatusOnly) {
+        if (sidebarRailOnly) {
+          const remote = (await realHosts(request)).find((host) => host.kind === "ssh");
+          expect(remote, "the real staged fleet has a remote avatar").toBeDefined();
+          const avatar = hostChoice(page, remote!.id);
+          await chooseHost(page, remote!.id);
+          await expect(page.locator(".session-count")).toHaveText(/^\d+ of \d+$/);
+          await shot(page, `${name}-rail-selected`, window, { pad: 0 });
+          await avatar.focus();
+          await expect(avatar).toBeFocused();
+          await avatar.press("Shift+F10");
+          const hostMenu = page.locator(`.host-row[data-host-id="${remote!.id}"] .host-row-menu-panel`);
+          await inspectMenu(page, hostMenu);
+          await shot(page, `${name}-rail-menu`, window, { pad: 0 });
+          await page.keyboard.press("Escape");
+          await expect(hostMenu).toBeHidden();
+          await expect(avatar).toBeFocused();
+          await chooseHost(page);
+          await showHostsPanel(page);
+          await page.mouse.click(0, 0);
+          await shot(page, `${name}-hosts-panel`, window, { pad: 0 });
+          await widthShots("-hosts-panel");
+          const managementRow = page.locator(`.host-row[data-host-id="${remote!.id}"]`);
+          await openHostMenu(managementRow);
+          await inspectMenu(page, hostMenu);
+          await shot(page, `${name}-hosts-panel-menu`, window, { pad: 0 });
+          await page.keyboard.press("Escape");
+          await expect(hostMenu).toBeHidden();
+          await page.locator(".host-details-toggle").check();
+          await expect(managementRow.locator(".host-detail")).toBeVisible();
+          await page.mouse.click(0, 0);
+          await shot(page, `${name}-hosts-panel-details`, window, { pad: 0 });
+          await page.locator(".host-details-toggle").uncheck();
+          await showSessionsPanel(page);
+          const settings = await openSettings(page);
+          await shot(page, `${name}-rail-settings`, window, { pad: 0 });
+          await page.keyboard.press("Escape");
+          await expect(settings).toBeHidden();
+          await page.locator(".app-help-toggle").click();
+          await expect(page.getByRole("menu", { name: "help", exact: true })).toBeVisible();
+          await shot(page, `${name}-rail-help`, window, { pad: 0 });
+          await page.keyboard.press("Escape");
+          await expect(page.getByRole("menu", { name: "help", exact: true })).toBeHidden();
+          // Escape returns keyboard focus to Help. Use the ordinary chrome
+          // gap to dismiss that control's help before the unrelated setup shot.
+          await page.mouse.click(0, 0);
+          await showRailSetup(page, request, scenario, name);
+          const waiting = scenario.sessions.find((session) => session.status === "waiting");
+          expect(waiting, "the stale capture needs a real waiting session").toBeDefined();
+          await showUnavailable(page, request, scenario, waiting!, name);
+          // Force only the existing desktop layout class. This checks the
+          // closest web geometry, not native traffic lights or AppKit input.
+          await page.locator(".app-shell").evaluate((element) => element.classList.add("macos-window"));
+          await expect(page.locator(".app-bar")).toHaveCSS("height", "48px");
+          expect((await page.locator(".host-rail").boundingBox())!.y).toBeGreaterThanOrEqual(48);
+          await shot(page, `${name}-rail-macos`, window, { pad: 0 });
+          await page.locator(".app-shell").evaluate((element) => element.classList.remove("macos-window"));
+        }
+        if (sidebarHeaderOnly || sidebarStatusOnly || sidebarRailOnly) {
           // Seed through the same awaited API path as the full capture.
           // An optimistic menu write could otherwise race the final restore.
           await patchPreferences(request, { compact: true });
@@ -666,6 +834,7 @@ for (const colorScheme of ["dark", "light"] as const) {
         if (!scenario.add_host) throw new Error("the approved docs add-host check needs its scenario destination");
         expect((await readPreferences(request)).skip_host_setup_confirmation).toBe(false);
         const beforeAdd = (await realHosts(request)).map((candidate) => candidate.id).sort((a, b) => a - b);
+        await showHostsPanel(page);
         await page.locator(".add-host-button").click();
         const add = page.locator(".host-add-dialog");
         await expect(add).toBeVisible();

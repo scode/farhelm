@@ -57,8 +57,8 @@ async function rendered(page: Page) {
 
 /** Use the supported separator gesture before opening; never set CSS or storage directly. */
 async function resizeSidebar(page: Page, desired: number) {
-  expect(desired).toBeGreaterThanOrEqual(240);
-  expect(desired).toBeLessThanOrEqual(600);
+  expect(desired).toBeGreaterThanOrEqual(296);
+  expect(desired).toBeLessThanOrEqual(656);
   const handle = page.getByRole("separator", { name: "Sidebar width" });
   await expect(handle).toHaveAttribute("data-sidebar-bound", "true");
   const current = Number(await handle.getAttribute("aria-valuenow"));
@@ -88,7 +88,7 @@ async function measure(source: Locator, targetId: string) {
     const titleStyle = getComputedStyle(title);
     const rows = [...document.querySelectorAll(".session-list .session-row")];
     const target = rows.find((row) => row.getAttribute("data-session-id") === targetId)!;
-    const sidebar = document.querySelector(".app-sidebar")!;
+    const sidebar = document.querySelector(".sidebar-content")!;
     const shell = document.querySelector(".app-shell")!;
     const font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
     const pinStyle = pin ? getComputedStyle(pin) : null;
@@ -343,7 +343,7 @@ async function openHeldMenu(page: Page, fixture: Fixture, targetId: string) {
 /** Pin updates must be real read witnesses while all older close inputs stay constant. */
 async function pinCase(page: Page, request: APIRequestContext, where: "lower" | "own" | "earlier" | "compact") {
   const fixture = await prepare(page, request, { compact: where === "compact" });
-  await resizeSidebar(page, 240);
+  await resizeSidebar(page, 296);
   const targetId = where === "own" ? fixture.a : where === "earlier" ? fixture.c : fixture.b;
   const before = await openHeldMenu(page, fixture, targetId);
   expect(before.separators).toBe(0);
@@ -410,7 +410,7 @@ test("compact pin preserves the lower actions menu and row heights", async ({ pa
  */
 test("one accepted identity contribution exchange wholly above preserves the menu", async ({ page, request }) => {
   const fixture = await prepare(page, request, { pinnedPrefix: true });
-  await resizeSidebar(page, 240);
+  await resizeSidebar(page, 296);
   const long = "00 whole prefix ordinary long title ".repeat(8);
   const short = "10 T";
   await fixture.replacePrefixTitles(long, short);
@@ -436,7 +436,7 @@ test("one accepted identity contribution exchange wholly above preserves the men
 /** Raw peer spellings can change while the actual displayed identity stays identical. */
 test("same displayed pinned title with new raw spelling preserves the menu", async ({ page, request }) => {
   const fixture = await prepare(page, request, { pinnedPrefix: true });
-  await resizeSidebar(page, 240);
+  await resizeSidebar(page, 296);
   await fixture.replaceSourceRead({ title: "10 ordinary\u200b" });
   await expect(fixture.source.locator(".session-title")).toHaveText("10 ordinary<U+200B>");
   const before = await openHeldMenu(page, fixture, fixture.b);
@@ -469,7 +469,7 @@ for (const compact of [false, true]) {
       await gate.wait();
       await route.continue();
     });
-    await resizeSidebar(page, 240);
+    await resizeSidebar(page, 296);
     await openHeldMenu(page, fixture, fixture.b);
     const headerDelete = page.locator(".header-delete");
     await headerDelete.focus();
@@ -501,7 +501,7 @@ for (const compact of [false, true]) {
  */
 test("activity track growth rewraps pinned copy and closes the lower menu", async ({ page, request }) => {
   const fixture = await prepare(page, request, { pinnedPrefix: true });
-  await resizeSidebar(page, 340);
+  await resizeSidebar(page, 396);
   const now = Math.floor(Date.now() / 1000);
   const old = now - 9999 * 86400 - 3600;
   const older = now - 10000 * 86400 - 3600;
@@ -536,7 +536,7 @@ test("activity track growth rewraps pinned copy and closes the lower menu", asyn
   // bounded fixture preparation, before the menu's observed update.
   const shift = Math.round(oldShape.titleTextWidth - (budget(oldShape) + budget(newShape)) / 2);
   expect(Math.abs(shift), JSON.stringify({ oldShape, newShape })).toBeLessThanOrEqual(8);
-  await resizeSidebar(page, 340 + shift);
+  await resizeSidebar(page, 396 + shift);
   const wrapped = await measure(fixture.source, fixture.b);
   expect(wrapped.title.y).toBeGreaterThan(wrapped.pin!.y + 2);
   await fixture.replaceSourceRead({ last_activity_at: old });

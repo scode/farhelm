@@ -10,11 +10,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import { open } from "./open";
 import { shot } from "./shot";
+import { showHostsPanel } from "../tests/helpers/fleet";
 
 const PAGE = "add-a-remote-host";
 
 /** Open the add-host dialog from the hosts panel. */
 async function openAddDialog(page: Page) {
+  await showHostsPanel(page);
   await page.locator(".add-host-button").click();
   const dialog = page.locator(".host-add-dialog");
   await expect(dialog).toBeVisible();
@@ -23,6 +25,7 @@ async function openAddDialog(page: Page) {
 
 test("add button", async ({ page, request }) => {
   const { director } = await open(page, request);
+  await showHostsPanel(page);
   const button = page.locator(".add-host-button");
   await director.callout(button, "Adds a host: a Linux machine you can reach over ssh.", { side: "right" });
   await shot(page, `${PAGE}/add-button`, [button, page.locator(".host-list")], { maxWidth: 900 });
@@ -79,6 +82,7 @@ test("setup plan", async ({ page, request }) => {
 
 test("connected host", async ({ page, request }) => {
   const { scenario, director } = await open(page, request);
+  await showHostsPanel(page);
   const remote = scenario.hosts.find((host) => host.kind === "remote");
   if (!remote) throw new Error("the docs scenario needs a remote host");
   const row = page.locator(".host-row").filter({ has: page.locator(".host-name", { hasText: remote.alias }) });

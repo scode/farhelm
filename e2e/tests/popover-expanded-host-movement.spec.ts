@@ -298,7 +298,7 @@ async function prepare(page: Page, request: APIRequestContext, options: Options 
     await expect(page.locator(".host-details-toggle")).toBeChecked();
     expect(await page.locator(".hosts-panel .host-row").evaluateAll((rows) =>
       rows.map((row) => Number(row.getAttribute("data-host-id"))))).toEqual([local!.id, ...KEYS.map((key) => ids[key])]);
-    expect(await page.locator(".app-sidebar").evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);
+    expect(await page.locator(".sidebar-content").evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);
     expect(feed.openSockets()).toBeGreaterThan(0);
     for (const key of KEYS) await expect(host(key)).toHaveAttribute("data-host-phase", "connected");
   };
@@ -347,7 +347,7 @@ async function geometry(toggle: Locator) {
       return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
     };
     const panel = document.querySelector(".hosts-panel")!;
-    const sidebar = document.querySelector(".app-sidebar")!;
+    const sidebar = document.querySelector(".sidebar-content")!;
     const shell = document.querySelector(".app-shell")!;
     const rows = [...panel.querySelectorAll(".host-row")];
     const row = node.closest(".host-row")!;
@@ -377,7 +377,7 @@ async function observePanel(page: Page) {
       style.borderRightWidth, style.paddingTop, style.paddingBottom, style.paddingLeft, style.paddingRight];
     const sizes: { width: number; height: number; outer: number[] }[] = [];
     let overflow = false;
-    const sidebar = document.querySelector(".app-sidebar")!;
+    const sidebar = document.querySelector(".sidebar-content")!;
     const shell = document.querySelector(".app-shell")!;
     const scroll = () => [scrollX, scrollY, sidebar.scrollLeft, sidebar.scrollTop, shell.scrollLeft, shell.scrollTop];
     const initialScroll = scroll();

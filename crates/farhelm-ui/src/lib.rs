@@ -1764,7 +1764,7 @@ fn AppBody() -> Element {
     // Bumped by every EXTERNAL event that can move a session row out from
     // under an open actions panel's already-measured `position: fixed`
     // coordinates: an `onscroll` on either scrolling ancestor of the
-    // session list below — `.app-sidebar` (the real vertical scroller)
+    // session list below — the sidebar shell
     // and `.app-shell` (which scrolls horizontally in a narrow window) —
     // plus (see the `onresize` below) a resize of the sidebar itself.
     // Read by `ListView`'s own effect to close any open row actions panel
@@ -1775,7 +1775,8 @@ fn AppBody() -> Element {
     // scroll/resize events, and `.app-shell`/`.app-sidebar` are this
     // component's own elements, not `ListView`'s. The counter is
     // deliberately never READ here, only bumped — "layout", not "scroll",
-    // because it now covers more than scrolling.
+    // because it now covers more than scrolling. ListView owns its inner
+    // content and rail scroll events, which feed its existing local epoch.
     let mut layout_epoch = use_signal(|| 0_u64);
     let build_skew = skew::build_skew_detected();
     let token_required = *auth::TOKEN_REQUIRED.read();
@@ -1873,9 +1874,8 @@ fn AppBody() -> Element {
                     onscroll: move |_| layout_epoch += 1,
                     div {
                         class: "app-sidebar",
-                        // As above, for THIS element's own vertical
-                        // scrolling — the sidebar's usual case.
-                        onscroll: move |_| layout_epoch += 1,
+                        // The ListView-owned content and rail scrollers
+                        // publish their own movement below this shell.
                         // A window resize does not scroll anything, but it can
                         // still move every row: dragging the sidebar edge or a resize
                         // narrow enough to trigger `.app-shell`'s horizontal
@@ -1957,9 +1957,9 @@ fn AppBody() -> Element {
                         tabindex: "0",
                         "aria-label": "Sidebar width",
                         "aria-orientation": "vertical",
-                        "aria-valuemin": "240",
-                        "aria-valuemax": "600",
-                        "aria-valuenow": "340",
+                        "aria-valuemin": "296",
+                        "aria-valuemax": "656",
+                        "aria-valuenow": "396",
                         "data-tooltip": "Drag to resize the sidebar; double-click to reset",
                         onmounted: move |_| {
                             document::eval(r#"(async () => {

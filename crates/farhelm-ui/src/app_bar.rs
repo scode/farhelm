@@ -531,6 +531,35 @@ fn BarMenuToggle(
     }
 }
 
+/// Anchor the footer's Help menu from its bottom edge, rather than reserving
+/// the much taller session menu's height above a shorter actual panel. The
+/// same measured trigger and generation still own placement and focus.
+fn footer_menu_placement(placement: PanelPlacement) -> (String, Option<String>) {
+    let PanelPlacement::Measured(rect) = placement else {
+        return (
+            format!("{} bottom: auto;", session_menu_placement_style(placement)),
+            session_menu_pointer_style(placement),
+        );
+    };
+    let left = rect.max_x() + 10.0;
+    let bottom = rect.max_y() + 4.0;
+    let pointer = (rect.max_y() - rect.min_y()) / 2.0 - 1.0;
+    (
+        format!(
+            "opacity: 1; pointer-events: auto; right: auto; top: auto; \
+                 --menu-left: max(8px, min({left}px, calc(100vw - 254px))); \
+                 left: var(--menu-left); \
+                 --menu-bottom: max(8px, calc(100vh - {bottom}px)); \
+                 bottom: var(--menu-bottom); \
+                 max-width: calc(100vw - var(--menu-left) - 8px); \
+                 max-height: calc(100vh - var(--menu-bottom) - 8px);"
+        ),
+        Some(format!(
+            "top: auto; bottom: clamp(12px, {pointer}px, calc(100% - 18px));"
+        )),
+    )
+}
+
 /// A bar menu's flyout, the bar's next sibling (see the section note above
 /// for why it must not be inside the bar), shown while the menu is open.
 #[component]
@@ -544,6 +573,14 @@ fn BarMenuFlyout(
     let wiring = menu.wiring(order);
     let mut open = menu.open;
     let mut menu_focus = menu.menu_focus;
+    let (placement_style, pointer_style) = if menu.name == "help" {
+        footer_menu_placement((menu.placement)())
+    } else {
+        (
+            session_menu_placement_style((menu.placement)()),
+            session_menu_pointer_style((menu.placement)()),
+        )
+    };
     let tab_stop = menu_focus()
         .and_then(|position| order.get(position))
         .or_else(|| order.get(0));
@@ -556,8 +593,8 @@ fn BarMenuFlyout(
             div {
                 class: "host-row-menu-flyout bar-menu-flyout",
                 "data-bar-menu": menu.name,
-                style: session_menu_placement_style((menu.placement)()),
-                if let Some(pointer_style) = session_menu_pointer_style((menu.placement)()) {
+                style: placement_style,
+                if let Some(pointer_style) = pointer_style {
                     span { class: "host-row-menu-pointer", style: pointer_style, "aria-hidden": "true" }
                 }
                 div { class: "host-row-menu-panel bar-menu-panel",
@@ -605,14 +642,18 @@ fn BarMenuFlyout(
 /// two), so the status region is in the accessibility tree when it changes.
 const ANNOUNCE_AFTER_CLOSE_MS: u64 = 100;
 
-/// Render the sticky sidebar bar: the Farhelm wordmark at the window's top
-/// left, then the build identity (the update menu's toggle while an update
-/// waits), the settings gear, and the help menu, followed by the bar menus'
-/// flyouts as the bar's siblings (see "The bar menus" above).
-/// The modals are siblings too, so the sticky bar cannot cap their stacking
-/// order.
+/// Keep app-wide menu and dialog lifetimes independent of sidebar layout.
+/// The top band holds wordmark/build identity; its sibling rail footer holds
+/// settings and help. Flyouts and modals remain outside both stacking
+/// contexts, and moving a trigger never remounts its pending work.
 #[component]
-pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
+pub(crate) fn AppBar(
+    layout_epoch: ReadSignal<u64>,
+    /// ListView owns presentation; this footer only hosts its persistent control.
+    #[props(default = rsx! {})]
+    hosts_toggle: Element,
+    children: Element,
+) -> Element {
     let mut settings_open = use_signal(|| false);
     let mut ssh_help_open = use_signal(|| false);
     let mut feedback_open = use_signal(|| false);
@@ -802,6 +843,14 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                     on_commit: status_committed,
                 }
             }
+        }
+        // Keep the caller's persistent content before the footer in DOM
+        // order, so keyboard navigation reaches host choices before Settings.
+        {children}
+        // These triggers stay in AppBar's scope: moving chrome must not
+        // replace the settings/help owners or their pending dialog work.
+        div { class: "host-rail-footer",
+            {hosts_toggle}
             button {
                 r#type: "button",
                 class: "btn btn-neutral app-settings-toggle",

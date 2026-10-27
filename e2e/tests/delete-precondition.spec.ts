@@ -77,6 +77,17 @@ test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precon
       const tab = await request.post(`/api/sessions/${encodeURIComponent(session.id)}/tabs`);
       expect(tab.ok(), await tab.text()).toBe(true);
     }
+    // Creation publishes the session before its agent has necessarily started.
+    // Stopping in that interval can correctly produce a startup error rather
+    // than "exited"; this test needs an agent that was alive and then ended.
+    // Keep the complete status in the assertion so a failed start retains its
+    // diagnostic instead of looking like a delete-precondition regression.
+    await expect
+      .poll(
+        async () => (await listSessions(request)).sessions.find((listed) => listed.id === session.id)?.status,
+        { timeout: 20_000, message: "the delete fixture's agent must start before it is stopped" },
+      )
+      .toMatchObject({ state: /^(running|waiting|idle)$/ });
     await stopSession(request, session.id);
     // Settled server-side before the page looks: the stop returns when the
     // kill is issued, not when "exited" reaches the helm's cache.

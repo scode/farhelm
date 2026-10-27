@@ -1,3 +1,4 @@
+import { chooseHost, hostChoice } from "./helpers/host-rail";
 import { chooseSort, setCompact, expectCompactRows } from "./helpers/list-header";
 import { chooseLauncherHost, launcherHostOptions } from "./helpers/host-picker";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
@@ -57,6 +58,8 @@ import {
   listSessions,
   openHostMenu,
   openHostsPanel,
+  showHostsPanel,
+  showSessionsPanel,
   openRowMenu,
   patchPreferences,
   pinAutoSelect,
@@ -274,7 +277,19 @@ test("filtered-list absence retains an enabled rename editor and its draft", asy
     await field.fill(draft);
     await field.focus();
 
-    await page.locator(".filter-host").selectOption(String(remote.id));
+    // Inject the query transition without pointer or focus input: Rename
+    // deliberately makes the rail inert. This tests a narrowed read's evidence,
+    // not a user's ability to interact through a modal backdrop.
+    await expect(field).toBeFocused();
+    const choice = hostChoice(page, remote.id);
+    expect(await choice.evaluate((button) => button.closest("[inert]") !== null)).toBe(true);
+    const narrowed = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/sessions" && url.searchParams.get("host") === String(remote.id);
+    });
+    await choice.dispatchEvent("click");
+    expect((await narrowed).ok()).toBe(true);
+    await expect(choice).toHaveAttribute("aria-pressed", "true");
     await expect(target).toHaveCount(0, { timeout: 20_000 });
     await expect(row(page, decoy.id)).toBeVisible();
     await expect(dialog.locator(".rename-unavailable")).toHaveCount(0);
@@ -292,7 +307,7 @@ test("filtered-list absence retains an enabled rename editor and its draft", asy
 
 /**
  * The readout only earns "always visible" if it survives the sidebar
- * scrolling: `.app-sidebar` is the scroll container for the whole session
+ * scrolling: `.sidebar-content` is the scroll container for the whole session
  * list, so an ordinary first child would leave with the rows. Fills the
  * sidebar past one screen, scrolls it to the bottom, and expects the bar to
  * still sit at the sidebar's visible top edge.
@@ -304,7 +319,7 @@ test("the sidebar app bar stays pinned while the session list scrolls", async ({
     await page.setViewportSize({ width: 900, height: 500 });
     await page.goto("/");
     await expect(row(page, created[0].id)).toBeVisible({ timeout: 20_000 });
-    const sidebar = page.locator(".app-sidebar");
+    const sidebar = page.locator(".sidebar-content");
     await expect
       .poll(() => sidebar.evaluate((el) => el.scrollHeight > el.clientHeight), { timeout: 20_000 })
       .toBe(true);
@@ -316,7 +331,7 @@ test("the sidebar app bar stays pinned while the session list scrolls", async ({
     const bar = page.locator(".app-bar");
     await expect(bar).toBeVisible();
     const barBox = await bar.boundingBox();
-    const sidebarBox = await sidebar.boundingBox();
+    const sidebarBox = await page.locator(".app-sidebar").boundingBox();
     expect(barBox, "the app bar must have a box").not.toBeNull();
     expect(sidebarBox, "the sidebar must have a box").not.toBeNull();
     expect(Math.abs(barBox!.y - sidebarBox!.y)).toBeLessThanOrEqual(1);
@@ -350,13 +365,13 @@ test("macOS header controls stay clear of native buttons while the shell scrolls
   await page.locator(".window-root").evaluate((element) => element.classList.add("macos-root"));
   // Only inert content height is synthetic. The bar, controls, drag
   // spacer, scrollers, and selected session header are production nodes.
-  await page.locator(".app-sidebar").evaluate((element) => {
+  await page.locator(".sidebar-content").evaluate((element) => {
     const filler = document.createElement("div");
     filler.dataset.headerScrollFixture = "true";
     filler.style.height = "1200px";
     element.append(filler);
   });
-  const sidebar = page.locator(".app-sidebar");
+  const sidebar = page.locator(".sidebar-content");
   await expect.poll(() => sidebar.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
   await expect(drag).toBeVisible();
   await expect(drag.locator("button, input, a, [tabindex]")).toHaveCount(0);
@@ -368,7 +383,7 @@ test("macOS header controls stay clear of native buttons while the shell scrolls
   for (const width of [900, 540, 400]) {
     await page.setViewportSize({ width, height: 500 });
     const maximum = await shell.evaluate((element) => element.scrollWidth - element.clientWidth);
-    if (width < 661) expect(maximum, "the narrow fixture must actually overflow horizontally").toBeGreaterThan(0);
+    if (width < 717) expect(maximum, "the narrow fixture must actually overflow horizontally").toBeGreaterThan(0);
     for (const offset of [0, Math.min(76, maximum), maximum]) {
       await shell.evaluate((element, left) => { element.scrollLeft = left; }, offset);
       await expect.poll(() => shell.evaluate((element) => element.scrollLeft)).toBeCloseTo(offset, 0);
@@ -390,11 +405,11 @@ test("macOS header controls stay clear of native buttons while the shell scrolls
       const barBox = await bar.boundingBox();
       expect(barBox).not.toBeNull();
       expect(barBox!.y).toBeCloseTo(0, 0);
-      // Only the narrow layout (the 661px media query) stacks the header
+      // Only the narrow layout (396px total sidebar plus the main floor) stacks the header
       // below a fixed app bar. A wider window can still overflow sideways
       // when the header's actions need more than the main pane has, and
       // there the header rightly sits beside the sidebar at the top.
-      if (width < 661) {
+      if (width < 717) {
         const headerBox = await header.boundingBox();
         expect(headerBox).not.toBeNull();
         expect(headerBox!.y).toBeGreaterThanOrEqual(barBox!.y + barBox!.height);
@@ -516,7 +531,7 @@ test("the sidebar hides its scrollbar without giving up scrolling", async ({ pag
     await page.setViewportSize({ width: 900, height: 500 });
     await page.goto("/");
     await expect(row(page, created[0].id)).toBeVisible({ timeout: 20_000 });
-    const sidebar = page.locator(".app-sidebar");
+    const sidebar = page.locator(".sidebar-content");
     await expect
       .poll(() => sidebar.evaluate((el) => el.scrollHeight > el.clientHeight), { timeout: 20_000 })
       .toBe(true);
@@ -525,7 +540,7 @@ test("the sidebar hides its scrollbar without giving up scrolling", async ({ pag
     // assertion below is "the wheel moved it", not "it is scrolled".
     expect(await sidebar.evaluate((el) => el.scrollTop), "the sidebar rests at the top").toBe(0);
 
-    for (const selector of [".app-sidebar", ".session-list"]) {
+    for (const selector of [".sidebar-content", ".session-list"]) {
       expect(
         await page.locator(selector).evaluate((el) => getComputedStyle(el).scrollbarWidth),
         `${selector} must resolve scrollbar-width: none`,
@@ -839,14 +854,14 @@ test("scrolling fixture owns partial allocation and bounded teardown", async ({ 
 });
 
 /**
- * Create enough sessions that `.app-sidebar` — the sidebar's real vertical
+ * Create enough sessions that `.sidebar-content` — the sidebar's real vertical
  * scroll container — must scroll to show them all, regardless of engine or
  * viewport font metrics.
  *
  * `.session-list` itself carries `overflow-y: auto` in the stylesheet but
  * no height constraint of its own, so it never actually scrolls; the
- * bounded-height ancestor that does is `.app-sidebar` (see its own
- * `onscroll` doc in lib.rs, and app.css's comment beside `.session-list`).
+ * bounded-height ancestor that does is `.sidebar-content` (see its own
+ * `onscroll` in ListView, and app.css's comment beside `.session-list`).
  * A FIXED count rather than a computed one, because row height depends on
  * font metrics this suite does not control — callers additionally poll for
  * `scrollHeight > clientHeight` before trusting the fixture rather than
@@ -2889,7 +2904,7 @@ test("opening a menu does not move the rows below it", async ({ page, request })
     const second = firstIsA ? row(page, b.id) : row(page, a.id);
 
     await first.locator(".session-row-menu").hover();
-    const sidebar = page.locator(".app-sidebar");
+    const sidebar = page.locator(".sidebar-content");
     const scrollBefore = await sidebar.evaluate((element) => element.scrollTop);
     const before = (await second.boundingBox())!;
     await openRowMenu(first);
@@ -2987,34 +3002,33 @@ test("rename lives in a stable dialog and locks the row's open button while edit
 });
 
 /**
- * The sidebar's resting chrome keeps one host list, the compact session
- * heading, session rows, create control, and permanent host selector visible.
- *
- * This pins the one-list contract directly: a regression that hides the
- * list, restores the old duplicate strip, or makes host actions hover-only
- * fails at the resting state where those choices matter.
+ * Sessions is the resting surface; Hosts reveals the same mounted management
+ * rows and their native details switch without duplicating either list.
  */
-test("the host list and host selector are permanent while details stay on demand", async ({
+test("the rail stays visible while Hosts swaps session content for management", async ({
   page,
 }) => {
   await page.goto("/");
-  await expect(page.locator(".hosts-panel")).toBeVisible();
+  await expect(page.locator(".hosts-heading")).not.toBeVisible();
   await expect(page.locator(".hosts-toggle")).toHaveCount(0);
   await expect(page.locator(".sidebar-controls")).toHaveCount(0);
   const hostHeading = page.locator(".hosts-heading");
-  const details = hostHeading.getByRole("checkbox", { name: "details", exact: true });
-  await expect(details).toBeVisible();
+  const details = hostHeading.getByRole("checkbox", { name: "Details", exact: true });
   // Sort is the title beside the count and icon actions. Host filtering
-  // stays below it until the separate host-rail change.
+  // remains available independently in the permanent rail.
   const header = page.locator(".list-header");
   await expect(header.locator(":scope > .session-heading .session-count")).toHaveCount(1);
   await expect(header.locator(":scope > .session-heading .sort-title")).toHaveCount(1);
   await expect(header.locator(":scope > .session-heading .new-session-button")).toHaveCount(1);
-  await expect(header.locator(":scope > .list-header-controls")).toHaveCount(1);
-  await expect(header.locator(":scope > .list-header-controls .filter-host")).toHaveCount(1);
-  await expect(header.locator(":scope > .list-header-controls .sort-title")).toHaveCount(0);
+  await expect(page.locator(".host-rail")).toHaveCount(1);
+  await expect(header.locator(".host-rail-avatar")).toHaveCount(0);
+  await expect(hostChoice(page, "")).toHaveAttribute("aria-pressed", "true");
+  await showHostsPanel(page);
+  await expect(details).toBeVisible();
+  // Role queries omit concealed controls. Establish the native choice only
+  // after its management surface enters the accessibility tree.
   await expect(details).not.toBeChecked();
-  await expect(page.locator(".filter-host")).toHaveValue("");
+  await expect(header.locator(".session-heading")).not.toBeVisible();
   const rows = page.locator(".host-row");
   await expect(rows.first()).toBeVisible({ timeout: 20_000 });
   const count = await rows.count();
@@ -3024,7 +3038,7 @@ test("the host list and host selector are permanent while details stay on demand
   const hostControls = [
     hostHeading.locator(".host-count"),
     hostHeading.locator(".host-details-control"),
-    hostHeading.getByRole("button", { name: "add host", exact: true }),
+    hostHeading.getByRole("button", { name: "Add host", exact: true }),
   ];
   const hostBoxes = await Promise.all(hostControls.map((control) => control.boundingBox()));
   expect(hostBoxes.every((box) => box !== null)).toBe(true);
@@ -3033,7 +3047,7 @@ test("the host list and host selector are permanent while details stay on demand
   );
   const local = rows.first();
   await expect(local.locator(".host-status .status-dot")).toBeVisible();
-  await expect(local.locator(".host-status-label")).toHaveCount(0);
+  await expect(local.locator(".host-status-label")).toHaveText("Connected");
   await expect(local.locator(".host-row-menu")).toHaveCSS("opacity", "1");
 
   // Space toggles the focusable checkbox itself and still applies the global
@@ -3183,6 +3197,7 @@ test("host details reveal every row's version line together", async ({ page, req
   const rows = page.locator(".host-row");
   await expect(rows).toHaveCount(2, { timeout: 20_000 });
   await expect(rows.locator(".host-detail")).toHaveCount(0);
+  await showHostsPanel(page);
   await page.locator(".host-details-toggle").click();
   await expect(rows.nth(0).locator(".host-detail")).toContainText("1.2.3-local");
   await expect(rows.nth(1).locator(".host-detail")).toContainText("4.5.6-remote");
@@ -3230,12 +3245,12 @@ test("a host-filtered-out row's open menu stays closed when it returns", async (
 
     // The decoy keeps the result non-empty, so an empty placeholder cannot
     // mask a failure to reconcile the menu after the host reply commits.
-    await page.locator(".filter-host").selectOption(String(remote.id));
+    await chooseHost(page, String(remote.id));
     await expect(row(page, target.id)).toHaveCount(0, { timeout: 20_000 });
     await expect(row(page, decoy.id)).toBeVisible();
 
     // ...and bring it back: present again, menu CLOSED.
-    await page.locator(".filter-host").selectOption("");
+    await chooseHost(page, "");
     await expect(row(page, target.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, target.id).locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(row(page, target.id).locator(".session-row-menu")).toHaveAttribute(
@@ -3292,10 +3307,10 @@ test("filtering out the active session preserves its terminal and restores its s
       (window as typeof window & { __farhelmHostFilterTerminal?: Element }).__farhelmHostFilterTerminal = node;
     });
 
-    const host = page.locator(".filter-host");
+    const host = hostChoice(page);
     await host.focus();
     await expect(host).toBeFocused();
-    await host.selectOption(String(remote.id));
+    await chooseHost(page, String(remote.id));
     await expect(row(page, active.id)).toHaveCount(0, { timeout: 20_000 });
     await expect(row(page, decoy.id)).toBeVisible();
     await expect(page.locator(".session-details .title")).toHaveText(active.title);
@@ -3304,7 +3319,7 @@ test("filtering out the active session preserves its terminal and restores its s
       node === (window as typeof window & { __farhelmHostFilterTerminal?: Element }).__farhelmHostFilterTerminal
     ))).toBe(true);
 
-    await host.selectOption("");
+    await chooseHost(page, "");
     await expect(row(page, active.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, active.id)).toHaveAttribute("data-session-selected", "true");
     await expect(page.locator(".session-details .title")).toHaveText(active.title);
@@ -3383,10 +3398,11 @@ test("the host list counts every host, humanizes phases, and clips long names", 
   await page.goto("/");
 
   const entries = page.locator(".host-row");
+  await showHostsPanel(page);
   await expect(entries).toHaveCount(2, { timeout: 20_000 });
   await expect(page.locator(".host-count")).toHaveText("2 hosts");
   await expect(entries.nth(0).locator(".host-name")).toHaveText("local (this machine)");
-  await expect(entries.nth(0).locator(".host-status-label")).toHaveCount(0);
+  await expect(entries.nth(0).locator(".host-status-label")).toHaveText("Connected");
   await expect(entries.nth(1).locator(".host-status-label")).toHaveText(
     "unreachable, retrying",
   );
@@ -3411,6 +3427,7 @@ test("host count keeps its heading while session count accompanies the sort titl
   try {
     await page.goto("/");
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
+    await showHostsPanel(page);
     for (const heading of [page.locator(".hosts-heading .host-count")]) {
       // Fixture premise: this is the plain count, the only variant that is a
       // heading. A filtered or truncated banner is a sentence and keeps its
@@ -3421,10 +3438,13 @@ test("host count keeps its heading while session count accompanies the sort titl
       expect(label.x + label.width, "the label is painted to the left of the count").toBeLessThanOrEqual(count.x);
       expect(label.width, "the label must be painted, not collapsed by the reorder").toBeGreaterThan(0);
     }
+    await showSessionsPanel(page);
     const count = page.locator(".session-heading .session-count");
     await expect(count).toHaveText(/^\d+$/);
     await expect(count.locator(".heading-label")).toHaveCount(0);
-    const title = page.getByRole("button", { name: "Sort: Recently active", exact: true });
+    // The helm remembers sort across clients and earlier cases. This checks
+    // count geometry beside the chosen title, independent of that order.
+    const title = page.locator(".session-heading .sort-title");
     await expect(title).toBeVisible();
     const titleBox = (await title.boundingBox())!;
     const countBox = (await count.boundingBox())!;
@@ -3559,7 +3579,7 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
       });
     });
     await page.goto("/");
-    await page.locator(".app-sidebar").evaluate((element) => {
+    await page.locator(".sidebar-content").evaluate((element) => {
       (element as HTMLElement).style.width = "280px";
     });
     const target = row(page, "width-contention-session");
@@ -3816,7 +3836,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   });
 
   await page.goto("/");
-  await page.locator(".app-sidebar").evaluate((element) => {
+  await page.locator(".sidebar-content").evaluate((element) => {
     (element as HTMLElement).style.width = "280px";
   });
   const rows = [
@@ -3913,6 +3933,9 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   expect(sessionExcess).toBeGreaterThanOrEqual(0);
   expect(sessionExcess).toBeLessThanOrEqual(8.5);
 
+  // Hosts and Sessions share the sidebar column, so measure each surface
+  // while it is actually shown, preserving both gutter assertions.
+  await showHostsPanel(page);
   const host = page.locator(".host-row").first();
   await expect(host).toBeVisible({ timeout: 20_000 });
   const hostExcess = await menuExcess(
@@ -3922,6 +3945,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   );
   expect(hostExcess).toBeGreaterThanOrEqual(0);
   expect(hostExcess).toBeLessThanOrEqual(8.5);
+  await showSessionsPanel(page);
 
   // Compact mode keeps the ended row to one visual line: the complete
   // status and retention words move into accessible names/tooltips while
@@ -4646,7 +4670,7 @@ async function placeOwnRowAtSidebarBottom(
       ),
   );
 
-  const sidebar = page.locator(".app-sidebar");
+  const sidebar = page.locator(".sidebar-content");
   expect(
     await sidebar.evaluate((el) => el.scrollTop),
     "placing the row must have scrolled the sidebar, or the row was never near the bottom",
@@ -4720,7 +4744,7 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
     // then a menu that stays put) must not race an initial host read.
     await waitForHostsListSettled(page);
 
-    const sidebar = page.locator(".app-sidebar");
+    const sidebar = page.locator(".sidebar-content");
     await expect
       .poll(() => sidebar.evaluate((el) => el.scrollHeight > el.clientHeight + 1), {
         timeout: 20_000,
@@ -4885,7 +4909,7 @@ test("a retained refusal stays inside a bottom-row menu's scrolling panel", asyn
     await page.goto("/");
     await expect(row(page, created[0].id)).toBeVisible({ timeout: 20_000 });
     await waitForHostsListSettled(page);
-    const sidebar = page.locator(".app-sidebar");
+    const sidebar = page.locator(".sidebar-content");
     await expect
       .poll(() => sidebar.evaluate((el) => el.scrollHeight > el.clientHeight + 1), {
         timeout: 20_000,
@@ -5021,8 +5045,8 @@ test("a retained refusal stays inside a bottom-row menu's scrolling panel", asyn
  * The flyout is positioned `fixed` against the viewport from a ONE-TIME
  * measurement of the toggle's rect (list.rs's `PanelPlacement`); once the
  * row scrolls, that snapshot is stale and the panel would float over
- * whatever content the scroll left behind. `AppBody`'s `onscroll` on
- * `.app-sidebar` (lib.rs) is what notices and closes it — this is the
+ * whatever content the scroll left behind. `ListView`'s `onscroll` on
+ * `.sidebar-content` (ListView) is what notices and closes it — this is the
  * direct proof that listener actually fires and actually reaches the menu,
  * as opposed to the layout-dismissal tests below, which go through the
  * sidebar's OWN toggles instead.
@@ -5039,7 +5063,7 @@ test("scrolling the sidebar closes an open row menu", async ({ page, request }) 
     // reason.
     await waitForHostsListSettled(page);
 
-    const sidebar = page.locator(".app-sidebar");
+    const sidebar = page.locator(".sidebar-content");
     await expect
       .poll(() => sidebar.evaluate((el) => el.scrollHeight > el.clientHeight + 1), {
         timeout: 20_000,
@@ -5104,6 +5128,8 @@ test("opening host details closes an open row menu", async ({ page, request }) =
     await waitForHostsListSettled(page);
     await openRowMenu(target);
 
+    await showHostsPanel(page);
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await page.locator(".host-details-toggle").click();
     await expect(page.locator(".host-details-toggle")).toBeChecked();
     await expect(page.locator(".host-detail").first()).toBeVisible();
@@ -5156,10 +5182,10 @@ test("the session header controls are usable while the first listing read is pen
   );
   try {
     await page.goto("/");
-    await expect(page.locator(".list-header-controls .filter-host")).toBeVisible({ timeout: 20_000 });
+    await expect(hostChoice(page)).toBeVisible({ timeout: 20_000 });
     await expect(page.locator(".session-heading .sort-title")).toBeVisible();
     await expect(page.locator(".session-count")).toHaveCount(0);
-    await expect(page.locator(".filter-host")).toHaveValue("");
+    await expect(hostChoice(page, "")).toHaveAttribute("aria-pressed", "true");
   } finally {
     release();
     await page.unroute((url) => url.pathname === "/api/sessions");
@@ -8169,6 +8195,8 @@ test("aliasing a remote host renames it everywhere but the details view", async 
   await expect(hostRow.locator(".host-name")).toHaveText("Build Box");
   await dialog.locator(".host-settings-close").click();
   await expect(dialog).toHaveCount(0);
+  // Closing host settings returns to management; New belongs to Sessions.
+  await showSessionsPanel(page);
   await page.locator(".new-session-button").click();
   await expect(page.locator(".create-session-form")).toBeVisible();
   await launcherHostOptions(page.locator(".create-session-host"));
@@ -8216,6 +8244,8 @@ test("aliasing a remote host renames it everywhere but the details view", async 
   await expect(dialog).toHaveCount(0);
   await expect(hostRow.locator(".host-destination-detail")).toHaveCount(0);
 
+  // Removing the alias leaves management open just like saving it did.
+  await showSessionsPanel(page);
   await page.locator(".new-session-button").click();
   await expect(page.locator(".create-session-form")).toBeVisible();
   await launcherHostOptions(page.locator(".create-session-host"));

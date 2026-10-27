@@ -3,12 +3,12 @@
  * clipping, capture and focus errors that pure parsing tests cannot see. */
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
-import { cleanupSession, createSession, openRowMenu } from "./helpers/fleet";
+import { cleanupSession, createSession, openRowMenu, showHostsPanel, showSessionsPanel } from "./helpers/fleet";
 import { FAKE_AGENT_INVOCATION } from "./helpers/terminal-suite";
 import { waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 
-/** Observe the content width; the existing border is deliberately extra. */
+/** Observe total rail-plus-content width; the border is deliberately extra. */
 async function width(page: Page): Promise<number> {
   return page.locator(".app-sidebar").evaluate((el) => parseFloat(getComputedStyle(el).width));
 }
@@ -25,6 +25,8 @@ async function headingActionsFit(page: Page): Promise<void> {
     ".session-heading .new-session-button",
     ".session-heading .templates-button",
   ]) {
+    if (selector.startsWith(".hosts-heading")) await showHostsPanel(page);
+    else await showSessionsPanel(page);
     const control = page.locator(selector);
     await expect(control).toBeVisible();
     const box = (await control.boundingBox())!;
@@ -34,10 +36,12 @@ async function headingActionsFit(page: Page): Promise<void> {
     );
   }
   const trash = (await page.locator(".session-heading .checkout-trash-button").boundingBox())!;
+  const templates = (await page.locator(".session-heading .templates-button").boundingBox())!;
   const next = (await page.locator(".session-heading .new-session-button").boundingBox())!;
   expect(trash.height, "trash and New use the same control height").toBe(next.height);
   expect(trash.y, "the pair stays on the same wrapped header line").toBe(next.y);
-  expect(next.x - trash.x - trash.width, "trash sits immediately left of New").toBeLessThanOrEqual(6);
+  expect(templates.x - trash.x - trash.width, "Templates follows Trash").toBeLessThanOrEqual(6);
+  expect(next.x - templates.x - templates.width, "New follows Templates").toBeLessThanOrEqual(6);
 }
 
 /** Drag the real separator from its current position, including outside it. */
@@ -71,7 +75,7 @@ test("sidebar drag clamps, persists, resets and refits the program", async ({ pa
     await waitForTermText(page, "FAKE-AGENT READY");
     const handle = page.getByRole("separator", { name: "Sidebar width" });
     await expect(handle).toHaveAttribute("data-sidebar-bound", "true");
-    expect(await width(page), "fixture: a fresh device starts at the default").toBe(340);
+    expect(await width(page), "fixture: a fresh device starts at the default").toBe(396);
     await headingActionsFit(page);
     // The resize strip may use the terminal gutter, but its first content
     // column must still receive clicks for selection, links and mouse mode.
@@ -82,28 +86,28 @@ test("sidebar drag clamps, persists, resets and refits the program", async ({ pa
     await page.screenshot({ path: info.outputPath("sidebar-default.png") });
 
     await dragBy(page, 90);
-    await expect.poll(() => width(page)).toBe(430);
-    await expect(handle).toHaveAttribute("aria-valuenow", "430");
+    await expect.poll(() => width(page)).toBe(486);
+    await expect(handle).toHaveAttribute("aria-valuenow", "486");
     await expect.poll(() => page.evaluate(() => localStorage.getItem("farhelm.sidebar-width"))).toBe("430");
     await page.reload();
     await waitForSessionRevealed(page, session.id);
-    await expect.poll(() => width(page)).toBe(430);
-    await expect(handle).toHaveAttribute("aria-valuenow", "430");
+    await expect.poll(() => width(page)).toBe(486);
+    await expect(handle).toHaveAttribute("aria-valuenow", "486");
 
     await dragBy(page, 500);
-    await expect.poll(() => width(page)).toBe(600);
+    await expect.poll(() => width(page)).toBe(656);
     await headingActionsFit(page);
     // Focus is the premise: a keypress that went elsewhere would also leave
     // the width at the maximum and pass the clamp check vacuously.
     await handle.focus();
     await expect(handle).toBeFocused();
     await page.keyboard.press("ArrowRight");
-    await expect.poll(() => width(page)).toBe(600);
+    await expect.poll(() => width(page)).toBe(656);
     await expect(handle).toBeFocused();
     await page.screenshot({ path: info.outputPath("sidebar-maximum.png") });
     const before = await page.evaluate(() => (window as any).__farhelmTerm.cols);
     await dragBy(page, -500);
-    await expect.poll(() => width(page)).toBe(240);
+    await expect.poll(() => width(page)).toBe(296);
     await headingActionsFit(page);
     await expect.poll(() => page.evaluate(() => (window as any).__farhelmTerm.cols)).toBeGreaterThan(before);
     await page.screenshot({ path: info.outputPath("sidebar-minimum.png") });
@@ -125,22 +129,23 @@ test("sidebar drag clamps, persists, resets and refits the program", async ({ pa
     await handle.focus();
     await expect(handle).toBeFocused();
     await page.keyboard.press("ArrowRight");
-    await expect.poll(() => width(page)).toBe(250);
+    await expect.poll(() => width(page)).toBe(306);
     await expect(handle).toBeFocused();
     await page.keyboard.press("ArrowLeft");
     await page.keyboard.press("ArrowLeft");
-    await expect.poll(() => width(page)).toBe(240);
+    await expect.poll(() => width(page)).toBe(296);
     await expect(handle).toBeFocused();
     await handle.dblclick({ position: { x: 3, y: 200 } });
-    await expect.poll(() => width(page)).toBe(340);
+    await expect.poll(() => width(page)).toBe(396);
     await expect.poll(() => page.evaluate(() => localStorage.getItem("farhelm.sidebar-width"))).toBe("340");
-    // The stylesheet's own default is also 340, so the reloaded width proves
+    // The stylesheet's own default is also 396, so the reloaded width proves
     // the reset persisted only once the width script has applied the stored
-    // value; before that, a reset that left 240 stored would read 340 too.
+    // value; before that, a reset that left the old 240 content width stored
+    // could be masked by the stylesheet's default total width.
     await page.reload();
     await expect(handle).toHaveAttribute("data-sidebar-bound", "true");
-    await expect.poll(() => width(page)).toBe(340);
-    await expect(handle).toHaveAttribute("aria-valuenow", "340");
+    await expect.poll(() => width(page)).toBe(396);
+    await expect(handle).toHaveAttribute("aria-valuenow", "396");
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -161,7 +166,7 @@ test("sidebar width moves narrow-window chrome and menu-pointer cutoffs", async 
     await expect(row).toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole("separator")).toHaveAttribute("data-sidebar-bound", "true");
     await dragBy(page, 260);
-    await expect.poll(() => width(page)).toBe(600);
+    await expect.poll(() => width(page)).toBe(656);
     await page.setViewportSize({ width: 800, height: 700 });
     await page.locator(".app-shell").evaluate((el) => el.classList.add("macos-window"));
     await expect(page.locator("html")).toHaveClass(/sidebar-narrow-window/);
@@ -170,7 +175,7 @@ test("sidebar width moves narrow-window chrome and menu-pointer cutoffs", async 
     await openRowMenu(row);
     await expect(row.locator(".session-row-menu-pointer")).toBeHidden();
     await page.screenshot({ path: info.outputPath("sidebar-narrow.png") });
-    await page.setViewportSize({ width: 1000, height: 700 });
+    await page.setViewportSize({ width: 1100, height: 700 });
     await expect(page.locator("html")).not.toHaveClass(/sidebar-narrow-window/);
     await openRowMenu(row);
     await expect(row.locator(".session-row-menu-pointer")).toBeVisible();

@@ -419,7 +419,10 @@ async function assertLive(page: Page, id: string) {
   await page.goto("/");
   await attachSession(page, id);
   await waitForTermText(page, "FAKE-AGENT READY", 20_000);
-  const probe = `checkout-live-${id}-${Date.now()}`;
+  // The attachment already pins the full session identity. A short suffix
+  // and fresh stamp keep this witness on one physical row in the narrowed
+  // terminal, whose text helper deliberately preserves wrap separators.
+  const probe = `checkout-live-${id.slice(-8)}-${Date.now()}`;
   // This is a byte round trip, not a per-key handling test. One text input
   // avoids dozens of protocol round trips while the real terminal and agent
   // still have to receive the probe and produce a fresh echo. Attachment

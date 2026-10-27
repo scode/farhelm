@@ -1,3 +1,4 @@
+import { chooseHost, hostChoice } from "./helpers/host-rail";
 // The invalidation feed's contract in a real browser (PLAN_M6_75.md item
 // 6): the channel that replaced all four of the UI's periodic loops, and the
 // three ways it can be wrong.
@@ -912,10 +913,10 @@ test.describe("the invalidation feed", () => {
 
     // And then a person asks for one host.
     const before = reads.count("listing");
-    const host = page.locator(".filter-host");
+    const host = hostChoice(page);
     await host.focus();
     await expect(host).toBeFocused();
-    await host.selectOption(String(local));
+    await chooseHost(page, String(local));
 
     await expect(page.locator(".session-row")).toHaveCount(localListing.sessions.length, { timeout: 20_000 });
     await expect(row(page, wanted.id)).toBeVisible();

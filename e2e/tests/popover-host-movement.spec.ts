@@ -9,6 +9,7 @@ import {
   patchPreferences,
   pinAutoSelect,
   resetPreferences,
+  showSessionsPanel,
   type SessionRow,
   stubFeed,
   waitForFeedReadersSettled,
@@ -178,7 +179,7 @@ async function prepare(page: Page, request: APIRequestContext, longAt?: HostKey)
 
   /** Visible content and completed reads jointly establish the quiet premise. */
   const quiet = async () => {
-    await expect(page.locator(".hosts-panel")).toBeVisible();
+    await expect(page.locator(".hosts-panel")).toHaveCount(1);
     await expect(page.locator(".hosts-panel .host-row")).toHaveCount(4);
     await expect(page.locator(".hosts-status, .hosts-refresh-error, .hosts-load-error")).toHaveCount(0);
     await expect(page.locator(".hosts-panel .host-error, .hosts-panel .host-warning, .provisioning-run, .provisioning-trace")).toHaveCount(0);
@@ -194,7 +195,7 @@ async function prepare(page: Page, request: APIRequestContext, longAt?: HostKey)
       await expect(host(key).locator(".host-destination-detail")).toHaveCount(0);
     }
     expect(unexpectedMutations, "opening a menu cannot issue a fake host mutation").toEqual([]);
-    expect(await page.locator(".app-sidebar").evaluate((node) => node.scrollHeight <= node.clientHeight),
+    expect(await page.locator(".sidebar-content").evaluate((node) => node.scrollHeight <= node.clientHeight),
       "all fixture rows must fit without a sidebar scroll").toBe(true);
   };
   await expect.poll(ids).toEqual(renderedIds);
@@ -250,7 +251,7 @@ async function geometry(toggle: Locator) {
       const box = element.getBoundingClientRect();
       return { x: box.x, y: box.y, width: box.width, height: box.height };
     };
-    const sidebar = document.querySelector(".app-sidebar")!;
+    const sidebar = document.querySelector(".sidebar-content")!;
     const shell = document.querySelector(".app-shell")!;
     const panel = document.querySelector(".hosts-panel")!;
     const hosts = [...panel.querySelectorAll(".host-row")];
@@ -326,12 +327,13 @@ for (const scenario of [
 }
 
 for (const kind of ["menu", "bell"] as const) {
-  /** An equal-height host permutation does not move sessions below the panel.
-   * This catches an owner that accidentally broadcasts host order to all rows.
+  /** Concealed management cannot move a session anchor. Registry order still
+   * changes behind Sessions, so a host-only invalidation broadcast is visible.
    */
-  test(`a same-height host reorder leaves the session ${kind} below it open`, async ({ page, request }) => {
+  test(`a concealed same-height host reorder leaves the session ${kind} open`, async ({ page, request }) => {
     const fixture = await prepare(page, request);
     await equalHostHeights(KEYS.map(fixture.host));
+    await showSessionsPanel(page);
     const target = page.locator(`[data-session-id="${fixture.targetSession}"]`);
     const toggle = target.locator(kind === "menu" ? ".session-row-menu" : ".session-row-bell");
     await toggle.focus();

@@ -23,6 +23,8 @@ import {
   patchPreferences,
   pinAutoSelect,
   readPreferences,
+  showHostsPanel,
+  showSessionsPanel,
 } from "./helpers/fleet";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { addTab } from "./helpers/terminal-suite";
@@ -208,7 +210,9 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
     // before anything else touches the page, so this is genuinely resting
     // state rather than a post-interaction snapshot.
     await expectPrimary(".new-session-button");
+    await showHostsPanel(page);
     await expectNeutral(".add-host-button");
+    await showSessionsPanel(page);
 
     // Launch shares the primary selection fill with the sidebar action;
     // the dialog must not introduce another, brighter primary tier.
@@ -245,7 +249,7 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
     await expect(page.locator(".create-session-form")).toHaveCount(0);
 
     // --- Normal primary: the "add a host" dialog's own submit.
-    await page.getByRole("button", { name: "add host" }).click();
+    await page.locator(".host-rail-add").click();
     await expect(page.locator(".add-host-form")).toBeVisible();
     await expectPrimary(".add-host-submit");
     // The form is a modal now, so the heading's toggle sits behind it and
@@ -317,17 +321,16 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
 /**
  * Sidebar heading buttons keep their requested hierarchy and density.
  * The session heading fits three actions with narrower side padding; the
- * host heading keeps its own spacing rather than sharing that layout budget.
- * The permanent native host select is deliberately outside this button-paint
- * contract; explicit dimensions guard the compact heading size independently.
+ * host heading keeps Add neutral while using the same compact icon anatomy.
  */
 test("sidebar heading buttons retain their hierarchy and compact sizing", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByRole("button", { name: "New session", exact: true })).toBeVisible();
   await expect(page.locator(".new-session-button svg")).toBeVisible();
-  await expect(page.locator(".new-session-button")).toHaveCSS("height", "24px");
-  await expect(page.getByRole("button", { name: "add host" })).toHaveText("add");
+  await showHostsPanel(page);
+  await expect(page.locator(".add-host-button svg")).toBeVisible();
+  await expect(page.locator(".add-host-button")).toHaveAccessibleName("Add host");
 
   await expect(page.locator(".add-host-button")).toHaveClass(/btn-neutral/);
   const secondaryBackground = await page
@@ -338,13 +341,9 @@ test("sidebar heading buttons retain their hierarchy and compact sizing", async 
     .evaluate((node) => getComputedStyle(node).backgroundColor);
   expect(primaryBackground).not.toBe(secondaryBackground);
 
-  for (const [selector, topPadding, sidePadding] of [
-    [".new-session-button", "3px", "3px"],
-    [".add-host-button", "2px", "8px"],
-  ]) {
+  for (const selector of [".new-session-button", ".add-host-button"]) {
     await expect(page.locator(selector)).toHaveCSS("font-size", "12px");
-    await expect(page.locator(selector)).toHaveCSS("padding-top", topPadding);
-    await expect(page.locator(selector)).toHaveCSS("padding-right", sidePadding);
+    await expect(page.locator(selector)).toHaveCSS("height", "24px");
   }
 
   // Details is a native checkbox: its checked state is the disclosure

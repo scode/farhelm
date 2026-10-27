@@ -1,3 +1,4 @@
+import { chooseHost, hostChoice } from "./helpers/host-rail";
 // =====================================================================
 // Terminal auto-reconnect (PLAN_M6.md item 7), and the client↔helm skew
 // edge it depends on (item 6).
@@ -2389,10 +2390,10 @@ test("client-helm-skew-prompts-reload", async ({ page, request }) => {
         new URL(response.url()).searchParams.get("host") === (i === 0 ? String(local) : null),
       { timeout: 30_000 },
     );
-    const host = page.locator(".filter-host");
+    const host = hostChoice(page);
     await host.focus();
     await expect(host).toBeFocused();
-    await host.selectOption(i === 0 ? String(local) : "");
+    await chooseHost(page, i === 0 ? String(local) : "");
     await landed;
   }
   await expect(

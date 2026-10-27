@@ -3,6 +3,7 @@ import { expect, test } from "./helpers/evidence";
 import { cleanupSession, createSession, listHosts, listSessions, localHostId, pinAutoSelect, resetPreferences, stubFeed } from "./helpers/fleet";
 import { attachSession } from "./helpers/term";
 import { chooseStatus } from "./helpers/list-header";
+import { chooseHost, hostChoice } from "./helpers/host-rail";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 
 const owned: string[] = [];
@@ -78,7 +79,7 @@ for (const hiddenBy of ["status alone", "host and status", "neither"] as const) 
     await pinAutoSelect(page, live.id);
     await page.goto("/");
     await attachSession(page, live.id);
-    await page.locator(".filter-host").selectOption(String(local));
+    await chooseHost(page, local);
     await chooseStatus(page, "Idle");
     if (hidden) await expect(page.locator(`[data-session-id="${target.id}"]`)).toHaveCount(0);
     else await expect(page.locator(`[data-session-id="${target.id}"]`)).toBeVisible();
@@ -90,7 +91,7 @@ for (const hiddenBy of ["status alone", "host and status", "neither"] as const) 
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole("radio", { name: hidden ? "All" : "Idle", exact: true })).toBeChecked();
-    await expect(page.locator(".filter-host")).toHaveValue(hidden ? "" : String(local));
+    await expect(hostChoice(page, hidden ? undefined : local)).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator(`[data-session-id="${target.id}"]`)).toHaveAttribute("data-session-selected", "true");
   });
 }

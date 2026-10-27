@@ -1,3 +1,4 @@
+import { chooseHost, hostChoice } from "./helpers/host-rail";
 /** Session shortcuts must preserve consent, editor focus and terminal input ownership. */
 import { expect, test } from "./helpers/evidence";
 import type { Page } from "@playwright/test";
@@ -238,8 +239,8 @@ test("browser Rename chord edits the filtered open session and returns live term
     expect(filteredReply.ok(), await filteredReply.text()).toBe(true);
     const filtered = await filteredReply.json();
     expect(filtered.sessions.some((entry: { id: string }) => entry.id === session.id)).toBe(false);
-    await page.locator(".filter-host").selectOption(String(remote!.id));
-    await expect(page.locator(".filter-host")).toHaveValue(String(remote!.id));
+    await chooseHost(page, String(remote!.id));
+    await expect(hostChoice(page, String(remote!.id))).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator(`.session-row[data-session-id="${session.id}"]`)).toHaveCount(0, { timeout: 20_000 });
     await expect(page.locator(".session-details .title")).toHaveText(shown);
     await expect(page.locator(".session-rename-trigger")).toBeEnabled();

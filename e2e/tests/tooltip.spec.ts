@@ -312,21 +312,25 @@ test("hovering a row mark shows its text above it after the delay", async ({ pag
 });
 
 /**
- * With no room above (the app bar's gear sits at the top of the window),
+ * With no room above (the version readout sits at the top of the window),
  * the tooltip goes below with the larger gap that clears the cursor's body.
  * Why: the fallback is the one placement where the cursor can cover the
  * text, and the larger gap is the only thing preventing that.
  */
-test("a control at the top edge gets its tooltip below, clear of the cursor", async ({ page }) => {
+test("the version at the top edge gets its tooltip below, clear of the cursor", async ({ page }) => {
   await loadRow(page);
   await parkPointer(page);
-  const gear = page.locator(".app-settings-toggle");
-  await gear.hover();
+  // Settings moved to the rail's foot. The real version readout still
+  // exercises the top-edge fallback without manufacturing element geometry.
+  const version = page.locator(".app-version");
+  const words = await version.getAttribute("data-tooltip");
+  expect(words, "the readout carries its actual version explanation").toBeTruthy();
+  await version.hover();
   await expect(tooltip(page)).toBeVisible();
-  await expect(tooltip(page)).toHaveText(/^settings/);
-  const { tip, anchor, viewport } = await boxes(page, gear);
-  expect(anchor.y - 6 - tip.height, "premise: there is no room above the gear").toBeLessThan(4);
-  expect(tip.y, "the tooltip sits below the gear").toBeGreaterThanOrEqual(anchor.y + anchor.height);
+  await expect(tooltip(page)).toHaveText(words!);
+  const { tip, anchor, viewport } = await boxes(page, version);
+  expect(anchor.y - 6 - tip.height, "premise: there is no room above the version").toBeLessThan(4);
+  expect(tip.y, "the tooltip sits below the version").toBeGreaterThanOrEqual(anchor.y + anchor.height);
   expect(tip.y - (anchor.y + anchor.height), "with the 28 px gap").toBeGreaterThanOrEqual(26);
   expectInsideViewport(tip, viewport);
 });

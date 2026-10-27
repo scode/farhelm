@@ -678,6 +678,10 @@ pub(crate) fn HostMark(
     #[props(default)] icon: farhelm_proto::host_appearance::HostIcon,
     #[props(default)] color: farhelm_proto::host_appearance::HostColor,
     #[props(default)] local: bool,
+    /// A larger identity control may supply a complete host/phase tooltip.
+    /// Leave ordinary row callers' locality explanation unchanged.
+    #[props(default)]
+    tooltip: Option<String>,
 ) -> Element {
     use farhelm_proto::host_appearance::{HostColor, HostIcon};
     let tint = if color == HostColor::Default {
@@ -689,7 +693,7 @@ pub(crate) fn HostMark(
         svg {
             class: "host-kind-icon", "data-glyph": icon.as_str(),
             "data-host-color": color.as_str(), style: "{tint}",
-            "data-tooltip": if local { "local: on this machine, where the helm runs" } else { "remote: on another machine, reached over ssh" },
+            "data-tooltip": tooltip.unwrap_or_else(|| if local { "local: on this machine, where the helm runs" } else { "remote: on another machine, reached over ssh" }.to_string()),
             view_box: "0 0 16 16", fill: "none", stroke: "currentColor",
             stroke_width: "1.3", stroke_linecap: "round", stroke_linejoin: "round",
             "aria-hidden": "true",

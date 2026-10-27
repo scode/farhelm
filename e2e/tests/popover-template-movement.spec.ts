@@ -120,7 +120,7 @@ async function geometry(toggle: Locator) {
     const row = node.closest("li") as HTMLElement;
     const list = dialog.querySelector(".templates-list") as HTMLElement;
     const rows = Array.from(list.children);
-    const sidebar = document.querySelector(".app-sidebar") as HTMLElement;
+    const sidebar = document.querySelector(".sidebar-content") as HTMLElement;
     const shell = document.querySelector(".app-shell") as HTMLElement;
     return {
       toggle: rect(node), label: node.textContent,
