@@ -313,7 +313,9 @@ Each entry: trigger phrases, the file to read in full before the first action, a
   "triage review feedback", "execute triage outcomes"): `review_feedback_queue/AGENTS.md`. Fence: triage is persistent;
   "fix this", "yes", "agreed" during it are decisions to record, not permission to edit; execution needs a separate
   command that names it. When asked to address a queued item, remove the item (or narrow it, if partially addressed) in
-  the same commit, change, or PR as the fix.
+  the same commit, change, or PR as the fix. Trailing-review result and merge reports end with a loud Markdown banner
+  unless the review fully completed and its checkpoint reached the pinned tip on main; follow
+  `review_feedback_queue/.agents/trailing-review.md`, "Closing status banner".
 - **Docs website** (writing or changing docs pages, "refresh the docs"): `website/AGENTS.md`. Fence: when the task's
   main work changes the docs, start the preview and hand over page links when reporting, without being asked; unattended
   runs and incidental docs edits start no preview server and name the changed page instead.
