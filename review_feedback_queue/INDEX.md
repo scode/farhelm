@@ -157,9 +157,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   recording recurring baseline flakes, including further template, host-action and sidebar Replace observations; private
   runtime evidence was not authenticated here.
 
-- [`launcher-report-confuses-apply-with-launch.md`](launcher-report-confuses-apply-with-launch.md) — The landing report
-  says Enter launches where the launcher actually applies queued templates to the draft.
-
 - [`numeric-version-guard-hides-artifact-filenames.md`](numeric-version-guard-hides-artifact-filenames.md) — Some bare
   artifact filenames lose file actions under the numeric-version guard; acceptance is ambiguous.
 
