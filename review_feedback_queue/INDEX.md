@@ -8,10 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`template-delete-reads-new-selection.md`](template-delete-reads-new-selection.md) — On desktop, Delete still shown
-  for one template can delete a newly selected template. Its temporary Undo does not restore shortcut bindings; event
-  frequency is unmeasured.
-
 - [`template-delete-lost-reply-loses-undo.md`](template-delete-lost-reply-loses-undo.md) — An ordinary template deletion
   can commit but offer no Undo when its success reply is lost. Manual recovery from the mounted editor remains possible
   until it closes; the unknown-outcome exception's scope is ambiguous.
