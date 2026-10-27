@@ -146,6 +146,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   - Re-triage the review-queue items that rest on a lost GUI–helm reply under the new rule, starting with
     `review_feedback_queue/rename-lost-reply-restores-old-shortcut-indication.md` and
     `review_feedback_queue/failed-test-response-does-not-fence-settings-write.md`.
+- **Make auto-tunneling safe.** Figure out how to make auto-tunneling properly safe: can we use some hostname trick so
+  the service does not present as localhost? TBD. Pinggy? TBD.
 
 ## Doc todo
 
