@@ -39,10 +39,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   ordinary Restart can then resume that previous conversation. The conditional source route is established; occurrence
   is unmeasured.
 
-- [`older-installer-rebuild-deletes-late-foreign-app.md`](older-installer-rebuild-deletes-late-foreign-app.md) —
-  Installing an older release can delete an unrelated app moved into Farhelm's usual location after the installer's
-  initial ownership check. This conditional path needs neither an interruption nor failed restoration.
-
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
