@@ -18940,7 +18940,8 @@
   refusals keep today's error. A test loses the reply of a committed delete. The follow-up the user asked for is already
   in TODO.md's "Near term" bucket as "Treat the GUI–helm connection as infallible" (added during triage on their
   request); this outcome does not carry it out. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/template-delete-guards.md`.
+- Execution: implemented in change `pxtuqvtxwrnkynqumxnrwskryzpxlkvu`, bookmark
+  `plan/template-delete-guards/03-lost-delete-reply`; draft PR https://github.com/scode/farhelm/pull/2748/changes.
 
 ## installer-terminal-link-overwrites-new-foreign-file.md
 
