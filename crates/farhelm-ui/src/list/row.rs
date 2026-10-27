@@ -305,6 +305,8 @@ fn menu_label(title: &crate::peer::PeerText) -> String {
 /// until `PeerLine` applies escaping and direction isolation at render time.
 /// Separators and the concise state word are this UI's own wording and remain
 /// ordinary text runs, which prevents a relayed value from reordering them.
+/// A raw launch's command basename uses mono; structured launch choices are
+/// interface labels and keep Inter, including in the hover card's reuse.
 pub(super) fn menu_header_summary_parts(session: &Session, state: Option<&str>) -> Vec<DetailPart> {
     let values = if let Some(launch) = session.agent_selection() {
         let mut values =
@@ -326,7 +328,11 @@ pub(super) fn menu_header_summary_parts(session: &Session, state: Option<&str>) 
         if index != 0 {
             parts.push(DetailPart::text(" · "));
         }
-        parts.push(DetailPart::peer(value));
+        parts.push(if session.agent_selection().is_some() {
+            DetailPart::peer(value)
+        } else {
+            DetailPart::mono_peer(value)
+        });
     }
     if let Some(state) = state {
         parts.push(DetailPart::text(" · "));
@@ -345,7 +351,7 @@ fn menu_header_summary_tooltip(parts: &[DetailPart]) -> String {
         .iter()
         .map(|part| match part {
             DetailPart::Text(text) => text.clone(),
-            DetailPart::Peer(value) => value.escaped(),
+            DetailPart::Peer(value) | DetailPart::MonoPeer(value) => value.escaped(),
         })
         .collect()
 }

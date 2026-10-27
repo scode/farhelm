@@ -1274,35 +1274,23 @@ declare_assets! {
         "/assets/vendor/addon-clipboard-LICENSES.txt",
         AssetOptions::builder().with_hash_suffix(false)
     );
-    // The `onBinary` byte-conversion helper terminal.js calls into (PLAN_M6_5.md
-    // item 1) — a separate asset, registered ahead of terminal.js, purely so
-    // `node --test` can load this exact file rather than a copy of its logic.
-    // Registration order is not execution order (script injection is async);
-    // terminal.js's mount readiness gate waits for the helper's global.
-    // JetBrains Mono Nerd Font, embedded for the same self-contained reason
-    // xterm.js itself is vendored (SPEC_impl.md, "Terminal widget: xterm.js
-    // island" — no CDN, no reliance on whatever happens to be installed on the
-    // host). Two consumers reference these bytes: `terminal.js` sets the family
-    // as xterm.js's `fontFamily`, and `app.css`'s `--font-ui` token applies the
-    // same family to the rest of the chrome (sidebar, titlebar, forms) — so
-    // this is no longer a terminal-only asset, and both surfaces share the one
-    // cached download.
+    // Both interface and terminal fonts ship with the app: a page must not
+    // depend on a CDN or on fonts installed on the host. Inter supplies the
+    // interface; JetBrains Mono Nerd Font supplies the terminal and technical
+    // values such as paths, commands and ages. Those mono consumers share the
+    // same two cached files, and only the terminal gates mounting on them.
     //
-    // These two are declared differently from every other `Asset` constant in
-    // this file: `app.css`'s `@font-face` `url()` needs a path it can write as
-    // a plain string, but a static CSS file has no way to interpolate a Rust
+    // Fonts use a fixed basename: `app.css`'s `@font-face` `url()` needs a
+    // path it can write as a plain string, but CSS cannot interpolate a Rust
     // value the way `document::Link`/`Script` do via `Display`. `manganis`'s
     // documented answer for an asset consumed outside Rust code, where the
     // caller must know the served path ahead of time, is `with_hash_suffix(false)`.
     // The macro argument below is the SOURCE path, not the served one — the
     // bundler serves every asset flat under `/assets/`, named from its
     // basename alone regardless of source subdirectory, so the served path
-    // drops the `fonts/` segment. `app.css` hardcodes that served form
-    // (verified against `dx build --platform web --release`'s actual output,
-    // not assumed): `/assets/JetBrainsMonoNerdFont-Regular.woff2` and
-    // `/assets/JetBrainsMonoNerdFont-Bold.woff2`. The cost of the fixed,
-    // unhashed path is losing cache-busting for these two files specifically;
-    // acceptable, since font bytes only change when someone deliberately
+    // drops the `fonts/` segment. The CSS therefore uses `/assets/<basename>`.
+    // Fixed paths lose cache-busting, which is acceptable because font bytes
+    // only change when someone deliberately
     // re-vendors them, unlike the app's own generated CSS/JS. `#[used]` is
     // required alongside it: unused by any Rust code (no Display call, no rsx
     // attribute — see above), these would otherwise be dead code the linker
@@ -1311,13 +1299,12 @@ declare_assets! {
     // belt-and-braces rather than the only thing keeping them alive. Keep it
     // anyway: the failure it guards — fonts silently absent from the bundle —
     // shows up as terminals that never mount (terminal.js gates on the font),
-    // on top of chrome rendered in the fallback stack.
+    // or interface values rendered in the fallback stack.
     //
     // Provenance: JetBrains Mono Nerd Font, from the nerd-fonts project's
     // `patched-fonts/JetBrainsMono` release build, OFL-1.1 licensed, re-encoded
     // as WOFF2 from the project's vendored TTF (fontTools, lossless — every
-    // glyph survives) since chrome now fetches this file on pages that never
-    // open a terminal at all. Full license text at `assets/fonts/OFL.txt`
+    // glyph survives). Full license text at `assets/fonts/OFL.txt`
     // ships in both bundles as `/assets/OFL.txt`, declared below.
     #[used]
     static FONT_JETBRAINS_MONO_REGULAR: Asset = asset!(
@@ -1336,6 +1323,33 @@ declare_assets! {
         "/assets/fonts/OFL.txt",
         AssetOptions::builder().with_hash_suffix(false)
     );
+    // Inter's unchanged 400/600/700 WOFF2 files and license are copied from
+    // website/public/fonts/. Keep a distinct license basename because assets
+    // are flattened; replacing OFL.txt would drop the mono font's notice.
+    #[used]
+    static FONT_INTER_REGULAR: Asset = asset!(
+        "/assets/fonts/Inter-Regular.woff2",
+        AssetOptions::builder().with_hash_suffix(false)
+    );
+    #[used]
+    static FONT_INTER_SEMIBOLD: Asset = asset!(
+        "/assets/fonts/Inter-SemiBold.woff2",
+        AssetOptions::builder().with_hash_suffix(false)
+    );
+    #[used]
+    static FONT_INTER_BOLD: Asset = asset!(
+        "/assets/fonts/Inter-Bold.woff2",
+        AssetOptions::builder().with_hash_suffix(false)
+    );
+    #[used]
+    static FONT_INTER_LICENSE: Asset = asset!(
+        "/assets/fonts/OFL-Inter.txt",
+        AssetOptions::builder().with_hash_suffix(false)
+    );
+    // The `onBinary` byte-conversion helper terminal.js calls into (PLAN_M6_5.md
+    // item 1) is separate so `node --test` loads the shipped implementation.
+    // Registration order is not execution order (script injection is async);
+    // terminal.js's mount readiness gate waits for the helper's global.
     const TERM_BYTES_JS: Asset = asset!("/assets/term-bytes.js");
     // The Ghostty-compatible palette terminal.js passes to xterm.js. It is
     // separate so the node tests can load the exact shipped theme object.

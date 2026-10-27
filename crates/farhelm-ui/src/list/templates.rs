@@ -21,7 +21,7 @@ use crate::menu_panel::{
 };
 use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus};
 use crate::ops::{ConfirmSlot, ConfirmToken, use_confirm_slot};
-use crate::peer::{PeerText, display_peer};
+use crate::peer::{DetailPart, PeerText, display_peer};
 use dioxus::prelude::*;
 pub(super) use farhelm_proto::launcher::quick_launch_eligible;
 use farhelm_proto::launcher::{
@@ -95,8 +95,8 @@ struct TemplateAnchorKey {
 
 impl TemplateAnchorKey {
     /// Separate strict presentation equality from possible anchor displacement.
-    /// Known digits have distinct labels but equal width in the inherited
-    /// monospace face; changing one to another must still update the menu's
+    /// Known digits have distinct labels but equal width through the toggle's
+    /// explicit tabular-numeral setting; changing one must still update the menu's
     /// binding without invalidating its placement.
     fn movement_key(&self) -> (usize, usize, bool, String) {
         (
@@ -930,82 +930,123 @@ pub(super) fn new_name_refusal(name: &str, templates: Option<&[LaunchTemplate]>)
     save_name_refusal(None, name, &names)
 }
 
-/// A one-line description of what a template sets, for its row in the
-/// list: every field it sets, a reset shown as such. The command and resume
-/// text are left out (they can be long, and the edit form shows them).
-/// Model ids can originate on a host, so escape them before composing the
-/// approval wording shared by the list and quick switcher.
-pub(super) fn template_summary(fields: &TemplateFields) -> String {
+/// Describe saved edits without flattening technical values into interface prose.
+/// Command and resume bodies stay in the editor because they can be long.
+/// Raw peer values remain isolated and escaped by the visible renderer; only
+/// shell arguments and wrapper bytes use mono, not the surrounding labels.
+fn template_summary_parts(fields: &TemplateFields) -> Vec<DetailPart> {
     let choice = |name: &str, value: Option<String>| match value {
         Some(value) => format!("{name} {value}"),
         None => format!("{name} default"),
     };
     let mut parts = Vec::new();
+    let mut push = |runs: Vec<DetailPart>| {
+        if !parts.is_empty() {
+            parts.push(DetailPart::text(" · "));
+        }
+        parts.extend(runs);
+    };
     if fields.prompt.is_some() {
-        parts.push("initial prompt".to_string());
+        push(vec![DetailPart::text("initial prompt")]);
     }
     if let Some(kind) = fields.kind {
-        parts.push(format!("{} launch", word(kind)));
+        push(vec![DetailPart::text(format!("{} launch", word(kind)))]);
     }
     if let Some(agent) = fields.agent {
-        parts.push(crate::launch_composer::harness_label(agent).to_string());
+        push(vec![DetailPart::text(
+            crate::launch_composer::harness_label(agent),
+        )]);
     }
     if let Some(model) = &fields.model {
-        parts.push(match model {
-            Some(model) => crate::peer::display_peer(model),
-            None => "model default".to_string(),
-        });
+        push(vec![match model {
+            Some(model) => DetailPart::peer(model.clone()),
+            None => DetailPart::text("model default"),
+        }]);
     }
     if let Some(effort) = fields.effort {
-        parts.push(choice("effort", effort.map(word)));
+        push(vec![DetailPart::text(choice("effort", effort.map(word)))]);
     }
     if let Some(permissions) = fields.permissions {
-        parts.push(format!(
+        push(vec![DetailPart::text(format!(
             "approvals {}",
             crate::launch_composer::permission_label(fields.agent, permissions)
-        ));
+        ))]);
     }
     if let Some(words) = &fields.permission_flags {
-        parts.push(crate::peer::display_peer(&shell_words::join(words)));
+        push(vec![DetailPart::mono_peer(shell_words::join(words))]);
     }
     if let Some(prefix) = &fields.wrapper_prefix {
-        parts.push(match prefix {
-            Some(words) => format!(
-                "wrapper prefix {}",
-                crate::peer::display_peer(&shell_words::join(words))
-            ),
-            None => "wrapper prefix none".to_string(),
+        push(match prefix {
+            Some(words) => vec![
+                DetailPart::text("wrapper prefix "),
+                DetailPart::mono_peer(shell_words::join(words)),
+            ],
+            None => vec![DetailPart::text("wrapper prefix none")],
         });
     }
     if fields.command.is_some() {
-        parts.push("command".to_string());
+        push(vec![DetailPart::text("command")]);
     }
     if let Some(yolo) = fields.yolo {
-        parts.push(if yolo { "YOLO" } else { "not YOLO" }.to_string());
+        push(vec![DetailPart::text(if yolo {
+            "YOLO"
+        } else {
+            "not YOLO"
+        })]);
     }
     if let Some(resume) = &fields.resume_command {
-        parts.push(
-            if resume.is_some() {
-                "resume command"
-            } else {
-                "resume default"
-            }
-            .to_string(),
-        );
+        push(vec![DetailPart::text(if resume.is_some() {
+            "resume command"
+        } else {
+            "resume default"
+        })]);
     }
     if fields.host.is_some() {
-        parts.push("host".to_string());
+        push(vec![DetailPart::text("host")]);
     }
     if fields.destination.is_some() {
-        parts.push("destination".to_string());
+        push(vec![DetailPart::text("destination")]);
     }
     if let Some(name) = &fields.name {
-        parts.push(format!("name {}", display_peer(name)));
+        push(vec![
+            DetailPart::text("name "),
+            DetailPart::peer(name.clone()),
+        ]);
     }
     if parts.is_empty() {
-        "sets nothing yet".to_string()
+        vec![DetailPart::text("sets nothing yet")]
     } else {
-        parts.join(" · ")
+        parts
+    }
+}
+
+/// Keep plain-text test expectations on the visible summary's escaped wording.
+#[cfg(test)]
+pub(super) fn template_summary(fields: &TemplateFields) -> String {
+    crate::peer::detail_text(&template_summary_parts(fields))
+}
+
+/// Share inline summary markup between the template list and quick switcher.
+/// The wrapper stays phrasing content inside their native buttons. Each peer
+/// run owns its bidi boundary; technical runs additionally opt into mono.
+#[component]
+pub(super) fn TemplateSummary(class: String, fields: TemplateFields) -> Element {
+    let parts = template_summary_parts(&fields);
+    rsx! {
+        span { class,
+            for (index, part) in parts.iter().enumerate() {
+                match part {
+                    DetailPart::Text(text) => rsx! { span { key: "{index}", "{text}" } },
+                    DetailPart::Peer(value) | DetailPart::MonoPeer(value) => rsx! {
+                        bdi {
+                            key: "{index}",
+                            class: if matches!(part, DetailPart::MonoPeer(_)) { "peer-value font-mono" } else { "peer-value" },
+                            dir: "ltr", "{value.escaped()}"
+                        }
+                    },
+                }
+            }
+        }
     }
 }
 
@@ -1288,7 +1329,7 @@ fn FieldEditor(
                     }
                     label {
                         span { if github { "repository" } else { "folder path" } }
-                        input { class: "templates-destination", value: escaped.unwrap_or(value), disabled, readonly: text_read_only, placeholder: if github { "owner/name" } else { "/path/to/project" },
+                        input { class: if github { "templates-destination" } else { "templates-destination templates-code" }, value: escaped.unwrap_or(value), disabled, readonly: text_read_only, placeholder: if github { "owner/name" } else { "/path/to/project" },
                             autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                             "data-tooltip": if github { "repository: each session gets a managed checkout" } else { "folder path: the working folder on the selected host" },
                             oninput: move |e| { if !text_read_only { draft.with_mut(|d| d.fields.destination=Some(if github { TemplateDestination::Github(e.value()) } else { TemplateDestination::Folder(e.value()) })); } },
@@ -2191,7 +2232,7 @@ pub(super) fn TemplatesDialog(
                                             }
                                             button { r#type: "button", class: "templates-row", disabled: disabled || templates.pending(), aria_pressed: previous().as_ref()==Some(&row.template.name), "data-tooltip": "edit template {display_peer(&row.template.name)}", onclick: move |_| depart.call(Departure::Open(Box::new(row.template.clone()))),
                                                 span { class: "templates-row-name peer-value", dir: "ltr", "{display_peer(&row.template.name)}" }
-                                                span { class: "templates-row-summary", "{template_summary(&row.template.fields)}" }
+                                                TemplateSummary { class: "templates-row-summary", fields: row.template.fields.clone() }
                                                 if row.anchor.marked { span { class: "templates-quick-chord", "{quick_launch_chord}" } }
                                             }
                                         }
@@ -2372,7 +2413,7 @@ mod tests {
         );
     }
 
-    /// Monospace digit changes must not close a popup; unknown text must not
+    /// Tabular digit changes must not close a popup; unknown text must not
     /// acquire guessed Unicode widths or lose the formatter's fallback behavior.
     #[test]
     fn template_number_width_shape_groups_only_actual_known_digit_chords() {
@@ -2680,6 +2721,41 @@ mod tests {
         assert_eq!(fields.wrapper_prefix, None);
         fields.kind = Some(LauncherKind::Command);
         assert!(!Field::Wrapper.offered(&fields));
+    }
+
+    /// Visible summaries preserve raw peer bytes until rendering, and only
+    /// command arguments use mono. Names and model choices remain interface
+    /// text even when they carry escaping and bidi requirements.
+    #[test]
+    fn summary_roles_keep_shell_values_separate_from_names() {
+        let fields = TemplateFields {
+            model: Some(Some("model\u{202e}".into())),
+            name: Some("review\u{200b}".into()),
+            permission_flags: Some(vec!["--mode".into(), "ask me".into()]),
+            wrapper_prefix: Some(Some(vec!["wrapper".into(), "--".into()])),
+            ..Default::default()
+        };
+        let parts = template_summary_parts(&fields);
+        let technical: Vec<_> = parts
+            .iter()
+            .filter_map(|part| match part {
+                DetailPart::MonoPeer(value) => Some(value.raw()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(technical, vec!["--mode 'ask me'", "wrapper --"]);
+        let names: Vec<_> = parts
+            .iter()
+            .filter_map(|part| match part {
+                DetailPart::Peer(value) => Some(value.raw()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["model\u{202e}", "review\u{200b}"]);
+        assert_eq!(
+            template_summary(&fields),
+            "model<U+202E> · --mode 'ask me' · wrapper prefix wrapper -- · name review<U+200B>"
+        );
     }
 
     /// Presence is the template edit, including an empty message that clears

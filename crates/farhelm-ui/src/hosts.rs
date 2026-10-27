@@ -723,7 +723,7 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
         } => {
             let mut parts = vec![
                 DetailPart::text("farhelm "),
-                DetailPart::peer(build_version),
+                DetailPart::mono_peer(build_version),
             ];
             match identity {
                 Some(identity) => {
@@ -748,9 +748,9 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
             DetailPart::text(format!(
                 "the host speaks protocol {peer_protocol} (farhelm "
             )),
-            DetailPart::peer(peer_build),
+            DetailPart::mono_peer(peer_build),
             DetailPart::text(format!("); this helm speaks {our_protocol} (farhelm ")),
-            DetailPart::peer(our_build),
+            DetailPart::mono_peer(our_build),
             DetailPart::text(")"),
         ],
         // Keep identity preformatting before PeerLine's ordinary escape pass:
@@ -976,9 +976,10 @@ pub(crate) struct HostFlow<'a> {
     pub(crate) auto_details: &'a HashSet<HostId>,
 }
 
-/// Peer isolation is part of a displayed line, even when its text matches
-/// authored text. Escaped peer text is the same value PeerLine writes to DOM.
-type DisplayedHostLine = Vec<(bool, String)>;
+/// Peer isolation and font role are part of a displayed line, even when its
+/// text matches another run. Mono can change wrapping and invalidate an anchor
+/// just as changed text can. Escapes match the values PeerLine writes to DOM.
+type DisplayedHostLine = Vec<(bool, bool, String)>;
 
 /// Project each row once; identities route reports, while independently
 /// stacked line containers can cancel harmless exchanges above an anchor.
@@ -993,8 +994,9 @@ fn displayed_host_line(parts: &[DetailPart]) -> DisplayedHostLine {
     parts
         .iter()
         .map(|part| match part {
-            DetailPart::Text(text) => (false, text.clone()),
-            DetailPart::Peer(value) => (true, value.escaped()),
+            DetailPart::Text(text) => (false, false, text.clone()),
+            DetailPart::Peer(value) => (true, false, value.escaped()),
+            DetailPart::MonoPeer(value) => (true, true, value.escaped()),
         })
         .collect()
 }
@@ -2839,7 +2841,7 @@ fn uninstall_notice_parts(notice: &UninstallNotice) -> Vec<DetailPart> {
         DetailPart::Text("Farhelm was removed from ".to_string()),
         DetailPart::peer(notice.host_name.clone()),
         DetailPart::Text("; its data remains in ".to_string()),
-        DetailPart::peer(notice.state_dir.clone()),
+        DetailPart::mono_peer(notice.state_dir.clone()),
         DetailPart::Text(" on that host.".to_string()),
     ]
 }
@@ -2881,18 +2883,20 @@ fn host_menu_label(name: &str) -> String {
 
 /// Split the host-menu header into app-authored separators and peer-owned
 /// values so bidi and invisible controls cannot reorder the summary.
+/// Only actual destinations and version stamps use mono; local/disconnected
+/// placeholders remain interface wording with the same peer isolation.
 fn host_menu_summary_parts(host: &Host) -> Vec<DetailPart> {
     let destination = host
         .destination
         .as_ref()
-        .map_or_else(|| DetailPart::peer("local host"), DetailPart::peer);
+        .map_or_else(|| DetailPart::peer("local host"), DetailPart::mono_peer);
     let version = match &host.state {
-        HostPhase::Connected { build_version, .. } => DetailPart::peer(build_version),
-        HostPhase::VersionSkew { peer_build, .. } => DetailPart::peer(peer_build),
+        HostPhase::Connected { build_version, .. } => DetailPart::mono_peer(build_version),
+        HostPhase::VersionSkew { peer_build, .. } => DetailPart::mono_peer(peer_build),
         _ => host
             .remote_farhelm
             .as_ref()
-            .map_or_else(|| DetailPart::peer("not connected"), DetailPart::peer),
+            .map_or_else(|| DetailPart::peer("not connected"), DetailPart::mono_peer),
     };
     vec![destination, DetailPart::text(" · Farhelm "), version]
 }
@@ -2908,7 +2912,9 @@ fn peer_parts_tooltip(parts: &[DetailPart]) -> String {
         .iter()
         .map(|part| match part {
             DetailPart::Text(text) => text.clone(),
-            DetailPart::Peer(value) => format!("\u{2066}{}\u{2069}", value.escaped()),
+            DetailPart::Peer(value) | DetailPart::MonoPeer(value) => {
+                format!("\u{2066}{}\u{2069}", value.escaped())
+            }
         })
         .collect()
 }
@@ -3313,7 +3319,8 @@ fn UpdateProgressPopup(
             style,
             onmounted: move |element| own.set(Some(element.data())),
             span { "{verb}: {done} of {total} steps done" }
-            span { class: "host-update-popup-elapsed", "{elapsed} elapsed" }
+            // The duration is technical; the suffix is interface wording.
+            span { class: "host-update-popup-elapsed", span { class: "font-mono", "{elapsed}" } " elapsed" }
             ol { class: "provisioning-steps host-update-popup-steps",
                 for step in steps {
                     li {
@@ -4438,7 +4445,7 @@ fn HostDestinationForm(
             },
             input {
                 r#type: "text",
-                class: "host-destination-input",
+                class: if alias { "host-destination-input" } else { "host-destination-input font-mono" },
                 placeholder: if alias { "host alias" } else { "ssh destination" },
                 // Every browser text "correction" is off for both fields
                 // this input can be — see this component's own doc for why
@@ -4662,10 +4669,11 @@ fn probe_error_parts(error: String) -> Vec<DetailPart> {
 /// to let that destination bypass this module's escaping and isolation:
 /// the row's own NAME gets the identical treatment (`HostRow`'s own doc),
 /// and a destination is exactly as peer/registry-supplied as a name is.
+/// Destination bytes use mono independently of an alias's interface face.
 fn destination_detail_parts(destination: impl Into<crate::peer::PeerText>) -> Vec<DetailPart> {
     vec![
         DetailPart::text("destination: "),
-        DetailPart::peer(destination),
+        DetailPart::mono_peer(destination),
     ]
 }
 
@@ -5254,12 +5262,13 @@ mod tests {
     /// here the same way `probe_errors_cross_the_peer_text_boundary` pins
     /// the add form's peer text, and needed for the same reason: a raw
     /// interpolated string would have let this line bypass the escaping
-    /// and isolation the row's own NAME already gets.
+    /// and isolation the row's own NAME already gets. Its technical font role
+    /// must also stay independent of the host alias's interface typography.
     #[farhelm_testtrace::test]
     fn destination_details_cross_the_peer_text_boundary() {
-        let shown = detail_text(&destination_detail_parts(
-            "host\u{202E}spoof\u{200B}.example",
-        ));
+        let parts = destination_detail_parts("host\u{202E}spoof\u{200B}.example");
+        assert!(matches!(&parts[1], DetailPart::MonoPeer(_)));
+        let shown = detail_text(&parts);
         assert_eq!(shown, "destination: host<U+202E>spoof<U+200B>.example");
     }
 
@@ -5369,6 +5378,8 @@ mod tests {
     /// Escaping and peer isolation belong to visible content. A literal escape
     /// and the control it depicts draw alike; authored and peer spans do not
     /// have the same bidi contract even when their words happen to match.
+    /// A mono role can change wrapping with the same bytes, so it must also
+    /// invalidate the displayed-line comparison used for menu anchors.
     #[farhelm_testtrace::test]
     fn host_flow_compares_displayed_peer_runs() {
         assert_eq!(
@@ -5378,6 +5389,10 @@ mod tests {
         assert_ne!(
             displayed_host_line(&[DetailPart::text("<U+200B>")]),
             displayed_host_line(&[DetailPart::peer("<U+200B>")])
+        );
+        assert_ne!(
+            displayed_host_line(&[DetailPart::peer("v1.2.3")]),
+            displayed_host_line(&[DetailPart::mono_peer("v1.2.3")])
         );
         let before = [flow_host(3, "\u{200b}"), flow_host(1, "anchor")];
         let after = [flow_host(3, "<U+200B>"), flow_host(1, "anchor")];
@@ -6182,7 +6197,7 @@ mod tests {
         let peers: Vec<&str> = parts
             .iter()
             .filter_map(|part| match part {
-                DetailPart::Peer(value) => Some(value.raw()),
+                DetailPart::Peer(value) | DetailPart::MonoPeer(value) => Some(value.raw()),
                 DetailPart::Text(_) => None,
             })
             .collect();
@@ -6191,7 +6206,7 @@ mod tests {
             .iter()
             .map(|part| match part {
                 DetailPart::Text(value) => value.as_str(),
-                DetailPart::Peer(value) => value.raw(),
+                DetailPart::Peer(value) | DetailPart::MonoPeer(value) => value.raw(),
             })
             .collect();
         assert_eq!(
@@ -6357,7 +6372,7 @@ mod tests {
         let peers: Vec<&str> = parts
             .iter()
             .filter_map(|part| match part {
-                DetailPart::Peer(value) => Some(value.raw()),
+                DetailPart::Peer(value) | DetailPart::MonoPeer(value) => Some(value.raw()),
                 DetailPart::Text(_) => None,
             })
             .collect();

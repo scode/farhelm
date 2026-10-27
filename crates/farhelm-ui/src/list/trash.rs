@@ -375,17 +375,20 @@ fn space(bytes: u64, partial: bool) -> String {
 
 /// The archive rename's known UTC date; missing historical evidence stays
 /// unknown instead of being replaced by the directory's modification time.
-fn archived_when(seconds: Option<i64>) -> String {
+/// Only the timestamp is technical text: the prefix and unknown-time message
+/// remain interface prose without changing their combined accessible wording.
+fn archived_when(seconds: Option<i64>) -> Element {
     let Some(seconds) = seconds else {
-        return "archive time unknown".into();
+        return rsx! { "archive time unknown" };
     };
     let (year, month, day) = farhelm_proto::time::civil_from_days(seconds.div_euclid(86400));
     let time = seconds.rem_euclid(86400);
-    format!(
-        "archived {year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
+    let timestamp = format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
         time / 3600,
         time % 3600 / 60
-    )
+    );
+    rsx! { "archived " span { class: "font-mono", "{timestamp}" } }
 }
 
 /// Dismiss the band opening `shown`, the one the cancelling render drew
@@ -454,7 +457,7 @@ fn close_action(
 #[component]
 fn Issue(issue: CheckoutTrashIssue) -> Element {
     rsx! { div { class: "checkout-trash-issue", role: "status",
-        if !issue.path.is_empty() { div { class: "peer-value", dir: "ltr", "{display_peer(&issue.path)}" } }
+        if !issue.path.is_empty() { div { class: "peer-value font-mono", dir: "ltr", "{display_peer(&issue.path)}" } }
         div { class: "peer-value", dir: "ltr", "{display_peer(&issue.message)}" }
     } }
 }
@@ -1069,7 +1072,7 @@ pub(super) fn TrashControl(
                                                             }, "delete"
                                                         }
                                                     }
-                                                    div { class: "checkout-trash-entry-meta", BranchIcon {} span { class: "peer-value", dir: "ltr", "{display_peer(&checkout.repository)}" } span { "{archived_when(checkout.archived_at)}" } }
+                                                    div { class: "checkout-trash-entry-meta", BranchIcon {} span { class: "peer-value", dir: "ltr", "{display_peer(&checkout.repository)}" } span { {archived_when(checkout.archived_at)} } }
                                                 }
                                                 }
                                                 }

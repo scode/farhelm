@@ -269,6 +269,8 @@
         line.className = `peer-value ${part.className || ''}`;
         if (part.icon) {
           const icon = document.createElement('span');
+          // Nerd Font glyphs must keep their face even beside Inter hints.
+          icon.className = 'terminal-file-icon';
           icon.textContent = part.icon + ' ';
           icon.setAttribute('aria-hidden', 'true');
           line.appendChild(icon);

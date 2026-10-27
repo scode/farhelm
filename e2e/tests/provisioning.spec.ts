@@ -2613,6 +2613,20 @@ test("single Update shows inline progress without opening its row", async ({
   await expect(popup).toContainText(/updating: \d+ of \d+ steps done/);
   await expect(popup.locator(".host-update-popup-step")).toHaveText("create directories");
   await expect(popup).toContainText(/\d+:\d{2} elapsed/);
+  // Both live clocks keep their technical face; the popup's explanatory
+  // suffix stays in Inter. Resolve the actual weight-matched bundled face.
+  for (const [clock, family] of [
+    [row.locator(".host-update-elapsed"), "JetBrains Mono"],
+    [popup.locator(".host-update-popup-elapsed .font-mono"), "JetBrains Mono"],
+    [popup.locator(".host-update-popup-elapsed"), "Inter"],
+  ] as const) {
+    await expect.poll(() => clock.evaluate(async (element, family) => {
+      const style = getComputedStyle(element);
+      if (style.fontFamily.split(",")[0].replace(/["']/g, "").trim() !== family) return false;
+      const faces = await document.fonts.load(`${style.fontWeight} ${style.fontSize} "${family}"`, element.textContent || "M");
+      return faces.length > 0 && faces.every((face) => face.status === "loaded");
+    }, family), { message: `${family} loads for the held operation clock role` }).toBe(true);
+  }
   // Every step of the held run is listed, in executor order with the
   // statuses the helm reports, and exactly one is marked as in progress:
   // the held `create-directories`.

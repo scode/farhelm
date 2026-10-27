@@ -1,5 +1,14 @@
 # Third-party notices
 
+## Inter interface font
+
+The Inter regular, semibold and bold WOFF2 files in `crates/farhelm-ui/assets/fonts/` are unchanged copies of the
+website's vendored Inter fonts. Copyright 2016 The Inter Project Authors
+([`rsms/inter`](https://github.com/rsms/inter)). They are licensed under the SIL Open Font License, Version 1.1; the
+complete notice is in `crates/farhelm-ui/assets/fonts/OFL-Inter.txt` and ships in the app as `/assets/OFL-Inter.txt`.
+
+## Harness marks
+
 The session sidebar's harness marks in `crates/farhelm-ui/src/icons.rs` vendor geometry from the sources below. Each is
 used unaltered apart from a uniform scale into the shared 12-unit box; `docs/harness-marks.md` records why each mark was
 chosen and what the owner's terms allow. Marks not listed here (Claude, Terminal) are Farhelm's own drawings.

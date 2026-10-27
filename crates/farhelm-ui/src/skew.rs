@@ -241,12 +241,12 @@ pub(crate) fn note_build(resp: &reqwest::Response) {
 fn skew_notice(skew: &Skew) -> Vec<DetailPart> {
     let mut parts = vec![
         DetailPart::text("this page was loaded from farhelm "),
-        DetailPart::peer(CLIENT_BUILD),
+        DetailPart::mono_peer(CLIENT_BUILD),
     ];
     match skew {
         Skew::Reported(helm) => {
             parts.push(DetailPart::text(", but the helm now reports "));
-            parts.push(DetailPart::peer(helm));
+            parts.push(DetailPart::mono_peer(helm));
         }
         // No version to name, so the sentence says what IS known rather
         // than leaving a blank where a number should be: a helm that
@@ -361,7 +361,7 @@ mod tests {
             .iter()
             .map(|part| match part {
                 DetailPart::Text(text) => text.as_str(),
-                DetailPart::Peer(value) => value.raw(),
+                DetailPart::Peer(value) | DetailPart::MonoPeer(value) => value.raw(),
             })
             .collect();
         assert!(
@@ -416,7 +416,7 @@ mod tests {
                 .iter()
                 .map(|part| match part {
                     DetailPart::Text(text) => text.clone(),
-                    DetailPart::Peer(value) => value.raw().to_owned(),
+                    DetailPart::Peer(value) | DetailPart::MonoPeer(value) => value.raw().to_owned(),
                 })
                 .collect()
         };
@@ -425,7 +425,7 @@ mod tests {
         let peers: Vec<&str> = reported
             .iter()
             .filter_map(|part| match part {
-                DetailPart::Peer(value) => Some(value.raw()),
+                DetailPart::Peer(value) | DetailPart::MonoPeer(value) => Some(value.raw()),
                 DetailPart::Text(_) => None,
             })
             .collect();

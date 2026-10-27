@@ -1,7 +1,7 @@
 /**
  * The docs screenshots' layer over the README staging (docs/docs-shots/SPEC.md):
  * the docs overlay theme, the staged fleet handed from the staging project to
- * the shot projects, and the three extra in-transit rewrites the docs need on
+ * the shot projects, and the extra in-transit rewrites the docs need on
  * top of the hero's two.
  *
  * Why more rewrites than the hero allows: docs pages show parts of the UI the
@@ -16,6 +16,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import type { OverlayTheme } from "../readme-video/overlay";
 import type { Scenario } from "../readme-hero/scenario";
 import { openStagedFleet, type StagedFleet } from "../readme-hero/stage";
+import { requireHelmBuild } from "../tests/helpers/helm-build";
 import { DOCS_FLEET_PATH, DOCS_SHOTS_DIR } from "./paths";
 
 /**
@@ -203,6 +204,11 @@ async function installDocsRewrites(page: Page, request: APIRequestContext, scena
  */
 async function installCheckoutTrash(page: Page, request: APIRequestContext, scenario: Scenario, now: number) {
   const ids = await hostIds(request, scenario);
+  // The body is staged, but the reply still belongs to this live helm. A
+  // missing stamp latches build skew across every later picture on the page.
+  const identity = await request.get("/api/hosts");
+  expect(identity.ok(), "GET /api/hosts for staged trash identity").toBeTruthy();
+  const build = requireHelmBuild(identity, "docs staged checkout trash");
   const keyById = new Map([...ids.entries()].map(([key, id]) => [id, key]));
   const stamp = (seconds: number) => new Date(seconds * 1000).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
   await page.route((url) => url.pathname === "/api/checkout-trash/delete", (route) =>
@@ -225,7 +231,7 @@ async function installCheckoutTrash(page: Page, request: APIRequestContext, scen
           bytes: checkout.bytes,
         };
       });
-    await route.fulfill({ json: { checkouts, issues: [] } });
+    await route.fulfill({ headers: { "x-farhelm-build": build }, json: { checkouts, issues: [] } });
   });
 }
 

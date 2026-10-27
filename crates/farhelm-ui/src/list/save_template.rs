@@ -303,7 +303,12 @@ pub(super) fn SaveTemplatePanel(
                                 },
                             }
                             span { "{field.label()}: "
-                                span { class: "peer-value", dir: "ltr", "{choice_text(field, &candidate.fields, &host_label)}" }
+                                span {
+                                    class: if matches!(field, Field::Wrapper | Field::Command | Field::Resume)
+                                        || (field == Field::Destination && matches!(candidate.fields.destination, Some(TemplateDestination::Folder(_))))
+                                        { "peer-value font-mono" } else { "peer-value" },
+                                    dir: "ltr", "{choice_text(field, &candidate.fields, &host_label)}"
+                                }
                             }
                         }
                         if field == Field::Name {

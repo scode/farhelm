@@ -90,6 +90,8 @@ async function measure(source: Locator, targetId: string) {
     const sidebar = document.querySelector(".app-sidebar")!;
     const shell = document.querySelector(".app-shell")!;
     const font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const pinStyle = pin ? getComputedStyle(pin) : null;
+    const pinFont = pinStyle ? `${pinStyle.fontWeight} ${pinStyle.fontSize} ${pinStyle.fontFamily}` : null;
     const titleRange = document.createRange();
     titleRange.selectNodeContents(title);
     const titleTextWidth = titleRange.getBoundingClientRect().width;
@@ -116,7 +118,7 @@ async function measure(source: Locator, targetId: string) {
       titlePosition: titleStyle.position,
       gap: style.columnGap, rowGap: style.rowGap,
       titleText: title.textContent,
-      fontsLoaded: document.fonts.status === "loaded", pinFontReady: document.fonts.check(font, "\uf08d"),
+      fontsLoaded: document.fonts.status === "loaded", pinFontReady: pinFont ? document.fonts.check(pinFont, "\uf08d") : true,
       target: rect(target.querySelector(".session-row-menu")!),
       targetExpanded: target.querySelector(".session-row-menu")!.getAttribute("aria-expanded"),
       menu: panel ? rect(panel) : null,
@@ -439,9 +441,11 @@ test("same displayed pinned title with new raw spelling preserves the menu", asy
 for (const compact of [false, true]) {
   /** The header can begin deletion while a different row menu is already open.
    * Hold the actual DELETE before forwarding; its later removal/refusal must
-   * never explain the small font/baseline entry movement being tested.
+   * never explain the close. Entering deletion changes the in-flow child and
+   * its font treatment: the causal projection invalidates a later opening
+   * even where this loaded face happens to leave its physical bounds equal.
    */
-  test(`unpinned delete entry closes the lower menu with compact=${compact}`, async ({ page, request }) => {
+  test(`unpinned delete style invalidates the lower menu with compact=${compact}`, async ({ page, request }) => {
     const fixture = await prepare(page, request, { compact, selectedA: true });
     const gate = routeGate();
     releases.push(() => gate.release());
@@ -473,11 +477,6 @@ for (const compact of [false, true]) {
     expect(after.titlePosition).toBe("absolute");
     expect(after.progressText).toBe("Stopping agent…");
     expect(after.progressBox).not.toBeNull();
-    const growth = after.row.height - before.row.height;
-    const delta = after.target.y - before.target.y;
-    expect(growth, "actual font/baseline entry movement can be smaller than one pixel").toBeGreaterThan(0.1);
-    expect(delta).toBeGreaterThan(0.1);
-    expect(Math.abs(delta - growth)).toBeLessThan(0.1);
     await expect(fixture.target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(fixture.target.locator(".session-row-menu")).toHaveAttribute("aria-expanded", "false");
   });
@@ -497,11 +496,41 @@ test("activity track growth rewraps pinned copy and closes the lower menu", asyn
   await fixture.replaceSourceRead({ title: "10 ordinary", last_activity_at: old,
     notifications: [], notifications_read_through: 0 });
   const initial = await measure(fixture.source, fixture.b);
-  const character = initial.titleTextWidth / initial.titleText!.length;
-  expect(character).toBeGreaterThan(0);
   const available = initial.copy.width - initial.pin!.width - parseFloat(initial.gap);
-  const columns = Math.max(4, Math.min(60, Math.floor(available / character)));
-  await fixture.replaceSourceRead({ title: "10 " + "x".repeat(columns - 3) });
+  // A proportional face has no average character width that can size another
+  // string. Measure the repeated glyph in the loaded title face to make a
+  // nearby candidate; real DOM budgets below establish the actual crossing.
+  const title = await fixture.source.locator(".session-title").evaluate((node, available) => {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d")!;
+    context.font = getComputedStyle(node).font;
+    const prefix = "10 ";
+    const advance = context.measureText("i").width;
+    if (!(advance > 0)) throw new Error("the loaded title face needs a measurable i advance");
+    const count = Math.floor((available - context.measureText(prefix).width - 1) / advance);
+    if (count < 1 || count > 200) throw new Error(`unexpected title capacity: ${count}`);
+    return prefix + "i".repeat(count);
+  }, available);
+  await fixture.replaceSourceRead({ title });
+  const oldShape = await measure(fixture.source, fixture.b);
+  await fixture.replaceSourceRead({ last_activity_at: older });
+  const newShape = await measure(fixture.source, fixture.b);
+  const budget = (shape: Shape) => shape.copy.width - shape.pin!.width - parseFloat(shape.gap);
+  expect(budget(oldShape)).toBeGreaterThan(budget(newShape));
+  // The activity track's 4ch floor can make the remaining interval narrower
+  // than one proportional glyph. Shift the supported sidebar width once so
+  // the actual DOM text falls midway between old/new capacities. This is
+  // bounded fixture preparation, before the menu's observed update.
+  const shift = Math.round(oldShape.titleTextWidth - (budget(oldShape) + budget(newShape)) / 2);
+  expect(Math.abs(shift), JSON.stringify({ oldShape, newShape })).toBeLessThanOrEqual(8);
+  await resizeSidebar(page, 340 + shift);
+  const wrapped = await measure(fixture.source, fixture.b);
+  expect(wrapped.title.y).toBeGreaterThan(wrapped.pin!.y + 2);
+  await fixture.replaceSourceRead({ last_activity_at: old });
+  const fitted = await measure(fixture.source, fixture.b);
+  expect(fitted.title.y).toBeLessThan(fitted.pin!.y + fitted.pin!.height);
+  expect(fitted.titleTextWidth).toBeLessThanOrEqual(fitted.title.width + 0.1);
+  expect(wrapped.row.height - fitted.row.height).toBeGreaterThan(5);
   await expect(fixture.source.locator(".status-time")).toHaveText("9999d");
   const before = await openHeldMenu(page, fixture, fixture.b);
   expect(before.pinned).toEqual(["true", "true", "false"]);

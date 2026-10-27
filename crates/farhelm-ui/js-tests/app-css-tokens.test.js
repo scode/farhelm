@@ -285,28 +285,16 @@ test("var(--menu-top) is accepted though never declared in :root", () => {
 });
 
 test("a clean stylesheet with only var() use sites passes", () => {
-  // `--font-ui` here deliberately mirrors the shipped shape (the vendored
-  // face, not a generic platform stack) — see the "shipped app.css applies
-  // the vendored face" tests below for why a `system-ui` value would now
-  // read as stale rather than merely a simplified example.
-  const css = `:root {\n  --bg-0: #14161a;\n  --font-ui: "JetBrains Mono", ui-monospace, monospace;\n}\n` +
+  // Keep the example on the shipped interface role; technical values use
+  // the separate mono token rather than inheriting the interface face.
+  const css = `:root {\n  --bg-0: #14161a;\n  --font-ui: "Inter", system-ui, sans-serif;\n}\n` +
     `.thing {\n  color: var(--bg-0);\n  font-family: var(--font-ui);\n}`;
   const result = checkAppCss(css);
   assert.deepEqual(result.errors, []);
 });
 
-// ---- Chrome-font regression coverage (review fixup for PR #233: "set the
-// chrome in the vendored JetBrains Mono face") ----
-//
-// `checkAppCss` above only proves every font stack is a token reference; it
-// says nothing about WHICH face that token names or WHICH rule actually
-// consumes it. Both are exactly the two ways a future edit could quietly
-// undo the chrome-unification this PR did: reverting `--font-ui`'s value to
-// a platform stack, or having the shell rule fall back to a literal/
-// unrelated var(). Neither would trip `checkAppCss`'s literal-vs-token
-// scan, so these two tests exist as narrower, targeted assertions on top of
-// it — read directly from the shipped file rather than a synthetic
-// snippet, so they fail the moment either regression actually ships.
+// Font-role coverage complements token hygiene: a valid token can still
+// name the wrong face or be disconnected from the element that needs it.
 
 /** Extracts the value assigned to `--font-ui` inside the FIRST `:root`
  * block of `css` (comments already stripped) — the shipped dark palette,
@@ -333,18 +321,30 @@ function shellFontFamilyValue(strippedCss) {
   return declMatch ? declMatch[1].trim() : null;
 }
 
-test("the shipped --font-ui names the vendored JetBrains Mono face, not a platform stack", () => {
+test("the shipped --font-ui leads with vendored Inter", () => {
   const stripped = stripComments(fs.readFileSync(APP_CSS_PATH, "utf8"));
   const value = firstRootFontUiValue(stripped);
   assert.ok(value, "expected --font-ui to be declared in the shipped file's first :root block");
-  // Anchored to the start, not just "contains": a stack that led with
-  // `system-ui` (the pre-fixup default) or a misspelled `"JetBrains Mon"`
-  // both still CONTAIN a substring match against a looser check, and both
-  // are exactly the regressions this test exists to catch.
+  // A fallback preceding Inter would silently change the chosen interface.
   assert.ok(
-    value.startsWith('"JetBrains Mono"'),
-    `--font-ui should start with "JetBrains Mono", got: ${value}`,
+    value.startsWith('"Inter"'),
+    `--font-ui should start with "Inter", got: ${value}`,
   );
+});
+
+/** Technical roles opt into mono, including invisible age measurement copies.
+ * Peer isolation alone cannot select a font: names share that trust boundary
+ * with paths, but only paths are technical text. Match complete selectors so a
+ * scoped path role is not mistaken for a global peer rule. */
+test("technical values and the bell's hidden age copy retain the mono role", () => {
+  const stripped = stripComments(fs.readFileSync(APP_CSS_PATH, "utf8"));
+  const rules = [...stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  for (const selector of ["code", "pre", "kbd", "samp", ".session-pin", ".status-time", ".session-bell-time-spacer", ".trash-entry-elapsed", ".host-update-elapsed"]) {
+    assert.ok(rules.some(([, header, body]) => header.split(",").map((part) => part.trim()).includes(selector)
+      && /font-family:\s*var\(--font-mono\)\s*;/.test(body)), `${selector} must explicitly use mono`);
+  }
+  assert.ok(!rules.some(([, header, body]) => header.split(",").map((part) => part.trim()).includes(".peer-value")
+    && /font-family\s*:/.test(body)), "peer isolation must not choose a font role");
 });
 
 test("the shell rule (html, body, #main) pulls its typeface from --font-ui, not a literal or a different token", () => {
