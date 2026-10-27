@@ -1605,6 +1605,35 @@ impl DeleteKind {
     }
 }
 
+/// Keep each destructive promise attached to the element the user can click.
+/// Native Dioxus replaces listeners before the webview paints the mutations:
+/// changing one button's kind could execute Permanent under a painted plain
+/// Delete label. Both controls stay mounted, and each always sends its own
+/// literal kind, so a click from the preceding paint keeps that promise.
+#[component]
+fn TemplateDeleteButtons(
+    kind: DeleteKind,
+    disabled: bool,
+    on_delete: EventHandler<DeleteKind>,
+) -> Element {
+    rsx! {
+        button {
+            r#type: "button", class: "btn btn-danger templates-delete templates-delete-restorable",
+            hidden: kind != DeleteKind::Restorable, disabled,
+            "data-tooltip": "delete this template now; undo is available here for about ten seconds",
+            onclick: move |_| on_delete.call(DeleteKind::Restorable),
+            "delete"
+        }
+        button {
+            r#type: "button", class: "btn btn-danger templates-delete templates-delete-permanent",
+            hidden: kind != DeleteKind::Permanent, disabled,
+            "data-tooltip": "delete this template now; it fails current save rules, so undo is not available",
+            onclick: move |_| on_delete.call(DeleteKind::Permanent),
+            "delete permanently"
+        }
+    }
+}
+
 /// The Undo notice a successful Delete leaves, decided by the kind the button
 /// showed, never by the template value the click went on to delete.
 ///
@@ -1807,15 +1836,14 @@ pub(super) fn TemplatesDialog(
         .and_then(|r| r.as_ref().ok())
         .cloned();
     let list = templates.read().clone();
-    // The Delete handler below captures this value, so the click does what
-    // this render's label says.
+    // Each kind has its own mounted control, so native listener updates
+    // cannot change the promise of an element still painted on screen.
     let delete_kind = DeleteKind::of(
         list.as_ref()
             .and_then(|r| r.as_ref().ok())
             .map(Vec::as_slice),
         previous().as_deref(),
     );
-    let permanent_delete = delete_kind == DeleteKind::Permanent;
     let names: Vec<String> = list
         .as_ref()
         .and_then(|r| r.as_ref().ok())
@@ -2035,7 +2063,7 @@ pub(super) fn TemplatesDialog(
     });
 
     let delete_base = base.clone();
-    let delete = move |_| {
+    let delete = move |shown_kind| {
         // Save's authoritative reload must land before Delete snapshots the
         // fields for Undo; the retained resource value can still be older.
         if busy() || templates.pending() {
@@ -2087,13 +2115,13 @@ pub(super) fn TemplatesDialog(
                         .retain(|_, owner| owner.raw() != name);
                     undo_generation += 1;
                     let generation = undo_generation();
-                    // Whether Undo follows is the kind this render's label
-                    // promised (`delete_kind`, captured by this closure), not
+                    // Whether Undo follows is the kind the painted control
+                    // promised (its fixed `shown_kind`), not
                     // a fresh shape check of the value deleted: a list reload
                     // landing between the render the user saw and the click
                     // must not turn "delete" into a delete with no Undo, or
                     // "delete permanently" into one that offers it.
-                    undo.set(undo_after_delete(delete_kind, template, generation));
+                    undo.set(undo_after_delete(shown_kind, template, generation));
                     leave_editor(
                         Departure::Back,
                         draft,
@@ -2340,7 +2368,7 @@ pub(super) fn TemplatesDialog(
                                     div { class: "templates-actions",
                                         if previous().is_some() {
                                             button { r#type: "button", class: "btn btn-neutral templates-duplicate", disabled: disabled || templates.pending(), "data-tooltip": "open a new unsaved copy with a free name", onclick: move |_| depart.call(Departure::Duplicate), "duplicate" }
-                                            button { r#type: "button", class: "btn btn-danger templates-delete", disabled: disabled || templates.pending(), "data-tooltip": if permanent_delete { "delete this template now; it fails current save rules, so undo is not available" } else { "delete this template now; undo is available here for about ten seconds" }, onclick: delete, if permanent_delete { "delete permanently" } else { "delete" } }
+                                            TemplateDeleteButtons { kind: delete_kind, disabled: disabled || templates.pending(), on_delete: delete }
                                         }
                                         button { r#type: "button", class: "btn btn-primary templates-save", disabled, "data-tooltip": "save the template's name, switch and shown fields", onclick: move |_| save.call(None), "save" }
                                     }
@@ -3311,9 +3339,9 @@ mod tests {
     /// Spec: the delete kind a render computes for the label ("delete" offers
     /// Undo, "delete permanently" does not) decides the Undo offer on its own:
     /// `undo_after_delete` takes that kind and the clicked row and never
-    /// re-checks the template's shape. This covers the two helpers the Delete
-    /// handler calls; the handler itself is not mounted in unit tests, and the
-    /// reload race it guards against is not reachable from a browser.
+    /// re-checks the template's shape. The mounted-control regression below
+    /// separately covers native listener replacement before the next paint;
+    /// a browser applies display edits during its render and misses that gap.
     ///
     /// Why: the label comes from one render's list, and the handler used to
     /// re-run the shape check on the list as it stood at the click. A reload
@@ -3359,6 +3387,318 @@ mod tests {
             DeleteKind::of(Some(std::slice::from_ref(&unsaveable)), Some("other")),
             DeleteKind::Restorable
         );
+    }
+
+    /// The desktop dispatch path can update listeners before the webview paints.
+    /// Keep its serialized-event fixture native, like the renderer it models.
+    #[cfg(native_desktop)]
+    mod native_delete {
+        use super::*;
+        use dioxus::core::ElementId;
+
+        /// A real resource's externally completed reads expose Retry without a
+        /// network peer, a process environment change or a scheduler delay.
+        struct DeleteFixture {
+            reads:
+                RefCell<std::collections::VecDeque<futures_channel::oneshot::Receiver<DeleteRows>>>,
+            resource: Cell<Option<Resource<DeleteRows>>>,
+            frame: Cell<DeleteFrame>,
+            renders: Cell<usize>,
+            calls: RefCell<Vec<DeleteKind>>,
+        }
+
+        type DeleteRows = Result<Vec<LaunchTemplate>, String>;
+
+        /// The list result actually consumed by the fixture's last native render.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum DeleteFrame {
+            Missing,
+            Failed,
+            Plain,
+            Permanent,
+        }
+
+        /// Use the production classification and controls with an owned list source.
+        /// Like the dialog, pending is peeked; Retry need not paint a loading frame.
+        fn delete_fixture_app(fixture: Rc<DeleteFixture>) -> Element {
+            let source = fixture.clone();
+            let mut templates = use_resource(move || {
+                let next = source
+                    .reads
+                    .borrow_mut()
+                    .pop_front()
+                    .expect("an owned list read");
+                async move {
+                    next.await
+                        .expect("the test completes every started list read")
+                }
+            });
+            fixture.resource.set(Some(templates));
+            fixture.renders.set(fixture.renders.get() + 1);
+            let list = templates.read().clone();
+            let kind = DeleteKind::of(
+                list.as_ref()
+                    .and_then(|rows| rows.as_ref().ok())
+                    .map(Vec::as_slice),
+                Some("legacy"),
+            );
+            fixture.frame.set(match &list {
+                None => DeleteFrame::Missing,
+                Some(Err(_)) => DeleteFrame::Failed,
+                Some(Ok(_)) if kind == DeleteKind::Permanent => DeleteFrame::Permanent,
+                Some(Ok(_)) => DeleteFrame::Plain,
+            });
+            let recorded = fixture.clone();
+            rsx! {
+                TemplateDeleteButtons {
+                    kind, disabled: templates.pending(),
+                    on_delete: move |kind| recorded.calls.borrow_mut().push(kind),
+                }
+                if matches!(list, Some(Err(_))) {
+                    button { class: "templates-retry", onclick: move |_| templates.restart(), "retry" }
+                }
+            }
+        }
+
+        /// A completed oneshot needs only local scheduler/render work. Keep it
+        /// bounded, and retain the deliberate native-update-without-paint boundary.
+        fn render_delete_frame(dom: &mut VirtualDom, fixture: &DeleteFixture, wanted: DeleteFrame) {
+            for _ in 0..16 {
+                dom.process_events();
+                let _unpainted = dom.render_immediate_to_vec();
+                if fixture.frame.get() == wanted {
+                    return;
+                }
+            }
+            panic!(
+                "wanted {wanted:?}, last native render was {:?}",
+                fixture.frame.get()
+            );
+        }
+
+        /// Inspect production button markup rather than assuming a sibling count.
+        /// This also lets the old single-control negative control reach dispatch.
+        fn visible_delete_fixture_target(dom: &VirtualDom, class: &str, label: &str) -> ElementId {
+            use dioxus::core::{AttributeValue, DynamicNode, TemplateAttribute, TemplateNode};
+
+            /// Read the label for either fixed controls or the changing-label
+            /// negative control, without assuming how rsx stores its text.
+            fn label_text(node: &TemplateNode, vnode: &VNode) -> String {
+                match node {
+                    TemplateNode::Text { text } => (*text).into(),
+                    TemplateNode::Element { children, .. } => children
+                        .iter()
+                        .map(|child| label_text(child, vnode))
+                        .collect(),
+                    TemplateNode::Dynamic { id } => match &vnode.dynamic_nodes[*id] {
+                        DynamicNode::Text(text) => text.value.clone(),
+                        DynamicNode::Fragment(children) => children
+                            .iter()
+                            .flat_map(|child| {
+                                child
+                                    .template
+                                    .roots
+                                    .iter()
+                                    .map(|node| label_text(node, child))
+                            })
+                            .collect(),
+                        _ => String::new(),
+                    },
+                }
+            }
+
+            /// Static classes live in the template, not the mutation stream.
+            fn collect(
+                dom: &VirtualDom,
+                vnode: &VNode,
+                class: &str,
+                found: &mut Vec<(ElementId, String, bool)>,
+            ) {
+                for (index, attrs) in vnode.dynamic_attrs.iter().enumerate() {
+                    if !attrs.iter().any(|attr| attr.name == "onclick") {
+                        continue;
+                    }
+                    let path = vnode.template.attr_paths[index];
+                    let mut node = &vnode.template.roots[usize::from(path[0])];
+                    for &step in &path[1..] {
+                        let TemplateNode::Element { children, .. } = node else {
+                            panic!("button path crosses a non-element")
+                        };
+                        node = &children[usize::from(step)];
+                    }
+                    let TemplateNode::Element {
+                        tag,
+                        attrs: fixed,
+                        children,
+                        ..
+                    } = node
+                    else {
+                        continue;
+                    };
+                    let matching = fixed.iter().any(|attr| matches!(attr,
+                    TemplateAttribute::Static { name: "class", value, .. } if value.split_whitespace().any(|word| word == class)
+                ));
+                    // Dioxus can split one element's attributes into several
+                    // groups. Its listener group need not contain visibility.
+                    let flag = |name| {
+                        vnode
+                            .dynamic_attrs
+                            .iter()
+                            .enumerate()
+                            .filter(|(index, _)| vnode.template.attr_paths[*index] == path)
+                            .flat_map(|(_, attrs)| attrs.iter())
+                            .any(|attr| {
+                                attr.name == name
+                                    && matches!(attr.value, AttributeValue::Bool(true))
+                            })
+                    };
+                    if matching && !flag("hidden") {
+                        assert_eq!(*tag, "button");
+                        let text = children
+                            .iter()
+                            .map(|child| label_text(child, vnode))
+                            .collect::<String>();
+                        found.push((
+                            vnode
+                                .mounted_dynamic_attribute(index, dom)
+                                .expect("mounted button"),
+                            text,
+                            flag("disabled"),
+                        ));
+                    }
+                }
+                for (index, node) in vnode.dynamic_nodes.iter().enumerate() {
+                    match node {
+                        DynamicNode::Fragment(children) => {
+                            for child in children {
+                                collect(dom, child, class, found);
+                            }
+                        }
+                        DynamicNode::Component(component) => {
+                            if let Some(scope) = component.mounted_scope(index, vnode, dom) {
+                                collect(dom, scope.root_node(), class, found);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            let mut found = Vec::new();
+            collect(
+                dom,
+                dom.get_scope(ScopeId::APP)
+                    .expect("fixture mounted")
+                    .root_node(),
+                class,
+                &mut found,
+            );
+            assert_eq!(found.len(), 1, "one visible {class} control");
+            let (id, text, disabled) = found.remove(0);
+            assert_eq!(text, label, "premise: this is the painted label");
+            assert!(!disabled, "premise: the painted control accepts clicks");
+            id
+        }
+
+        /// Deliver the webview's captured element identity to the current native
+        /// listener table, without applying any intervening display mutations.
+        fn click_delete_fixture(dom: &VirtualDom, id: ElementId) {
+            let data: Rc<dyn std::any::Any> = Rc::new(dioxus::html::PlatformEventData::new(
+                Box::new(dioxus::html::SerializedMouseData::default()),
+            ));
+            dom.runtime()
+                .handle_event("click", dioxus::core::Event::new(data, true), id);
+        }
+
+        /// A failed follow-up read and successful Retry must not install permanent
+        /// deletion under the plain button still painted by the desktop webview.
+        /// The reverse transition must likewise keep the no-Undo promise. A single
+        /// changing-kind control fails at the observed callback kind in this test.
+        #[farhelm_testtrace::test]
+        fn retry_keeps_the_kind_of_the_painted_delete_element() {
+            dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
+            let mut replies = Vec::new();
+            let mut reads = std::collections::VecDeque::new();
+            for _ in 0..4 {
+                let (send, receive) = futures_channel::oneshot::channel();
+                replies.push(send);
+                reads.push_back(receive);
+            }
+            let mut replies = replies.into_iter();
+            let fixture = Rc::new(DeleteFixture {
+                reads: RefCell::new(reads),
+                resource: Cell::new(None),
+                frame: Cell::new(DeleteFrame::Missing),
+                renders: Cell::new(0),
+                calls: RefCell::new(Vec::new()),
+            });
+            let specimen = |name: &str| LaunchTemplate {
+                name: "legacy".into(),
+                fields: TemplateFields {
+                    name: Some(name.into()),
+                    ..Default::default()
+                },
+            };
+            let valid = specimen("plain");
+            let invalid = specimen("hidden\u{200B}name");
+            assert!(check_template_shape(&valid).is_ok());
+            assert!(check_template_shape(&invalid).is_err());
+            let mut dom = VirtualDom::new_with_props(delete_fixture_app, fixture.clone());
+            dom.rebuild_to_vec();
+            replies
+                .next()
+                .unwrap()
+                .send(Ok(vec![valid.clone()]))
+                .unwrap();
+            render_delete_frame(&mut dom, &fixture, DeleteFrame::Plain);
+            visible_delete_fixture_target(&dom, "templates-delete", "delete");
+
+            let mut resource = fixture.resource.get().expect("resource mounted");
+            dom.in_runtime(|| resource.restart());
+            replies
+                .next()
+                .unwrap()
+                .send(Err("follow-up list read failed".into()))
+                .unwrap();
+            render_delete_frame(&mut dom, &fixture, DeleteFrame::Failed);
+            let old_plain = visible_delete_fixture_target(&dom, "templates-delete", "delete");
+            let retry = visible_delete_fixture_target(&dom, "templates-retry", "retry");
+            let renders = fixture.renders.get();
+            click_delete_fixture(&dom, retry);
+            dom.process_events();
+            assert!(resource.pending(), "Retry started a real read");
+            assert_eq!(
+                fixture.renders.get(),
+                renders,
+                "no intermediate loading frame was painted"
+            );
+            replies
+                .next()
+                .unwrap()
+                .send(Ok(vec![invalid.clone()]))
+                .unwrap();
+            render_delete_frame(&mut dom, &fixture, DeleteFrame::Permanent);
+            click_delete_fixture(&dom, old_plain);
+            assert_eq!(*fixture.calls.borrow(), [DeleteKind::Restorable]);
+            assert!(undo_after_delete(fixture.calls.borrow()[0], invalid, 1).is_some());
+
+            // The new state is now the conceptual painted frame. Its permanent
+            // element must not inherit the ordinary handler from a later render.
+            let old_permanent =
+                visible_delete_fixture_target(&dom, "templates-delete", "delete permanently");
+            dom.in_runtime(|| resource.restart());
+            replies
+                .next()
+                .unwrap()
+                .send(Ok(vec![valid.clone()]))
+                .unwrap();
+            render_delete_frame(&mut dom, &fixture, DeleteFrame::Plain);
+            click_delete_fixture(&dom, old_permanent);
+            assert_eq!(
+                *fixture.calls.borrow(),
+                [DeleteKind::Restorable, DeleteKind::Permanent]
+            );
+            assert!(undo_after_delete(fixture.calls.borrow()[1], valid, 2).is_none());
+        }
     }
 
     /// Mount a leave-prompt slot the way `TemplatesDialog` does and run `body`

@@ -5816,11 +5816,14 @@ saving under a name another template already has is refused in the panel rather 
 pending or failed name-list read cannot prove a new name is free. Delete checks the stored snapshot, not the unsaved
 draft, against the existing template shape rules. If it fails, the control says "delete permanently" and deletion clears
 any Undo; the ordinary save path could not restore that snapshot. Otherwise Delete retains the stored template
-client-side for about ten seconds; undo freshly reads the names before restoring and refuses a taken name. The notice
-and its timer belong to this mounted dialog, with a generation guarding against an earlier timer expiring a later
-deletion. Writes are serialized and disable navigation until their outcome is known. API last-write-wins semantics
-remain unchanged; name checks do not acquire an atomic cross-client reservation. The launcher reads templates when it
-opens and again whenever the Templates dialog closes, using the existing revision bump and focus return.
+client-side for about ten seconds; undo freshly reads the names before restoring and refuses a taken name. The two
+delete kinds have separate, always-mounted buttons, switched with `hidden`, whose handlers each carry a fixed kind.
+Native listener updates can precede a webview paint, so reusing one button could change the Undo promise before its new
+label appears. The notice and its timer belong to this mounted dialog, with a generation guarding against an earlier
+timer expiring a later deletion. Writes are serialized and disable navigation until their outcome is known. API
+last-write-wins semantics remain unchanged; name checks do not acquire an atomic cross-client reservation. The launcher
+reads templates when it opens and again whenever the Templates dialog closes, using the existing revision bump and focus
+return.
 
 ### Agent launches from the CLI
 

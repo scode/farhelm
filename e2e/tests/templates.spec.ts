@@ -227,7 +227,7 @@ for (const [field, value] of [
       await input.fill("repaired draft");
       await expect(input).toHaveValue("repaired draft");
     }
-    const remove = dialog.locator(".templates-delete");
+    const remove = dialog.locator(".templates-delete:visible");
     await expect(remove).toHaveText("delete permanently");
     await expect(remove).toHaveAttribute("data-tooltip", /current save rules.*undo is not available/);
     expect(deletes, "the permanent warning must be visible before any delete").toBe(0);
@@ -981,7 +981,7 @@ for (const [trust, write] of [[true, "edit"], [false, "duplicate"], [null, "undo
         await dialog.locator(".templates-save").click();
         await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
       } else if (write === "undo") {
-        await dialog.locator(".templates-delete").click();
+        await dialog.locator(".templates-delete:visible").click();
         await expect(dialog.locator(".templates-undo")).toBeVisible();
         await dialog.locator(".templates-undo").click();
         await expect(dialog.locator(".templates-undo")).toHaveCount(0);
@@ -1256,7 +1256,7 @@ test("delete waits for the saved template list before offering undo", async ({ p
     await expect.poll(() => held).toBe(true);
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "true");
     expect((await storedTemplate(request, name)).fields.name).toBe("new title");
-    await dialog.locator(".templates-delete").dispatchEvent("click");
+    await dialog.locator(".templates-delete:visible").dispatchEvent("click");
     // sleep-ok: observe the absence of a queued Delete while the saved list is deliberately held.
     await page.waitForTimeout(250);
     expect(deletes).toBe(0);
@@ -1264,7 +1264,7 @@ test("delete waits for the saved template list before offering undo", async ({ p
     hold = false;
     gate.release();
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
-    await dialog.locator(".templates-delete").click();
+    await dialog.locator(".templates-delete:visible").click();
     await expect(dialog.locator(".templates-undo")).toBeVisible();
     expect(deletes).toBe(1);
     await dialog.locator(".templates-undo").click();
@@ -1370,7 +1370,7 @@ test("the Templates dialog creates, edits, renames, deletes and undoes", async (
     await expect(dialog.locator(".templates-row-name", { hasText: renamed })).toBeVisible();
     expect(await storedTemplate(request, name)).toBeUndefined();
     expect((await storedTemplate(request, renamed)).fields).toEqual({ kind: "agent", agent: "codex", effort: "low" });
-    await dialog.locator(".templates-delete").click();
+    await dialog.locator(".templates-delete:visible").click();
     await expect(dialog.locator(".templates-undo")).toBeVisible();
     expect(await storedTemplate(request, renamed)).toBeUndefined();
     await dialog.locator(".templates-undo").click();
@@ -1419,7 +1419,7 @@ test("long summaries stay reachable and taken names refuse save and undo", async
     expect((await storedTemplate(request, late)).fields).toEqual({ name: "outside" });
     expect((await storedTemplate(request, name)).fields).toEqual(fields);
     await dialog.locator(".templates-name").fill(name);
-    await dialog.locator(".templates-delete").click();
+    await dialog.locator(".templates-delete:visible").click();
     await expect(dialog.locator(".templates-undo")).toBeVisible();
     expect(await storedTemplate(request, name)).toBeUndefined();
     await putTemplate(request, name, { name: "replacement" });
@@ -1456,7 +1456,7 @@ test("session name kind survives duplicate and undo and base saves stay clean", 
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
     expect((await storedTemplate(request, copy)).fields.name_kind).toBe("fixed");
-    await dialog.locator(".templates-delete").click();
+    await dialog.locator(".templates-delete:visible").click();
     await expect(dialog.locator(".templates-undo")).toBeVisible();
     expect(await storedTemplate(request, copy)).toBeUndefined();
     await dialog.locator(".templates-undo").click();
@@ -1759,7 +1759,7 @@ test("undo expires independently of earlier deletions and ends on close", async 
       await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
       await dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) }).click();
       await expect(dialog.locator(".templates-name")).toHaveValue(name);
-      await dialog.locator(".templates-delete").click();
+      await dialog.locator(".templates-delete:visible").click();
       await expect(dialog.locator(".templates-undo-notice")).toContainText(`Deleted ${name}.`);
       expect(await storedTemplate(request, name)).toBeUndefined();
     };
