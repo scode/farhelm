@@ -190,7 +190,9 @@ It is never committed.
 
 Fence: during triage, “fix this”, “fix code”, “update the spec”, “let’s do that”, “agreed” and “yes” are decisions to
 record in `TRIAGE_OUTCOMES.md`, never permission to edit code, specifications, TODO entries or queue files; execution
-needs a separate command that names it.
+needs a separate command that names it. Questions go on one `interactive-artifact` page, not in conversation, unless the
+maintainer explicitly asks for the conversation instead (`review_feedback_queue/.agents/triage.md`, "Presenting items on
+one page").
 
 ### Executing triage outcomes ("execute triage outcomes", "execute the recorded triage outcomes", "implement the approved fixes now", "start the execution phase")
 

@@ -18780,3 +18780,188 @@
   the cache. The code, test and documentation total 122 changed lines, over the original gate of about 100 (about 27 of
   them the test and about 20 more comments). The maintainer approved the built fix on 2026-10-23 in the plan's
   Decisions. PR: https://github.com/scode/farhelm/pull/2665/changes.
+
+## restart-trust-follows-stale-checkout-membership.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 2977e6c9 (not run). Restart with's automatic workspace trust
+  (`crates/farhelm-helm/src/sessions.rs` around 2823–2851) treats the session as managed when its live row carries any
+  checkout membership (`working_copy.is_some()`), which the supervisor fills from plain membership with no folder
+  identity check. A borrower (an ordinary session attached to another session's checkout by canonical path) skips the
+  origin's identity recovery on Restart, and the cwd check compares path spelling only. New launches instead go through
+  the identity-checked managed-checkout read, which also refuses checkouts with no creation time. So a folder put at the
+  checkout's path outside Farhelm can get automatic Codex or Pi trust through Restart with. Scope: Codex and Pi only; a
+  trust switch must be on; the replacement happens outside Farhelm. Plain Restart keeps its stored launch per SPEC.md
+  ("Plain Restart and plain Replace keep their stored launch"), so that is not part of this finding. The 2026-10-18
+  `reused-checkout-path-grants-trust.md` decision states the required behavior: "the managed-checkout membership read
+  used for trust counts a recorded checkout only when the folder at its path still matches the recorded identity; a
+  replaced or missing folder counts as ordinary." Its fix (#2354) changed only the new-launch read, and
+  `no-birth-time-checkout-archives-reclone.md`'s execution notes "Restart with in such a folder still trusts as before
+  (follow-up)" with no tracking item. Bucket highest kept (trust boundary), though that earlier assessment noted it
+  gives an attacker nothing.
+- Decision: recorded as `fix code` without asking, under the 2026-10-19 clearly-settled rule (triage.md, "Preparing each
+  item"), on the 2026-10-18 decision quoted above and SPEC.md "Managed checkouts" (a checkout without a creation time
+  "does not trust its agent automatically"). The user can revise it.
+- Completion criteria: Restart with decides "managed" for automatic trust through the same identity-checked
+  managed-checkout read new launches use, for the session's cwd, so a replaced, missing or creation-time-less folder
+  counts as ordinary for borrowers and origins alike. A test covers a borrower whose checkout folder was replaced at the
+  same path. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
+  changelog fragment); over it, block and bring it back, keeping the 2026-10-18 complexity gate. Remove the feedback
+  file and its index entry.
+- Execution: `pending`.
+
+## template-retry-installs-unseen-permanent-delete.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 2977e6c9 (not run), with the pinned Dioxus 0.7.10 sources. After a
+  rename's PUT succeeds and the follow-up preferences and list reads fail, Templates keeps showing an enabled plain
+  "delete" (Restorable, with the Undo tooltip) beside Retry. Retry causes no re-render, because the dialog reads the
+  resource's loading state with `peek` and never subscribes, so the disabled-while-loading button is never drawn. When
+  the reload finishes, the next render installs a Permanent handler before the label edit is painted on the next
+  animation frame, and a click in that gap permanently deletes a stored template that fails current save rules, with
+  neither the advance "delete permanently" warning nor Undo. SPEC.md (Templates): "The label the user saw decides: a
+  click on 'delete permanently' never offers undo, and a click on plain 'delete' always does, even if the template list
+  changed in between." SPEC.md's 2026-10-10 sub-second allowance keeps "Guards this spec names explicitly". Frequency is
+  unmeasured; the gap is about one frame.
+- Decision: the user picked "Named guards hold; the target follows the click" (2026-10-26 highest-bucket triage page,
+  Q1): a guard the spec names, such as the delete label, holds even for a click that lands between a render and its
+  paint.
+- Completion criteria: a click on a Delete whose painted label was plain "delete" never deletes permanently without
+  Undo, including when a newer render has changed the kind but not yet been painted; the shape (for example painting a
+  disabled button while the list reloads, or refusing a click whose kind differs from what was last painted) is
+  execution's choice. A test covers the failed-reload, Retry, kind-change sequence. Remove the feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## template-delete-reads-new-selection.md
+
+- Outcome: `discard`.
+- Assessment: confirmed as a desktop mechanism on main 2977e6c9 (code reading, not run): clicking template B's row makes
+  B the selection synchronously, and a Delete click delivered before the next render reads the live selection and
+  deletes B. Undo is still offered when A's kind was restorable; Undo never restores the quick-launch mark, which
+  SPEC.md states. Which template Delete applies to is not a guard SPEC.md names; SPEC_impl.md's "Answers bind to what
+  was drawn" is written for answered or confirmed controls. Needs two clicks in different places within about one frame.
+- Decision: the user picked "Named guards hold; the target follows the click" (2026-10-26 highest-bucket triage page,
+  Q1): outside the guards the spec names, a click within that gap is carried out as delivered, under SPEC.md's
+  2026-10-10 sub-second allowance.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `pending`.
+
+## link-refusal-conceals-delete-warning.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 2977e6c9 (not run, pixels unmeasured). A link refusal raised because the
+  link's preview is covered sits across the terminal's top at z-index 51 while the pointer stays on the link; the
+  session's header confirmations (Delete, and likely Restart and Replace, which share the panel) hang over the
+  terminal's top right at 30 in the same stacking context. The band covers the first line or two of the consequence
+  text; the focused affirmative button stays visible. The Delete shortcut opens the panel without moving the pointer,
+  and a fresh Enter confirms. SPEC.md allows the refusal to cover approval cards only; `app.css`'s layer ladder says the
+  consequence text "must never be covered" and records this as a known follow-up. Neither queued Steel plan changes it.
+- Decision: the user picked "It may not cover the warning" (2026-10-26 highest-bucket triage page, Q3).
+- Completion criteria: while any session header confirmation is open, a raised link refusal never covers its consequence
+  text (the recommended shape: opening one lowers the refusal beneath it). The layer-ladder comment is updated. A test
+  opens the Delete confirmation by its shortcut while a raised refusal is up. Remove the feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## tunnel-reuses-custom-helm-credential-origin.md
+
+- Outcome: `fix code`.
+- Assessment: partly confirmed by code reading on main 2977e6c9 (not run). A desktop tunnel binds `127.0.0.1:0` and
+  rejects only the remote port number, then opens `http://127.0.0.1:<local port>` in the system browser. A standalone
+  helm signed into from that browser keeps its device secret in that origin's localStorage, with no expiry or port
+  binding server-side, and stopping the helm revokes nothing. So when a tunnel gets a port a standalone helm once served
+  on, the remote page can read the secret. The default 7433 is outside the ephemeral range; ports from `--port 0` or a
+  custom port inside that range are affected. Narrower than the file: only a standalone helm accepts the secret, none
+  can run on the desktop app's state directory while the tunnel exists, and later use needs local reach, so the strong
+  route is the open tab driving a standalone helm later restarted on that port. SPEC.md: "A remote host must not gain
+  unauthorized execution or access to secrets on the helm's machine or another host through Farhelm." The 2026-10-22
+  `tunnel-can-take-standalone-helm-port.md` outcome fixed only the remote-number collision.
+- Decision: the user picked "Tunnels avoid ports a helm has served on" (2026-10-26 highest-bucket triage page, Q4).
+- Completion criteria: the standalone helm durably records each local port it serves on, and tunnel port allocation
+  skips recorded ports the way it already skips the remote number. Ports used before the change are not covered, as the
+  page said. A test drives allocation onto a recorded port and expects a different one. Remove the feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## named-restart-reporter-failure-keeps-old-resume.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code reading on main 2977e6c9 (not run). For a named Restart with of Pi or OMP with hooks
+  allowed, the relaunch keeps the old capture A, expecting the reporter to report B. If preparing the reporter extension
+  fails (write error, or an existing file with the wrong bytes), the launch logs a warning and continues without it; no
+  report arrives, and a later plain Restart resumes A. SPEC.md (conversation capture) clears the old capture when hooks
+  are off "since no report can then replace the old capture", but names only that case. The 2026-10-22
+  `named-restart-with-keeps-unreported-old-conversation.md` outcome left this variant out of scope. The non-first-class
+  harness filter excludes resuming the wrong conversation, so it does not apply.
+- Decision: the user picked "Treat it like hooks off" (2026-10-26 highest-bucket triage page, Q5).
+- Completion criteria: SPEC.md says the same clearing applies when the conversation reporter a launch needs cannot be
+  prepared. The reporter is prepared before the relaunch transaction decides whether to clear the capture, and a failure
+  clears it there, reusing the existing clear-and-restore path (a definitive pre-spawn abort restores it). A test makes
+  preparation fail and expects plain Restart to say it cannot resume. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## template-delete-lost-reply-loses-undo.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed as a mechanism by code reading on main 2977e6c9 (not run). When an ordinary template Delete
+  commits on the helm but its reply is lost (timeout or transport error), Templates shows the raw error, drops the
+  snapshot Undo would need, offers no Undo, and does not reload the list, so the template still shows as present until
+  the dialog closes. `delete_template` cannot tell transport failures from helm refusals. SPEC.md (Signing in again):
+  "In the desktop app, an action the user started is never lost silently: it either completes and reports its outcome,
+  or reports that its outcome is unknown." Manual recovery (save the clean editor again, or Duplicate) works until the
+  dialog closes. Very rare against a local helm.
+- Decision: the user picked "Say the outcome is unknown and refresh" (2026-10-26 highest-bucket triage page, Q2). On the
+  page they also set a direction for the whole topic: "The UI and the Helm fundamentally should have an infallible
+  connection. If the connection in any way fails then (a) for desktop that means the app crashes, and (b) for browser
+  that's a full page reload. We need to stop adding complexity and causing code review feedback on this topic.
+  _Logically speaking_, we should treat messages going between helm and UI as going over an infalliable transport." With
+  the pick they asked to "record a near term todo to do all the follow-up work - settle the full story on what the
+  behavior should be for all cases, audit all existing complexity due lack of this infallibility, remove all such
+  existing compliexity etc. make sure the todo item is detailed enough so there is no problem reconstructing what this
+  is about." Two questions raised in chat stayed open: whether the desktop app literally crashes or restarts its
+  interface from scratch, and whether GUI request deadlines stay as a watchdog or go away.
+- Completion criteria: on a transport failure or timeout of a template Delete, Templates says the delete may have
+  happened and re-reads the list, so a deleted template shows as gone; no Undo is offered after a lost reply. Helm
+  refusals keep today's error. A test loses the reply of a committed delete. The follow-up the user asked for is already
+  in TODO.md's "Near term" bucket as "Treat the GUI–helm connection as infallible" (added during triage on their
+  request); this outcome does not carry it out. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## installer-terminal-link-overwrites-new-foreign-file.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main 2977e6c9 (not run). The installer's Terminal-command placement
+  (`place_link` in `crates/farhelm-supervisor/src/installation/install.rs`) inspects `~/.local/bin/farhelm`, moves a
+  foreign file there aside under a visible name, then publishes with an overwriting `rename`, so a file another program
+  writes there between the check and the rename (microseconds; longer during the one-time old-layout move, where an old
+  copy is hashed by path and then removed) is lost. A file that was already there is kept. SPEC.md keeps foreign files
+  at that path through crashes and interruptions and lists "the installer keeping a user's file" among protections the
+  accident-guard carve-out never removes; concurrent writers are not named. A no-replace rename (`RENAME_EXCL` through
+  rustix) is already used in the same file for the app.
+- Decision: the user picked "Close situation 1, accept situation 2" (2026-10-26 highest-bucket triage page, Q6), "with
+  complexity gate, if this turns out to be non-trivial block the plan."
+- Completion criteria: the final placement of the Terminal command never replaces an entry that appeared after the
+  installer's check: it uses a no-replace rename and, on a new arrival, keeps that arrival (or refuses with a re-run
+  instruction), with a fallback for volumes without the flag. A recorded old-layout copy that is meant to be replaced is
+  moved aside and identity-checked rather than removed by path. A test places a file after the check. Complexity gate:
+  if this is non-trivial (well beyond the estimated 20–40 lines plus a test), block and bring it back. Remove the
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## older-installer-rebuild-deletes-late-foreign-app.md
+
+- Outcome: `fix spec`.
+- Assessment: partly confirmed by code reading on main 2977e6c9 (not run). `scripts/install.sh` hands any target below
+  its handoff floor (0.31.1-dev.0, so every stable up to v0.31.0) to that release's own published, checksummed
+  installer. On its rebuild path, which only a fresh install or an approved old-layout app reaches (downgrading a
+  current install takes the in-place path), the old script builds the new app, then moves whatever is at the app
+  location aside and deletes it without re-checking, so an app placed there during the roughly one second of local
+  building is deleted. Checked in v0.27.0 (matching the fixture byte for byte) and v0.31.0. Published scripts cannot
+  change; the only code remedy would be refusing the handoff.
+- Decision: the user picked "Close situation 1, accept situation 2" (2026-10-26 highest-bucket triage page, Q6), "with
+  complexity gate, if this turns out to be non-trivial block the plan."
+- Completion criteria: SPEC.md (installation) states that installing a release older than the handoff floor runs that
+  release's own installer, with the protections it had then, which include no protection against something put at the
+  app location while it builds. No code change. Remove the feedback file and its index entry.
+- Execution: `pending`.

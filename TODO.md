@@ -118,6 +118,35 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `plans/queue/steel-foundation.md`, `plans/queue/steel-sidebar.md`, `plans/queue/steel-session-chrome.md`,
   `plans/queue/steel-dialogs.md`, `plans/queue/steel-sentence-case.md`.
 
+- **Treat the GUI–helm connection as infallible.** Decided by the maintainer on 2026-10-26 during triage of the review
+  queue's highest bucket (`TRIAGE_OUTCOMES.md`, `template-delete-lost-reply-loses-undo.md`), in their words: "The UI and
+  the Helm fundamentally should have an infallible connection. If the connection in any way fails then (a) for desktop
+  that means the app crashes, and (b) for browser that's a full page reload. We need to stop adding complexity and
+  causing code review feedback on this topic. _Logically speaking_, we should treat messages going between helm and UI
+  as going over an infalliable transport." Nothing the GUI holds survives such a failure; the GUI starts over from what
+  the helm reports, the way the 2026-10-22 browser sign-in-expiry rule already works. The point is to stop review
+  findings about lost replies, transport errors and unknown outcomes between the GUI and the helm, and to remove the
+  complexity that exists only because that link can fail. The work, in order:
+  - Settle the behavior for every case and write it into SPEC.md and SPEC_impl.md. Open questions: whether the desktop
+    app literally crashes or restarts its interface from scratch (same logical effect, friendlier); the browser with the
+    helm down or restarting for an update, and after a laptop sleep, which should show the outage screen and reload once
+    the helm answers rather than loop; terminal and event streams dropping; and the GUI's own request deadlines (10 s
+    reads, 60 s for host operations that work on another machine, 15 min for trash deletes, all in
+    `crates/farhelm-ui/src/api.rs`). Those deadlines either stay only as a watchdog whose expiry means the helm is
+    broken, with the helm always answering promptly (for example "accepted" or "the host timed out"), or go away. The
+    boundaries to state: the helm's links to supervisors stay fallible, and their timeouts are ordinary helm replies the
+    GUI shows; refusals are replies, not failures. Say how this replaces SPEC.md's rule that a desktop action "either
+    completes and reports its outcome, or reports that its outcome is unknown", and how it relates to the 2026-10-22
+    decisions on browser sign-in expiry and failed GUI saves.
+  - Audit the GUI and the helm for complexity that exists only because the GUI–helm link can fail: lost-reply
+    reconciliation (number keys and quick-launch marks, SPEC_impl.md), unknown-outcome reports (including the
+    template-delete "may have happened" report this same triage chose as a stopgap), retry ladders, fences against late
+    replies, and the tests for all of them.
+  - Remove it.
+  - Re-triage the review-queue items that rest on a lost GUI–helm reply under the new rule, starting with
+    `review_feedback_queue/rename-lost-reply-restores-old-shortcut-indication.md` and
+    `review_feedback_queue/failed-test-response-does-not-fence-settings-write.md`.
+
 ## Doc todo
 
 - Tell users that a working-copy (checkout) root must be a location only they can write: Farhelm is not designed for
