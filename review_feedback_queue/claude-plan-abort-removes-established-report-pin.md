@@ -1,44 +1,49 @@
-# Claude's planned abort reset removes an established report pin
+# Failed Claude Restart removes an established report pin
 
 Reviewed commit: 463cac1528b5c5e259404975380d321a3fff0412
 
+Additional reviewed implementation: 77ef80e12e754b7b0a2691ec5da37b132e86d02b
+
 ## TLDR
 
-The planned reset can admit a delayed child report after a failed Restart stops the correcting parent. Later
-specifications explicitly document pin removal after abort, but acceptance of this whole consequence is ambiguous. This
-reviews the plan, not the later shipped implementation.
+After Restart stops Claude but fails before replacement, its conversation can survive while its reporting pin is
+cleared. A delayed eligible child report could then replace that Resume target. An ordinary supported producer of the
+required hooked, unmarked nested child remains unestablished, so the harmful sequence is conditional.
 
 ## Details
 
-Suggested bucket: **other**. Confidence: Source-only assessment; the established mechanism, contract ambiguity and
-verification limits are preserved below. No reproduction was performed.
+Suggested bucket: **other**. Confidence: confirmed reset, abort and report-admission composition, with a missing
+supported input producer. No vendor behavior, harmful Resume or runtime frequency was measured.
 
-Source location: `plans/queue/claude-wrapper-capture.md:74-79,118-123,146-154`. Locations and revisions in the
-assessment below identify the reviewed source; later main is outside this review's pinned range.
+The original review concerned `plans/queue/claude-wrapper-capture.md:74–79,118–123,146–154` at the first reviewed
+commit. Its narrow pin-retention refutation remains valid. The implementation review now supplies the formerly missing
+control flow, rather than treating the plan as proof of shipped behavior.
 
-Synthesis of reviewed commit 463cac1528b5c5e259404975380d321a3fff0412, not a review of later implementation. Original
-producer prose: a055 'Aborted relaunch leaves Claude unpinned'; g131 'Pin survives relaunch or conflicts with retained
-capture', only its distinct unpin-loss interpretation. Original narrow exclusion remains DISAGREE; literal pin retention
-remains refuted. Later recording-coverage verdict AMBIGUOUS: 11ce27e971f0892fe6d3e1840a1ca8a2b9bb42d4 SPEC.md:2313-2332
-expressly describes Claude selecting reports, first-report pins, ancestor correction, and abort not restoring the pin
-(2325-2327); SPEC_impl.md:2918-2936 and 3055-3080 expressly apply the shared pin reset to Claude (3071-3074). This
-clearly covers the intentional reset mechanism. It does not expressly identify the combined trigger of a report left
-after the decision-time drain, the old parent subsequently stopped, a definitive failed spawn restoring the old pane,
-and the delayed child report replacing an already-valid Resume target without a surviving correcting parent. The
-adjacent accepted gap is framed as a lost parent's report / upgrade and subsequent ancestor reporting, not removal of an
-established pin after the tree is stopped. It may have been intended to accept all first-report consequences after
-abort, but that intent is not unambiguous from these sections, so no full-consequence exclusion is approved.
-Reviewed-source route remains core.rs:11137,11348-11397 (drain then stop); hook.rs:337-350 (recorded evidence survives);
-store.rs:4145-4155,4238-4245 (clear pin and restore pane without it); core.rs:11633-11635,11723-11730,11802-11812
-(definitive abort and republication); core.rs:15764-15778 / procs.rs:478-513 (dead-pane recorded-chain anchor);
-report_files.rs:319-332 (current generation used). TLDR: the planned reset can let a delayed nested report replace
-Resume after the parent was stopped. Suggested bucket OTHER, as parent provisionally retained: a conditional plan
-concern with no shipped-Claude-regression claim. Confidence confirmed source composition under the plan's specified
-future first-report admission; actual occurrence unmeasured. Missing source premise for any claim about the later
-shipped implementation: its admission/control-flow was not reviewed and is outside this assigned range. possible_cover
-the named later specification paragraphs, partial for reset and ambiguous for full harm; pinned plan child-first
-acceptance 118-122 and Codex-only ledger 16086-16097 do not explicitly settle this distinct trigger. proposed_drop no.
-No runtime observations or later-code safety claims inferred; existing events preserved.
+At the additional implementation revision, paths below are under `crates/farhelm-supervisor/src/`:
 
-Provenance: `a077/f1`, `g131/f3`. These are reviewer-local identities, not additional findings. Proposed drop: none for
-the retained remainder.
+- Restart drains reports before stopping the old tree (`service/core.rs:11312–11322,11533`), and opening a generation
+  clears its pin (`store.rs:4142–4155`).
+- Definitive pre-respawn failure can restore the old pane without its pin (`service/core.rs:12056–12061,11908–11935`;
+  `store.rs:4238–4245`). Republication uses the current generation (`service/core.rs:11987–12006`).
+- Recorded ancestry can anchor a delayed report against that dead pane (`service/core.rs:15930–15944`;
+  `procs.rs:483–513`), receive the current generation (`service/report_files.rs:319–332`), and reach unpinned admission
+  (`service/core/vendor/claude.rs:79–80,142–158`). Already-anchored stale reports and retained-parent-pin descendants
+  remain separately fenced; those narrower refutations do not settle this re-anchoring path.
+
+The remaining source/input premise matters: reporter injection is local to launch argv (`agent_kind/mod.rs:1251–1286`).
+Wrappers forward that argv to their launched agent, without establishing recursive injection. At later reviewed commit
+`3e23099d37a9cab5d893d1ec052b13042cc77f74`, `crates/farhelm/tests/e2e/real_agent_capture.rs:580–612` explicitly supplies
+child hooks as a stand-in for user/project settings and says the parent's injected setting is not inherited. Synthetic
+reports, preserved user hooks and inherited credentials do not establish an ordinary supported producer or the complete
+harmful sequence. This is a missing premise, not merely unmeasured occurrence.
+
+Possible cover: trailing tip `a2c2f8861418f8222eca096c797b9f31585ecc1a`, `SPEC.md:2313–2332` and
+`SPEC_impl.md:3055–3080`, explicitly accepts reset and abort without restoring the pin. The ordinary initial child-first
+interval is also accepted. Whether those paragraphs accept the whole post-stop, definitive-abort and delayed-report
+consequence remains ambiguous; the independent review retains that remainder. `TRIAGE_OUTCOMES.md:16086–16097` is
+Codex-specific. `SPEC.md:2211–2218` accepts continuing to resume stored capture after tracking stops; do not count that
+derivative consequence alone as another defect. Unread parent-report displacement before admission is separate.
+
+Provenance: original `a077/f1`, `g131/f3`; implementation `g078/f2`, `g079/f1`, independently retained by `a011/f1`.
+These are shared identities for one concern. Proposed drop: none for the conditional remainder; no fixes or triage were
+performed.

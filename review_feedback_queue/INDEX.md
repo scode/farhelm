@@ -39,6 +39,14 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   ordinary Restart can then resume that previous conversation. The conditional source route is established; occurrence
   is unmeasured.
 
+- [`older-installer-rebuild-deletes-late-foreign-app.md`](older-installer-rebuild-deletes-late-foreign-app.md) —
+  Installing an older release can delete an unrelated app moved into Farhelm's usual location after the installer's
+  initial ownership check. This conditional path needs neither an interruption nor failed restoration.
+
+- [`installer-terminal-link-overwrites-new-foreign-file.md`](installer-terminal-link-overwrites-new-foreign-file.md) —
+  Installation can overwrite a file another tool places at Farhelm's public Terminal-command location after the
+  installer checked or preserved its earlier contents.
+
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
@@ -54,6 +62,22 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   direct builds in one checkout can copy tmux bytes replaced after their digest was checked. This maintainer-tooling
   authenticity concern is conditional on an ambiguous concurrency contract; practical race control and catastrophic harm
   are unproved.
+
+- [`older-handoff-reports-success-for-directory-program.md`](older-handoff-reports-success-for-directory-program.md) —
+  Installing an older release can report success while leaving an already damaged app unlaunchable because its
+  main-program path is a directory.
+
+- [`older-installer-prunes-live-custom-state-version.md`](older-installer-prunes-live-custom-state-version.md) —
+  Repeated installation of v0.27.0 can remove the executable a newer running supervisor still needs for later session
+  launches, when that supervisor uses another state directory.
+
+- [`automatic-legacy-installer-overwrites-later-terminal-choice.md`](automatic-legacy-installer-overwrites-later-terminal-choice.md)
+  — An app kept open across a Terminal downgrade can choose an older installer that ignores its expected installation
+  state, then replace a newer Terminal installation completed while it downloads.
+
+- [`older-handoff-keeps-damaged-version-program.md`](older-handoff-keeps-damaged-version-program.md) — Reinstalling
+  v0.27.0 can report that Farhelm is ready while retaining its already damaged command-line executable, even though the
+  installer downloaded verified replacement bytes.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -347,8 +371,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   is ambiguous; no harmful carried-over input sequence was established.
 
 - [`installer-rerun-advice-omits-stale-lock-prerequisite.md`](installer-rerun-advice-omits-stale-lock-prerequisite.md) —
-  The install guide's blanket rerun recovery promise omits the manual removal an older unmarked stale installer lock may
-  require. Refusing that lock is accepted; the diagnostic-documentation filter's scope is ambiguous.
+  Installer rerun advice omits manual stale-lock removal after an older unmarked lock or a new marking failure followed
+  by interruption. Executable refusal is accepted; documentation-filter coverage remains ambiguous.
 
 - [`window-check-export-budget-omits-standalone-captures.md`](window-check-export-budget-omits-standalone-captures.md) —
   Ten raw screenshots can exceed the standalone reference budget, leaving fewer exported captures even when the check
@@ -418,10 +442,10 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   an agent deletes a template, repeated GUI saves under its now-free name can still report a collision without doing the
   fresh check. Reopening refreshes the list; the gate predates the patch.
 
-- [`failed-test-response-does-not-fence-settings-write.md`](failed-test-response-does-not-fence-settings-write.md) — An
-  individual transport failure can let a settings test restore old values before its earlier owned save commits,
-  contaminating its private stack. The repair follows its prescribed response-wait strategy; acceptance of the residual
-  limitation is ambiguous.
+- [`failed-test-response-does-not-fence-settings-write.md`](failed-test-response-does-not-fence-settings-write.md) —
+  Transport failure, forwarded saves and unfenced retries can let a test restore settings before its earlier owned write
+  commits. Version-matched Playwright source establishes the response and cleanup boundaries; adverse scheduling is
+  unmeasured.
 
 - [`devbuild-buffers-unauthenticated-metadata.md`](devbuild-buffers-unauthenticated-metadata.md) — A compromised release
   origin can provide oversized checksum or signature files that are downloaded and fully read before rejection. Material
@@ -450,10 +474,10 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   later primary press can then be refused while the earlier request satisfies the test. Production behavior remains
   correct.
 
-- [`claude-plan-abort-removes-established-report-pin.md`](claude-plan-abort-removes-established-report-pin.md) — The
-  planned reset can admit a delayed child report after a failed Restart stops the correcting parent. Later
-  specifications explicitly document pin removal after abort, but acceptance of this whole consequence is ambiguous.
-  This reviews the plan, not the later shipped implementation.
+- [`claude-plan-abort-removes-established-report-pin.md`](claude-plan-abort-removes-established-report-pin.md) — Failed
+  Claude Restart clears the report pin before restoring the old pane. A delayed child could replace its Resume target,
+  but an ordinary hooked, unmarked nested producer remains unestablished; shipped implementation now extends the plan
+  evidence.
 
 - [`new-opening-folder-inherits-fallback-host.md`](new-opening-folder-inherits-fallback-host.md) — A host refresh before
   New mounts can pair the selected remote session's raw folder with the fallback local host. This contextual mechanism
@@ -467,3 +491,115 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`browse-result-survives-automatic-host-fallback.md`](browse-result-survives-automatic-host-fallback.md) — On desktop,
   an old host's directory result can become an explicit folder after New falls back to the local host. Frequency and the
   web route are unverified; final Launch still displays and checks its target.
+
+- [`installer-fallback-lock-parent-replacement-source-gap.md`](installer-fallback-lock-parent-replacement-source-gap.md)
+  — Replacing the installation's parent directory could separate the held directory from its fallback lock. A supported
+  sequence causing conflicting work on the same app remains unestablished.
+
+- [`uninstall-refusal-missing-identity-wording-source-gap.md`](uninstall-refusal-missing-identity-wording-source-gap.md)
+  — A refusal could describe an unidentified installation as a different installation. A compatible shipped sequence
+  reaching that missing-identity comparison remains unestablished.
+
+- [`hidden-trash-overlap-migration-result-source-gap.md`](hidden-trash-overlap-migration-result-source-gap.md) — The
+  planned trash migration must skip active checkouts without making existing archives disappear from tracking. No
+  prescribed or implemented skip result establishing the suspected loss was found.
+
+- [`shutdown-wait-test-does-not-witness-waiting.md`](shutdown-wait-test-does-not-witness-waiting.md) — The shutdown
+  regression can pass even if shutdown stops waiting for a launch whose registration is still in flight.
+
+- [`installer-file-symlink-test-masks-nofollow-removal.md`](installer-file-symlink-test-masks-nofollow-removal.md) — The
+  installer's symlink test would still pass if its no-follow protection disappeared, because the fixture points to a
+  directory that another check rejects.
+
+- [`installer-stage-real-folder-substitution-source-gap.md`](installer-stage-real-folder-substitution-source-gap.md) —
+  Cleanup removes the current private staging directory without rechecking its acquired identity. An ordinary supported
+  replacement placing unrelated work there remains unestablished.
+
+- [`installer-legacy-inode-approval-alias-source-gap.md`](installer-legacy-inode-approval-alias-source-gap.md) — A
+  different directory with the same inode number could inherit legacy-app replacement approval. A supported incidental
+  Mac history reaching harmful replacement remains unestablished.
+
+- [`installer-mounted-descendant-admission-source-gap.md`](installer-mounted-descendant-admission-source-gap.md) —
+  Recursive installer cleanup could reach external mounted contents if such a tree passes all preceding moves. No
+  supported incidental Mac topology establishing that admission was found.
+
+- [`installer-compatibility-folder-replacement-source-gap.md`](installer-compatibility-folder-replacement-source-gap.md)
+  — Cleanup renames the current compatibility-lock folder before removing it. A supported replacement causing harmful
+  movement of unrelated work remains unestablished.
+
+- [`installer-terminal-backup-crash-persistence-source-gap.md`](installer-terminal-backup-crash-persistence-source-gap.md)
+  — Whether power loss can preserve a replacement Terminal link while losing the preceding foreign-file backup remains
+  unresolved. The source's live-file preservation order alone establishes neither loss nor crash safety.
+
+- [`installer-moved-app-cleanup-durability-source-gap.md`](installer-moved-app-cleanup-durability-source-gap.md) —
+  Interrupted cleanup can flush the app currently at the usual location rather than the app moved during installation. A
+  harmful second-crash history remains unestablished.
+
+- [`installer-interruption-test-rejects-no-swap-fallback.md`](installer-interruption-test-rejects-no-swap-fallback.md) —
+  The same-version interruption regression can reject the installer's documented fallback on a filesystem without atomic
+  directory exchange.
+
+- [`installer-leftover-test-rejects-fallback-lock-file.md`](installer-leftover-test-rejects-fallback-lock-file.md) —
+  Installer tests can report leftover debris when the installer correctly retains its permanent fallback lock file on a
+  filesystem without directory locking.
+
+- [`automatic-reopen-can-launch-older-replacement-app.md`](automatic-reopen-can-launch-older-replacement-app.md) — An
+  older bundle substituted during automatic reopening can launch instead of being refused. Native dispatch and timing
+  remain unmeasured; no work-loss consequence is established.
+
+- [`legacy-expectation-is-parsed-as-cli-option.md`](legacy-expectation-is-parsed-as-cli-option.md) — The installer CLI
+  rejects its documented ID-less expectation when the shell supplies it as a separate argument. An ordinary published
+  updater history reaching that boundary remains unestablished.
+
+- [`uninstall-skipped-stage-resurrection-source-gap.md`](uninstall-skipped-stage-resurrection-source-gap.md) — Normal
+  readable staging leftovers are now consumed before uninstall removes the app. A supported history leaving a skipped
+  stage that later restores the uninstalled app remains unestablished.
+
+- [`legacy-update-expectation-identity-collision-source-gap.md`](legacy-update-expectation-identity-collision-source-gap.md)
+  — Two legacy ownership records can have indistinguishable expected identities. A complete supported
+  updater/replacement history producing harm through that collision remains unestablished.
+
+- [`steel-split-restart-availability-wording-conflict.md`](steel-split-restart-availability-wording-conflict.md) — One
+  redesign instruction could disable Restart with when users need to enter a conversation manually, while other clauses
+  explicitly preserve its independent availability. No current GUI regression is established.
+
+- [`delivery-reports-reuse-cases-from-failed-commands.md`](delivery-reports-reuse-cases-from-failed-commands.md) —
+  Several delivery reports combine passing cases from a failed command with narrower reruns, despite the repository's
+  rule that evidence reuse is per command. They disclose the failures; this is a validation-accounting conflict.
+
+- [`steel-visual-delivery-omits-required-states.md`](steel-visual-delivery-omits-required-states.md) — The redesign
+  report reaches delivery with some changed states reviewed only from code, although its plan requires visual captures
+  of every changed screen and state. An external waiver remains unverified.
+
+- [`terminal-skin-tone-width-parity-source-gap.md`](terminal-skin-tone-width-parity-source-gap.md) — A newer hand emoji
+  with a skin-tone modifier may use fewer browser cells than tmux, displacing later output or the replayed cursor. Its
+  exact shipped add-on classifications remain unverified.
+
+- [`terminal-narrow-base-zwj-width-source-gap.md`](terminal-narrow-base-zwj-width-source-gap.md) — A one-cell base
+  followed by ZWJ and a two-cell pictograph may leave tmux and the browser disagreeing about following cells. The
+  shipped trie classification of a concrete failing sequence remains unestablished.
+
+- [`claude-unread-parent-report-displacement-source-gap.md`](claude-unread-parent-report-displacement-source-gap.md) — A
+  hooked, unmarked nested Claude could overwrite an unread parent conversation-switch report before admission refuses
+  the child. An ordinary supported producer and complete consequential sequence remain unestablished.
+
+- [`claude-oversized-stop-payload-source-gap.md`](claude-oversized-stop-payload-source-gap.md) — A Claude Stop callback
+  above the hook's input limit is rejected. Whether supported vendor payloads can reach that limit and lose needed
+  tracking information remains unestablished.
+
+- [`trash-failed-host-refresh-test-lacks-application-witness.md`](trash-failed-host-refresh-test-lacks-application-witness.md)
+  — The multi-host trash-failure test can miss a regression that loses the failed host's remaining entries or warning
+  when its final refresh arrives.
+
+- [`launch-input-database-duplication-rationale-overstated.md`](launch-input-database-duplication-rationale-overstated.md)
+  — The implementation specification says launch input contains nothing absent from the session database, but
+  create-time agent-request prompts are an exception. Retaining the private current-generation file is explicitly
+  allowed.
+
+- [`older-handoff-power-loss-durability-source-gap.md`](older-handoff-power-loss-durability-source-gap.md) — The
+  historical installer uses copy and rename without explicit flushes. Supported Mac utility and filesystem guarantees
+  establishing an unusable post-power-loss installation remain unverified.
+
+- [`matching-restart-template-model-normalizes-historical-permissions.md`](matching-restart-template-model-normalizes-historical-permissions.md)
+  — A template repeating the current agent and model can change a session's historical agent-owned permission setting to
+  Guarded without containing a permission edit, making an otherwise unchanged Restart draft count as edited.

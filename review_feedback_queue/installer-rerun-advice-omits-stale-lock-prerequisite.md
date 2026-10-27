@@ -40,3 +40,25 @@ narrow older-lock documentation caveat, not a claim that every interrupted new i
 
 Provenance: `g307/f1`. These are reviewer-local identities, not additional findings. Proposed drop: none for the
 retained remainder.
+
+## New-installer marking-failure caveat
+
+Additional reviewed commit: `0ae92a2a7957de08c23dc6db8a10af281175a5b7`; persistence checked at trailing tip
+`a2c2f8861418f8222eca096c797b9f31585ecc1a`.
+
+`docs/install_uninstall.md:88–92` attributes the manual-lock prerequisite to older installers while promising rerun
+recovery. However, `crates/farhelm-supervisor/src/installation/mod.rs:302–317` ignores failure to mark its new
+compatibility folder. An interruption can then leave a newly created unmarked folder that the next run refuses. At the
+tip the corresponding branches remain at `306–319`, with xattr marking at `381–413`. Thus the same manual prerequisite
+can follow marking failure in the new installer, not just an older installer.
+
+Suggested bucket remains **other**. Confidence: confirmed conditional documentation mismatch; a supported Mac
+marking-failure topology and actual occurrence remain unverified. No security, bricking or user-work-loss route is
+established. Possible cover: the existing item covers the recovery prerequisite but originally names a different trigger
+and guide; diagnostic-documentation filtering remains ambiguous. The executable refusal is accepted and gives manual
+recovery advice. Qualifying the explanation does not require removing that protection.
+
+Provenance: `g014/f1`. Its separate allegation that the new uninstaller lacked the shared kernel lock was repaired by
+later in-range commit `b92b06824645734a8fc17b115fa3f7fa2e8080f3`; tip `crates/farhelm/src/uninstall.rs:374–377` acquires
+the locks implemented in `uninstall/locks.rs:141–198`. That historical resolved portion is not retained as a current
+defect. No runtime reproduction ran.

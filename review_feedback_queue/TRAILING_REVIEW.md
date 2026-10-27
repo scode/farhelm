@@ -6,6 +6,99 @@ This is the exclusive starting point for the next trailing code review of `main`
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
 
+## Incomplete review toward a2c2f886
+
+Pinned range: `5c6e49937b1e779be2a5445059637aadf3757356..a2c2f8861418f8222eca096c797b9f31585ecc1a`, 735 commits. The
+review is **incomplete**. `Last reviewed commit` remains unchanged; merging this result does not advance it.
+
+The first 661 commits explicitly reuse private run `ef6e18fa-8ac0-4850-a557-d59b8af5efb9` and its referenced earlier
+runs. All 2,908 prior individual patch parts were compared exactly with immutable Git history, and all 704 original
+reviewer identities received fresh successful delivery audits. Their semantic completion remains 648 complete and 56
+incomplete. Previously completed identities did not perform new searches, and existing source gaps remain open.
+
+The additional 74 commits contain 400 patch parts covering 379 commit/path pairs, assigned to 99 bounded functional
+groups. Seventeen fresh auditors inspect independent exclusions and cross-group source questions. The combined
+inventories account for all 3,308 patch parts and 3,224 individual commit/path diffs, including intermediate changes and
+deleted text. Mandatory groups remain within 2,000 lines and 64 KiB, including the complete 735-commit list.
+Supplemental auditor inputs have separate complete delivery audits. Surrounding source and coverage sections were read
+selectively.
+
+All mandatory delivery is verified, but 34 new identities stop on substantive source or causal gaps:
+
+- Installation/version-lock investigations lack a supported same-name executable replacement and harmful downstream
+  caller, or a supported current-executable failure/rename premise. Ordinary reinstall does not supply those histories.
+- Private real-folder substitution, inode-only legacy approval, mounted descendants, compatibility-folder replacement
+  and fallback parent replacement lack their supported incidental producer, topology, admitted overlap or harmful route.
+  Stable-symlink and held-root refutations remain narrow. Backup persistence and moved-app cleanup lack supported
+  filesystem crash histories; historical shell durability also lacks authoritative utility/filesystem guarantees.
+- Skipped-stage resurrection lacks a successful-uninstall, later-recognition and stale-updater history. The ordinary
+  recognized/readable-stage route is repaired before this tip. Identical legacy expectation tuples and leading-hyphen
+  CLI expectations retain separate missing updater/deployment premises. Malformed removing-record and older retry
+  histories remain private unresolved leads.
+- GUI investigations lack complete compatible late-write/delete, native eval/input/property-publication,
+  authenticated-remount/seed or failure/teardown schedules. No additional affirmative queue finding was established by
+  those empty logs. A distinct trust-question recurrence without an accepted reset snapshot also remains unestablished.
+- The terminal-width leads lack concrete entries from the shipped compressed Unicode tables; neighboring parity and
+  byte-buffer producer questions remain unresolved. Static pinned tmux source narrows those claims without proving a
+  rendered failure.
+- Claude failed-Restart pin clearing and unread parent-report displacement lack an ordinary hooked, unmarked nested
+  reporter and complete consequential ordering. Oversized Stop rejection additionally lacks vendor payload/truncation
+  and distinct needed-tracking premises. Stored-capture continuation has explicit partial acceptance. The refusal
+  diagnostic lacks a compatible serving missing-identity or stale-row producer.
+- Hidden-trash planning does not prescribe the successful skip result and new-name-only lookup needed for the alleged
+  loss of tracking. Existing error results preserve records; no implementation regression is inferred from the plan.
+
+These are missing premises, not skipped patches or merely unknown occurrence rates. Affected groups stop under the
+stuck-investigation rule; nominal empty searches are not used to claim completion. Other groups completed inspected
+later synthesis and separate credible empty discovery on their original identities. Verified new discoveries received
+another search. Fresh auditors checked possibly-highest exclusions, including withdrawals and candidates mentioned only
+in prose. Their agreements remain limited to the exact source mechanisms, decisions and partial coverage.
+
+There are 34 new queue records: two highest, four high and 28 other. The highest items concern successful historical
+rebuild deleting a foreign app that arrived after inspection, and public Terminal-command publication overwriting a late
+foreign file. Both conditional source routes are established; actual occurrence and loss were not measured. The four
+high items concern historical directory-destination false success, historical reuse of an already damaged program,
+historical pruning of a live custom-state supervisor's needed executable, and automatic historical installation
+overwriting a later Terminal choice. Their deployment and damaged-input assumptions remain explicit. The other items
+include confirmed test-oracle and documentation conflicts alongside conditional source leads; stronger consequences are
+not promoted without their missing route.
+
+Three existing items are extended. The Claude abort-pin record now includes shipped reset, definitive-abort and fresh
+report-anchoring evidence, preserving its missing nested-producer premise. The failed-response settings item gains
+forwarded-save and unfenced-retry instances; version-matched Playwright 1.64 source establishes response, poll and
+cleanup boundaries, while adverse scheduling remains unmeasured. Installer recovery advice gains the new marking-failure
+and interruption case; the executable refusal remains accepted. No existing finding is fixed or triaged.
+
+Evidence remains private under run `2ebdbeb7-c7fd-4154-9de5-6f1acd34683e`. `completion.md` is the compact record;
+`completion.json` retains assignments, manifests, session identities, actual attempts and turns, audits, synthesis and
+discovery passes, and exact stop reasons. `dispositions.json` preserves every original finding event, withdrawal,
+retained mapping, scoped independent agreement and final-reply candidate reference, with explicit prior evidence reuse.
+Each reviewer retains its append-only log, progress and actual replies. Reviewers used Codex `gpt-6.1-sol`, high
+reasoning, with at most 19 concurrent children. Across reused and new evidence there are 820 distinct identities: 631
+primary groups and 189 auditors. Of these, 730 meet the protocol and 90 remain incomplete. The new continuation has 82
+complete and 34 incomplete identities, none pending, with 338 completed actual turns, including 125 synthesis turns and
+97 discovery passes. Its logs contain 188 reviewer-local identities: 133 latest open and 55 withdrawn, including audit
+verdicts and duplicates. These are not counts of distinct open bugs.
+
+Nineteen attempts were interrupted when the parent's queue runner encountered a file-renaming race. Their exits were not
+retained, so they earn no completed-turn credit. Exact recovery mappings preserve artifacts and continue the same
+reviewer identities. The runner then serializes each identity's jobs. Rejected clipped packets remain in historical
+audits, with complete smaller rereads supplying the missing delivery. Private bookkeeping-script failures remain
+recorded; neither is a product test failure. Delivery establishes neither attention nor understanding, correctness or
+exhaustiveness.
+
+Recording-time main remains the pinned tip `a2c2f8861418f8222eca096c797b9f31585ecc1a`; a final fetch reported no
+changes. The clean working copy was already based there. The checkpoint, queue, filters and coverage sources are
+unchanged from the pinned versions. No later commit is claimed reviewed. Scope is unfiltered: bookkeeping-only commits
+are reviewed as well as product changes; the queue filters apply to findings rather than excluding commits.
+
+This review is source-only. No product/runtime, browser, native Mac, vendor-agent or filesystem-fault test or
+reproduction ran, and no historical runtime pass was reused as current evidence. Published historical installer bytes
+and version-matched dependency sources were checked statically; no downloaded installer was executed. No live
+installation, plan, TODO, FLAKES, known-flakes or triage record changed. This result changes queue records, their index
+and this incomplete-review note. Validation covers changed Markdown, whitespace, queue/index consistency, required
+fields, bounded assignments and instruction pointers. Its PR stays a draft for separate manual review and merging.
+
 ## Incomplete review toward 463cac15
 
 Pinned range: `5c6e49937b1e779be2a5445059637aadf3757356..463cac1528b5c5e259404975380d321a3fff0412`, 661 commits. The
