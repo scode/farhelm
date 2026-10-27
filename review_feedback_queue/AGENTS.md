@@ -162,9 +162,9 @@ Triggers: "perform trailing code review", or similar wording around "trailing co
 Fence: use `persistent-review` for the reviews; the request authorizes recording findings and updating the checkpoint
 only, not triage, fixes or execution; the checkpoint advances only after every commit in the range meets the skill's
 completion requirements and every finding is handled; the review-result PR stays a draft and is never merged
-automatically. Trailing-review result and merge reports end with a loud Markdown banner unless the review fully
-completed and its checkpoint reached the pinned tip on main; follow `review_feedback_queue/.agents/trailing-review.md`,
-"Closing status banner".
+automatically. Trailing-review result and merge reports end with a loud Markdown banner only when the review is
+incomplete or checkpoint handling is exceptional; an ordinary draft PR awaiting merge needs no banner. Follow
+`review_feedback_queue/.agents/trailing-review.md`, "Closing status banner".
 
 ### Triage ("triage review feedback")
 

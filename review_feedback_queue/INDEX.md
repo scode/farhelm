@@ -166,8 +166,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   FIFO release can block after its reader exits; the standard runner supplies only an outer timeout.
 
 - [`checkout-test-skips-new-spare-setting-restoration.md`](checkout-test-skips-new-spare-setting-restoration.md) — An
-  earlier caller-cleanup failure can skip restoring the prepared-checkout switch or the new chrome test's confirmation
-  preference; effective confirmation contamination needs an incoming true value, and decision coverage remains
+  earlier caller-cleanup failure can skip restoring the prepared-checkout switch, chrome confirmation preference or
+  Hosts-test sort; effective confirmation contamination needs an incoming true value, and decision coverage remains
   ambiguous.
 
 - [`tunnel-consent-conflicts-with-restart-dialog.md`](tunnel-consent-conflicts-with-restart-dialog.md) — Tunnel consent
@@ -270,8 +270,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   indication/dispatch consequences remain ambiguously covered.
 
 - [`post-clone-test-save-overtakes-restoration.md`](post-clone-test-save-overtakes-restoration.md) — The new post-clone
-  Save can remain in flight after the test restores its private stack's settings, then overwrite that restoration.
-  Adverse scheduling is unmeasured; no production user-work loss is claimed.
+  Save or Hosts-test sort save can remain in flight after private-stack restoration, then overwrite it. Adverse
+  scheduling is unmeasured; no production user-work loss is claimed.
 
 - [`auth-skew-remount-retains-row-operation-count.md`](auth-skew-remount-retains-row-operation-count.md) — After another
   tab restores shared credentials, a build-skew remount can leave the old GUI usable but keep an abandoned mutation
@@ -595,3 +595,41 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`late-reporter-preparation-capture-conflict.md`](late-reporter-preparation-capture-conflict.md) — A reporter failure
   arising only during named restart can retain the previous conversation. Broad tracking-failure acceptance and the
   specific preparation-clearing promise conflict; no healthy concurrent-publication trigger is established.
+
+- [`unsupported-filter-warning-cannot-wrap.md`](unsupported-filter-warning-cannot-wrap.md) — A CSS conflict prevents the
+  older-helm filter warning from wrapping; its full text remains in the tooltip and accessible name.
+
+- [`short-window-host-rail-reachability.md`](short-window-host-rail-reachability.md) — A very short window may put the
+  host choices behind the footer; engine hit testing and keyboard recovery remain unverified.
+
+- [`visual-capture-clicks-hidden-templates.md`](visual-capture-clicks-hidden-templates.md) — The unscoped visual capture
+  opens Hosts and then waits on the hidden Templates button.
+
+- [`status-sound-test-misses-reseed-transition.md`](status-sound-test-misses-reseed-transition.md) — The status-filter
+  sound regression never supplies the audible edge needed to detect missing silent reseeding.
+
+- [`completed-only-retry-keeps-host-warning.md`](completed-only-retry-keeps-host-warning.md) — Another client's success
+  may leave an old host warning if every Running observation is missed; the end-to-end schedule remains unverified.
+
+- [`reopened-rail-menu-loses-keyboard-handles.md`](reopened-rail-menu-loses-keyboard-handles.md) — Reopening the same
+  host's still-mounted rail menu clears its keyboard-navigation handles until it is closed and reopened.
+
+- [`hosts-panel-test-misses-filtered-row-premise.md`](hosts-panel-test-misses-filtered-row-premise.md) — The terminal
+  preservation test never establishes that its selected session row was filtered out.
+
+- [`host-removal-test-leaks-confirmation-preference.md`](host-removal-test-leaks-confirmation-preference.md) — A host
+  removal test omits preference restoration; changed later behavior needs an unestablished incoming true value.
+
+- [`hidden-progress-test-observes-unaffected-host.md`](hidden-progress-test-observes-unaffected-host.md) — The hidden
+  management regression observes a menu already excluded by a separate row-order rule.
+
+- [`narrow-sidebar-tests-measure-outer-container.md`](narrow-sidebar-tests-measure-outer-container.md) — Two narrow row
+  tests retain containment bounds from the wider outer sidebar after shrinking only its content area.
+
+- [`remove-retirement-may-release-later-dialog.md`](remove-retirement-may-release-later-dialog.md) — Old desktop Remove
+  cleanup may release a replacement dialog's isolation; native ordering remains unverified, with no harmful action
+  established.
+
+- [`native-confirmation-reopen-paint-order-source-gap.md`](native-confirmation-reopen-paint-order-source-gap.md) — A
+  pre-existing retained Delete flyout is focusable while unmeasured; an ordinary native sequence accepting an unseen
+  answer remains unestablished.

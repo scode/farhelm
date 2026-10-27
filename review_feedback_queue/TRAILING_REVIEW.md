@@ -1,10 +1,58 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `98bb15850f5f5ba1df6ed66873338261c45ff948`
+Last reviewed commit: `9b19f8d754bf7658761ef246cfda0ea8397f4f21`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
+
+## Review through 9b19f8d7
+
+Reviewed range: `98bb15850f5f5ba1df6ed66873338261c45ff948..9b19f8d754bf7658761ef246cfda0ea8397f4f21`, nine commits. The
+exclusive checkpoint and inclusive main tip were fetched and pinned, with ancestry verified. A final recording-time
+fetch found the same main, checkpoint and coverage sources; no later commit is claimed reviewed.
+
+The review is **complete** under the persistent-review protocol. All 127 individual commit/path diffs, reconstructed
+exactly from 130 immutable patch parts, were assigned once across 20 bounded functional groups. Two fresh independent
+auditors checked potentially highest exclusions, including withdrawn and prose-only candidates. Every required group
+remained below 2,000 lines and 64 KiB, including the second auditor's additional candidate inventory. Surrounding source
+and specification context were inspected selectively; no assigned patch text remains unread.
+
+All 22 original reviewer identities completed initial review, later-turn synthesis and a separate credible final empty
+discovery search: 70 actual turns, including 22 synthesis turns and 24 discovery passes. A new narrow-sidebar test issue
+found in discovery received another search. Targeted framework clarification of Remove retirement was followed by
+another empty search. No recording or independent-exclusion step remains unresolved. Five concerns are retained as
+unverified after source investigation; that disposition does not claim their suspected runtime consequences occurred.
+
+There are twelve new queue records, all **other**: seven source-confirmed issues and five investigated uncertainties.
+The source issues concern warning wrapping, repeated host-menu keyboard navigation, a blocked visual capture and four
+test-oracle gaps. Uncertainties concern very short host-rail reachability, another client's completed-only retry leaving
+a warning, an omitted test-preference restoration's effective impact, desktop Remove retirement and a separate native
+confirmation-paint ordering lead. The last is adjacent pre-existing code, with no established in-range regression or
+unseen destructive activation. No new security or user-work-loss route was established. Two existing test-cleanup and
+late-save records gain the Hosts-panel sort instances; they are extensions rather than new queue items.
+
+Independent exclusions remain precise: text-only host tooltips and named character escaping, numeric width storage, sort
+menus below destination disclosures, filtered replies lacking absence authority, captured destructive-answer
+identities/tokens/preconditions, visibility separate from operation targets, and setup/uninstall modal siblings outside
+concealed management fragments. Fleet Update-all's click-time eligibility follows its exact accepted specification.
+Version-matched Dioxus dispatch source refutes the alleged retained older Rust callback; both its original claim and the
+auditor's corrected verdict remain preserved. This is not a blanket safety verdict for those subsystems.
+
+Private evidence is retained under run `bfd30ff4-8bd3-46a2-9101-56314a921992`. `completion.md` is the compact record;
+`completion.json` preserves assignments, manifests, exact session identities, actual turns, replies and audits.
+`finding-events.json` and `dispositions.json` preserve all 57 reviewer-local finding IDs and their
+revisions/withdrawals, independent verdicts and queue mappings. The 26 latest open and 31 withdrawn identities include
+duplicates and audit verdicts, not 57 distinct bugs. Reviewers used Codex `gpt-6.1-sol`, high reasoning, with at most 19
+concurrent children. Rejected clipped reads earned no credit; complete supported packets supply all mandatory delivery.
+The supplemental candidate text has separate complete delivery audits. No manual transcript fallback was needed.
+Delivery proves neither attention nor understanding, correctness or exhaustiveness.
+
+This was source-only. No product/runtime suite, browser/native experiment, vendor-agent turn or live-installation action
+ran, and no historical runtime result was reused. Version-matched dependency source was checked statically. Validation
+covers changed Markdown, whitespace, queue/index consistency, record fields, complete patch assignment and instruction
+pointers; the pointer checker retains two unrelated existing warnings. No fixes, triage decisions or plan actions were
+executed. This checkpoint proposal stays in a draft PR for separate manual merging; writing it does not advance main.
 
 ## Review through 98bb1585
 

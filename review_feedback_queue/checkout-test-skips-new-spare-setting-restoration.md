@@ -8,6 +8,8 @@ A failed checkout browser test can leave prepared checkouts disabled for later t
 cleanup failure can prevent the fixture's restoration from running at all. The teardown structure predates this change;
 the change adds another shared setting it can leave behind.
 
+The chrome and Hosts-panel instances below can likewise leave confirmation or sort settings behind.
+
 ## Details
 
 Suggested bucket: **other**, for private test-stack contamination. Confidence: **confirmed conditional source
@@ -59,3 +61,26 @@ remains a triage question; this extension does not alter its pending execution o
 
 Provenance: trailing-review run `47edc805-f43c-4ef2-abb1-0bba27a41c2f/review-98bb1585`, `g034/f1`. Neighbor `g035`
 verified that its separate buttons test already uses nested `finally` and does not share this omission.
+
+## Hosts-panel sort instance
+
+Reviewed commit: a03f32543bdaed2cbfea9cf33d43335611e071ff
+
+`e2e/tests/hosts-panel.spec.ts:25` changes the shared sort to title. Its sequential `finally` awaits `cleanupSession`
+before restoring `previous.list_sort` (`74–75`). Session cleanup throws on transport failure or a non-404 refusal
+(`helpers/fleet.ts:556–565`), so restoration is never requested. The passive evidence fixture does not reset
+preferences, and the worker's helm persists across tests (`e2e/playwright.config.ts:98–107`). This remains at review tip
+`9b19f8d754bf7658761ef246cfda0ea8397f4f21`.
+
+Suggested bucket remains **other**. Confidence: **confirmed conditional cleanup omission**. Effective contamination
+requires an inherited order other than title and a committed title save; the ordinary activity default supplies a
+permitted initial value. Failure frequency and downstream effects were not measured, and no runtime reproduction ran.
+Use independent cleanup steps or nested `finally`. A separate late-save concern remains even after that repair and is
+recorded in `post-clone-test-save-overtakes-restoration.md`.
+
+Possible cover: the ledger's named-block decisions at `15107–15137,15169–15193,17182–17216` and checkout-specific
+decision at `20338–20351` do not name this new Hosts test or sort preference. The latter's discard-unless-trivial scope
+remains a triage question, rather than acceptance of this additional instance. No exact Planned, unlanded repair, BUGS
+or filter coverage was found. Proposed drop: none. This extension does not expand an approved cleanup sweep.
+
+Provenance: trailing-review run `bfd30ff4-8bd3-46a2-9101-56314a921992`, `g016/g016-f1`.
