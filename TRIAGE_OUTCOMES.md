@@ -18968,7 +18968,9 @@
 - Completion criteria: SPEC.md (installation) states that installing a release older than the handoff floor runs that
   release's own installer, with the protections it had then, which include no protection against something put at the
   app location while it builds. No code change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/installer-link-noreplace.md`.
+- Execution: implemented in change `zprxtrxzsmxkxnpmxlpmyuzzsxzuuvnv`, bookmark
+  `plan/installer-link-noreplace/02-older-installer-spec`; draft PR
+  [#2741](https://github.com/scode/farhelm/pull/2741/changes).
 
 ## timing-history-can-retain-failed-recorder-success.md
 

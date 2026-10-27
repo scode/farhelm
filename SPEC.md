@@ -447,6 +447,10 @@ what that layout's ownership record says it put there. Anything else at `~/.loca
 file or a Farhelm from before the record existed, is kept under a visible name and reported, and the install proceeds;
 no crash or interruption point may lose it.
 
+Installing a release older than the installer's handoff floor runs that release's own published installer, with the
+protections it had then. Those installers do not protect an unrelated app put at `~/Applications/Farhelm.app` while they
+build its replacement.
+
 "Built it" covers the whole bundle. Once the installer recognizes `Farhelm.app` as one it made, everything inside it is
 the installer's to replace or remove, old version folders included, along with anything a user put in them. The same
 holds for the names the installer reserves for its own temporary files: `.farhelm-new.*` inside the app and
