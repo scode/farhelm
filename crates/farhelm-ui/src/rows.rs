@@ -669,11 +669,9 @@ pub(crate) fn no_match_line(listing: &SessionListing) -> Option<&'static str> {
 
 /// The count line above the rows, decided but not rendered.
 ///
-/// `class` carries which of the two banners this is and `text` the
-/// sentence; the caller interpolates both verbatim. (A third field once
-/// carried the paged design's "the list changed while it was being read"
-/// note as its own text run; a whole-list reply cannot contradict itself,
-/// so there is nothing left for it to say.)
+/// `class` selects the count or warning treatment, and `text` is rendered
+/// verbatim. Short counts belong beside the title; warnings retain their
+/// sentence and a full-width line so they cannot be mistaken for completeness.
 /// Equality is the actual header contribution, including sentence/heading
 /// shape, so accepted listing commits can report possible header rewrapping.
 #[derive(Debug, PartialEq, Eq)]
@@ -682,37 +680,10 @@ pub(crate) struct CountBanner {
     /// it (`truncation-banner` vs. `session-count`), and the stylesheet and
     /// the browser suite both select on that.
     pub(crate) class: &'static str,
-    /// The count sentence itself.
+    /// A short count for a complete supported listing, or the full warning.
     pub(crate) text: String,
-    /// How many leading bytes of `text` are the count, when this banner is
-    /// the plain "N sessions" heading and nothing else; `None` for every
-    /// sentence-shaped variant.
-    ///
-    /// The plain count doubles as the sidebar's section heading, and a
-    /// heading is drawn label first with the number set apart ("SESSIONS
-    /// 12"), so the renderer needs to know where the number ends. It gets a
-    /// split point into `text` rather than a second string so that the two
-    /// spans it renders can only ever concatenate back to `text`: the
-    /// element's text content stays "12 sessions", which is what a screen
-    /// reader announces and what the browser suite asserts. The
-    /// reordering is visual only, done in CSS.
-    ///
-    /// A filtered or truncated banner is a sentence, not a heading ("2
-    /// matching of 12 sessions" has no single number to set apart), which
-    /// is why those carry `None` and render as one run of text.
-    pub(crate) count_len: Option<usize>,
-}
-
-impl CountBanner {
-    /// Split `text` into its count and the label after it, for the one
-    /// variant that has a count to set apart; `None` otherwise.
-    ///
-    /// The label keeps its leading space. The renderer puts the two halves
-    /// in adjacent spans, and dropping the space would change the element's
-    /// text content from "12 sessions" to "12sessions".
-    pub(crate) fn heading_parts(&self) -> Option<(&str, &str)> {
-        self.count_len.map(|len| self.text.split_at(len))
-    }
+    /// Warnings need a full-width line; a compact count may stay by the title.
+    pub(crate) warning: bool,
 }
 
 /// The clause a filtered banner carries when the helm never answered the
@@ -748,7 +719,7 @@ const TRUNCATION_NOTE: &str = " — could not read the list to the end";
 ///   cap cut (`truncated`, via [`listing_is_complete`]) — nothing else
 ///   makes a list short. The denominator printed beside N is `matching`
 ///   for a filtered banner and the view's own `total` for an unfiltered one.
-/// - **Filtering.** A filtered list says "N matching of M sessions"
+/// - **Filtering.** A complete filtered list says "N of M"
 ///   (PLAN_M6_75.md item 7), which is the distinction the second count
 ///   exists to make: without it, a filter that hid 690 of 700 rows and a
 ///   cap that could only serve 10 of them look identical on screen, and only
@@ -779,32 +750,18 @@ pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
     // beside it reasoned as though the list were whole would be the UI
     // disagreeing with itself about the one fact it just printed.
     let short = !listing_is_complete(listing);
-    // The third element is `CountBanner::count_len`: set by the one arm whose
-    // text is a bare count, right beside the `format!` it measures, so the
-    // split point and the sentence cannot be changed apart. A decimal `u64`
-    // is ASCII, so its byte length is always a char boundary for `split_at`.
-    let (class, text, count_len) = match (listing.filtered, listing.matching, short) {
-        (false, _, false) => {
-            let total = listing.total.to_string();
-            let count_len = total.len();
-            (
-                "banner session-count",
-                format!("{total} sessions"),
-                Some(count_len),
-            )
-        }
+    let (class, text) = match (listing.filtered, listing.matching, short) {
+        (false, _, false) => ("banner session-count", listing.total.to_string()),
         (false, _, true) => (
             "banner truncation-banner",
             format!(
                 "showing {shown} of {} sessions{TRUNCATION_NOTE}",
                 listing.total
             ),
-            None,
         ),
         (true, Some(matching), false) => (
             "banner session-count filtered",
-            format!("{matching} matching of {} sessions", listing.total),
-            None,
+            format!("{matching} of {}", listing.total),
         ),
         // Three numbers, because all three are different questions: how many
         // are on screen, how many match, and how big the view is. Dropping
@@ -816,7 +773,6 @@ pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
                 "showing {shown} of {matching} matching sessions ({} in all){TRUNCATION_NOTE}",
                 listing.total
             ),
-            None,
         ),
         // No matching count to report: the sentence reverts to the
         // unfiltered one, which is what the rows actually are, and the
@@ -826,7 +782,6 @@ pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
         (true, None, false) => (
             "banner session-count filtered",
             format!("{} sessions{FILTER_UNSUPPORTED_NOTE}", listing.total),
-            None,
         ),
         (true, None, true) => (
             "banner truncation-banner filtered",
@@ -834,13 +789,12 @@ pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
                 "showing {shown} of {} sessions{TRUNCATION_NOTE}{FILTER_UNSUPPORTED_NOTE}",
                 listing.total
             ),
-            None,
         ),
     };
     CountBanner {
         class,
         text,
-        count_len,
+        warning: short || (listing.filtered && listing.matching.is_none()),
     }
 }
 
@@ -1682,17 +1636,11 @@ mod tests {
         let ten = listing(10, 10, false);
         assert_eq!(nine.sessions[0].id, ten.sessions[0].id);
         assert_ne!(count_banner(&nine), count_banner(&ten));
-        assert_eq!(
-            count_banner(&nine).heading_parts(),
-            Some(("9", " sessions"))
-        );
-        assert_eq!(
-            count_banner(&ten).heading_parts(),
-            Some(("10", " sessions"))
-        );
+        assert_eq!(count_banner(&nine).text, "9");
+        assert_eq!(count_banner(&ten).text, "10");
         let filtered = filtered_listing(9, 9, 10, false);
         assert_ne!(count_banner(&ten), count_banner(&filtered));
-        assert!(count_banner(&filtered).heading_parts().is_none());
+        assert_eq!(count_banner(&filtered).text, "9 of 10");
         assert_ne!(count_banner(&ten), count_banner(&listing(10, 10, true)));
     }
 
@@ -1701,7 +1649,7 @@ mod tests {
     ///
     /// Neither flag is derived from the rows below it — a request carrying
     /// a filter may match everything and still answer yes to both, which is
-    /// exactly the case the banner has to keep saying "N matching of M" for.
+    /// exactly the case the banner has to keep saying "N of M" for.
     fn filtered_listing(rows: usize, matching: u64, total: u64, truncated: bool) -> SessionListing {
         SessionListing {
             matching: Some(matching),
@@ -1750,7 +1698,7 @@ mod tests {
         // (listing, expected class, expected text)
         let cases = [
             // A complete reply: the total, and no claim to be a subset.
-            (listing(4, 4, false), "banner session-count", "4 sessions"),
+            (listing(4, 4, false), "banner session-count", "4"),
             // The helm's cap cut the view: `truncated` set even though the
             // counts happen to agree — the flag is the whole test, not the
             // arithmetic.
@@ -1784,47 +1732,18 @@ mod tests {
         }
     }
 
-    /// Only the plain count offers a number to set apart, and its two halves
-    /// concatenate back to the pinned sentence.
-    ///
-    /// The sidebar draws the plain count as a section heading, label first
-    /// ("SESSIONS 12"), by rendering the halves in two spans and reordering
-    /// them in CSS. That is only safe while the spans' text still reads "12
-    /// sessions" in DOM order: the browser suite asserts that exact text
-    /// across several spec files and a screen reader announces it. So the split must
-    /// lose nothing (the label keeps its leading space), must land exactly
-    /// after the digits for a multi-digit total, and must not be offered for
-    /// the sentence-shaped variants, where a lone leading number set apart
-    /// from "matching of 12 sessions" would be a heading made of half a
-    /// sentence.
+    /// Complete totals sit beside the sort title without a repeated section
+    /// label. Multi-digit totals must remain whole, including an empty fleet.
     #[farhelm_testtrace::test]
-    fn only_the_plain_count_splits_into_a_number_and_a_label() {
+    fn complete_counts_are_short_numbers_beside_the_sort_title() {
         for total in [0, 4, 12, 700] {
             let banner = count_banner(&listing(total as usize, total, false));
-            let (count, label) = banner
-                .heading_parts()
-                .expect("the plain count is a heading with a number to set apart");
-            assert_eq!(count, total.to_string());
-            assert_eq!(label, " sessions");
-            assert_eq!(format!("{count}{label}"), banner.text);
-        }
-        for sentence in [
-            listing(4, 4, true),
-            filtered_listing(2, 2, 12, false),
-            filtered_listing(2, 5, 12, true),
-        ] {
-            let banner = count_banner(&sentence);
-            assert_eq!(
-                banner.heading_parts(),
-                None,
-                "{:?} is a sentence, not a heading",
-                banner.text
-            );
+            assert_eq!(banner.text, total.to_string());
         }
     }
 
-    /// A filtered list says "N matching of M sessions" (PLAN_M6_75.md item
-    /// 7) — the distinction the helm's second count exists to make.
+    /// A filtered list retains both matching and fleet counts, even when
+    /// every session matches. Narrowing must not look like an unfiltered list.
     ///
     /// Without it, a filter that hid 690 of 700 sessions and a cap that
     /// could only serve 10 of them produce the same sentence, and only one of
@@ -1837,13 +1756,13 @@ mod tests {
     fn a_filtered_list_reports_both_counts() {
         let banner = count_banner(&filtered_listing(12, 12, 700, false));
         assert_eq!(banner.class, "banner session-count filtered");
-        assert_eq!(banner.text, "12 matching of 700 sessions");
+        assert_eq!(banner.text, "12 of 700");
 
         // A filter matching NOTHING is still a filter, and the fleet total
         // is what keeps "0 matching" from reading as an empty fleet.
         assert_eq!(
             count_banner(&filtered_listing(0, 0, 700, false)).text,
-            "0 matching of 700 sessions"
+            "0 of 700"
         );
 
         // A filter matching EVERYTHING still says so. Derived from the
@@ -1852,7 +1771,7 @@ mod tests {
         // a user unable to tell whether their filter took.
         let matched_all = count_banner(&filtered_listing(700, 700, 700, false));
         assert_eq!(matched_all.class, "banner session-count filtered");
-        assert_eq!(matched_all.text, "700 matching of 700 sessions");
+        assert_eq!(matched_all.text, "700 of 700");
     }
 
     /// A filtered reply the cap cut reports all THREE numbers, and a
@@ -1969,7 +1888,7 @@ mod tests {
     /// The rows on screen are the WHOLE fleet — a helm that predates the
     /// matching count predates server-side filtering too, so it ignored the
     /// query (`api::matching_count`). Substituting the fleet total would
-    /// print "700 matching of 700 sessions" over those rows and vouch for a
+    /// print "700 of 700" over those rows and vouch for a
     /// filter that never ran, which is the one thing a count line must never
     /// do. The unfiltered sentence plus a clause is the honest reading of
     /// what is actually being shown.

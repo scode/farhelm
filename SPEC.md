@@ -1177,24 +1177,25 @@ blocked trash operation reported rather than its records forgotten. A session st
 recorded working-directory spelling, so restarting it can fail after the move; permanent deletion still recognizes its
 reference and refuses that archive.
 
-The session list's trash button sits immediately left of New, with an outline can when empty and an open-lid can and
-count when it holds checkouts on reachable hosts. Its dialog groups archives newest first by host, showing repository,
-archive time, bounded disk usage and the directory to copy work out of before cleanup. Unreachable hosts remain visible
-but cannot be checked or deleted. Unknown sizes make totals explicitly partial. Per-host and global delete ask once in
-place, naming the confirmed hosts, checkout count and size, and warning that uncommitted or unpushed work is permanently
-lost. The global action skips unreachable hosts and waits until every reachable host can be read. There is no restore
-action or automatic cleanup. Each checkout also has a delete button that removes it immediately, without confirmation or
-a warning about uncommitted or unpushed work; it is unavailable under the same host-listing and operation guards as bulk
-cleanup. The header keeps the title, total, global delete action and close control visible while the host list scrolls.
-Global confirmation appears first in that scroll region; its actions are brought into view when it opens, and cancelling
-returns focus to the global delete action. There is no footer. Deletion sends one checkout at a time on each host, with
-hosts progressing in parallel and up to fifteen minutes to confirm each request. While a run is active, the header and
-trash button show an upside-down, bobbing can (static but still upside down under Reduce Motion). Their checkout counts
-and the header's size total fall as confirmed deletions remove entries. Each current checkout shows a spinner and
-elapsed seconds; queued checkouts say "waiting". Host headers show "N of M deleted", and the header announces how many
-checkouts remain to process. Per-record issues accumulate while that host continues; an unconfirmed reply stops only
-that host's queue and warns that some folders may already be deleted. The listing is rechecked once the whole run
-finishes. Close and Escape stay unavailable until then, and Close's tooltip explains the wait.
+The session list's header places Trash, Templates and New in that order. Trash shows an outline can when empty and an
+open-lid can and count when it holds checkouts on reachable hosts. Its dialog groups archives newest first by host,
+showing repository, archive time, bounded disk usage and the directory to copy work out of before cleanup. Unreachable
+hosts remain visible but cannot be checked or deleted. Unknown sizes make totals explicitly partial. Per-host and global
+delete ask once in place, naming the confirmed hosts, checkout count and size, and warning that uncommitted or unpushed
+work is permanently lost. The global action skips unreachable hosts and waits until every reachable host can be read.
+There is no restore action or automatic cleanup. Each checkout also has a delete button that removes it immediately,
+without confirmation or a warning about uncommitted or unpushed work; it is unavailable under the same host-listing and
+operation guards as bulk cleanup. The header keeps the title, total, global delete action and close control visible
+while the host list scrolls. Global confirmation appears first in that scroll region; its actions are brought into view
+when it opens, and cancelling returns focus to the global delete action. There is no footer. Deletion sends one checkout
+at a time on each host, with hosts progressing in parallel and up to fifteen minutes to confirm each request. While a
+run is active, the header and trash button show an upside-down, bobbing can (static but still upside down under Reduce
+Motion). Their checkout counts and the header's size total fall as confirmed deletions remove entries. Each current
+checkout shows a spinner and elapsed seconds; queued checkouts say "waiting". Host headers show "N of M deleted", and
+the header announces how many checkouts remain to process. Per-record issues accumulate while that host continues; an
+unconfirmed reply stops only that host's queue and warns that some folders may already be deleted. The listing is
+rechecked once the whole run finishes. Close and Escape stay unavailable until then, and Close's tooltip explains the
+wait.
 
 Only the client that issued a session Delete plays an archive cue, and only when the host confirms that a checkout
 moved: the row's dashed outline flies into the trash, which then wiggles briefly. Reduced motion skips both parts.
@@ -1467,6 +1468,10 @@ metadata and says why there is no terminal, rather than an empty pane.
 
 ### Session list
 
+The chosen order is the list's title: **Recently active**, **Newest created** or **Title A–Z**, with a menu offering
+those orders and **Compact**. Trash with its count, Templates and New are compact icon buttons beside the title; their
+hover text and accessible names explain the actions, and New remains the sidebar's one filled control.
+
 One flat list across all registered hosts, with an always-visible host selector. It starts at `ALL`; `This machine`
 means the registered local host, and configured remote hosts follow in registry order, including unavailable hosts whose
 last-known sessions remain useful. Choosing a host sends a server-side query immediately and is not persisted. The list
@@ -1595,8 +1600,9 @@ in its tooltip and accessible text. A heavier separator with a small gap below f
 run of pinned rows, only when an unpinned row follows; there is no Pinned heading. A newly pinned row held below that
 run does not move the separator there, and unpinning a row inside the run shortens it immediately.
 
-The list always carries a count of every session. The host selector is a narrowing query, so its count says how many
-matched alongside how big the whole fleet is.
+The list always carries a count beside its title: **N**, or **N of M** when narrowed, where N matched and M is the whole
+fleet. A truncated reply or an unsupported filter retains its explicit warning rather than claiming a complete matching
+count.
 
 The list is served and rendered WHOLE. The fleet this product is for is tens of sessions across a few hosts, not
 thousands, and the design assumes that scale outright: every supervisor answers a listing with its entire list in one

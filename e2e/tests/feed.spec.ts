@@ -932,7 +932,7 @@ test.describe("the invalidation feed", () => {
     // The banner is the helm's own count, so it is the half the page could
     // not have produced by narrowing rows it already held.
     await expect(page.locator(".session-count")).toHaveText(
-      new RegExp(`^${localListing.sessions.length} matching of \\d+ sessions$`),
+      new RegExp(`^${localListing.sessions.length} of \\d+$`),
     );
     // Still skewed, and still saying so: the read the user asked for is not a
     // reason to forget the mismatch.

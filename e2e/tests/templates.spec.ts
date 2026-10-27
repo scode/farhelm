@@ -789,10 +789,11 @@ test("tl: search reports a failed template read and retries it", async ({ page, 
 /**
  * Open within the current app lifetime and establish the name-list premise.
  * Close/reopen tests need this path so navigation cannot erase the state whose
- * ownership they are checking.
+ * ownership they are checking. The sidebar opener is an icon whose accessible
+ * name is Templates; its tooltip is a separate quick-launch hint.
  */
 async function openTemplatesInPlace(page: Page) {
-  await page.getByRole("button", { name: "templates", exact: true }).click();
+  await page.getByRole("button", { name: "Templates", exact: true }).click();
   const dialog = page.locator('.templates-dialog[role="dialog"]');
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");

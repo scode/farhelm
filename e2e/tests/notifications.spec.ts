@@ -8,6 +8,7 @@
 // injects notifications into their rows and answers the two notification
 // routes itself, keeping the read and cleared marks the way the helm does.
 // The supervisor's recording and the helm's marks have their own Rust tests.
+import { setCompact } from "./helpers/list-header";
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { Locator, Page, Route } from "@playwright/test";
@@ -177,7 +178,7 @@ test.describe("session notifications", () => {
 
     await bell.click();
     await expect(panel).toBeFocused();
-    const elsewhere = page.getByRole("button", { name: "new session", exact: true });
+    const elsewhere = page.getByRole("button", { name: "New session", exact: true });
     await elsewhere.focus();
     await expect(elsewhere).toBeFocused();
     await page.setViewportSize(viewport);
@@ -483,7 +484,7 @@ test.describe("session notifications", () => {
     for (const compact of [false, true]) {
       const target = row(page, belled.id);
       if (compact) {
-        await page.getByLabel("compact").check();
+        await setCompact(page, true);
         // Premise: the row really is compact before it is measured.
         await expect(target.locator(".session-row-meta")).toHaveCount(0);
       }

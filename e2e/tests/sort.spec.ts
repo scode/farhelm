@@ -42,6 +42,7 @@
  * orders are exact reverses of each other, which is the strongest contrast a
  * three-row fixture can carry.
  */
+import { chooseSort } from "./helpers/list-header";
 import { expect, test } from "./helpers/evidence";
 import { APIRequestContext, Page, Route } from "@playwright/test";
 import {
@@ -88,7 +89,7 @@ async function listWithStubbedFeed(page: Page): Promise<FeedStub> {
   await page.goto("/");
   await feed.waitForConnection(1);
   feed.notify(1);
-  await expect(page.locator(".sort-select")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".sort-title")).toBeVisible({ timeout: 20_000 });
   return feed;
 }
 
@@ -335,7 +336,7 @@ test.describe("session list ordering", () => {
     for (const sort of asked) {
       expect(sort, "every listing read must name the order it wants").toBe("activity");
     }
-    await expect(page.locator(".sort-select")).toHaveValue("activity");
+    await expect(page.locator(".sort-title")).toHaveAttribute("data-sort", "activity");
     // Newest first, and for these rows that is both the activity order and
     // the creation order (see the fixture's docstring).
     expect(await orderOf(page, [ids.a, ids.m, ids.z])).toEqual([ids.z, ids.m, ids.a]);
@@ -366,7 +367,7 @@ test.describe("session list ordering", () => {
     // Installed after the initial load, so what it records is the re-sorted
     // walk and nothing else.
     const asked = await watchSortParameters(page);
-    await page.locator(".sort-select").selectOption("title");
+    await chooseSort(page, "title");
 
     await expect
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
@@ -396,7 +397,7 @@ test.describe("session list ordering", () => {
 
     const feed = await listWithStubbedFeed(page);
     await expect(row(page, ids.a)).toBeVisible({ timeout: 20_000 });
-    await page.locator(".sort-select").selectOption("title");
+    await chooseSort(page, "title");
     await expect
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.a, ids.m, ids.z]);
@@ -412,7 +413,7 @@ test.describe("session list ordering", () => {
     await feed.waitForConnection(2);
     feed.notify(2);
 
-    await expect(page.locator(".sort-select")).toHaveValue("title", { timeout: 20_000 });
+    await expect(page.locator(".sort-title")).toHaveAttribute("data-sort", "title", { timeout: 20_000 });
     await expect
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.a, ids.m, ids.z]);
@@ -446,7 +447,7 @@ test.describe("session list ordering", () => {
     await expect(page.locator(".session-details .title")).toContainText(`sortfix-${stamp}-aaa`);
     await expect(row(page, ids.a)).toHaveAttribute("data-session-selected", "true");
 
-    await page.locator(".sort-select").selectOption("title");
+    await chooseSort(page, "title");
     await expect
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.a, ids.m, ids.z]);
@@ -457,39 +458,60 @@ test.describe("session list ordering", () => {
     await expect(row(page, ids.z)).toHaveAttribute("data-session-selected", "false");
   });
 
-  /**
-   * The control is a labelled `combobox` offering exactly the three orders,
-   * each with the word the helm takes and the words a person reads.
-   *
-   * Located by ROLE and accessible name rather than by `.sort-select`,
-   * because the class is an implementation detail while the role and the
-   * name are the contract a keyboard or screen-reader user actually meets —
-   * a control that lost its label would still match the class selector every
-   * other test in this file uses, and nothing would notice.
-   *
-   * The pairs are asserted exactly. A value the helm does not know is a
-   * listing that 400s rather than one that sorts oddly, and a label that
-   * drifted from its value ("newest created" wired to `activity`) would be a
-   * control that lies about what it does while every order-of-rows assertion
-   * still passes.
+  /** The title exposes the current order, exclusive choices and independent
+   * density setting. Real keyboard focus must follow the shared menu model;
+   * Escape restores the surviving trigger and outside input dismisses it.
+   * Wire requests are checked separately so a correctly named but miswired
+   * choice cannot satisfy the full ordering contract.
    */
-  test("the sort control is a labelled combobox offering the three wire orders", async ({ page }) => {
+  test("the sort title exposes checked choices and keyboard menu semantics", async ({ page }) => {
     await listWithStubbedFeed(page);
-
-    const control = page.getByRole("combobox", { name: "sort" });
+    const control = page.getByRole("button", { name: "Sort: Recently active", exact: true });
     await expect(control).toBeVisible();
-
-    const offered = await control.locator("option").evaluateAll((options) =>
-      options.map((option) => [
-        (option as HTMLOptionElement).value,
-        (option.textContent ?? "").trim(),
-      ])
-    );
-    expect(offered).toEqual([
-      ["activity", "recently active"],
-      ["created", "newest created"],
-      ["title", "title A–Z"],
-    ]);
+    await expect(control).toHaveAttribute("aria-haspopup", "menu");
+    await expect(control).toHaveAttribute("aria-expanded", "false");
+    await control.focus();
+    await expect(control).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    const menu = page.getByRole("menu", { name: "Sort", exact: true });
+    await expect(menu).toBeVisible();
+    const radios = menu.getByRole("menuitemradio");
+    await expect(radios).toHaveCount(3);
+    for (const [index, label] of ["Recently active", "Newest created", "Title A–Z"].entries()) {
+      await expect(radios.nth(index)).toHaveAccessibleName(new RegExp(`^${label}(?:$|\\s)`));
+      await expect(radios.nth(index)).toHaveAttribute("aria-checked", String(index === 0));
+    }
+    const compact = menu.getByRole("menuitemcheckbox", { name: /^Compact(?:$|\s)/ });
+    await expect(compact).toHaveAttribute("aria-checked", "false");
+    await expect(radios.nth(0)).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(radios.nth(1)).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(compact).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(radios.nth(0)).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(control).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await expect(compact).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(radios.nth(0)).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(radios.nth(1)).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(menu).toHaveCount(0);
+    await expect(control).toHaveCount(0);
+    const changed = page.getByRole("button", { name: "Sort: Newest created", exact: true });
+    await expect(changed).toBeFocused();
+    await changed.click();
+    await expect(radios.nth(1)).toHaveAttribute("aria-checked", "true");
+    await expect(radios.nth(0)).toHaveAttribute("aria-checked", "false");
+    // The side-anchored menu can cover the host selector. The main pane is
+    // the actual outside surface, rather than a control underneath the menu.
+    await page.locator(".app-main").click({ position: { x: 400, y: 200 } });
+    await expect(menu).toHaveCount(0);
+    await expect(changed).toHaveAttribute("aria-expanded", "false");
   });
 
   /**
@@ -522,7 +544,7 @@ test.describe("session list ordering", () => {
     ).toBeUndefined();
 
     const before = asked.length;
-    await page.locator(".sort-select").selectOption("activity");
+    await chooseSort(page, "activity");
     // A settle window rather than an assertion that resolves as soon as it
     // is true: what is being proved is that nothing happens, and nothing
     // happening is only observable by waiting long enough for it to have.
@@ -573,7 +595,7 @@ test.describe("session list ordering", () => {
     await listWithStubbedFeed(page);
     await expect(row(page, ids.a)).toBeVisible({ timeout: 20_000 });
 
-    await page.locator(".sort-select").selectOption("title");
+    await chooseSort(page, "title");
     await expect
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.a, ids.m, ids.z]);
@@ -583,7 +605,7 @@ test.describe("session list ordering", () => {
     await expect(host).toBeFocused();
     await host.selectOption(String(local));
     await expect(page.locator(".session-count")).toHaveText(
-      new RegExp(`^${localListing.sessions.length} matching of \\d+ sessions$`),
+      new RegExp(`^${localListing.sessions.length} of \\d+$`),
     );
     await expect(page.locator(".session-row")).toHaveCount(localListing.sessions.length);
     await expect(row(page, decoy.id)).toHaveCount(0);
@@ -594,12 +616,12 @@ test.describe("session list ordering", () => {
 
     // Re-sorting while narrowed: the request has to carry both, and the
     // membership and the banner must not move — only the sequence does.
-    await page.locator(".sort-select").selectOption("created");
+    await chooseSort(page, "created");
     await expect
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.z, ids.m, ids.a]);
     await expect(page.locator(".session-count")).toHaveText(
-      new RegExp(`^${localListing.sessions.length} matching of \\d+ sessions$`),
+      new RegExp(`^${localListing.sessions.length} of \\d+$`),
     );
     await expect(page.locator(".session-row")).toHaveCount(localListing.sessions.length);
     const resorted = latestRead(reads);
@@ -611,9 +633,9 @@ test.describe("session list ordering", () => {
 
     // Returning to ALL widens the list and leaves the order alone.
     await host.selectOption("");
-    await expect(page.locator(".session-count")).toHaveText(/^\d+ sessions$/);
+    await expect(page.locator(".session-count")).toHaveText(/^\d+$/);
     await expect(row(page, decoy.id)).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator(".sort-select")).toHaveValue("created");
+    await expect(page.locator(".sort-title")).toHaveAttribute("data-sort", "created");
     await expect
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.z, ids.m, ids.a]);
@@ -661,7 +683,7 @@ test.describe("session list ordering", () => {
     await listWithStubbedFeed(page);
     await expect(row(page, ids.a)).toBeVisible({ timeout: 20_000 });
 
-    await expect(page.locator(".sort-select")).toHaveValue("activity");
+    await expect(page.locator(".sort-title")).toHaveAttribute("data-sort", "activity");
     expect(asked.length, "loading the list must read it").toBeGreaterThan(0);
     await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toHaveCount(0);
     for (const sort of asked) {
@@ -704,7 +726,7 @@ test.describe("session list ordering", () => {
     await listWithStubbedFeed(page);
     await expect(row(page, ids.a)).toBeVisible({ timeout: 20_000 });
 
-    await expect(page.locator(".sort-select")).toHaveValue("activity");
+    await expect(page.locator(".sort-title")).toHaveAttribute("data-sort", "activity");
     for (const sort of asked) {
       expect(sort, "an unreadable preference reads as no preference").toBe("activity");
     }
@@ -747,11 +769,11 @@ test.describe("session list ordering", () => {
     await expect(row(page, ids.a)).toBeVisible({ timeout: 20_000 });
 
     const before = asked.length;
-    await page.locator(".sort-select").selectOption("title");
+    await chooseSort(page, "title");
     await expect
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.a, ids.m, ids.z]);
-    await expect(page.locator(".sort-select")).toHaveValue("title");
+    await expect(page.locator(".sort-title")).toHaveAttribute("data-sort", "title");
     for (const sort of asked.slice(before)) {
       expect(sort, "the read that follows the choice must carry the new order").toBe("title");
     }
@@ -815,13 +837,13 @@ test.describe("session list ordering", () => {
     // with defaults, which is the OTHER test's subject.
     // sleep-ok: observe premature mounting while the captured seed reply stays held, before its own fallback deadline.
     await page.waitForTimeout(500);
-    await expect(page.locator(".sort-select")).toHaveCount(0);
+    await expect(page.locator(".sort-title")).toHaveCount(0);
     expect(asked.length, "no listing read may start before the seed").toBe(0);
 
     release();
     await feed.waitForConnection(1);
     feed.notify(1);
-    await expect(page.locator(".sort-select")).toHaveValue("title", { timeout: 20_000 });
+    await expect(page.locator(".sort-title")).toHaveAttribute("data-sort", "title", { timeout: 20_000 });
     await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toHaveCount(0);
     await expect(page.locator(".session-details .title")).toContainText(`sortfix-${stamp}-mmm`, {
       timeout: 20_000,
@@ -863,7 +885,7 @@ test.describe("session list ordering", () => {
     await listWithStubbedFeed(page);
     await expect(row(page, ids.a)).toBeVisible({ timeout: 20_000 });
 
-    await expect(page.locator(".sort-select")).toHaveValue("activity");
+    await expect(page.locator(".sort-title")).toHaveAttribute("data-sort", "activity");
     for (const sort of asked) {
       expect(sort, "an unanswerable preference reads as no preference").toBe("activity");
     }
@@ -893,7 +915,7 @@ test.describe("session list ordering", () => {
     // Another client selects a session; then THIS page changes only the
     // sort. The row must end with both.
     await patchPreferences(request, { last_selected: ids.m });
-    await page.locator(".sort-select").selectOption("title");
+    await chooseSort(page, "title");
     await expect
       .poll(async () => (await readPreferences(request)).list_sort, { timeout: 20_000 })
       .toBe("title");
@@ -992,8 +1014,8 @@ test.describe("session list ordering", () => {
     feed.notify(2);
     await expect.poll(() => activityReads, { timeout: 20_000 }).toBeGreaterThan(0);
 
-    await page.locator(".sort-select").selectOption("title");
-    await expect(page.locator(".sort-select")).toHaveValue("title");
+    await chooseSort(page, "title");
+    await expect(page.locator(".sort-title")).toHaveAttribute("data-sort", "title");
 
     releaseActivity();
     // The title read being dispatched proves the stale reply has been
@@ -1396,7 +1418,7 @@ test.describe("session list ordering", () => {
       }
       await route.fallback();
     });
-    await page.locator(".sort-select").selectOption("created");
+    await chooseSort(page, "created");
     await expect.poll(() => release !== undefined, { message: "the new order's read is held" }).toBe(true);
     await row(page, ids.a).hover();
     release!();

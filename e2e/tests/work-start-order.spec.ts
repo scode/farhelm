@@ -108,7 +108,7 @@ test("active sessions lead across bursts, idle demotion, reload and rename", asy
     const seed = new Map((await ownedRows(request, ids)).map((row) => [row.id, row.last_work_started_at]));
     await Promise.all([page.goto("/"), other.goto("/")]);
     for (const client of [page, other]) {
-      await expect(client.locator(".sort-select")).toHaveValue("activity");
+      await expect(client.locator(".sort-title")).toHaveAttribute("data-sort", "activity");
     }
 
     await writeFile(a.mode, "run");

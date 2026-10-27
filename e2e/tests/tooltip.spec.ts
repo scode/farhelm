@@ -23,6 +23,7 @@
  * activity stamp), so the row's controls are present and identical on every
  * run without starting a real agent.
  */
+import { expectCompactRows } from "./helpers/list-header";
 import { expect, test } from "./helpers/evidence";
 import { resolveToken } from "./helpers/color";
 import { type Locator, type Page } from "@playwright/test";
@@ -117,8 +118,7 @@ test("a session's title and open area share its summary card", async ({ page, re
     for (const compact of [false, true]) {
       await patchPreferences(request, { compact });
       await page.reload();
-      if (compact) await expect(page.locator(".compact-toggle input")).toBeChecked();
-      else await expect(page.locator(".compact-toggle input")).not.toBeChecked();
+      await expectCompactRows(page, compact);
       await parkPointer(page);
       await row.locator(".session-title").hover();
       const card = tooltip(page).locator(".session-summary");

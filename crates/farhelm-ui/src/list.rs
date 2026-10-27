@@ -49,6 +49,8 @@ mod row;
 /// Save a snapshot of the launcher without changing the draft being launched.
 mod save_template;
 mod shared;
+/// Ordering and density controls share the list's title menu.
+mod sort_menu;
 /// The sidebar's one hover summary, rendered as a hidden source for shared hover help.
 mod summary_card;
 /// The Templates panel beside New (SPEC.md, Launch templates).

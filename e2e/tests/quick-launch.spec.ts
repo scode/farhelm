@@ -121,7 +121,7 @@ test("quick launch shows New when the host's recent setups cannot be read", asyn
     expect(saved.ok(), await saved.text()).toBe(true);
     await patchPreferences(request, { quick_launch_template: name, last_selected: null });
     await page.goto("/");
-    await expect(page.locator(".session-count")).toHaveText("0 sessions");
+    await expect(page.locator(".session-count")).toHaveText("0");
     await chord(page);
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();

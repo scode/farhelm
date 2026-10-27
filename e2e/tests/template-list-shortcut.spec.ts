@@ -123,7 +123,7 @@ test("Cmd-J yields to dialogs and hidden quick-launch preparation", async ({ pag
     await patchPreferences(request, { quick_launch_template: name });
     await page.goto("/");
     await expect(page.locator(".quick-switcher-template-trigger")).toHaveCount(1);
-    await page.getByRole("button", { name: "templates", exact: true }).click();
+    await page.getByRole("button", { name: "Templates", exact: true }).click();
     const templates = page.locator('.templates-dialog[role="dialog"]');
     await expect(templates).toBeVisible();
     await page.keyboard.press("Control+Shift+j");

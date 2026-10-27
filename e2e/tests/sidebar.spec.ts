@@ -1,3 +1,4 @@
+import { chooseSort, setCompact, expectCompactRows } from "./helpers/list-header";
 import { chooseLauncherHost, launcherHostOptions } from "./helpers/host-picker";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { resolveToken as tokenColor } from "./helpers/color";
@@ -2252,7 +2253,7 @@ test("a row moving under a pointer-opened menu clears its tint without losing fo
     await page.goto("/");
     await waitForHostsListSettled(page);
     await waitForSessionRevealed(page, selected.id);
-    await page.getByRole("combobox", { name: "sort", exact: true }).selectOption({ label: "title A–Z" });
+    await chooseSort(page, "title");
     await expect(page.locator(".session-row").first()).toHaveAttribute("data-session-id", above.id);
     await expect(page.locator(".session-row").nth(1)).toHaveAttribute("data-session-id", moved.id);
     const target = row(page, moved.id);
@@ -2306,7 +2307,7 @@ test("a row above an open menu growing a detail line closes the menu", async ({ 
     await page.goto("/");
     await waitForHostsListSettled(page);
     await waitForSessionRevealed(page, selected.id);
-    await page.getByRole("combobox", { name: "sort", exact: true }).selectOption({ label: "title A–Z" });
+    await chooseSort(page, "title");
     await expect(page.locator(".session-row").first()).toHaveAttribute("data-session-id", above.id);
     await expect(page.locator(".session-row").nth(1)).toHaveAttribute("data-session-id", target.id);
     await expect(row(page, above.id).locator(".session-row-detail")).toHaveCount(0);
@@ -3003,16 +3004,15 @@ test("the host list and host selector are permanent while details stay on demand
   const hostHeading = page.locator(".hosts-heading");
   const details = hostHeading.getByRole("checkbox", { name: "details", exact: true });
   await expect(details).toBeVisible();
-  // Count, compact, and new share one heading; host and sort share the
-  // following control row. DOM order matters because each count explains
-  // the rows before the controls that can change them.
+  // Sort is the title beside the count and icon actions. Host filtering
+  // stays below it until the separate host-rail change.
   const header = page.locator(".list-header");
   await expect(header.locator(":scope > .session-heading .session-count")).toHaveCount(1);
-  await expect(header.locator(":scope > .session-heading .compact-toggle")).toHaveCount(1);
+  await expect(header.locator(":scope > .session-heading .sort-title")).toHaveCount(1);
   await expect(header.locator(":scope > .session-heading .new-session-button")).toHaveCount(1);
   await expect(header.locator(":scope > .list-header-controls")).toHaveCount(1);
   await expect(header.locator(":scope > .list-header-controls .filter-host")).toHaveCount(1);
-  await expect(header.locator(":scope > .list-header-controls .sort-select")).toHaveCount(1);
+  await expect(header.locator(":scope > .list-header-controls .sort-title")).toHaveCount(0);
   await expect(details).not.toBeChecked();
   await expect(page.locator(".filter-host")).toHaveValue("");
   const rows = page.locator(".host-row");
@@ -3052,8 +3052,8 @@ test("the host list and host selector are permanent while details stay on demand
 /**
  * Both compact choices apply immediately, persist through reload, and seed
  * another client from the helm. Turning it off must persist false rather than
- * merely clear a local checkbox. Changing row heights also dismisses a menu whose
- * measured anchor would otherwise belong to the old layout. The already-open-client broadcast deliberately stays
+ * merely clear local state. Opening Sort dismisses the row menu through
+ * ordinary outside input before Compact changes row height. The already-open-client broadcast deliberately stays
  * out of scope; opening the second page is the next preference seed.
  */
 test("compact hides the second line and persists across client seeds", async ({
@@ -3074,14 +3074,18 @@ test("compact hides the second line and persists across client seeds", async ({
     await expect(target).toBeVisible({ timeout: 20_000 });
     const expandedHeight = (await target.boundingBox())!.height;
     await expect(target.locator(".session-row-meta")).toBeVisible();
-    const compact = page.getByRole("checkbox", { name: "compact", exact: true });
-    await expect(compact).not.toBeChecked();
+    await expectCompactRows(page, false);
     await waitForHostsListSettled(page);
     await openRowMenu(target);
 
-    await compact.check();
-    await expect(compact).toBeChecked();
+    await page.locator(".sort-title").click();
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(target.locator(".session-row-meta")).toBeVisible();
+    const compact = page.getByRole("menu", { name: "Sort", exact: true })
+      .getByRole("menuitemcheckbox", { name: /^Compact(?:$|\s)/ });
+    await expect(compact).toHaveAttribute("aria-checked", "false");
+    await compact.click();
+    await expectCompactRows(page, true);
     await expect(target.locator(".session-row-meta")).toHaveCount(0);
     const cardId = await target.locator(".session-row-open").getAttribute("data-tooltip-card");
     expect(cardId, "compact rows point to their summary card").toBeTruthy();
@@ -3096,19 +3100,19 @@ test("compact hides the second line and persists across client seeds", async ({
     await expect.poll(async () => (await readPreferences(request)).compact).toBe(true);
 
     await page.reload();
-    await expect(page.locator(".compact-toggle input")).toBeChecked();
+    await expectCompactRows(page, true);
     await expect(row(page, session.id).locator(".session-row-meta")).toHaveCount(0);
 
     second = await context.newPage();
     await second.goto("/");
-    await expect(second.locator(".compact-toggle input")).toBeChecked();
+    await expectCompactRows(second, true);
     await expect(row(second, session.id).locator(".session-row-meta")).toHaveCount(0);
 
-    await second.locator(".compact-toggle input").uncheck();
+    await setCompact(second, false);
     await expect(row(second, session.id).locator(".session-row-meta")).toBeVisible();
     await expect.poll(async () => (await readPreferences(request)).compact).toBe(false);
     await page.reload();
-    await expect(page.locator(".compact-toggle input")).not.toBeChecked();
+    await expectCompactRows(page, false);
     await expect(row(page, session.id).locator(".session-row-meta")).toBeVisible();
     expect((await row(page, session.id).boundingBox())!.height).toBeGreaterThan(expandedHeight - 1);
   } finally {
@@ -3398,31 +3402,34 @@ test("the host list counts every host, humanizes phases, and clips long names", 
 });
 
 /**
- * The sidebar's two counts are drawn as headings, label first ("HOSTS 2",
- * "SESSIONS 1"), while their text stays count first ("2 hosts").
- *
- * Both halves matter and they pull against each other. The text is a
- * contract: a screen reader announces it, and this suite asserts "N
- * sessions" / "N hosts" across several spec files, so the markup keeps the number first. The
- * heading order is the design, done by a CSS reorder of two spans. A change
- * that "fixed" either one by touching the other (swapping the spans in the
- * markup, or dropping the reorder) would pass every other test here.
+ * The host count retains its label-first visual heading and count-first
+ * accessible text. The session count is numeric beside the sort title;
+ * carrying over the old SESSIONS label would duplicate that new heading.
  */
-test("sidebar count headings read label first on screen and count first in text", async ({ page, request }) => {
+test("host count keeps its heading while session count accompanies the sort title", async ({ page, request }) => {
   const session = await createSession(request, { title: `heading-order-${Date.now()}` });
   try {
     await page.goto("/");
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
-    for (const heading of [page.locator(".hosts-heading .host-count"), page.locator(".session-heading .session-count")]) {
+    for (const heading of [page.locator(".hosts-heading .host-count")]) {
       // Fixture premise: this is the plain count, the only variant that is a
       // heading. A filtered or truncated banner is a sentence and keeps its
       // single run of text, so it would have no spans to compare.
-      await expect(heading).toHaveText(/^\d+ (host|hosts|sessions)$/);
+      await expect(heading).toHaveText(/^\d+ hosts?$/);
       const count = (await heading.locator(".heading-count").boundingBox())!;
       const label = (await heading.locator(".heading-label").boundingBox())!;
       expect(label.x + label.width, "the label is painted to the left of the count").toBeLessThanOrEqual(count.x);
       expect(label.width, "the label must be painted, not collapsed by the reorder").toBeGreaterThan(0);
     }
+    const count = page.locator(".session-heading .session-count");
+    await expect(count).toHaveText(/^\d+$/);
+    await expect(count.locator(".heading-label")).toHaveCount(0);
+    const title = page.getByRole("button", { name: "Sort: Recently active", exact: true });
+    await expect(title).toBeVisible();
+    const titleBox = (await title.boundingBox())!;
+    const countBox = (await count.boundingBox())!;
+    expect(countBox.x, "the count follows the sort title").toBeGreaterThanOrEqual(titleBox.x + titleBox.width);
+    expect(Math.max(titleBox.y, countBox.y)).toBeLessThan(Math.min(titleBox.y + titleBox.height, countBox.y + countBox.height));
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -3919,7 +3926,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   // Compact mode keeps the ended row to one visual line: the complete
   // status and retention words move into accessible names/tooltips while
   // distinct, inspected SVGs remain in their existing fixed tracks.
-  await page.getByLabel("compact").check();
+  await setCompact(page, true);
   await expect(rows[1].locator(".session-row-detail")).toHaveCount(0);
   await expect(rows[1].locator(".session-row-meta")).toHaveCount(0);
   await expect(rows[1].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "exited");
@@ -5150,7 +5157,7 @@ test("the session header controls are usable while the first listing read is pen
   try {
     await page.goto("/");
     await expect(page.locator(".list-header-controls .filter-host")).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator(".list-header-controls .sort-select")).toBeVisible();
+    await expect(page.locator(".session-heading .sort-title")).toBeVisible();
     await expect(page.locator(".session-count")).toHaveCount(0);
     await expect(page.locator(".filter-host")).toHaveValue("");
   } finally {

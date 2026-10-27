@@ -324,7 +324,9 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
 test("sidebar heading buttons retain their hierarchy and compact sizing", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("button", { name: "new session" })).toHaveText("new");
+  await expect(page.getByRole("button", { name: "New session", exact: true })).toBeVisible();
+  await expect(page.locator(".new-session-button svg")).toBeVisible();
+  await expect(page.locator(".new-session-button")).toHaveCSS("height", "24px");
   await expect(page.getByRole("button", { name: "add host" })).toHaveText("add");
 
   await expect(page.locator(".add-host-button")).toHaveClass(/btn-neutral/);
@@ -336,12 +338,12 @@ test("sidebar heading buttons retain their hierarchy and compact sizing", async 
     .evaluate((node) => getComputedStyle(node).backgroundColor);
   expect(primaryBackground).not.toBe(secondaryBackground);
 
-  for (const [selector, sidePadding] of [
-    [".new-session-button", "6px"],
-    [".add-host-button", "8px"],
+  for (const [selector, topPadding, sidePadding] of [
+    [".new-session-button", "3px", "3px"],
+    [".add-host-button", "2px", "8px"],
   ]) {
     await expect(page.locator(selector)).toHaveCSS("font-size", "12px");
-    await expect(page.locator(selector)).toHaveCSS("padding-top", "2px");
+    await expect(page.locator(selector)).toHaveCSS("padding-top", topPadding);
     await expect(page.locator(selector)).toHaveCSS("padding-right", sidePadding);
   }
 

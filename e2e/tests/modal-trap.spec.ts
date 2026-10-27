@@ -288,7 +288,8 @@ test("busy Templates contains Tab on its root with no enabled descendant", async
       await route.fulfill({ response: await route.fetch() });
     });
     await page.goto("/");
-    await page.getByRole("button", { name: "templates", exact: true }).click();
+    // The sidebar icon and the dialog keep distinct accessible names.
+    await page.getByRole("button", { name: "Templates", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "templates", exact: true });
     await expect(dialog).toBeVisible();
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");

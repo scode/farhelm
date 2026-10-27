@@ -447,18 +447,12 @@ fn remember_compact(base: &str, mut preferences: SharedPreferences, compact: boo
 /// liveness signal — so the label deliberately says "active" rather than
 /// anything implying "running now" (which is what the status badge answers).
 ///
-/// The default leads the list as PRESENTATION, not as mechanism. Which
-/// option a user sees selected is decided by the select's own `value` and by
-/// each option's `selected` — the control is fully controlled from `sort`,
-/// so nothing would visibly break if the default sat third. What ordering it
-/// first buys is that the list reads the way the sidebar behaves out of the
-/// box, and that a stray uncontrolled render (an engine ignoring the
-/// attribute on mount, a framework losing the binding) degrades to showing
-/// the order the rows are actually in rather than to a control that lies.
-const SORT_OPTIONS: [(ListSort, &str); 3] = [
-    (ListSort::Activity, "recently active"),
-    (ListSort::Created, "newest created"),
-    (ListSort::Title, "title A–Z"),
+/// The title and menu use these words; selection comes from the shared
+/// preference rather than the position of the default in this list.
+pub(super) const SORT_OPTIONS: [(ListSort, &str); 3] = [
+    (ListSort::Activity, "Recently active"),
+    (ListSort::Created, "Newest created"),
+    (ListSort::Title, "Title A–Z"),
 ];
 
 /// SPEC.md's auto-select fallback — the newest-created session from the rows
@@ -2035,12 +2029,16 @@ pub(crate) fn ListView(
     // elsewhere, so it goes on rendering as the selected one.
     let sort_read = request_listing.clone();
     let sort_base = base.clone();
-    let mut apply_sort = move |next: ListSort| {
+    let sort_popovers = popovers.clone();
+    let apply_sort = move |next: ListSort| {
         // Re-selecting the option already in force is not a change: acting on
         // it would restart the walk and write the helm's row for nothing.
         if *sort.peek() == next {
             return;
         }
+        // A different title can wrap the header even before the new rows
+        // arrive. Existing fixed popovers must not retain that old anchor.
+        sort_popovers.close_registered(AnchorRegion::Sessions);
         sort.set(next);
         remember_sort(&sort_base, preferences, next);
         sort_read(Trigger::Explicit);
@@ -4062,51 +4060,47 @@ pub(crate) fn ListView(
                 hosts.write().record_appearance(id, icon, color);
             },
         }
-        // The session list's own header: count, compact preference, and the
-        // creation actions share a band. The trailing pair stays together;
-        // at the minimum width it wraps instead of clipping either action.
+        // The ordering is the list's title; count and icon actions share its
+        // band. At minimum width the action group wraps as a whole.
         div { class: "list-header",
             div { class: "session-heading",
+                super::sort_menu::SortMenu {
+                    sort: sort(), compact, layout_epoch,
+                    on_sort: apply_sort,
+                    on_compact: move |next| {
+                        popovers.close_registered(AnchorRegion::Sessions);
+                        remember_compact(&base, preferences, next);
+                    },
+                }
                 if let Some(Ok(listing)) = &*listing.read() {
                     {
                         let banner = count_banner(listing);
-                        // The plain count is this list's section heading, so
-                        // its number and label go in separate spans for the
-                        // stylesheet to reorder ("SESSIONS 12"). Number first
-                        // in the DOM, deliberately: the element's text stays
-                        // "12 sessions" (see `CountBanner::count_len`). The
-                        // sentence-shaped variants stay one run of text.
-                        match banner.heading_parts() {
-                            Some((count, label)) => rsx! {
-                                div { class: "{banner.class}",
-                                    span { class: "heading-count", "{count}" }
-                                    span { class: "heading-label", "{label}" }
-                                }
-                            },
-                            None => rsx! { div { class: "{banner.class}", "{banner.text}" } },
+                        rsx! {
+                            div { class: "{banner.class}",
+                                "data-warning": banner.warning,
+                                aria_label: format!("Sessions: {}", banner.text),
+                                "data-tooltip": format!("Sessions: {}", banner.text),
+                                "{banner.text}"
+                            }
                         }
                     }
-                }
-                label { class: "compact-toggle",
-                    "data-tooltip": "compact: one line per session, with the folder shown on hover",
-                    input {
-                        r#type: "checkbox",
-                        checked: compact,
-                        onchange: move |event| {
-                            let next = event.checked();
-                            // Removing metadata moves every row below it; an
-                            // open menu, or notification list, still holds its
-                            // old anchor coordinates.
-                            popovers.close_registered(AnchorRegion::Sessions);
-                            remember_compact(&base, preferences, next);
-                        },
-                    }
-                    "compact"
                 }
                 div { class: "session-heading-actions",
                     super::trash::TrashControl {
                         hosts, revision: trash_revision,
                         gate: crate::ops::PaneGate::new(ops, row_ops),
+                    }
+                    // Beside New, the action it feeds (SPEC.md: "The Templates
+                    // control sits beside New in the session list header").
+                    button {
+                        r#type: "button",
+                        class: "btn btn-neutral templates-button",
+                        aria_label: "Templates",
+                        "data-tooltip": preferences.0.read().quick_launch_template.as_ref().map_or_else(|| format!("templates: mark one with ⚡ for quick launch ({})", crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)), |name| format!("templates: quick launch {} ({})", name.escaped(), crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop))),
+                        aria_haspopup: "dialog",
+                        disabled: busy,
+                        onclick: move |_| { opening_generation += 1; quick_launch_pending.set(false); auto_launch.set(false); initial_template.set(None); quick_launch_hint.set(false); number_shortcut_hint.set(false); templates_open.set(true); },
+                        crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Templates }
                     }
                     button {
                     r#type: "button",
@@ -4114,10 +4108,7 @@ pub(crate) fn ListView(
                     // live control by class, so both retain its ordinary guards.
                     class: "btn btn-primary new-session-button",
                     "data-tooltip": NEW_SESSION_TOOLTIP,
-                    // The heading keeps the short visible word "new" while the
-                    // accessible name preserves the object named by the former
-                    // full-width label.
-                    aria_label: "new session",
+                    aria_label: "New session",
                     // This control UNMOUNTS the create form, so it must not act
                     // while anything is in flight: dropping the component drops
                     // its `spawn`ed task's ability to ever act on the response,
@@ -4159,19 +4150,9 @@ pub(crate) fn ListView(
                         }
                         show_create.set(false);
                     },
-                        "new"
+                        crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Add }
                     }
-                    // Beside New, the action it feeds (SPEC.md: "The Templates
-                    // control sits beside New in the session list header").
-                    button {
-                        r#type: "button",
-                        class: "btn btn-neutral templates-button",
-                        "data-tooltip": preferences.0.read().quick_launch_template.as_ref().map_or_else(|| format!("templates: mark one with ⚡ for quick launch ({})", crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)), |name| format!("templates: quick launch {} ({})", name.escaped(), crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop))),
-                        aria_haspopup: "dialog",
-                        disabled: busy,
-                        onclick: move |_| { opening_generation += 1; quick_launch_pending.set(false); auto_launch.set(false); initial_template.set(None); quick_launch_hint.set(false); number_shortcut_hint.set(false); templates_open.set(true); },
-                        "templates"
-                    }
+
                 }
             }
             if templates_open() {
@@ -4339,8 +4320,8 @@ pub(crate) fn ListView(
                     },
                 }
             }
-        // Both native controls remain available while a listing is loading or
-        // failed, including when a selected host has become a tombstone.
+        // Host choice remains available while a listing is loading or failed,
+        // including when the selected host has become a tombstone.
             div { class: "list-header-controls",
                 select {
                     class: "filter-host",
@@ -4374,33 +4355,6 @@ pub(crate) fn ListView(
                     }
                     if let Some(missing) = removed_filter_host {
                         option { value: "{missing}", disabled: true, selected: true, "host {missing} (no longer registered)" }
-                    }
-                }
-                // A native select keeps the platform's keyboard and assistive
-                // behavior. Its accessible name survives without a visible
-                // word that would only duplicate the selected order's meaning.
-                select {
-                    class: "sort-select",
-                    aria_label: "sort",
-                    "data-tooltip": "sort: the order of the session list, shared by every client",
-                    value: sort().key(),
-                    onchange: move |evt| {
-                        // A word this build does not know is ignored rather
-                        // than defaulted: every option here is ours, so the
-                        // only way to reach that arm is a value nobody
-                        // offered, and silently re-sorting to the default
-                        // would be a worse answer than doing nothing.
-                        if let Some(next) = ListSort::from_key(&evt.value()) {
-                            apply_sort(next);
-                        }
-                    },
-                    for (option_sort, option_label) in SORT_OPTIONS {
-                        option {
-                            key: "{option_sort.key()}",
-                            value: "{option_sort.key()}",
-                            selected: sort() == option_sort,
-                            "{option_label}"
-                        }
                     }
                 }
             }
@@ -5758,13 +5712,8 @@ mod tests {
     /// on the request side; between them, an option and the query it produces
     /// cannot drift apart without one of the two failing.
     ///
-    /// The default-first half is a presentation contract rather than a
-    /// functional one — the select is controlled from `sort`, so the right
-    /// option shows selected whatever position it sits in (see
-    /// `SORT_OPTIONS`). What the assertion protects is the fallback reading:
-    /// a render that lost the binding shows the head of the list, and the
-    /// head being the default is what makes that degrade to a control
-    /// agreeing with the rows instead of one contradicting them.
+    /// Default first is presentation: the menu highlights the shared choice,
+    /// while a new user meets the usual ordering before the alternatives.
     #[farhelm_testtrace::test]
     fn the_offered_orders_are_the_wire_vocabulary_with_the_default_first() {
         assert_eq!(
@@ -5775,7 +5724,7 @@ mod tests {
         assert_eq!(
             SORT_OPTIONS[0].0,
             ListSort::default(),
-            "the head of the list is the order an unbound render would show"
+            "the default order leads the offered choices"
         );
         for (_, label) in SORT_OPTIONS {
             assert!(

@@ -1,3 +1,4 @@
+import { expectCompactRows } from "./helpers/list-header";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { expect, test } from "./helpers/evidence";
@@ -88,7 +89,10 @@ async function prepare(page: Page, request: APIRequestContext, clock = false) {
   const target = await ownedSession(request, `aaa-width-${stamp}`);
   const stable = await ownedSession(request, `bbb-width-${stamp}`);
   const selected = await ownedSession(request, `ccc-width-${stamp}`);
-  await patchPreferences(request, { welcome_seen: true, compact: true, list_sort: "title" });
+  // Recently active no longer reaches the supported-width wrap threshold.
+  // Newest created still has to pass the actual fit premise below. The frozen
+  // listing owns row order, independently of the requested sort label.
+  await patchPreferences(request, { welcome_seen: true, compact: true, list_sort: "created" });
   await pinAutoSelect(page, selected);
   const response = await request.get("/api/sessions");
   expect(response.ok()).toBe(true);
@@ -161,8 +165,8 @@ async function prepare(page: Page, request: APIRequestContext, clock = false) {
   await feed.waitForConnection(1);
   await settle(page);
   await trashReady(page, 0);
-  await expect(page.locator(".compact-toggle input")).toBeChecked();
-  await expect(page.locator(".session-heading .heading-count")).toHaveText("3");
+  await expectCompactRows(page, true);
+  await expect(page.locator(".session-heading .session-count")).toHaveText("3");
   await expect(page.locator(".session-row")).toHaveCount(3);
   expect(await page.locator(".session-row").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-session-id"))))
     .toEqual([target, stable, selected]);
@@ -425,16 +429,16 @@ async function headerMetrics(page: Page) {
     const box = node.getBoundingClientRect();
     const style = getComputedStyle(node);
     const count = node.querySelector(".session-count")!.getBoundingClientRect();
-    const compact = node.querySelector(".compact-toggle")!.getBoundingClientRect();
+    const title = node.querySelector(".sort-title-owner")!.getBoundingClientRect();
     const actions = node.querySelector(".session-heading-actions")!.getBoundingClientRect();
     return {
       height: box.height,
       available: box.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
-      total: count.width + compact.width + actions.width + 2 * parseFloat(style.columnGap),
+      total: count.width + title.width + actions.width + 2 * parseFloat(style.columnGap),
       actionsY: actions.y,
       actionsX: actions.x,
-      compactBottom: compact.bottom,
-      compactRight: compact.right,
+      titleBottom: title.bottom,
+      titleRight: title.right,
       sidebar: parseFloat(getComputedStyle(document.querySelector(".app-sidebar")!).width),
     };
   });
@@ -457,7 +461,7 @@ for (const kind of ["menu", "bell"] as const) {
     await sidebarWidth(page, desired);
     const fitted = await headerMetrics(page);
     expect(fitted.height).toBe(empty.height);
-    expect(fitted.actionsX).toBeGreaterThanOrEqual(fitted.compactRight);
+    expect(fitted.actionsX).toBeGreaterThanOrEqual(fitted.titleRight);
     expect(fitted.available).toBeGreaterThanOrEqual(empty.total);
     expect(fitted.available).toBeLessThan(one.total);
     const complete = await fixture.holdTrash(1);
@@ -476,13 +480,13 @@ for (const kind of ["menu", "bell"] as const) {
     expect(after.bellY - before.bellY).toBe(growth);
     expect(after.actions.y - before.actions.y).toBe(growth);
     const wrapped = await headerMetrics(page);
-    expect(wrapped.actionsY).toBeGreaterThan(wrapped.compactBottom);
+    expect(wrapped.actionsY).toBeGreaterThan(wrapped.titleBottom);
     expect({ ...after, heading: { ...after.heading, height: before.heading.height },
       row: { ...after.row, y: before.row.y }, actions: { ...after.actions, y: before.actions.y }, bellY: before.bellY })
       .toEqual(before);
     expect(fixture.reads(), "trash acceptance must not rely on a session listing change").toBe(reads);
     expect(await page.locator(".session-row").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-session-id")))).toEqual(ids);
-    await expect(page.locator(".session-heading .heading-count")).toHaveText("3");
+    await expect(page.locator(".session-heading .session-count")).toHaveText("3");
     await expect(panel).toHaveCount(0);
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
   });

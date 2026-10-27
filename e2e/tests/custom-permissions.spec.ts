@@ -472,7 +472,7 @@ test("custom template words round trip into the launcher and clear on a stacked 
     await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true }).click();
     await expect(form.locator(".custom-permission-flags")).toHaveValue("");
     await form.locator(".launch-composer-cancel").click();
-    await page.getByRole("button", { name: "templates", exact: true }).click();
+    await page.getByRole("button", { name: "Templates", exact: true }).click();
     const dialog = page.locator(".templates-dialog");
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
     await dialog.locator(".templates-row-name").filter({ hasText: new RegExp(`^${name}$`) }).click();

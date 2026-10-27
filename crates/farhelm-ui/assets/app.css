@@ -1044,9 +1044,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   .app-version-refresh-spinning { animation: none; }
 }
 
-/* The count remains its own element for the committed-list contract. Count,
-   compact choice, and the header actions describe the same list, so they
-   share one compact heading rather than spending a row each. */
+/* Each list keeps its count in the header. The session title and icon
+   actions share a band; density lives in the title's menu. */
 .session-heading,
 .hosts-heading {
   display: flex;
@@ -1065,28 +1064,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   padding: 0;
 }
 
-/* The section label: small, uppercase, tracked, in the muted foreground.
-   ONE type treatment for every place the chrome names a section, which is
-   the launch composer's field groups and the sidebar's two list headings.
-   It started in the composer and was the part of that dialog most worth
-   keeping, so the sidebar's counts ("3 hosts", "12 sessions") now wear it
-   too and both surfaces label their sections the same way.
-
-   Only the PLAIN count. The same element also carries whole sentences when
-   a filter is in force ("2 matching of 12 sessions", and the longer notice
-   that a helm ignored the filter), marked `.filtered`. Those are prose, and
-   a sentence in tracked capitals in a 340px column is hard to read, so they
-   keep the banner's ordinary type. The `.banner` in the selector is there
-   for specificity: `.banner.session-count` further down sets its own
-   `font-size` and would otherwise win by coming later.
-
-   Type only. What differs stays with each owner: the composer's label is a
-   block with a hairline after it (`.launch-composer-section-label`), the
-   sidebar's count is an inline member of a heading row. `text-transform`
-   does the uppercasing, so the DOM text, and with it the accessible name
-   and everything the browser suite matches on, stays as written. */
+/* Composer section labels and the host heading keep their small tracked
+   treatment. The session list instead names its chosen ordering as its title. */
 .launch-composer-section-label,
-.session-heading .banner.session-count:not(.filtered),
 .hosts-heading .host-count {
   color: var(--fg-1);
   font-size: 11px;
@@ -1094,10 +1074,10 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   text-transform: uppercase;
 }
 
-/* The sidebar's two counts read as headings, label first: "HOSTS 3",
-   "SESSIONS 12". The markup keeps the number FIRST (`.heading-count` then
+/* The host count reads as a heading, label first: "HOSTS 3".
+   The markup keeps the number FIRST (`.heading-count` then
    `.heading-label`, the label carrying its own leading space) so the
-   element's text content is still "3 hosts" / "12 sessions": that is the
+   element's text content is still "3 hosts": that is the
    sentence a screen reader announces, and the browser suite asserts it
    across several spec files. `row-reverse` swaps the two on screen only, and
    `flex-end` keeps the swapped pair at the row's start. A flex item drops
@@ -1106,7 +1086,6 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    label and not part of the word. It is NOT a quieter color: the band is
    `--bg-2`, where `--fg-2` falls under the AA floor, so both halves stay
    `--fg-1`. */
-.session-heading .banner.session-count:not(.filtered),
 .hosts-heading .host-count {
   display: inline-flex;
   flex-direction: row-reverse;
@@ -1119,7 +1098,6 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   letter-spacing: 0;
 }
 
-.compact-toggle,
 .host-details-control {
   display: inline-flex;
   align-items: center;
@@ -1143,7 +1121,11 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .session-heading .new-session-button,
 .session-heading .templates-button,
 .session-heading .checkout-trash-button {
-  padding: 2px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 3px;
   height: 24px;
   box-sizing: border-box;
 }
@@ -1153,18 +1135,50 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   padding-inline: 8px;
 }
 
-.session-heading .templates-button {
-  font-size: 11px;
+.session-heading .banner.session-count {
+  color: var(--fg-1);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
-/* At 240px the header gives up its single line, rather than shrinking labels
-   into unreadable fragments. Trash remains immediately left of New on either
-   line, and Templates follows the pair. */
+/* The sort is the title, with its count beside it. These controls may wrap
+   as groups at the minimum width; none borrows the host heading's capitals. */
+.sort-title-owner {
+  min-width: 0;
+}
+
+.session-heading .sort-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  color: var(--fg-0);
+  font: 600 13px var(--font-ui);
+  white-space: nowrap;
+}
+
+.sort-title .action-glyph {
+  width: 12px;
+  height: 12px;
+}
+
+.sort-menu-item[aria-checked="true"] .menu-label::after {
+  content: " ✓";
+}
+
+.session-heading [data-warning="true"] {
+  flex-basis: 100%;
+  white-space: normal;
+}
+
+/* At 240px the header gives up its single line. Trash, Templates and New
+   remain a nonshrinking group, in their native keyboard order. */
 .session-heading-actions {
   display: flex;
   align-items: center;
   gap: 4px;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .session-heading .checkout-trash-button {
@@ -1204,23 +1218,10 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   background: var(--bg-1);
 }
 
-/* A select's displayed value says what ordering is in force, so the visible
-   "sort" label would repeat it. The accessible label remains in the markup. */
-.list-header-controls .sort-select {
-  margin-left: auto;
-  background: var(--well);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--fg-0);
-  font: 12px var(--font-ui);
-  padding: 1px 4px;
-}
-
-/* The sidebar keeps its two native selectors visible even for a failed list
-   read. Both may contain long registry labels, so neither gets to impose its
+/* The host choice stays visible even for a failed list read. Its registry
+   label can be long, so it must not impose its
    intrinsic width on a narrow sidebar. */
-.list-header-controls .filter-host,
-.list-header-controls .sort-select {
+.list-header-controls .filter-host {
   min-width: 0;
   max-width: 100%;
 }
@@ -1229,10 +1230,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   flex: 1 1 9em;
 }
 
-/* Keep the new native selector in the same compact visual language as sort
-   without replacing the platform behavior that makes it accessible. */
-.list-header-controls .filter-host,
-.list-header-controls .sort-select {
+/* Keep host selection compact without replacing the native keyboard and
+   focus behavior that makes it accessible. */
+.list-header-controls .filter-host {
   background: var(--well);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -2393,7 +2393,8 @@ a:any-link,
    header triggers as one category, not as separate exceptions. Its glyph
    uses the inverse role because the pressed fill is now solid. */
 .session-row-menu[aria-expanded="true"],
-.host-row-menu[aria-expanded="true"] {
+.host-row-menu[aria-expanded="true"],
+.session-heading .sort-title[aria-expanded="true"] {
   background: var(--accent-fill-hover);
   color: var(--on-fill);
 }
