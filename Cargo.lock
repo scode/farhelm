@@ -2025,6 +2025,7 @@ dependencies = [
  "futures-channel",
  "gio",
  "gloo-timers",
+ "gtk",
  "mime_guess",
  "objc2",
  "objc2-app-kit",
@@ -2046,6 +2047,7 @@ dependencies = [
  "web-sys",
  "web-time",
  "webbrowser",
+ "webkit2gtk",
  "windows-sys 0.61.2",
 ]
 

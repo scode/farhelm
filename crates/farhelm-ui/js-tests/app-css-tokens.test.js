@@ -1,7 +1,7 @@
 // Static invariant coverage for app.css's design-token layer (see that
 // file's own header and `:root` signpost comment for the rule this test
-// pins: colors, font stacks, and non-zero corner radii live ONCE in
-// `:root` as named custom properties, and every use site carries
+// pins: colors, font stacks, and non-zero corner radii live in the
+// root token blocks as named custom properties, and every use site carries
 // `var(--token)` rather than a literal).
 //
 // Why this file exists rather than trusting review: the token layer is a
@@ -21,9 +21,9 @@
 // specifically so the negative-path assertions can feed it small synthetic
 // snippets instead of mutating the real stylesheet — see the "synthetic
 // cases" tests. It is a pragmatic regex/brace-matching scanner, not a full
-// CSS parser: good enough for this file's actual shape (no nested at-rules
-// besides `@font-face`, no custom properties whose values contain braces),
-// not a general-purpose CSS validator.
+// CSS parser: it assumes flat palette blocks and custom properties whose
+// values contain no braces. Other at-rules are scanned only for literal
+// hygiene; browser checks own the cascade and rendered inheritance.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -64,7 +64,13 @@ const RADIUS_DECL_RE = /border(?:-[a-z]+)*-radius\s*:\s*([^;{}]+)/g;
 const RADIUS_LENGTH_LITERAL_RE =
   /(?<![\w.-])(?![0.]+[a-z])\d*\.?\d+(?:px|r?em|ch|ex|pt|pc|cm|mm|in|q|v[wh]|vmin|vmax)\b/i;
 const VAR_REF_RE = /var\(\s*(--[a-zA-Z0-9-]+)/g;
-const VAR_DECL_RE = /(--[a-zA-Z0-9-]+)\s*:/g;
+const PALETTE_SELECTORS = [":root", ':root[data-appearance="light"]'];
+// These describe geometry and type, so inheriting them is intentional. Every
+// other root role belongs to a palette, including opacity and elevation.
+const SHARED_TOKENS = new Set([
+  "--sidebar-width", "--dialog-vertical-margin", "--radius-sm", "--radius-md", "--radius-lg", "--radius-pill",
+  "--row-slot", "--row-slot-gap", "--font-ui", "--font-mono",
+]);
 
 /** Removes every `/* ... *\/` comment so the checks below never trip on
  * prose that happens to mention a hex code or a font name. Must run before
@@ -107,18 +113,60 @@ function findBlocks(css, keyword) {
   return blocks;
 }
 
-/** The set of `--name` custom properties declared inside any `:root` block
- * in `css` (comments already stripped). A light theme's SECOND `:root`
- * block — see app.css's own header — would union in here too, which is
- * deliberate: this checker's job is "was a token declared somewhere legal",
- * not "was it declared exactly once". */
-function declaredRootTokens(css) {
-  const declared = new Set();
-  for (const block of findBlocks(css, ":root")) {
-    const body = css.slice(block.bodyStart, block.bodyEnd);
-    for (const match of body.matchAll(VAR_DECL_RE)) declared.add(match[1]);
+/** Read exact palette owners, never a descendant or a root-looking selector.
+ * Completeness must not be proved by unioning fallback dark declarations into
+ * light: a forgotten light role would otherwise silently keep its dark value.
+ * Root declarations are flat; this is not an at-rule or selector parser. */
+function rootPalettes(css) {
+  return [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((match) => {
+    // Only top-level blocks that declare tokens can own a palette. The
+    // inactive-window rule targets descendants; phone layout overrides shared
+    // geometry inside @media. Neither adds another palette to the contract.
+    if (!match[1].includes(":root") || !/--[a-zA-Z0-9-]+\s*:/.test(match[2])) return false;
+    const prefix = css.slice(0, match.index);
+    return (prefix.match(/\{/g)?.length ?? 0) === (prefix.match(/\}/g)?.length ?? 0);
+  }).map((match) => {
+    const selector = match[1].trim();
+    const tokens = new Map();
+    for (const declaration of match[2].matchAll(/(--[a-zA-Z0-9-]+)\s*:\s*([^;]+);/g)) {
+      tokens.set(declaration[1], declaration[2].trim());
+    }
+    return { selector, tokens };
+  });
+}
+
+/** Check the two-block contract separately from generic literal hygiene.
+ * Only the explicit shared roles may inherit. Each palette's references are
+ * then resolved against its own declarations plus those shared roles, so even
+ * a valid dark fallback cannot hide an incomplete light palette. */
+function checkPaletteCoverage(css) {
+  const palettes = rootPalettes(stripComments(css));
+  const errors = [];
+  for (const selector of PALETTE_SELECTORS) {
+    if (palettes.filter((palette) => palette.selector === selector).length !== 1) {
+      errors.push(`expected exactly one ${selector} palette`);
+    }
   }
-  return declared;
+  for (const { selector } of palettes) {
+    if (!PALETTE_SELECTORS.includes(selector)) errors.push(`unexpected palette selector ${selector}`);
+  }
+  const dark = palettes.find((palette) => palette.selector === ":root");
+  const light = palettes.find((palette) => palette.selector === PALETTE_SELECTORS[1]);
+  if (!dark || !light) return errors;
+  const roles = new Set([...dark.tokens.keys(), ...light.tokens.keys()].filter((name) => !SHARED_TOKENS.has(name)));
+  const referenced = new Set([...stripComments(css).matchAll(VAR_REF_RE)].map((match) => match[1]));
+  for (const { selector, tokens } of [dark, light]) {
+    for (const name of roles) {
+      if (!tokens.has(name)) errors.push(`${selector}: missing palette role ${name}`);
+    }
+    for (const name of referenced) {
+      if (!tokens.has(name) && !(SHARED_TOKENS.has(name) && dark.tokens.has(name)) &&
+        !RUNTIME_ALLOWLISTED_VARS.has(name)) {
+        errors.push(`${selector}: var(${name}) cannot resolve independently`);
+      }
+    }
+  }
+  return errors;
 }
 
 /** Returns `css` with the given blocks' full text (header through closing
@@ -181,7 +229,7 @@ function checkAppCss(css) {
     }
   }
 
-  const declared = declaredRootTokens(stripped);
+  const declared = new Set(rootPalettes(stripped).flatMap(({ tokens }) => [...tokens.keys()]));
   const referenced = new Set([...stripped.matchAll(VAR_REF_RE)].map((m) => m[1]));
   for (const name of referenced) {
     if (!declared.has(name) && !RUNTIME_ALLOWLISTED_VARS.has(name)) {
@@ -192,16 +240,49 @@ function checkAppCss(css) {
   return { ok: errors.length === 0, errors };
 }
 
-// ---- Real-file regression: the invariant the rest of this file exists to
-// protect. Everything below this point exercises `checkAppCss` in
-// isolation against synthetic snippets, which pin the checker's OWN
-// behavior; this is the one test that pins app.css itself. ----
+// ---- Real-file regressions bind token hygiene and complete palettes.
+// Synthetic cases then prove that the scanner catches each failure. ----
 
 test("the shipped app.css holds no bare literals and every var() resolves", () => {
   const css = fs.readFileSync(APP_CSS_PATH, "utf8");
   const result = checkAppCss(css);
   assert.deepEqual(result.errors, []);
   assert.equal(result.ok, true);
+});
+
+/** A dark fallback is valid CSS but the wrong appearance. Check exact block
+ * identities and role coverage in addition to the generic use-site scanner. */
+test("both shipped palettes explicitly cover their color, opacity and elevation roles", () => {
+  const css = fs.readFileSync(APP_CSS_PATH, "utf8");
+  assert.deepEqual(checkPaletteCoverage(css), []);
+});
+
+test("a missing light color or shadow fails despite an available dark fallback", () => {
+  const css = ':root { --fg-0: #fff; --shadow-menu: 0 1px 2px #000; }\n' +
+    ':root[data-appearance="light"] { --fg-0: #111; --shadow-menu: 0 1px 2px #222; }\n' +
+    '.thing { color: var(--fg-0); box-shadow: var(--shadow-menu); }';
+  assert.deepEqual(checkPaletteCoverage(css), [], "the complete fixture must establish both roles first");
+  for (const declaration of ["--fg-0: #111;", "--shadow-menu: 0 1px 2px #222;"]) {
+    const broken = css.replace(declaration, "");
+    assert.notEqual(broken, css);
+    assert.ok(checkPaletteCoverage(broken).some((error) => error.includes("missing palette role")));
+    assert.deepEqual(checkAppCss(broken).errors, [], "union-based token hygiene alone cannot catch this failure");
+  }
+});
+
+test("a root-looking descendant cannot impersonate the light palette", () => {
+  const css = ':root { --fg-0: #fff; } :root[data-appearance="light"] .card { --fg-0: #111; }';
+  assert.ok(checkPaletteCoverage(css).some((error) => error.includes("expected exactly one")));
+});
+
+/** Responsive shared geometry is independent of the two palette owners. */
+test("nested geometry and root descendant rules do not become palettes", () => {
+  const palettes = ':root { --fg-0: #fff; } :root[data-appearance="light"] { --fg-0: #111; }';
+  const unrelated = '@media (max-width: 620px) { :root { --dialog-vertical-margin: 12px; } } ' +
+    ':root[data-window-active="false"] * { animation-play-state: paused; }';
+  assert.deepEqual(checkPaletteCoverage(palettes + unrelated), []);
+  const nestedOnly = ':root { --fg-0: #fff; } @media (prefers-color-scheme: light) { :root[data-appearance="light"] { --fg-0: #111; } }';
+  assert.ok(checkPaletteCoverage(nestedOnly).some((error) => error.includes("expected exactly one")));
 });
 
 // ---- Synthetic cases: each pins one failure mode in isolation, so a
@@ -296,16 +377,11 @@ test("a clean stylesheet with only var() use sites passes", () => {
 // Font-role coverage complements token hygiene: a valid token can still
 // name the wrong face or be disconnected from the element that needs it.
 
-/** Extracts the value assigned to `--font-ui` inside the FIRST `:root`
- * block of `css` (comments already stripped) — the shipped dark palette,
- * not a hypothetical future light-theme override. `null` if the token is
- * not declared there at all. */
+/** Extracts the shared `--font-ui` from the exact dark root owner.
+ * Light inherits type rather than introducing a second font contract.
+ * Returns `null` when the shared role is not declared. */
 function firstRootFontUiValue(strippedCss) {
-  const [firstRoot] = findBlocks(strippedCss, ":root");
-  if (!firstRoot) return null;
-  const body = strippedCss.slice(firstRoot.bodyStart, firstRoot.bodyEnd);
-  const match = body.match(/--font-ui:\s*([^;]+);/);
-  return match ? match[1].trim() : null;
+  return rootPalettes(strippedCss).find(({ selector }) => selector === ":root")?.tokens.get("--font-ui") || null;
 }
 
 /** Extracts the `font-family` declaration's raw value from the `html,

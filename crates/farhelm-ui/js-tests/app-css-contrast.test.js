@@ -1,5 +1,5 @@
 // Independent WCAG contrast-floor coverage for app.css's shipped `:root`
-// palette — the sibling to app-css-tokens.test.js, which pins the
+// palettes — the sibling to app-css-tokens.test.js, which pins the
 // no-literals STRUCTURE of the token layer but says nothing about whether
 // any given pair of tokens is actually legible together.
 //
@@ -25,6 +25,7 @@ const path = require("node:path");
 const APP_CSS_PATH = path.join(__dirname, "../assets/app.css");
 
 const HEX_DECL_RE = /(--[a-zA-Z0-9-]+)\s*:\s*(#[0-9a-fA-F]{3,8})\s*[;)]/g;
+const PALETTES = [["dark", ":root"], ["light", ':root[data-appearance="light"]']];
 
 /** Removes every `/* ... *\/` comment, so a token-looking string inside a
  * prose comment (the `:root` block is full of them) can never be mistaken
@@ -34,29 +35,26 @@ function stripComments(css) {
 }
 
 /**
- * Every `--token: #hex` custom property declared in the FIRST `:root`
- * block of `css`. Comments are stripped before scanning. Non-hex
- * declarations (`rgba()`, `calc()`, font stacks, `--radius-*`) are
- * silently skipped — contrast math only ever needs the hex-valued color
- * tokens. A light theme's SECOND `:root` block (app.css's own header
- * describes that arrangement) is out of scope for this check, same
- * carve-out the sibling token-usage test makes.
+ * Read hex colors from one exact palette owner, without dark fallback.
+ * The token checker owns complete role coverage, including non-hex veils and
+ * shadows. This scanner handles flat, top-level root blocks only; a missing
+ * or duplicate owner yields no colors so contrast bindings cannot pass by
+ * accidentally borrowing the other palette or a root-looking descendant.
  */
-function extractRootHexTokens(css) {
+function extractRootHexTokens(css, appearance = "dark") {
+  const selector = PALETTES.find(([name]) => name === appearance)?.[1];
   const stripped = stripComments(css);
-  const start = stripped.indexOf(":root");
-  if (start === -1) return new Map();
-  const openBrace = stripped.indexOf("{", start);
-  let depth = 1;
-  let i = openBrace + 1;
-  while (i < stripped.length && depth > 0) {
-    if (stripped[i] === "{") depth++;
-    else if (stripped[i] === "}") depth--;
-    i++;
-  }
-  const body = stripped.slice(openBrace + 1, i - 1);
+  const blocks = [...stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter((match) => match[1].trim() === selector)
+    // A phone-width :root changes shared geometry inside @media. It is not
+    // another palette owner, even though its selector has the same spelling.
+    .filter((match) => {
+      const prefix = stripped.slice(0, match.index);
+      return (prefix.match(/\{/g)?.length ?? 0) === (prefix.match(/\}/g)?.length ?? 0);
+    });
   const tokens = new Map();
-  for (const match of body.matchAll(HEX_DECL_RE)) {
+  if (blocks.length !== 1) return tokens;
+  for (const match of blocks[0][2].matchAll(HEX_DECL_RE)) {
     tokens.set(match[1], match[2]);
   }
   return tokens;
@@ -113,12 +111,16 @@ function contrastRatio(hexA, hexB) {
 const NEUTRAL_SURFACES = ["--bg-0", "--bg-1", "--bg-2", "--control-hover-bg", "--chip-bg", "--well"];
 const SELECTED_SURFACES = ["--accent-fill", "--accent-fill-hover"];
 const REQUIRED_BINDINGS = [
-  ["--link", "--bg-2", 4.5],
-  ["--warn", "--warn-bg", 4.5],
+  ...NEUTRAL_SURFACES.map((bg) => ["--link", bg, 4.5]),
+  ...["--warn-bg", "--warn-bg-dim", "--warn-fill-hover"].flatMap((bg) =>
+    ["--warn", "--warn-bright"].map((fg) => [fg, bg, 4.5])
+  ),
+  ...["--fg-0", "--fg-1", "--danger", "--danger-strong"].map((fg) => [fg, "--danger-bg-dim", 4.5]),
   ...["lavender", "orchid", "teal", "steel", "sand", "copper", "red"].flatMap((name) =>
     NEUTRAL_SURFACES.map((bg) => [`--host-icon-${name}`, bg, 4.5])
   ),
-  ...["--fg-0", "--fg-1", "--fg-2", "--danger-strong", "--accent"].flatMap((fg) =>
+  ...["--fg-0", "--fg-dim", "--fg-1", "--fg-2", "--fg-bright", "--ok", "--danger", "--danger-strong", "--warn",
+    "--warn-bright", "--info", "--accent"].flatMap((fg) =>
     NEUTRAL_SURFACES.map((bg) => [fg, bg, 4.5])
   ),
   ...["--ok", "--danger", "--info"].flatMap((fg) => NEUTRAL_SURFACES.map((bg) => [fg, bg, 3])),
@@ -130,28 +132,28 @@ const REQUIRED_BINDINGS = [
 
 /**
  * Checks every `[fg, bg, min]` triple in `bindings` against the hex values
- * `css` declares in `:root`, returning `{ ok, errors, ratios }` — never
+ * `css` declares in the named palette, returning `{ ok, errors, ratios }` — never
  * throws, so both the real-file regression and the synthetic negative
  * cases below can assert on the error list's shape rather than catching.
  * A binding naming a token `css` never declared is itself an error (not a
  * thrown exception), so a synthetic snippet can exercise that path
  * directly too.
  */
-function checkContrastBindings(css, bindings) {
-  const tokens = extractRootHexTokens(css);
+function checkContrastBindings(css, bindings, appearance = "dark") {
+  const tokens = extractRootHexTokens(css, appearance);
   const errors = [];
   const ratios = [];
   for (const [fg, bg, min] of bindings) {
     const fgHex = tokens.get(fg);
     const bgHex = tokens.get(bg);
     if (!fgHex || !bgHex) {
-      errors.push(`${fg} on ${bg}: one or both tokens not declared in :root`);
+      errors.push(`${appearance}: ${fg} on ${bg}: one or both tokens not declared in palette`);
       continue;
     }
     const ratio = contrastRatio(fgHex, bgHex);
     ratios.push({ fg, bg, ratio });
     if (ratio < min) {
-      errors.push(`${fg} (${fgHex}) on ${bg} (${bgHex}): ${ratio.toFixed(3)}:1 is below the ${min}:1 floor`);
+      errors.push(`${appearance}: ${fg} (${fgHex}) on ${bg} (${bgHex}): ${ratio.toFixed(3)}:1 is below the ${min}:1 floor`);
     }
   }
   return { ok: errors.length === 0, errors, ratios };
@@ -243,6 +245,17 @@ const HIGHLIGHTED_COMMANDS = ["session-row-menu-item", "host-row-menu-item"].fla
   ["hover", "focus"].map((state) => `.${name}:${state}:not([aria-disabled="true"])`)
 );
 const SHIPPED_ROLE_BINDINGS = [
+  [".status-badge.running", "color", "var(--ok)"],
+  [".status-badge.waiting", "color", "var(--danger)"],
+  [".status-badge.idle", "color", "var(--fg-1)"],
+  [".status-badge.idle.unseen", "color", "var(--info)"],
+  [".status-badge.exited", "color", "var(--fg-1)"],
+  [".status-badge.interrupted", "color", "var(--warn)"],
+  [".status-badge.error", "color", "var(--danger-strong)"],
+  [".session-row.stale .status-badge .status-dot", "color", "var(--fg-2)"],
+  [".host-update-dot", "background", "var(--warn)"],
+  [".delete-progress-dot", "background", "var(--accent)"],
+  ['.provisioning-step[data-status="running"] .provisioning-step-marker', "color", "var(--warn)"],
   ...SELECTED_OWNERS.map((selector) => [selector, "background", "var(--accent-fill)"]),
   ...SELECTED_OWNERS.filter((selector) =>
     ![".session-row.selected", ".host-icon-choice[aria-pressed=\"true\"]"].includes(selector)
@@ -314,11 +327,23 @@ function compositeHex(foreground, background, opacity) {
 // ---- Real-file regressions: arithmetic, use sites and selected motion.
 // Browser checks complement these by resolving the actual DOM cascade. ----
 
-test("the shipped app.css palette clears every AA/non-text binding its comments promise", () => {
+test("both shipped palettes clear every AA/non-text binding their comments promise", () => {
   const css = fs.readFileSync(APP_CSS_PATH, "utf8");
-  const result = checkContrastBindings(css, REQUIRED_BINDINGS);
-  assert.deepEqual(result.errors, []);
-  assert.equal(result.ok, true);
+  for (const [appearance] of PALETTES) {
+    const result = checkContrastBindings(css, REQUIRED_BINDINGS, appearance);
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.ok, true);
+  }
+});
+
+/** Native controls must follow the explicit appearance even when it opposes
+ * the OS. The terminal is independently themed and must not follow either. */
+test("each palette declares its native color scheme and the unchanged terminal surface", () => {
+  const css = fs.readFileSync(APP_CSS_PATH, "utf8");
+  for (const [appearance, selector] of PALETTES) {
+    assert.equal(declarationsForSelector(css, selector).get("color-scheme"), appearance);
+    assert.equal(extractRootHexTokens(css, appearance).get("--terminal-bg"), "#282c34");
+  }
 });
 
 test("solid selection uses inverse roles at actual owners, metadata, marks and focus", () => {
@@ -326,13 +351,13 @@ test("solid selection uses inverse roles at actual owners, metadata, marks and f
   assert.deepEqual(checkShippedRoles(css), []);
 });
 
-test("selected running retains its shaped stepped pulse above the graphical floor", () => {
+test("both palettes retain shaped stepped status pulses above the painted graphical floor", () => {
   const css = fs.readFileSync(APP_CSS_PATH, "utf8");
-  const root = declarationsForSelector(css, ":root");
-  const tokens = extractRootHexTokens(css);
-  const minimum = Number(root.get("--selected-status-pulse-min"));
-  assert.equal(minimum, 0.85);
-  assert.equal(root.get("--status-pulse-min"), "0.60");
+  const marker = '.provisioning-step[data-status="running"] .provisioning-step-marker';
+  assert.equal(declarationsForSelector(css, marker).has("animation"), false, "the ordinal stays opaque");
+  assert.equal(declarationsForSelector(css, marker).get("color"), "var(--warn)");
+  assert.equal(declarationsForSelector(css, marker + "::after").get("animation"), "none", "Reduce Motion stops the ring");
+  assert.match(stripComments(css), /\.provisioning-step\[data-status="running"\] \.provisioning-step-marker::after\s*\{[^}]*animation: farhelm-status-pulse 2s steps\(4\) infinite;/);
   for (const selector of [".session-row.selected", ".quick-switcher-row[aria-selected=\"true\"]"]) {
     assert.equal(declarationsForSelector(css, selector).get("--status-pulse-min"), "var(--selected-status-pulse-min)");
   }
@@ -360,22 +385,42 @@ test("selected running retains its shaped stepped pulse above the graphical floo
     declarationsForSelector(css, ".session-row.stale .status-badge.running .status-dot").get("animation"),
     "none",
   );
-  for (const surface of SELECTED_SURFACES) {
-    const background = tokens.get(surface);
-    const trough = compositeHex(tokens.get("--on-fill"), background, minimum);
-    assert.ok(contrastRatio(trough, background) >= 3, `${surface}: selected pulse trough fell below 3:1`);
-    assert.ok(
-      contrastRatio(compositeHex(tokens.get("--on-fill"), background, 0.45), background) < 3,
-      `${surface}: premise that the old pulse trough loses contrast no longer holds`,
-    );
-  }
-  // Ordinary green also needs the opacity calculation. The quick switcher's
-  // neutral hover is brighter than the sidebar/card, so it binds this floor.
-  for (const surface of ["--bg-1", "--bg-2", "--control-hover-bg"]) {
-    const background = tokens.get(surface);
-    const trough = compositeHex(tokens.get("--ok"), background, Number(root.get("--status-pulse-min")));
-    assert.ok(contrastRatio(trough, background) >= 3, `${surface}: ordinary running pulse trough fell below 3:1`);
-    assert.ok(contrastRatio(compositeHex(tokens.get("--ok"), background, 0.45), background) < 3);
+  for (const [appearance, selector] of PALETTES) {
+    const root = declarationsForSelector(css, selector);
+    const tokens = extractRootHexTokens(css, appearance);
+    const minimum = Number(root.get("--selected-status-pulse-min"));
+    assert.equal(minimum, 0.85);
+    for (const surface of SELECTED_SURFACES) {
+      const background = tokens.get(surface);
+      const trough = compositeHex(tokens.get("--on-fill"), background, minimum);
+      assert.ok(contrastRatio(trough, background) >= 3, `${appearance} ${surface}: selected pulse trough below 3:1`);
+      assert.ok(
+        contrastRatio(compositeHex(tokens.get("--on-fill"), background, 0.45), background) < 3,
+        `${appearance} ${surface}: old pulse trough must establish the regression premise`,
+      );
+    }
+    // The ordinary pulse has a palette-specific minimum: opaque green alone
+    // cannot prove its fading mark remains visible on a quick-switcher hover.
+    const ordinaryMinimum = Number(root.get("--status-pulse-min"));
+    assert.equal(ordinaryMinimum, appearance === "dark" ? 0.60 : 0.73);
+    for (const surface of ["--bg-1", "--bg-2", "--control-hover-bg"]) {
+      const background = tokens.get(surface);
+      const trough = compositeHex(tokens.get("--ok"), background, ordinaryMinimum);
+      assert.ok(contrastRatio(trough, background) >= 3, `${appearance} ${surface}: ordinary pulse trough below 3:1`);
+      assert.ok(contrastRatio(compositeHex(tokens.get("--ok"), background, 0.45), background) < 3);
+    }
+    // Host update dots and the circular provisioning marker reuse this pulse
+    // in amber. The delete header's accent dot lives on chrome, not hover.
+    for (const [foreground, surfaces] of [
+      ["--warn", ["--bg-1", "--bg-2", "--control-hover-bg"]],
+      ["--accent", ["--bg-1"]],
+    ]) {
+      for (const surface of surfaces) {
+        const background = tokens.get(surface);
+        const trough = compositeHex(tokens.get(foreground), background, ordinaryMinimum);
+        assert.ok(contrastRatio(trough, background) >= 3, `${appearance} ${foreground} on ${surface}: pulse below 3:1`);
+      }
+    }
   }
 });
 
@@ -415,6 +460,46 @@ test("a synthetic pair that clears its floor passes", () => {
   assert.deepEqual(result.errors, []);
 });
 
+/** Opposite palettes and reversed source order prove that the light check
+ * reads its own exact owner rather than inheriting or reading the first root. */
+test("contrast resolves dark and light independently of their source order", () => {
+  const css = ':root[data-appearance="light"] { --fg-0: #000; --bg-0: #fff; }\n' +
+    ':root { --fg-0: #fff; --bg-0: #000; }';
+  assert.equal(extractRootHexTokens(css, "dark").get("--fg-0"), "#fff");
+  assert.equal(extractRootHexTokens(css, "light").get("--fg-0"), "#000");
+  for (const [appearance] of PALETTES) {
+    assert.deepEqual(checkContrastBindings(css, [["--fg-0", "--bg-0", 4.5]], appearance).errors, []);
+  }
+});
+
+test("contrast rejects a missing light foreground despite a valid dark fallback", () => {
+  const css = ':root { --fg-0: #fff; --bg-0: #000; }\n' +
+    ':root[data-appearance="light"] { --fg-0: #000; --bg-0: #fff; }';
+  const bindings = [["--fg-0", "--bg-0", 4.5]];
+  assert.equal(checkContrastBindings(css, bindings, "light").ok, true, "establish the complete light fixture first");
+  const broken = css.replace("--fg-0: #000;", "");
+  assert.notEqual(broken, css);
+  assert.equal(checkContrastBindings(broken, bindings, "dark").ok, true);
+  assert.ok(checkContrastBindings(broken, bindings, "light").errors.some((error) => error.includes("not declared")));
+});
+
+test("a descendant or duplicate light root cannot supply contrast tokens", () => {
+  const block = ':root[data-appearance="light"] { --fg-0: #000; --bg-0: #fff; }';
+  assert.equal(extractRootHexTokens(block.replace('] {', '] .card {'), "light").size, 0);
+  assert.equal(extractRootHexTokens(`${block}\n${block}`, "light").size, 0);
+});
+
+/** The ordinary green used to look safe when only its opaque token was
+ * checked. Preserve that premise and demonstrate the light-only fade loss. */
+test("the old ordinary opacity fails the light graphical floor despite an accessible opaque green", () => {
+  const css = fs.readFileSync(APP_CSS_PATH, "utf8");
+  const tokens = extractRootHexTokens(css, "light");
+  const foreground = tokens.get("--ok");
+  const background = tokens.get("--control-hover-bg");
+  assert.ok(contrastRatio(foreground, background) >= 4.5);
+  assert.ok(contrastRatio(compositeHex(foreground, background, 0.60), background) < 3);
+});
+
 test("a synthetic pair that crosses the AA floor fails", () => {
   // #777777 on #666666: close enough in lightness that eyeballing a
   // screenshot would not catch it, which is the whole reason this file
@@ -444,6 +529,14 @@ test("a binding naming a token the snippet never declares is reported, not throw
   const result = checkContrastBindings(css, [["--fg-0", "--bg-does-not-exist", 4.5]]);
   assert.equal(result.ok, false);
   assert.ok(result.errors.some((e) => e.includes("not declared")), result.errors.join("\n"));
+});
+
+/** A shared phone-layout root must neither replace nor duplicate the palette. */
+test("contrast ignores nested root geometry and rejects nested-only palette owners", () => {
+  const dark = ':root { --fg-0: #fff; --bg-0: #000; }';
+  const responsive = '@media (max-width: 620px) { :root { --dialog-vertical-margin: 12px; } }';
+  assert.equal(checkContrastBindings(dark + responsive, [["--fg-0", "--bg-0", 4.5]]).ok, true);
+  assert.equal(extractRootHexTokens('@media (min-width: 1px) { ' + dark + ' }').size, 0);
 });
 
 test("a hex color mentioned only inside a comment is not read as a declaration", () => {

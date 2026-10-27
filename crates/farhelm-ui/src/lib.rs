@@ -132,6 +132,7 @@ mod anchored_popovers;
 mod api;
 mod app_bar;
 mod app_updater;
+mod appearance;
 /// The cards that ask the user to approve an agent's `farhelm` command.
 mod approvals;
 mod attachments;
@@ -1408,7 +1409,18 @@ declare_assets! {
     // authentication, and the desktop's startup and failure pages (whose
     // Retry button has hover text) render before `AppBody` exists.
     const TOOLTIP_JS: Asset = asset!("/assets/tooltip.js");
-    const APP_CSS: Asset = asset!("/assets/app.css");
+    // The device choice must resolve before the first page content. A classic
+    // blocking head script runs before the renderer; AppBody insertion would
+    // arrive asynchronously after bootstrap or authentication already painted.
+    // Native startup inlines these same sources before its own body loader.
+    const APPEARANCE_JS: Asset = asset!(
+        "/assets/appearance.js",
+        AssetOptions::js().with_static_head(true).with_module(false)
+    );
+    const APP_CSS: Asset = asset!(
+        "/assets/app.css",
+        AssetOptions::css().with_static_head(true)
+    );
     // The webview console shim (PLAN_desktop_web_bug_triage.md; see that file's
     // own module docs for the loaded-first and desktop-only contracts).
     // Rendered only from `App`'s desktop branch below, rather than from
@@ -1466,6 +1478,7 @@ pub fn App() -> Element {
         // during this render; the webview only sees the markup after the
         // render's edits are applied, so "first hook" is early enough.
         desktop::use_embedded_asset_handler();
+        desktop::use_appearance_smoke();
         desktop::use_foreground_on_launch();
         webview_watchdog::use_webview_watchdog();
         return rsx! {
@@ -1777,7 +1790,6 @@ fn AppBody() -> Element {
             },
         }
         document::Link { rel: "stylesheet", href: VENDOR_XTERM_CSS }
-        document::Link { rel: "stylesheet", href: APP_CSS }
         document::Script { src: VENDOR_XTERM_JS }
         document::Script { src: VENDOR_FIT_JS }
         document::Script { src: VENDOR_UNICODE_GRAPHEMES_JS }

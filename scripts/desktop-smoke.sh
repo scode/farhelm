@@ -25,12 +25,13 @@
 # in. `farhelm-desktop` itself is exercised by
 # `scripts/check-desktop-assets.sh` at build time and by the maintainer on a
 # real Mac.
-# The one pixel-based check (ImageMagick, region-brightness) is an
+# The legacy leg's pixel-based check (ImageMagick, region-brightness) is an
 # interaction GATE, not an assertion: it only answers "has the create
 # form visibly opened yet, so it's safe to click into it" and retries
 # until it has. It never decides pass or fail on its own — every real
-# assertion still goes through the API or tmux. Screenshots are taken
-# only as debugging artifacts on failure.
+# assertion still goes through the API or tmux. Default/legacy screenshots
+# are debugging artifacts on failure; the appearance leg retains its own
+# successful startup evidence too.
 #
 # Why this exists: ordinary CI compiles the desktop renderer, while this
 # release gate runs it on native WebKitGTK. A compile-only surface is exactly
@@ -48,6 +49,13 @@
 # web bundle, which is then embedded in the desktop build), and tmux.
 # Usage: scripts/desktop-smoke.sh   (from the repo root; ~5 min)
 # Honors CARGO_TARGET_DIR, relative or absolute.
+# DESKTOP_SMOKE_APPEARANCE=1 selects only the finite native appearance leg
+# after the shared build/display setup. It retains bounded JSON and one final
+# client screenshot per case. DOM state is not proof of presentation; normal
+# appshots supply visual review. Linux observations are not macOS evidence.
+# DESKTOP_SMOKE_APPEARANCE=no-initialize runs only the fixed rootless-document
+# fault: the hidden native window must refuse within its creation deadline and
+# its owned supervisor must stop through the stdin tether before cleanup.
 #
 # Known handling quirks, learned the hard way:
 # - The window sometimes maps at 10x10 and stays black until a resize
@@ -75,6 +83,11 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+APPEARANCE_MODE="${DESKTOP_SMOKE_APPEARANCE:-}"
+case "$APPEARANCE_MODE" in
+  ""|1|no-initialize) ;;
+  *) echo "FAIL: invalid DESKTOP_SMOKE_APPEARANCE selection" >&2; exit 1 ;;
+esac
 
 # The tmux-preflight legs below assert the exact stderr farhelm-desktop
 # renders for a below-floor tmux, and that message quotes `TMUX_FLOOR`.
@@ -107,7 +120,6 @@ for tool in Xvfb xdotool openbox import convert curl python3 tmux dx; do
     exit 0
   fi
 done
-
 API=""
 DISP="" # assigned once Xvfb reports its allocated display number, below
 
@@ -146,6 +158,11 @@ DESKTOP_READY="$X/desktop-ready.json"
 
 fail() {
   echo "FAIL: $*" >&2
+  if [ -n "$APPEARANCE_MODE" ] && [ -n "${window:-}" ] && [ -n "${evidence:-}" ]; then
+    # Keep a failure image inside the fixture's lifetime. If the window already
+    # disappeared, retained logs and bounded observations remain available.
+    DISPLAY=$DISP timeout 10 import -window "$window" "$evidence/failure-client.png" 2>/dev/null
+  fi
   DISPLAY=$DISP import -window root "$X/failure.png" 2>/dev/null &&
     echo "screenshot: $X/failure.png" >&2
   exit 1
@@ -249,6 +266,9 @@ stop_answering() {
   fi
 }
 PASS=""
+APPEARANCE_STATES=()
+APPEARANCE_PROFILES=()
+
 teardown() {
   [ -n "$TEARDOWN_DONE" ] && return
   TEARDOWN_DONE=1
@@ -270,7 +290,43 @@ teardown() {
   for p in desktop openbox xvfb; do
     [ -f "$X/$p.pid" ] && kill "$(cat "$X/$p.pid")" 2>/dev/null
   done
+  # A failed tether assertion must retain its evidence before this fallback.
+  # pidfd signalling plus the recorded birth identity cannot hit a reused PID.
+  if [ -f "$X/no-initialize/supervisor.json" ]; then
+    python3 - "$X/no-initialize/supervisor.json" <<'PY'
+import json, os, signal, sys, time
+from pathlib import Path
+
+owned = json.loads(Path(sys.argv[1]).read_text())
+try:
+    descriptor = os.pidfd_open(owned["pid"])
+except ProcessLookupError:
+    sys.exit(0)
+try:
+    def same_live_child():
+        """Only this recorded birth may receive failure-path cleanup signals."""
+        try:
+            fields = Path(f'/proc/{owned["pid"]}/stat').read_text().rsplit(') ', 1)[1].split()
+            return fields[0] != 'Z' and int(fields[19]) == owned['startTicks']
+        except FileNotFoundError:
+            return False
+    if same_live_child():
+        signal.pidfd_send_signal(descriptor, signal.SIGTERM)
+        deadline = time.monotonic() + 2
+        while same_live_child() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        if same_live_child():
+            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+except ProcessLookupError:
+    pass  # The owned child completed between the final observation and signal.
+finally:
+    os.close(descriptor)
+PY
+  fi
   tmux -S "$X/state/tmux.sock" kill-server 2>/dev/null
+  for state in "${APPEARANCE_STATES[@]}"; do
+    timeout 10 tmux -S "$state/tmux.sock" kill-server 2>/dev/null
+  done
   stop_answering
 
   # Last-resort scope cleanup, scoped to THIS run's session id only. A
@@ -285,7 +341,15 @@ teardown() {
       awk '{print $1}' | xargs -r -n1 systemctl --user stop 2>/dev/null
   fi
 
-  if [ -n "$PASS" ]; then
+  if [ -n "$PASS" ] && [ -n "$APPEARANCE_MODE" ]; then
+    # The profile is disposable fixture state; the retained images and JSON are
+    # the evidence. A failure keeps everything for diagnosis instead.
+    for state in "${APPEARANCE_STATES[@]}" "${APPEARANCE_PROFILES[@]}"; do
+      rm -r -- "$state"
+    done
+    rm -f -- "$CURL_AUTH_CONFIG" "$DESKTOP_READY"
+    echo "appearance evidence kept at $X" >&2
+  elif [ -n "$PASS" ]; then
     rm -r -- "$X"
   else
     echo "state kept at $X" >&2
@@ -433,6 +497,7 @@ chmod 700 "$SENTINEL_TMUX"
 # exist and answer as a supported tmux, the missing-tmux leg would prove
 # nothing, and bootstrap would proceed into whatever state or sibling
 # `desktop_state_dir()`/`bundled_farhelm()` fell back to.
+if [ -z "$APPEARANCE_MODE" ]; then
 echo "== tmux preflight: a missing tmux refuses with one plain message"
 # The refusal legs run the dx-built `farhelm-ui` desktop app rather than a
 # separately Cargo-built `farhelm-desktop`: the shipped `farhelm-desktop`
@@ -572,6 +637,7 @@ for banned in panicked RUST_BACKTRACE; do
     fail "non-tmux bootstrap failure must never contain $banned (see $BOGUS_STATE_STDERR)"
   fi
 done
+fi
 
 echo "== booting Xvfb, openbox, and the self-contained app"
 
@@ -594,6 +660,345 @@ DISP=":$DISPNUM"
 DISPLAY=$DISP openbox >"$X/openbox.log" 2>&1 &
 echo $! >"$X/openbox.pid"
 sleep 1
+
+# Unlike the four appearance cases, this intentionally never initializes App.
+# Observe real hidden native creation and the child before the independent
+# deadline; an early bootstrap failure with the same exit status cannot pass.
+if [ "$APPEARANCE_MODE" = no-initialize ]; then
+  evidence="$X/no-initialize"
+  profile="$X/no-initialize-profile"
+  appearance_state="$X/no-initialize-state"
+  mkdir -m 0700 "$evidence" "$profile" "$appearance_state" || fail "creating missing-initialize fixture"
+  APPEARANCE_PROFILES+=("$profile")
+  APPEARANCE_STATES+=("$appearance_state")
+  # Failure cleanup requires PID-bound signalling; no name-based process search
+  # or signal can substitute for the actual child identity retained below.
+  python3 -c 'import os, signal; fd=os.pidfd_open(os.getpid()); os.close(fd); assert hasattr(signal, "pidfd_send_signal")' || fail "missing-initialize smoke requires Linux pidfd support"
+  rm -f "$DESKTOP_READY"
+  DISPLAY="$DISP" GTK_THEME="Adwaita:dark" NO_COLOR=1 PATH="/usr/bin:/bin" \
+    FARHELM_TMUX="$HOST_TMUX" FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
+    FARHELM_DESKTOP_STATE_DIR="$appearance_state" FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
+    FARHELM_SMOKE_APPEARANCE=no-initialize FARHELM_SMOKE_WEBVIEW_DATA_DIR="$profile" \
+    RUST_LOG="info,farhelm_ui::desktop=debug,desktop_startup=debug" \
+    "$APP" >"$evidence/desktop.log" 2>&1 &
+  desktop_pid=$!
+  echo "$desktop_pid" >"$X/desktop.pid"
+  # Python is already the harness's process/JSON tool. Keep its bounded Linux
+  # identity observation here with the owned launch, rather than adding another
+  # application-control service. It reads no credentials or process environment.
+  DISPLAY="$DISP" python3 - "$desktop_pid" "$BUILT_FARHELM" "$appearance_state" "$evidence" <<'PY'
+import json, os, re, subprocess, sys, time
+from pathlib import Path
+
+desktop = int(sys.argv[1])
+program, state, evidence = Path(sys.argv[2]).resolve(), Path(sys.argv[3]), Path(sys.argv[4])
+result = {"ok": False, "minimumPollDelayMs": 100, "visibleSamples": 0,
+          "coverage": "sampled no observed mapped client; no continuous X-event assertion",
+          "xid": None, "xidObservation": "not discovered; realization unknown"}
+
+def process(pid):
+    """Read birth identity before trusting a PID, including nonrunning zombies."""
+    root = Path(f'/proc/{pid}')
+    try:
+        fields = (root / 'stat').read_text().rsplit(') ', 1)[1].split()
+        record = {"pid": pid, "state": fields[0], "ppid": int(fields[1]), "startTicks": int(fields[19])}
+        if record["state"] != 'Z':
+            record["exe"] = os.readlink(root / 'exe')
+            raw = (root / 'cmdline').read_bytes()
+            assert len(raw) < 65536, 'unexpectedly large owned process argv'
+            record["argv"] = [part.decode() for part in raw.split(b'\0') if part]
+        return record
+    except FileNotFoundError:
+        return None
+
+def live(record):
+    """A zombie has exited even if its new parent has not reaped it yet."""
+    return record is not None and record['state'] != 'Z'
+
+def startup_log():
+    """Read only the fixed observation cap, even when a failing child floods stderr."""
+    with (evidence / 'desktop.log').open() as stream:
+        log = stream.read(1048577)
+    assert len(log) <= 1048576, 'fault log exceeded retained observation cap'
+    return log
+
+def windows(visible=False):
+    """Query only this owned desktop; timeout and output caps bound each sample."""
+    args = ['xdotool', 'search'] + (['--onlyvisible'] if visible else [])
+    observed = subprocess.run(args + ['--pid', str(desktop), '--name', '^farhelm$'],
+                              capture_output=True, text=True, timeout=2, check=False)
+    assert observed.returncode in (0, 1), 'xdotool could not inspect owned windows'
+    assert len(observed.stdout) < 4096, 'unexpectedly many owned windows'
+    return observed.stdout.split()
+
+def identify_supervisor():
+    """Prove direct ownership, exact private state, and the actual stdin pipe."""
+    children = Path(f'/proc/{desktop}/task/{desktop}/children').read_text().split()
+    assert len(children) <= 128, 'unexpected desktop child count'
+    matches = []
+    for child in children:
+        candidate = process(int(child))
+        if not live(candidate):
+            continue
+        if candidate.get('argv', [])[1:] == ['supervisor', 'run', '--exit-on-stdin-close', '--state-dir', str(state)]:
+            assert candidate['ppid'] == desktop and Path(candidate['exe']).resolve() == program, 'managed child executable/parent mismatch'
+            matches.append(candidate)
+    assert len(matches) == 1, 'expected exactly one live managed supervisor child'
+    owned = matches[0]
+    pipe = os.readlink(f'/proc/{owned["pid"]}/fd/0')
+    assert pipe.startswith('pipe:['), 'managed supervisor stdin is not the lifetime pipe'
+    descriptors = list(Path(f'/proc/{desktop}/fd').iterdir())
+    assert len(descriptors) <= 1024, 'unexpected desktop descriptor count'
+    writers = []
+    for descriptor in descriptors:
+        try:
+            if os.readlink(descriptor) != pipe:
+                continue
+            info = Path(f'/proc/{desktop}/fdinfo/{descriptor.name}').read_text()
+            flags = next(line.split()[1] for line in info.splitlines() if line.startswith('flags:'))
+            if int(flags, 8) & os.O_ACCMODE == os.O_WRONLY:
+                writers.append(int(descriptor.name))
+        except FileNotFoundError:
+            continue
+    assert writers, 'desktop holds no write end of the supervisor stdin pipe'
+    owned.update(stdinPipe=pipe, desktopWriterFds=writers)
+    (evidence / 'supervisor.json').write_text(json.dumps(owned, indent=2) + '\n')
+    return owned
+
+try:
+    original = process(desktop)
+    if not live(original):
+        (evidence.parent / 'desktop.pid').unlink(missing_ok=True)
+    assert live(original), 'desktop exited before fault observation began'
+    started, created_at = time.monotonic(), None
+    owned = None
+    log = ''
+    while True:
+        current = process(desktop)
+        if not live(current):
+            # Bash may reap its background child while this observer runs.
+            # Retire the raw cleanup handle before any post-exit assertion.
+            (evidence.parent / 'desktop.pid').unlink(missing_ok=True)
+            break
+        if current['startTicks'] != original['startTicks']:
+            (evidence.parent / 'desktop.pid').unlink(missing_ok=True)
+        assert current['startTicks'] == original['startTicks'], 'desktop PID identity changed'
+        log = startup_log()
+        # Native creation is a Tao/GTK object boundary. It need not have an
+        # XID until realization, so X11 discovery cannot be that premise.
+        creation = re.search(r'native creation state.*\bwindow=(.*?)\s+visible=false(?:\s|$)', log)
+        if creation and 'hidden native window created' in log and created_at is None:
+            created_at = time.monotonic()
+            result['createdObservedAt'] = created_at
+            result['nativeCreation'] = {"taoWindow": creation.group(1), "visible": False}
+            owned = identify_supervisor()
+            result['supervisorBeforeRefusal'] = owned
+        now = time.monotonic()
+        assert now < (created_at + 35 if created_at is not None else started + 60), 'desktop survived the native startup observation deadline'
+        assert not windows(visible=True), 'missing-initialize client became visible'
+        result['visibleSamples'] += 1
+        if result['xid'] is None:
+            # An absent result is retained as unknown realization state. Never
+            # realize/show a native window merely to obtain an evidence handle.
+            hidden = windows()
+            if hidden:
+                assert len(hidden) == 1, 'ambiguous hidden native window identity'
+                result.update(xid=hidden[0], xidObservation='owned hidden XID discovered')
+                geometry = subprocess.run(['xdotool', 'getwindowgeometry', '--shell', hidden[0]],
+                                          capture_output=True, text=True, timeout=2, check=True)
+                assert len(geometry.stdout) < 4096, 'unexpected native geometry output'
+                (evidence / 'client-geometry.txt').write_text(geometry.stdout)
+        if owned is not None:
+            child = process(owned['pid'])
+            if not live(child) or child['startTicks'] != owned['startTicks']:
+                # Desktop and tethered child can both exit between samples.
+                # Recheck the owner before calling a natural exit premature.
+                current = process(desktop)
+                if not live(current):
+                    (evidence.parent / 'desktop.pid').unlink(missing_ok=True)
+                    break
+                if current['startTicks'] != original['startTicks']:
+                    (evidence.parent / 'desktop.pid').unlink(missing_ok=True)
+                    raise AssertionError('desktop PID identity changed')
+                raise AssertionError('managed supervisor died before desktop refusal')
+        # sleep-ok: bounded sampling of owned process identity and X11 visibility; never a paint guarantee.
+        time.sleep(0.1)
+    exited_at = time.monotonic()
+    assert created_at is not None and 'nativeCreation' in result and owned is not None, 'missing native hidden-creation/owned-child premise'
+    elapsed = exited_at - created_at
+    result.update(exitedObservedAt=exited_at, secondsAfterObservedCreation=elapsed)
+    assert 28.5 <= elapsed <= 35, 'refusal did not match the 30-second creation deadline within observation tolerance'
+    log = startup_log()
+    refusal = 'farhelm-desktop: native window startup did not finish within 30 seconds'
+    assert log.count(refusal) == 1, 'expected exactly one native startup deadline refusal'
+    assert 'desktop_no_initialize: configured rootless index' in log, 'rootless fixture was not configured'
+    for forbidden in ['desktop_no_initialize: unexpected App root', 'root content acknowledged',
+                      'requesting reveal', 'focusing once', 'panicked', 'RUST_BACKTRACE']:
+        assert forbidden not in log, f'unexpected fault-path marker: {forbidden}'
+    stored = json.loads((state / 'desktop-client.json').read_text())
+    assert stored['webview_auth_generation'] == 0, 'webview authenticated despite missing initialize'
+    child_deadline = time.monotonic() + 20
+    while True:
+        child = process(owned['pid'])
+        if not live(child) or child['startTicks'] != owned['startTicks']:
+            result['supervisorAfterRefusal'] = child
+            break
+        assert time.monotonic() < child_deadline, 'managed supervisor outlived the closed desktop stdin tether'
+        # sleep-ok: bounded observation of this captured child's natural tether shutdown before cleanup.
+        time.sleep(0.1)
+    result['supervisorStoppedBeforeCleanup'] = True
+    result['ok'] = True
+except Exception as error:
+    result['error'] = str(error)
+    raise
+finally:
+    (evidence / 'observation.json').write_text(json.dumps(result, indent=2) + '\n')
+PY
+  observation_status=$?
+  [ "$observation_status" -eq 0 ] || fail "missing-initialize lifetime observation failed (see $evidence)"
+  wait "$desktop_pid"
+  desktop_status=$?
+  printf '%s\n' "$desktop_status" >"$evidence/desktop-exit-status"
+  # Only this shell can reap its direct child. Bind that actual exit status to
+  # the process/pipe observations before presenting the JSON as a passing leg.
+  python3 - "$evidence/observation.json" "$desktop_status" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+result = json.loads(path.read_text())
+result['desktopExitStatus'] = int(sys.argv[2])
+result['ok'] = result['ok'] and result['desktopExitStatus'] == 1
+path.write_text(json.dumps(result, indent=2) + '\n')
+PY
+  [ "$?" -eq 0 ] || fail "recording actual missing-initialize exit status"
+  rm -f "$X/desktop.pid"
+  [ "$desktop_status" -eq 1 ] || fail "missing-initialize app did not naturally refuse with exit status 1"
+  printf '%s\n' 'Native creation deadline refused before App initialization; owned supervisor stopped before cleanup.' \
+    'No mapped client observed by bounded X11 polling; no continuous event assertion.' \
+    'Linux-only fault evidence, not ordinary appearance or macOS paint coverage.' >"$evidence/assessment.txt"
+  echo "missing-initialize native deadline/tether assertions passed; evidence kept at $evidence"
+  PASS=1
+  exit 0
+fi
+
+# This is an opt-in finite integration experiment, not a second native command
+# service. The debug app contains the only driver, with fixed Settings/radio
+# actions. Child-only GTK inputs request two startup signals; the app must
+# establish the actual matchMedia premise before any palette assertion passes.
+if [ "$APPEARANCE_MODE" = 1 ]; then
+  # Keep a closed selection rather than accepting arbitrary scenario strings.
+  # The ordinary mode still proves each fresh profile and its stored relaunch.
+  appearance_schemes=(dark light)
+  appearance_lifetimes=(fresh stored)
+  for scheme in "${appearance_schemes[@]}"; do
+    profile="$X/appearance-$scheme-profile"
+    appearance_state="$X/appearance-$scheme-state"
+    mkdir -m 0700 "$profile" "$appearance_state" || fail "creating private appearance profile/state"
+    APPEARANCE_PROFILES+=("$profile")
+    APPEARANCE_STATES+=("$appearance_state")
+    for lifetime in "${appearance_lifetimes[@]}"; do
+      window=""
+      selection="$scheme-$lifetime"
+      evidence="$X/appearance-$selection"
+      mkdir -m 0700 "$evidence" || fail "creating appearance evidence directory"
+      if [ "$scheme" = dark ]; then gtk_theme="Adwaita:dark"; else gtk_theme="Adwaita"; fi
+
+      rm -f "$DESKTOP_READY"
+      DISPLAY="$DISP" GTK_THEME="$gtk_theme" PATH="/usr/bin:/bin" \
+        FARHELM_TMUX="$HOST_TMUX" FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
+        FARHELM_DESKTOP_STATE_DIR="$appearance_state" FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
+        FARHELM_SMOKE_APPEARANCE="$selection" FARHELM_SMOKE_WEBVIEW_DATA_DIR="$profile" \
+        RUST_LOG="info,farhelm_ui::desktop=debug,desktop_startup=debug" \
+        "$APP" >"$evidence/desktop.log" 2>&1 &
+      desktop_pid=$!
+      echo "$desktop_pid" >"$X/desktop.pid"
+      window=""
+      for _ in $(seq 1 300); do
+        kill -0 "$desktop_pid" 2>/dev/null || fail "appearance app exited before mapping"
+        window=$(DISPLAY="$DISP" xdotool search --onlyvisible --pid "$desktop_pid" --name '^farhelm$' 2>/dev/null | head -n1)
+        [ -n "$window" ] && break
+        sleep 0.1
+      done
+      [ -n "$window" ] || fail "appearance app never mapped a visible window"
+      printf 'window=%s\npid=%s\ndisplay=%s\nrequested_gtk_theme=%s\n' \
+        "$window" "$desktop_pid" "$DISP" "$gtk_theme" >"$evidence/window.txt"
+      DISPLAY="$DISP" xdotool getwindowgeometry --shell "$window" >"$evidence/client-geometry.txt" || fail "reading owned client geometry"
+      for _ in $(seq 1 300); do
+        [ -s "$DESKTOP_READY" ] && break
+        kill -0 "$desktop_pid" 2>/dev/null || fail "appearance app exited before helm readiness"
+        sleep 0.1
+      done
+      [ -s "$DESKTOP_READY" ] || fail "appearance app did not publish readiness"
+      read_desktop_ready "$DESKTOP_READY"
+      connected=""
+      for _ in $(seq 1 100); do
+        if curl_auth -sf --max-time 2 "$API/api/hosts" | python3 -c \
+          'import json,sys; assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in json.load(sys.stdin)["hosts"])' 2>/dev/null; then
+          connected=1
+          break
+        fi
+        sleep 0.1
+      done
+      [ -n "$connected" ] || fail "appearance fixture local host never connected"
+      body=$(python3 -c 'import json,sys; print(json.dumps({"cwd":sys.argv[1],"command":{"command":"bash","yolo":False},"title":"appearance fixture"}))' "$X/work") || fail "encoding appearance session"
+      SID=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$body" "$API/api/sessions" |
+        python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating appearance session"
+      LOCAL_SID="${SID#*:}"
+      observed=""
+      for _ in $(seq 1 750); do
+        # A long JSON record takes several writes. The prefix can be visible
+        # while its final string is still incomplete; this marker follows the
+        # completed write on the same stderr stream.
+        if grep -q '^desktop_appearance_smoke_done$' "$evidence/desktop.log"; then observed=1; break; fi
+        kill -0 "$desktop_pid" 2>/dev/null || fail "appearance app exited before observation"
+        sleep 0.1
+      done
+      [ -n "$observed" ] || fail "native appearance observation timed out"
+      sed -n 's/^desktop_appearance_smoke: //p' "$evidence/desktop.log" >"$evidence/observation.json"
+      python3 -c 'import json,sys; result=json.load(open(sys.argv[1])); assert result.get("ok"), result' \
+        "$evidence/observation.json" || fail "native appearance observation failed (see $evidence)"
+      kill -0 "$desktop_pid" 2>/dev/null || fail "appearance app died before final frame"
+      DISPLAY="$DISP" timeout 10 import -window "$window" "$evidence/final-client.png" || fail "capturing final appearance client"
+      # A uniform/nonpainting client cannot establish visible native behavior.
+      # This is only a rejection oracle; varied pixels still need inspection.
+      variation=$(convert "$evidence/final-client.png" -format '%[fx:standard_deviation]' info:) || fail "measuring final client"
+      python3 -c 'import sys; assert float(sys.argv[1]) > 0.01, "uniform/nonpainting native client"' "$variation" || fail "native client did not visibly paint"
+      grep -q 'desktop asset handler: served /assets/' "$evidence/desktop.log" || fail "native appearance loaded no embedded assets"
+      if grep -n 'desktop asset handler: missing ' "$evidence/desktop.log" >"$evidence/asset-misses.txt"; then
+        fail "native appearance has embedded asset misses"
+      fi
+      curl_auth -sf --max-time 30 -X DELETE "$API/api/sessions/$SID" >/dev/null || fail "deleting appearance fixture session"
+      SID=""; LOCAL_SID=""
+
+      # Openbox handles Alt-F4 as the ordinary WM close request. Wait for a
+      # successful process exit before reusing the profile: SIGKILL is the
+      # transport smoke's separate contract and cannot prove profile flushing.
+      DISPLAY="$DISP" timeout 10 xdotool windowactivate --sync "$window" key --clearmodifiers alt+F4 || fail "requesting graceful appearance close"
+      exited=""
+      for _ in $(seq 1 100); do
+        stat=$(ps -o stat= -p "$desktop_pid" 2>/dev/null | tr -d ' ')
+        if [ -z "$stat" ] || [ "${stat#Z}" != "$stat" ]; then exited=1; break; fi
+        sleep 0.1
+      done
+      [ -n "$exited" ] || fail "appearance app did not acknowledge graceful close"
+      wait "$desktop_pid"
+      desktop_status=$?
+      rm -f "$X/desktop.pid"
+      [ "$desktop_status" -eq 0 ] || fail "appearance app failed during graceful close"
+      # Retain where WebKit actually wrote. The two fresh profiles plus each
+      # control-selected relaunch distinguish isolated persistence from a
+      # silently shared default profile; directory creation alone would not.
+      find "$profile" -type f -printf '%P %s bytes\n' >"$evidence/profile-files.txt" || fail "recording private profile writes"
+      [ -s "$evidence/profile-files.txt" ] || fail "WebKit wrote nothing to the explicit private profile"
+      printf '%s\n' 'Native startup/control/persistence assertions passed; final client image retained.' \
+        'DOM observations do not establish transient paint correctness.' \
+        'No live native system-appearance event or macOS coverage.' >"$evidence/assessment.txt"
+    done
+  done
+  echo "appearance integration assertions passed; final client images retained"
+  PASS=1
+  exit 0
+fi
 rm -f "$DESKTOP_READY"
 DISPLAY=$DISP \
   PATH="/usr/bin:/bin" \

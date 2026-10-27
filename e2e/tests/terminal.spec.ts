@@ -4318,55 +4318,61 @@ test("an idle session with unseen output uses its row's new-output foreground an
 // stale override sits at higher specificity than the base running rule (see
 // `.session-row.stale .status-badge.running .status-dot` in app.css), which
 // is exactly the kind of thing a later selector edit breaks silently.
-test("only a reachable running dot pulses", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  // Preference seeding validates reference syntax even for a synthetic
-  // listing. This invented host-qualified id establishes selection honestly.
-  const reachable = liveDotListing({ id: "0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:selected-pulse" });
-  const ordinary = liveDotListing({ id: "synthetic-ordinary-dot", title: "synthetic-ordinary-dot" });
-  const unreachable = liveDotListing({
-    id: "synthetic-stale-dot",
-    title: "synthetic-stale-dot",
-    stale: true,
-  });
-  await page.route(SESSION_LISTING, (route) =>
-    fulfillAsHelm(route, {
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        sessions: [reachable, ordinary, unreachable],
-        total: 3,
-        truncated: false,
+for (const palette of ["dark", "light"] as const) {
+  test(`only a reachable running dot pulses in ${palette}`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "no-preference", colorScheme: palette });
+    // Preference seeding validates reference syntax even for a synthetic
+    // listing. This invented host-qualified id establishes selection honestly.
+    const reachable = liveDotListing({ id: "0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:selected-pulse" });
+    const ordinary = liveDotListing({ id: "synthetic-ordinary-dot", title: "synthetic-ordinary-dot" });
+    const unreachable = liveDotListing({
+      id: "synthetic-stale-dot",
+      title: "synthetic-stale-dot",
+      stale: true,
+    });
+    await page.route(SESSION_LISTING, (route) =>
+      fulfillAsHelm(route, {
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          sessions: [reachable, ordinary, unreachable],
+          total: 3,
+          truncated: false,
+        }),
       }),
-    }),
-  );
-
-  await pinAutoSelect(page, reachable.id);
-  await page.goto("/");
-  const dotOf = (id: string) =>
-    page.locator(`[data-session-id="${id}"] .status-badge.running .status-dot`);
-  const animationOf = (id: string) =>
-    dotOf(id).evaluate((element) => getComputedStyle(element).animationName);
-
-  await expect(dotOf(reachable.id)).toHaveCount(1, { timeout: 10_000 });
-  await expect(dotOf(ordinary.id)).toHaveCount(1);
-  await expect(dotOf(unreachable.id)).toHaveCount(1);
-
-  expect(await animationOf(reachable.id)).toBe("farhelm-status-pulse");
-  expect(await animationOf(ordinary.id)).toBe("farhelm-status-pulse");
-  expect(await animationOf(unreachable.id)).toBe("none");
-  await expect(page.locator(`[data-session-id="${reachable.id}"]`)).toHaveAttribute("data-session-selected", "true");
-  await expect(page.locator(`[data-session-id="${ordinary.id}"]`)).toHaveAttribute("data-session-selected", "false");
-  // Read the resolved animation keyframes: a declared minimum alone would
-  // miss a lost inherited override in the actual selected DOM.
-  for (const [id, minimum, role] of [[reachable.id, "0.85", "--on-fill"], [ordinary.id, "0.6", "--ok"]]) {
-    await expect(dotOf(id)).toHaveCSS("color", await resolveToken(page, role));
-    const opacities = await dotOf(id).evaluate((dot) =>
-      dot.getAnimations().flatMap((animation) => animation.effect?.getKeyframes().map((frame) => frame.opacity) ?? [])
     );
-    expect(opacities).toContain(minimum);
-  }
-});
+
+    await pinAutoSelect(page, reachable.id);
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-appearance", palette);
+    const dotOf = (id: string) =>
+      page.locator(`[data-session-id="${id}"] .status-badge.running .status-dot`);
+    const animationOf = (id: string) =>
+      dotOf(id).evaluate((element) => getComputedStyle(element).animationName);
+
+    await expect(dotOf(reachable.id)).toHaveCount(1, { timeout: 10_000 });
+    await expect(dotOf(ordinary.id)).toHaveCount(1);
+    await expect(dotOf(unreachable.id)).toHaveCount(1);
+
+    expect(await animationOf(reachable.id)).toBe("farhelm-status-pulse");
+    expect(await animationOf(ordinary.id)).toBe("farhelm-status-pulse");
+    expect(await animationOf(unreachable.id)).toBe("none");
+    await expect(page.locator(`[data-session-id="${reachable.id}"]`)).toHaveAttribute("data-session-selected", "true");
+    await expect(page.locator(`[data-session-id="${ordinary.id}"]`)).toHaveAttribute("data-session-selected", "false");
+    // Read the resolved animation keyframes: a declared minimum alone would
+    // miss a lost inherited override in the actual selected DOM.
+    // The ordinary light mark needs less fading to remain recognizable on
+    // pale chrome. Pin both contracts independently of their CSS variables.
+    const ordinaryMinimum = palette === "light" ? "0.73" : "0.6";
+    for (const [id, minimum, role] of [[reachable.id, "0.85", "--on-fill"], [ordinary.id, ordinaryMinimum, "--ok"]]) {
+      await expect(dotOf(id)).toHaveCSS("color", await resolveToken(page, role));
+      const opacities = await dotOf(id).evaluate((dot) =>
+        dot.getAnimations().flatMap((animation) => animation.effect?.getKeyframes().map((frame) => frame.opacity) ?? [])
+      );
+      expect(opacities).toContain(minimum);
+    }
+  });
+}
 
 test("truncation banner shows when the listing reports truncated", async ({
   page,

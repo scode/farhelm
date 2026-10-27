@@ -73,12 +73,26 @@ windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 # `start_native_drag`) because Tao's helper can hand AppKit a pressure event
 # instead of the press. Same versions Tao already pulls in.
 objc2 = "0.6.5"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSGraphicsContext", "NSResponder", "NSWindow"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "NSApplication",
+  "NSEvent",
+  "NSGraphicsContext",
+  "NSResponder",
+  "NSWindow",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Use the desktop's dispatch API, already present through GTK, rather than
 # waiting for xdg-open: its generic fallback can wait for the app to exit.
 gio = { version = "0.18", optional = true }
+# The native menu keeps GTK's own opaque background while the startup window
+# borrows the document ground. This is the renderer's already locked GTK.
+gtk = { version = "0.18.2", optional = true }
+# The startup backing uses normalized GDK channels through WebKitGTK's typed
+# API. Wry 0.53.5's byte-color setter passes unnormalized channels on Linux.
+# This is the same library already supplied by the desktop renderer.
+webkit2gtk = { version = "2.0.1", features = ["v2_8"], optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
@@ -146,7 +160,16 @@ tracing-subscriber.workspace = true
 [features]
 default = []
 web = ["dioxus/web"]
-desktop = ["dioxus/desktop", "dep:arboard", "dep:raw-window-handle", "dep:dirs", "dep:webbrowser", "dep:gio"]
+desktop = [
+  "dioxus/desktop",
+  "dep:arboard",
+  "dep:raw-window-handle",
+  "dep:dirs",
+  "dep:webbrowser",
+  "dep:gio",
+  "dep:gtk",
+  "dep:webkit2gtk",
+]
 
 [dev-dependencies]
 farhelm-teststate.workspace = true

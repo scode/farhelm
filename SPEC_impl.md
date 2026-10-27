@@ -419,49 +419,75 @@ where a corner has to stay square because it joins a neighboring control, names 
 tokens are named for the role a value plays — surface levels (`--bg-*`), foreground levels (`--fg-*`), one accent
 family, `--ok`/`--warn`/`--danger` with their fill and border variants, `--radius-*`, `--font-ui`/`--font-mono` — rather
 than for the color it happens to be, so a restyle is an edit to one block instead of to every rule that mentioned the
-same hex. The dark palette is Steel: blue-gray surfaces and a periwinkle accent. A light theme lands as a second `:root`
-block redefining the same names, which is the arrangement the no-literals rule exists to protect.
+same hex. The dark palette is Steel: blue-gray surfaces and a periwinkle accent. Steel Light is a second
+`:root[data-appearance="light"]` block defining every color, elevation and opacity role independently. Geometry and font
+roles remain shared. The token and contrast checks read both owners separately, so a missing light role cannot silently
+inherit its dark value.
+
+One classic head script owns the device appearance choice, stored as `system`, `dark` or `light` under
+`farhelm.appearance` in localStorage. Missing, invalid or refused storage starts with System; an unavailable system
+query resolves to Dark. The owner resolves System through `prefers-color-scheme`, sets the root's `data-appearance`
+before renderer content, and follows live system and same-origin storage changes. A refused write still keeps this
+page's selected choice. Settings supplies native radios whose checked properties the same owner synchronizes on mount;
+Rust holds no second choice signal and the helm stores no copy. The web build packages the classic script and stylesheet
+as static head assets. The desktop custom head inlines those exact sources, script first, without waiting for its
+embedded asset handler. Native backing before a document exists is a separate surface; DOM order alone is not paint
+evidence.
+
+On Linux, the native window starts hidden while the root acknowledges applied ordinary content and returns the page
+owner's computed opaque ground. The native WebKit backing receives that color before the single startup reveal; this
+transient RGB value is neither another preference nor a native theme choice. Readiness includes Starting and Retry
+pages, without waiting for authentication, fonts or a terminal. A deadline measured from window creation bounds missing
+initialization and unanswered eval; failure refuses startup rather than leaving an invisible process or revealing an
+unprepared backing. Closing cancels the pending reveal. Dioxus derives its direct-edit interpreter mode from initial
+hidden visibility and retains that scheduling after reveal. macOS keeps the framework's existing reveal and foreground
+path. Native recordings are still required to assess presentation; DOM acknowledgement and backing readback are not
+compositor acknowledgements.
+
+The Linux window ground also receives that startup RGB, because the native surface can appear before WebKit's backing.
+Its existing native menu uses GTK's standard background role so its ground and labels retain the OS theme together,
+including when the page has an inverse device override. No native palette or theme subscription is added.
 
 Two of those roles are design constraints and not merely names. The first is the surface ladder: exactly three levels
 are in use — the ground (the page), the chrome one step above it (sidebar, main header, tab strip), and the floating
 level one step above that (menus, dialogs, forms, bands that interrupt a pane). All three lean cool by the same small
-amount, the ground included: it is a near-black and not `#000`, because pure black would be the one untinted surface in
-a set meant to read as one material at three depths. The terminal's own `--terminal-bg` surface, Ghostty's default
+amount. In Steel, the ground is a near-black and not `#000`, because pure black would be the one untinted surface in a
+set meant to read as one material at three depths. The terminal's own `--terminal-bg` surface, Ghostty's default
 background for an out-of-the-box readable terminal, is not a rung on that ladder: it is the color xterm.js paints,
 mirrored so the pane's gutter and viewport agree. Which level an element sits on is recorded in the `:root` comments; a
 `--control-hover-bg` and a `--chip-bg` token fill a bordered control's hover state and a small chip respectively, named
 for that specific role rather than folded into the `--bg-*` surface family, so neither one reads as a fourth and fifth
 level to lay something out on. `--well` is a third fill of that kind: the inside of an input, select, or code box,
-darker than any surface a control can sit on so that a field reads as cut into its panel, and lighter than the ground so
-that a field on a dialog does not read as a hole through to the page. The second is that there is ONE accent, and what
-it may be spent on is a closed list rather than a palette to decorate with: selection, `:focus-visible`, normal primary
-actions, any PRESSED disclosure control, and the wait after a confirmed delete (the spinner and words on the session's
-row and over its terminal, and the dot and words in its header). That last entry is the maintainer's choice
-(2026-09-30): the wait is the outcome the user just confirmed, so the danger red it used to be read as a failure; grey
-is what an earlier indicator used, and it went unnoticed; and `--info`, the blue for status, already means idle with
-unseen output. It is the one entry that does not mean "this is where you are" (see below), so it is kept narrow enough
-not to compete with selection: it colors only the spinner or dot, the words, and the terminal overlay card's edge, and
-the deleting row takes no tint or edge of its own, which would look exactly like the selection it usually already is.
-Action buttons use three deliberate tiers on the shared ghost `.btn` base: `.btn-primary` is the normal periwinkle
-affirmative, `.btn-neutral` is the quiet secondary treatment, and `.btn-danger` is reserved for destructive
-confirmations. A permanent answer uses the outlined form of its one-off tier: the YOLO confirmation's "start, and don't
-ask again on this host" and host removal's "remove, don't ask again" keep the danger color, while host setup's "set up,
-don't ask again" keeps the primary color. Each leaves its one-off action as the filled choice. The maintainer chose
-(2026-09-30) not to make a permanent answer the filled one that draws the reflex click. The host row's inline update
-action is another deliberate outlined treatment: amber (`--warn`) for an optional update and red (`--danger-strong`) for
-a required one. Its outline signals urgency without presenting an update as a destructive confirmation. Being outlined,
-it preserves the sidebar's one-filled-control rule. Pressed disclosures use `--accent-fill-hover` so an open trigger is
-distinct from a resting primary. The normal-primary entry is scoped per SURFACE, not per screen: the sidebar's resting
-chrome carries exactly one filled control (`new session`), and each dialog or popup that floats over it may supply its
-own affirmative primary. The sidebar's secondary actions use the neutral tier; menu items, tabs, composer selections,
-relays, and other explicit exemptions retain their ghost or purpose-built styling. Destructive menu items remain red
-text, while their confirmation buttons use the danger tier. SPEC.md requires the sidebar to mark the selected session's
-row readably at a glance, so anything else joining that list has to be a place where the accent means "this is where you
-are" — the same thing every entry but the delete wait says — because an accent spread across ordinary decoration would
-leave nothing to make the selection readable. Both constraints have a contrast floor under them: the quiet foreground
-tokens are set so that metadata stays at WCAG AA against the brightest ordinary surface it lands on. Solid selected
-surfaces have separate inverse text roles, so their legibility does not depend on muted prose colors also surviving the
-selection fill.
+darker than its raised panel so that a field reads as cut into it. In Steel it stays lighter than the ground so a field
+on a dialog does not read as a hole through to the page; Steel Light uses a pale recessed fill. The second is that there
+is ONE accent, and what it may be spent on is a closed list rather than a palette to decorate with: selection,
+`:focus-visible`, normal primary actions, any PRESSED disclosure control, and the wait after a confirmed delete (the
+spinner and words on the session's row and over its terminal, and the dot and words in its header). That last entry is
+the maintainer's choice (2026-09-30): the wait is the outcome the user just confirmed, so the danger red it used to be
+read as a failure; grey is what an earlier indicator used, and it went unnoticed; and `--info`, the blue for status,
+already means idle with unseen output. It is the one entry that does not mean "this is where you are" (see below), so it
+is kept narrow enough not to compete with selection: it colors only the spinner or dot, the words, and the terminal
+overlay card's edge, and the deleting row takes no tint or edge of its own, which would look exactly like the selection
+it usually already is. Action buttons use three deliberate tiers on the shared ghost `.btn` base: `.btn-primary` is the
+normal periwinkle affirmative, `.btn-neutral` is the quiet secondary treatment, and `.btn-danger` is reserved for
+destructive confirmations. A permanent answer uses the outlined form of its one-off tier: the YOLO confirmation's
+"start, and don't ask again on this host" and host removal's "remove, don't ask again" keep the danger color, while host
+setup's "set up, don't ask again" keeps the primary color. Each leaves its one-off action as the filled choice. The
+maintainer chose (2026-09-30) not to make a permanent answer the filled one that draws the reflex click. The host row's
+inline update action is another deliberate outlined treatment: amber (`--warn`) for an optional update and red
+(`--danger-strong`) for a required one. Its outline signals urgency without presenting an update as a destructive
+confirmation. Being outlined, it preserves the sidebar's one-filled-control rule. Pressed disclosures use
+`--accent-fill-hover` so an open trigger is distinct from a resting primary. The normal-primary entry is scoped per
+SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control (`new session`), and each
+dialog or popup that floats over it may supply its own affirmative primary. The sidebar's secondary actions use the
+neutral tier; menu items, tabs, composer selections, relays, and other explicit exemptions retain their ghost or
+purpose-built styling. Destructive menu items remain red text, while their confirmation buttons use the danger tier.
+SPEC.md requires the sidebar to mark the selected session's row readably at a glance, so anything else joining that list
+has to be a place where the accent means "this is where you are" — the same thing every entry but the delete wait says —
+because an accent spread across ordinary decoration would leave nothing to make the selection readable. Both constraints
+have a contrast floor under them: the quiet foreground tokens are set so that metadata stays at WCAG AA against the
+brightest ordinary surface it lands on. Solid selected surfaces have separate inverse text roles, so their legibility
+does not depend on muted prose colors also surviving the selection fill.
 
 Links use their own `--link` role (`#9cb7ff` in Steel), separate from the accent and from status colors. Every anchor
 and button styled as an inline link uses that color and stays underlined at rest, with no different visited or hover

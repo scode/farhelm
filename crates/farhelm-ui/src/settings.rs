@@ -1,7 +1,7 @@
-//! Helm-wide choices that have no natural home in the session or host rows.
+//! Group helm-wide and device choices without changing their owners.
 //!
-//! These are the same preferences the host dialogs write when the user answers
-//! permanently. Update the shared client copy before queuing the sparse write:
+//! The helm-wide preferences include the host dialogs' permanent answers.
+//! Update the shared client copy before queuing the sparse write:
 //! the next add or removal in this window must see the answer immediately.
 //! Other clients keep their loaded preferences until they reload, as usual.
 //!
@@ -11,6 +11,8 @@
 //! to the app's own state file through the updater, never the helm.
 //! Sound switches belong to this device's webview storage and remain live
 //! even if a storage write fails; the sound asset owns those controls.
+//! Appearance follows the same device boundary: its head asset owns the live
+//! palette and native radios, including changes while Settings is closed.
 //! The checkout folder and post-clone command are helm configuration, not
 //! preferences: each explicitly saves validated text and shows its outcome.
 //! Ntfy alerts follow that explicit-save contract too, with a secret that is
@@ -24,8 +26,8 @@
 //! recognize as safe.
 //!
 //! Section changes hide mounted panels rather than replacing their component
-//! trees. Explicit-save fields keep their drafts and pending work, and the sound
-//! asset can initialize its device-owned inputs before their panel is visible.
+//! trees. Explicit-save fields keep their drafts and pending work, and device
+//! assets initialize their inputs before their panels are visible.
 
 use dioxus::prelude::*;
 use std::cell::Cell;
@@ -48,8 +50,9 @@ pub(crate) const RETURN_FOCUS: &str =
     "document.querySelector('.app-settings-toggle')?.focus({ preventScroll: true });";
 
 /// Navigation and panel IDs share these closed keys; app follows updater availability.
-const SETTINGS_SECTIONS: [(&str, &str); 7] = [
+const SETTINGS_SECTIONS: [(&str, &str); 8] = [
     ("sessions", "sessions"),
+    ("appearance", "Appearance"),
     ("hosts", "hosts"),
     ("terminal", "terminal"),
     ("checkouts", "checkouts"),
@@ -443,6 +446,18 @@ pub(crate) fn SettingsDialog(
                                     "Could not save whether to color terminal frames. Try again."
                                 }
                             }
+                        }
+                        section {
+                            id: "settings-appearance",
+                            class: "host-settings-section app-settings-panel",
+                            aria_label: "Appearance",
+                            hidden: selected() != "appearance",
+                            h3 {
+                                class: "host-settings-section-title",
+                                tabindex: "-1",
+                                "Appearance"
+                            }
+                            crate::appearance::AppearanceSettings {}
                         }
                         section {
                             id: "settings-hosts",

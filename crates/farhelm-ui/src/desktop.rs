@@ -39,9 +39,13 @@ use std::time::Duration;
 
 use farhelm_supervisor::service::{SHUTDOWN_OUTPUT_BUDGET, STATE_DIR_CLAIM_WAIT};
 
+#[cfg(debug_assertions)]
+mod appearance_smoke;
 mod assets;
 mod bundle;
 mod menu;
+#[cfg(target_os = "linux")]
+mod startup;
 mod state;
 mod tmux_preflight;
 mod updater;
@@ -149,9 +153,13 @@ pub fn run() -> anyhow::Result<()> {
     let restore_tracker = Arc::clone(&window_tracker);
     let event_tracker = Arc::clone(&window_tracker);
     let state_path = window_state_path;
+    #[cfg(target_os = "linux")]
+    let native_startup = startup::Startup::default();
     let builder = dioxus::LaunchBuilder::new()
         .with_context(crate::ApiBase(desktop.api_base().to_string()))
         .with_context(desktop.webview_bootstrap());
+    #[cfg(target_os = "linux")]
+    let builder = builder.with_context(native_startup.clone());
     // Only an app that can update itself gets a handle in the context; its
     // absence is how every update surface knows to stay as it was
     // (`crate::app_updater`).
@@ -205,42 +213,87 @@ pub fn run() -> anyhow::Result<()> {
     // what that pass is checking the effect of. The checklist that pass
     // has to work through — including the one risk it is most likely to
     // trip over — is written out in `attachments`' module header.
-    builder
-        .with_cfg(menu::configure(
-            dioxus::desktop::Config::new()
-                // Dioxus's index has no charset declaration. WebKit otherwise
-                // can choose a legacy encoding for this native page and the text
-                // assets that inherit it, including literal UTF-8 in CSS.
-                .with_custom_head("<meta charset=\"utf-8\">".to_owned())
-                .with_window(desktop_window())
-                // The webview credential is page-memory-only. Keep the
-                // context-menu reload control out of release windows so the
-                // supported credential lifetime is the app window, not an
-                // exposed page reload. This repeats Dioxus's release default
-                // deliberately, and keeps its developer-tools path debug-only
-                // across dependency upgrades.
-                .with_disable_context_menu(!cfg!(debug_assertions))
-                .with_on_window(move |window, _| {
-                    restore_tracker
-                        .lock()
-                        .expect("window tracker poisoned")
-                        .attach(window);
-                })
-                .with_custom_event_handler(move |event, _| {
-                    // Tao sends this before hard exit, including AppKit's Cmd-Q;
-                    // the bootstrap's destructor cannot reclaim these partial saves.
-                    if matches!(event, dioxus::desktop::tao::event::Event::LoopDestroyed) {
-                        farhelm_helm::cleanup_native_downloads();
-                    }
-                    event_tracker
-                        .lock()
-                        .expect("window tracker poisoned")
-                        .observe(event, &state_path);
-                })
-                .with_disable_drag_drop_handler(true),
-        ))
-        .launch(crate::App);
+    #[cfg(target_os = "linux")]
+    let creation_startup = native_startup.clone();
+    let config = dioxus::desktop::Config::new()
+        .with_custom_head(native_head())
+        .with_window(desktop_window())
+        // The webview credential is page-memory-only. Keep the
+        // context-menu reload control out of release windows so the
+        // supported credential lifetime is the app window, not an
+        // exposed page reload. This repeats Dioxus's release default
+        // deliberately, and keeps its developer-tools path debug-only
+        // across dependency upgrades.
+        .with_disable_context_menu(!cfg!(debug_assertions))
+        .with_on_window(move |window, _| {
+            // Start the outer deadline before webview construction or App's
+            // initialize message: neither is guaranteed to reach the root hook.
+            #[cfg(target_os = "linux")]
+            {
+                creation_startup.created(window.id());
+                // A hidden GTK window need not have an X11 client yet. Observe
+                // its real native identity and visibility without mapping it
+                // merely to make startup-failure diagnostics discoverable.
+                tracing::debug!(target: "desktop_startup", window = ?window.id(), visible = window.is_visible(), "native creation state");
+            }
+            restore_tracker
+                .lock()
+                .expect("window tracker poisoned")
+                .attach(window);
+        })
+        .with_custom_event_handler(move |event, _| {
+            #[cfg(target_os = "linux")]
+            native_startup.observe(event);
+            // Tao sends this before hard exit, including AppKit's Cmd-Q;
+            // the bootstrap's destructor cannot reclaim these partial saves.
+            if matches!(event, dioxus::desktop::tao::event::Event::LoopDestroyed) {
+                farhelm_helm::cleanup_native_downloads();
+            }
+            event_tracker
+                .lock()
+                .expect("window tracker poisoned")
+                .observe(event, &state_path);
+        })
+        .with_disable_drag_drop_handler(true);
+    #[cfg(debug_assertions)]
+    let config = appearance_smoke::configure(config).unwrap_or_else(|error| {
+        refuse_and_exit(&format!("farhelm-desktop: {error:#}"));
+    });
+    builder.with_cfg(menu::configure(config)).launch(crate::App);
     Ok(())
+}
+
+/// Resolve the browser-owned appearance before any native renderer markup.
+///
+/// These are the exact shared sources, not a second bootstrap palette. A head
+/// asset URL would race App's registration of the embedded handler; inline
+/// sources need no handler before the body loader runs. Fonts are requested
+/// only when renderer text uses them. Native backing before this document
+/// exists is a separate surface and must be observed in the native smoke.
+fn native_head() -> String {
+    // Dioxus's index has no charset declaration. Keep this first so literal
+    // UTF-8 in scripts and styles never inherits a legacy encoding.
+    let head = format!(
+        "<meta charset=\"utf-8\"><script id=\"farhelm-appearance\">{}</script><style id=\"farhelm-app-css\">{}</style>",
+        include_str!("../assets/appearance.js"),
+        include_str!("../assets/app.css"),
+    );
+    #[cfg(debug_assertions)]
+    let head = if appearance_smoke::enabled() {
+        head + appearance_smoke::HEAD_OBSERVER
+    } else {
+        head
+    };
+    head
+}
+
+/// Start the fixed appearance observation only in an explicitly selected smoke.
+///
+/// App calls this once after embedded-handler registration. Production builds
+/// have no profile input, observer, driver, or output path for this fixture.
+pub(crate) fn use_appearance_smoke() {
+    #[cfg(debug_assertions)]
+    appearance_smoke::use_observation();
 }
 
 /// Retain native window controls while letting macOS content reach the top edge.
@@ -264,6 +317,13 @@ fn desktop_window() -> dioxus::desktop::WindowBuilder {
     }
     #[cfg(not(target_os = "macos"))]
     {
+        // Linux otherwise maps the native/WebKit backing before the page's
+        // appearance owner can prepare it. Dioxus 0.7.10 derives headless mode
+        // from this configured visibility once, so edits remain direct rather
+        // than rAF-batched after reveal. startup owns only this first reveal;
+        // it never mutates the interpreter or revisits visibility later.
+        #[cfg(target_os = "linux")]
+        let window = window.with_visible(false);
         window
     }
 }
@@ -843,7 +903,20 @@ pub(crate) fn log_smoke_session_answered(query: &str) {
 static SMOKE_HOOKS_ARMED: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os("FARHELM_SMOKE_CLIENT_LOG_MARKER").is_some());
 
-/// Bring the window to the foreground once dioxus first makes it visible.
+/// Bring the first usable native window forward without waiting for authentication.
+///
+/// Linux prepares the browser-resolved backing before its one startup reveal;
+/// other platforms retain the framework-owned reveal and only wait to focus it.
+/// App owns this hook outside its authentication gate, so Starting and Retry
+/// pages have the same presentation lifetime as the authenticated application.
+pub(crate) fn use_foreground_on_launch() {
+    #[cfg(target_os = "linux")]
+    startup::use_prepared_window();
+    #[cfg(not(target_os = "linux"))]
+    use_framework_foreground_on_launch();
+}
+
+/// Focus the framework-owned non-Linux reveal without taking over its timing.
 ///
 /// Without this, launching the desktop app from a terminal (laptop-dev.sh
 /// nohup's the bundle's inner binary; `cargo run` hits it too) puts the icon
@@ -865,11 +938,11 @@ static SMOKE_HOOKS_ARMED: LazyLock<bool> =
 /// the window never becoming visible (it should within the first render);
 /// past it the task exits without focusing rather than lingering forever.
 ///
-/// On GTK `set_focus` presents the window, which at startup is a no-op or
-/// harmless. NOTE: macOS 14+ treats `activateIgnoringOtherApps` as a
+/// NOTE: macOS 14+ treats `activateIgnoringOtherApps` as a
 /// cooperative activation request, so the OS can in principle still decline;
 /// this is the strongest lever tao's public API offers.
-pub(crate) fn use_foreground_on_launch() {
+#[cfg(not(target_os = "linux"))]
+fn use_framework_foreground_on_launch() {
     use dioxus::prelude::{spawn, use_hook};
     use_hook(|| {
         spawn(async {

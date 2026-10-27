@@ -100,7 +100,8 @@ that its required systemd or SSH substrate ran.
   compile WebKit), which means `-p` is the only thing that ever compiles it.
 - `scripts/check-desktop-assets.sh` — holds the desktop build's `asset!()` set and the web bundle's files to the same
   set, in both directions. The shipped desktop-artifact builder calls `--compare` on its actual embedded bundle, so
-  release validation preserves parity without a duplicate CI rebuild.
+  release validation preserves parity without a duplicate CI rebuild. `--self-test` also proves head CSS/classic JS
+  remain product assets while only the body renderer module and WASM are excluded.
 - `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" scripts/desktop-smoke.sh` — the x86_64 Linux release gate runs this
   with an isolated `CARGO_TARGET_DIR`; before any of it needs Xvfb, four pre-display process legs drive
   `farhelm-desktop`'s own entry point directly: a missing tmux and a below-floor tmux each refuse with one exact plain
@@ -110,6 +111,19 @@ that its required systemd or SSH substrate ran.
   tmux override reaching the managed supervisor, hard-exit tether, restart persistence, and that every asset the window
   requested went through the desktop asset handler. API checks retain host-qualified session references; tmux and scope
   checks use their local session IDs. The optional coordinate-driven leg is not part of CI.
+- `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` — optional Linux native appearance integration using the
+  ordinary owned Xvfb/openbox setup. Four fresh/stored dark/light cases check native media-query premises, palette
+  before renderer content, real Settings choices, private WebKit profile persistence, Inter, embedded assets and the
+  same live terminal attachment's input and ordered output. Retains bounded JSON and one final client screenshot per
+  case. DOM assertions do not prove transient paint correctness; normal appshots provide visual review. No live native
+  system-appearance event, physical keyboard dispatch, throughput or macOS claim. Run through the recorder; the script
+  supplies its own private profile and closed scenario inputs.
+- `DESKTOP_SMOKE_APPEARANCE=no-initialize scripts/desktop-smoke.sh` — one optional Linux missing-initialize leg using
+  the same builds and owned display. A fixed valid rootless index exercises the creation-time startup deadline before
+  App renders. It requires actual hidden native creation, natural refusal with exit 1, the owned supervisor's birth and
+  stdin-pipe identity, and its natural exit before cleanup. Private profiles and bounded process/window observations are
+  retained. X11 polling supplies sampled no-observed-map evidence; an absent hidden XID is recorded as unknown
+  realization, never manufactured by showing the window. Requires Linux pidfd support in the existing Python runner.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not

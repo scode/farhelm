@@ -89,7 +89,7 @@ Generic recorder wrapping is fine but not required for these; record each result
   `rustup toolchain install <version> --profile minimal -c clippy` and run `cargo +<version> clippy ...` with
   `CARGO_TARGET_DIR` pointing into your scratch directory, so it does not churn the checkout's `target/`.
 - `cargo check -p farhelm-ui --features desktop` and `cargo check -p farhelm-desktop`
-- `scripts/check-desktop-assets.sh`
+- `scripts/check-desktop-assets.sh` (including its head-product-assets parity fixtures)
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh`
 - The CI install-script job's Alpine/BusyBox run (the `docker run ... alpine:3` step in `.github/workflows/ci.yml`, with
   a static musl `farhelm` from `cargo build -p farhelm --target x86_64-unknown-linux-musl` passed as `--farhelm`; the
@@ -122,6 +122,18 @@ both engines, desktop nextest, both doctest runs, the two JS harnesses, `test-in
 desktop smoke, including the public-to-local session identity boundary), `scripts/test-tmux-pinned-shutdown.sh` (the
 sweep's workspace nextest runs the same tests on the same pinned tmux), and the macOS-only uninstall acceptance (the
 rehearsal's macOS leg runs it in step 4).
+
+The opt-in `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` checks four native fresh/stored dark/light cases:
+startup palette, ordinary Settings choices, private-profile persistence, fonts and same-attachment terminal input. It
+retains JSON and one final client image per case. Normal appshots supply visual review; DOM observations do not prove
+transient paint correctness. This is not an extra default battery. See `.agents/validation.md` for coverage.
+
+The separate `DESKTOP_SMOKE_APPEARANCE=no-initialize scripts/desktop-smoke.sh` leg exercises one fixed
+missing-initialize fault through the same builds and owned display. It observes the hidden native creation deadline,
+natural refusal and the actual owned supervisor's stdin-tether shutdown before cleanup. It retains bounded
+process/window evidence, with sampled X11 visibility rather than a continuous no-map assertion. It is not another
+default battery or ordinary appearance coverage; see `.agents/validation.md` for its Linux pidfd prerequisite and
+limits.
 
 A failure here is fixed or recorded per the ground rules before going on. Static fixes can be verified at once by
 rerunning the check.
