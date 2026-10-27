@@ -1637,6 +1637,9 @@ user's, that Farhelm does not check them and counts the session as YOLO, and sho
 command under Launched with. The launcher's permission choice has a separate ? button with that help, opening the docs
 section on permission modes.
 
+On a solid selected row, host and permission marks use the inverse foreground while retaining their shapes, hover
+explanations and accessible meanings.
+
 Hovering a live status dot, agent mark, or permission mark explains that mark. A clickable dot also names its mark read
 or mark unread action. The hover text uses the same status and permission meaning the row exposes to assistive
 technology. Exactly how a row lays out its lines and pixels is an implementation choice, covered in SPEC_impl.md rather
@@ -1666,10 +1669,10 @@ be parsed as a semantic version, or the helm is an unreleased development build,
 `connected`. The host count, its unpersisted details checkbox, and the secondary add action share one header row. Host
 actions open on demand from the row menu, with the older-host update button also available inline; details reveals the
 version, identity, session count, remedies, diagnostics, and provisioning progress under every row. Templates use the
-neutral secondary tier for routine row actions and the normal blue tier for popup affirmatives, while the host selector
-stays a native control; session creation remains the blue primary action. Destructive confirmations use the danger tier,
-and explicit menu, tab, and composer controls retain their purpose-built styling. Sessions on an unreachable host stay
-in the list from the helm's last-known knowledge (which survives helm restarts), with a neutral cause mark such as
+neutral secondary tier for routine row actions and the primary tier for popup affirmatives, while the host selector
+stays a native control; session creation remains the filled primary action. Destructive confirmations use the danger
+tier, and explicit menu, tab, and composer controls retain their purpose-built styling. Sessions on an unreachable host
+stay in the list from the helm's last-known knowledge (which survives helm restarts), with a neutral cause mark such as
 `waiting for supervisor` or `host needs update`, rather than vanishing. Compact rows carry the same cause in accessible
 text and hover help. Lifecycle operations against an unreachable host are refused with a clear error; nothing queues for
 later delivery in v1. Such a session shows one calm accent card naming the cause, with the helm's remedy and smaller
@@ -1724,9 +1727,11 @@ focused or not visible, to save CPU and battery.
 
 The dot's colour is one of four, not three: running pulses green; waiting is red, since it is the one live status that
 is a request directed at a human and belongs with the other attention colours rather than beside "nothing is wrong";
-idle is grey when its last output has been seen; idle is blue when it has not. Seen state is one stored fact per session
-— an activity stamp recorded the last time some client looked at it, or nothing at all if no client ever has — kept by
-the helm and shared by every client the same way the list order and the last-selected session are (see Session list): no
+idle is grey when its last output has been seen; idle is blue when it has not. On a solid selected row, inverse marks
+keep the same shapes instead of their ordinary colors: running circle, waiting triangle, unseen idle diamond and seen
+idle ring. Running still pulses, while a last-known report remains still. Seen state is one stored fact per session — an
+activity stamp recorded the last time some client looked at it, or nothing at all if no client ever has — kept by the
+helm and shared by every client the same way the list order and the last-selected session are (see Session list): no
 client keeps its own copy, and opening the same session from a second client sees the same colour the first one does. A
 session reads UNSEEN whenever its most recent activity is newer than that recorded stamp, or nothing is recorded at all;
 otherwise it reads SEEN.

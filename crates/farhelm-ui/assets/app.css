@@ -32,12 +32,10 @@
  * comments below carry the element-by-element map.
  *
  * Two more rules hold the look together across surfaces, and a dialog is
- * not exempt from either. Selection is ONE construct wherever it appears
- * (session row, tab, the launch composer's chosen controls): the quiet
- * `--accent-fill`, an accent bar on one edge, and `--fg-bright` text. And
- * the status colors are the loudest thing in the sidebar, each paired with
- * a shape of its own (`.status-dot`), so the session that needs a person
- * is louder than the one already open. There is one corner
+ * not exempt from either. Selection is ONE construct wherever it appears:
+ * solid `--accent-fill` with inverse text and marks. Selected status marks
+ * retain their distinct shapes and running pulse; ordinary rows retain
+ * their status colors. There is one corner
  * scale and shared font roles for the same reason the accent is single: the
  * launch composer once had a palette, radii, and a selection color of
  * its own, and read as a different application.
@@ -120,6 +118,7 @@
    the layering item in the 2026-08 UI refresh is where the fold could be
    a deliberate decision, and this is that change. */
 :root {
+  color-scheme: dark;
   /* A fresh profile keeps the old geometry before the width asset loads. */
   --sidebar-width: 340px;
   /* Modal backdrops and cards share this vertical budget. Dynamic viewport
@@ -129,13 +128,13 @@
   /* Host identity colors carry no state. They tint a host's chosen mark,
      away from status and accent hues, on chrome, menus and dialogs.
      Each clears 4.5:1 on the surfaces bound by the contrast harness. */
-  --host-icon-lavender: #b8a4f0;
-  --host-icon-orchid: #e090d8;
-  --host-icon-teal: #4fc8c0;
-  --host-icon-steel: #93aec4;
-  --host-icon-sand: #c8b48e;
-  --host-icon-copper: #d0906a;
-  --host-icon-red: #e08080;
+  --host-icon-lavender: #b8a4e8;
+  --host-icon-orchid: #dfa0d2;
+  --host-icon-teal: #76c6bf;
+  --host-icon-steel: #a1b8cd;
+  --host-icon-sand: #cdbb99;
+  --host-icon-copper: #d7a180;
+  --host-icon-red: #e69c9c;
   /* Surfaces. THREE levels are in use, and which level a thing sits on
      is a decision recorded here rather than something each rule picks
      for itself: ground for content, one step up for the chrome around
@@ -154,8 +153,8 @@
      the ground binds, was retuned for it). The terminal has its own surface
      token, matching the xterm theme, so its 4px gutter and viewport do not
      frame the pane in the ground color. */
-  --bg-0: #05070a; /* GROUND: the page behind everything */
-  --well: #0c1015; /* RECESSED: the inside of a control that holds a value
+  --bg-0: #181c24; /* GROUND: the page behind everything */
+  --well: #1a2029; /* RECESSED: the inside of a control that holds a value
                       or a choice: inputs, selects, code boxes, and in the
                       launch composer the harness chips, segments, and the
                       recent-setups list. Darker than any surface a control
@@ -168,16 +167,16 @@
                              background (assets/terminal-theme.js), mirrored
                              here so the pane's gutter and viewport match; a
                              js-test pins the two to the same value */
-  --bg-1: #141920; /* RAISED CHROME: the sidebar column and everything in it,
+  --bg-1: #1d222c; /* RAISED CHROME: the sidebar column and everything in it,
                       the main pane's titlebar, the tab strip, and the quiet
                       bands (stale notice, stale metadata) */
-  --bg-2: #1b222c; /* FLOATING: surfaces that sit above chrome — the row
+  --bg-2: #282e3a; /* FLOATING: surfaces that sit above chrome — the row
                        actions menu, the header's confirmation popover, the
                        auth card, the create form, the bands that interrupt a
                        pane (tab confirm, count banner, attach status) — and
                        the tint a session row takes while hovered or holding
                        focus */
-  --control-hover-bg: #232b37; /* the hover fill of a bordered control, which
+  --control-hover-bg: #333b49; /* the hover fill of a bordered control, which
                                    has to read on --bg-2 as well as on --bg-1.
                                    Also a binding constraint like --fg-1
                                    below rather than a free pick: this is
@@ -188,35 +187,33 @@
                                    than this — toward the surfaces it has
                                    to stay distinct from — would take that
                                    text below AA again */
-  --chip-bg: #394252; /* small filled chips, such as the invocation badge */
+  --chip-bg: #333b49; /* small filled chips, such as the invocation badge */
 
   /* Foregrounds, loudest first. Each clears WCAG AA (4.5:1) against
      every surface it actually lands on, and for the two quiet ones that
-     is a binding constraint rather than an observation: --fg-1 is set by
-     the brightest surface it has to survive (--accent-fill-hover, the
-     hovered selected row, where it is 4.8:1) and --fg-2 by the ground
-     (4.6:1). Darkening either, or lightening the surfaces under them,
-     takes metadata below AA. --fg-2 was lifted a few units when the
-     ground stopped being pure black, to hold that same 4.6:1. */
-  --fg-0: #d8dee9; /* primary text */
-  --fg-dim: #b8c0cc; /* explanatory prose on a notice or placeholder surface */
-  --fg-1: #9199a7; /* secondary/muted: labels, metadata lines, quiet status words */
-  --fg-2: #717988; /* faint: empty-state text nobody needs to read twice */
-  --fg-bright: #fff; /* high-contrast cue on a filled surface (selected row/tab, red banner); not part of the loudness scale above */
+     is a binding constraint rather than an observation: --fg-2 clears
+     4.5:1 even on --control-hover-bg, the brightest neutral fill. Selected
+     objects use inverse roles instead, because ordinary metadata and host
+     colors do not remain readable over the solid periwinkle. */
+  --fg-0: #e2e6f0; /* primary text */
+  --fg-dim: #bbc3d2; /* explanatory prose on a notice or placeholder surface */
+  --fg-1: #a2aabb; /* secondary/muted: labels, metadata lines, quiet status words */
+  --fg-2: #9ba5b8; /* quiet prose, including on raised and hovered controls */
+  --fg-bright: #f2f5ff; /* emphasis on an ordinary neutral surface */
+  --on-fill: #ffffff; /* text and shapes on solid selection, primary and danger fills */
 
   /* Links carry navigable prose, distinct from the accent's selection and
      action cues and --info's idle-with-unseen-output status. Underlining
      distinguishes them from surrounding text without relying on color. */
-  --link: #78b7ff;
+  --link: #9cb7ff;
 
   /* The one accent. Blue
      because the greys are already blue-cast, so it reads as the same
      family turned up rather than as a foreign hue, and because every
      other hue in this sheet is spoken for by a state (green ok, amber
-     warn, red danger). --info's sky blue
-     is the near neighbor; the two are kept apart by role and weight —
-     --info is a light tone that carries a WORD, the accent is a
-     saturated fill, edge, or single glyph — never a run of prose. The
+     warn, red danger). --info shares its periwinkle family but has a
+     different role: unseen output on an ordinary row. The accent is a
+     fill, edge, or single glyph — never a run of prose. The
      one place the accent carries words is the short delete-wait label
      below, which is why --accent is pinned at 4.5:1 as text as well.
 
@@ -238,37 +235,22 @@
      "readable at a glance rather than only from the titlebar", and a
      palette that spent the accent on ordinary
      decoration would have nothing left to make that true. */
-  --accent: #5896e8; /* the accent at full strength: the selected row's inset
-                        bar, every focus ring, the glyph of an actions-menu
-                        toggle whose menu is open, and the delete-wait
-                        spinner, dot, words, and overlay card edge */
-  --accent-fill: #15263d; /* accent-tinted SURFACE: every selected thing (session
-                             row, tab, and the launch composer's chosen
-                             harness, segment, folder, and list option), and
-                             the fill a primary button takes. Deliberately
-                             quiet: the accent BAR on the selected thing's
-                             edge is what announces the selection, and the
-                             fill only has to stay recognizably blue beside
-                             the neutral hover tint (see
-                             `.session-row.selected`), so that status colors
-                             stay the loudest pixels in the sidebar */
-  --accent-fill-hover: #1a2d47; /* hover/focus inside an already-selected row */
-  --accent-edge: #3d6ba8; /* the accent at border weight: the outline a filled
-                             primary or a pressed titlebar trigger takes, and
-                             the fill of the launch composer's own submit */
+  --accent: #8ea2f5; /* focus on neutral surfaces and the confirmed delete wait */
+  --accent-fill: #5268d0; /* solid selection and normal primary actions */
+  --accent-fill-hover: #495fc7; /* hover/focus inside selection and pressed disclosures */
+  --accent-edge: #5268d0; /* boundary of a filled primary or pressed disclosure */
 
   /* Rules and control outlines. */
-  --border: #36404f; /* the standard control outline: buttons, inputs, menu panel, auth card */
-  --border-dim: #232a35; /* the quiet rule: the box around an embedded detail */
-  --border-sidebar-edge: #36404f; /* the sidebar's own edge against the main pane; same value as
-                                     --border today but its own role, so a theme can move one
-                                     without the other */
-  --border-row: #232a35; /* hairline between stacked items: the session row's bottom separator
+  --border: #485367; /* the standard control outline: buttons, inputs, menu panel, auth card */
+  --border-dim: #303846; /* the quiet rule: the box around an embedded detail */
+  --border-sidebar-edge: #3c4657; /* the sidebar's edge against the main pane,
+                                     separate from ordinary control outlines */
+  --border-row: #303846; /* hairline between stacked items: the session row's bottom separator
                              and the hosts panel's own bottom rule, the same role wearing two
                              class names. A rule token, not a surface one: the row and the
                              sidebar under it are both --bg-1 now, so a separator borrowing a
                              surface value would be invisible against what it separates */
-  --border-nested: #36404f; /* the rule marking an indented sub-section subordinate to the row
+  --border-nested: #485367; /* the rule marking an indented sub-section subordinate to the row
                                 above it — host provisioning (.provisioning-panel). A surface
                                 value used to do this job and stopped working the moment the
                                 surfaces moved */
@@ -277,35 +259,27 @@
      attention-but-not-broken family (see `.status-badge.interrupted` and
      `.host-status.unreachable` for why several things are amber rather
      than red), `danger` the destructive-or-failed family. */
-  --ok: #7fd88f; /* running, connected, step completed */
+  --ok: #7fcf9a; /* running, connected, step completed */
 
-  --warn: #d8b45f; /* the amber label/badge tone */
-  --warn-bright: #e0d090; /* amber PROSE, which needs more lift than a badge does */
-  --warn-bg: #3a3520; /* the filled amber band (truncated-walk banner) */
-  --warn-bg-dim: #2a2620; /* the quieter amber band (build skew) */
-  --warn-border: #4a4230; /* rule under an amber band */
-  --warn-fill-hover: #6a5a34; /* hover on a control that sits on amber */
+  --warn: #e5bb6e; /* the amber label/badge tone */
+  --warn-bright: #ead09b; /* amber PROSE, which needs more lift than a badge does */
+  --warn-bg: #3d3424; /* the filled amber band (truncated-walk banner) */
+  --warn-bg-dim: #302b23; /* the quieter amber band (build skew) */
+  --warn-border: #6a5533; /* rule under an amber band */
+  --warn-fill-hover: #51442d; /* hover on a control that sits on amber */
 
-  --danger: #e08080; /* the red text tone: errors, destructive actions, and the
+  --danger: #ee8a8a; /* the red text tone: errors, destructive actions, and the
                          waiting status badge — a live session blocked on the
                          user earns the same red-family urgency as a failure,
                          even though nothing has actually failed */
-  --danger-strong: #e47a72; /* saturated red: a state that IS failure, not a
-                                risky button. Calibrated to clear WCAG AA
-                                (4.5:1) on every row surface the error status
-                                badge and an error row's own text can sit on
-                                — --bg-1, --bg-2, --accent-fill, and
-                                --accent-fill-hover, the tightest of the four
-                                at ~4.85:1 — so an error stays legible while
-                                its row is plain, hovered, focused, or
-                                selected. */
-  --danger-soft: #e0b0b0; /* pale red, for an outline that has to read against a red fill */
-  --danger-bg: #7a3b3b; /* the filled red banner */
-  --danger-bg-dim: #3a2a2a; /* subdued destructive hover and permanent-deletion confirmation fill */
-  --danger-fill-hover: #964a4a; /* hover on a control that sits on the red banner */
+  --danger-strong: #f09595; /* failure prose on ordinary surfaces; selected failures invert */
+  --danger-soft: #f2c0c4; /* pale red, for an outline that has to read against a red fill */
+  --danger-bg: #a83e4d; /* the filled red banner */
+  --danger-bg-dim: #3a292f; /* subdued destructive hover and permanent-deletion confirmation fill */
+  --danger-fill-hover: #983644; /* hover on a control that sits on the red banner */
 
   /* State hues outside the ok/warn/danger triad. */
-  --info: #6fb8f0; /* idle with output nobody has looked at (waiting moved to --danger) */
+  --info: #8ea2f5; /* idle with output nobody has looked at (waiting moved to --danger) */
 
   /* Overlay. Black rather than the blue-grey it used to be: it lies over
      the terminal's `--terminal-bg` surface and must be darker than it,
@@ -328,7 +302,7 @@
      than a tinted shade, and soft rather than tight, for the same reason
      `--scrim` is black: against this ground a lighter or harder edge
      reads as a drawn frame instead of as depth. */
-  --shadow-menu: 0 6px 18px rgba(0, 0, 0, 0.45);
+  --shadow-menu: 0 6px 18px rgba(0, 0, 0, 0.35);
 
   /* Modal dialogs. A dialog sits on the ordinary floating level (`--bg-2`)
      and its controls use the ordinary tokens. What it adds is only what
@@ -343,18 +317,21 @@
      accent, which the closed list above rules out. If a dialog ever needs
      a value the shared tokens lack, it gets a role-named token here, not a
      `--composer-` one. */
-  --scrim-dialog: rgb(3 5 8 / 62%); /* the veil behind a modal dialog. Not
+  --scrim-dialog: rgb(8 11 17 / 62%); /* the veil behind a modal dialog. Not
                                        `--scrim`: that one has to hide a stale
                                        terminal, this one only has to push
                                        the app back while leaving it readable */
-  --border-dialog: #4a5668; /* a modal panel's own edge */
-  --shadow-dialog: 0 10px 24px rgb(0 0 0 / 50%); /* tighter and darker than the
+  --border-dialog: #59667c; /* a modal panel's own edge */
+  --shadow-dialog: 0 10px 24px rgb(0 0 0 / 40%); /* tighter and darker than the
                                                     glow it replaced: a panel
                                                     in front, not a card
                                                     hovering over a page */
-  --on-accent-dim: #e2ecfb; /* secondary text on a filled accent control (the
-                               launch button's destination): legible on the
-                               fill, quieter than the verb beside it */
+  --on-accent-dim: #f4f6ff; /* selected metadata, still AA on both selection fills */
+  /* The pulse is shallow on selection: white at the old 45% minimum
+     loses the graphical contrast floor over periwinkle. The same stepped
+     keyframes serve both contexts without changing their cadence. */
+  --status-pulse-min: 0.60;
+  --selected-status-pulse-min: 0.85;
 
   /* Corner radii. One scale for every surface, dialogs included: the
      terminal beside the chrome is a grid of square cells, and large radii
@@ -1287,8 +1264,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 .header-copy:hover,
 .header-copy:focus-visible {
-  background: var(--accent-fill-hover);
-  color: var(--fg-bright);
+  background: var(--control-hover-bg);
+  color: var(--fg-0);
 }
 .copy-glyph { display: none; margin-right: 4px; }
 .header-copy:hover .copy-glyph,
@@ -1394,10 +1371,11 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .terminal-link-target.terminal-link-target-mismatch {
   padding: 8px 10px;
   background: var(--danger-bg);
-  color: var(--fg-bright);
+  color: var(--on-fill);
   border: 2px solid var(--danger-strong);
   font-size: 14px;
 }
+.terminal-link-target-mismatch strong { color: var(--on-fill); }
 /* The link's own text, as the program sent it: forced left to right so
    right-to-left letters inside it cannot reorder it away from the order the
    terminal draws it in, which is the order the user is comparing. */
@@ -1659,7 +1637,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .titlebar-actions .restart-primary[aria-disabled="true"]:focus-visible,
 .titlebar-actions .restart-with-trigger[aria-disabled="true"]:hover,
 .titlebar-actions .restart-with-trigger[aria-disabled="true"]:focus-visible {
-  background: var(--accent-fill);
+  background: var(--control-hover-bg);
 }
 
 /* A trigger whose confirmation is open reads as PRESSED, not merely
@@ -1671,7 +1649,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   opacity: 1;
   background: var(--accent-fill-hover);
   border-color: var(--accent-edge);
-  color: var(--fg-bright);
+  color: var(--on-fill);
 }
 
 /* The restart confirmation, anchored under the button that opened
@@ -1927,7 +1905,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .btn-primary {
   background: var(--accent-fill);
   border-color: var(--accent-edge);
-  color: var(--fg-bright);
+  color: var(--on-fill);
 }
 
 /* Secondary actions retain the quiet sidebar chrome without inheriting the
@@ -1941,7 +1919,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 
 .btn-neutral:hover:not(:disabled),
 .btn-neutral:focus-visible:not(:disabled) {
-  background: var(--accent-fill-hover);
+  background: var(--control-hover-bg);
 }
 
 /* Destructive confirmations are a distinct tier: the red fill makes the
@@ -1949,7 +1927,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .btn-danger {
   background: var(--danger-bg);
   border-color: var(--danger-soft);
-  color: var(--fg-bright);
+  color: var(--on-fill);
 }
 
 .btn-danger:hover:not(:disabled),
@@ -1963,6 +1941,13 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   color: var(--danger);
   background: transparent;
   border-color: var(--danger);
+}
+
+/* The permanent answer remains outlined even under hover/focus. Its red
+   foreground cannot be carried onto the one-off action's solid red fill. */
+.btn-danger.btn-outline:hover:not(:disabled),
+.btn-danger.btn-outline:focus-visible:not(:disabled) {
+  background: var(--danger-bg-dim);
 }
 
 .host-remove-explanation {
@@ -2097,66 +2082,20 @@ a:any-link,
   background: var(--bg-2);
 }
 
-/* ...except on the SELECTED row, where the neutral tint would erase the
-   accent fill SPEC.md requires to keep the current session readable at a
-   glance. One step up inside the accent family instead — the same
-   substitution `.session-row.selected .session-row-open:hover` makes, and
-   bound by the same `--fg-1` AA cap. Three classes outrank both two-class
-   rules above, so this wins on specificity and not on source order — and
-   it overrides the background ALONE, leaving `.session-row.selected`'s
-   inset accent bar in force. */
+/* Menu ownership retains the solid selection on the current session. Its
+   inverse text is calibrated on both fills; a neutral tint here would erase
+   the current-session cue while its menu is open. */
 .session-row.menu-open.selected {
   background: var(--accent-fill-hover);
 }
 
-/* The selected row is the session the right pane currently shows. Same
-   visual language as `.tab.selected` (filled background plus an inset
-   accent bar), and for the same stated reason, which SPEC.md states as a
-   requirement rather than a preference: the sidebar marks the selected
-   session's row "readable at a glance rather than only from the
-   titlebar".
-
-   Three cues, so no single one has to carry a low-vision reader alone:
-   an accent-TINTED fill, the accent bar at full strength, and a title
-   that goes full white below. What makes them work is HUE, not just
-   lightness — the fill is the only chromatic SESSION-ROW surface (the
-   sidebar's amber truncation banner is chromatic too, but it is a band
-   stating a fact, not a row marking a selection, so it competes with
-   nothing here), so it cannot be mistaken for the neutral `--bg-2` tint a
-   hovered row takes even though the two sit at nearly the same lightness
-   (measured: ΔE76 ≈ 9 between them, against ΔE76 ≈ 13 from the fill to
-   the plain row). Before the palette had a real accent this rule had to
-   buy that separation with a lightness step alone, which is exactly why
-   selection was hard to see.
-
-   The fill is quieter than it used to be (ΔE76 ≈ 15 and ≈ 20), on
-   purpose. A saturated selected row outshouted the status marks beside
-   it, and the row a person most needs to notice is usually a WAITING one,
-   not the one already open. So the bar and the white title carry the
-   selection, and the fill keeps only as much hue as it takes to stay
-   apart from the hover tint. A neutral fill was tried on paper and
-   rejected for exactly that: at ΔE76 ≈ 2 from `--bg-2`, a selected row
-   reads as a hovered one.
-
-   The fill also stops short of where lightness would help more:
-   `--fg-1` metadata has to clear AA (4.5:1) on every row surface this
-   fill and its hover step produce. The resting fill has real headroom
-   (~5.3:1); the hover fill sits closer to the floor (~4.85:1) — the
-   hover pair is the actual binding constraint on how much brighter
-   either step could go, not the resting one.
-
-   `box-shadow: inset` for the accent bar simply because it needs no
-   extra element and no positioning rule — a left border would shift the
-   row's content by its own width. NOT opacity-based: stale rows and
-   disabled open buttons already speak through opacity, and a background
-   fill composes with both instead of multiplying against them. */
+/* The current session uses the same solid selection as tabs and choices.
+   There is no extra edge stripe: the fill itself identifies the selection.
+   Metadata and status marks invert below instead of retaining ordinary-row
+   hues that would disappear against periwinkle. This changes no row metrics. */
 .session-row.selected {
   background: var(--accent-fill);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-
-.session-row.selected .session-title {
-  color: var(--fg-bright);
+  --status-pulse-min: var(--selected-status-pulse-min);
 }
 
 /* Without these, the open button's own hover/focus rule (below) paints
@@ -2165,8 +2104,7 @@ a:any-link,
    its weakest the moment it appears, under the still-focused,
    still-hovered button. Staying in the accent family and going one step
    up keeps hover/focus feedback on a selected row without letting it
-   swallow the selection, and stays under the same `--fg-1` AA cap the
-   resting fill is bound by. */
+   swallow the selection. Both fills retain AA for inverse metadata. */
 .session-row.selected .session-row-open:hover:not(:disabled),
 .session-row.selected .session-row-open:focus {
   background: var(--accent-fill-hover);
@@ -2351,13 +2289,12 @@ a:any-link,
    `--accent-fill` and `--accent-edge` for the same reason): a pressed disclosure
    control wears the accent for as long as what it opened is showing. See
    SPEC_impl.md's accent list — that entry covers this toggle and those
-   header triggers as one category, not as separate exceptions. It costs
-   the selection nothing — one glyph of accent text cannot compete with a
-   whole row's accent fill. */
+   header triggers as one category, not as separate exceptions. Its glyph
+   uses the inverse role because the pressed fill is now solid. */
 .session-row-menu[aria-expanded="true"],
 .host-row-menu[aria-expanded="true"] {
   background: var(--accent-fill-hover);
-  color: var(--accent);
+  color: var(--on-fill);
 }
 
 /* Coarse/no-hover pointers (touch) never get a `:hover` state to reveal
@@ -2669,6 +2606,16 @@ a:any-link,
 .session-row.deleting .session-row-open:disabled {
   opacity: 1;
 }
+/* The current session must stay identifiable while a confirmation owns its
+   navigation lock. Group opacity would blend every inverse value into the
+   solid fill; dim only the title, using the existing AA inverse role. The
+   native disabled state and default cursor still refuse navigation. */
+.session-row.selected .session-row-open:disabled {
+  opacity: 1;
+}
+.session-row.selected .session-row-open:disabled .session-title {
+  color: var(--on-accent-dim);
+}
 
 /* ===== Row actions and confirmations ============================== */
 
@@ -2721,14 +2668,16 @@ a:any-link,
   line-height: 1.25;
 }
 
-.host-row-menu-item:hover,
-.host-row-menu-item:focus {
-  background: var(--control-hover-bg);
+.host-row-menu-item:hover:not([aria-disabled="true"]),
+.host-row-menu-item:focus:not([aria-disabled="true"]) {
+  background: var(--accent-fill);
+  color: var(--on-fill);
 }
 
-.session-row-menu-item:hover,
-.session-row-menu-item:focus {
-  background: var(--control-hover-bg);
+.session-row-menu-item:hover:not([aria-disabled="true"]),
+.session-row-menu-item:focus:not([aria-disabled="true"]) {
+  background: var(--accent-fill);
+  color: var(--on-fill);
 }
 
 .session-row-menu-icon {
@@ -2942,9 +2891,9 @@ a:any-link,
 .claude-trust-band {
   flex: 0 0 auto;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--accent-edge);
-  background: var(--accent-fill);
-  color: var(--fg-bright);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--fg-0);
   box-shadow: inset 3px 0 var(--info);
   font-size: 12px;
   line-height: 1.5;
@@ -3152,7 +3101,7 @@ a:any-link,
 .templates-row[aria-pressed="true"] {
   background: var(--accent-fill);
   border-color: var(--accent-edge);
-  box-shadow: inset 3px 0 var(--accent);
+  color: var(--on-fill);
 }
 .templates-row-name,
 .templates-row-summary {
@@ -3254,8 +3203,8 @@ a:any-link,
   font: inherit;
   cursor: pointer;
 }
-.templates-segments button[aria-pressed="true"] { background: var(--accent-fill); border-color: var(--accent-edge); }
-.templates-segments button:hover,
+.templates-segments button[aria-pressed="true"] { background: var(--accent-fill); border-color: var(--accent-edge); color: var(--on-fill); }
+.templates-segments button:hover:not([aria-pressed="true"]),
 .templates-suggestion:hover { background: var(--control-hover-bg); }
 .templates-model-suggestions { display: flex; flex-wrap: wrap; gap: 4px; }
 .templates-suggestion { font-size: 12px; overflow-wrap: anywhere; text-align: left; }
@@ -3285,7 +3234,7 @@ a:any-link,
 .templates-departure { display: grid; gap: 10px; }
 .templates-error { color: var(--warn); font-size: 12px; overflow-wrap: anywhere; }
 .templates-empty { color: var(--fg-1); align-self: center; margin: auto !important; }
-.templates-undo-notice { padding: 10px; background: var(--accent-fill); border-radius: var(--radius-sm); flex-wrap: wrap; }
+.templates-undo-notice { padding: 10px; background: var(--bg-1); border-radius: var(--radius-sm); flex-wrap: wrap; }
 .templates-back { display: none; }
 
 /* At phone width list navigation and editor navigation occupy the same
@@ -3349,7 +3298,7 @@ a:any-link,
 .app-settings-dialog[aria-label="settings"] .app-settings-navigation button[aria-pressed="true"] {
   background: var(--accent-fill);
   border-color: var(--accent-edge);
-  box-shadow: inset 3px 0 var(--accent);
+  color: var(--on-fill);
 }
 .app-settings-dialog[aria-label="settings"] .app-settings-content { display: grid; gap: 14px; min-width: 0; }
 /* A hidden panel keeps its component state and JS-owned controls. Explicitly
@@ -3641,8 +3590,8 @@ a:any-link,
   border-radius: 50%;
   background: var(--fg-1);
 }
-.host-settings-switch:checked { background: var(--accent-fill); border-color: var(--accent); }
-.host-settings-switch:checked::before { transform: translateX(14px); background: var(--fg-0); }
+.host-settings-switch:checked { background: var(--accent-fill); border-color: var(--accent-edge); }
+.host-settings-switch:checked::before { transform: translateX(14px); background: var(--on-fill); }
 .host-settings-switch:disabled { opacity: .5; cursor: default; }
 .host-settings-footer {
   align-items: center;
@@ -4475,8 +4424,8 @@ a:any-link,
 /* The running pulse, spent here deliberately: running is the one status
    that means something is happening RIGHT NOW, and a still dot cannot
    distinguish "working" from "alive but at rest" without asking the user
-   to compare two greens. Slow (2s) and shallow (down to 45% opacity, never
-   off) so it reads as a heartbeat in peripheral vision rather than as a
+   to compare two greens. Slow (2s) and shallow (down to 60% opacity on
+   ordinary surfaces, 85% on selection, never off) so it reads as a heartbeat in peripheral vision rather than as a
    blink demanding attention — this sits in a sidebar someone stares at all
    day. The host update dot and the delete header dot reuse it.
 
@@ -4488,7 +4437,7 @@ a:any-link,
    ("GUI: Dioxus", looping animations) has the rule: at most 10 visual
    changes per second, and every looping animation pauses while the window
    is inactive (the `data-window-active` rule at the end of this sheet).
-   `steps(4)` applies per keyframe interval, so the 1 to 0.45 to 1 cycle
+   `steps(4)` applies per keyframe interval, so each full-bright to dim to full-bright cycle
    takes eight steps in 2s (five opacity levels, down and back): four
    changes per second.
 
@@ -4504,7 +4453,7 @@ a:any-link,
   }
 
   50% {
-    opacity: 0.45;
+    opacity: var(--status-pulse-min);
   }
 }
 
@@ -4683,16 +4632,6 @@ a:any-link,
    already `--fg-1` at rest, so this loses none of their own signal, and
    the badge stays the semantic marker it always was. */
 .session-row.stale .session-title {
-  color: var(--fg-1);
-}
-
-/* Selection normally lifts the title to `--fg-bright` (see
-   `.session-row.selected .session-title` above); a stale row overrides
-   that back down so a stale-and-selected row still reads as quieter
-   than an ordinary selection instead of the two states cancelling each
-   other out. The extra `.stale` class outranks the plain selected rule
-   on specificity regardless of source order. */
-.session-row.stale.selected .session-title {
   color: var(--fg-1);
 }
 
@@ -5750,9 +5689,9 @@ a:any-link,
 .partial-template-banner {
   margin: 0 0 16px;
   padding: 14px 16px;
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--warn);
   border-radius: var(--radius-md);
-  background: var(--accent-fill);
+  background: var(--bg-2);
   color: var(--fg-0);
 }
 .partial-template-banner strong { display: block; margin-bottom: 6px; }
@@ -5967,8 +5906,7 @@ a:any-link,
 .launch-composer-folder-options button:hover { background: var(--control-hover-bg); }
 .launch-composer-folder-options button[aria-selected="true"] {
   background: var(--accent-fill);
-  color: var(--fg-bright);
-  box-shadow: inset 3px 0 0 var(--accent);
+  color: var(--on-fill);
 }
 /* The computed label already has a start ellipsis. If a narrower viewport
    needs still less room, clip its leading edge, never the distinguishing tail.
@@ -6005,12 +5943,8 @@ a:any-link,
   background: var(--well);
 }
 
-/* The launch-kind tabs at the top of the choices column (SPEC.md: agent and
-   command, each showing only its own fields). A plain underlined strip
-   rather than another row of option buttons, because choosing a tab
-   changes which fields exist below it, not a value among them; the
-   selected tab carries the accent bar underneath, like every other
-   horizontal choice here. */
+/* Launch-kind tabs change which fields exist below the strip. Their chosen
+   state uses the same solid fill as choices without changing tab geometry. */
 .launch-kind-tabs {
   display: flex;
   gap: 4px;
@@ -6029,8 +5963,7 @@ a:any-link,
 
 .launch-kind-tab.selected {
   background: var(--accent-fill);
-  color: var(--fg-bright);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--on-fill);
 }
 
 /* The command tab's fields sit directly in the choices column, so its grid
@@ -6373,7 +6306,7 @@ a:any-link,
 
 .launch-composer-repository-options > button[aria-selected="true"] {
   background: var(--accent-fill);
-  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--on-fill);
 }
 
 /* Discovery status is helper text beside the repository choice, including
@@ -6412,46 +6345,27 @@ a:any-link,
   color: var(--fg-1);
 }
 
-/* Selection in the composer, stated ONCE for every control that can hold
-   one. It is the same construct the sidebar's selected row and the tab strip
-   use: the quiet `--accent-fill`, an accent bar on one edge, and
-   `--fg-bright` text. The composer used to mark a chosen thing with a
-   periwinkle outline and fill of its own, which made it a third selection
-   language next to the row's and the tab's.
-
-   Which edge the bar takes follows the control's shape, the way it does
-   outside the composer. A thing chosen from a HORIZONTAL set (a harness
-   chip or a segment) carries it underneath, like a tab. A thing
-   chosen from a VERTICAL list (a model option, a search result) carries it
-   on the leading edge, like a session row. The bar is an inset shadow for
-   the reason `.session-row.selected` gives: it needs no element and moves
-   no content.
-
-   These rules must stay ABOVE `.launch-composer-segment-danger`, which ties
-   with them on specificity and has to win the text color. */
+/* Composer selections share the row/tab fill and inverse text. The YOLO
+   label remains explicit warning wording; its selected text also inverts,
+   because red text over periwinkle cannot carry that warning readably. */
 .launch-composer-options > button.selected,
 .launch-composer-segmented > button.selected {
   background: var(--accent-fill);
-  color: var(--fg-bright);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--on-fill);
 }
 
 .launch-composer-listbox > button.selected,
 .launch-composer-search-group > button.selected {
   background: var(--accent-fill);
-  color: var(--fg-bright);
-  box-shadow: inset 3px 0 0 var(--accent);
+  color: var(--on-fill);
 }
 
 .launch-composer-segmented > button.selected {
   font-weight: 600;
 }
 
-/* YOLO remains an explicit warning after selection; the selected-state text
-   color must not turn a dangerous choice into an ordinary segment. This rule
-   ties with `button.selected` on specificity and wins by coming later in the
-   sheet, which is why it must stay below that rule. */
-.launch-composer-segmented > button.launch-composer-segment-danger {
+/* Unchosen YOLO remains red; solid selection needs an inverse foreground. */
+.launch-composer-segmented > button.launch-composer-segment-danger:not(.selected) {
   color: var(--danger);
 }
 
@@ -6744,12 +6658,9 @@ a:any-link,
   overflow-wrap: anywhere;
 }
 
-/* Launch is the one saturated fill in the composer. It takes the accent at
-   border weight as its FILL (brighter than `--accent-fill`, which is a
-   surface tint), so it reads as the single action while everything around it
-   stays outline or text. The hover/focus rule below must outrank the generic
-   `.btn-primary:hover` (0,3,0), which would otherwise swap this fill for the
-   surface tint the moment the pointer arrives. */
+/* Launch shares the primary fill; only its larger, contextual label needs
+   composer-specific geometry. The hover rule retains that tier rather than
+   using the lighter accent text color as a background. */
 .launch-composer-actions .create-session-submit {
   /* A flex row rather than inline text on purpose: the context span below
      hides its overflow for the ellipsis, and an inline-block with hidden
@@ -6777,17 +6688,17 @@ a:any-link,
   min-height: 44px;
   padding: calc((44px - 20px - 3px) / 2) 18px;
   line-height: 20px;
-  border: 1.5px solid var(--accent);
+  border: 1.5px solid var(--accent-edge);
   border-radius: var(--radius-sm);
-  background: var(--accent-edge);
-  color: var(--fg-bright);
+  background: var(--accent-fill);
+  color: var(--on-fill);
   font-size: 15px;
   font-weight: 700;
 }
 
 .launch-composer-actions .create-session-submit:hover:not([aria-disabled="true"]),
 .launch-composer-actions .create-session-submit:focus-visible:not([aria-disabled="true"]) {
-  background: var(--accent);
+  background: var(--accent-fill-hover);
 }
 
 /* Refused launch attempts stay reachable to explain themselves; their grey
@@ -6975,7 +6886,7 @@ a:any-link,
 .banner {
   display: none;
   background: var(--danger-bg);
-  color: var(--fg-bright);
+  color: var(--on-fill);
   padding: 4px 10px;
   font-size: 13px;
 }
@@ -7217,7 +7128,7 @@ a:any-link,
   font-size: 12px;
   padding: 1px 8px;
   border-color: var(--danger-soft);
-  color: var(--fg-bright);
+  color: var(--on-fill);
 }
 
 .banner-reclaim:hover:not(:disabled),
@@ -7225,18 +7136,10 @@ a:any-link,
   background: var(--danger-fill-hover);
 }
 
-/* The sheet-wide `:focus-visible` ring (`outline: 2px solid var(--accent)`,
-   declared once near the top of this file) reads at only ~2.8:1 against
-   `--danger-bg` — well under the 3:1 a non-text UI indicator needs — because
-   the accent blue was tuned to stand out against this sheet's dark
-   neutrals, not against a saturated red banner. `--fg-bright` is what the
-   rest of this banner already uses for exactly that reason (the button's
-   own text and the reconnect control share it), and at ~8.3:1 against
-   `--danger-bg` it clears the floor with room to spare. Restated here
-   rather than left to the global rule, the same way `.session-row-open`
-   restates its own focus ring above for its own contextual reason. */
+/* An inverse ring stays visible on a solid danger band; the neutral-surface
+   accent ring is not calibrated for a red background. */
 .banner-reclaim:focus-visible {
-  outline: 2px solid var(--fg-bright);
+  outline: 2px solid var(--on-fill);
   outline-offset: 1px;
 }
 
@@ -7368,24 +7271,12 @@ a:any-link,
   cursor: default;
 }
 
-/* The selected tab is the one whose terminal is visible. It wears the same
-   selection construct as the sidebar's selected row and the composer's
-   chosen controls: the quiet `--accent-fill`, an accent bar, and
-   `--fg-bright` text. A tab is one of a horizontal set, so the bar runs
-   underneath it. A fill AND a bar, not a bar alone: with several tabs the
-   selection has to be readable at a glance from across the strip.
-
-   The bar is an inset shadow, so it moves no content and leaves alone the
-   transparent 1px border `.tab` reserves (via `.btn`). That border used to
-   be colored `--accent-edge` here, an outline around the whole tab. It
-   went for two reasons. An outline plus a fill was a second way of
-   drawing "selected", different from the row's. And it needed a special
-   case to keep its right edge from showing as a seam against `.tab-close`;
-   a bar along the bottom never meets that join. */
+/* The visible terminal's tab shares the solid row/choice selection. Keep
+   the reserved transparent border and joined corners; color changes do not
+   alter tab metrics or introduce a seam beside its close control. */
 .tab.selected {
   background: var(--accent-fill);
-  color: var(--fg-bright);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--on-fill);
 }
 
 /* Every tab carries `.btn` too (see `TabStripItem` in tabs.rs), and its
@@ -7967,7 +7858,8 @@ a:any-link,
 .quick-switcher-row[aria-selected="true"] {
   background: var(--accent-fill);
   border-color: var(--accent-edge);
-  box-shadow: inset 3px 0 var(--accent);
+  color: var(--on-fill);
+  --status-pulse-min: var(--selected-status-pulse-min);
 }
 .quick-switcher-row mark { background: transparent; color: var(--accent); font-weight: 600; }
 .quick-switcher-footer {
@@ -8016,8 +7908,8 @@ a:any-link,
 }
 /* The named choice owns hover; the mark's SSH tooltip belongs to real rows. */
 .host-icon-choice .host-kind-icon { width: 14px; height: 14px; pointer-events: none; }
-.host-icon-choice[aria-pressed="true"] { background: var(--accent-fill); border-color: var(--accent); }
-.host-icon-choice:hover:not(:disabled) { background: var(--control-hover-bg); }
+.host-icon-choice[aria-pressed="true"] { background: var(--accent-fill); border-color: var(--accent-edge); }
+.host-icon-choice:hover:not(:disabled):not([aria-pressed="true"]) { background: var(--control-hover-bg); }
 .host-icon-choice:disabled, .host-color-choice:disabled { opacity: .5; cursor: default; }
 .host-appearance-colors { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .host-color-choice {
@@ -8025,7 +7917,7 @@ a:any-link,
   border: 1px solid transparent; border-radius: 50%; background: transparent; cursor: pointer;
 }
 .host-color-choice span { width: 100%; height: 100%; border-radius: 50%; background: var(--fg-0); }
-.host-color-choice[aria-pressed="true"] { border-color: var(--accent); }
+.host-color-choice[aria-pressed="true"] { border-color: var(--on-fill); background: var(--accent-fill); }
 .host-color-choice[data-host-color="lavender"] span { background: var(--host-icon-lavender); }
 .host-color-choice[data-host-color="orchid"] span { background: var(--host-icon-orchid); }
 .host-color-choice[data-host-color="teal"] span { background: var(--host-icon-teal); }
@@ -8050,7 +7942,7 @@ a:any-link,
 .launcher-host-option { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--fg-0); text-align: left; font: inherit; cursor: pointer; }
 .launcher-host-option bdi { white-space: nowrap; }
 .launcher-host-option:hover { background: var(--control-hover-bg); }
-.launcher-host-option[aria-selected="true"] { background: var(--accent-fill); border-color: var(--accent-edge); box-shadow: inset 3px 0 var(--accent); }
+.launcher-host-option[aria-selected="true"] { background: var(--accent-fill); border-color: var(--accent-edge); color: var(--on-fill); }
 
 /* Recorded archives are grouped by their host, including an unreachable host
    whose contents cannot be read. Only the explicit confirmation spends danger
@@ -8318,6 +8210,135 @@ a:any-link,
   border: 1px solid currentColor;
 }
 .session-tunnel-error { color: var(--fg-0); padding: 4px 12px; }
+
+/* ===== Inverse roles on solid selection ============================
+   These are the existing selection owners, not a second state mechanism.
+   Their descendants already declare ordinary foregrounds, so inheritance
+   alone cannot invert a selected object's metadata, failures or marks.
+   Keep these after those ordinary roles, including stale-status overrides. */
+.session-row.selected .session-title,
+.session-row.selected .session-repository,
+.session-row.selected .sidebar-glyph,
+.session-row.selected .status-badge,
+.session-row.selected .status-badge .status-dot,
+.session-row.selected .delete-progress,
+.session-row.selected .action-error,
+.session-row.selected .session-row-menu,
+.session-row.selected .session-row-bell,
+.session-row.selected .inline-link,
+.session-row.selected a:any-link {
+  color: var(--on-fill);
+}
+
+/* A title's stale dimming and every secondary value remain AA. Removing
+   the invocation chip's neutral backing lets that value share the same
+   inverse contract instead of putting near-white text on a pale chip. */
+.session-row.stale.selected .session-title,
+.session-row.selected .session-pin,
+.session-row.selected .session-host,
+.session-row.selected .session-host-separator,
+.session-row.selected .session-cwd,
+.session-row.selected .session-invocation,
+.session-row.selected .status-time,
+.session-row.selected .stale-badge,
+.session-row.selected .session-detail-copy,
+.session-row.selected .managed-checkout-mark,
+.session-row.selected .compact-qualifier {
+  color: var(--on-accent-dim);
+}
+.session-row.selected .session-invocation { background: transparent; }
+
+/* HostMark deliberately supplies its identity tint inline. Selection must
+   override that actual SVG, not merely its parent, or named host colors
+   retain unreadable contrast. The narrow important rule is the only place
+   identity loses its tint; ordinary rows and previews keep the chosen color. */
+.session-row.selected .host-kind-icon,
+.quick-switcher-row[aria-selected="true"] .host-kind-icon,
+.launcher-host-option[aria-selected="true"] .host-kind-icon,
+.host-icon-choice[aria-pressed="true"] .host-kind-icon {
+  color: var(--on-fill) !important;
+}
+
+.quick-switcher-row[aria-selected="true"] .status-badge,
+.quick-switcher-row[aria-selected="true"] .status-dot,
+.quick-switcher-row[aria-selected="true"] mark {
+  color: var(--on-fill);
+}
+.quick-switcher-row[aria-selected="true"] .quick-switcher-agent,
+.quick-switcher-row[aria-selected="true"] .quick-switcher-host,
+.quick-switcher-row[aria-selected="true"] .quick-switcher-cwd,
+.quick-switcher-row[aria-selected="true"] .quick-switcher-template-summary,
+.quick-switcher-row[aria-selected="true"] .quick-switcher-template-keys kbd,
+.templates-row[aria-pressed="true"] .templates-row-summary,
+.launch-composer-folder-options button[aria-selected="true"] .launch-composer-folder-meaning,
+.launch-composer-search-group > button.selected .launch-composer-search-recent-selection {
+  color: var(--on-accent-dim);
+}
+
+/* Specific base rules for trailing list actions and browser search results
+   occur after the initial selection rules. Restate only their foreground
+   here; neither their order nor their geometry changes with selection. */
+.launch-composer-listbox > button.selected:last-child,
+.launch-composer-search-group > button.selected {
+  color: var(--on-fill);
+}
+
+/* A highlighted command uses selection even when it is destructive. Its
+   wording, icon shape and separating rule still identify the destructive
+   command; red remains its resting color. Disabled items never gain a fill. */
+.session-row-menu-item:hover:not([aria-disabled="true"]) .session-row-menu-icon,
+.session-row-menu-item:focus:not([aria-disabled="true"]) .session-row-menu-icon,
+.host-row-menu-item:hover:not([aria-disabled="true"]) .session-row-menu-icon,
+.host-row-menu-item:focus:not([aria-disabled="true"]) .session-row-menu-icon {
+  color: var(--on-fill);
+}
+.session-row-menu-item:hover:not([aria-disabled="true"]) .session-row-menu-description,
+.session-row-menu-item:focus:not([aria-disabled="true"]) .session-row-menu-description,
+.session-row-menu-item:hover:not([aria-disabled="true"]) .templates-number-owner,
+.session-row-menu-item:focus:not([aria-disabled="true"]) .templates-number-owner,
+.host-row-menu-item:hover:not([aria-disabled="true"]) .session-row-menu-description,
+.host-row-menu-item:focus:not([aria-disabled="true"]) .session-row-menu-description {
+  color: var(--on-accent-dim);
+}
+
+/* Selected segments retain their fill under pointer hover. Neutral hover is
+   for an unchosen option, and must never erase the active value. */
+.templates-row[aria-pressed="true"]:hover,
+.templates-segments button[aria-pressed="true"]:hover,
+.host-icon-choice[aria-pressed="true"]:hover:not(:disabled),
+.launcher-host-option[aria-selected="true"]:hover,
+.quick-switcher-row[aria-selected="true"]:hover {
+  background: var(--accent-fill-hover);
+}
+
+/* The ordinary accent ring does not contrast with its own solid fill.
+   Inverse focus applies to the selected owner and controls inside it, plus
+   filled primary/danger actions and pressed disclosures. Outlined permanent
+   answers retain the neutral-surface ring. Existing offsets stay intact. */
+.session-row.selected :focus-visible,
+.quick-switcher-row[aria-selected="true"]:focus-visible,
+.launcher-host-option[aria-selected="true"]:focus-visible,
+.host-icon-choice[aria-pressed="true"]:focus-visible,
+.host-color-choice[aria-pressed="true"]:focus-visible,
+.templates-row[aria-pressed="true"]:focus-visible,
+.templates-segments button[aria-pressed="true"]:focus-visible,
+.app-settings-navigation button[aria-pressed="true"]:focus-visible,
+.launch-composer-folder-options button[aria-selected="true"]:focus-visible,
+.launch-composer-repository-options > button[aria-selected="true"]:focus-visible,
+.launch-composer-options > button.selected:focus-visible,
+.launch-composer-segmented > button.selected:focus-visible,
+.launch-composer-listbox > button.selected:focus-visible,
+.launch-composer-search-group > button.selected:focus-visible,
+.launch-kind-tab.selected:focus-visible,
+.tab.selected:focus-visible,
+.host-settings-switch:checked:focus-visible,
+.session-row-menu-item:focus-visible:not([aria-disabled="true"]),
+.host-row-menu-item:focus-visible:not([aria-disabled="true"]),
+.btn-primary:not(.btn-outline):focus-visible,
+.btn-danger:not(.btn-outline):focus-visible,
+.btn[aria-expanded="true"]:focus-visible {
+  outline-color: var(--on-fill);
+}
 
 /* ===== Technical value typography ==================================
  * Value roles are explicit, never inferred from the trust boundary class

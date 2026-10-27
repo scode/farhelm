@@ -3,6 +3,7 @@
  * so a checkbox that changes only its appearance cannot satisfy the round trip.
  */
 import { expect, test } from "./helpers/evidence";
+import { resolveToken } from "./helpers/color";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { clickDialogGap } from "./helpers/dialog-gap";
 import { routeGate } from "./helpers/route-gate";
@@ -602,7 +603,7 @@ test("prepared checkout settings preserve saved choices across reads, refusals a
     const help = field.getByRole("link");
     await expect(help).toHaveAttribute("href", "https://farhelm.io/docs/using/start-a-session/#prepared-checkouts");
     await expect(help).toHaveText("How prepared checkouts differ from a fresh clone ↗");
-    await expect(help).toHaveCSS("color", "rgb(120, 183, 255)");
+    await expect(help).toHaveCSS("color", await resolveToken(page, "--link"));
     await expect(help).toHaveCSS("text-decoration-line", "underline");
     mode = "refuse";
     // Refusal may restore the native state before Playwright checks an

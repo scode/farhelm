@@ -14,6 +14,7 @@
 // ---------------------------------------------------------------------
 import { expect, newObservedContext, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { resolveToken } from "./helpers/color";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
 import { renameSession, stubFeed } from "./helpers/fleet";
@@ -2359,26 +2360,8 @@ test("a tab list past the island cap is listed in full but only partly attached"
 });
 
 /**
- * Resolves a `:root` custom property to the RGB string a browser would
- * compute for any real element that used it, via a live probe element's
- * `getComputedStyle`. Duplicated from chrome.spec.ts's identical helper
- * rather than shared: the two files have no other coupling, and a shared
- * helper module would exist for this one function alone.
- */
-async function resolveToken(page: Page, token: string): Promise<string> {
-  return page.evaluate((name) => {
-    const probe = document.createElement("div");
-    probe.style.color = `var(${name})`;
-    document.body.appendChild(probe);
-    const value = getComputedStyle(probe).color;
-    probe.remove();
-    return value;
-  }, token);
-}
-
-/**
  * Keyboard focus and pointer hover are independent states here. A selected
- * tab keeps the lighter accent-hover fill under a pointer on its own, but a
+ * tab keeps the selected-hover fill under a pointer on its own, but a
  * keyboard user must still read selection as the resting accent even when
  * their pointer happens to be over the tab. The test therefore establishes
  * their intersection rather than relying on the mouse position a prior click

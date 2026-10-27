@@ -5,6 +5,7 @@
  */
 import { Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
+import { resolveToken } from "./helpers/color";
 import { patchPreferences, readPreferences, resetPreferences } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 import { DEVICE_SECRET_KEY } from "./helpers/device-auth";
@@ -160,7 +161,7 @@ test("welcome links, modal isolation and short-window dismissal", async ({ page,
   await page.mouse.move(0, 0);
   for (const link of [guideLink, dialog.getByRole("button", { name: "Send feedback now", exact: true })]) {
     expect(await link.evaluate(element => element.matches(":hover")), "premise: resting inline link").toBe(false);
-    await expect(link).toHaveCSS("color", "rgb(120, 183, 255)");
+    await expect(link).toHaveCSS("color", await resolveToken(page, "--link"));
     await expect(link).toHaveCSS("text-decoration-line", "underline");
   }
   await page.keyboard.press("Control+Shift+P");
@@ -173,7 +174,7 @@ test("welcome links, modal isolation and short-window dismissal", async ({ page,
   await dialog.screenshot({ path: testInfo.outputPath("welcome.png") });
   await guideLink.hover();
   expect(await guideLink.evaluate(element => element.matches(":hover")), "premise: hovered guide link").toBe(true);
-  await expect(guideLink).toHaveCSS("color", "rgb(120, 183, 255)");
+  await expect(guideLink).toHaveCSS("color", await resolveToken(page, "--link"));
   await expect(guideLink).toHaveCSS("text-decoration-line", "underline");
   const external = context.waitForEvent("page");
   await guideLink.click();

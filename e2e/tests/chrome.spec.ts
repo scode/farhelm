@@ -1,26 +1,23 @@
 /**
  * The sidebar/session chrome/menu-panel layering contract — the
- * three-level surface ladder and the single keyboard-focus accent that
+ * three-level surface ladder and keyboard-focus roles that
  * app.css's `:root` block declares as design constraints, not accidents
  * (see that file's header comment and the surface-levels paragraph inside
- * `:root`). Nothing else in the suite reads a computed style to check
- * either claim: the rest of the browser suite treats CSS as an
- * implementation detail behind whatever attribute or text it asserts on,
- * which is exactly why a specificity bug (a selected tab's hover fill
- * losing to `.btn:hover`) or an accidental token swap can ship unnoticed
- * behind a screenshot nobody diffed pixel-for-pixel.
+ * `:root`). Computed styles catch a missing selector or specificity
+ * regression even when the classes and accessible state remain correct.
  *
- * Two properties, two tests: that the three declared levels are actually
- * three distinct computed backgrounds with the right elements grouped
- * onto each one, and that the sheet's single `:focus-visible` accent
- * shows up for a keyboard user and stays away from a mouse one. Kept
+ * The three declared levels must produce distinct computed backgrounds with
+ * the right elements grouped onto each one. Keyboard focus uses accent on
+ * neutral surfaces and inverse on selection, staying away from mouse clicks. A selected
+ * identity must remain readable when a confirmation disables navigation. Kept
  * small and deterministic on purpose — this file is not trying to be a
  * general CSS regression harness, just a witness for the two claims nothing
  * else would catch.
  */
 import { expect, test } from "./helpers/evidence";
+import { resolveToken } from "./helpers/color";
 import { type Locator, type Page } from "@playwright/test";
-import { cleanupSession, createSession, openRowMenu, pinAutoSelect } from "./helpers/fleet";
+import { cleanupSession, createSession, openRowMenu, patchPreferences, pinAutoSelect, readPreferences } from "./helpers/fleet";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 function row(page: Page, id: string) {
@@ -83,27 +80,48 @@ test("the three-level surface ladder renders distinct, correctly grouped levels"
   }
 });
 
-/**
- * Resolves a `:root` custom property to the RGB string a browser would
- * compute for any real element that used it — via a live probe element's
- * `getComputedStyle`, the same normalization `outline-color` goes
- * through — rather than hardcoding the token's hex value in this file.
- * `--danger-strong` was already retuned once by this very fixup; a test
- * that baked in a hex would go stale on the next retune instead of
- * tracking it.
+/** A confirmation must disable activation without dimming selected identity below AA.
+ * The native button contains the title and status; opacity on that ancestor
+ * blends every inverse value into the periwinkle, even when each computed
+ * foreground is correct. Exercise the real confirmation rather than assigning
+ * a disabled property or testing only the title's color.
  */
-async function resolveToken(page: Page, token: string): Promise<string> {
-  return page.evaluate((name) => {
-    const probe = document.createElement("div");
-    probe.style.color = `var(${name})`;
-    document.body.appendChild(probe);
-    const value = getComputedStyle(probe).color;
-    probe.remove();
-    return value;
-  }, token);
-}
+test("selected session identity stays legible while confirmation disables navigation", async ({ page, request }) => {
+  const previous = await readPreferences(request);
+  const session = await createSession(request, {
+    title: `chrome-disabled-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await patchPreferences(request, { skip_session_confirmations: false });
+    await pinAutoSelect(page, session.id);
+    await page.goto("/");
+    const target = row(page, session.id);
+    await waitForSessionRevealed(page, session.id);
+    await expect(target).toHaveAttribute("data-session-selected", "true");
+    await expect(target).toHaveAttribute("data-session-stale", "false");
+    await openRowMenu(target);
+    await target.locator(".session-row-delete").click();
+    await expect(target.locator(".confirm-consequence")).toBeVisible();
+    await expect(target.locator(".session-row-open")).toBeDisabled();
+    await expect(target.locator(".session-row-open")).toHaveCSS("opacity", "1");
+    await expect(target.locator(".session-title")).toHaveCSS("color", await resolveToken(page, "--on-accent-dim"));
+    await expect(target).toHaveCSS("background-color", await resolveToken(page, "--accent-fill-hover"));
+    await target.locator(".confirm-cancel").click();
+    await expect(target.locator(".session-row-open")).toBeEnabled();
+    await expect(target.locator(".session-title")).toHaveCSS("color", await resolveToken(page, "--on-fill"));
+  } finally {
+    await cleanupSession(request, session.id);
+    await patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null });
+  }
+});
 
-test("keyboard focus paints the accent outline; a mouse click does not", async ({
+/** Focus must remain visible on ordinary chrome and on solid selection.
+ * The selected row needs an inverse ring; its accent-colored counterpart
+ * remains the contract for controls on neutral surfaces.
+ */
+test("keyboard focus uses accent on ordinary controls and inverse on selection; a mouse click does not", async ({
   page,
   request,
   browserName,
@@ -128,6 +146,8 @@ test("keyboard focus paints the accent outline; a mouse click does not", async (
     await waitForSessionRevealed(page, session.id);
 
     const accentRgb = await resolveToken(page, "--accent");
+    const selectedRing = await resolveToken(page, "--on-fill");
+    await expect(target).toHaveAttribute("data-session-selected", "true");
     // A native checkbox with no contextual focus override of its own —
     // unlike `.session-row-open` below, which restates its own ring for
     // a documented reason (see that class's `:focus-visible` comment in
@@ -173,18 +193,19 @@ test("keyboard focus paints the accent outline; a mouse click does not", async (
       // `currentcolor` fallback (`--fg-1`, observed on a loaded CI run).
       // A steal inside one attempt fails that attempt atomically, and the
       // retry's re-focus makes the next attempt independent of it.
-      async function expectFocusRing(el: Locator) {
+      /** Observe focus and its paint together despite terminal reconnect churn. */
+      async function expectFocusRing(el: Locator, color: string) {
         await expect(async () => {
           await el.focus();
           const ring = await el.evaluate((node) => {
             const style = getComputedStyle(node);
             return { outlineStyle: style.outlineStyle, outlineColor: style.outlineColor };
           });
-          expect(ring).toEqual({ outlineStyle: "solid", outlineColor: accentRgb });
+          expect(ring).toEqual({ outlineStyle: "solid", outlineColor: color });
         }).toPass({ timeout: 10_000 });
       }
-      await expectFocusRing(btn);
-      await expectFocusRing(openButton);
+      await expectFocusRing(btn, accentRgb);
+      await expectFocusRing(openButton, selectedRing);
     }
 
     // The mouse-click half, with a real click this time.
