@@ -51,6 +51,39 @@ const NEW_SESSION_TOOLTIP: &str = if crate::HAS_NEW_SESSION_SHORTCUT {
     "new session: start an agent or a command on any host"
 };
 
+/// Whether a fleet-wide switcher pick needs the sidebar widened to reveal it.
+///
+/// This is a navigation decision, not a second list filter: the helm still
+/// owns membership. Only the three offered live states match a nonempty
+/// status choice; ended or unclassified picks require All. An admitted sidebar
+/// reply answering this exact filter takes precedence over the switcher's
+/// older status snapshot. Presence proves visibility even in a cut reply;
+/// absence does so only in a complete one, never proving deletion.
+/// Callers pass None for failed or superseded replies
+/// and clear neither dimension until the ordinary open guard accepts the pick.
+fn switcher_pick_hidden(
+    filter: &SessionFilter,
+    session: &Session,
+    current_listing: Option<&SessionListing>,
+) -> bool {
+    if let Some(current) = current_listing {
+        if current.sessions.iter().any(|row| row.id == session.id) {
+            return false;
+        }
+        if !current.truncated {
+            return filter.narrows();
+        }
+    }
+    let status_matches = match filter.status.as_str() {
+        "" => true,
+        "running" => matches!(session.status, SessionStatus::Running),
+        "waiting" => matches!(session.status, SessionStatus::Waiting),
+        "idle" => matches!(session.status, SessionStatus::Idle),
+        _ => false,
+    };
+    filter.host.is_some_and(|host| session.host != Some(host)) || !status_matches
+}
+
 /// A successful render's held-order identities and their actual copy flow.
 ///
 /// None is an absent/failed listing, not a successful empty list. The rendered
@@ -1225,9 +1258,8 @@ pub(crate) fn ListView(
     // intentionally separate from clone prefill: no title, host, command, or
     // structured launch choice is implied by this convenience.
     let mut ordinary_new_cwd = use_signal(|| None::<String>);
-    // The page-local host query carried by listing reads. The selector changes
-    // only this field, so every retired API dimension
-    // stay at their `SessionFilter` defaults.
+    // Host and status choices are page-local queries, not preferences. Each
+    // control changes only its own field; the helm combines their membership.
     let mut filter = use_signal(SessionFilter::default);
     // The order the reads are carrying, seeded from the helm's shared
     // remembered order (`stored_sort` over the `SharedPreferences` context).
@@ -2006,6 +2038,13 @@ pub(crate) fn ListView(
     // still serializes and coalesces demand; `Explicit` merely records this
     // user action immediately rather than waiting for a text debounce.
     let request_host_filter = request_listing.clone();
+    let request_status_filter = request_listing.clone();
+    let apply_status = use_callback(move |value: &'static str| {
+        if filter.peek().status != value {
+            filter.write().status = value.to_string();
+            request_status_filter(Trigger::Explicit);
+        }
+    });
 
     // Change the order the list is read in, and remember it for this client.
     //
@@ -3783,14 +3822,29 @@ pub(crate) fn ListView(
             match pick {
                 Some(super::quick_switcher::SwitcherPick::Session(session)) => {
                     let same = selected.peek().as_deref() == Some(session.id.raw());
-                    let hidden = filter
-                        .peek()
-                        .host
-                        .is_some_and(|host| session.host != Some(host));
+                    let hidden = {
+                        let current_filter = filter.peek();
+                        let current_listing = listing.peek();
+                        let answers_current = listing_query
+                            .peek()
+                            .as_ref()
+                            .is_some_and(|(answered, _)| answered == &*current_filter);
+                        let current = current_listing
+                            .as_ref()
+                            .and_then(|result| result.as_ref().ok())
+                            .filter(|_| answers_current);
+                        switcher_pick_hidden(&current_filter, &session, current)
+                    };
                     if guarded_open.call(*session) {
                         restore = same;
                         if hidden {
-                            filter.write().host = None;
+                            // Reveal a hidden fleet pick with one widening read.
+                            // A refused navigation must retain both choices.
+                            {
+                                let mut current = filter.write();
+                                current.host = None;
+                                current.status.clear();
+                            }
                             switcher_listing(Trigger::Explicit);
                         }
                     }
@@ -4322,6 +4376,25 @@ pub(crate) fn ListView(
             }
         // Host choice remains available while a listing is loading or failed,
         // including when the selected host has become a tombstone.
+            div { class: "session-status-filter",
+                div { class: "segmented-control", role: "radiogroup", aria_label: "Session status",
+                    for (value, label, help) in [
+                        ("", "All", "Show every session, including ended sessions"),
+                        ("running", "Running", "Show sessions whose agents are working"),
+                        ("waiting", "Waiting", "Show sessions that need your attention"),
+                        ("idle", "Idle", "Show live sessions whose agents are at rest"),
+                    ] {
+                        label { class: "segment-radio", "data-tooltip": help,
+                            input {
+                                r#type: "radio", name: "session-status", value,
+                                checked: filter.read().status == value,
+                                onchange: move |_| apply_status.call(value),
+                            }
+                            span { "{label}" }
+                        }
+                    }
+                }
+            }
             div { class: "list-header-controls",
                 select {
                     class: "filter-host",
@@ -4725,6 +4798,91 @@ fn listed_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A switcher widens only when host or status hides the accepted pick.
+    /// Ended and unclassified sessions cannot match a live-only segment.
+    #[farhelm_testtrace::test]
+    fn switcher_picks_respect_both_sidebar_dimensions() {
+        let mut session = crate::list::row::row_specimen("pick");
+        session.host = Some(7);
+        for status in [
+            SessionStatus::Running,
+            SessionStatus::Waiting,
+            SessionStatus::Idle,
+            SessionStatus::Unknown,
+            SessionStatus::Exited { exit_code: Some(0) },
+            SessionStatus::Interrupted,
+            SessionStatus::Error {
+                detail: "refused".into(),
+            },
+        ] {
+            session.status = status;
+            assert!(!switcher_pick_hidden(
+                &SessionFilter::default(),
+                &session,
+                None
+            ));
+            for (key, matches) in [
+                ("running", matches!(session.status, SessionStatus::Running)),
+                ("waiting", matches!(session.status, SessionStatus::Waiting)),
+                ("idle", matches!(session.status, SessionStatus::Idle)),
+            ] {
+                let mut filter = SessionFilter {
+                    host: Some(7),
+                    status: key.into(),
+                    ..Default::default()
+                };
+                assert_eq!(switcher_pick_hidden(&filter, &session, None), !matches);
+                filter.host = Some(8);
+                assert!(switcher_pick_hidden(&filter, &session, None));
+            }
+        }
+    }
+
+    /// An admitted current membership beats stale switcher statuses in both directions.
+    /// Missing rows widen navigation only; they still carry no deletion evidence.
+    #[farhelm_testtrace::test]
+    fn switcher_picks_prefer_current_complete_membership() {
+        let mut session = crate::list::row::row_specimen("pick");
+        session.status = SessionStatus::Idle;
+        let filter = SessionFilter {
+            status: "idle".into(),
+            ..Default::default()
+        };
+        let mut current = SessionListing {
+            sessions: vec![],
+            total: 1,
+            matching: Some(0),
+            filtered: true,
+            omits_fleet_members: true,
+            truncated: false,
+        };
+        assert!(switcher_pick_hidden(&filter, &session, Some(&current)));
+        session.status = SessionStatus::Running;
+        current.sessions.push(Session {
+            status: SessionStatus::Idle,
+            ..session.clone()
+        });
+        assert!(!switcher_pick_hidden(&filter, &session, Some(&current)));
+        current.truncated = true;
+        assert!(
+            !switcher_pick_hidden(&filter, &session, Some(&current)),
+            "presence still proves visibility in a cut reply"
+        );
+        current.sessions.clear();
+        session.status = SessionStatus::Idle;
+        assert!(
+            !switcher_pick_hidden(&filter, &session, Some(&current)),
+            "a cut omission falls back to the snapshot"
+        );
+        session.status = SessionStatus::Running;
+        assert!(switcher_pick_hidden(&filter, &session, None));
+        assert!(!switcher_pick_hidden(
+            &SessionFilter::default(),
+            &session,
+            Some(&current)
+        ));
+    }
 
     /// Keep a real admitted B opening while independently publishing held row
     /// snapshots. Cells deliberately leave effect polling under test control;

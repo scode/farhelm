@@ -6577,6 +6577,23 @@ mod tests {
         );
     }
 
+    /// Status-only filtering narrows even when every row happens to match.
+    /// Its omitted sessions cannot prove deletion or retire selected state.
+    #[farhelm_testtrace::test]
+    fn status_only_queries_are_narrowed_and_never_fleet_absence_evidence() {
+        for status in ["running", "waiting", "idle"] {
+            let filter = SessionFilter {
+                status: status.into(),
+                ..Default::default()
+            };
+            assert!(filter.narrows());
+            assert!(filter.omits_fleet_members());
+            assert_eq!(filter.query(), format!("status={status}"));
+        }
+        assert!(!SessionFilter::default().narrows());
+        assert!(!SessionFilter::default().omits_fleet_members());
+    }
+
     /// A tab id is supervisor-supplied and lands in a URL PATH, so an id
     /// carrying path syntax must not be able to choose which resource the
     /// request names. `../../victim` is the concrete attack: unescaped, a

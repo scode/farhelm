@@ -19,10 +19,12 @@ import { open, openLauncher, rowOf } from "./open";
 import { DOCS_SHOTS_DIR } from "./paths";
 import { shot as captureShot, type CropOptions } from "./shot";
 import { readFleet } from "./stage-docs";
+import { chooseStatus } from "../tests/helpers/list-header";
 
 // A sidebar-only PR needs its changed states, rather than every unchanged
 // foundation dialog. The same script, fleet, shot helper and cleanup still run.
 const sidebarHeaderOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-header";
+const sidebarStatusOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-status";
 
 /** Park before observing tooltip state, not only at the screenshot's last step.
  * Pointer departure cancels pending hover help. Focus captures establish their
@@ -468,7 +470,27 @@ for (const colorScheme of ["dark", "light"] as const) {
           }
         };
         await widthShots();
-        if (sidebarHeaderOnly) {
+        if (sidebarStatusOnly) {
+          // These are the staged supervisors' real statuses. Combining a
+          // waiting query with the local host proves an honestly empty view.
+          await chooseStatus(page, "Waiting");
+          await expect(rowOf(page, scenario, (session) => session.status === "waiting")).toBeVisible();
+          await expect(page.locator(".session-count")).toHaveText(/^\d+ of \d+$/);
+          await page.mouse.click(0, 0);
+          await shot(page, `${name}-status-waiting`, window, { pad: 0 });
+          await widthShots("-status-waiting");
+          const local = (await realHosts(request)).find((host) => host.kind === "local");
+          expect(local, "the staged registry identifies its local host").toBeDefined();
+          await page.locator(".filter-host").selectOption(String(local!.id));
+          await expect(page.locator(".filter-empty")).toBeVisible();
+          await expect(page.locator(".session-count")).toHaveText(/^0 of \d+$/);
+          await page.mouse.click(0, 0);
+          await shot(page, `${name}-status-empty`, window, { pad: 0 });
+          await page.locator(".filter-host").selectOption("");
+          await chooseStatus(page, "All");
+          await expect(row).toBeVisible();
+        }
+        if (sidebarHeaderOnly || sidebarStatusOnly) {
           // Seed through the same awaited API path as the full capture.
           // An optimistic menu write could otherwise race the final restore.
           await patchPreferences(request, { compact: true });

@@ -1472,6 +1472,11 @@ The chosen order is the list's title: **Recently active**, **Newest created** or
 those orders and **Compact**. Trash with its count, Templates and New are compact icon buttons beside the title; their
 hover text and accessible names explain the actions, and New remains the sidebar's one filled control.
 
+Below the list title, a single-status segmented choice offers **All**, **Running**, **Waiting** and **Idle**, without
+counts. It combines with the host choice in the helm's query and is not persisted. Ended sessions appear only under All.
+A narrowed list keeps its visible "N of M" count, including when every session matches. Hiding the selected session
+changes neither that selection nor its open terminal; a filter with no matches says so in the list.
+
 One flat list across all registered hosts, with an always-visible host selector. It starts at `ALL`; `This machine`
 means the registered local host, and configured remote hosts follow in registry order, including unavailable hosts whose
 last-known sessions remain useful. Choosing a host sends a server-side query immediately and is not persisted. The list
@@ -2175,9 +2180,10 @@ nothing typed, sessions appear in most recent activity order. Every match is rea
 listing cap cut the snapshot, the switcher says only the most recently active sessions were searched. Rows show status,
 agent, host (with its chosen mark) and directory, with matching characters marked. Arrow keys choose and Enter opens the
 selected session, using the same busy refusals as a sidebar row; the first match is initially selected. Opening a
-session hidden by the host selector resets that selector to ALL. Escape or a click outside closes and restores the
-previous focus. A loading list says loading, rather than no matches, and Enter picks nothing until a reply arrives; a
-failed read says so.
+session hidden by the host choice or status filter resets both to All after the open is accepted; a refused pick keeps
+both choices. A pick already visible through both leaves them in place. Escape or a click outside closes and restores
+the previous focus. A loading list says loading, rather than no matches, and Enter picks nothing until a reply arrives;
+a failed read says so.
 
 While text is typed, a pinned row below the scrolling session matches offers "new session named X". It follows the
 sessions in arrow-key order and is selected when no session matches, except while the session list is still loading,

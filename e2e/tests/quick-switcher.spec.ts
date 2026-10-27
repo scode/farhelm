@@ -1,6 +1,7 @@
 /** Keyboard navigation must cross the modal boundary before terminal focus. */
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { chooseStatus } from "./helpers/list-header";
 import { type Page } from "@playwright/test";
 import {
   cleanupSession, createSession, listHosts, listSessions, localHostId,
@@ -243,6 +244,9 @@ test("a busy pick leaves navigation and the host filter untouched", async ({ pag
     await attachSession(page, first.id);
     await waitForTermText(page, "FAKE-AGENT READY");
     await page.locator(".filter-host").selectOption(String(local));
+    await expect.poll(async () => (await listSessions(request)).sessions.find((s) => s.id === first.id)?.status?.state,
+      { timeout: 20_000, message: "the busy-navigation origin must match the live-only segment" }).toBe("idle");
+    await chooseStatus(page, "Idle");
     const row = page.locator(`[data-session-id="${first.id}"]`);
     await page.route(`**/api/sessions/${encodeURIComponent(first.id)}/stop`, async (route) => {
       requested = true;
@@ -264,6 +268,7 @@ test("a busy pick leaves navigation and the host filter untouched", async ({ pag
     await expect(dialog).toHaveCount(0);
     await expect(terminal).toBeFocused();
     await expect(page.locator(".filter-host")).toHaveValue(String(local));
+    await expect(page.getByRole("radio", { name: "Idle", exact: true })).toBeChecked();
     await expect(row).toHaveAttribute("data-session-selected", "true");
     gate.release();
     await expect(row.locator(".session-row-open")).toBeEnabled();
