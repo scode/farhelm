@@ -53,7 +53,12 @@ test("guarded choices explain each agent and Cursor keeps its own setting", asyn
     const chipBox = await guarded.boundingBox();
     const helpBox = await help.boundingBox();
     expect(chipBox && helpBox, "both permission and documentation controls have a painted box").toBeTruthy();
-    expect(Math.abs(chipBox!.y - helpBox!.y), "help stays beside the permission chips").toBeLessThanOrEqual(2);
+    // The segmented well adds a 1px border and 2px padding around a 30px
+    // chip. Its 36px help button aligns with that chip's center, not its top.
+    expect(
+      Math.abs((chipBox!.y + chipBox!.height / 2) - (helpBox!.y + helpBox!.height / 2)),
+      "help stays centered beside the permission chips",
+    ).toBeLessThanOrEqual(2);
     if (agent === "Claude") {
       const search = form.locator('.launch-composer-search input[role="combobox"]');
       await search.fill("perms:guarded");

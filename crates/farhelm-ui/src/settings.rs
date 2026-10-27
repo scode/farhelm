@@ -28,6 +28,8 @@
 //! Section changes hide mounted panels rather than replacing their component
 //! trees. Explicit-save fields keep their drafts and pending work, and device
 //! assets initialize their inputs before their panels are visible.
+//! Label/help groups keep each explanation with its own choice; they do not
+//! combine preference writers or create a dialog-wide save lifecycle.
 
 use dioxus::prelude::*;
 use std::cell::Cell;
@@ -305,7 +307,7 @@ pub(crate) fn SettingsDialog(
                     dismiss_tooltip: "close settings; unsaved fields are discarded",
                     on_dismiss: move |_| on_close.call(()),
                 }
-                div { class: if sections_open() { "host-settings-body app-settings-sections-open" } else { "host-settings-body" },
+                div { class: if sections_open() { "dialog-body host-settings-body app-settings-sections-open" } else { "dialog-body host-settings-body" },
                     nav {
                         class: "app-settings-navigation",
                         aria_label: "settings sections",
@@ -346,104 +348,110 @@ pub(crate) fn SettingsDialog(
                                 tabindex: "-1",
                                 "sessions"
                             }
-                            label {
-                                class: "app-settings-choice",
-                                "data-tooltip": "delete, replace, restart and close terminal tabs on the first click",
-                                span { "skip session confirmations" }
-                                input {
-                                    r#type: "checkbox",
-                                    class: "host-settings-switch",
-                                    checked: skip_sessions,
-                                    aria_describedby: "session-confirmations-help",
-                                    onchange: move |event| {
-                                        let skip = event.checked();
-                                        preferences.0.write().skip_session_confirmations = Some(skip);
-                                        let generation = session_generation() + 1;
-                                        session_generation.set(generation);
-                                        session_error.set(false);
-                                        if skip {
-                                            store_preference(&session_base, PreferenceValue::SessionConfirmations(true));
-                                        } else {
-                                            let completion = restore_session_confirmations(&session_base);
-                                            spawn(async move {
-                                                let saved = completion.await;
-                                                if session_generation() == generation {
-                                                    session_error.set(!saved);
-                                                }
-                                            });
-                                        }
-                                    },
+                            div { class: "setting-group",
+                                label {
+                                    class: "app-settings-choice setting-row",
+                                    "data-tooltip": "delete, replace, restart and close terminal tabs on the first click",
+                                    span { "skip session confirmations" }
+                                    input {
+                                        r#type: "checkbox",
+                                        class: "control-switch",
+                                        checked: skip_sessions,
+                                        aria_describedby: "session-confirmations-help",
+                                        onchange: move |event| {
+                                            let skip = event.checked();
+                                            preferences.0.write().skip_session_confirmations = Some(skip);
+                                            let generation = session_generation() + 1;
+                                            session_generation.set(generation);
+                                            session_error.set(false);
+                                            if skip {
+                                                store_preference(&session_base, PreferenceValue::SessionConfirmations(true));
+                                            } else {
+                                                let completion = restore_session_confirmations(&session_base);
+                                                spawn(async move {
+                                                    let saved = completion.await;
+                                                    if session_generation() == generation {
+                                                        session_error.set(!saved);
+                                                    }
+                                                });
+                                            }
+                                        },
+                                    }
                                 }
-                            }
-                            p {
-                                id: "session-confirmations-help",
-                                class: "host-settings-help",
-                                "Delete, replace, restart and close terminal tabs on the first click. YOLO, host and trash confirmations still follow their own rules. This choice applies to this helm; other open clients pick it up when they reload."
-                            }
-                            if session_error() {
                                 p {
-                                    class: "host-settings-help app-settings-error",
-                                    role: "alert",
-                                    "Confirmations may still be off for this helm. Try again."
+                                    id: "session-confirmations-help",
+                                    class: "host-settings-help",
+                                    "Delete, replace, restart and close terminal tabs on the first click. YOLO, host and trash confirmations still follow their own rules. This choice applies to this helm; other open clients pick it up when they reload."
+                                }
+                                if session_error() {
+                                    p {
+                                        class: "host-settings-help app-settings-error",
+                                        role: "alert",
+                                        "Confirmations may still be off for this helm. Try again."
+                                    }
                                 }
                             }
-                            label {
-                                class: "app-settings-choice",
-                                "data-tooltip": "offer to name a quick-launched session while its agent starts",
-                                span { "name sessions on quick launch" }
-                                input {
-                                    r#type: "checkbox",
-                                    class: "host-settings-switch",
-                                    checked: name_quick_launches,
-                                    "data-preference-checked": name_quick_launches.to_string(),
-                                    aria_describedby: "quick-launch-naming-help",
-                                    onchange: move |event| {
-                                        save_settings_preference(
-                                            &naming_base,
-                                            preferences,
-                                            PreferenceValue::NameSessionOnQuickLaunch(event.checked()),
-                                            naming_error,
-                                            naming_mounted.clone(),
-                                        );
-                                    },
+                            div { class: "setting-group",
+                                label {
+                                    class: "app-settings-choice setting-row",
+                                    "data-tooltip": "offer to name a quick-launched session while its agent starts",
+                                    span { "name sessions on quick launch" }
+                                    input {
+                                        r#type: "checkbox",
+                                        class: "control-switch",
+                                        checked: name_quick_launches,
+                                        "data-preference-checked": name_quick_launches.to_string(),
+                                        aria_describedby: "quick-launch-naming-help",
+                                        onchange: move |event| {
+                                            save_settings_preference(
+                                                &naming_base,
+                                                preferences,
+                                                PreferenceValue::NameSessionOnQuickLaunch(event.checked()),
+                                                naming_error,
+                                                naming_mounted.clone(),
+                                            );
+                                        },
+                                    }
+                                }
+                                p {
+                                    id: "quick-launch-naming-help",
+                                    class: "host-settings-help",
+                                    "Offer to name a quick-launched session while its agent starts. Enter keeps its default name. This choice applies to this helm; other open clients pick it up when they reload."
+                                }
+                                if naming_error().is_some_and(|write| write.is_current()) {
+                                    p { class: "host-settings-help app-settings-error", role: "alert",
+                                        "Could not save whether to name quick-launched sessions. Try again."
+                                    }
                                 }
                             }
-                            p {
-                                id: "quick-launch-naming-help",
-                                class: "host-settings-help",
-                                "Offer to name a quick-launched session while its agent starts. Enter keeps its default name. This choice applies to this helm; other open clients pick it up when they reload."
-                            }
-                            if naming_error().is_some_and(|write| write.is_current()) {
-                                p { class: "host-settings-help app-settings-error", role: "alert",
-                                    "Could not save whether to name quick-launched sessions. Try again."
+                            div { class: "setting-group",
+                                label {
+                                    class: "app-settings-choice setting-row",
+                                    "data-tooltip": "color each terminal's frame to match its host icon",
+                                    span { "color terminal frames by host" }
+                                    input {
+                                        r#type: "checkbox",
+                                        class: "control-switch",
+                                        checked: color_frames,
+                                        "data-preference-checked": color_frames.to_string(),
+                                        aria_describedby: "terminal-frame-color-help",
+                                        onchange: move |event| {
+                                            let color = event.checked();
+                                            save_settings_preference(&frame_base, preferences,
+                                                PreferenceValue::ColorTerminalFrames(color), frame_error,
+                                                frame_mounted.clone());
+                                        },
+                                    }
                                 }
-                            }
-                            label {
-                                class: "app-settings-choice",
-                                "data-tooltip": "color each terminal's frame to match its host icon",
-                                span { "color terminal frames by host" }
-                                input {
-                                    r#type: "checkbox",
-                                    class: "host-settings-switch",
-                                    checked: color_frames,
-                                    "data-preference-checked": color_frames.to_string(),
-                                    aria_describedby: "terminal-frame-color-help",
-                                    onchange: move |event| {
-                                        let color = event.checked();
-                                        save_settings_preference(&frame_base, preferences,
-                                            PreferenceValue::ColorTerminalFrames(color), frame_error,
-                                            frame_mounted.clone());
-                                    },
+                                p {
+                                    id: "terminal-frame-color-help",
+                                    class: "host-settings-help",
+                                    "Match the thin frame around every session's terminal to its host icon color. The terminal background stays the same. This choice applies to this helm; other open clients pick it up when they reload."
                                 }
-                            }
-                            p {
-                                id: "terminal-frame-color-help",
-                                class: "host-settings-help",
-                                "Match the thin frame around every session's terminal to its host icon color. The terminal background stays the same. This choice applies to this helm; other open clients pick it up when they reload."
-                            }
-                            if frame_error().is_some_and(|write| write.is_current()) {
-                                p { class: "host-settings-help app-settings-error", role: "alert",
-                                    "Could not save whether to color terminal frames. Try again."
+                                if frame_error().is_some_and(|write| write.is_current()) {
+                                    p { class: "host-settings-help app-settings-error", role: "alert",
+                                        "Could not save whether to color terminal frames. Try again."
+                                    }
                                 }
                             }
                         }
@@ -472,14 +480,14 @@ pub(crate) fn SettingsDialog(
                             p { class: "host-settings-help",
                                 "The host choices apply to every host on this helm. Other open clients pick them up when they reload."
                             }
-                            div {
+                            div { class: "setting-group",
                                 label {
-                                    class: "app-settings-choice",
+                                    class: "app-settings-choice setting-row",
                                     "data-tooltip": "set up a new host as soon as it has been checked, without showing the plan first",
                                     span { "set up new hosts without asking" }
                                     input {
                                         r#type: "checkbox",
-                                        class: "host-settings-switch",
+                                        class: "control-switch",
                                         checked: setup,
                                         aria_describedby: "host-setup-preference-help",
                                         onchange: move |event| {
@@ -501,14 +509,14 @@ pub(crate) fn SettingsDialog(
                                     }
                                 }
                             }
-                            div {
+                            div { class: "setting-group",
                                 label {
-                                    class: "app-settings-choice",
+                                    class: "app-settings-choice setting-row",
                                     "data-tooltip": "forget a host as soon as you choose remove, without asking; its sessions keep running",
                                     span { "remove hosts without asking" }
                                     input {
                                         r#type: "checkbox",
-                                        class: "host-settings-switch",
+                                        class: "control-switch",
                                         checked: remove,
                                         aria_describedby: "host-remove-preference-help",
                                         onchange: move |event| {
@@ -544,23 +552,25 @@ pub(crate) fn SettingsDialog(
                             p { class: "host-settings-help",
                                 "Clicking a web link in a terminal: this choice applies to every client of this helm. Other open clients pick it up when they reload. This web-link choice does not change file downloads."
                             }
-                            TerminalLinkChoice {
-                                value: TerminalLinkClick::Intercept,
-                                label: "open in Farhelm, don't pass the click on",
-                                help: "Farhelm opens the link once. The program does not receive that click or a drag starting there.",
-                                on_change: link_change,
-                            }
-                            TerminalLinkChoice {
-                                value: TerminalLinkClick::Both,
-                                label: "open in Farhelm and also pass the click on",
-                                help: "Use this when the program needs link clicks. A program that opens links itself may open a second tab.",
-                                on_change: link_change,
-                            }
-                            TerminalLinkChoice {
-                                value: TerminalLinkClick::Program,
-                                label: "pass the click on only",
-                                help: "Let the program handle links. Farhelm does not open them; without mouse reporting, clicking a link does nothing.",
-                                on_change: link_change,
+                            div { class: "segmented-control terminal-link-choices", role: "radiogroup", aria_label: "Terminal web links",
+                                TerminalLinkChoice {
+                                    value: TerminalLinkClick::Intercept,
+                                    label: "open in Farhelm, don't pass the click on",
+                                    help: "Farhelm opens the link once. The program does not receive that click or a drag starting there.",
+                                    on_change: link_change,
+                                }
+                                TerminalLinkChoice {
+                                    value: TerminalLinkClick::Both,
+                                    label: "open in Farhelm and also pass the click on",
+                                    help: "Use this when the program needs link clicks. A program that opens links itself may open a second tab.",
+                                    on_change: link_change,
+                                }
+                                TerminalLinkChoice {
+                                    value: TerminalLinkClick::Program,
+                                    label: "pass the click on only",
+                                    help: "Let the program handle links. Farhelm does not open them; without mouse reporting, clicking a link does nothing.",
+                                    on_change: link_change,
+                                }
                             }
                             if link_error().is_some_and(|write| write.is_current()) {
                                 p { class: "host-settings-help app-settings-error", role: "alert",
@@ -629,14 +639,14 @@ pub(crate) fn SettingsDialog(
                                 p { class: "host-settings-help",
                                     "This one belongs to this Farhelm app on this Mac."
                                 }
-                                div {
+                                div { class: "setting-group",
                                     label {
-                                        class: "app-settings-choice",
+                                        class: "app-settings-choice setting-row",
                                         "data-tooltip": "install updates automatically: check for a new Farhelm release when the app starts and about once a day, and install it in the background",
                                         span { "install updates automatically" }
                                         input {
                                             r#type: "checkbox",
-                                            class: "host-settings-switch",
+                                            class: "control-switch",
                                             checked: automatic(),
                                             aria_describedby: "automatic-updates-help",
                                             // Only a saved choice is shown as the choice: on
@@ -679,22 +689,24 @@ pub(crate) fn SettingsDialog(
                         }
                     }
                 }
-                div { class: "host-settings-actions host-settings-footer",
+                crate::modal_dialog::DialogFooter { class: "host-settings-actions",
                     // Only the desktop app shows the file-types field, so only
                     // its footer names it.
-                    span {
+                    span { class: "dialog-footer-hint",
                         if cfg!(native_desktop) {
                             "Most choices save immediately. Ntfy alerts, checkout fields and file types use save."
                         } else {
                             "Most choices save immediately. Ntfy alerts and checkout fields use save."
                         }
                     }
-                    button {
-                        r#type: "button",
-                        class: "btn btn-neutral app-settings-close",
-                        "data-tooltip": "close settings; unsaved fields are discarded",
-                        onclick: move |_| on_close.call(()),
-                        "close"
+                    crate::modal_dialog::DialogActions {
+                        button {
+                            r#type: "button",
+                            class: "btn btn-neutral app-settings-close",
+                            "data-tooltip": "close settings; unsaved fields are discarded",
+                            onclick: move |_| on_close.call(()),
+                            "close"
+                        }
                     }
                 }
             }
@@ -965,6 +977,8 @@ mod open_extensions_tests {
 /// One radio choice writes only terminal link ownership, through the shared queue.
 /// Its mounted terminals see the optimistic choice immediately; closing settings
 /// cannot cancel the write or leave only the selected terminal using the new rule.
+/// The shared segment paints the native input's checked/focus state; its visible
+/// explanation remains the input's description, separate from its stable name.
 #[component]
 fn TerminalLinkChoice(
     value: TerminalLinkClick,
@@ -976,22 +990,23 @@ fn TerminalLinkChoice(
     let selected = TerminalLinkClick::from_key(preferences.0.read().terminal_link_click.as_deref());
     let help_id = format!("terminal-link-{}-help", value.key());
     rsx! {
-        div {
-            label { class: "app-settings-choice", "data-tooltip": help,
-                span { "{label}" }
-                input {
-                    r#type: "radio",
-                    name: "terminal-link-click",
-                    value: value.key(),
-                    checked: selected == value,
-                    "data-preference-checked": (selected == value).to_string(),
-                    aria_describedby: help_id.clone(),
-                    onchange: move |_| {
-                        on_change.call(value);
-                    },
-                }
+        label { class: "app-settings-choice segment-radio", "data-tooltip": help,
+            input {
+                r#type: "radio",
+                name: "terminal-link-click",
+                value: value.key(),
+                checked: selected == value,
+                "data-preference-checked": (selected == value).to_string(),
+                aria_label: label,
+                aria_describedby: help_id.clone(),
+                onchange: move |_| {
+                    on_change.call(value);
+                },
             }
-            p { id: help_id, class: "host-settings-help", "{help}" }
+            span {
+                span { "{label}" }
+                span { id: help_id, class: "terminal-link-description", "{help}" }
+            }
         }
     }
 }

@@ -14,6 +14,7 @@
 import { Locator, Page, Route } from "@playwright/test";
 import { openHostMenu, openRowMenu, patchPreferences, readPreferences, resetPreferences } from "./helpers/fleet";
 import { expect, test } from "./helpers/evidence";
+import { resolveToken } from "./helpers/color";
 
 const DOCS_URL = "https://farhelm.io/docs/";
 const RELEASE_NOTES_URL = "https://farhelm.io/docs/release-notes/";
@@ -74,7 +75,7 @@ test("feedback uses dark fields and pinned chrome at normal and short heights", 
   await expect(dialog.locator(".feedback-contact")).toHaveCSS("background-color", well);
   await expect(message).toHaveCSS("font-size", "13px");
   await expect(dialog.locator(".feedback-field").first()).toHaveCSS("font-size", "12px");
-  await expect(dialog.locator(".host-settings-title")).toHaveCSS("font-size", "14px");
+  await expect(dialog.locator(".host-settings-title")).toHaveCSS("font-size", "18px");
   await expect(dialog.locator(".feedback-send")).toBeDisabled();
   await expect(dialog.locator(".feedback-send")).toHaveCSS("opacity", "1");
   await expect(dialog.locator(".feedback-hint")).toHaveText("nothing is sent until you press send");
@@ -120,7 +121,11 @@ test("feedback uses dark fields and pinned chrome at normal and short heights", 
   // The shared answer row stacks on phone widths. The hint may wrap, but
   // must not overlap either answer or push the footer beyond the viewport.
   await page.setViewportSize({ width: 380, height: 460 });
-  await expect(dialog.locator(".host-dialog-answers")).toHaveCSS("flex-direction", "column-reverse");
+  await expect(dialog.locator(".host-dialog-answers")).toHaveCSS("flex-direction", "column");
+  const narrowCancel = (await dialog.locator(".feedback-cancel").boundingBox())!;
+  const narrowSend = (await dialog.locator(".feedback-send").boundingBox())!;
+  expect(narrowCancel.y + narrowCancel.height, "Cancel stays before Send when answers stack")
+    .toBeLessThanOrEqual(narrowSend.y);
   const narrowHint = (await dialog.locator(".feedback-hint").boundingBox())!;
   const narrowAnswers = (await dialog.locator(".host-dialog-answers").boundingBox())!;
   const beside = narrowHint.x + narrowHint.width <= narrowAnswers.x;
@@ -681,6 +686,14 @@ test("the dialog refuses blank and over-long messages without sending", async ({
   await expect(send).toBeEnabled();
   await message.fill("   \n  ");
   await expect(send).toBeDisabled();
+  for (const colorScheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme });
+    // Disabled filled actions use a readable quiet surface in both palettes;
+    // an empty message must not leave faded inverse text on an affirmative fill.
+    await expect(send).toHaveCSS("background-color", await resolveToken(page, "--bg-1"));
+    await expect(send).toHaveCSS("color", await resolveToken(page, "--fg-2"));
+    await expect(send).toHaveCSS("opacity", "1");
+  }
   await message.fill("x".repeat(4001));
   await expect(dialog.getByRole("alert")).toContainText("longer than 4000 characters");
   await expect(send).toBeDisabled();

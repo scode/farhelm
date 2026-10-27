@@ -7,11 +7,13 @@
 
 use dioxus::prelude::*;
 
-/// Keep native radio labels and keyboard behavior while JS owns checked state.
+/// Present native radio choices as segments while JS owns checked state.
 ///
 /// The head bootstrap must have installed `farhelmAppearance` before this
 /// component mounts. Reopening Settings synchronizes its new inputs with the
 /// surviving page owner; hiding a panel does not reset the device choice.
+/// CSS hides only the native radio drawing, retaining its focus, label and
+/// keyboard behavior while the adjacent span paints selection and focus.
 #[component]
 pub(crate) fn AppearanceSettings() -> Element {
     rsx! {
@@ -29,16 +31,18 @@ pub(crate) fn AppearanceSettings() -> Element {
                 class: "appearance-choices",
                 aria_describedby: "appearance-help",
                 legend { class: "appearance-legend", "Color theme" }
-                for (choice, label) in [("system", "System"), ("dark", "Dark"), ("light", "Light")] {
-                    label {
-                        class: "appearance-choice",
-                        input {
-                            r#type: "radio",
-                            name: "farhelm-appearance",
-                            value: choice,
-                            "data-appearance-choice": choice,
+                div { class: "segmented-control",
+                    for (choice, label) in [("system", "System"), ("dark", "Dark"), ("light", "Light")] {
+                        label {
+                            class: "appearance-choice segment-radio",
+                            input {
+                                r#type: "radio",
+                                name: "farhelm-appearance",
+                                value: choice,
+                                "data-appearance-choice": choice,
+                            }
+                            span { "{label}" }
                         }
-                        span { "{label}" }
                     }
                 }
             }

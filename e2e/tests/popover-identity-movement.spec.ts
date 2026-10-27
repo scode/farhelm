@@ -231,7 +231,16 @@ async function prepare(page: Page, request: APIRequestContext, options: {
   await page.goto("/");
   await waitForSessionReady(page, options.selectedA ? a : c);
   await feed.waitForConnection(1);
-  await page.evaluate(() => document.fonts.ready);
+  // The resting pointer over C starts a delayed summary card whose bold
+  // title uses a face absent from the list. A bare fonts.ready wait cannot
+  // cover a load that starts later; load the declared faces before any
+  // pointer-dependent geometry so the card cannot disturb that premise.
+  await page.evaluate(async () => {
+    const loads: Promise<FontFace>[] = [];
+    document.fonts.forEach((face) => { loads.push(face.load()); });
+    await Promise.all(loads);
+    await document.fonts.ready;
+  });
   await waitForFeedReadersSettled(page);
   await expect(page.locator(".session-row")).toHaveCount(3);
   await expect(page.locator(".compact-toggle input")).toBeChecked({ checked: !!options.compact });
@@ -317,6 +326,9 @@ async function openHeldMenu(page: Page, fixture: Fixture, targetId: string) {
   await page.mouse.move(safe.x + 20, safe.y + 8);
   expect(await page.locator(".session-list").evaluate((node) => node.matches(":hover"))).toBe(true);
   await expect(target.locator(".session-row-menu-panel")).toBeVisible();
+  // Settle this mounted surface's font layout. The delayed row hover card's
+  // faces were loaded in prepare, before the pointer could schedule it.
+  await page.evaluate(() => document.fonts.ready);
   const before = await measure(fixture.source, targetId);
   expect(before.ids).toEqual(fixture.ids);
   expect(before.targetExpanded).toBe("true");

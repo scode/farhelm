@@ -677,7 +677,7 @@ agent choice is independent of that destination:
   visible highlighted row, or leaves the explanation in place when there is none. Enter on a choice button (launch-kind
   tab, harness, effort, or permissions) applies that choice and then launches through the ordinary Launch path, or shows
   its refusal beside Launch; custom instead selects the mode and focuses its required flags editor. Enter on the closed
-  host picker or the agent-type dropdown, YOLO radios, or Resume checkbox launches with the values shown, without
+  host picker, agent-type or effort dropdown, YOLO radios, or Resume checkbox launches with the values shown, without
   changing them; those native controls retain their Space and arrow behavior. Action buttons keep their normal press.
   The search box, model field, YOLO confirmation, and save-as-template panel keep their own Enter rules. In the editable
   folder field, Enter chooses an arrow-highlighted dropdown entry without launching; with no highlighted entry it

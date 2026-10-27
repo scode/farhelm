@@ -53,6 +53,10 @@
 //! records where it applies). A shared abstraction that tried to also cover
 //! those would need to know things about both rows that neither needs to
 //! know about the other.
+//!
+//! The presentation helpers render subject and command copy independently
+//! of those mechanics. Callers keep native item buttons and place headers
+//! outside the menu role, so shared anatomy cannot alter keyboard ownership.
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -62,20 +66,81 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use dioxus::html::geometry::PixelsRect;
 use dioxus::prelude::*;
 
+// ===== Shared presentation, independent of action and focus ownership ===
+
+/// Identify a menu's subject without making its heading a navigable command.
+///
+/// Callers place this before the element with `role="menu"`. Supplied
+/// elements retain peer escaping, direction isolation and technical fonts;
+/// tooltips retain the full value when the visible header is bounded by CSS.
+#[component]
+pub(crate) fn MenuHeader(
+    title: Element,
+    summary: Element,
+    title_tooltip: Option<String>,
+    summary_tooltip: Option<String>,
+) -> Element {
+    rsx! {
+        div { class: "menu-header session-row-menu-header",
+            div { class: "menu-title session-row-menu-title", "data-tooltip": title_tooltip,
+                {title}
+            }
+            div { class: "menu-summary session-row-menu-summary", "data-tooltip": summary_tooltip,
+                {summary}
+            }
+        }
+    }
+}
+
+/// Share two-line command copy while the caller keeps its native menu button.
+///
+/// Accessible names and descriptions remain explicit at the call site. The
+/// supplied description id is preserved rather than generated here, and
+/// absent descriptions add no empty line or new spoken text. Element props
+/// keep peer values and their direction boundaries intact.
+#[component]
+pub(crate) fn MenuItemCopy(
+    label: Element,
+    description: Option<Element>,
+    description_id: Option<String>,
+) -> Element {
+    rsx! {
+        span { class: "menu-copy session-row-menu-copy",
+            span { class: "menu-label session-row-menu-label", {label} }
+            if let Some(description) = description {
+                span { class: "menu-description session-row-menu-description", id: description_id,
+                    {description}
+                }
+            }
+        }
+    }
+}
+
+/// Separate visible command groups without adding a menu focus destination.
+///
+/// The domain owner decides whether a nonempty group needs this boundary;
+/// separators never enter MenuOrder or receive mounted item handles.
+#[component]
+pub(crate) fn MenuSeparator(#[props(default)] class: String) -> Element {
+    rsx! { div { class: "menu-separator {class}", role: "separator" } }
+}
+
 /// Height kept free below the session flyout's clamped top, sized to show
 /// the full menu near the viewport bottom without internal scrolling.
 ///
 /// Measured, not derived: the tallest ordinary menu (header, then rename,
 /// mark read/unread, pin to top, clone, replace with, replace, stop and
-/// delete, with the five descriptions and three separators) renders 368.6px
-/// tall in both Chromium and WebKit under the browser suite. 407px leaves
-/// about 38px of slack for font-metric differences between renderers and
-/// platforms.
+/// delete, with the five descriptions and three separators) renders 415.33px
+/// tall in both Chromium and WebKit with loaded Inter, a one-line subject
+/// and a short invocation. 464px leaves the 8px viewport bottom gap plus
+/// about 40px for font-metric differences between renderers and platforms.
 /// Re-measure when an item, description, or the header changes height.
+/// Wrapped peer-authored headers may still scroll; the reserve describes
+/// the ordinary menu, not an upper bound on arbitrary subject text.
 /// Shorter menus and the confirm prompts fit inside the same reserve;
 /// `max-height` with internal scrolling is what keeps a viewport shorter
 /// than the reserve safe.
-const SESSION_MENU_PANEL_MIN_RESERVE_PX: f64 = 407.0;
+const SESSION_MENU_PANEL_MIN_RESERVE_PX: f64 = 464.0;
 
 /// Where the actions panel currently believes its own screen position is,
 /// while an async `get_client_rect()` measurement races the render that
@@ -1449,7 +1514,7 @@ mod tests {
         let placement = PanelPlacement::Measured(rect);
         let style = session_menu_placement_style(placement);
         assert!(style.contains("--menu-left: max(8px, min(344px, calc(100vw - 254px)))"));
-        assert!(style.contains("min(46px, calc(100vh - 407px))"));
+        assert!(style.contains("min(46px, calc(100vh - 464px))"));
         assert!(style.contains("right: auto"));
         assert!(
             session_menu_pointer_style(placement)

@@ -362,7 +362,8 @@ test("terminal link ownership opens once and preserves program clicks in all mou
     for (const mode of ["both", "intercept", "program"] as const) {
       await openSettings(page, "terminal");
       const dialog = page.getByRole("dialog", { name: "settings", exact: true });
-      await dialog.getByRole("radio", { name: labels[mode], exact: true }).check();
+      // The native radio owns state; its visible segment is the pointer target.
+      await dialog.getByRole("radio", { name: labels[mode], exact: true }).locator("..").click();
       await expect.poll(() => readPreferences(request)).toMatchObject({ terminal_link_click: mode });
       await expect.poll(() => page.evaluate(() => (window as any).farhelmTerminalLinkClickMode)).toBe(mode);
       await dialog.getByRole("button", { name: "close settings", exact: true }).click();
@@ -589,7 +590,11 @@ test("program-only link clicks do nothing without mouse reporting", async ({ pag
     for (const [mode, count] of [["program", 0], ["both", 1], ["intercept", 2]] as const) {
       await openSettings(page, "terminal");
       const dialog = page.getByRole("dialog", { name: "settings", exact: true });
-      await dialog.getByRole("radio", { name: labels[mode], exact: true }).check();
+      const choice = dialog.getByRole("radio", { name: labels[mode], exact: true });
+      // The native radio is visually clipped inside its clickable segment.
+      // Activate the user-facing label, then prove the actual input changed.
+      await choice.locator("..").click();
+      await expect(choice).toBeChecked();
       await expect.poll(() => page.evaluate(() => (window as any).farhelmTerminalLinkClickMode)).toBe(mode);
       await dialog.getByRole("button", { name: "close settings", exact: true }).click();
       await cue(page, "links");

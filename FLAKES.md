@@ -2781,3 +2781,121 @@ Error: scrolling back at least 20 lines at "terminal" did not land within 10000m
 Class: fixture-premise
 
 Cause: established
+
+## 2026-10-26 — offer retirement releases only its owner (e2e/tests/provisioning.spec.ts)
+
+The WebKit `waiting behind another host` variant timed out while clicking the second host's Uninstall item in full
+browser run `c909ec87-c8e1-4ae1-b0bb-e849195af2c9`, before its held-offer assertions. The menu was detached during click
+stability checks. The retained network trace shows a fallback host read changing a preceding fake host's retry details
+at that boundary, consistent with the intentional movement-dismissal rule. The existing feed stub had no initial
+greeting. PR #2732 greets it with revision 1 while retaining the explicit revision 2 retarget notification, both held
+replies and all owner/focus/release assertions. Both admission variants passed on both engines in
+`92271d2f-6ba5-47e5-a622-b9a30684d6f8` (4/4 offer cases). This addresses the fixture premise; the trace does not
+directly identify the callback that closed the menu, and one later pass does not establish causation.
+
+```text
+Error: locator.click: Test timeout of 60000ms exceeded.
+  - waiting for element to be visible, enabled and stable
+  - element was detached from the DOM, retrying
+```
+
+The full run used clean commit `563407f9ac9466fc99038f066f5fb054e8b66657`, fingerprint
+`129ffeca0c4bf90978f24f29ff559d7f537bec6d40418532a5706026b40b4116`, `npx playwright test`, three workers with one owned
+stack each and zero retries. It reported 2679 passes, three failures and 14 skips; the other failures were the cwd-tail
+and automatic-setup cases below. The 18.7 MB raw report and complete console agree, but the recorder's 16 MiB
+report-inspection cap leaves automatic report validation incomplete. The whole failed UUID remains privately retained in
+temporary storage. Linux x86_64, kernel 6.8.0-147-generic, Node 26.12.1, Playwright 1.64.0 and WebKit 27.2; pinned tmux
+3.7c executable SHA256 `3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`. Locale was C.UTF-8. Ambient
+`FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and `FARHELM_TMUX` were
+removed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. CPU load
+and unrelated jobs are unavailable; observed memory and disk headroom were healthy. The fixture predates this session
+(commit `e13fcede1`). The narrow run used the same substrate and a dirty tree containing only the feed greeting and
+font-readiness corrections, fingerprint `896092835980c72e4d9798f7f8969513ad5c77c278da9f546cfa7eaf34c62c39`.
+
+Class: fixture-premise
+
+Cause: hypothesis
+
+## 2026-10-26 — a long cwd shows its tail with characters in logical order (e2e/tests/sidebar.spec.ts)
+
+WebKit measured an absolute tail offset of exactly 1px against the strict less-than-1px assertion in full run
+`c909ec87-c8e1-4ae1-b0bb-e849195af2c9`, with the source, substrate and other failures recorded above. Overflow, logical
+path text and both bidi directions had passed. An ordinary failure screenshot showed the suffix in logical order; no
+visible product defect was established. PR #2732 awaits `document.fonts.ready` before settled geometry, retaining the
+strict threshold and all overflow/text/bidi/ellipsis assertions. The exact case passed on both engines in
+`92271d2f-6ba5-47e5-a622-b9a30684d6f8` and `2fa75d14-9eb8-4c63-a070-0ac26c415d70` (four passes total). Font readiness is
+a plausible missing premise, not an established cause. The test predates this session (`96c842e6e`); its scratch-path
+setup last changed in `99b69ac2b`. The second narrow run added only the automatic probe-readiness correction below,
+fingerprint `2f66e60e8badfbe9b418f227be292e9665762cc8d1ba4a005213cd88a3fa5d7b`. Whole failed evidence remains retained;
+no tolerance was widened and no product CSS changed.
+
+```text
+Error: the tail must align with the clipper's visible right edge
+expect(received).toBeLessThan(expected)
+Expected: < 1
+Received:   1
+```
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-10-26 — automatic setup refuses forced activation while another host operation is busy (e2e/tests/terminal-multihost.spec.ts)
+
+WebKit could not find the initial local setup error within five seconds in full run
+`c909ec87-c8e1-4ae1-b0bb-e849195af2c9`, before the unrelated retry or forced activation. The source, substrate and other
+failures are recorded above. Initial host/progress discovery consumed most of that assertion window; the expected
+probe's 503 response arrived near its end. The exact unchanged case passed on both engines in
+`92271d2f-6ba5-47e5-a622-b9a30684d6f8`. PR #2732 now awaits that initial POST response and asserts its 503 before
+starting the error-rendering assertion. It retains the single-probe count, held unrelated retry, focusable disabled
+command and forced-click guard. Both engines passed after correction in `2fa75d14-9eb8-4c63-a070-0ac26c415d70` (2/2
+automatic-setup cases), on the dirty source fingerprint recorded above. The test predates this session (`7218a7553`).
+Startup timing is the hypothesis; the retained trace does not establish why the error missed the original window. No
+timeout, retry policy or product behavior changed, and the failed run stays retained.
+
+```text
+Error: expect(locator).toContainText(expected) failed
+Locator: locator('[data-host-kind="local"]').locator('.provisioning-error')
+Expected substring: "automatic setup needs retry"
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-10-27 — a long cwd shows its tail with characters in logical order (e2e/tests/sidebar.spec.ts)
+
+The exact 1px WebKit tail offset recurred in full browser run `f6bc51f5-3985-441d-b5ce-17e4bfd8e648`, despite the
+font-readiness wait recorded above. It was the only failed case: 2681 passed and 14 skipped, with no retries or global
+errors. The raw JSON and complete console agree; the report exceeds the recorder's 16 MiB inspection cap, so these are
+manually checked counts. The test passed its overflow, logical-text and bidi premises before the alignment assertion.
+The retained screenshot is after session cleanup and does not show the measured path; it cannot establish whether that
+path looked correct. PR #2732 changes the endpoint from `< 1` to `<= 1` CSS pixel, matching the neighboring
+row-alignment checks, and includes box and scroll measurements in future failure messages. The independent
+front-overflow and text/bidi/ellipsis assertions remain. This corrects an inconsistent test boundary; WebKit
+scroll-origin or fractional layout rounding is only a hypothesis, and no product CSS changed. The exact case then passed
+once per engine in `b03e96d6-56c9-4afc-9fc8-f51d343bed70` (2/2, no skips, 12.3s); this is not proof of the engine
+mechanism or flake absence. The full run tested clean `cef8e2a12524ffd5d9fd5df6153e727dbb5a50fb`, fingerprint
+`4f843a4e98508ec1c09b48c2ad1988e41dcf95c016873df3f209e197634d858e`; the focused run used that head with only this test
+correction, fingerprint `27bdf8253048f41826b806d07988782114ed6fd8328137112564c24819149ec7`. Both used three configured
+workers with one owned stack each (two active workers for the focused run), Linux x86_64, kernel 6.8.0-147-generic,
+Playwright 1.64.0, C.UTF-8 and pinned tmux 3.7c, executable SHA256
+`3590826b41cd0671f16fce6b08d11ef6ac75cc548373c7eb98204273e4f0539f`. Ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`,
+`FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and `FARHELM_TMUX` were removed; only recorder-owned
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. CPU load and unrelated jobs are
+unavailable; sampled memory and disk headroom were healthy. The owned full run and a brief read-only consult were
+concurrent; no other owned runtime test or build was active. Whole failed evidence remains privately retained in
+temporary storage. The full command remains failed; the focused pass does not replace it.
+
+```text
+Error: the tail must align with the clipper's visible right edge
+expect(received).toBeLessThan(expected)
+Expected: < 1
+Received:   1
+```
+
+Class: ambiguous-observable
+
+Cause: hypothesis

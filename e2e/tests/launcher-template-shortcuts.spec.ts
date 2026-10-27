@@ -415,6 +415,10 @@ test("a template shortcut preserves editor focus when clearing a quick-launch YO
     expect(again.status()).toBe(409);
     expect(again.headers()["x-farhelm-yolo-confirmation"]).toBe("confirmation-required");
     await expect(question).toBeVisible();
+    // Visibility precedes the question's initial safe-answer focus handoff.
+    // Settle that opening before editing; the later shortcut still has to
+    // retire the question without disturbing the name field's selection.
+    await expect(question.locator(".yolo-cancel")).toBeFocused();
     expect(bodies).toHaveLength(2);
 
     await search.focus();

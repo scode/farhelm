@@ -446,8 +446,14 @@ for (const mode of ["plan", "refusal", "two plans"]) {
           : { headers: { "x-farhelm-build": HELM_BUILD }, json: { probe_id: `held-modal-${index}`, confirmation: "remove fixture Farhelm", plan: { state_dir: "/tmp/fixture-state" } } });
       });
     }
+    // Fake setup targets keep retrying SSH after setup completes. Their
+    // changing detail lines legitimately dismiss lower menus; control those
+    // unrelated notifications while the planning replies remain held below.
+    const feed = await stubFeed(page);
+    feed.notifyOnConnect(1);
     try {
       await page.goto("/");
+      await feed.waitForConnection(1);
       await openHostsPanel(page);
       for (const id of ids) {
         const row = page.locator(`[data-host-id="${id}"]`);
@@ -493,6 +499,9 @@ for (const admission of ["visible", "waiting behind another host"] as const) {
     await waitForProgress(request, one.host_id, "completed");
     await waitForProgress(request, two.host_id, "completed");
     const feed = await stubFeed(page);
+    // Keep unrelated fake-host retry details from moving the menu during
+    // admission. The explicit revision below still retires the owned offer.
+    feed.notifyOnConnect(1);
     const gates = [routeGate(), routeGate()];
     const arrived = new Set<number>();
     let observation: ModalReleaseObservation | undefined;
@@ -985,7 +994,8 @@ test.afterEach(async ({ request }) => {
 /**
  * Compare painted answer geometry, rather than inferring layout from classes.
  * The desktop row must share its baseline; on a phone every answer must span
- * the footer and the permanent hint must follow the whole stack.
+ * the footer in DOM order (Cancel first), and the permanent hint must follow
+ * the whole stack. Visual and keyboard answer order must agree at both widths.
  */
 async function expectHostAnswers(dialog: Locator, labels: string[], phone: boolean): Promise<void> {
   const answers = dialog.locator(".host-dialog-answers");
@@ -1015,7 +1025,7 @@ async function expectHostAnswers(dialog: Locator, labels: string[], phone: boole
       expect(Math.abs(button.width - measured.width)).toBeLessThan(1);
       expect(Math.abs(button.left - measured.left)).toBeLessThan(1);
     }
-    for (let i = 1; i < buttons.length; i++) expect(buttons[i].bottom).toBeLessThan(buttons[i - 1].top);
+    for (let i = 1; i < buttons.length; i++) expect(buttons[i].top).toBeGreaterThan(buttons[i - 1].bottom);
   } else {
     expect(Math.max(...buttons.map((b) => b.bottom)) - Math.min(...buttons.map((b) => b.bottom))).toBeLessThan(1);
     for (let i = 1; i < buttons.length; i++) expect(buttons[i].left).toBeGreaterThan(buttons[i - 1].left);

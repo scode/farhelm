@@ -72,12 +72,12 @@ pub(crate) fn CheckoutRootField(note: String, on_saved: EventHandler<()>) -> Ele
             if let Some(error) = load_error {
                 p { class: "checkout-root-error", role: "alert", "{error}" }
                 button {
-                    r#type: "button", "data-tooltip": "retry loading the all-hosts checkout folder",
+                    r#type: "button", class: "btn btn-neutral", "data-tooltip": "retry loading the all-hosts checkout folder",
                     onclick: move |_| root.restart(), "retry"
                 }
             } else {
                 button {
-                    r#type: "button", aria_disabled: locked || !edited(),
+                    r#type: "button", class: "btn btn-primary", aria_disabled: locked || !edited(),
                     "data-tooltip": "save the checkout folder for every host",
                     onclick: move |_| {
                         if !initialized() || saving() || !edited() { return; }

@@ -31,7 +31,7 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
   await expect(form).toBeVisible();
   const harnesses = form.locator(".launch-composer-harness-choice");
   const permissions = form.locator(".launch-composer-permissions-choice");
-  const efforts = form.locator(".launch-composer-effort-choice");
+  const effort = form.getByRole("combobox", { name: "effort", exact: true });
   const status = form.getByRole("status");
 
   // Harness selection: the OMP chip exists, is searchable by its word, and
@@ -56,12 +56,14 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
       .getByRole("option", { name: "harness default", exact: true }),
   ).toBeVisible();
 
-  // OMP's effort vocabulary is the closed seven-level list: OMP's `auto`
-  // mode and the shared enum's `ultra` are deliberately absent.
-  for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
-    await expect(efforts.getByRole("button", { name: level, exact: true })).toBeVisible();
-  }
-  await expect(efforts.getByRole("button", { name: "ultra", exact: true })).toHaveCount(0);
+  // Eight choices belong in a native dropdown. Its vocabulary remains OMP's
+  // closed seven-level list plus Default; `auto` and `ultra` stay absent.
+  await expect(effort).toBeVisible();
+  await expect(effort).toHaveValue("default");
+  const levels = ["default", "off", "minimal", "low", "medium", "high", "xhigh", "max"];
+  await expect(effort.locator("option")).toHaveText(levels);
+  expect(await effort.locator("option").evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value)))
+    .toEqual(levels);
 
   // OMP offers guarded (its write mode), YOLO, custom flags and Approve;
   // a new launch defaults to guarded. Goose-only approval modes are not offered. The
@@ -84,7 +86,7 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
   await model.fill("x-ai/grok-4.6");
   await form.getByRole("option", { name: "x-ai/grok-4.6", exact: true }).click();
   await expect(model).toHaveValue("x-ai/grok-4.6");
-  await efforts.getByRole("button", { name: "max", exact: true }).click();
+  await effort.selectOption("max");
   await permissions.getByRole("button", { name: "approve", exact: true }).click();
   await expect(status).toHaveCount(0);
   await form.getByLabel("folder", { exact: true }).fill("/tmp");

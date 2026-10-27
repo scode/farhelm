@@ -2378,12 +2378,15 @@ test("a legal multi-KB, unbroken title keeps the consequence text intact and cli
     inside("title", titleBox!);
     expect(titleBox!.height).toBeGreaterThan(5);
     // On its own line above both buttons, never overlapping them...
-    expect(titleBox!.y + titleBox!.height).toBeLessThanOrEqual(confirmBox!.y + 1);
-    // ...the buttons stacked in order (confirm above cancel), each fully
-    // inside the panel and not overlapping each other.
+    expect(titleBox!.y + titleBox!.height).toBeLessThanOrEqual(cancelBox!.y + 1);
+    // At this wide viewport the shared actions occupy one row, in DOM order:
+    // Cancel before confirm. The huge title must not push either answer out
+    // of the panel or onto a separate line.
     inside("confirm", confirmBox!);
     inside("cancel", cancelBox!);
-    expect(confirmBox!.y + confirmBox!.height).toBeLessThanOrEqual(cancelBox!.y + 1);
+    expect(titleBox!.y + titleBox!.height).toBeLessThanOrEqual(confirmBox!.y + 1);
+    expect(Math.abs(cancelBox!.y - confirmBox!.y)).toBeLessThanOrEqual(1);
+    expect(cancelBox!.x + cancelBox!.width).toBeLessThanOrEqual(confirmBox!.x + 1);
   } finally {
     await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`).catch(() => {});
     await request.delete(`/api/sessions/${encodeURIComponent(id)}`).catch(() => {});

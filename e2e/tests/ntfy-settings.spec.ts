@@ -4,10 +4,13 @@
 import { expect, test } from "./helpers/evidence";
 import { createServer } from "node:http";
 import { openSettings, selectSettingsSection } from "./helpers/settings";
+import { resolveToken } from "./helpers/color";
 
 /** Reopening must fetch non-secret settings, preserve a saved token while editing
  * other fields, and keep rejected drafts editable. Phone geometry matters because
- * this section makes the settings dialog taller than its viewport. */
+ * this section makes the settings dialog taller than its viewport. Native
+ * priority-button keys edit only the draft; refusal must retain that edit
+ * while the real saved configuration keeps its preceding priority. */
 test("ntfy settings explicitly save, refuse, preserve and clear a token", async ({ page, request }, testInfo) => {
   await page.goto("/");
   const original = await (await request.get("/api/ntfy-alerts")).json();
@@ -21,6 +24,7 @@ test("ntfy settings explicitly save, refuse, preserve and clear a token", async 
   const serverUrl = `http://127.0.0.1:${address.port}`;
   const dialog = page.getByRole("dialog", { name: "settings", exact: true });
   const section = dialog.getByRole("region", { name: "ntfy alerts" });
+  const priority = section.getByRole("group", { name: "priority", exact: true });
   const topic = section.getByRole("textbox", { name: "topic", exact: true });
   const password = section.getByLabel("access token (optional)", { exact: true });
   try {
@@ -29,13 +33,26 @@ test("ntfy settings explicitly save, refuse, preserve and clear a token", async 
     await expect(section.getByLabel("send ntfy alerts", { exact: true })).not.toBeChecked();
     const server = section.getByRole("textbox", { name: "server URL", exact: true });
     await expect(server).toHaveValue("https://ntfy.sh");
+    await expect(server).toHaveCSS("font-family", /JetBrains Mono/);
+    const actions = section.locator(".dialog-actions");
+    await expect(actions.getByRole("button")).toHaveText(["send test", "save"]);
+    const save = actions.getByRole("button", { name: "save", exact: true });
+    const sendTest = actions.getByRole("button", { name: "send test", exact: true });
+    await expect(save).toHaveCSS("background-color", await resolveToken(page, "--accent-fill"));
+    await expect(sendTest).toHaveCSS("background-color", await resolveToken(page, "--bg-2"));
     await server.fill(serverUrl);
     await topic.fill("browser-alerts");
     await password.fill("browser-token");
-    await section.getByRole("combobox", { name: "priority", exact: true }).selectOption("high", { timeout: 5000 });
-    await expect(section.getByRole("combobox", { name: "priority", exact: true })).toHaveCSS("color-scheme", "dark");
+    await expect(priority.getByRole("button")).toHaveCount(5);
+    await expect(priority.getByRole("button", { name: original.priority, exact: true })).toHaveAttribute("aria-pressed", "true");
+    const high = priority.getByRole("button", { name: "high", exact: true });
+    await high.focus();
+    await expect(high).toBeFocused();
+    await high.press("Space");
+    await expect(high).toHaveAttribute("aria-pressed", "true");
     await section.getByLabel("send ntfy alerts", { exact: true }).check();
     expect((await (await request.get("/api/ntfy-alerts")).json()).topic).toBe(original.topic);
+    expect((await (await request.get("/api/ntfy-alerts")).json()).priority).toBe(original.priority);
     await section.getByRole("button", { name: "save", exact: true }).click();
     await expect(section.getByRole("status")).toHaveText("ntfy alert settings saved");
     const saved = await (await request.get("/api/ntfy-alerts")).json();
@@ -47,6 +64,14 @@ test("ntfy settings explicitly save, refuse, preserve and clear a token", async 
       await topic.scrollIntoViewIfNeeded();
       const geometry = await section.evaluate((el) => ({ width: el.clientWidth, content: el.scrollWidth }));
       expect(geometry.content).toBeLessThanOrEqual(geometry.width);
+      // The explicit actions stay together and in reading order when the
+      // shared action row stacks; neither button becomes another form owner.
+      const testBox = (await sendTest.boundingBox())!;
+      const saveBox = (await save.boundingBox())!;
+      if (width <= 560) expect(testBox.y + testBox.height).toBeLessThanOrEqual(saveBox.y);
+      else expect(testBox.x + testBox.width).toBeLessThanOrEqual(saveBox.x);
+      await expect(save).toHaveCSS("font-size", await dialog.getByRole("button", { name: "close", exact: true })
+        .evaluate((element) => getComputedStyle(element).fontSize));
       await section.screenshot({ path: testInfo.outputPath(`ntfy-settings-${width}.png`) });
     }
     await dialog.getByRole("button", { name: "close", exact: true }).click();
@@ -54,15 +79,27 @@ test("ntfy settings explicitly save, refuse, preserve and clear a token", async 
     await expect(topic).toHaveValue("browser-alerts");
     await expect(password).toHaveValue("");
     await expect(password).toHaveAttribute("placeholder", "token saved; leave blank to keep it");
+    await expect(high).toHaveAttribute("aria-pressed", "true");
+    // Native button Enter edits the draft, including a draft whose next Save
+    // will be refused. It must neither save early nor erase the refused edit.
+    const urgent = priority.getByRole("button", { name: "urgent", exact: true });
+    await urgent.focus();
+    await expect(urgent).toBeFocused();
+    await urgent.press("Enter");
+    await expect(urgent).toHaveAttribute("aria-pressed", "true");
+    expect((await (await request.get("/api/ntfy-alerts")).json()).priority).toBe("high");
     await topic.fill("bad/topic");
     await section.getByRole("button", { name: "save", exact: true }).click();
     await expect(section.getByRole("alert")).toContainText("topic must contain");
     await expect(topic).toHaveValue("bad/topic");
+    await expect(urgent).toHaveAttribute("aria-pressed", "true");
     expect((await (await request.get("/api/ntfy-alerts")).json()).topic).toBe("browser-alerts");
+    expect((await (await request.get("/api/ntfy-alerts")).json()).priority).toBe("high");
     await topic.fill("browser-alerts-edited");
     await section.getByRole("button", { name: "save", exact: true }).click();
     await expect(section.getByRole("status")).toHaveText("ntfy alert settings saved");
     expect((await (await request.get("/api/ntfy-alerts")).json()).token_set).toBe(true);
+    expect((await (await request.get("/api/ntfy-alerts")).json()).priority).toBe("urgent");
     // A path edit stays on the same server; another origin must explain the
     // secret's removal before Save, without teaching the form the token.
     const originHint = section.locator(".ntfy-token-origin-hint");
@@ -176,7 +213,17 @@ test("ntfy settings load failure is visible and retry restores editing", async (
   const section = page.getByRole("region", { name: "ntfy alerts" });
   await expect(section.getByRole("alert")).toHaveText("could not read ntfy alert settings");
   await expect(section.getByRole("button", { name: "save", exact: true })).toBeDisabled();
+  await expect(section.getByRole("button", { name: "save", exact: true })).toHaveCSS("opacity", "1");
+  await expect(section.getByRole("button", { name: "save", exact: true })).toHaveCSS("background-color", await resolveToken(page, "--bg-2"));
+  const priority = section.getByRole("group", { name: "priority", exact: true });
+  await expect(priority.getByRole("button")).toHaveCount(5);
+  for (const value of ["min", "low", "default", "high", "urgent"]) {
+    await expect(priority.getByRole("button", { name: value, exact: true })).toBeDisabled();
+  }
   await section.getByRole("button", { name: "retry loading", exact: true }).click();
   await expect(section.getByRole("textbox", { name: "topic", exact: true })).toBeEditable();
   await expect(section.getByRole("button", { name: "save", exact: true })).toBeEnabled();
+  for (const value of ["min", "low", "default", "high", "urgent"]) {
+    await expect(priority.getByRole("button", { name: value, exact: true })).toBeEnabled();
+  }
 });

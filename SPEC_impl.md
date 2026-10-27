@@ -510,6 +510,15 @@ lose contrast on a solid selection. Focus on a selected control needs its own vi
 dialogs use the shared surface and selection roles; a dialog adds only what being modal needs (a veil, a panel edge one
 step brighter than a control outline, a shadow), on the same one corner scale as everything else.
 
+On/off settings share a switch presentation over native checkboxes. Two to five exclusive choices share segmented
+controls; longer effort lists use a native select, including any inherited value the current catalog no longer offers.
+The launcher's YOLO radios and Resume checkbox keep their native Enter behavior. Presentation does not own their values
+or requests. Menu headers, icon/label/description rows and separators likewise leave native item buttons and their
+navigation in each caller. Dialog header, body and footer presentation preserves each existing scroll region and modal
+owner. The shared action row keeps Cancel, any outlined permanent answer and the ordinary main action in that order,
+including when a narrow window stacks them. Disabled filled actions return to a quiet raised surface with readable text
+rather than fading the affirmative fill.
+
 Nothing on screen may redraw on its own more than 10 times per second. "On its own" means an indicator or decoration
 that moves, fades, spins, or blinks while nothing about the state it shows has changed; drawing new content because new
 data arrived (terminal output, a list update) is not animation, and this rule does not cover it. In this codebase that

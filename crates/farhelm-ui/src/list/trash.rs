@@ -1045,7 +1045,7 @@ pub(super) fn TrashControl(
                                                     .filter(|(run, index)| !run.finished && *index >= run.next);
                                                 rsx! {
                                                 div { key: "{checkout.id}", class: "checkout-trash-entry",
-                                                    div { class: "checkout-trash-entry-heading", strong { class: "peer-value", dir: "ltr", "{display_peer(&checkout.name)}" }
+                                                    div { class: "checkout-trash-entry-heading", strong { class: "peer-value font-mono", dir: "ltr", "{display_peer(&checkout.name)}" }
                                                         if !pending { if let Some(bytes) = checkout.bytes { span { "{space(bytes, false)}" } } }
                                                         if let Some((run, index)) = selected {
                                                             if let Some(started_at) = run.started_at.filter(|_| index == run.next) {

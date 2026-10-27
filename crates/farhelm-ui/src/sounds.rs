@@ -216,10 +216,10 @@ pub(crate) fn SoundSettings() -> Element {
                 ("approval", "approval request", true, "play a ding-dong when an agent asks Farhelm to do something that needs your approval"),
                 ("finished", "turn finished", false, "play a soft pluck when an agent goes from running to idle"),
             ] {
-                label { class: "app-settings-choice",
+                label { class: "app-settings-choice setting-row",
                     "data-tooltip": help,
                     span { "{label}" }
-                    input { r#type: "checkbox", class: "host-settings-switch", checked: default, "data-sound-event": kind }
+                    input { r#type: "checkbox", class: "control-switch", checked: default, "data-sound-event": kind }
                 }
             }
         }

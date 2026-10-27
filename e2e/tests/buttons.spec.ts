@@ -6,10 +6,9 @@
  * pin each tier's paint and retain the sidebar hierarchy so a specificity
  * change cannot silently flatten the distinctions.
  *
- * Four tests: the permitted-primaries/ghost-controls color sweep, the sidebar
- * heading controls, the row kebab's opacity reveal states, and the kebab's
- * coarse-pointer
- * (touch) fallback. Each is kept to a fixed, deliberately small sample of
+ * Coverage samples the permitted-primaries/ghost-controls tiers, unavailable
+ * actions, compact confirmations, sidebar headings, and the row kebab's
+ * reveal states and coarse-pointer fallback. Each uses a small sample of
  * controls per class of claim rather than trying to enumerate every `.btn`
  * call site in the sheet — the point is to witness the SYSTEM working, not
  * to duplicate app.css itself here.
@@ -21,11 +20,14 @@ import {
   cleanupSession,
   createSession,
   openRowMenu,
+  patchPreferences,
   pinAutoSelect,
+  readPreferences,
 } from "./helpers/fleet";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { addTab } from "./helpers/terminal-suite";
 
+/** Keep each action assertion attached to the session this test actually owns. */
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
 }
@@ -35,6 +37,87 @@ function row(page: Page, id: string) {
 // which is what makes a single constant enough to assert "no visible fill"
 // and "no visible border" with the same value.
 const GHOST = "rgba(0, 0, 0, 0)";
+
+/** An unavailable Restart must remain readable and discoverable for its reason.
+ * A real legacy command has no resumable conversation, so this exercises the
+ * ARIA-disabled owner and its hover/focus cascade rather than a disabled mock.
+ * The same row's two compact questions retain confirming-answer focus while
+ * Cancel precedes danger in reading order, including the narrow stacked layout.
+ */
+test("unavailable filled actions stay quiet and compact questions keep answer order", async ({ page, request }) => {
+  test.setTimeout(60_000);
+  const previous = await readPreferences(request);
+  const session = await createSession(request, {
+    title: `buttons-unavailable-${Date.now()}`, cwd: "/tmp", invocation: "sleep 300",
+  });
+  try {
+    await patchPreferences(request, { skip_session_confirmations: false });
+    await page.goto("/");
+    const target = row(page, session.id);
+    await target.locator(".session-row-open").click();
+    await waitForSessionRevealed(page, session.id);
+    const restart = page.locator(".restart-primary");
+    await expect(restart).toHaveAttribute("aria-disabled", "true");
+    expect(await restart.evaluate((element: HTMLButtonElement) => !element.disabled && element.tabIndex >= 0),
+      "the unavailable action keeps a native focus stop for its explanation").toBe(true);
+    for (const colorScheme of ["dark", "light"] as const) {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.emulateMedia({ colorScheme });
+      /** Resolve real palette roles after each state change, including hover. */
+      const quiet = async () => {
+        await expect(restart).toHaveCSS("background-color", await resolveToken(page, "--bg-2"));
+        await expect(restart).toHaveCSS("color", await resolveToken(page, "--fg-2"));
+        await expect(restart).toHaveCSS("opacity", "1");
+      };
+      await page.mouse.move(0, 0);
+      await restart.blur();
+      await quiet();
+      await restart.hover();
+      await quiet();
+      await page.mouse.move(0, 0);
+      await restart.focus();
+      // A non-activating native key establishes keyboard modality without
+      // depending on WebKit's platform policy for Tab among buttons.
+      await page.keyboard.press("ArrowRight");
+      await expect(restart).toBeFocused();
+      expect(await restart.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+      await quiet();
+      await expect(restart).toHaveCSS("outline-color", await resolveToken(page, "--accent"));
+      await expect(restart).toHaveCSS("outline-offset", "1px");
+      for (const width of [1280, 520]) {
+        await page.setViewportSize({ width, height: 800 });
+        for (const action of ["delete", "replace"]) {
+          await openRowMenu(target);
+          await target.locator(`.session-row-${action}`).click();
+          const panel = target.locator(".session-row-menu-panel");
+          const confirm = panel.locator(`.confirm-${action}`);
+          const cancel = panel.getByRole("button", { name: "cancel", exact: true });
+          await expect(confirm).toBeEnabled();
+          await expect(confirm).toBeFocused();
+          await expect(panel.locator(".dialog-actions button")).toHaveText(["cancel", `confirm ${action}`]);
+          const cancelBox = (await cancel.boundingBox())!;
+          const confirmBox = (await confirm.boundingBox())!;
+          if (width <= 560) expect(cancelBox.y + cancelBox.height).toBeLessThanOrEqual(confirmBox.y);
+          else expect(cancelBox.x + cancelBox.width).toBeLessThanOrEqual(confirmBox.x);
+          await cancel.click();
+          await expect(confirm).toBeHidden();
+          // Cancel removes its focused answer. Re-enter the ordinary menu
+          // before Escape, so closing has an actual keyboard owner at either
+          // viewport width instead of depending on another pointer toggle.
+          const firstItem = panel.getByRole("menuitem").first();
+          await expect(firstItem).toBeVisible();
+          await firstItem.focus();
+          await expect(firstItem).toBeFocused();
+          await firstItem.press("Escape");
+          await expect(panel).toBeHidden();
+        }
+      }
+    }
+  } finally {
+    try { await cleanupSession(request, session.id); }
+    finally { await patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null }); }
+  }
+});
 
 /**
  * Ordinary actions must retain their resting color tiers while menu and tab

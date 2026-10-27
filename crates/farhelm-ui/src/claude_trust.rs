@@ -131,11 +131,11 @@ pub(crate) fn ClaudeTrustSettings() -> Element {
 
     rsx! {
         div { id: "checkout-claude-trust", class: "checkout-claude-trust", tabindex: "-1",
-            label { class: "app-settings-choice",
+            label { class: "app-settings-choice setting-row",
                 "data-tooltip": "mark each new managed checkout trusted in Claude's own settings file before the agent starts; see the caveats below",
                 span { "answer Claude's \"trust this folder?\" for new checkouts" }
                 input {
-                    r#type: "checkbox", class: "host-settings-switch", checked: enabled, disabled: locked,
+                    r#type: "checkbox", class: "control-switch", checked: enabled, disabled: locked,
                     aria_describedby: "claude-trust-help claude-trust-caveats",
                     onchange: move |event| {
                         let choice = event.checked();
@@ -169,10 +169,10 @@ pub(crate) fn ClaudeTrustSettings() -> Element {
                 p { "A Claude session exiting at the same instant can rarely undo Farhelm's edit or lose one of its own updates. Any Claude update can change the file or its locking without notice: the edit may stop working, so Claude asks again, or collide with Claude's writes. Farhelm cannot detect every such change. This is best effort; Farhelm cannot promise it stays safe across Claude versions." }
                 p { "As when you answer Yes yourself, the repository's Claude hooks and commands then run without Claude's warning. When Farhelm archives the checkout, it removes that folder's trust key again, also best effort." }
             }
-            label { class: "app-settings-choice",
+            label { class: "app-settings-choice setting-row",
                 "data-tooltip": "show a note above the terminal when Claude asks whether to trust a new managed checkout",
                 span { "show the hint when Claude asks about a managed checkout" }
-                input { r#type: "checkbox", class: "host-settings-switch", checked: !dismissed, disabled: value.is_none(),
+                input { r#type: "checkbox", class: "control-switch", checked: !dismissed, disabled: value.is_none(),
                     "data-preference-checked": (!dismissed).to_string(),
                     onchange: move |event| {
                         let dismissed = !event.checked();

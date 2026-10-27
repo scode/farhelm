@@ -237,9 +237,10 @@ async function apiHosts(request: APIRequestContext): Promise<any[]> {
 
 /**
  * Removal and uninstall must keep their safe answer beside the action on a
- * desktop, and below full-width actions on a phone. Measure painted geometry
- * and tiers: checking classes alone misses a rule that loses the baseline or
- * accidentally fills the permanent destructive answer.
+ * desktop, and above full-width actions on a phone, matching DOM order.
+ * Measure painted geometry and tiers: checking classes alone misses a rule
+ * that loses the baseline or accidentally fills the permanent destructive
+ * answer.
  */
 async function expectManagementAnswers(dialog: Locator, labels: string[], phone: boolean): Promise<void> {
   const answers = dialog.locator(".host-dialog-answers");
@@ -260,7 +261,7 @@ async function expectManagementAnswers(dialog: Locator, labels: string[], phone:
   expect(buttons.at(-1)!.fill, "the one-off destructive action stays filled").not.toBe("rgba(0, 0, 0, 0)");
   if (phone) {
     for (const button of buttons) expect(Math.abs(button.width - geometry.width)).toBeLessThan(1);
-    for (let i = 1; i < buttons.length; i++) expect(buttons[i].bottom).toBeLessThan(buttons[i - 1].top);
+    for (let i = 1; i < buttons.length; i++) expect(buttons[i].top).toBeGreaterThan(buttons[i - 1].bottom);
   } else {
     expect(Math.max(...buttons.map((b) => b.bottom)) - Math.min(...buttons.map((b) => b.bottom))).toBeLessThan(1);
     for (let i = 1; i < buttons.length; i++) expect(buttons[i].left).toBeGreaterThan(buttons[i - 1].left);
@@ -2330,7 +2331,16 @@ test.describe("multi-host", () => {
     });
 
     try {
-      await page.goto("/");
+      // Error rendering is measured after the automatic probe answers.
+      // Initial host/progress discovery must not consume its assertion budget.
+      const [initialProbe] = await Promise.all([
+        page.waitForResponse((response) =>
+          new URL(response.url()).pathname === "/api/hosts/probe"
+          && response.request().method() === "POST"
+        ),
+        page.goto("/"),
+      ]);
+      expect(initialProbe.status()).toBe(503);
       const local = page.locator('[data-host-kind="local"]');
       const source = page.locator('[data-host-id="9014"]');
       await expect(local.locator(".provisioning-error")).toContainText(
@@ -3654,7 +3664,9 @@ test.describe("multi-host", () => {
       // had killed and relaunched things would produce exactly the same row.
       // `sleep 600` was never stopped, so anything other than alive means
       // the removal reached past the registry.
-      await expect(rediscovered.locator(".status-badge")).toHaveText(LIVE_BADGE);
+      // Rediscovery can also reveal unseen output from the surviving agent.
+      // That qualifies idle without changing whether the agent is alive.
+      await expect(rediscovered.locator(".status-badge")).toHaveText(/^(running|waiting|idle(?: — new output)?)$/);
       const listing = await (await request.get("/api/sessions")).json();
       const survivor = listing.sessions.find((s: any) => s.title === title);
       // Re-adding creates a new host entry, so the reference changes while the

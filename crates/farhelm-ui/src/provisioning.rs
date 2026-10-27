@@ -1438,17 +1438,17 @@ pub(crate) fn SetupPlanConfirmation(
             dismiss_tooltip: "cancel: change nothing on this host",
             on_dismiss: on_cancel,
         }
-        ScrollRegion { class: "host-settings-body",
+        ScrollRegion { class: "dialog-body host-settings-body",
             handle: settings_dialog::ADD_DIALOG, selector: ".host-settings-body", name: "host setup plan",
             recovery: RecoveryFocus::new(".add-host-cancel", None, true, RecoveryDelay::OneFrame),
             PlanStepList { confirmation, body }
             if let Some(error) = error { {error} }
         }
-        div { class: "host-settings-footer host-dialog-footer",
-            p { id: "host-setup-permanent-hint", class: "host-dialog-permanent-hint",
+        crate::modal_dialog::DialogFooter { class: "host-dialog-footer",
+            p { id: "host-setup-permanent-hint", class: "dialog-footer-hint host-dialog-permanent-hint",
                 "undo \"don't ask again\" with the gear at the top of the sidebar"
             }
-            div { class: "host-dialog-answers add-host-confirm-actions",
+            crate::modal_dialog::DialogActions { class: "add-host-confirm-actions",
             button {
                 r#type: "button",
                 class: "btn btn-neutral add-host-cancel",
@@ -1512,13 +1512,13 @@ pub(crate) fn UninstallConfirmation(
             dismiss_tooltip: "cancel: leave Farhelm installed on this host",
             on_dismiss: on_cancel,
         }
-        ScrollRegion { class: "host-settings-body",
+        ScrollRegion { class: "dialog-body host-settings-body",
             handle: DialogHandle::new(settings_dialog::UNINSTALL_DIALOG_SELECTOR), selector: ".host-settings-body", name: "host uninstall plan",
             recovery: RecoveryFocus::new(".uninstall-cancel", None, true, RecoveryDelay::OneFrame),
             PlanStepList { confirmation, body }
         }
-        div { class: "host-settings-footer host-dialog-footer",
-            div { class: "host-dialog-answers",
+        crate::modal_dialog::DialogFooter { class: "host-dialog-footer",
+            crate::modal_dialog::DialogActions {
                 button {
                     r#type: "button",
                     class: "btn btn-neutral provisioning-cancel uninstall-cancel",

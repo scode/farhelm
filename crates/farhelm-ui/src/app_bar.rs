@@ -84,6 +84,20 @@ enum BarMenuItem {
 }
 
 impl BarMenuItem {
+    /// Choose a decorative shared drawing without changing the item's action.
+    /// Help and update menus retain their own ordering and native key wiring.
+    fn glyph(self) -> crate::icons::ActionGlyph {
+        use crate::icons::ActionGlyph;
+        match self {
+            Self::SendFeedback => ActionGlyph::Feedback,
+            Self::Documentation | Self::ReleaseNotes | Self::WhatsNew => ActionGlyph::Document,
+            Self::SshHelp => ActionGlyph::Terminal,
+            Self::Welcome => ActionGlyph::Info,
+            Self::CheckForUpdates => ActionGlyph::Update,
+            Self::RestartToUpdate => ActionGlyph::Restart,
+        }
+    }
+
     /// The item's label, which is also its `data-bar-menu-item` marker.
     fn label(self) -> &'static str {
         match self {
@@ -547,6 +561,10 @@ fn BarMenuFlyout(
                     span { class: "host-row-menu-pointer", style: pointer_style, "aria-hidden": "true" }
                 }
                 div { class: "host-row-menu-panel bar-menu-panel",
+                    crate::menu_panel::MenuHeader {
+                        title: rsx! { if menu.name == "help" { "Help" } else { "Farhelm update" } },
+                        summary: rsx! { if menu.name == "help" { "Farhelm guides and feedback" } else { "An installed update is ready" } },
+                    }
                     div {
                         class: "host-row-menu-items session-row-menu-items",
                         role: "menu",
@@ -557,7 +575,7 @@ fn BarMenuFlyout(
                             button {
                                 key: "{item.label()}",
                                 r#type: "button",
-                                class: "btn session-row-menu-item host-row-menu-item bar-menu-item",
+                                class: "btn menu-item session-row-menu-item host-row-menu-item bar-menu-item",
                                 "data-bar-menu-item": item.label(),
                                 "data-menu-focus": crate::menu_panel::menu_item_focus_key(wiring, item),
                                 "data-tooltip": item.tooltip(),
@@ -568,9 +586,10 @@ fn BarMenuFlyout(
                                 onfocusout: move |_| menu_focus.set(None),
                                 onkeydown: move |evt| handle_menu_key(&evt, order.position(item), wiring, &()),
                                 onclick: move |_| choose(item),
-                                span { class: "session-row-menu-copy",
-                                    span { class: "session-row-menu-label", "{item.label()}" }
-                                    span { class: "session-row-menu-description", "{item.description()}" }
+                                crate::icons::ActionIcon { glyph: item.glyph(), class: "menu-icon session-row-menu-icon" }
+                                crate::menu_panel::MenuItemCopy {
+                                    label: rsx! { "{item.label()}" },
+                                    description: rsx! { "{item.description()}" },
                                 }
                             }
                         }

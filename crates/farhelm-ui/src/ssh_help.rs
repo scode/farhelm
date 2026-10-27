@@ -47,7 +47,7 @@ pub(crate) fn SshHelpDialog(destination: Option<String>, on_close: EventHandler<
                     dismiss_label: "close ssh help", dismiss_tooltip: "close: return without adding a host or starting ssh",
                     on_dismiss: move |_| on_close.call(()),
                 }
-                ScrollRegion { class: "host-settings-body ssh-help-body",
+                ScrollRegion { class: "dialog-body host-settings-body ssh-help-body",
                     handle: DIALOG, selector: ".ssh-help-body", name: "ssh connection help",
                     // Command arrival withdraws text-only entry. Close wins
                     // only after lost focus, never over an approval's answer.
@@ -74,9 +74,11 @@ pub(crate) fn SshHelpDialog(destination: Option<String>, on_close: EventHandler<
                         },
                     }
                 }
-                div { class: "host-settings-footer",
-                    button { r#type: "button", class: "btn btn-neutral ssh-help-close", "data-tooltip": "close: return without starting ssh",
-                        onclick: move |_| on_close.call(()), "close" }
+                crate::modal_dialog::DialogFooter {
+                    crate::modal_dialog::DialogActions {
+                        button { r#type: "button", class: "btn btn-neutral ssh-help-close", "data-tooltip": "close: return without starting ssh",
+                            onclick: move |_| on_close.call(()), "close" }
+                    }
                 }
             }
         }

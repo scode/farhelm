@@ -28,6 +28,76 @@ import {
 /** The web fixture has no updater, so its navigation omits the app pane. */
 const webSettingsSections: SettingsSection[] = ["sessions", "Appearance", "hosts", "terminal", "checkouts", "agent trust", "notifications"];
 
+/** A checked switch's inverse outline must be drawn against its own fill.
+ * Real native Tab focus and a supported gap click protect the failure premise:
+ * a color-only assertion would pass with the old invisible outer white ring.
+ * Label/help distances witness grouping without treating wrapper classes as
+ * the behavior. Checkout actions also keep the shared compact button metrics.
+ */
+test("settings focus stays on its painted fill and descriptions stay with their labels", async ({ page, request }) => {
+  test.setTimeout(60_000);
+  const previous = await readPreferences(request);
+  try {
+    await patchPreferences(request, { name_session_on_quick_launch: true, skip_session_confirmations: false });
+    await page.goto("/");
+    const dialog = await openSettings(page);
+    const first = dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true });
+    const naming = dialog.getByRole("checkbox", { name: "name sessions on quick launch", exact: true });
+    for (const colorScheme of ["dark", "light"] as const) {
+      await page.emulateMedia({ colorScheme });
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 800 });
+        await selectSettingsSection(page, "sessions");
+        await expect(first).not.toBeChecked();
+        await expect(naming).toBeChecked();
+        await expect(naming).toBeEnabled();
+        await first.focus();
+        await page.keyboard.press("Tab");
+        await expect(naming).toBeFocused();
+        expect(await naming.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+        await clickDialogGap(page, dialog);
+        await expect(naming).toBeFocused();
+        await expect(naming).toBeChecked();
+        await expect(naming).toBeEnabled();
+        expect(await naming.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+        await expect(naming).toHaveCSS("outline-color", await resolveToken(page, "--on-fill"));
+        await expect(naming).toHaveCSS("outline-offset", "-3px");
+        const distances = await dialog.locator("#settings-sessions input").evaluateAll((inputs) => inputs.map((input, index) => {
+          const label = input.closest("label")!;
+          const help = document.getElementById(input.getAttribute("aria-describedby")!)!;
+          const next = inputs[index + 1]?.closest("label");
+          return {
+            within: help.getBoundingClientRect().top - label.getBoundingClientRect().bottom,
+            between: next ? next.getBoundingClientRect().top - help.getBoundingClientRect().bottom : null,
+          };
+        }));
+        expect(distances).toHaveLength(3);
+        for (const distance of distances) {
+          expect(distance.within).toBeGreaterThanOrEqual(0);
+          if (distance.between !== null) expect(distance.between).toBeGreaterThan(distance.within);
+        }
+        await selectSettingsSection(page, "checkouts");
+        const close = dialog.getByRole("button", { name: "close", exact: true });
+        for (const field of [".checkout-root-field", ".checkout-post-clone-field"]) {
+          await expect(dialog.locator(field).locator("input, textarea")).toBeEditable();
+          const save = dialog.locator(field).getByRole("button", { name: "save", exact: true });
+          await expect(save).toHaveAttribute("aria-disabled", "true");
+          await expect(save).toHaveCSS("font-size", await close.evaluate((element) => getComputedStyle(element).fontSize));
+          await expect(save).toHaveCSS("color", await resolveToken(page, "--fg-2"));
+          await expect(save).toHaveCSS("opacity", "1");
+        }
+      }
+    }
+    expect((await readPreferences(request)).name_session_on_quick_launch).toBe(true);
+  } finally {
+    try { await page.close(); }
+    finally { await patchPreferences(request, {
+      name_session_on_quick_launch: previous.name_session_on_quick_launch ?? null,
+      skip_session_confirmations: previous.skip_session_confirmations ?? null,
+    }); }
+  }
+});
+
 /** End the page's preference queue before releasing held replies or restoring
  * shared state. Otherwise a later queued click could overwrite cleanup after
  * its route disappears and contaminate another spec using the same helm. */
@@ -99,7 +169,9 @@ for (const choice of [
       await expect(control).toBeEnabled();
       // click() permits the refused state to roll back before the action
       // finishes; check()/uncheck() would demand that it remain changed.
-      await control.click();
+      // A segmented radio keeps a clipped native input; its label is the
+      // visible pointer surface, while checked state still belongs to input.
+      await (choice.role === "radio" ? control.locator("..") : control).click();
       await reached.wait();
       await expect(control).toBeEnabled();
       await expect(control).toBeChecked({ checked: choice.role === "radio" || !choice.oldChecked });
@@ -111,14 +183,14 @@ for (const choice of [
       if (choice.role === "radio") await expect(control).not.toBeChecked();
       expect((await readPreferences(request))[choice.field]).toBe(choice.saved);
       expect(writes).toBe(1);
-      const controlBox = await control.boundingBox();
+      const controlBox = await (choice.role === "radio" ? control.locator("..") : control).boundingBox();
       const errorBox = await error.boundingBox();
       expect(controlBox, "the restored control is rendered beside its failure").not.toBeNull();
       expect(errorBox, "the failure is rendered below the control").not.toBeNull();
       expect(errorBox!.y).toBeGreaterThanOrEqual(controlBox!.y + controlBox!.height);
       await expect(page.locator(".build-skew")).toHaveCount(0);
       refuse = false;
-      await control.click();
+      await (choice.role === "radio" ? control.locator("..") : control).click();
       await expect.poll(async () => (await readPreferences(request))[choice.field]).toBe(choice.next);
       await expect(error).toHaveCount(0);
       bodyFailed = false;
@@ -458,11 +530,11 @@ test("settings ignores a superseded link-choice failure", async ({ page, request
       observer.observe(element, { childList: true, subtree: true });
       return { seen, observer };
     });
-    await program.click();
+    await program.locator("..").click();
     await firstReached.wait();
     await expect(program).toBeChecked();
     await expect(both).toBeEnabled();
-    await both.click();
+    await both.locator("..").click();
     await expect(both).toBeChecked();
     firstRelease.release();
     await newestReached.wait();
@@ -1659,6 +1731,70 @@ test("settings reverses a permanent removal answer without reloading", async ({ 
   }
 });
 
+/** Described segments must retain native radio keys and the real preference
+ * writer. Keeping all explanations visible matters because two choices can
+ * pass clicks to a program, including one that opens another browser tab.
+ */
+test("terminal link segments keep native keys and descriptions", async ({ page, request }) => {
+  const previous = await readPreferences(request);
+  let bodyFailed = true;
+  const choices = [
+    { value: "intercept", label: "open in Farhelm, don't pass the click on", help: "Farhelm opens the link once. The program does not receive that click or a drag starting there." },
+    { value: "both", label: "open in Farhelm and also pass the click on", help: "Use this when the program needs link clicks. A program that opens links itself may open a second tab." },
+    { value: "program", label: "pass the click on only", help: "Let the program handle links. Farhelm does not open them; without mouse reporting, clicking a link does nothing." },
+  ] as const;
+  try {
+    await patchPreferences(request, { terminal_link_click: "intercept" });
+    expect((await readPreferences(request)).terminal_link_click).toBe("intercept");
+    await page.goto("/");
+    const dialog = await openSettings(page, "terminal");
+    const group = dialog.getByRole("radiogroup", { name: "Terminal web links", exact: true });
+    for (const colorScheme of ["dark", "light"] as const) {
+      await page.emulateMedia({ colorScheme });
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 800 });
+        await expect(group.getByRole("radio")).toHaveCount(3);
+        for (const choice of choices) {
+          const radio = group.getByRole("radio", { name: choice.label, exact: true });
+          const helpId = `terminal-link-${choice.value}-help`;
+          await expect(radio).toHaveAttribute("aria-describedby", helpId);
+          await expect(group.locator(`#${helpId}`)).toHaveText(choice.help);
+          await expect(group.locator(`#${helpId}`)).toBeVisible();
+        }
+        const first = group.getByRole("radio", { name: choices[0].label, exact: true });
+        const both = group.getByRole("radio", { name: choices[1].label, exact: true });
+        const program = group.getByRole("radio", { name: choices[2].label, exact: true });
+        await first.locator("..").click();
+        await expect(first).toBeChecked();
+        await expect.poll(async () => (await readPreferences(request)).terminal_link_click).toBe("intercept");
+        await first.focus();
+        await expect(first).toBeFocused();
+        await first.press("ArrowRight");
+        await expect(both).toBeChecked();
+        await expect(both).toBeFocused();
+        await expect.poll(async () => (await readPreferences(request)).terminal_link_click).toBe("both");
+        // Focusing an unselected radio must not itself choose it. Space uses
+        // the native input even though its adjacent span supplies the drawing.
+        await program.focus();
+        await expect(program).toBeFocused();
+        await expect(program).not.toBeChecked();
+        await program.press("Space");
+        await expect(program).toBeChecked();
+        await expect.poll(async () => (await readPreferences(request)).terminal_link_click).toBe("program");
+        const painted = program.locator("..").locator(":scope > span");
+        await expect(painted).toHaveCSS("background-color", await resolveToken(page, "--accent-fill"));
+        await expect(painted).toHaveCSS("outline-color", await resolveToken(page, "--on-fill"));
+        const geometry = await group.evaluate((element) => ({ width: element.clientWidth, content: element.scrollWidth }));
+        expect(geometry.content, `${colorScheme} terminal choices fit width ${width}`).toBeLessThanOrEqual(geometry.width);
+      }
+    }
+    bodyFailed = false;
+  } finally {
+    await endPreferenceSaveTest(page, async () => {}, () => {},
+      () => patchPreferences(request, { terminal_link_click: previous.terminal_link_click ?? null }), bodyFailed);
+  }
+});
+
 /** Every pane's switches must fit beside their labels and keep native keyboard
  * behavior. The modal also isolates the page and returns focus to its opener;
  * styling a replacement control must not bypass either lifecycle.
@@ -1693,8 +1829,8 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
         const panel = await selectSettingsSection(page, section);
         await dialog.screenshot({ path: testInfo.outputPath(`settings-switches-${width}-${section}.png`) });
         // Measure rendered text independently of the label's full-width box:
-        // a checkbox above or before its caption must fail this contract. Radios
-        // share the label layout but retain native geometry, unlike these switches.
+        // a checkbox above or before its caption must fail this contract. Native
+        // radios paint a separate segmented group rather than switch geometry.
         const rows = await panel.locator('.app-settings-choice:has(input[type="checkbox"])').evaluateAll((labels) => labels.map((label) => {
           const input = label.querySelector("input")!;
           const range = document.createRange();
@@ -1722,7 +1858,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
           expect(row.appearance).toBe("none");
         }
         const alignment = await panel.evaluate((el) => ({
-          choices: Array.from(el.querySelectorAll(".app-settings-choice"), (row) => row.getBoundingClientRect().left),
+          choices: Array.from(el.querySelectorAll(".app-settings-choice:not(.segment-radio), .terminal-link-choices"), (row) => row.getBoundingClientRect().left),
           help: Array.from(el.querySelectorAll(".host-settings-help"), (help) => help.getBoundingClientRect().left),
           heading: el.querySelector(":scope > h3")!.getBoundingClientRect().left,
           overflowing: el.scrollWidth > el.clientWidth,

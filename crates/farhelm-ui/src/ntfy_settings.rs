@@ -46,6 +46,7 @@ fn server_origin_changed(saved: &str, draft: &str) -> bool {
 /// Explicit Save and Send test report their own outcome inline. Requests survive
 /// modal dismissal, but component state is touched only while mounted; the saved
 /// token is never seeded into a password field or preference queue.
+/// Priority segments edit this same draft; selecting one never saves or sends.
 #[component]
 pub(crate) fn NtfySettings() -> Element {
     let base = use_context::<ApiBase>().0;
@@ -92,14 +93,14 @@ pub(crate) fn NtfySettings() -> Element {
             p { class: "host-settings-help",
                 "Send a session's title and host when it waits for you. Applies to every window using this helm. In the desktop app, keep the window open."
             }
-            label { class: "app-settings-choice",
+            label { class: "app-settings-choice setting-row",
                 span { "send ntfy alerts" }
-                input { r#type: "checkbox", class: "host-settings-switch", checked: draft.read().enabled, disabled: locked,
+                input { r#type: "checkbox", class: "control-switch", checked: draft.read().enabled, disabled: locked,
                     "data-tooltip": "send alerts when a session waits for you; Save applies this to every window using this helm",
                     onchange: move |event| { draft.write().enabled = event.checked(); outcome.set(None); } }
             }
             label { class: "checkout-root-label", span { "server URL" }
-                input { r#type: "url", value: "{draft.read().server_url}", readonly: locked,
+                input { r#type: "url", class: "font-mono", value: "{draft.read().server_url}", readonly: locked,
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                     "data-tooltip": "ntfy server that receives session alerts",
                     oninput: move |event| { draft.write().server_url = event.value(); outcome.set(None); } }
@@ -131,62 +132,64 @@ pub(crate) fn NtfySettings() -> Element {
             if draft.read().token_set && origin_changed && token().is_empty() && !clear() {
                 p { class: "host-settings-help ntfy-token-origin-hint", "changing the server clears the saved token when you save" }
             }
-            label { class: "app-settings-choice",
+            label { class: "app-settings-choice setting-row",
                 span { "clear saved token" }
-                input { r#type: "checkbox", class: "host-settings-switch", checked: clear(), disabled: locked,
+                input { r#type: "checkbox", class: "control-switch", checked: clear(), disabled: locked,
                     "data-tooltip": "remove the saved access token when you Save",
                     onchange: move |event| { clear.set(event.checked()); outcome.set(None); } }
             }
-            label { class: "checkout-root-label", span { "priority" }
-                select { value: draft.read().priority.header(), disabled: locked,
-                    "data-tooltip": "priority used for session alerts; Save applies the selected priority",
-                    onchange: move |event| {
-                        draft.write().priority = match event.value().as_str() {
-                            "min" => Priority::Min, "low" => Priority::Low, "high" => Priority::High,
-                            "urgent" => Priority::Urgent, _ => Priority::Default,
-                        }; outcome.set(None);
-                    },
-                    option { value: "min", "min" } option { value: "low", "low" }
-                    option { value: "default", "default" } option { value: "high", "high" }
-                    option { value: "urgent", "urgent" }
+            div { class: "checkout-root-label", span { "priority" }
+                div { class: "segmented-control", role: "group", aria_label: "priority",
+                    for priority in [Priority::Min, Priority::Low, Priority::Default, Priority::High, Priority::Urgent] {
+                        button { r#type: "button", value: priority.header(), disabled: locked,
+                            aria_pressed: draft.read().priority == priority,
+                            "data-tooltip": "priority used for session alerts; Save applies the selected priority",
+                            onclick: move |_| { draft.write().priority = priority; outcome.set(None); },
+                            "{priority.header()}"
+                        }
+                    }
                 }
             }
             if let Some(error) = error {
                 p { class: "checkout-root-error", role: "alert", "{error}" }
-                button { r#type: "button", "data-tooltip": "load the saved ntfy alert settings again", onclick: move |_| load.restart(), "retry loading" }
+                button { r#type: "button", class: "btn btn-neutral", "data-tooltip": "load the saved ntfy alert settings again", onclick: move |_| load.restart(), "retry loading" }
             }
-            button { r#type: "button", disabled: locked,
-                "data-tooltip": "save ntfy alert settings for every window using this helm",
-                onclick: move |_| {
-                    if locked { return; }
-                    busy.set(true); outcome.set(None);
-                    let request = save_request(draft(), token(), clear());
-                    let base = base.clone(); let mounted = mounted.clone();
-                    let saving_request = save_ntfy_settings(&base, request);
-                    dioxus::core::spawn_forever(async move {
-                        let result = saving_request.await;
-                        if !mounted.get() { return; }
-                        busy.set(false);
-                        match result {
-                            Ok(settings) => { saved_server.set(settings.server_url.clone()); draft.set(settings); token.set(String::new()); clear.set(false);
-                                outcome.set(Some(Ok("ntfy alert settings saved".into()))); }
-                            Err(error) => outcome.set(Some(Err(error))),
-                        }
-                    });
-                }, "save"
-            }
-            button { r#type: "button", disabled: locked,
-                "data-tooltip": "send one alert using the saved settings, including while alerts are switched off",
-                onclick: move |_| {
-                    if locked { return; }
-                    busy.set(true); outcome.set(None);
-                    let base = testing_base.clone(); let mounted = testing_mounted.clone();
-                    dioxus::core::spawn_forever(async move {
-                        let result = test_ntfy_settings(&base).await;
-                        if !mounted.get() { return; }
-                        busy.set(false); outcome.set(Some(result.map(|()| "test alert sent".into())));
-                    });
-                }, "send test"
+            // These actions share presentation, not a submission: Send test
+            // uses saved settings and must never apply this draft implicitly.
+            crate::modal_dialog::DialogActions {
+                button { r#type: "button", class: "btn btn-neutral", disabled: locked,
+                    "data-tooltip": "send one alert using the saved settings, including while alerts are switched off",
+                    onclick: move |_| {
+                        if locked { return; }
+                        busy.set(true); outcome.set(None);
+                        let base = testing_base.clone(); let mounted = testing_mounted.clone();
+                        dioxus::core::spawn_forever(async move {
+                            let result = test_ntfy_settings(&base).await;
+                            if !mounted.get() { return; }
+                            busy.set(false); outcome.set(Some(result.map(|()| "test alert sent".into())));
+                        });
+                    }, "send test"
+                }
+                button { r#type: "button", class: "btn btn-primary", disabled: locked,
+                    "data-tooltip": "save ntfy alert settings for every window using this helm",
+                    onclick: move |_| {
+                        if locked { return; }
+                        busy.set(true); outcome.set(None);
+                        let request = save_request(draft(), token(), clear());
+                        let base = base.clone(); let mounted = mounted.clone();
+                        let saving_request = save_ntfy_settings(&base, request);
+                        dioxus::core::spawn_forever(async move {
+                            let result = saving_request.await;
+                            if !mounted.get() { return; }
+                            busy.set(false);
+                            match result {
+                                Ok(settings) => { saved_server.set(settings.server_url.clone()); draft.set(settings); token.set(String::new()); clear.set(false);
+                                    outcome.set(Some(Ok("ntfy alert settings saved".into()))); }
+                                Err(error) => outcome.set(Some(Err(error))),
+                            }
+                        });
+                    }, "save"
+                }
             }
             p { class: "host-settings-help", "Save before testing. Send test uses the saved settings, not this form's unsaved changes." }
             if busy() { p { role: "status", "working…" } }

@@ -492,16 +492,19 @@ async function waitForMouseTracking(page: Page): Promise<void> {
 
 /** A plain left-button drag across the agent terminal's screen, well past
  * the drag threshold, starting a few rows down so it is on the screen.
- * Return the release point so placement is checked against the actual input. */
+ * Use integer CSS pixels so the returned point is also the MouseEvent's
+ * client position; fractional font metrics must not make the expected anchor
+ * differ from the release the notice actually receives. */
 async function dragAcrossTerminal(page: Page): Promise<{ x: number; y: number }> {
   const box = await page.locator("#terminal .xterm-screen").boundingBox();
   if (!box) throw new Error("the agent terminal's screen has no box");
-  const y = box.y + Math.min(60, box.height / 2);
+  const y = Math.floor(box.y + Math.min(60, box.height / 2));
+  const releaseX = Math.floor(box.x + 160);
   await page.mouse.move(box.x + 20, y);
   await page.mouse.down();
-  await page.mouse.move(box.x + 160, y, { steps: 8 });
+  await page.mouse.move(releaseX, y, { steps: 8 });
   await page.mouse.up();
-  return { x: box.x + 160, y };
+  return { x: releaseX, y };
 }
 
 /** The forcing modifier the page itself will name, from the shipped rule. */

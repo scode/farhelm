@@ -189,10 +189,10 @@ pub(crate) fn WorkspaceTrustSettings(agent: TrustAgent) -> Element {
 
     rsx! {
         div { id: "checkout-{key}-trust", class: "checkout-claude-trust", tabindex: "-1",
-            label { class: "app-settings-choice", "data-tooltip": agent.help(),
+            label { class: "app-settings-choice setting-row", "data-tooltip": agent.help(),
                 span { "{agent.choice_label()}" }
                 input {
-                    r#type: "checkbox", class: "host-settings-switch", checked: enabled, disabled: locked,
+                    r#type: "checkbox", class: "control-switch", checked: enabled, disabled: locked,
                     aria_describedby: "{key}-trust-help {key}-trust-risk",
                     onchange: move |event| {
                         let choice = event.checked();
@@ -225,10 +225,10 @@ pub(crate) fn WorkspaceTrustSettings(agent: TrustAgent) -> Element {
                 "As when you approve it yourself, repository hooks, settings and commands are then trusted. This is why the switch is off by default."
             }
             if agent.has_hint() {
-                label { class: "app-settings-choice",
+                label { class: "app-settings-choice setting-row",
                     "data-tooltip": "show a note above the terminal when {name} asks about trust in a managed checkout",
                     span { "show the hint when {name} asks about a managed checkout" }
-                    input { r#type: "checkbox", class: "host-settings-switch", checked: !dismissed, disabled: value.is_none(),
+                    input { r#type: "checkbox", class: "control-switch", checked: !dismissed, disabled: value.is_none(),
                         "data-preference-checked": (!dismissed).to_string(),
                         onchange: move |event| {
                             let dismissed = !event.checked();

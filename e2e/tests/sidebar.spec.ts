@@ -1315,6 +1315,9 @@ test("a long cwd shows its tail with characters in logical order", async ({
 
     const inner = target.locator(".session-cwd-text");
     const clipper = target.locator(".session-cwd");
+    // The tail is a settled-layout contract; fallback-font metrics are not
+    // evidence that the final monospace glyph run clips the correct end.
+    await page.evaluate(() => document.fonts.ready);
     // Establish real overflow before checking its paint and clipping policy.
     expect(await clipper.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
     // The DOM text is the logical path regardless of rendering...
@@ -1335,12 +1338,26 @@ test("a long cwd shows its tail with characters in logical order", async ({
     const geometry = await clipper.evaluate((el) => {
       const clip = el.getBoundingClientRect();
       const text = el.querySelector(".session-cwd-text")!.getBoundingClientRect();
-      return { front: text.left - clip.left, tail: text.right - clip.right };
+      return {
+        front: text.left - clip.left,
+        tail: text.right - clip.right,
+        clipWidth: clip.width,
+        textWidth: text.width,
+        scrollLeft: el.scrollLeft,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+      };
     });
     // Direction alone does not prove which end remains visible. A block
     // inner span can keep both directions while clipping the path's tail.
     expect(geometry.front, "the front of the long path must lie outside the clipper").toBeLessThan(0);
-    expect(Math.abs(geometry.tail), "the tail must align with the clipper's visible right edge").toBeLessThan(1);
+    // Use the same inclusive CSS-pixel boundary as the row-alignment checks
+    // above. WebKit has reported exactly one pixel even after fonts settle;
+    // the separate overflow/front checks still reject clipping the wrong end.
+    expect(
+      Math.abs(geometry.tail),
+      `the tail must align with the clipper's visible right edge: ${JSON.stringify(geometry)}`,
+    ).toBeLessThanOrEqual(1);
     // Ellipsis is paint, not a layout box: these computed styles plus the
     // overflow premise establish the condition under which it is drawn.
     expect(await clipper.evaluate((el) => {
@@ -2681,7 +2698,7 @@ test("the actions menu has a raised surface and inset choices", async ({ page, r
     const separator = panel.locator(".session-row-menu-separator");
     await expect(separator).toHaveCount(3);
     expect(
-      await separator.first().evaluate((element) => getComputedStyle(element).borderTopColor),
+      await separator.first().evaluate((element) => getComputedStyle(element).backgroundColor),
     ).toBe(await tokenColor(page, "--border-dim"));
     const separatorBox = (await separator.last().boundingBox())!;
     const deleteBox = (await panel.locator(".session-row-delete").boundingBox())!;
@@ -2706,31 +2723,50 @@ test("the actions menu has a raised surface and inset choices", async ({ page, r
  * lifted the panel 328px above it; the premise check below turns that
  * situation into a named fixture failure instead of a misplacement.
  */
-test("the session flyout sits beside its row with a titled, described menu", async ({ page, request }) => {
+test("the session flyout sits beside its row with a titled, described menu", async ({ page, request }, testInfo) => {
   const title = `menu-flyout-${Date.now()}`;
   const session = await createSession(request, { title, cwd: "/tmp", invocation: "sleep 300" });
   try {
-    await hideSeenState(page);
     await waitForFixtureStates(request, [session], "idle");
-    await page.setViewportSize({ width: 900, height: 900 });
+    await page.setViewportSize({ width: 900, height: 1000 });
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
     await waitForHostsListSettled(page);
+    await page.evaluate(() => document.fonts.ready);
     await target.evaluate((element) => element.scrollIntoView({ block: "center" }));
     await target.locator(".session-row-menu").hover();
-    // The flyout keeps SESSION_MENU_PANEL_MIN_RESERVE_PX (407px) below its
+    // The flyout keeps SESSION_MENU_PANEL_MIN_RESERVE_PX (464px) below its
     // top before clamping upward; a row lower than that is the clamp's
     // case, which the scrolled-list tests below own.
     const restingRow = (await target.boundingBox())!;
     expect(
-      restingRow.y + 407,
+      restingRow.y + 464,
       "the row must leave the full menu's reserve below it, or this test measures the clamp",
-    ).toBeLessThanOrEqual(900);
+    ).toBeLessThanOrEqual(1000);
     await openRowMenu(target);
 
     const panel = target.locator(".session-row-menu-panel");
+    // A real live session exposes read or unread; either label occupies the
+    // same eighth row. Hiding that row would under-measure the placement reserve.
+    await expect(panel.locator(".session-row-mark-seen"), "the full menu needs its real seen-state action")
+      .toBeVisible({ timeout: 45_000 });
+    await expect(panel.getByRole("menuitem"), "measure all eight ordinary commands").toHaveCount(8);
     const panelBox = (await panel.boundingBox())!;
+    // The ordinary full menu should fit without scrolling. Retain its actual
+    // dimensions so the shared placement reserve can be checked after a restyle.
+    const extent = await panel.evaluate((element) => ({
+      height: element.getBoundingClientRect().height,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      items: [...element.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent),
+    }));
+    await testInfo.attach("session-menu-geometry", {
+      body: JSON.stringify(extent),
+      contentType: "application/json",
+    });
+    expect(extent.scrollHeight, "the full ordinary menu must not need internal scrolling")
+      .toBeLessThanOrEqual(extent.clientHeight + 1);
     const sidebarBox = (await page.locator(".app-sidebar").boundingBox())!;
     const rowBox = (await target.boundingBox())!;
     expect(rowBox.y, "opening the menu must not scroll its row").toBe(restingRow.y);
@@ -4655,7 +4691,7 @@ async function placeOwnRowAtSidebarBottom(
 test("opening the last visible row's menu in a scrolled list stays inside the viewport", async ({
   page,
   request,
-}) => {
+}, testInfo) => {
   const marker = `clip-${Date.now()}`;
   const created = await fillSidebarPastOneScreen(request, marker);
   try {
@@ -4710,6 +4746,14 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
 
     const viewport = page.viewportSize()!;
     const panelBox = (await panel.boundingBox())!;
+    const geometry = { viewport, toggleBox, panelBox, aimedTop: rowAimedPointerTop(toggleBox),
+      extent: await panel.evaluate((el) => ({ clientHeight: el.clientHeight, scrollHeight: el.scrollHeight })) };
+    await testInfo.attach("bottom-menu-geometry", { body: JSON.stringify(geometry), contentType: "application/json" });
+    // Retain the actual fixture while it still exists; an after-test screenshot
+    // can show only the cleaned-up shared page when this premise fails.
+    if (geometry.aimedTop < panelBox.y + panelBox.height) {
+      await page.screenshot({ path: testInfo.outputPath("bottom-menu-premise.png") });
+    }
     // All four edges: the old absolute scheme's failure mode was clipping
     // at the BOTTOM/RIGHT, but a regression in the opposite direction —
     // the panel pushed off the TOP or LEFT edge by a broken clamp — is
@@ -4724,7 +4768,7 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
     // alone differ from one bounded by the panel.
     expect(
       rowAimedPointerTop(toggleBox),
-      "the row-aimed pointer spot must lie below the panel's bottom, or the pointer clamp is not exercised",
+      `the row-aimed pointer must need the panel clamp: ${JSON.stringify(geometry)}`,
     ).toBeGreaterThanOrEqual(panelBox.y + panelBox.height);
 
     // The rotated diamond must overlap the panel's left edge vertically and
@@ -4822,7 +4866,7 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
 test("a retained refusal stays inside a bottom-row menu's scrolling panel", async ({
   page,
   request,
-}) => {
+}, testInfo) => {
   const marker = `refusal-${Date.now()}`;
   const created = await fillSidebarPastOneScreen(request, marker);
   try {
@@ -4858,6 +4902,16 @@ test("a retained refusal stays inside a bottom-row menu's scrolling panel", asyn
       }),
     );
     await openRowMenu(target);
+    // Establish the last-command boundary before inducing the refusal as well
+    // as after reopening; the fixture must exercise the intended pointer case.
+    const initialDelete = (await target.locator(".session-row-delete").boundingBox())!;
+    const initialGeometry = { toggleBox, initialDelete, aimedTop: rowAimedPointerTop(toggleBox) };
+    await testInfo.attach("refusal-menu-initial-geometry", { body: JSON.stringify(initialGeometry), contentType: "application/json" });
+    if (initialGeometry.aimedTop < initialDelete.y + initialDelete.height) {
+      await page.screenshot({ path: testInfo.outputPath("refusal-menu-initial-premise.png") });
+    }
+    expect(initialGeometry.aimedTop, `the initial menu must exercise the pointer bound: ${JSON.stringify(initialGeometry)}`)
+      .toBeGreaterThanOrEqual(initialDelete.y + initialDelete.height);
     await target.locator(".session-row-stop").click();
     // Acceptance closes the menu; the failure lands in the closed row's
     // own error line, which is the state a user reopens the menu over.
@@ -4878,24 +4932,30 @@ test("a retained refusal stays inside a bottom-row menu's scrolling panel", asyn
     await expect(error).toHaveCount(1);
     await expect(error).toContainText("refusal-sentinel-0");
 
-    // Premises: the refusal alone is taller than the whole reserve the
-    // flyout keeps below its top, so it cannot fit unscrolled; and the row
-    // sits so low that the pointer's row-aimed spot is below every command,
+    // Premises: the refusal alone is taller than the painted panel, so it
+    // cannot fit unscrolled; and the row sits so low that the pointer's
+    // row-aimed spot is below every command,
     // where a wrapper taller than the panel could put it beside the refusal.
-    expect(
-      (await error.boundingBox())!.height,
-      "the refusal must be taller than the flyout's height reserve",
-    ).toBeGreaterThan(407);
+    const panelBox = (await panel.boundingBox())!;
+    const errorBoxBeforeScroll = (await error.boundingBox())!;
+    const extent = await panel.evaluate((el) => ({ clientHeight: el.clientHeight, scrollHeight: el.scrollHeight }));
     const deleteBox = (await panel.locator(".session-row-delete").boundingBox())!;
+    const geometry = { toggleBox, panelBox, deleteBox, errorBox: errorBoxBeforeScroll, extent,
+      aimedTop: rowAimedPointerTop(toggleBox) };
+    await testInfo.attach("refusal-menu-geometry", { body: JSON.stringify(geometry), contentType: "application/json" });
+    if (geometry.aimedTop < deleteBox.y + deleteBox.height || errorBoxBeforeScroll.height <= extent.clientHeight) {
+      await page.screenshot({ path: testInfo.outputPath("refusal-menu-premise.png") });
+    }
+    expect(errorBoxBeforeScroll.height, `the refusal alone must exceed the painted panel: ${JSON.stringify(geometry)}`)
+      .toBeGreaterThan(extent.clientHeight);
     expect(
       rowAimedPointerTop(toggleBox),
-      "the row-aimed pointer spot must lie below the last command, or the pointer bound is not exercised",
+      `the row-aimed pointer must lie below the last command: ${JSON.stringify(geometry)}`,
     ).toBeGreaterThanOrEqual(deleteBox.y + deleteBox.height);
 
     // The pointer overlaps the painted panel's left edge, not the space
     // below it.
     const viewport = page.viewportSize()!;
-    const panelBox = (await panel.boundingBox())!;
     const pointer = target.locator(".session-row-menu-pointer");
     await expect(pointer, "a measured session menu must render its row pointer").toBeVisible();
     const pointerBox = (await pointer.boundingBox())!;
