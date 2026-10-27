@@ -1,79 +1,85 @@
 ## Since the last review
 
-The landing attempt merged none of the five PRs. This round keeps the same stack: #2728 and #2729 are unchanged apart
-from rebasing; #2730 corrects the selected local-host specification; #2731 restores the terminal background and fixes
-formatting and the visible-wordmark test; #2732 renames the permission choice group and corrects the affected tests. No
-PR was added or dropped.
+None of the five draft PRs has merged. This round changes the session-list movement test setup, a long-path alignment
+test and its flake record in #2732; #2728 through #2731 are rebased without source changes. No PR was added or dropped.
 
-The terminal again keeps its existing dark gray background, #282c34, in both palettes. The persistent permissions
-choices are announced as permission mode, while their visible label and the Permissions search section stay unchanged.
-Selected local and remote host marks share the inverse selection color, as requested. The specification also includes
-the effort dropdown in the existing Enter-to-launch contract.
+The reported intermittent failure was a font-readiness assertion, not an overflowing sidebar. In all seven retained
+failures from the two landing runs and two focused repetition runs, the sidebar-fit assertion passed before the global
+font-loaded assertion failed. The test parks the pointer over a session row to hold the list order. That starts its
+delayed hover card, whose bold title first requests Inter Bold after the test's earlier font wait has finished. A
+retained failure trace confirms that ordering. The floating card does not contribute to sidebar layout; no sidebar
+height regression was established.
 
-The requested full browser run completed: 2679 passed, three failed and 14 skipped. All 36 failures from the landing
-attempt passed. The three additional WebKit failures were pre-existing test fixtures; this round tightened their
-readiness using existing helpers and verified the affected cases on both engines. The full command remains failed; the
-focused passes below do not turn it into a green full run.
+The test now loads the declared fonts before pointer-dependent geometry. Its page dimensions, pointer position, font
+checks, strict geometry comparisons and menu assertions are unchanged. This is a test starting-condition correction;
+product code is unchanged. The bounded Opus consult independently confirmed the cause and recommended this correction.
+
+The required whole-file repetitions passed: all nine tests ran 20 times on each engine, 360 passes, zero retries or
+skips. The full browser run then finished with 2681 passes, one failure and 14 skips; the corrected movement tests
+passed on both engines. The remaining failure was an older long-path alignment assertion: WebKit reported exactly one
+CSS pixel against a strict `< 1` check, despite waiting for fonts. The test now accepts `<= 1`, matching neighboring
+row-alignment checks, and includes its box and scroll values in failure messages. Its independent overflow, front-edge,
+logical-text, direction and ellipsis assertions remain. That exact test passed once on each engine afterward. The full
+command remains failed; it was not rerun after this test-only correction.
 
 ## What this was about
 
 This is the shared foundation for Steel: blue-gray dark colors, a light counterpart, solid periwinkle selections, Inter
-for interface text, and common styling for buttons, switches, menus and dialogs. Paths, commands, versions, ages and
-terminal text keep JetBrains Mono. Settings gains a per-device System/Dark/Light appearance choice. The terminal keeps
-its own theme. The later Steel plans still own the host rail, session toolbar and tunnels, later dialog layouts, and
+for interface text, and shared button, switch, menu and dialog styling. Paths, commands, versions, ages and terminal
+text keep JetBrains Mono. Settings gains a per-device System/Dark/Light appearance choice. The terminal keeps its
+existing dark theme. The later Steel plans own the host rail, session toolbar and tunnels, later dialog layouts, and
 sentence case. The reference mockups and the shared TODO entry remain unchanged.
 
 ## Things you should know
 
-The terminal regression came from stylesheet priority: the terminal library's later black viewport rule won over
-Farhelm's theme. The corrected selector makes Farhelm's existing terminal token win regardless of insertion order. No
-terminal palette or renderer behavior was changed.
+The preceding follow-up restored the terminal's #282c34 background by correcting stylesheet priority. It renamed the
+launcher permission-choice group to permission mode, while keeping the visible label and Permissions search section.
+Selected local and remote host marks use the same inverse selection color, as requested. The effort dropdown is included
+in the specification's existing Enter-to-launch contract. Those product and specification corrections remain.
 
-The other landing failures required accessibility, expectation or fixture corrections. The following accounts for all 36
-failed engine cases from the landing run. The counts are failures in that run, not a claim that later passes erase them.
+The other earlier landing failures were test corrections for intended behavior or test setup. Dialog tests now follow
+Cancel-first ordering, with the long-title confirmation retaining containment checks. Launcher tests use the native
+effort dropdown, establish its focus before reopening the model picker, and compare the padded permission segment's
+center with its help control. The template typography test treats shortcut digits as technical values in JetBrains Mono
+while requiring prose in Inter. The drag-copy notice test uses the same integer mouse-release coordinates for dispatch
+and measurement; the title-band test measures the visible palette wordmark; the terminal link-click test clicks the
+native radio's visible label and checks its actual state and terminal behavior. Host rediscovery admits the existing
+idle-with-new-output status. The template editor fixture awaits initial Cancel focus before testing shortcut focus
+preservation. The two-host planning fixture excludes unrelated fake-host retry updates while keeping both plans held
+behind Settings. The earlier movement-font wait was insufficient and is superseded by this round's preload. Source
+maintenance formatted the interface's Cargo.toml; specification maintenance records the requested selected-host mark and
+effort Enter contract. These were not additional product changes beyond the restored terminal background and requested
+accessible group rename.
 
-| Cases | Behavior                                                           | What was corrected                                                                                                                                                                         |
-| ----- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 4     | Terminal theme and host-colored frame, both engines                | Product CSS priority, restoring #282c34.                                                                                                                                                   |
-| 2     | Launcher word search, both engines                                 | Requested accessible group rename; tests distinguish permission mode from Permissions search results.                                                                                      |
-| 6     | Custom permissions, Goose/Pi, Replace with, both engines           | Tests use the intended native effort dropdown and preserve reconciliation/admission checks. Goose/Pi also establishes dropdown focus before reopening the model picker.                    |
-| 2     | Guarded-permission help alignment, both engines                    | Tests compare centers of the padded segment well and help control with the existing tolerance.                                                                                             |
-| 2     | Template typography, both engines                                  | Shortcut digits are technical values in JetBrains Mono; prose remains Inter. Loaded-font and equal-width checks remain.                                                                    |
-| 2     | Drag-copy notice placement, both engines                           | The test dispatches and returns the same integer mouse-release coordinates, retaining the anchoring tolerances.                                                                            |
-| 3     | Session-header popover geometry, one Chromium and two WebKit cases | The fixture waits for menu fonts before measuring settled geometry; movement and wrapping assertions remain.                                                                               |
-| 6     | Phone setup, Remove host and uninstall questions, both engines     | Tests follow the intended Cancel-first order and retain exact consequence text, containment and action checks.                                                                             |
-| 2     | Very long session-title confirmation, both engines                 | At wide width, tests require Cancel left of confirm on one line, the title above both, and all four edges contained.                                                                       |
-| 2     | Terminal link-click setting, both engines                          | The test clicks the visible native-radio label, then checks the actual checked state and terminal behavior.                                                                                |
-| 2     | Title-band wordmark, both engines                                  | The test requires one visible palette variant before measuring; drag exclusions remain.                                                                                                    |
-| 1     | Host removal and rediscovery, WebKit                               | The exact live-status oracle now admits the existing idle — new output state; identity and removal checks remain.                                                                          |
-| 1     | Template shortcut preserving editor focus, WebKit                  | The fixture waits for the second question's initial Cancel focus before editing. The later shortcut must still preserve the name field's focus and selection.                              |
-| 1     | Two delayed host plans behind Settings, Chromium                   | The existing event-feed stub excludes unrelated retry-detail updates from fake hosts. Both planning replies remain held until Settings owns focus; serial modal admission remains checked. |
+The sidebar investigation found an inaccurate premise in the latest Blocked text. Runs
+9a3c0404-de1e-4a81-8af2-dc4bad149e19, d00d80ec-381b-4ba3-9684-1619781fa98e, b31c6a07-16b9-4b74-8bfd-bb7f4e4e8ecf and
+85ec7662-61f7-4e76-b486-d54cdb2ced8d all failed this file's global font-loaded check after passing its fit check. In one
+d00 failure, the font wait resolved before the hover card requested Inter Bold; the later failure diagnostic already
+showed fonts loaded again. The other failures match the assertion and shared pointer setup; their individual network
+timelines were not all inspected.
 
-The last two failures were reproduced during focused follow-up. The focus failure occurred before the shortcut ran. The
-host menu opened and then closed as an earlier fake host's retry details changed, consistent with the existing
-movement-dismissal contract. These were isolated using existing test facilities, with no timeout increase, retries or
-weaker menu readiness check.
+The card sits in a fixed body-level tooltip, so this delayed load cannot make the sidebar taller. Its first title can
+briefly use a fallback font under the existing font-display: swap policy. That is ordinary first-use font loading, not
+an established row or sidebar layout defect. The fix establishes the settled-font premise required by these movement
+tests without changing application loading policy.
 
-The full run also found three setup or measurement boundaries in older tests. Offer retirement now gives its existing
-event-feed stub an initial healthy greeting, preventing unrelated fake-host retry details from moving its menu; both
-held offers, the later retarget notification and owner/focus/release checks remain. The long-path sidebar test waits for
-fonts before measuring its settled tail, keeping the strict less-than-1px threshold and all text/bidi/overflow checks.
-The automatic-setup test waits for its initial probe response before checking the rendered error, then retains the
-single-probe count and the busy-operation forced-click guard. Their full-run failures and focused outcomes are recorded
-in FLAKES.md with hypothesis-level causes; the later passes do not prove those causes.
+The long-path recurrence shows the previous font wait did not cure that separate test. WebKit scroll-origin or
+fractional-layout rounding is a hypothesis, not an established cause. The retained failure screenshot was taken after
+cleanup and does not show the measured path, so it cannot establish whether that path looked correct. The new flake
+entry preserves that limitation and the exact change from an exclusive to an inclusive one-pixel endpoint. Product CSS
+is unchanged.
 
 ## Open questions and possible follow-ups
 
-The visual gate is representative ordinary appshot inspection. It makes no transient-paint, native macOS or physical
-input claim. Active host operations, pending Trash, loaded SSH help, the installed updater and successful uninstall
-planning retain the preceding report's code-only visual coverage. No live installation was changed.
+No maintainer decision is pending for this correction. The visual evidence remains representative ordinary appshots; it
+makes no transient-paint, native macOS or physical-input claim. Active host operations, pending Trash, loaded SSH help,
+the installed updater and successful uninstall planning retain the preceding code-only visual coverage.
 
-An earlier artificial native sequence opened Settings, changed appearance rapidly, then immediately closed and reopened
-it. It showed a Light Settings card over a Dark page and stale section content briefly. Ordinary input has not
-reproduced this, and neither its cause nor a product fix is established. This round added no native timing diagnostics.
-
-Opus observed the existing A+ toolbar clipping at the 650px main pane; the later session-toolbar plan owns that layout.
-Mixed sentence case remains with the final wording plan. Neither expands this follow-up.
+An earlier artificial native sequence rapidly changed appearance and immediately reopened Settings. It briefly showed a
+Light card over a Dark page and stale section content. Ordinary input has not reproduced it; neither a cause nor a
+product fix is established. No further native timing diagnostics were added. Existing A+ clipping at a 650px main pane
+belongs to the later session-toolbar plan; mixed sentence case belongs to the final wording plan. No live installation
+was changed.
 
 ## The PRs
 
@@ -83,97 +89,104 @@ Mixed sentence case remains with the final wording plan. Neither expands this fo
 - [#2731: device appearance choice and Steel Light](https://github.com/scode/farhelm/pull/2731/changes).
 - [#2732: shared controls, menus and dialogs](https://github.com/scode/farhelm/pull/2732/changes).
 
-All five remain drafts in one linear stack, updated in this round. Pushed heads, in the same order: `5d261d0e65a6`,
-`c26d0d9b3ae0`, `8211af23aa64`, `f51d73fc7c93`, `2c35e63a7054`. None was marked ready or merged by the executor.
+Final pushed heads, respectively: 8b97bf57a652, efc0971b8e2c, 027578c576dc, da0f86374ea8 and 694621c0c8eb. All five
+remain drafts in one linear stack; the executor marked none ready and merged none.
 
 ## Checks run, reused and skipped
 
-Current static checks passed: workspace Rust formatting, dprint on the changed Cargo/spec files, and the test-delay
-checker (322 inspected, zero missing reasons). Current CSS checks passed 53/53 in 4e4e2f86-76a6-4f50-85e7-b5f4ae5c59c0.
-The corrected web build passed in e2a41109-01cd-4cf2-803c-71840625b13f. An earlier build selected an unrelated
-executable named dx and failed immediately; run 38857758-0b6a-4bed-8879-b2b471e44bcf remains retained as a
-tool-selection failure.
+Current source-only `python -B scripts/check-test-sleeps.py` passed using the prepared isolated interpreter: 322
+inspected, zero missing reasons. `dprint check FLAKES.md` passed. The repository's dprint plugins do not format this
+TypeScript file, so its no-files result is not claimed as a formatting pass. Playwright executes the changed TypeScript;
+there is no separate e2e typecheck command in the package's scripts or validation inventory.
 
-Focused browser validation used both Chromium and WebKit, three workers, one owned stack each, pinned tmux 3.7c and zero
-retries. Run 8fac9c3a-2c85-462d-a9b6-33e76e2a4f17 produced 38 passes and six failures. Its four deterministic
-test-interaction/layout failures passed after correction in d4fec7c3-ec90-40a8-9e63-6203f80c8468 (4/4). The two
-remaining setup-boundary failures and their related held-dialog modes passed in 4e8af30a-c780-44bc-8e1a-ee0ccac48220
-(8/8). Failed attempts remain failures and are retained.
+The initial whole-file run, 8955c750-e7a4-4d0a-8270-49e7845d7736, hit the recorder's three-minute deadline: 17 passed
+and the last WebKit case was interrupted. It remains a timed-out command, with complete output and retained artifacts.
+Its short deadline was not reused for repetition.
 
-Ordinary appshots used the existing docs-fleet capture. Run a0c822bd-4cc1-4777-8bc8-3fdf7ecd32a3 saved 148 valid images
-before all four layout variants reached the same old permission-group selector and failed. Its eight earlier
-main-window/terminal-settings images supplied the current visual review. After the one-line selector correction,
-e4acb3b3-e5f9-4c34-a950-3dbe50ddf5c2 passed staging and the entire 46-surface dark-wide sequence. Other variants' saved
-images retain their actual scope; the failed command is not described as a passing matrix.
+Run 84ed17c8-f465-4dae-a62c-2fa85a120f9d passed the whole movement file with
+`npx playwright test tests/popover-identity-movement.spec.ts --repeat-each=20 --reporter=line,json` from `e2e/`, on both
+engines: every one of the nine cases passed 20 times on Chromium and 20 times on WebKit, 360 passes total, zero skips,
+failures, retries or global errors. It took 32.4 minutes with three workers and pinned tmux 3.7c. This used generic
+command recording because strict browser mode does not allow internal repetition. Counts and resolved policy were
+checked directly in its retained JSON; they are not recorder-validated browser counts. Source was
+30fe006abd3bb9ef3debb24fbd9dd385108679b4 plus the test delta, with complete fingerprint
+bb5555bf958b1f7f45705754db3ed438e9b273bf76a9dccf20216542dcdde39a. All 101824 output bytes were retained, EOF was
+observed, cleanup completed without force, and the output scan found no runtime SKIPPED marker. Folding into the
+original PR preserved the tested tree byte for byte.
 
-Full run c909ec87-c8e1-4ae1-b0bb-e849195af2c9 used `npx playwright test` on both engines with the same three-worker,
-zero-retry policy. It completed in about 131 minutes, exit 1. Console and raw JSON agree on 2679 passed, three failed,
-14 skipped and zero flaky outcomes: Chromium 1346 passed and two skipped; WebKit 1333 passed, three failed and 12
-skipped. No global errors were reported. Automatic recorder report validation is incomplete because the 18.7 MB raw JSON
-exceeds its 16 MiB inspection cap. The complete console, source identity, raw report and failure artifacts remain
-retained; the counts above were read directly from the existing report and checked against the console. They are not
-recorder-validated counts or evidence of a full-command pass. Skips cover four opt-in real-vendor-agent cases, nine
-WebKit clipboard cases blocked by Playwright permissions, and the WebKit copy of the deliberately Chromium-only visual
-capture matrix. No missing SSH or systemd substrate was reported.
+Full browser run f6bc51f5-3985-441d-b5ce-17e4bfd8e648 (`npx playwright test`, three workers, both engines, no retries)
+finished in 1.8 hours: Chromium 1346 passed and two skipped; WebKit 1335 passed, one failed and 12 skipped. There were
+no global errors or flaky outcomes. Clean tested source was cef8e2a12524ffd5d9fd5df6153e727dbb5a50fb, complete
+fingerprint 4f843a4e98508ec1c09b48c2ad1988e41dcf95c016873df3f209e197634d858e. Its raw JSON exceeds the recorder's 16 MiB
+inspection cap, so these counts were checked manually against the raw report and complete console, rather than presented
+as recorder-validated. All 1284466 output bytes were retained, EOF was observed and cleanup completed without force.
+Both child and recorder exited 1; the whole failed UUID is retained.
 
-After the feed and font-readiness corrections, 92271d2f-6ba5-47e5-a622-b9a30684d6f8 passed all eight selected cases:
-both offer-admission variants, the long-path tail and automatic setup, each on both engines. The automatic-setup case
-passed unchanged in that run. After adding its explicit initial-probe response boundary,
-2fa75d14-9eb8-4c63-a070-0ac26c415d70 passed the automatic-setup and long-path cases on both engines (4/4). Both focused
-runs have complete recorder reports, no skips, full output EOF and completed cleanup. No product code changed after the
-full run, so another two-hour suite would add no useful coverage for these three local fixture corrections.
+The 14 skips are four deliberate real-vendor-agent cases, nine WebKit clipboard cases that Playwright cannot grant the
+required permissions, and the WebKit copy of a Chromium-only visual matrix. Their retained skip explanations were read;
+those substrates are not claimed as covered.
 
-| Run prefix | Recorded HEAD / complete source fingerprint | Child command or exact selection                                                                                                                                                                                               |
-| ---------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 4e4e2f86   | 121fca4d450c / 0159460f8aad                 | node --test app-css-contrast.test.js app-css-tokens.test.js app-css-animations.test.js                                                                                                                                         |
-| e2a41109   | 121fca4d450c / 0159460f8aad                 | dx build --package farhelm-ui --platform web --release                                                                                                                                                                         |
-| 8fac9c3a   | 121fca4d450c / 0159460f8aad                 | Playwright selection covering every prior failure and both-engine counterparts; 44 cases                                                                                                                                       |
-| d4fec7c3   | 121fca4d450c / b0672b6d82b5                 | Goose/Pi permission transitions and very-long-title confirmation, both engines                                                                                                                                                 |
-| 4e8af30a   | 121fca4d450c / 45589fa2617e                 | All delayed-host-dialog modes and template-shortcut editor-focus case, both engines                                                                                                                                            |
-| a0c822bd   | 121fca4d450c / b0672b6d82b5                 | scripts/docs-screenshots.sh --only visual-review --no-build                                                                                                                                                                    |
-| e4acb3b3   | 121fca4d450c / 45589fa2617e                 | npx playwright test -c docs-shots.config.ts docs-shots/visual-review.spec.ts -g 'dark wide' --reporter=line                                                                                                                    |
-| c909ec87   | 563407f9ac94 / 129ffeca0c4b                 | npx playwright test; full suite, both engines                                                                                                                                                                                  |
-| 92271d2f   | 563407f9ac94 / 896092835980                 | Playwright: offer retirement releases only its owner (both variants), a long cwd shows its tail with characters in logical order, automatic setup refuses forced activation while another host operation is busy; both engines |
-| 2fa75d14   | 563407f9ac94 / 2f66e60e8bad                 | Playwright: the same long-cwd and automatic-setup cases; both engines                                                                                                                                                          |
+After the inclusive-boundary correction, b03e96d6-56c9-4afc-9fc8-f51d343bed70 ran
+`npx playwright test tests/sidebar.spec.ts -g 'a long cwd shows its tail with characters in logical order'` from `e2e/`,
+once in Chromium and once in WebKit: two passes, zero skips or retries, 12.3 seconds. Its strict browser report is
+complete. Source was cef8e2a12524ffd5d9fd5df6153e727dbb5a50fb plus only that test correction, complete fingerprint
+27bdf8253048f41826b806d07988782114ed6fd8328137112564c24819149ec7. All 7167 output bytes were retained and read, EOF was
+observed and cleanup completed without force. This pass does not replace the failed full run or prove the engine
+rounding hypothesis. No second full suite was warranted for a local assertion endpoint and diagnostic-only change.
 
-HEADs and fingerprints in the tables are prefixes of the complete identities retained by the recorder. Dirty-source
-fingerprints identify the actual tested files. Folding the corrections into their original PRs preserved the tested
-files byte for byte. The built web product remained unchanged after its successful build; later edits affected only
-tests, capture selectors and the flake ledger. No extra rebuild or visual capture was needed.
+The application build from e2a41109-01cd-4cf2-803c-71840625b13f is reused. It passed against source
+121fca4d450c0c78f8a2e2bf6d21d02868c44d1c with complete fingerprint
+0159460f8aadeb4b8a755cce4f521fc4e40248869dea5874d0a17b4fd5299032. Subsequent changes affected tests, specification text,
+the flake ledger and queue records; the built product is unchanged and its artifacts remain present. No rebuild was
+needed for this test-only correction.
 
-Earlier Rust evidence retains its actual baseline scope: UI library run 85b323ce-5cd5-4442-a7c5-af3377b0dded passed 783
-tests at the Inter step, and typography run 572f1230-80d1-4622-90bf-3164de9a84d1 passed 29 selected tests after the font
-corrections. This is not a claim that all UI library tests were rerun at the final tip. Asset JavaScript
-3570be6e-81dd-4a26-8da5-1fdbf4f18eaf passed 358 tests; its executable asset sources are unchanged by this follow-up,
-while the changed CSS has the current 53-case run above.
+The preceding full run c909ec87-c8e1-4ae1-b0bb-e849195af2c9 remains failed: 2679 passed, three failed, 14 skipped. All
+36 original landing failures passed there. Three older fixture-readiness corrections subsequently passed in focused
+both-engine runs 92271d2f-6ba5-47e5-a622-b9a30684d6f8 (8/8) and 2fa75d14-9eb8-4c63-a070-0ac26c415d70 (4/4). These are
+historical observations, not this round's full-suite result. The old full report exceeded the recorder's 16 MiB
+inspection cap; its counts were checked directly against the complete console and raw JSON, not presented as
+recorder-validated.
 
-Ordinary native appearance c772ca7a-6aec-4dff-89ac-9bbeb2e024fe retains startup, persistence, font, embedded-asset and
-same-terminal input/output evidence. It does not prove this round's terminal CSS correction; the current browser
-assertions and ordinary appshots cover that.
+The earlier CSS checks passed 53/53 in 4e4e2f86-76a6-4f50-85e7-b5f4ae5c59c0 at the same build source and fingerprint
+above; their CSS is unchanged. Earlier Rust evidence keeps its actual baseline scope: UI library
+85b323ce-5cd5-4442-a7c5-af3377b0dded passed 783 tests at the Inter step, and typography
+572f1230-80d1-4622-90bf-3164de9a84d1 passed 29 selected tests after font corrections. Asset JavaScript
+3570be6e-81dd-4a26-8da5-1fdbf4f18eaf passed 358 tests. Native appearance c772ca7a-6aec-4dff-89ac-9bbeb2e024fe retains
+startup, persistence, font, embedded-asset and same-terminal input/output evidence. None is described as a fresh
+final-tip battery.
 
-| Reused run prefix | Recorded HEAD / complete source fingerprint | Child command                                                                              |
-| ----------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| 85b323ce          | 6d83cb62cc2e / 0d9960f1c5e3                 | cargo nextest run -p farhelm-ui --lib                                                      |
-| 572f1230          | 6d83cb62cc2e / 2dde68f8fe78                 | Same command with -E 'test(/list::templates::tests::\|hosts::tests::destination_details/)' |
-| 3570be6e          | 4a9f5fb5ee2f / 13258aefa2da                 | node --test in the UI asset harness                                                        |
-| c772ca7a          | 19e9eadd86ae / ccc8ad5d96b0                 | DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh                                        |
+| Reused run prefix | Recorded HEAD / complete source fingerprint | Selection                                                      |
+| ----------------- | ------------------------------------------- | -------------------------------------------------------------- |
+| 85b323ce          | 6d83cb62cc2e / 0d9960f1c5e3                 | cargo nextest run -p farhelm-ui --lib                          |
+| 572f1230          | 6d83cb62cc2e / 2dde68f8fe78                 | Same UI command, typography/template/destination-detail filter |
+| 3570be6e          | 4a9f5fb5ee2f / 13258aefa2da                 | node --test in the UI asset harness                            |
+| c772ca7a          | 19e9eadd86ae / ccc8ad5d96b0                 | DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh            |
 
-No new full Rust battery, native smoke, release, installer, deployment or live-service restart was justified by this
-CSS/accessibility/test follow-up.
+The identities above are prefixes of the complete retained records. They retain their preceding baseline scope because
+this round changes only browser tests and the flake ledger, with no Rust, asset JavaScript, native code or product
+styling changes.
+
+Ordinary appshot run a0c822bd-4cc1-4777-8bc8-3fdf7ecd32a3 retained valid images before its selector failure; eight
+main-window/terminal-settings images supplied the preceding representative visual review. After that selector was
+corrected, e4acb3b3-e5f9-4c34-a950-3dbe50ddf5c2 passed staging and the 46-surface dark-wide capture. The failed matrix
+remains failed. Product pixels are unchanged in this round, so those representative captures and their stated limits
+still apply. No additional appshots, Rust battery, native smoke, installer or deployment checks were needed for the
+test-only corrections.
 
 ## Review gate's outcome
 
-The same required gpt-6.1-sol/high reviewer cleared every corrected unit of #2730, #2731 and #2732, including the final
-focus handoffs, wide confirmation geometry and deliberately held modal boundary. The final review has no findings.
-Earlier review conclusions that missed two test assumptions were explicitly superseded.
+Fresh gpt-6.1-sol/high review 0822afca-3eef-44ec-865e-200103e717a7 found no issue in this test-only delta and confirmed
+all geometry, font, menu, focus and hold assertions remain. Parent inspection agreed. Bounded Opus 5.5/high consult
+4c1fe407-76b7-4382-9443-a8235d3372cc independently identified the delayed hover-card font trigger; that consult is
+separate from the code gate and from visual review.
 
-The same reviewer also cleared the final three fixture-readiness corrections and the accompanying flake records,
-confirming that the strict geometry threshold, held replies, focus ownership, forced-click guard and cleanup remain. It
-found no additional product integration risk requiring another full suite. This was a static assessment, separate from
-the reported runtime results.
+Final gpt-6.1-sol/high review 127ed937-e73e-4cc3-bb9f-a15920f96fae found no issues in the alignment-test and
+flake-record delta. Parent inspection agreed that the inclusive endpoint preserves the distinction between clipping the
+path's front and clipping its tail. The reviewed delta was folded into the original PR without changing the tested tree.
+The bounded Opus 5.5/high follow-up consult 3c1b469a-58df-4d36-94b6-5b4828a5e333 recommended matching the neighboring
+inclusive endpoint; its engine-cause hypothesis remains unproven.
 
-The required fresh Opus 5.5/high reviewer inspected eight ordinary dark/light main-window and terminal-settings images
-at wide and 650px widths. Its verdict is a representative visual pass, with no findings against this round. It checked
-host-colored frame styling from CSS and the cited browser assertions, not a frame-enabled image. The other four PRs'
-preceding representative visual gates retain their scope; there is no claim that every screenshot or uncaptured state
-was inspected anew.
+The previous required code reviews of the five original units and the preceding corrections remain applicable to
+unchanged source. The preceding Opus 5.5/high visual gate inspected eight ordinary images across dark/light and
+wide/650px main-pane layouts, with host-colored-frame details judged from code and browser behavior. This round changes
+no visible product behavior and requires no new visual gate.
