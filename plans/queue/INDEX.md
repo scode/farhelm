@@ -12,4 +12,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `installer-link-noreplace.md` — The installer never overwrites a file that appears at the Terminal command's location mid-install, and the spec accepts older releases' own installers (two triage outcomes)
 - [complete] `restart-with-trust-identity.md` — Restart with checks the checkout folder's identity before trusting a Codex or Pi agent automatically (triage outcome)
 - [complete] `link-refusal-confirm-layer.md` — A refused-link explanation never covers an open session confirmation's warning (triage outcome)
-- [in-flight c41902] `named-restart-reporter-clear.md` — Restart with into another Pi or OMP conversation clears the old one when the conversation reporter cannot be prepared (triage outcome)
+- [complete] `named-restart-reporter-clear.md` — Restart with into another Pi or OMP conversation clears the old one when the conversation reporter cannot be prepared (triage outcome)
