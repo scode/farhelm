@@ -12,12 +12,13 @@
  * these rewrites by name; anything else rewritten here would be a SPEC change.
  */
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import type { OverlayTheme } from "../readme-video/overlay";
-import type { Scenario } from "../readme-hero/scenario";
-import { openStagedFleet, type StagedFleet } from "../readme-hero/stage";
+import type { Scenario, ScenarioSession } from "../readme-hero/scenario";
+import { openStagedFleet, readStackInfo, type StagedFleet, writeAgentScript } from "../readme-hero/stage";
 import { requireHelmBuild } from "../tests/helpers/helm-build";
-import { DOCS_FLEET_PATH, DOCS_SHOTS_DIR } from "./paths";
+import { DOCS_FLEET_PATH, DOCS_SHOTS_DIR, DOCS_STACK_INFO_PATH } from "./paths";
 
 /**
  * Red and small: docs images are cropped, shown at half their pixel size, and
@@ -40,18 +41,62 @@ interface FleetFile {
   ids: Array<[string, string]>;
   now: number;
   openId: string;
+  /** Development-only metadata for the same two approved cwd/age rewrites. */
+  toolbarReview?: ScenarioSession;
 }
 
 /** Hand the staged fleet to the shot projects, which run as separate tests. */
-export function writeFleet(fleet: StagedFleet): void {
-  const file: FleetFile = { ids: [...fleet.ids.entries()], now: fleet.now, openId: fleet.openId };
+export function writeFleet(fleet: StagedFleet, toolbarReview?: ScenarioSession): void {
+  const file: FleetFile = { ids: [...fleet.ids.entries()], now: fleet.now, openId: fleet.openId, toolbarReview };
   writeFileSync(DOCS_FLEET_PATH, JSON.stringify(file));
 }
 
 /** Read the fleet the staging project staged in this run. */
-export function readFleet(): StagedFleet {
+export function readFleet(): StagedFleet & { toolbarReview?: ScenarioSession } {
   const file = JSON.parse(readFileSync(DOCS_FLEET_PATH, "utf8")) as FleetFile;
-  return { ids: new Map(file.ids), now: file.now, openId: file.openId };
+  return { ids: new Map(file.ids), now: file.now, openId: file.openId, toolbarReview: file.toolbarReview };
+}
+
+/** Stage an enabled Restart without inventing a launch or conversation reply.
+ * The existing transcript wrapper keeps the photographed invocation portable;
+ * its fixture reports through the real Claude hook. The stack owns cleanup,
+ * just as for every other staged session. Only cwd and age use scenario values.
+ */
+export async function stageToolbarReviewSession(request: APIRequestContext, scenario: Scenario, fleet: StagedFleet) {
+  const source = scenario.sessions.find((session) => session.status === "idle" && session.wrapper === "claude")!;
+  const local = scenario.hosts.find((host) => host.kind === "local")!;
+  const review: ScenarioSession = {
+    ...source,
+    title: "Review session toolbar",
+    host: local.key,
+    wrapper: "claude",
+    status: "idle",
+    then: "quiet",
+    yolo: false,
+    seen: true,
+    open: false,
+  };
+  const info = readStackInfo(DOCS_STACK_INFO_PATH);
+  const cwd = path.join(info.work, "toolbar-review");
+  mkdirSync(cwd, { recursive: true });
+  writeAgentScript(info, DOCS_SHOTS_DIR, cwd, review, "toolbar-review-conversation");
+  const response = await request.post("/api/sessions", {
+    data: {
+      cwd, title: review.title, host: (await hostIds(request, scenario)).get(local.key),
+      command: { command: "claude {farhelm_args}", resume: "claude --resume {conversation} {farhelm_args}", agent: "claude", yolo: false },
+    },
+  });
+  expect(response.ok(), `create toolbar review: ${await response.text()}`).toBe(true);
+  const { id } = await response.json();
+  fleet.ids.set(review.title, id);
+  await expect.poll(async () => {
+    const listing = await request.get("/api/sessions");
+    expect(listing.ok()).toBe(true);
+    const current = (await listing.json()).sessions.find((session: { id: string }) => session.id === id);
+    return { offer: current?.restart_offer, state: current?.status?.state };
+  }, { timeout: 60_000, message: "the review fixture reports a real resumable conversation and settles idle" })
+    .toEqual({ offer: "resume", state: "idle" });
+  return review;
 }
 
 interface HostRow {
@@ -280,6 +325,7 @@ export async function openDocsFleet(
   options: DocsFleetOptions = {},
 ): Promise<StagedFleet> {
   const fleet = readFleet();
+  if (fleet.toolbarReview) scenario.sessions.push(fleet.toolbarReview);
   await installDocsRewrites(page, request, scenario, fleet.now);
   if (options.checkoutTrash) await installCheckoutTrash(page, request, scenario, fleet.now);
   if (options.terminalFiles) await installTerminalFiles(page, scenario);

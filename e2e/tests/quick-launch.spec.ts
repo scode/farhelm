@@ -26,6 +26,7 @@ import { attachSession, waitForTermText } from "./helpers/term";
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { routeGate } from "./helpers/route-gate";
 import { requireHelmBuild } from "./helpers/helm-build";
+import { openSessionActionMenu } from "./helpers/session-actions";
 
 /** Fabricated replies retain the owned helm's real build identity. The
  * terminal-family helper depends on that family's reset hooks, which these
@@ -930,9 +931,21 @@ test("hidden preparation isolates keys and a queued Replace with requires Launch
     await page.goto("/");
     await attachSession(page, source.id);
     await waitForTermText(page, "FAKE-AGENT READY");
-    const replace = page.locator(".header-replace-with");
+    const replace = page.locator(".replace-menu-toggle");
     await expect(replace).toBeVisible();
+    // Retain the actual With element before New isolates the page. Restoring
+    // terminal focus programmatically leaves the menu open; a pointer click
+    // would dismiss it and remove the origin of this queued callback.
+    await openSessionActionMenu(page, "Replace");
+    const replaceMenu = page.getByRole("menu", { name: "Replace", exact: true, includeHidden: true });
+    const replaceWith = replaceMenu.getByRole("menuitem", { name: "Replace with…", exact: true, includeHidden: true });
+    await expect(replaceWith).toBeVisible();
+    await expect(replaceWith).toHaveAttribute("aria-disabled", "false");
+    const queuedReplaceWith = await replaceWith.elementHandle();
+    if (!queuedReplaceWith) throw new Error("the pre-isolation Replace with element was not mounted");
+    await page.locator("#terminal .xterm-helper-textarea").focus();
     await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    expect(await queuedReplaceWith.evaluate((node) => node.isConnected), "the callback origin survives restoring terminal focus").toBe(true);
     await chord(page);
     await expect.poll(() => catalogReads).toBeGreaterThan(0);
     const form = page.locator(".create-session-form");
@@ -940,13 +953,23 @@ test("hidden preparation isolates keys and a queued Replace with requires Launch
     await expect.poll(() => replace.evaluate((node) => !!node.closest("[inert]")), {
       message: "the hidden form owns background keyboard isolation",
     }).toBe(true);
+    await expect(replaceWith).toBeVisible();
+    expect(await queuedReplaceWith.evaluate((node) => ({ connected: node.isConnected, inert: !!node.closest("[inert]") })),
+      "the same pre-isolation With element remains mounted in the isolated background").toEqual({ connected: true, inert: true });
     await page.keyboard.press("Tab");
     await page.keyboard.press("Enter");
     expect(bodies).toHaveLength(0);
     await expect(form).toBeHidden();
     // Programmatic delivery models a callback queued before the modal became
     // inert; it bypasses pointer hit-testing without bypassing the real handler.
-    await replace.evaluate((node: HTMLButtonElement) => node.click());
+    await expect(replace).toBeVisible();
+    expect(await replace.evaluate((node) => !!node.closest("[inert]")), "the persistent caret stays in the isolated background").toBe(true);
+    await expect(replaceWith).toBeVisible();
+    await expect(replaceWith).toHaveAttribute("aria-disabled", "false");
+    expect(await queuedReplaceWith.evaluate((node) => ({ connected: node.isConnected, inert: !!node.closest("[inert]") })),
+      "keyboard isolation must not replace or retire the queued callback's origin").toEqual({ connected: true, inert: true });
+    await queuedReplaceWith.evaluate((node) => (node as HTMLButtonElement).click());
+    await expect(replaceMenu).toHaveCount(0);
     await expect(form).toBeVisible();
     gate.release();
     await expect(form.getByLabel("name (optional)")).toHaveValue(`${name}-source`);

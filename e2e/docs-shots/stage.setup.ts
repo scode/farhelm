@@ -12,11 +12,14 @@ import { test } from "@playwright/test";
 import { loadScenario } from "../readme-hero/scenario";
 import { readStackInfo, stageFleet } from "../readme-hero/stage";
 import { DOCS_SHOTS_DIR, DOCS_STACK_INFO_PATH } from "./paths";
-import { stageTemplates, writeFleet } from "./stage-docs";
+import { stageTemplates, stageToolbarReviewSession, writeFleet } from "./stage-docs";
 
 test("stage the docs fleet", async ({ page, request }) => {
   const scenario = loadScenario(DOCS_SHOTS_DIR);
   const fleet = await stageFleet(page, request, scenario, DOCS_SHOTS_DIR, readStackInfo(DOCS_STACK_INFO_PATH));
   await stageTemplates(request, scenario);
-  writeFleet(fleet);
+  const toolbarReview = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "session-toolbar"
+    ? await stageToolbarReviewSession(request, scenario, fleet)
+    : undefined;
+  writeFleet(fleet, toolbarReview);
 });

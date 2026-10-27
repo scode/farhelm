@@ -40,6 +40,10 @@ use crate::tabs::{
 };
 use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 
+mod action_menu;
+use crate::icons::{ActionGlyph, ActionIcon};
+use action_menu::{ActionKind, ActionMenu};
+
 /// The DOM id of the element carrying the restart offer's explanation, which
 /// the restart button names through `aria-describedby`.
 ///
@@ -191,7 +195,7 @@ fn direct_restart_stops_agent(status: &SessionStatus, skip_confirmations: bool) 
 ///
 /// ## Session chrome
 ///
-/// Tabs and six lifecycle actions share the top row; status, session name,
+/// Tabs and split lifecycle actions share the top row; status, session name,
 /// host, age, directory and command line share a slim bottom bar. Moving
 /// identity below the terminal makes the active session and host easier to
 /// see and leaves more width for paths without moving actions away from tabs.
@@ -219,8 +223,7 @@ fn direct_restart_stops_agent(status: &SessionStatus, skip_confirmations: bool) 
 ///   the session's own conversation, and is greyed out with the specific
 ///   reason when it cannot, is carried by the button's own accessible name
 ///   (`restart_button_label`, which names the offer rather than the
-///   action) — the VISIBLE glyph is the compact "restart" every action
-///   button uses, so the cluster fits the supported minimum width, and
+///   action) — the visible icon-and-label half stays compact beside its caret, and
 ///   `aria-label` and the hover tooltip carry the full offer wording for whoever reads
 ///   them. `restart_offer_text`'s elaboration — why the terminal is gone,
 ///   what happens to the conversation — is a further hover tooltip and
@@ -242,11 +245,10 @@ fn direct_restart_stops_agent(status: &SessionStatus, skip_confirmations: bool) 
 ///   has no badge and still has an age.
 ///
 /// - **The action order is part of the keyboard contract.** The DOM places
-///   Restart, Restart with, Replace, Clone, Replace with, and Delete in that
-///   order, so pointer, keyboard, and assistive-technology users encounter
-///   the same controls. There is deliberately no overflow `⋯` menu: all six
-///   actions remain visible in the row; the tabs scroll within the remaining
-///   width. Identity fields below do not compete with those controls.
+///   text size, Restart and its caret, Replace and its caret, Clone and Delete
+///   in that order. With variants live in their split menus, where the same
+///   callbacks preserve admission and consent. Text size stays outside the
+///   scrolling tabs; identity fields below compete with neither surface.
 /// - **Directory and command line are copy buttons, not passive metadata.**
 ///   Their full values remain in the tooltip while the fields shrink before
 ///   the title. A hover or keyboard focus reveals the clipboard affordance;
@@ -559,6 +561,9 @@ pub(crate) fn SessionView(
     // Whether a restart is in flight (disables the control and guards
     // re-entry, mirroring `ListView`'s `pending`).
     let mut restarting = use_signal(|| false);
+    // One family can be open at a time; confirmations keep their separate
+    // consent slots and are admitted only after a menu action is chosen.
+    let action_menu = use_signal(|| None::<ActionKind>);
     // The shared operation lock as claimed by this view's Restart
     // operations: a header Restart once it is sent (directly, or after its
     // stop-first prompt is confirmed), and the interrupted card's Restart. Held here, as a
@@ -1958,6 +1963,54 @@ pub(crate) fn SessionView(
     let card_offers_replace_with =
         matches!(shown.launch, Some(crate::SessionLaunch::Legacy { .. }));
     let card_replace_with_session = shown.clone();
+    // Main buttons and menu entries share admission, so the menu cannot
+    // bypass a confirmation or choose a different lifecycle operation.
+    let on_restart = EventHandler::new(move |()| {
+        if !restart_available {
+            return;
+        }
+        if confirms_restart {
+            if let Some(claim) = lifecycle.claim_guard() {
+                confirming_restart.open((), claim);
+            }
+        } else if lifecycle.claim_into(&mut view_claim) {
+            direct_restart(direct_restart_stops);
+        }
+    });
+    let with_unavailable = with_reason.is_some();
+    let with_opening = shown.clone();
+    let on_restart_with = EventHandler::new(move |()| {
+        if with_unavailable || lifecycle.busy_now() {
+            return;
+        }
+        prefill_request.set(Some(crate::list::HeaderPrefillRequest::RestartWith(
+            with_opening.clone(),
+            restart_bridge,
+        )));
+    });
+    let on_replace = EventHandler::new(move |()| {
+        if let Some(claim) = lifecycle.claim_guard() {
+            if skip_session_confirmations {
+                direct_header_replace(
+                    claim,
+                    direct_header_source.clone(),
+                    replace_prompt_guard,
+                    None,
+                );
+            } else {
+                confirming_header_replace.open((), claim);
+            }
+        }
+    });
+    let on_replace_with = EventHandler::new(move |()| {
+        if lifecycle.busy_now() {
+            return;
+        }
+        cancel_replace_intent();
+        prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(
+            header_replace_session.clone(),
+        )));
+    });
     rsx! {
         div { class: "layout", "data-claude-trust-prompt": "{shown.claude_trust_prompt}",
             "data-workspace-trust-prompt": "{shown.workspace_trust_prompt}",
@@ -2047,7 +2100,6 @@ pub(crate) fn SessionView(
                         onclick: on_add_tab,
                         "+ terminal"
                     }
-                    TerminalTextSize {}
                 }
                 }
                 // While a delete of this session is in flight the actions give
@@ -2063,19 +2115,17 @@ pub(crate) fn SessionView(
                             "{crate::status::delete_progress_label(&shown.status, shown.tabs.len())}"
                         }
                     }
-                    // SPEC.md: "Opening an interrupted session offers
-                    // restart-with-resume" — which is why this is a
-                    // first-class control in the header rather than hidden
-                    // behind a menu, and why the LABEL names the offer rather
-                    // than the action. Declining is simply not clicking it:
-                    // there is no dismiss, and nothing about the session
-                    // changes. The same affordance serves every other state
-                    // too, since restart is the one relaunch mechanism there
-                    // is.
-                    div { class: "restart-offer",
+                    if keep_terminal_surface(&shown, relaunched(), had_terminal()) {
+                        div { inert: shown.stale.then_some(""), class: "toolbar-text-size",
+                            TerminalTextSize {}
+                        }
+                    }
+                    // The primary half remains the ordinary resume offer;
+                    // its caret also offers the existing editable launcher.
+                    div { class: "restart-offer header-action-split",
                         button {
                             r#type: "button",
-                            class: "btn btn-primary restart-primary",
+                            class: "btn btn-neutral restart-primary",
                             // Whether this click opens the confirmation rather
                             // than restarting outright — the status-derived
                             // decision, exposed so it is inspectable (the
@@ -2101,23 +2151,16 @@ pub(crate) fn SessionView(
                             // and the handler is what refuses activation.
                             "aria-disabled": !restart_available,
                             disabled: lifecycle.busy(),
-                            onclick: move |_| {
-                                if !restart_available {
-                                    return;
-                                }
-                                if confirms_restart {
-                                    // A working agent would be stopped, so
-                                    // the click obtains consent before
-                                    // sending that request. The prompt
-                                    // holds the claim until it is answered.
-                                    if let Some(claim) = lifecycle.claim_guard() {
-                                        confirming_restart.open((), claim);
-                                    }
-                                } else if lifecycle.claim_into(&mut view_claim) {
-                                    direct_restart(direct_restart_stops);
-                                }
-                            },
-                            "restart"
+                            onclick: move |_| on_restart.call(()),
+                            ActionIcon { glyph: ActionGlyph::Restart }
+                            "Restart"
+                        }
+                        ActionMenu {
+                            kind: ActionKind::Restart, open_menu: action_menu, busy: lifecycle.busy(),
+                            plain_unavailable: !restart_available, with_unavailable,
+                            plain_description: offer_explanation.clone(),
+                            with_description: restart_with_description.clone(),
+                            on_plain: on_restart, on_with: on_restart_with,
                         }
                         // Visually hidden, never absent: this is the offer
                         // explanation as an actual element, which is what
@@ -2198,48 +2241,28 @@ pub(crate) fn SessionView(
                             }
                         }
                     }
-                    button {
-                        r#type: "button",
-                        class: "btn btn-primary restart-with-trigger",
-                        "data-tooltip": "{restart_with_description}",
-                        "aria-describedby": RESTART_WITH_DESCRIPTION_ID,
-                        "aria-disabled": with_reason.is_some(),
-                        disabled: lifecycle.busy(),
-                        onclick: {
-                            let opening = shown.clone();
-                            move |_| {
-                                // `aria-disabled` keeps the tooltip hoverable;
-                                // the handler is what actually refuses activation.
-                                if with_reason.is_some()
-                                    || lifecycle.busy_now()
-                                { return; }
-                                prefill_request.set(Some(crate::list::HeaderPrefillRequest::RestartWith(opening.clone(), restart_bridge)));
-                            }
-                        },
-                        "restart with"
-                    }
                     span {
                         id: RESTART_WITH_DESCRIPTION_ID,
                         class: "visually-hidden",
                         "{restart_with_description}"
                     }
-                    div { class: "header-replace-anchor",
+                    div { class: "header-replace-anchor header-action-split",
                         button {
                             r#type: "button",
-                            class: "btn btn-primary header-replace",
+                            class: "btn btn-neutral header-replace",
                             "data-tooltip": "replace: swap this session for a fresh conversation with the same settings",
                             disabled: lifecycle.busy(),
                             "aria-expanded": "{confirming_header_replace.is_open()}",
-                            onclick: move |_| {
-                                if let Some(claim) = lifecycle.claim_guard() {
-                                    if skip_session_confirmations {
-                                        direct_header_replace(claim, direct_header_source.clone(), replace_prompt_guard, None);
-                                    } else {
-                                        confirming_header_replace.open((), claim);
-                                    }
-                                }
-                            },
-                            "replace"
+                            onclick: move |_| on_replace.call(()),
+                            ActionIcon { glyph: ActionGlyph::Replace }
+                            "Replace"
+                        }
+                        ActionMenu {
+                            kind: ActionKind::Replace, open_menu: action_menu, busy: lifecycle.busy(),
+                            plain_unavailable: false, with_unavailable: false,
+                            plain_description: "Swap this session for a fresh conversation with the same settings",
+                            with_description: "Edit the settings, then swap this session for a new one",
+                            on_plain: on_replace, on_with: on_replace_with,
                         }
                         if let Some(shown_replace) = header_replace_shown.clone() {
                             div { class: "header-confirm header-replace-confirm",
@@ -2293,22 +2316,12 @@ pub(crate) fn SessionView(
                     }
                     button {
                         r#type: "button",
-                        class: "btn btn-primary header-clone",
+                        class: "btn btn-neutral header-clone",
                         "data-tooltip": "clone: open the new-session form with these settings; this session keeps running",
                         disabled: lifecycle.busy(),
                         onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::Clone(header_session.clone()))),
-                        "clone"
-                    }
-                    button {
-                        r#type: "button",
-                        class: "btn btn-primary header-replace-with",
-                        "data-tooltip": "replace with: edit the settings, then swap this session for a new one",
-                        disabled: lifecycle.busy(),
-                        onclick: move |_| {
-                            cancel_replace_intent();
-                            prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(header_replace_session.clone())));
-                        },
-                        "replace with"
+                        ActionIcon { glyph: ActionGlyph::Clone }
+                        "Clone"
                     }
                     // A shortcut for deleting the open session without finding
                     // its row in the sidebar. Unless session questions are skipped,
@@ -2347,7 +2360,8 @@ pub(crate) fn SessionView(
                                     }
                                 }
                             },
-                            "delete"
+                            ActionIcon { glyph: ActionGlyph::Delete }
+                            "Delete"
                         }
                         if let Some(shown_delete) = header_delete_shown.clone() {
                             div { class: "header-confirm header-delete-confirm",
@@ -3476,9 +3490,8 @@ pub(crate) fn copy_to_clipboard(value: &str) {
 /// step there simply does nothing). Each terminal refits when the size
 /// changes, which is what tells the program inside about its new rows and
 /// columns. A click hands focus back to the terminal (terminal.js does
-/// that), so typing carries on where it was. Neutral rather than ghost for
-/// the same reason "+ terminal" is: they are actions, and ghost buttons in
-/// this strip read as more tabs.
+/// that), so typing carries on where it was. Its neutral buttons belong to
+/// the fixed action group, keeping them reachable when the tab strip scrolls.
 #[component]
 fn TerminalTextSize() -> Element {
     let step = |delta: i32| {

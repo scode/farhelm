@@ -1356,7 +1356,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   height: 100%;
 }
 
-/* Tabs spend the width left by the six actions, scrolling inside their own
+/* Tabs spend the width left by the action group, scrolling inside their own
    track rather than squeezing a lifecycle button. Both chrome rows keep
    their height when the window is short; only the terminal gives up space.
    The old 40px header plus tab row is now two 30px rows, with identity below
@@ -1807,12 +1807,58 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   white-space: nowrap;
 }
 
+/* A split action keeps its established button height. The caret spends a
+   narrow part of the same control, leaving tabs space at the 650px floor. */
+.header-action-split { display: inline-flex; position: relative; }
+.header-action-split > .btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.header-action-options { position: relative; display: inline-flex; }
+.titlebar-actions .header-action-caret {
+  padding: 2px 4px;
+  border-left-color: var(--border);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.titlebar-actions > .btn,
+.titlebar-actions .header-action-split > .btn,
+.titlebar-actions .header-delete-anchor > .btn { display: inline-flex; align-items: center; gap: 4px; }
+.titlebar-actions .action-glyph { width: 13px; height: 13px; flex: 0 0 13px; }
+
+/* Unlike a row flyout, this anchor never lives in a clipped scrolling list.
+   Absolute placement follows the caret through resize without a second
+   measurement lifecycle. The shared panel classes retain normal dismissal. */
+.header-action-menu.host-row-menu-panel {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  width: 260px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 88px);
+  overflow-y: auto;
+}
+.titlebar-actions .header-action-menu .menu-item { padding: 6px 7px; white-space: normal; }
+.titlebar-actions .header-action-menu .action-glyph { width: 14px; height: 14px; flex-basis: 14px; }
+/* An unavailable action's explanation is still useful reading. Retire its
+   label and icon without fading the quiet description below its AA floor. */
+.titlebar-actions .header-action-menu .menu-item[aria-disabled="true"] { opacity: 1; color: var(--fg-2); }
+.titlebar-actions .header-action-menu .menu-item[aria-disabled="true"] .menu-icon { color: var(--fg-2); }
+
 /* Keep the unavailable Restart and Restart with controls hoverable for their
    explanation. Some engines send no pointer events to a natively disabled
    button, so its tooltip could never show. */
 .titlebar-actions .restart-primary[aria-disabled="true"],
 .titlebar-actions .restart-with-trigger[aria-disabled="true"] {
   cursor: not-allowed;
+}
+
+/* aria-disabled keeps the main reason hoverable. The caret still opens the
+   reasons when neither choice is available, so its muted state is visual
+   rather than a false disabled contract on an operable button. */
+.titlebar-actions .restart-primary[aria-disabled="true"]:not([aria-expanded="true"]),
+.titlebar-actions .header-action-caret[data-actions-unavailable="true"]:not([aria-expanded="true"]) {
+  opacity: 1;
+  background: var(--bg-2);
+  border-color: var(--border-dim);
+  color: var(--fg-2);
 }
 
 /* A trigger whose confirmation is open reads as PRESSED, not merely
@@ -7474,12 +7520,9 @@ a:any-link,
   overflow-x: auto;
 }
 
-/* The terminal text-size buttons (A-/A+), pushed to the strip's right end
-   by the auto margin while the strip has room. When it does not, they
-   scroll with everything else rather than covering a tab; the strip's own
-   `overflow-x: auto` is the one overflow rule for all of it. Neutral like
-   "+ terminal" (they are actions, not tabs) and sized like the tabs so the
-   strip keeps one height. */
+/* Text size belongs to the nonshrinking toolbar actions. Scrolling many
+   terminal tabs must never move these controls out of keyboard or pointer
+   reach at the supported width. Neutral keeps them distinct from tabs. */
 .terminal-text-size {
   display: flex;
   flex-shrink: 0;

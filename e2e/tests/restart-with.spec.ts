@@ -20,6 +20,7 @@ import {
   stopSession,
 } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
+import { openSessionActionMenu, selectSessionActionWith } from "./helpers/session-actions";
 import { attachSession, cleanupSession, waitForTermText } from "./helpers/term";
 import {
   addTab,
@@ -75,7 +76,7 @@ test("named restart with requires a target when no conversation was captured", a
     "codex", "resume", "{conversation}", "{farhelm_args}",
   ]);
   const bodies = await acceptYoloRestart(page);
-  const dialog = await openInjectedDialog(page);
+  const dialog = await openInjectedDialog(page, true);
   const target = dialog.locator(".named-conversation");
   await expect(target).toHaveValue("");
   await expect(dialog).toContainText("Farhelm has no captured conversation");
@@ -231,9 +232,10 @@ async function acceptYoloRestart(page: Page): Promise<unknown[]> {
  * Open the injected row's session and its restart-with dialog.
  *
  * Returns once the dialog's initial focus has landed on cancel, which is also
- * the moment the dialog isolates the page behind it.
+ * the moment the dialog isolates the page behind it. The no-capture case
+ * asserts independent plain/With availability before leaving that boundary.
  */
-async function openInjectedDialog(page: Page) {
+async function openInjectedDialog(page: Page, plainUnavailable = false) {
   await page.goto("/");
   const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
   // Navigation finishes before WASM startup and the injected list render. Use
@@ -256,8 +258,17 @@ async function openInjectedDialog(page: Page) {
     throw new Error(`injected row readiness failed; ${source}; matching title buttons: ${titlePainted}`, { cause: error });
   }
   await row.locator(".session-row-open").click();
-  await expect(page.locator(".restart-with-trigger")).toHaveAttribute("aria-disabled", "false");
-  await page.locator(".restart-with-trigger").click();
+  if (plainUnavailable) {
+    await expect(page.locator(".restart-primary")).toHaveAttribute("aria-disabled", "true");
+    const menu = await openSessionActionMenu(page, "Restart");
+    await expect(menu.getByRole("menuitem", { name: "Restart", exact: true })).toHaveAttribute("aria-disabled", "true");
+    const withItem = menu.getByRole("menuitem", { name: "Restart with…", exact: true });
+    await expect(withItem).toHaveAttribute("aria-disabled", "false");
+    await withItem.click();
+    await expect(menu).toHaveCount(0);
+  } else {
+    await selectSessionActionWith(page, "Restart");
+  }
   const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".launch-composer-cancel")).toBeFocused();
@@ -282,7 +293,8 @@ test("restart with shows fixed context and submits one edited resume", async ({ 
     const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
     await expect(row).toBeVisible();
     await row.locator(".session-row-open").click();
-    const trigger = page.locator(".restart-with-trigger");
+    const menu = await openSessionActionMenu(page, "Restart");
+    const trigger = menu.locator(".restart-with-trigger");
     await expect(trigger).toBeVisible();
     await expect(trigger).not.toHaveAttribute("aria-disabled", "true");
     await trigger.click();
@@ -297,7 +309,7 @@ test("restart with shows fixed context and submits one edited resume", async ({ 
     await expect(dialog).toHaveCount(0);
     expect(bodies, "cancel must not send a restart").toEqual([]);
 
-    await trigger.click();
+    await selectSessionActionWith(page, "Restart");
     await expect(dialog).toBeVisible();
     await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
     await expect(dialog.locator(".launch-composer-permissions-choice .launch-composer-changed-marker"))
@@ -757,9 +769,42 @@ test("cancel and an answer to restart with's YOLO question in one burst restart 
   });
 });
 
+/** Measure the reason after compositing every item ancestor's opacity.
+ * A correct quiet-text token alone misses whole-button fading, which made
+ * unavailable explanations unreadable even though computed color was unchanged.
+ * These palettes render opaque RGB panels; refuse another substrate explicitly.
+ */
+async function unavailableReasonContrast(item: Locator) {
+  return item.locator(".menu-description").evaluate((description) => {
+    const rgb = (color: string) => {
+      if (!/^rgba?\(/.test(color)) throw new Error(`expected computed RGB color, got ${color}`);
+      return color.match(/[\d.]+/g)!.map(Number);
+    };
+    const panel = description.closest(".header-action-menu");
+    if (!panel) throw new Error("the unavailable reason must belong to its visible panel");
+    const panelStyle = getComputedStyle(panel);
+    const background = rgb(panelStyle.backgroundColor);
+    if ((background[3] ?? 1) !== 1 || Number(panelStyle.opacity) !== 1) {
+      throw new Error("the contrast premise requires an opaque menu panel");
+    }
+    const foreground = rgb(getComputedStyle(description).color);
+    let opacity = foreground[3] ?? 1;
+    for (let ancestor: Element | null = description; ancestor && ancestor !== panel; ancestor = ancestor.parentElement) {
+      opacity *= Number(getComputedStyle(ancestor).opacity);
+    }
+    const visible = foreground.slice(0, 3).map((channel, index) => channel * opacity + background[index] * (1 - opacity));
+    const luminance = (channels: number[]) => channels.slice(0, 3).map((channel) => {
+      const s = channel / 255;
+      return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+    const light = [luminance(visible), luminance(background)].sort((a, b) => b - a);
+    return (light[0] + 0.05) / (light[1] + 0.05);
+  });
+}
+
 /**
  * A legacy session has no structured selection to edit even if it can resume.
- * The inert button must remain visible and explain the missing prerequisite to
+ * The menu item must remain reachable and explain the missing prerequisite to
  * both a pointer user and assistive technology, while refusing activation.
  */
 test("unavailable restart with stays visible and inert with a reason", async ({ page }) => {
@@ -774,15 +819,31 @@ test("unavailable restart with stays visible and inert with a reason", async ({ 
   const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
   await expect(row).toBeVisible();
   await row.locator(".session-row-open").click();
-  const trigger = page.locator(".restart-with-trigger");
-  const reason = "this session was created before launch kinds, so its launch cannot be changed; use replace with";
+  const menu = await openSessionActionMenu(page, "Restart");
+  const trigger = menu.locator(".restart-with-trigger");
+  const reason = "This session was created before launch kinds, so its launch cannot be changed; use Replace with…";
   await expect(trigger).toBeVisible();
   await expect(trigger).toHaveAttribute("aria-disabled", "true");
   await trigger.hover();
   await expect(trigger).toHaveAttribute("data-tooltip", reason);
+  // Help retains its original channel without obscuring a neighboring
+  // choice. The normal viewport must have room outside the whole panel.
+  const tooltip = page.locator(".farhelm-tooltip");
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toHaveText(reason);
+  const helpBox = (await tooltip.boundingBox())!;
+  const panelBox = (await page.locator(".header-action-menu").boundingBox())!;
+  expect(helpBox.y + helpBox.height <= panelBox.y || helpBox.y >= panelBox.y + panelBox.height,
+    "the unavailable reason clears both menu choices").toBe(true);
+  for (const colorScheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expect(page.locator("html")).toHaveAttribute("data-appearance", colorScheme);
+    expect(await unavailableReasonContrast(trigger), `${colorScheme}: unavailable help retains the quiet-text AA floor`)
+      .toBeGreaterThanOrEqual(4.5);
+  }
   const descriptionId = await trigger.getAttribute("aria-describedby");
   expect(descriptionId, "the reason needs an assistive-technology target").toBeTruthy();
-  await expect(page.locator(`#${descriptionId}`)).toHaveText(reason);
+  await expect(page.locator(`[id="${descriptionId}"]`)).toHaveText(reason);
   // Playwright treats aria-disabled as non-actionable; dispatch the DOM click
   // to prove the handler also guards activation if an engine sends one.
   await trigger.evaluate((element) => (element as HTMLElement).click());
@@ -894,9 +955,7 @@ test("restart with keeps focus inside the dialog over a live terminal while pend
     // dialog about to open, so there is something that could steal focus.
     await attachSession(page, id);
 
-    const trigger = page.locator(".restart-with-trigger");
-    await expect(trigger).not.toHaveAttribute("aria-disabled", "true");
-    await trigger.click();
+    await selectSessionActionWith(page, "Restart");
     const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
     await expect(dialog).toBeVisible();
     await expect(dialog.locator(".launch-composer-cancel")).toBeFocused();
@@ -996,9 +1055,7 @@ test("restart with keeps focus inside the dialog when the selected tab goes away
     const tabId = await addTab(page, 0);
     await selectTabOverRevealedAgent(page, id, tabId);
 
-    const trigger = page.locator(".restart-with-trigger");
-    await expect(trigger).not.toHaveAttribute("aria-disabled", "true");
-    await trigger.click();
+    await selectSessionActionWith(page, "Restart");
     const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
     const cancel = dialog.locator(".launch-composer-cancel");
     await expect(dialog).toBeVisible();
@@ -1036,7 +1093,7 @@ test("restart with escapes the old model in its changed marker", async ({ page }
   const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
   await expect(row).toBeVisible();
   await row.locator(".session-row-open").click();
-  await page.locator(".restart-with-trigger").click();
+  await selectSessionActionWith(page, "Restart");
   const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
   await expect(dialog).toBeVisible();
 
@@ -1068,7 +1125,7 @@ test("restart with keeps Tab from the open model list inside the dialog", async 
   const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
   await expect(row).toBeVisible();
   await row.locator(".session-row-open").click();
-  await page.locator(".restart-with-trigger").click();
+  await selectSessionActionWith(page, "Restart");
   const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".launch-composer-cancel")).toBeFocused();
@@ -1188,9 +1245,9 @@ test("restart with pulls stray focus back and still cancels on Escape", async ({
   await page.goto("/");
   // Premise: a real terminal is attached and revealed beneath the dialog.
   await attachSession(page, id);
-  const trigger = page.locator(".restart-with-trigger");
-  await expect(trigger).not.toHaveAttribute("aria-disabled", "true");
-  await trigger.click();
+  const trigger = page.locator(".restart-menu-toggle");
+  await expect(trigger).toBeVisible();
+  await selectSessionActionWith(page, "Restart");
   const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".launch-composer-cancel")).toBeFocused();
@@ -1234,7 +1291,7 @@ test("restart with makes the page inert while open and restores it exactly", asy
   const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
   await expect(row).toBeVisible();
   await row.locator(".session-row-open").click();
-  const trigger = page.locator(".restart-with-trigger");
+  const trigger = page.locator(".restart-menu-toggle");
   await expect(trigger).toBeVisible();
 
   // The launcher now lives in the sidebar's subtree. An independent body
@@ -1259,7 +1316,7 @@ test("restart with makes the page inert while open and restores it exactly", asy
       const inside = (selector: string) => document.querySelector(selector)?.closest("[inert]") != null;
       return {
         dialog: inside(".create-session-form[data-launcher-mode=restart]"),
-        trigger: inside(".restart-with-trigger"),
+        trigger: inside(".restart-menu-toggle"),
         row: inside(`[data-session-id="${sessionId}"]`),
         new: inside(".new-session-button"),
       };
@@ -1267,7 +1324,7 @@ test("restart with makes the page inert while open and restores it exactly", asy
 
   const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
   const cancel = dialog.locator(".launch-composer-cancel");
-  await trigger.click();
+  await selectSessionActionWith(page, "Restart");
   await expect(cancel).toBeFocused();
   expect(
     await page.evaluate(() => {
@@ -1284,7 +1341,7 @@ test("restart with makes the page inert while open and restores it exactly", asy
   await expect(trigger).toBeFocused();
   expect(await inertSet(), "after cancel").toEqual(["outside"]);
 
-  await trigger.click();
+  await selectSessionActionWith(page, "Restart");
   await expect(cancel).toBeFocused();
   expect(await underInert()).toEqual({ dialog: false, trigger: true, row: true, new: true });
   await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })
@@ -1327,7 +1384,7 @@ test("restart with compares an older omitted permission by its effective mode", 
   const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
   await expect(row).toBeVisible();
   await row.locator(".session-row-open").click();
-  await page.locator(".restart-with-trigger").click();
+  await selectSessionActionWith(page, "Restart");
   const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
   await expect(dialog).toBeVisible();
   const permissions = dialog.locator(".launch-composer-permissions-choice");
@@ -1459,7 +1516,7 @@ test("restart with edits a command launch's command, resume command and YOLO ans
 });
 
 /**
- * Spec: Restart with stays visible but unavailable for a command launch
+ * Spec: Restart with stays inspectable in its menu for a command launch
  * with no resume command, and says why.
  *
  * Why: such a launch can never resume (SPEC.md), so Restart with, which is
@@ -1472,7 +1529,8 @@ test("restart with is unavailable for a command launch without a resume command"
   const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
   await expect(row).toBeVisible();
   await row.locator(".session-row-open").click();
-  const trigger = page.locator(".restart-with-trigger");
+  const menu = await openSessionActionMenu(page, "Restart");
+  const trigger = menu.locator(".restart-with-trigger");
   await expect(trigger).toBeVisible();
   await expect(trigger).toHaveAttribute("aria-disabled", "true");
   await expect(trigger).toHaveAttribute("data-tooltip", /no resume command/);
@@ -2220,7 +2278,7 @@ test("restart with withdraws working-agent consent when its source exits", async
     await page.keyboard.press("Enter");
     await waitForTermText(page, "busy-tick-");
     await expect(page.locator(".restart-primary")).toHaveAttribute("data-confirms", "true", { timeout: 15_000 });
-    await page.locator(".restart-with-trigger").click();
+    await selectSessionActionWith(page, "Restart");
     const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
     await expect(dialog.locator(".launch-composer-cancel")).toBeFocused();
     const submit = dialog.locator(".create-session-submit");

@@ -4306,7 +4306,7 @@ pub(crate) fn ListView(
                         // Release above must precede this immediate handback;
                         // the removed field would otherwise leave focus on body.
                         restart_bridge.set(None);
-                        FocusTarget::new(if was_restart { ".restart-with-trigger" } else { ".new-session-button" }, None, false).focus();
+                        FocusTarget::new(if was_restart { ".restart-menu-toggle" } else { ".new-session-button" }, None, false).focus();
                     },
                     on_template_saved: move |template| {
                         // Templates owns the next focus; release the launcher

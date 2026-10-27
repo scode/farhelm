@@ -147,15 +147,17 @@ pub(crate) fn ActionIcon(
             },
         ),
         ActionGlyph::ChevronDown => ("chevron-down", rsx! { path { d: "M3 5l4 4 4-4" } }),
-        ActionGlyph::Restart | ActionGlyph::Replace => (
-            if glyph == ActionGlyph::Restart {
-                "restart"
-            } else {
-                "replace"
-            },
+        ActionGlyph::Restart => (
+            "restart",
             rsx! {
                 path { d: "M11.5 5.5 A4.6 4.6 0 0 0 3 4.5 M2.5 8.5 A4.6 4.6 0 0 0 11 9.5 M11.8 2.5 V5.8 H8.6 M2.2 11.5 V8.2 H5.4" }
             },
+        ),
+        // Replace starts a fresh conversation, so it must not share the
+        // resume arrow when both operations appear beside one another.
+        ActionGlyph::Replace => (
+            "replace",
+            rsx! { path { d: "M2 4h10M9 1l3 3-3 3M12 10H2M5 7l-3 3 3 3" } },
         ),
         ActionGlyph::Clone | ActionGlyph::Copy => (
             if glyph == ActionGlyph::Clone {

@@ -53,6 +53,7 @@ import { fulfillAsHelm, helmBuild, installTerminalSuiteHooks, LIVE_BADGE, LIVE_S
  * create that already landed, so the UI keeps the key for a same-key retry. */
 const UNACCEPTED = { "x-farhelm-create-outcome": "definitely-unaccepted" };
 import { routeGate } from "./helpers/route-gate";
+import { selectSessionActionWith } from "./helpers/session-actions";
 import { answerYolo, attachSession, waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 
@@ -554,7 +555,7 @@ test("plain Replace gets a fresh sidebar key after cancelling header Replace wit
     await confirmSidebarReplace(sourceRow);
     await expect(sourceRow.locator(".action-error").first()).toContainText("replace:");
     expect(keys).toHaveLength(1);
-    await page.locator(".header-replace-with").click();
+    await selectSessionActionWith(page, "Replace");
     const launcherCancel = page.locator(".launch-composer-cancel");
     await expect(launcherCancel).toBeVisible();
     await launcherCancel.click();

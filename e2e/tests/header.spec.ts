@@ -1,8 +1,8 @@
 /**
  * Session chrome has two rows around the terminal: tabs and lifecycle
  * actions above it, identity and copy fields below it. Geometry matters:
- * all six actions must survive a 650px pane, identity must not consume
- * extra rows, and copy feedback must remain readable above the bottom edge.
+ * text size and both split actions must survive a 650px pane, identity must
+ * not consume extra rows, and copy feedback must remain readable above the bottom edge.
  * The tests also preserve full values behind truncated peer fields.
  */
 import { expect, test } from "./helpers/evidence";
@@ -17,23 +17,31 @@ import {
   stopSession,
   stubFeed,
 } from "./helpers/fleet";
+import { openSessionActionMenu, selectSessionActionWith } from "./helpers/session-actions";
 import { waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
-import { FAKE_AGENT_INVOCATION } from "./helpers/terminal-suite";
+import { addTab, FAKE_AGENT_INVOCATION, selectTerminal } from "./helpers/terminal-suite";
 
 /** Find only this test's owned session; other specs can share the listing. */
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
 }
 
-// The top row's six full labels need a 650px main pane. The app still permits
-// a 320px pane, where its single row may clip; this test exercises the
-// narrowest rounded width expected to keep all six actions visible. Measured
-// when Delete joined the row: the actions end at a 598px pane in Chromium and
-// a 608px pane in WebKit, and 650 keeps the same ~40px of platform font slack
-// the old five-action 580 had over its own WebKit measurement.
+// The supported floor belongs to the main pane, not the whole window. Text
+// size, both split pairs, Clone and Delete keep their width; only tabs scroll.
+// Smaller panes may clip, so measuring one would test a different contract.
 const SUPPORTED_MAIN_PANE_WIDTH = 650;
 const VIEWPORT_HEIGHT = 600;
+const PERSISTENT_ACTION_SELECTORS = [
+  '[data-text-size="smaller"]',
+  '[data-text-size="larger"]',
+  ".restart-primary",
+  ".restart-menu-toggle",
+  ".header-replace",
+  ".replace-menu-toggle",
+  ".header-clone",
+  ".header-delete",
+] as const;
 
 test(
   "tabs and actions share one top row above the terminal and details stay below it",
@@ -61,6 +69,13 @@ test(
       await row(page, session.id).locator(".session-row-open").click();
       await waitForSessionRevealed(page, session.id);
       await waitForTermText(page, "FAKE-AGENT READY");
+      // The split controls leave enough room for the agent tab alone. Real
+      // shell tabs establish overflow before asserting that only tabs scroll.
+      for (let previous = 0; previous < 3; previous += 1) {
+        await addTab(page, previous);
+      }
+      await selectTerminal(page, "agent");
+      await waitForSessionRevealed(page, session.id);
       // Restart opens its confirmation (measured below) only while the
       // agent is working, and a quiet fixture agent reads idle after a few
       // samples; `busy` keeps its screen changing so it stays working.
@@ -83,6 +98,7 @@ test(
       // Identity must not grow a second row or take the old separate
       // header's height. No conditional band is active in this fixture.
       const headerBox = (await page.locator(".session-topbar").boundingBox())!;
+      expect(headerBox.width, "premise: this is an actual 650px main pane").toBeCloseTo(SUPPORTED_MAIN_PANE_WIDTH, 0);
       const detailsBox = (await page.locator(".session-details").boundingBox())!;
       const terminalBox = (await page.locator(".terminal-panes").boundingBox())!;
       const tabsBox = (await page.locator(".session-topbar .tab-strip").boundingBox())!;
@@ -107,18 +123,24 @@ test(
       );
       expect(identityOrder).toEqual(["status-badge", "title", "host", "status-time", "copy", "copy"]);
 
-      // All six action labels stay intact while the tab strip shrinks.
+      // The eight persistent buttons stay intact while the tab strip shrinks.
+      // With items are deliberately absent until their caret opens a menu.
       const badgeBox = (await page.locator(".session-details .status-badge").boundingBox())!;
       const restartBox = (await restartButton.boundingBox())!;
-      for (const [name, box] of [
-        ["badge", badgeBox],
-        ["restart button", restartBox],
-        ["restart with button", (await page.locator(".restart-with-trigger").boundingBox())!],
-        ["replace button", (await page.locator(".header-replace").boundingBox())!],
-        ["clone button", (await page.locator(".header-clone").boundingBox())!],
-        ["replace with button", (await page.locator(".header-replace-with").boundingBox())!],
-        ["delete button", (await page.locator(".header-delete").boundingBox())!],
-      ] as const) {
+      await expect(page.locator(".titlebar-actions button:not([hidden])")).toHaveCount(8);
+      await expect(page.locator(".restart-with-trigger, .header-replace-with")).toHaveCount(0);
+      const boxes: [string, typeof badgeBox][] = [["badge", badgeBox]];
+      for (const selector of PERSISTENT_ACTION_SELECTORS) {
+        const control = page.locator(selector);
+        await expect(control).toBeVisible();
+        expect(await control.evaluate((node) => node.scrollWidth <= node.clientWidth), `${selector} does not clip its label`).toBe(true);
+        expect(await control.evaluate((node) => node.closest(".tab-strip") === null), `${selector} must not scroll with tabs`).toBe(true);
+        const box = (await control.boundingBox())!;
+        expect(box.x, `${selector} remains inside the main pane`).toBeGreaterThanOrEqual(headerBox.x);
+        expect(box.height, `${selector} retains today's compact button height`).toBeLessThanOrEqual(32);
+        boxes.push([selector, box]);
+      }
+      for (const [name, box] of boxes) {
         expect(box.x, `the ${name} must not be pushed off the left edge`).toBeGreaterThanOrEqual(0);
         expect(
           box.x + box.width,
@@ -140,6 +162,8 @@ test(
       await restartButton.click();
       const restartPanel = page.locator("#restart-confirm-panel");
       await expect(restartPanel).toBeVisible();
+      await expect(restartPanel.locator(".restart-confirm")).toBeFocused();
+      const restartConsent = await restartPanel.innerText();
       const restartPanelBox = (await restartPanel.boundingBox())!;
       expect(
         (await page.locator(".tab-strip").boundingBox())!,
@@ -160,6 +184,18 @@ test(
       await page.keyboard.press("Escape");
       await expect(restartPanel).toHaveCount(0);
 
+      // The repeated menu action must preserve the same working-agent
+      // consent, including focus on the confirming answer. Cancelling both
+      // paths avoids turning a geometry test into another restart lifecycle.
+      await expect(restartButton).toHaveAttribute("data-confirms", "true");
+      const restartMenu = await openSessionActionMenu(page, "Restart");
+      await restartMenu.getByRole("menuitem", { name: "Restart", exact: true }).click();
+      await expect(restartMenu).toHaveCount(0);
+      await expect(restartPanel).toHaveText(restartConsent, { useInnerText: true });
+      await expect(restartPanel.locator(".restart-confirm")).toBeFocused();
+      await restartPanel.getByRole("button", { name: "cancel", exact: true }).click();
+      await expect(restartPanel).toHaveCount(0);
+
       // A stopped session has a much longer badge than the live dot. It
       // must remain in the details bar, with its full status still
       // available in the tooltip; it cannot take room from the actions.
@@ -168,7 +204,7 @@ test(
       await expect(badge).toHaveClass(/\bexited\b/, { timeout: 20_000 });
       await expect(badge).toContainText("stopped by user");
       await expect(badge).toHaveAttribute("data-tooltip", /exited.*stopped by user/);
-      for (const selector of [".restart-primary", ".restart-with-trigger", ".header-replace", ".header-replace-with", ".header-clone", ".header-delete"]) {
+      for (const selector of PERSISTENT_ACTION_SELECTORS) {
         const control = page.locator(selector);
         await expect(control).toBeVisible();
         const box = (await control.boundingBox())!;
@@ -179,6 +215,118 @@ test(
     }
   },
 );
+
+/** Split menus must work without a pointer at the supported width.
+ * Each key starts from asserted focus so a terminal focus steal cannot pass
+ * as menu navigation. Tab follows the shared menu's close-and-return rule;
+ * the next Tab resumes the persistent toolbar order. */
+test("split menus keep keyboard navigation and focus handback at a 650px pane", async ({ page, request }) => {
+  const session = await createResumableSession(request, { title: `header-menu-keys-${Date.now()}` });
+  try {
+    await page.goto("/");
+    await expect(page.locator(".app-sidebar")).toBeVisible();
+    const viewportWidth = Math.ceil((await page.locator(".app-sidebar").boundingBox())!.width) + SUPPORTED_MAIN_PANE_WIDTH;
+    await page.setViewportSize({ width: viewportWidth, height: VIEWPORT_HEIGHT });
+    await row(page, session.id).locator(".session-row-open").click();
+    await waitForSessionRevealed(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await page.evaluate(() => document.fonts.ready);
+    const topbar = page.locator(".session-topbar");
+    const topbarBox = (await topbar.boundingBox())!;
+    expect(topbarBox.width, "premise: the pane itself is 650px wide").toBeCloseTo(SUPPORTED_MAIN_PANE_WIDTH, 0);
+
+    for (const [action, nextSelector] of [["Restart", ".header-replace"], ["Replace", ".header-clone"]] as const) {
+      const toggle = page.getByRole("button", { name: `${action} options`, exact: true });
+      const menu = page.getByRole("menu", { name: action, exact: true });
+      const plain = menu.getByRole("menuitem", { name: action, exact: true });
+      const withItem = menu.getByRole("menuitem", { name: `${action} with…`, exact: true });
+      await expect(toggle).toHaveAttribute("aria-haspopup", "menu");
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await toggle.focus();
+      await expect(toggle).toBeFocused();
+      await page.keyboard.press("ArrowDown");
+      await expect(menu).toBeVisible();
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await expect(menu.getByRole("menuitem")).toHaveCount(2);
+      await expect(plain).toBeFocused();
+      const popupBox = (await page.locator(".header-action-menu").boundingBox())!;
+      const toggleBox = (await toggle.boundingBox())!;
+      expect(popupBox.x).toBeGreaterThanOrEqual(0);
+      expect(popupBox.x + popupBox.width).toBeLessThanOrEqual(viewportWidth + 1);
+      expect(popupBox.y).toBeGreaterThanOrEqual(toggleBox.y + toggleBox.height - 1);
+      expect(popupBox.y + popupBox.height).toBeLessThanOrEqual(VIEWPORT_HEIGHT + 1);
+      expect(await topbar.boundingBox(), "opening the menu must not resize the toolbar").toEqual(topbarBox);
+
+      for (const [key, target] of [
+        ["ArrowDown", withItem],
+        ["ArrowDown", plain],
+        ["ArrowUp", withItem],
+        ["Home", plain],
+        ["End", withItem],
+      ] as const) {
+        await page.keyboard.press(key);
+        await expect(target, `${action} menu focus after ${key}`).toBeFocused();
+      }
+      await page.keyboard.press("Escape");
+      await expect(menu).toHaveCount(0);
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await expect(toggle).toBeFocused();
+
+      await page.keyboard.press("ArrowUp");
+      await expect(withItem).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(menu).toHaveCount(0);
+      await expect(toggle).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(page.locator(nextSelector)).toBeFocused();
+
+      // Enter and Space use native button activation. They must not also
+      // toggle a second time through the menu's own key handler.
+      for (const key of ["Enter", "Space"]) {
+        await toggle.focus();
+        await expect(toggle).toBeFocused();
+        await page.keyboard.press(key);
+        await expect(plain).toBeFocused();
+        await page.keyboard.press("Escape");
+        await expect(menu).toHaveCount(0);
+        await expect(toggle).toBeFocused();
+      }
+    }
+
+    // A With item unmounts when it opens the launcher. Cancel must return
+    // to the persistent Restart caret after modal isolation releases.
+    const restartToggle = page.locator(".restart-menu-toggle");
+    await restartToggle.focus();
+    await expect(restartToggle).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    const restartWith = page.getByRole("menuitem", { name: "Restart with…", exact: true });
+    await expect(restartWith).toBeFocused();
+    await expect(restartWith).toHaveAttribute("aria-disabled", "false");
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("menu", { name: "Restart", exact: true })).toHaveCount(0);
+    await expect(page.locator(".restart-with-trigger")).toHaveCount(0);
+    const launcher = page.locator(".create-session-form[data-launcher-mode=restart]");
+    const cancel = launcher.locator(".launch-composer-cancel");
+    await expect(cancel).toBeFocused();
+    await cancel.click();
+    await expect(launcher).toHaveCount(0);
+    await expect(restartToggle).toBeFocused();
+
+    // Switching families must replace the first popup, rather than leave
+    // two overlapping menus with competing keyboard focus owners.
+    await openSessionActionMenu(page, "Restart");
+    const replaceMenu = await openSessionActionMenu(page, "Replace");
+    await expect(page.getByRole("menu", { name: "Restart", exact: true })).toHaveCount(0);
+    const replaceWith = replaceMenu.getByRole("menuitem", { name: "Replace with…", exact: true });
+    await replaceWith.focus();
+    await expect(replaceWith).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(replaceMenu).toHaveCount(0);
+    await expect(page.locator(".replace-menu-toggle")).toBeFocused();
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
 
 test("oversized title and copy fields overflow their boxes, with full tooltips", async ({
   page,
@@ -277,8 +425,8 @@ test("copy fields use the details bar's free width before truncating", async ({ 
 });
 
 /**
- * The session header is the only surface that exposes all six lifecycle
- * actions together. This test pins their shared keyboard order, proves that
+ * The session header keeps persistent controls in keyboard order and offers
+ * the editable variants through menus. This test pins that order, proves that
  * both copy buttons hand their complete values to the native bridge, and
  * verifies that header actions reuse the existing composer prefill paths.
  * The Replace prompt must also keep its focused answer when a pointer lands
@@ -303,17 +451,16 @@ test("header actions stay ordered, copy full values, and open the right flows", 
     await waitForSessionRevealed(page, session.id);
     await waitForTermText(page, "FAKE-AGENT READY");
 
-    const actionNames = await page.locator(".titlebar-actions button").evaluateAll((buttons) =>
-      buttons.map((button) => button.textContent?.trim()),
-    );
-    expect(actionNames, "pointer and keyboard users must receive the same action order").toEqual([
-      "restart",
-      "restart with",
-      "replace",
-      "clone",
-      "replace with",
-      "delete",
-    ]);
+    const buttons = page.locator(".titlebar-actions button:not([hidden])");
+    await expect(buttons).toHaveCount(PERSISTENT_ACTION_SELECTORS.length);
+    for (const [index, selector] of PERSISTENT_ACTION_SELECTORS.entries()) {
+      expect(await buttons.nth(index).evaluate((button, selector) => button.matches(selector), selector),
+        `${selector} has its persistent toolbar position`).toBe(true);
+    }
+    await expect(page.locator(".restart-primary")).toHaveText("Restart");
+    await expect(page.locator(".header-replace")).toHaveAccessibleName("Replace");
+    await expect(page.locator(".header-clone")).toHaveAccessibleName("Clone");
+    await expect(page.locator(".header-delete")).toHaveAccessibleName("Delete");
 
     await page.evaluate(() => {
       (window as any).__headerCopies = [];
@@ -338,10 +485,11 @@ test("header actions stay ordered, copy full values, and open the right flows", 
       .toEqual([cwd, invocation]);
     await expect(copyButtons.nth(1)).toContainText("copied");
 
-    const replace = page.getByRole("button", { name: "replace", exact: true });
+    const replace = page.locator(".header-replace");
     await replace.click();
     const confirmation = page.locator(".header-replace-confirm");
     await expect(confirmation).toBeVisible();
+    const replaceConsent = await confirmation.innerText();
     await expect(confirmation.getByRole("button", { name: "replace", exact: true })).toHaveClass(
       /btn-danger/,
     );
@@ -352,14 +500,24 @@ test("header actions stay ordered, copy full values, and open the right flows", 
     await confirmation.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(confirmation).toHaveCount(0);
 
+    // Repeating Replace inside the split menu must not bypass the existing
+    // danger question or change the answer that receives the next Enter.
+    const replaceMenu = await openSessionActionMenu(page, "Replace");
+    await replaceMenu.getByRole("menuitem", { name: "Replace", exact: true }).click();
+    await expect(replaceMenu).toHaveCount(0);
+    await expect(confirmation).toHaveText(replaceConsent, { useInnerText: true });
+    await expect(confirmReplace).toBeFocused();
+    await confirmation.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(confirmation).toHaveCount(0);
+
     const form = page.locator(".create-session-form");
-    await page.getByRole("button", { name: "clone", exact: true }).click();
+    await page.locator(".header-clone").click();
     await expect(form).toBeVisible();
     await expect(form.locator('input[aria-label="folder"]')).toHaveValue(cwd);
     await form.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
 
-    await page.getByRole("button", { name: "replace with", exact: true }).click();
+    await selectSessionActionWith(page, "Replace");
     await expect(form).toBeVisible();
     await expect(form.locator(".create-session-submit")).toHaveText(/^replace\s+local \(this machine\) · \/tmp$/);
     await form.getByRole("button", { name: "cancel", exact: true }).click();

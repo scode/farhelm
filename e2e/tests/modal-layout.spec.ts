@@ -10,6 +10,7 @@
 import { expect, test } from "./helpers/evidence";
 import { type Locator, type Page } from "@playwright/test";
 import { agentLaunchRow, hostRowByName, openHostMenu, openRowMenu, SESSION_LISTING } from "./helpers/fleet";
+import { selectSessionActionWith } from "./helpers/session-actions";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 
 installTerminalSuiteHooks();
@@ -124,7 +125,7 @@ async function openTallDialog(page: Page, family: string): Promise<Locator> {
   await page.route(`**/api/sessions/${encodeURIComponent(SESSION)}/restart`, (route) =>
     fulfillAsHelm(route, { status: 400, contentType: "text/plain", body: LONG_REFUSAL }));
   await row.locator(".session-row-open").click();
-  await page.locator(".restart-with-trigger").click();
+  await selectSessionActionWith(page, "Restart");
   const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
   // Cancel is the restart opening boundary; wait for it before replacing
   // focus with the permission edit that makes this long refusal possible.

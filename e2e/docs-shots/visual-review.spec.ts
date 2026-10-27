@@ -32,6 +32,7 @@ const sidebarHeaderOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-h
 const sidebarStatusOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-status";
 const sidebarRailOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-rail";
 const sidebarWarningOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-warning";
+const toolbarOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "session-toolbar";
 
 /** Park before observing tooltip state, not only at the screenshot's last step.
  * Pointer departure cancels pending hover help. Focus captures establish their
@@ -541,6 +542,67 @@ for (const colorScheme of ["dark", "light"] as const) {
         const name = `visual-review/${colorScheme}-${width}`;
         const window = [page.locator("body")];
         await shot(page, `${name}-main`, window, { pad: 0 });
+        if (toolbarOnly) {
+          // The fixed actions must fit the measured main pane. A nominal
+          // viewport width alone would miss clipping beside a wider sidebar.
+          const actions = page.locator(".titlebar-actions");
+          await expect(actions.locator("button:visible")).toHaveCount(8);
+          const pane = (await main.boundingBox())!;
+          for (const button of await actions.locator("button:visible").all()) {
+            const box = (await button.boundingBox())!;
+            expect(box.x).toBeGreaterThanOrEqual(pane.x);
+            expect(box.x + box.width).toBeLessThanOrEqual(pane.x + pane.width);
+          }
+          for (const action of ["Restart", "Replace"] as const) {
+            const caret = page.getByRole("button", { name: `${action} options`, exact: true });
+            await keyboardFocusControl(page, page.locator("body"), caret);
+            await focusedShot(page, `${name}-${action.toLowerCase()}-caret-focused`, caret);
+            await caret.press("ArrowDown");
+            const menu = page.getByRole("menu", { name: action, exact: true });
+            const panel = page.locator(".header-action-menu");
+            await expect(menu).toBeVisible();
+            await inspectMenu(page, panel);
+            await menu.getByRole("menuitem").first().press("End");
+            const withAction = menu.getByRole("menuitem", { name: `${action} with…`, exact: true });
+            await expect(withAction).toBeFocused();
+            await focusedShot(page, `${name}-${action.toLowerCase()}-menu-focused`, withAction);
+            await withAction.press("Escape");
+            await expect(menu).toBeHidden();
+            await expect(caret).toBeFocused();
+          }
+          const restart = page.locator(".restart-primary");
+          await expect(restart).toHaveAttribute("aria-disabled", "true");
+          await keyboardFocusControl(page, page.locator("body"), restart);
+          await focusedShot(page, `${name}-toolbar-unavailable-restart`, restart);
+          const fleet = readFleet();
+          expect(fleet.toolbarReview, "the ordinary stage must provide the genuine reporting fixture").toBeDefined();
+          const reviewId = fleet.ids.get(fleet.toolbarReview!.title)!;
+          await attachSession(page, reviewId);
+          await waitForSessionRevealed(page, reviewId);
+          if (fleet.toolbarReview!.transcript) {
+            await waitForTermText(page, lastTranscriptLine(DOCS_SHOTS_DIR, fleet.toolbarReview!.transcript));
+          }
+          await expect(restart).toHaveAttribute("aria-disabled", "false");
+          await keyboardFocusControl(page, page.locator("body"), restart);
+          await focusedShot(page, `${name}-toolbar-available-restart`, restart);
+          const caret = page.locator(".restart-menu-toggle");
+          await keyboardFocusControl(page, page.locator("body"), caret);
+          await caret.press("ArrowDown");
+          const menu = page.getByRole("menu", { name: "Restart", exact: true });
+          const plain = menu.getByRole("menuitem", { name: "Restart", exact: true });
+          await expect(plain).toHaveAttribute("aria-disabled", "false");
+          await expect(menu.getByRole("menuitem", { name: "Restart with…", exact: true })).toHaveAttribute("aria-disabled", "false");
+          await expect(plain).toBeFocused();
+          await focusedShot(page, `${name}-restart-menu-available-focused`, plain);
+          await plain.press("Escape");
+          const reviewRow = page.locator(`[data-session-id="${reviewId}"]`);
+          await openRowMenu(reviewRow);
+          const rowPanel = page.locator(".session-row-menu-flyout");
+          await expect(rowPanel).toBeVisible();
+          await shot(page, `${name}-row-replace-glyph`, [page.locator("body")], { pad: 0 });
+          await page.keyboard.press("Escape");
+          return;
+        }
         if (sidebarWarningOnly) {
           await showRailSetup(page, request, scenario, name, true);
           return;
