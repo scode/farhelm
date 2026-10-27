@@ -1,10 +1,58 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `a2c2f8861418f8222eca096c797b9f31585ecc1a`
+Last reviewed commit: `98bb15850f5f5ba1df6ed66873338261c45ff948`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
+
+## Review through 98bb1585
+
+Reviewed range: `a2c2f8861418f8222eca096c797b9f31585ecc1a..98bb15850f5f5ba1df6ed66873338261c45ff948`, 53 commits. The
+saved exclusive base and inclusive main tip were fetched and pinned, with ancestry verified. This review starts after
+the explicitly advanced marker; it does not resume or claim completion of the earlier 735-commit review.
+
+The review is **complete** under the persistent-review protocol. Every individual commit patch, including intermediate
+changes, deleted text, plans, reports and bookkeeping, was assigned to 50 bounded functional groups. The immutable
+inventory reconstructs all 330 patch parts and 321 commit/path diffs exactly from Git. Eleven fresh auditors checked
+possibly-highest exclusions and cross-group questions. Each required assignment stayed within 2,000 lines and 64 KiB;
+supplemental auditor inputs have separate complete delivery audits. Surrounding source and coverage sections were read
+selectively. No assigned patch text remains unread, and no recording or independent-exclusion step remains unresolved.
+
+All 61 reviewer identities completed initial review, later synthesis and a credible final empty discovery search on the
+same identities: 188 actual turns, including 63 synthesis turns and 64 discovery passes. The effort-catalog focus issue
+was verified in discovery and received another search. Two auditors received further source clarification and separate
+final searches. In particular, the backup-substitution and smoke child-survival allegations were disposed as unsupported
+after focused producer/lifetime checks; missing universal absence proof is not presented as an unfinished investigation.
+That disposition neither proves arbitrary interference impossible nor weakens the applicable preservation contracts.
+
+There are nine new queue items, all `other`: four contrast problems, conditional link-refusal occlusion, catalog-arrival
+focus loss, a delayed cross-page appearance notification, and two conditional trust/capture contract conflicts. The last
+two retain their missing ordinary-producer or failure premises and ambiguous accepted-behavior coverage; they are not
+claims of observed unauthorized trust or wrong-conversation continuation. One existing cleanup item gains the chrome
+test's confirmation-preference instance, including its unestablished incoming-true contamination premise. No product
+fixes, triage outcomes or existing-item removals are part of this result.
+
+Independent exclusions remain narrow: exact historical installer decisions, occupied preservation names, the already
+queued credential-origin issue, recorded same-run desktop PID reuse, template-selection and lost-reply exceptions,
+repaired warning/hidden-control paths, captured host targets, canonical launch admission, fixed harnesses, generation
+fences, and ordinary legacy-trash protection. Ambiguous whole-finding exclusions were recorded for triage. No generic
+filesystem or same-account acceptance is treated as a blanket subsystem-safety verdict.
+
+Evidence remains private under run `47edc805-f43c-4ef2-abb1-0bba27a41c2f/review-98bb1585`. `completion.md` is the
+compact record; `completion.json` retains assignments, manifests, session identities, actual turns, audits, synthesis
+and search passes, parent judgments and actual final replies. `dispositions.json` preserves all 83 reviewer-local
+finding identities and their revisions/withdrawals, with nine new records and one extension after semantic
+reconciliation. The 39 latest open and 44 withdrawn identities include audit verdicts and duplicates, not 83 distinct
+bugs. Reviewers used Codex `gpt-6.1-sol`, high reasoning, with at most 19 concurrent children. Rejected clipped reads
+earned no credit; smaller supported rereads supplied the mandatory text. Delivery proves neither attention,
+understanding, correctness nor exhaustiveness.
+
+Recording-time main remains the pinned tip, with unchanged checkpoint and coverage sources at the final fetch. No later
+commit is claimed reviewed. This was source-only: no product/runtime, browser, native Mac, vendor-agent or
+filesystem-fault test or reproduction ran, and no historical runtime pass was reused. Validation checks changed
+Markdown, whitespace, queue/index consistency, required fields, exact assignments and instruction pointers. This
+checkpoint proposal stays in a draft PR for separate manual merging; it has not advanced main merely by being written.
 
 ## Explicit checkpoint advance through a2c2f886
 
