@@ -113,7 +113,7 @@ async function stubArchives(page: Page, request: APIRequestContext, names: strin
     expect(unavailable.has(host), "unreachable hosts must not be listed").toBe(false);
     await fulfillAsHelm(route, { json: { issues: issues.get(host) ?? [], checkouts: Array.from({ length: count }, (_, i) => ({
       id: `archive-${host}-${i}`, name: `archived-checkout-${i}`, repository: "example/repository",
-      path: `/work/checkouts/farhelm-archived-working-copies/archive-${i}`,
+      path: `/work/checkouts/.farhelm-trash/archive-${i}`,
       archived_at: 1_700_000_000 + i, bytes: 1024,
     })).filter((entry) => !removed.get(host)?.has(entry.id)) } });
   });
@@ -260,7 +260,7 @@ test("trash entry deletes pause after rows move under the pointer", async ({page
     if (!inserted || host !== ids[0]) return route.fallback();
     await fulfillAsHelm(route, {json: {issues: [], checkouts: ["new", 0, 1].map((suffix) => ({
       id: `archive-${host}-${suffix}`, name: `archived-checkout-${suffix}`, repository: "example/repository",
-      path: `/work/checkouts/farhelm-archived-working-copies/archive-${suffix}`, archived_at: 1_700_000_000, bytes: 1024,
+      path: `/work/checkouts/.farhelm-trash/archive-${suffix}`, archived_at: 1_700_000_000, bytes: 1024,
     })).filter((entry) => !removed.get(host)?.has(entry.id))}});
   });
   const calls: {host: number; ids: string[]}[] = [];

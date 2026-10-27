@@ -471,14 +471,14 @@ mod tests {
     use std::process::Command;
 
     use super::*;
-    use crate::working_copies::{ARCHIVE_DIR_NAME, SPARE_DIR_NAME};
+    use crate::working_copies::{ARCHIVE_DIR_NAME, LEGACY_ARCHIVE_DIR_NAME, SPARE_DIR_NAME};
 
     /// A reserved container can contain convincing Git metadata after a user
     /// mistake. Name reservation must win before the local-origin query runs.
     #[farhelm_testtrace::test]
     async fn reserved_containers_are_never_discovered_as_repositories() {
         let fixture = tempfile::tempdir().unwrap();
-        for name in [ARCHIVE_DIR_NAME, SPARE_DIR_NAME] {
+        for name in [ARCHIVE_DIR_NAME, LEGACY_ARCHIVE_DIR_NAME, SPARE_DIR_NAME] {
             init_repo(fixture.path(), name, "https://github.com/acme/reserved.git");
             assert!(fixture.path().join(name).join(".git/config").is_file());
         }

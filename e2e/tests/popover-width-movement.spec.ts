@@ -71,7 +71,7 @@ function archiveListing(host: number, count: number): ArchiveListing {
       id: `width-archive-${host}-${index}`,
       name: `width-archive-${index}`,
       repository: "example/repository",
-      path: `/work/checkouts/farhelm-archived-working-copies/width-archive-${index}`,
+      path: `/work/checkouts/.farhelm-trash/width-archive-${index}`,
       archived_at: 1_700_000_000 + index,
       bytes: null,
     })),

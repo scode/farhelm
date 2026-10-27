@@ -1059,7 +1059,7 @@ title. Naming the session after quick launch changes only its title: the checkou
 name. An explicit title at creation keeps its printable display spelling while the path uses `repo-` followed by its
 lowercase ASCII slug; runs outside letters and digits become hyphens. A title already starting with `repo-` does not
 repeat that prefix. An empty slug or a component over 200 bytes is refused, and so is a checkout path too long to
-archive later (the archive location adds up to 82 bytes to it, and the whole must stay within the system's path limit:
+archive later (the archive location adds up to 65 bytes to it, and the whole must stay within the system's path limit:
 4096 bytes on Linux, 1024 on macOS). Existing files, directories and symlinks all occupy a name. If another create wins
 the displayed path, Launch reports the conflict and obtains a new preview; it never submits automatically or silently
 chooses another directory. A typed name or a template's fixed name remains a conflict rather than gaining a suffix. A
@@ -1165,9 +1165,17 @@ inode and device comparison.
 Ownership follows use, not the lifetime of the session that first requested the checkout. Ordinary sessions in a managed
 directory or its canonical subdirectories also retain references, including references to managed ancestors. Stopped,
 exited, and errored sessions still count. Delete releases its reference; only the final reference causes the recorded
-checkout to move into `farhelm-archived-working-copies` under its original root, using its original basename plus a
-timestamp and collision handling. This is a no-overwrite move, never recursive deletion or a cross-device copy fallback.
-A foreign object replacing the recorded path must remain untouched. The UI calls this archive the trash.
+checkout to move into `.farhelm-trash` under its original root, using its original basename plus a timestamp and
+collision handling. This is a no-overwrite move, never recursive deletion or a cross-device copy fallback. A foreign
+object replacing the recorded path must remain untouched. The UI calls this archive the trash.
+
+Existing trash in `farhelm-archived-working-copies` moves automatically to `.farhelm-trash` before that root's trash is
+next archived into, recovered, listed or deleted from. A root that becomes reachable later follows the same rule. The
+move never replaces an existing new trash directory or merges their contents; when both names exist, only the new one is
+used. An older managed checkout overlapping the legacy directory prevents migration and is left untouched, with the
+blocked trash operation reported rather than its records forgotten. A session started inside old trash keeps its
+recorded working-directory spelling, so restarting it can fail after the move; permanent deletion still recognizes its
+reference and refuses that archive.
 
 The session list's trash button sits immediately left of New, with an outline can when empty and an open-lid can and
 count when it holds checkouts on reachable hosts. Its dialog groups archives newest first by host, showing repository,
@@ -3704,9 +3712,9 @@ tell apart safely. Other aliases, including shared unit or installation folders,
 directories and managed checkouts do not gain this exception.
 
 Confirmed 2026-10-11: Farhelm has dedicated ownership of the managed checkouts it creates, their checkout roots and the
-trash (`farhelm-archived-working-copies`) and reserved spare container (`.farhelm-spares`). Out-of-band manipulation of
-those paths is unsupported, including restoring a filesystem snapshot over them, user-instigated kernel-level overrides,
-or using uncommon filesystems such as FAT. Farhelm adds no complexity to detect or defend against these changes. The
+trash (`.farhelm-trash`) and reserved spare container (`.farhelm-spares`). Out-of-band manipulation of those paths is
+unsupported, including restoring a filesystem snapshot over them, user-instigated kernel-level overrides, or using
+uncommon filesystems such as FAT. Farhelm adds no complexity to detect or defend against these changes. The
 foreign-replacement guard protects ordinary replacement, such as a folder removed and recreated or a re-clone; replacing
 a folder inside the guard's check-then-move window is out of band too. The guard does not extend inside
 `.farhelm-spares` (accepted 2026-10-21): anything in that container that Farhelm did not put there, including a folder

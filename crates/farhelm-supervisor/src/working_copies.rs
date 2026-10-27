@@ -73,12 +73,16 @@ use thiserror::Error;
 /// Fixed name of the archive directory under a canonical root. Occupancy
 /// scans skip it exactly, and the archive move requires it to be a real
 /// same-device directory.
-pub const ARCHIVE_DIR_NAME: &str = "farhelm-archived-working-copies";
+pub const ARCHIVE_DIR_NAME: &str = ".farhelm-trash";
+
+/// The pre-hidden trash namespace stays reserved after its one-way migration.
+pub(crate) const LEGACY_ARCHIVE_DIR_NAME: &str = "farhelm-archived-working-copies";
 
 /// Ready checkouts and their private recovery names share this reserved root.
 /// Ordinary checkout names and discovery must never treat it as a repository.
 pub(crate) const SPARE_DIR_NAME: &str = ".farhelm-spares";
-const RESERVED_CHECKOUT_NAMES: [&str; 2] = [ARCHIVE_DIR_NAME, SPARE_DIR_NAME];
+const RESERVED_CHECKOUT_NAMES: [&str; 3] =
+    [ARCHIVE_DIR_NAME, LEGACY_ARCHIVE_DIR_NAME, SPARE_DIR_NAME];
 
 /// Recognize infrastructure even on a case-insensitive checkout filesystem.
 /// Keep discovery and allocation on the same set when another container is added.
@@ -94,8 +98,8 @@ pub(crate) fn reserved_checkout_name(name: &std::ffi::OsStr) -> bool {
 /// that its longest archive destination still fits the platform's path limit.
 ///
 /// Archiving turns `<root>/<name>` into
-/// `<root>/farhelm-archived-working-copies/<name>-<YYYYMMDDTHHMMSSZ>`, and
-/// after a name collision appends `-<32 hex digits>` as well, 82 bytes
+/// `<root>/.farhelm-trash/<name>-<YYYYMMDDTHHMMSSZ>`, and
+/// after a name collision appends `-<32 hex digits>` as well, 65 bytes
 /// longer in all. A checkout admitted within that margin of the limit could
 /// never be archived: every rename fails with `ENAMETOOLONG`. The limit is
 /// the platform's `PATH_MAX` less its terminating NUL (4096 bytes on Linux,
@@ -107,7 +111,7 @@ pub const MAX_ADMITTED_CHECKOUT_PATH: usize = libc::PATH_MAX as usize - 1 - ARCH
 /// archive folder, the `-<UTC timestamp>` suffix, and one collision suffix.
 const ARCHIVE_PATH_GROWTH: usize = 1 + ARCHIVE_DIR_NAME.len() + "-YYYYMMDDTHHMMSSZ".len() + 1 + 32;
 // SPEC.md and the docs above quote this figure; keep them in step.
-const _: () = assert!(ARCHIVE_PATH_GROWTH == 82);
+const _: () = assert!(ARCHIVE_PATH_GROWTH == 65);
 
 /// Hard ceiling on directory entries an occupancy scan will inspect. A
 /// root at or beyond this size refuses to answer rather than reporting a
@@ -1077,14 +1081,25 @@ fn refuse_overlapping_archive(conn: &Connection, row: &WorkingCopyRow) -> Result
 /// destination matches) must still finish, since nothing moves any more.
 fn refuse_archive_destination_checkout(conn: &Connection, row: &WorkingCopyRow) -> Result<()> {
     let archive_dir = Path::new(&row.canonical_root).join(ARCHIVE_DIR_NAME);
+    refuse_archive_path_checkout(conn, &archive_dir, Some(&row.id))
+}
+
+/// Historical registries may contain a checkout overlapping an infrastructure
+/// name. A migration checks every active row, including its caller's own row;
+/// an ordinary archive excludes its source, which is checked separately.
+fn refuse_archive_path_checkout(
+    conn: &Connection,
+    archive_dir: &Path,
+    source_id: Option<&str>,
+) -> Result<()> {
     let archive_dir_str = archive_dir.to_string_lossy();
     for other in all_working_copies(conn)? {
-        if other.id != row.id
+        if Some(other.id.as_str()) != source_id
             && other.allocation_state != AllocationState::Retired
             && path_overlaps(&other.canonical_path, &archive_dir_str)
         {
             return Err(WorkingCopyError::ArchiveRootIsCheckout {
-                path: archive_dir,
+                path: archive_dir.to_path_buf(),
                 other_id: other.id,
             });
         }
@@ -1621,7 +1636,7 @@ fn sync_archive_parent(path: &Path, sync: Option<&ArchiveParentSync>) -> Result<
 }
 
 /// Move an `allocated` working copy into
-/// `<canonical_root>/farhelm-archived-working-copies/` WITHOUT replacement,
+/// `<canonical_root>/.farhelm-trash/` WITHOUT replacement,
 /// journaling the destination first.
 ///
 /// Sequence, and the invariant each step owes:
@@ -1707,7 +1722,7 @@ fn archive_move_with_effects(
         return Err(WorkingCopyError::CreationTimeUnconfirmed { path: source });
     }
     let source_identity = source_observed.identity();
-    let archive_root = ensure_archive_root(&root)?;
+    let archive_root = ensure_archive_root(conn, &row, &root)?;
     if identity_of(&archive_root)?.0 != source_identity.0 {
         return Err(WorkingCopyError::ArchiveRootForeignDevice { path: archive_root });
     }
@@ -1752,9 +1767,79 @@ pub(crate) fn verified_root(row: &WorkingCopyRow) -> Result<PathBuf> {
     Ok(root)
 }
 
-/// Create (durably) or validate the canonical root's archive directory and
-/// return its path. Symlinks and non-directories are refused outright.
-fn ensure_archive_root(root: &Path) -> Result<PathBuf> {
+/// Move the old trash namespace before any caller can interpret the new name's
+/// absence as a missing archive. Callers first verify this opened root against
+/// their registry evidence. Rename and fsync stay on that handle; concurrent
+/// passive lists need no directory admission because only one no-replace rename
+/// can win, and the others observe a missing source or an occupied destination.
+///
+/// An active checkout overlapping the legacy folder prevents migration and
+/// returns the existing overlap refusal. In particular, a list must retain its
+/// archive records rather than prune them merely because migration was skipped.
+/// Callers hold the database lock through the overlap check and rename, so an
+/// allocation cannot commit a checkout inside the legacy path between them.
+pub(crate) fn migrate_legacy_archive(
+    conn: &Connection,
+    row: &WorkingCopyRow,
+    root: &fs::File,
+) -> Result<()> {
+    migrate_legacy_archive_with(conn, row, root, &mut rename_at_noreplace)
+}
+
+/// Keep fault injection at the actual migration rename, independent of the
+/// runner's permissions. The production wrapper always supplies no-replace.
+fn migrate_legacy_archive_with(
+    conn: &Connection,
+    row: &WorkingCopyRow,
+    root: &fs::File,
+    rename: &mut impl FnMut(
+        std::os::fd::RawFd,
+        &std::ffi::CStr,
+        std::os::fd::RawFd,
+        &std::ffi::CStr,
+    ) -> std::io::Result<()>,
+) -> Result<()> {
+    use rustix::fs::{AtFlags, FileType, statat};
+    use std::os::fd::AsRawFd;
+
+    let legacy = cstring(Path::new(LEGACY_ARCHIVE_DIR_NAME))?;
+    let current = cstring(Path::new(ARCHIVE_DIR_NAME))?;
+    let old = match statat(root, &legacy, AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(old) => old,
+        Err(rustix::io::Errno::NOENT) => return Ok(()),
+        Err(error) => return Err(std::io::Error::from(error).into()),
+    };
+    match statat(root, &current, AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(_) => return Ok(()), // Two namespaces are never merged or replaced.
+        Err(rustix::io::Errno::NOENT) => {}
+        Err(error) => return Err(std::io::Error::from(error).into()),
+    }
+    let legacy_path = Path::new(&row.canonical_root).join(LEGACY_ARCHIVE_DIR_NAME);
+    match FileType::from_raw_mode(old.st_mode) {
+        FileType::Symlink => {
+            return Err(WorkingCopyError::ArchiveRootSymlink { path: legacy_path });
+        }
+        FileType::Directory => {}
+        _ => return Err(WorkingCopyError::ArchiveRootNotDirectory { path: legacy_path }),
+    }
+    refuse_archive_path_checkout(conn, &legacy_path, None)?;
+    match rename(root.as_raw_fd(), &legacy, root.as_raw_fd(), &current) {
+        Ok(()) => root.sync_all()?,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::AlreadyExists
+            ) => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
+}
+
+/// Migrate before creating or validating the trash directory. Creating an empty
+/// destination after a migration refusal would hide the recoverable old trash.
+/// Symlinks and non-directories remain refused outright.
+fn ensure_archive_root(conn: &Connection, row: &WorkingCopyRow, root: &Path) -> Result<PathBuf> {
+    migrate_legacy_archive(conn, row, &verified_root_dir(row)?)?;
     let archive_root = root.join(ARCHIVE_DIR_NAME);
     match fs::symlink_metadata(&archive_root) {
         Ok(meta) => {
@@ -2062,7 +2147,7 @@ fn reconcile_archive_with_effects(
     };
     refuse_overlapping_archive(conn, &row)?;
     let root = verified_root(&row)?;
-    let archive_root = ensure_archive_root(&root)?;
+    let archive_root = ensure_archive_root(conn, &row, &root)?;
     let source = PathBuf::from(row.canonical_path.as_deref().unwrap_or_default());
     let destination_path = archive_root.join(&journaled);
 
@@ -2543,7 +2628,7 @@ mod tests {
         );
     }
 
-    /// Spec: a fresh checkout can never be named `ARCHIVE_DIR_NAME`, even in
+    /// Spec: a fresh checkout can never take the legacy trash name, even in
     /// an empty root where no registry row exists to derive the archive path
     /// from, and in a root where the archive directory already exists.
     ///
@@ -2554,7 +2639,7 @@ mod tests {
     /// rows, so the first checkout in a root was unprotected; this pins the
     /// name reservation that does not depend on the registry.
     #[test]
-    fn the_archive_directory_name_is_never_a_free_checkout_name() {
+    fn the_legacy_archive_directory_name_is_never_a_free_checkout_name() {
         for repo in [
             "acme/farhelm",
             "acme/farhelm-archived",
@@ -2562,17 +2647,18 @@ mod tests {
         ] {
             let repo =
                 farhelm_proto::github_checkout::parse_github_repo(repo).expect("valid repository");
-            let title = &ARCHIVE_DIR_NAME[repo.name.len() + 1..].replace('-', " ");
+            let title = &LEGACY_ARCHIVE_DIR_NAME[repo.name.len() + 1..].replace('-', " ");
             for existing_archive in [false, true] {
                 let root = tempfile::tempdir().expect("empty root");
                 if existing_archive {
-                    fs::create_dir(root.path().join(ARCHIVE_DIR_NAME)).expect("archive directory");
+                    fs::create_dir(root.path().join(LEGACY_ARCHIVE_DIR_NAME))
+                        .expect("archive directory");
                 }
                 let scan =
                     occupied_related_names(root.path(), &repo.name, 8).expect("complete scan");
-                assert!(scan.names.contains(ARCHIVE_DIR_NAME));
+                assert!(scan.names.contains(LEGACY_ARCHIVE_DIR_NAME));
                 let occupied = |name: &str| scan.names.contains(name);
-                for title in [title.as_str(), ARCHIVE_DIR_NAME] {
+                for title in [title.as_str(), LEGACY_ARCHIVE_DIR_NAME] {
                     assert_eq!(
                         farhelm_proto::github_checkout::checkout_basename(
                             &repo,
@@ -3190,6 +3276,163 @@ mod tests {
         );
     }
 
+    /// First post-upgrade archival moves the whole old container, preserving
+    /// earlier retired entries and their bare registry destinations.
+    #[farhelm_testtrace::test]
+    fn archive_move_migrates_legacy_trash_before_adding_another_checkout() {
+        let conn = registry_conn();
+        let root = tempfile::tempdir().unwrap();
+        let old = planned_row(&conn, root.path(), "old");
+        allocate(&conn, &old.id, None).unwrap();
+        fs::write(root.path().join("old/work"), b"old work").unwrap();
+        let ArchiveOutcome::Archived { destination } = archive_move(&conn, &old.id).unwrap() else {
+            panic!("archive premise")
+        };
+        remove_member(&conn, &old.origin_session_id, &old.id).unwrap();
+        retire(&conn, &old.id).unwrap();
+        let current = root.path().join(ARCHIVE_DIR_NAME);
+        let legacy = root.path().join(LEGACY_ARCHIVE_DIR_NAME);
+        fs::rename(&current, &legacy).unwrap();
+        let old_inode = fs::metadata(legacy.join(&destination)).unwrap().ino();
+        let new = planned_row(&conn, root.path(), "new");
+        allocate(&conn, &new.id, None).unwrap();
+        assert!(matches!(
+            archive_move(&conn, &new.id).unwrap(),
+            ArchiveOutcome::Archived { .. }
+        ));
+        assert!(!legacy.exists());
+        assert_eq!(entries(&current).len(), 2);
+        assert_eq!(
+            fs::metadata(current.join(&destination)).unwrap().ino(),
+            old_inode
+        );
+        assert_eq!(
+            fs::read(current.join(&destination).join("work")).unwrap(),
+            b"old work"
+        );
+        assert_eq!(
+            get_working_copy(&conn, &old.id)
+                .unwrap()
+                .unwrap()
+                .archive_destination
+                .as_deref(),
+            Some(destination.as_str())
+        );
+    }
+
+    /// Both names can exist after an out-of-band change. New archives use the
+    /// new container without merging, replacing or renaming the legacy tree.
+    #[farhelm_testtrace::test]
+    fn archive_move_leaves_a_second_legacy_namespace_untouched() {
+        let conn = registry_conn();
+        let root = tempfile::tempdir().unwrap();
+        let current = root.path().join(ARCHIVE_DIR_NAME);
+        let legacy = root.path().join(LEGACY_ARCHIVE_DIR_NAME);
+        fs::create_dir(&current).unwrap();
+        fs::create_dir(&legacy).unwrap();
+        fs::write(legacy.join("legacy-work"), b"keep").unwrap();
+        let before = fs::metadata(&legacy).unwrap().ino();
+        let row = planned_row(&conn, root.path(), "new");
+        allocate(&conn, &row.id, None).unwrap();
+        let ArchiveOutcome::Archived { destination } = archive_move(&conn, &row.id).unwrap() else {
+            panic!("archive premise")
+        };
+        assert!(current.join(destination).is_dir());
+        assert_eq!(fs::metadata(&legacy).unwrap().ino(), before);
+        assert_eq!(fs::read(legacy.join("legacy-work")).unwrap(), b"keep");
+    }
+
+    /// Recovery must migrate before looking up a journal destination. Otherwise
+    /// a rename already completed by an old supervisor looks like total absence.
+    #[farhelm_testtrace::test]
+    fn recovery_migrates_a_completed_legacy_archive_before_retiring_its_journal() {
+        let conn = registry_conn();
+        let root = tempfile::tempdir().unwrap();
+        let row = planned_row(&conn, root.path(), "pending");
+        allocate(&conn, &row.id, None).unwrap();
+        let legacy = root.path().join(LEGACY_ARCHIVE_DIR_NAME);
+        fs::create_dir(&legacy).unwrap();
+        let destination = "pending-20260101T000000Z";
+        persist_journal(&conn, &row.id, destination, AllocationState::Allocated).unwrap();
+        fs::rename(root.path().join("pending"), legacy.join(destination)).unwrap();
+        let inode = fs::metadata(legacy.join(destination)).unwrap().ino();
+        assert!(matches!(
+            reconcile_archive(&conn, &row.id).unwrap(),
+            ReconcileOutcome::MetadataComplete
+        ));
+        assert!(!legacy.exists());
+        assert_eq!(
+            fs::metadata(root.path().join(ARCHIVE_DIR_NAME).join(destination))
+                .unwrap()
+                .ino(),
+            inode
+        );
+        assert_eq!(
+            get_working_copy(&conn, &row.id)
+                .unwrap()
+                .unwrap()
+                .archive_destination
+                .as_deref(),
+            Some(destination)
+        );
+    }
+
+    /// Migration errors are uncertainty, never permission to create an empty
+    /// destination. Inject at the real rename so uid and permissions cannot mask it.
+    #[farhelm_testtrace::test]
+    fn migration_rename_errors_preserve_legacy_trash_and_leave_the_new_name_absent() {
+        let conn = registry_conn();
+        let root = tempfile::tempdir().unwrap();
+        let row = planned_row(&conn, root.path(), "source");
+        allocate(&conn, &row.id, None).unwrap();
+        let row = get_working_copy(&conn, &row.id).unwrap().unwrap();
+        let legacy = root.path().join(LEGACY_ARCHIVE_DIR_NAME);
+        fs::create_dir(&legacy).unwrap();
+        fs::write(legacy.join("work"), b"keep").unwrap();
+        let mut called = false;
+        let error = migrate_legacy_archive_with(
+            &conn,
+            &row,
+            &verified_root_dir(&row).unwrap(),
+            &mut |from_parent, from, to_parent, to| {
+                assert_eq!(from_parent, to_parent);
+                assert_eq!(from.to_bytes(), LEGACY_ARCHIVE_DIR_NAME.as_bytes());
+                assert_eq!(to.to_bytes(), ARCHIVE_DIR_NAME.as_bytes());
+                called = true;
+                Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            },
+        )
+        .unwrap_err();
+        assert!(called);
+        assert!(
+            matches!(error, WorkingCopyError::Io(error) if error.kind() == std::io::ErrorKind::PermissionDenied)
+        );
+        assert!(!root.path().join(ARCHIVE_DIR_NAME).exists());
+        assert_eq!(fs::read(legacy.join("work")).unwrap(), b"keep");
+    }
+
+    /// The archive entry point must propagate migration refusal before mkdir
+    /// or journaling, leaving both the old entry and source checkout intact.
+    #[farhelm_testtrace::test]
+    fn archive_move_does_not_create_new_trash_after_a_legacy_refusal() {
+        let conn = registry_conn();
+        let root = tempfile::tempdir().unwrap();
+        let row = planned_row(&conn, root.path(), "source");
+        allocate(&conn, &row.id, None).unwrap();
+        let legacy = root.path().join(LEGACY_ARCHIVE_DIR_NAME);
+        fs::write(&legacy, b"not a directory").unwrap();
+        assert!(matches!(
+            archive_move(&conn, &row.id),
+            Err(WorkingCopyError::ArchiveRootNotDirectory { .. })
+        ));
+        assert!(!root.path().join(ARCHIVE_DIR_NAME).exists());
+        assert!(root.path().join("source").is_dir());
+        assert_eq!(fs::read(legacy).unwrap(), b"not a directory");
+        let retained = get_working_copy(&conn, &row.id).unwrap().unwrap();
+        assert_eq!(retained.allocation_state, AllocationState::Allocated);
+        assert!(retained.archive_destination.is_none());
+    }
+
     /// An empty occupant created at the actual rename boundary forces a
     /// UUID suffix. Its identity must survive: ordinary replacing rename
     /// would overwrite an empty directory, so a nonempty fixture would
@@ -3282,7 +3525,12 @@ mod tests {
             let allocated = allocate(&conn, &row.id, None).unwrap();
             let source = root.join(&basename);
             fs::write(source.join("owned"), b"retained content").unwrap();
-            let archive_root = ensure_archive_root(&root).unwrap();
+            let archive_root = ensure_archive_root(
+                &conn,
+                &get_working_copy(&conn, &row.id).unwrap().unwrap(),
+                &root,
+            )
+            .unwrap();
             let mut occupants = Vec::new();
             if recovering {
                 let journaled =
@@ -3372,7 +3620,12 @@ mod tests {
             let allocated = allocate(&conn, &row.id, None).unwrap();
             let source = root.join(&basename);
             fs::write(source.join("owned"), b"preserve me").unwrap();
-            let archive_root = ensure_archive_root(&root).unwrap();
+            let archive_root = ensure_archive_root(
+                &conn,
+                &get_working_copy(&conn, &row.id).unwrap().unwrap(),
+                &root,
+            )
+            .unwrap();
             let uuid = uuid::Uuid::nil().simple().to_string();
             let journaled = format!("{basename}-20000101T000000Z-{uuid}-{uuid}");
             assert_eq!(journaled.len(), 283);
@@ -3548,7 +3801,7 @@ mod tests {
         }
         let mut names = entries(dir.path());
         names.sort();
-        assert_eq!(names, vec!["bar".to_string(), ARCHIVE_DIR_NAME.to_string()]);
+        assert_eq!(names, vec![ARCHIVE_DIR_NAME.to_string(), "bar".to_string()]);
         assert!(
             entries(&dir.path().join(ARCHIVE_DIR_NAME)).is_empty(),
             "nothing may be moved into the squatting checkout"
@@ -4159,7 +4412,12 @@ mod tests {
         let allocated = allocate(&conn, &row.id, None).unwrap();
         let source = dir.path().join("bar");
         fs::write(source.join("owned"), b"retained checkout").unwrap();
-        let archive_root = ensure_archive_root(dir.path()).unwrap();
+        let archive_root = ensure_archive_root(
+            &conn,
+            &get_working_copy(&conn, &row.id).unwrap().unwrap(),
+            dir.path(),
+        )
+        .unwrap();
         let journaled = "bar-occupied";
         persist_journal(&conn, &row.id, journaled, AllocationState::Allocated).unwrap();
         fs::create_dir(archive_root.join(journaled)).unwrap();
@@ -4227,7 +4485,12 @@ mod tests {
             let allocated = allocate(&conn, &row.id, None).unwrap();
             let source = dir.path().join("bar");
             fs::write(source.join("owned"), b"still here").unwrap();
-            let archive_root = ensure_archive_root(dir.path()).unwrap();
+            let archive_root = ensure_archive_root(
+                &conn,
+                &get_working_copy(&conn, &row.id).unwrap().unwrap(),
+                dir.path(),
+            )
+            .unwrap();
             persist_journal(&conn, &row.id, "bar-first", AllocationState::Allocated).unwrap();
             let mut attempts = 0;
             let error = rename_exclusive_into(
@@ -4359,7 +4622,12 @@ mod tests {
             let allocated = allocate(&conn, &row.id, None).unwrap();
             let source = dir.path().join("bar");
             fs::write(source.join("owned"), b"keep checkout content").unwrap();
-            let archive_root = ensure_archive_root(dir.path()).unwrap();
+            let archive_root = ensure_archive_root(
+                &conn,
+                &get_working_copy(&conn, &row.id).unwrap().unwrap(),
+                dir.path(),
+            )
+            .unwrap();
             let journaled = "bar-journaled";
             persist_journal(&conn, &row.id, journaled, AllocationState::Allocated).unwrap();
             if initially_occupied {
@@ -4455,7 +4723,12 @@ mod tests {
                 let dir = tempfile::tempdir().unwrap();
                 let row = planned_row(&conn, dir.path(), "bar");
                 let allocated = allocate(&conn, &row.id, None).unwrap();
-                let archive_root = ensure_archive_root(dir.path()).unwrap();
+                let archive_root = ensure_archive_root(
+                    &conn,
+                    &get_working_copy(&conn, &row.id).unwrap().unwrap(),
+                    dir.path(),
+                )
+                .unwrap();
                 let mut attempts = 0;
                 let mut refuse = |from: &Path, _to: &Path| {
                     assert_eq!(identity_of(from).unwrap(), allocated.identity);
@@ -4517,7 +4790,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let row = planned_row(&conn, dir.path(), "bar");
         allocate(&conn, &row.id, None).unwrap();
-        ensure_archive_root(dir.path()).unwrap();
+        ensure_archive_root(
+            &conn,
+            &get_working_copy(&conn, &row.id).unwrap().unwrap(),
+            dir.path(),
+        )
+        .unwrap();
         persist_journal(&conn, &row.id, "bar-journaled", AllocationState::Allocated).unwrap();
         let error = reconcile_archive_with_effects(&conn, &row.id, None, &mut |_, _| {
             Err(std::io::Error::from_raw_os_error(libc::EIO))

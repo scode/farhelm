@@ -2745,7 +2745,7 @@ mod tests {
     }
 
     /// E1 (Design E): the last-reference delete archives the checkout —
-    /// exact contents appear ONCE under farhelm-archived-working-copies,
+    /// exact contents appear ONCE under .farhelm-trash,
     /// the source path is gone, the registry row retires — while a
     /// multi-member delete moves NOTHING, and an unmanaged directory is
     /// never touched.
