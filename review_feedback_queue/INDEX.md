@@ -8,10 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`template-delete-lost-reply-loses-undo.md`](template-delete-lost-reply-loses-undo.md) — An ordinary template deletion
-  can commit but offer no Undo when its success reply is lost. Manual recovery from the mounted editor remains possible
-  until it closes; the unknown-outcome exception's scope is ambiguous.
-
 - [`tunnel-reuses-custom-helm-credential-origin.md`](tunnel-reuses-custom-helm-credential-origin.md) — A desktop tunnel
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.

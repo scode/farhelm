@@ -2022,7 +2022,9 @@ pub(super) fn TemplatesDialog(
                         templates.restart();
                         return;
                     }
-                    deleting_request.await
+                    deleting_request
+                        .await
+                        .map_err(crate::api::SubmissionError::into_text)
                 }
                 (result, _) => result,
             };
@@ -2147,7 +2149,16 @@ pub(super) fn TemplatesDialog(
                         }
                     });
                 }
-                Err(message) => error.set(Some(message)),
+                Err(crate::api::SubmissionError::Refused(message)) => error.set(Some(message)),
+                Err(crate::api::SubmissionError::Ambiguous(_)) => {
+                    // The helm may have committed this delete. A fresh list
+                    // resolves what is present; no reply justifies Undo.
+                    undo.set(None);
+                    error.set(Some(
+                        "the template may have been deleted; reloading the template list".into(),
+                    ));
+                    templates.restart();
+                }
             }
             busy.set(false);
         });

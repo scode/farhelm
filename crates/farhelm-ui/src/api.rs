@@ -4029,22 +4029,21 @@ pub(crate) enum ProvisioningSubmission {
     Unvalidated(String),
 }
 
-/// How a provisioning submission (ADD confirm or UPDATE) failed.
+/// Distinguish a helm refusal from a mutation whose reply never arrived.
 ///
 /// The two variants answer different questions, and sharing one `String`
 /// channel for them cost the Update panel its uncertainty: a request can
-/// commit while its response is lost, so no answer is not a refusal. A
-/// [`Refused`](Self::Refused) reply is the helm's own answer — the route
-/// admits the run before answering 202, so anything else means no run was
-/// admitted for this plan — and the next attempt replaces it. An
-/// [`Ambiguous`](Self::Ambiguous) failure means no usable answer arrived, so
-/// the submission may have committed unseen and the uncertainty stands until
-/// a correlated success or removal settles it.
+/// commit while its response is lost, so no answer is not a refusal.
+/// Provisioning admits a run before answering 202: a Refused reply means no
+/// run was admitted for that plan, while its Ambiguous state stands until a
+/// correlated success or removal settles it. Template Delete uses the same
+/// boundary only to report uncertainty and refresh its list; it keeps no
+/// reconciliation state.
 ///
 /// This does NOT split the send funnel itself: every `send` failure —
 /// transport, timeout, build, auth — arrives here as `Ambiguous`. A request
-/// that never left is over-retained rather than distinguished, deliberately:
-/// the unknown-outcome direction is the safe one.
+/// that never left is still classified as unknown rather than distinguished,
+/// deliberately: callers may report uncertainty even when nothing was sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SubmissionError {
     /// The helm answered with a non-success status; the text is its own words.
@@ -4242,16 +4241,20 @@ pub(crate) fn put_template(
 
 /// Register deletion now, including time spent retiring queued shortcut writes.
 /// Dropping an unpolled future releases the ticket if that preparation fails.
+/// A missing reply is Ambiguous because deletion may already have committed;
+/// a non-success response retains the helm's existing refusal text.
 pub(crate) fn delete_template(
     base: &str,
     name: &str,
-) -> impl Future<Output = Result<(), String>> + use<> {
+) -> impl Future<Output = Result<(), SubmissionError>> + use<> {
     let url = format!("{base}/api/templates/{}", encode_path_segment(name));
     let sending = send_save(client().delete(&url));
     async move {
-        let resp = sending.await?;
+        let resp = sending.await.map_err(SubmissionError::Ambiguous)?;
         if !resp.status().is_success() {
-            return Err(refusal_text("DELETE", &url, resp).await);
+            return Err(SubmissionError::Refused(
+                refusal_text("DELETE", &url, resp).await,
+            ));
         }
         Ok(())
     }

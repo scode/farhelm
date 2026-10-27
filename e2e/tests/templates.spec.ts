@@ -1277,6 +1277,104 @@ test("delete waits for the saved template list before offering undo", async ({ p
   }
 });
 
+/** A committed Delete with a lost reply must report uncertainty and refresh
+ * the stale list. The real helm write establishes the failure boundary; a
+ * settled refreshed list makes the absence of Undo observable without a delay. */
+test("a lost template Delete reply reports uncertainty and refreshes the list", async ({ page, request }) => {
+  const name = `delete-lost-reply-${Date.now()}`;
+  const fields = { kind: "agent", agent: "claude", name: "saved original" };
+  let committed = false;
+  let deletes = 0;
+  let rereads = 0;
+  let bodyFailed = false;
+  try {
+    await putTemplate(request, name, fields);
+    expect((await storedTemplate(request, name)).fields).toEqual(fields);
+    await page.route("**/api/templates", async (route) => {
+      if (committed && route.request().method() === "GET") rereads++;
+      await route.fallback();
+    });
+    await page.route(`**/api/templates/${encodeURIComponent(name)}`, async (route) => {
+      if (route.request().method() !== "DELETE") return route.fallback();
+      deletes++;
+      const deleted = await route.fetch();
+      expect(deleted.ok(), "premise: the helm accepted Delete before its reply was lost").toBe(true);
+      expect(await storedTemplate(request, name), "premise: Delete committed on the helm").toBeUndefined();
+      committed = true;
+      await route.abort("failed");
+    });
+    const dialog = await openTemplates(page);
+    const row = dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) });
+    await expect(row).toBeVisible();
+    await row.click();
+    await expect(row).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.locator(".templates-name")).toHaveValue(name);
+    await expect(dialog.locator(".templates-delete:visible")).toHaveText("delete");
+    await expect(dialog.locator(".templates-undo")).toHaveCount(0);
+    await dialog.locator(".templates-delete:visible").click();
+    await expect(dialog.locator('p.templates-error[role="status"]')).toHaveText(
+      "the template may have been deleted; reloading the template list",
+    );
+    await expect.poll(() => rereads, { message: "the page rereads templates after the lost reply" }).toBeGreaterThan(0);
+    await expect(row).toHaveCount(0);
+    await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    await expect(dialog.locator(".templates-retry")).toHaveCount(0);
+    await expect(dialog.locator(".templates-undo")).toHaveCount(0);
+    expect(committed).toBe(true);
+    expect(deletes).toBe(1);
+    expect(await storedTemplate(request, name)).toBeUndefined();
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["owned template routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["owned template", () => deleteTemplate(request, name)],
+    ]);
+  }
+});
+
+/** A definitive refusal must retain the helm's exact error and stored row.
+ * The lost-reply stopgap must not turn a known refusal into uncertainty. */
+test("a refused template Delete keeps the helm error and stored template", async ({ page, request }) => {
+  const name = `delete-refused-${Date.now()}`;
+  const fields = { kind: "agent", agent: "claude", name: "kept original" };
+  const refusal = "this template is still in use";
+  let refusals = 0;
+  let bodyFailed = false;
+  try {
+    await putTemplate(request, name, fields);
+    expect((await storedTemplate(request, name)).fields).toEqual(fields);
+    const build = requireHelmBuild(await request.get("/api/templates"), "template Delete refusal");
+    await page.route(`**/api/templates/${encodeURIComponent(name)}`, async (route) => {
+      if (route.request().method() !== "DELETE") return route.fallback();
+      refusals++;
+      await route.fulfill({ status: 409, body: refusal, headers: { "x-farhelm-build": build } });
+    });
+    const dialog = await openTemplates(page);
+    const row = dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) });
+    await expect(row).toBeVisible();
+    await row.click();
+    await expect(dialog.locator(".templates-name")).toHaveValue(name);
+    await expect(dialog.locator(".templates-delete:visible")).toHaveText("delete");
+    await dialog.locator(".templates-delete:visible").click();
+    await expect(dialog.locator('p.templates-error[role="status"]')).toHaveText(refusal);
+    await expect(row).toBeVisible();
+    await expect(dialog.locator(".templates-delete:visible")).toBeEnabled();
+    await expect(dialog.locator(".templates-undo")).toHaveCount(0);
+    expect(refusals).toBe(1);
+    expect((await storedTemplate(request, name)).fields).toEqual(fields);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["owned template routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["owned template", () => deleteTemplate(request, name)],
+    ]);
+  }
+});
+
 /** Destination type is a presentation choice over the existing stored schema.
  * Saving each type proves the editor does not confuse a repository with a
  * directory or silently change the template's other fields. */
