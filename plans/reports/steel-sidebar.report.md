@@ -211,3 +211,80 @@ Unchanged header, status and host visuals retain exact Opus 5.5/high gates `fe5e
 on light selection. Both were corrected; its follow-up inspected all twenty new images plus three rendered references
 and reported no remaining owned defect. Actual successful image reads and terminal success were verified. Optional
 spacing and later-plan limitations are disclosed above.
+
+### Landing
+
+Landed on the second delivery, with one specification sentence corrected at landing. The sidebar now follows Steel: the
+sort order is the list's title, a status filter sits below it, a strip of host icons replaces the host dropdown, and
+Hosts at the strip's foot shows host management in place of the session list. As you decided after the first landing
+attempt, a host whose setup or update fails or ends uncertain while Hosts is closed gets a warning mark on its icon,
+which stays until Hosts is opened or a later run of that action succeeds; Hosts never opens by itself.
+
+- #2747: sort order as the list title, the count, and compact icon actions.
+- #2749: status filter and the quick switcher's handling of filtered-out sessions.
+- #2750: host strip, Hosts panel, the failed-action warning, new sidebar widths and the title band layout.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing but plan bookkeeping and a trailing-review checkpoint landed since the plan was based. A fresh-context reviewer
+checked this delivery against your answer to the first landing attempt and found every instruction done and no test
+weakened to pass. The split you asked for: the warning is the only product change; every one of the 131 failures was
+repaired in the tests, by updating them for the intended layout and names or adding a missing starting condition, plus
+the SPEC.md header sentence. Most have an established cause. A few do not: whether a delete test's session was stopped
+too early or refused by the system's service manager, whether a timed-out multi-host test contaminated the later
+failures on the same test stack, and the native timing behind two keyboard and focus repairs remain hypotheses. A WebKit
+test of a host menu closing on a late Settings refusal timed out once and passed later without any change. One test step
+was narrowed: a busy Templates keyboard-scroll test no longer presses PageDown right after Home, because that failed
+intermittently for a reason recorded only as a hypothesis; it still checks scrolling and returning to the top.
+
+#### Fixes made at landing
+
+- SPEC_impl.md said every host row in Hosts always shows its connection dot. The plan hides the dot while a setup,
+  update or uninstall runs, when the progress line below the host's name takes its place, and the plan's tests already
+  expect that. The sentence now says so. Nothing else changed.
+
+#### Things you should know
+
+- Two failures stay out of sight while Hosts is closed, outside what your decision covered: an Add from the strip whose
+  reply was lost before any host appeared (there is no icon to mark; its notice is in the Hosts panel), and a failed
+  uninstall (deliberately not marked). Both show when Hosts is opened. A possible follow-up if you want them visible
+  too.
+- The warning is kept by a new UI module of about 760 lines behind one dot: well tested and reviewed, but more code to
+  maintain than the dot suggests.
+- The docs website's pages and the docs screenshots (first session, manage hosts, session list, add a remote host, send
+  feedback) still show the old sidebar; they change with "refresh the docs" and "refresh the docs screenshots".
+
+#### Checks
+
+This round landed only this plan. It ran, on the stack as delivered, before the one-sentence specification fix:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`,
+  `cargo check -p farhelm-desktop`, the check that every test delay states its reason, `dprint check` across the
+  repository, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (two warnings, both
+  about citations main already had), the workspace debug build, the UI's release web build and
+  `scripts/check-desktop-assets.sh` (the desktop app bundles exactly the files the web UI asks for): all passed.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `0bdae104-7c3e-4b03-bf07-53ae478f89da`: all 805 passed;
+  its desktop-build tests, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `fb61449e-3ccc-4b93-aead-ec86730527a2`: all 986 passed. The UI's JavaScript and stylesheet tests (`node --test` in
+  `crates/farhelm-ui/js-tests`), run `e2e109c1-99b1-466c-80b4-e9609c1e9a45`: 358 passed.
+- `npx playwright test` in `e2e/` with the 19 browser spec files this delivery changed since the first landing attempt
+  (among them the sidebar, Templates dialog, multi-host, settings, tooltip, notification, dialog and terminal-link
+  specs, and the new host warning spec), on Chromium and WebKit, three workers each with its own helm and supervisors,
+  no retries, run `329048ca-b554-4f63-9353-233a34c07814`: all 860 passed.
+- Reused, with a caveat: no single version of this plan passed every browser test in one run. The spec files above
+  passed at the landed tip. Every other spec file last ran in the executor's whole-suite run, split into two batches
+  that together hold every test on both engines: run `94504147-0bc1-47bd-b14c-1bd1d9d511bf` passed all 1339 of its
+  tests, and run `ea779e79-d750-4bb6-bb4e-9ed32faee243` passed 1412 and failed one WebKit Templates focus test, which
+  the executor then fixed in the test and repeated narrowly (it passed again in the run above). Those batches ran on the
+  executor's uncommitted working version; per the report, it differs from what landed only in that test fix, its
+  flake-log entry and four unrelated review-queue files from a rebase. The monitor could not compare the two byte for
+  byte, because the executor's checkout has moved on.
+- Skipped: the rest of the Rust workspace (only the UI crate changed, and only the desktop app depends on it), a full
+  browser run on the exact tip (the caveat above), the desktop smoke tests (the plan changes the title band's layout in
+  the desktop window, which those tests do not inspect) and the native Mac app (not runnable here). The specification
+  fix at landing changes one sentence of text and needs no runtime test; `dprint check SPEC_impl.md` passed after it.
+
+The macOS title band, window controls and window dragging were judged from code and a forced web layout only, as the
+report says. Nothing else in the executor's report became untrue at landing.
