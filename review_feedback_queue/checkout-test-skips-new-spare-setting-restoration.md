@@ -36,3 +36,26 @@ question before commissioning a broader cleanup sweep.
 Provenance: trailing-review run `30f46c42-a021-475f-96a8-eac06930471b`, `g018/f2`, found in discovery pass 2. Auditor
 `g045` independently noticed the sequential caller but treated it as the neighboring historical concern; the new shared
 switch is the retained remainder.
+
+## Confirmation-setting instance
+
+Reviewed commit: 3bc9f87d59ba9b9c44ad2987e3aa16bbb365a852
+
+The new disabled-chrome browser test adds the same caller-orchestration gap for the shared session-confirmation
+preference. `e2e/tests/chrome.spec.ts:97` writes `skip_session_confirmations=false`; its sequential `finally` awaits
+`cleanupSession` before restoration (`114–116`). That helper throws on an unsuccessful response
+(`helpers/fleet.ts:556–565`), preventing the restoration request. The worker's test fixture does not reset preferences
+between these tests (`helpers/evidence.ts:31–65`). This remains present at review tip
+`98bb15850f5f5ba1df6ed66873338261c45ff948`.
+
+Suggested bucket remains **other**. Confidence: **confirmed conditional cleanup omission**. Effective contamination
+requires an incoming true preference; no normal runner history supplying it was established. Incoming false or unset
+keeps the same effective confirmation mode. Failure frequency was not measured, and no production loss is claimed.
+
+Possible cover: tip ledger `14449–14477,17199–17216` names other test blocks. The newer checkout-specific decision
+(`20338–20351`) says to fix observed flakes, with an exception for an obvious trivial fix within about 30 lines. This
+new instance has the existing independent-cleanup or nested-finally shape. The decision's scope over this new test
+remains a triage question; this extension does not alter its pending execution or reopen a broad cleanup sweep.
+
+Provenance: trailing-review run `47edc805-f43c-4ef2-abb1-0bba27a41c2f/review-98bb1585`, `g034/f1`. Neighbor `g035`
+verified that its separate buttons test already uses nested `finally` and does not share this omission.

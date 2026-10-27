@@ -166,7 +166,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   FIFO release can block after its reader exits; the standard runner supplies only an outer timeout.
 
 - [`checkout-test-skips-new-spare-setting-restoration.md`](checkout-test-skips-new-spare-setting-restoration.md) — An
-  earlier caller-cleanup failure can skip restoring the new prepared-checkout switch; historical coverage remains
+  earlier caller-cleanup failure can skip restoring the prepared-checkout switch or the new chrome test's confirmation
+  preference; effective confirmation contamination needs an incoming true value, and decision coverage remains
   ambiguous.
 
 - [`tunnel-consent-conflicts-with-restart-dialog.md`](tunnel-consent-conflicts-with-restart-dialog.md) — Tunnel consent
@@ -565,3 +566,32 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`matching-restart-template-model-normalizes-historical-permissions.md`](matching-restart-template-model-normalizes-historical-permissions.md)
   — A template repeating the current agent and model can change a session's historical agent-owned permission setting to
   Guarded without containing a permission edit, making an otherwise unchanged Restart draft count as edited.
+
+- [`selected-template-state-contrast.md`](selected-template-state-contrast.md) — Dark appearance gives the selected
+  template a weak persistent state indicator; the approved palette's coverage remains ambiguous.
+
+- [`selected-template-shortcut-contrast.md`](selected-template-shortcut-contrast.md) — A selected quick-launch
+  template's keyboard hint keeps muted ink, leaving little contrast against its filled background.
+
+- [`light-appearance-darkens-terminal-catchup.md`](light-appearance-darkens-terminal-catchup.md) — Light appearance
+  darkens catch-up prose while its terminal background stays dark; display duration is unmeasured.
+
+- [`selected-session-inverse-ink-on-light-controls.md`](selected-session-inverse-ink-on-light-controls.md) — A selected
+  session's menu errors become white on white, and its actions toggle keeps white dots on pale hover/focus backgrounds.
+
+- [`header-confirmation-lowers-link-refusal.md`](header-confirmation-lowers-link-refusal.md) — A header confirmation
+  lowers a safely refused link's explanation beneath unrelated covers; exact overlap is unmeasured.
+
+- [`effort-catalog-replaces-focused-control.md`](effort-catalog-replaces-focused-control.md) — An arriving model catalog
+  can replace the focused effort buttons with a dropdown; the next key is consumed without restoring effort focus.
+
+- [`delayed-appearance-event-overrides-local-choice.md`](delayed-appearance-event-overrides-local-choice.md) — An older
+  cross-page notification can undo a newer local theme choice; browser frequency and filter coverage remain uncertain.
+
+- [`restart-trust-discards-observed-canonical-folder.md`](restart-trust-discards-observed-canonical-folder.md) — Restart
+  trust discards its lookup's canonical folder. An alias round trip exposes a conditional mismatch, but an ordinary
+  accidental producer and in-scope trust-boundary harm remain unestablished.
+
+- [`late-reporter-preparation-capture-conflict.md`](late-reporter-preparation-capture-conflict.md) — A reporter failure
+  arising only during named restart can retain the previous conversation. Broad tracking-failure acceptance and the
+  specific preparation-clearing promise conflict; no healthy concurrent-publication trigger is established.
