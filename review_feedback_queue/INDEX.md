@@ -25,11 +25,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
 
-- [`named-restart-reporter-failure-keeps-old-resume.md`](named-restart-reporter-failure-keeps-old-resume.md) — A
-  successful named Pi or OMP restart can keep the previous conversation when preparing its reporter fails. A later
-  ordinary Restart can then resume that previous conversation. The conditional source route is established; occurrence
-  is unmeasured.
-
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An

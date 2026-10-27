@@ -11599,6 +11599,19 @@ impl Supervisor {
         // be created instead; the driver's session-paired target remains
         // the cross-session safety barrier either way.
         let terminal_survives = pane_state.is_some();
+        // Asset-backed reporters must be usable before the transaction chooses
+        // to retain a capture. Spawn verifies the same asset again for injection;
+        // its warning-and-continue fallback cannot repair a retained old target.
+        let reporter_failed = if named_start.is_some()
+            && let Some(asset) = crate::pi_extension::reporter_asset(snapshot.kind)
+                .filter(|_| self.seams.agent_hooks.allows(snapshot.kind))
+        {
+            crate::pi_extension::materialize_asset(&self.state_dir, &asset)
+                .await
+                .is_err()
+        } else {
+            false
+        };
         // Keep the old capture only while a report can replace it; otherwise a
         // later plain Restart would reopen the old conversation indefinitely.
         let clear_capture = named_start.is_some()
@@ -11608,6 +11621,7 @@ impl Supervisor {
                 .agent_selection()
                 .is_some_and(|selection| {
                     !selection.harness.captures_named_conversation()
+                        || reporter_failed
                         || self
                             .seams
                             .agent_hooks
@@ -20881,7 +20895,8 @@ pub(crate) mod tests {
     /// then succeeding against the restored capture.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn named_goose_restart_clears_live_capture_and_restores_it_on_definitive_failure() {
-        named_restart_clears_and_restores_capture(LaunchHarness::Goose, Default::default()).await;
+        named_restart_clears_and_restores_capture(LaunchHarness::Goose, Default::default(), false)
+            .await;
     }
 
     /// A reporting harness whose reporter the hooks opt-out silences must take
@@ -20890,14 +20905,32 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn named_restart_clears_capture_when_hooks_silence_the_harness() {
         let hooks = crate::agent_kind::AgentHooks::None;
-        named_restart_clears_and_restores_capture(LaunchHarness::Claude, hooks).await;
+        named_restart_clears_and_restores_capture(LaunchHarness::Claude, hooks, false).await;
     }
 
-    /// The shared body of the two tests above, for a harness whose named
-    /// Restart with must clear the old capture.
+    /// A Pi extension collision must withdraw the old Resume target even though
+    /// Restart with succeeds; waiting for a report cannot work without its asset.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn named_pi_restart_clears_capture_when_reporter_preparation_fails() {
+        named_restart_clears_and_restores_capture(LaunchHarness::Pi, Default::default(), true)
+            .await;
+    }
+
+    /// OMP uses its own reporter asset, but must take the same transactional
+    /// clear/restore path when that artifact cannot be prepared for a named start.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn named_omp_restart_clears_capture_when_reporter_preparation_fails() {
+        named_restart_clears_and_restores_capture(LaunchHarness::Omp, Default::default(), true)
+            .await;
+    }
+
+    /// Exercise both rollback and successful publication for a named start that
+    /// cannot replace the old capture by reporting. An optional exact-byte asset
+    /// collision models preparation failure without changing the process environment.
     async fn named_restart_clears_and_restores_capture(
         harness: LaunchHarness,
         agent_hooks: crate::agent_kind::AgentHooks,
+        fail_reporter: bool,
     ) {
         let state = StateDir::new();
         // This existing fixture pattern supplies a live pane without an
@@ -20964,8 +20997,97 @@ pub(crate) mod tests {
             )
             .await
             .expect("create agent session");
-        sup.record_conversation_for_test(&created.id, TEST_CONVERSATION)
+        let captured = if fail_reporter {
+            // Locator-reporting kinds need an exact saved target, and OMP
+            // also requires ownership provenance. Seed that admitted state;
+            // this fixture tests relaunch, not the vendor attribution proof.
+            let file = state.path().join("old-conversation.jsonl");
+            std::fs::write(
+                &file,
+                format!("{{\"type\":\"session\",\"version\":3,\"id\":\"{TEST_CONVERSATION}\"}}\n"),
+            )
+            .expect("write the old conversation record");
+            let captured = crate::agent_kind::encode_locator(
+                crate::agent_kind::locator_vendor(harness.agent_kind())
+                    .expect("reporter fixture has a typed locator"),
+                crate::agent_kind::SessionLocator {
+                    version: 1,
+                    session_id: TEST_CONVERSATION.into(),
+                    session_file: Some(file.to_str().expect("UTF-8 fixture path").into()),
+                },
+            )
+            .expect("encode the old conversation locator");
+            let row = sup.store.session(&created.id).await.unwrap().unwrap();
+            assert!(
+                sup.store
+                    .admit_ownership_proven_conversation(
+                        &created.id,
+                        row.generation,
+                        None,
+                        0,
+                        &captured,
+                    )
+                    .await
+                    .expect("seed admitted conversation provenance")
+            );
+            captured
+        } else {
+            TEST_CONVERSATION.into()
+        };
+        sup.record_conversation_for_test(&created.id, &captured)
             .await;
+        let ready = sup.session_snapshot(&created.id).await.unwrap().unwrap();
+        assert_eq!(ready.restart_offer, farhelm_proto::RestartOffer::Resume);
+        if fail_reporter {
+            sup.verify_report_only_resume(&created.id, &ready)
+                .await
+                .expect("fixture premise: the old exact record is resumable");
+        }
+        let named = farhelm_proto::NamedConversationStart {
+            conversation: "named-target".into(),
+            argv: IntegrationSnapshot::of(&launch)
+                .filled_named_resume_argv("named-target")
+                .expect("named resume argv"),
+        };
+        if fail_reporter {
+            // A healthy reporter keeps the prior capture until a report replaces
+            // it. Establish the positive case before disabling this same asset.
+            sup.restart_session_named(
+                &created.id,
+                true,
+                Some(launch.clone()),
+                None,
+                Some(named.clone()),
+            )
+            .await
+            .expect("named restart with a healthy reporter");
+            assert_eq!(
+                sup.store
+                    .session(&created.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .captured_conversation
+                    .as_deref(),
+                Some(captured.as_str()),
+                "a usable reporter must keep the old capture until a new report"
+            );
+            let asset = crate::pi_extension::reporter_asset(harness.agent_kind())
+                .expect("fixture harness has a reporter asset");
+            let artifact = state
+                .path()
+                .join("integrations")
+                .join(asset.directory)
+                .join(asset.file_name);
+            std::fs::write(artifact, b"not the expected reporter bytes")
+                .expect("replace fixture reporter");
+            assert!(
+                crate::pi_extension::materialize_asset(state.path(), &asset)
+                    .await
+                    .is_err(),
+                "fixture premise: reporter preparation must fail before restart"
+            );
+        }
         let before = sup.store.session(&created.id).await.unwrap().unwrap();
         let entry = sup.sessions.lock().await[&created.id].clone();
         let agent = entry.terminal.as_ref().expect("agent terminal");
@@ -20978,21 +21100,14 @@ pub(crate) mod tests {
         );
         assert_eq!(
             before.captured_conversation.as_deref(),
-            Some(TEST_CONVERSATION)
+            Some(captured.as_str())
         );
         assert_eq!(before.conversation_source.as_deref(), Some("hook"));
         assert_eq!(
             entry.run.capture.lock().unwrap().committed_conversation(),
-            Some(TEST_CONVERSATION),
+            Some(captured.as_str()),
             "fixture premise: the old capture exists in memory"
         );
-        let named = farhelm_proto::NamedConversationStart {
-            conversation: "named-target".into(),
-            argv: IntegrationSnapshot::of(&launch)
-                .filled_named_resume_argv("named-target")
-                .expect("named resume argv"),
-        };
-
         // A launch-spec collision happens after begin_relaunch cleared
         // capture, before tmux can spawn. The advanced generation below
         // distinguishes rollback from a refusal during admission.
@@ -21025,7 +21140,7 @@ pub(crate) mod tests {
         let restored_entry = sup.sessions.lock().await[&created.id].clone();
         {
             let capture = restored_entry.run.capture.lock().unwrap();
-            assert_eq!(capture.committed_conversation(), Some(TEST_CONVERSATION));
+            assert_eq!(capture.committed_conversation(), Some(captured.as_str()));
             assert_eq!(
                 capture.committed_ownership_version(),
                 Some(before.capture_ownership_version)
@@ -21066,6 +21181,11 @@ pub(crate) mod tests {
             listed.restart_offer,
             farhelm_proto::RestartOffer::NotCaptured
         );
+        let refusal = sup
+            .restart_session(&created.id, true, None, None)
+            .await
+            .expect_err("plain Restart must not reopen the old conversation");
+        assert!(format!("{refusal:#}").contains("this session cannot be restarted"));
     }
 
     /// A tmux process can forge the agent marker on a user tab, so that
