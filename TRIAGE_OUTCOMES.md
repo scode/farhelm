@@ -18808,7 +18808,10 @@
   same path. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over it, block and bring it back, keeping the 2026-10-18 complexity gate. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/restart-with-trust-identity.md`.
+- Execution: change `kqyyqmztkytltoysnxtptskqlyxlonvt`, bookmark
+  `plan/restart-with-trust-identity/01-restart-with-identity-check`. Restart with now uses the existing identity-checked
+  ownership read; the scripted-peer test covers a borrower's stale membership after folder replacement. The size gate
+  held. Draft PR [#2738](https://github.com/scode/farhelm/pull/2738/changes).
 
 ## template-retry-installs-unseen-permanent-delete.md
 

@@ -97,8 +97,8 @@ pub(crate) async fn normalize_launch_workspace_trust(
 /// Resolve the setting into the selection while preserving non-trust argv.
 /// Fresh creates use this with their root/hook snapshot; approved agent
 /// launches use it once before the card and carry that result to dispatch.
-/// Restart with supplies membership from its owner's live session row because
-/// that operation cannot change cwd. Commands retain their literal words.
+/// Restart with checks ownership for its live session's fixed cwd through the
+/// same identity-checked read as New. Commands retain their literal words.
 pub(crate) fn configured_launch_workspace_trust(
     launch: SessionLaunch,
     config: &crate::checkout_config::ResolvedCheckoutConfig,
