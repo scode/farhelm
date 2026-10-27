@@ -492,3 +492,73 @@ the TODO.md entry; `steel-sentence-case.md` does, last. Open, not merged. If a `
 entry must also be satisfied. Then close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and
 12): deliver its report through the queue script, write a closing entry in its log, and stop the watchdog. Never edit
 `plans/` yourself.
+
+## Blocked
+
+Blocked while landing on 2026-10-27 (claim f494b4).
+
+### Landing stopped: the Steel sidebar breaks a large part of the browser test suite
+
+The landing monitor did not merge this plan. None of its three PRs (#2747, #2749, #2750) has merged, and main holds
+nothing of it. The plan restyles the sidebar for Steel: the sort order as its title, a status filter, a strip of host
+icons in place of the host dropdown, and a Hosts panel that replaces the session list on demand.
+
+Its executor ran selected browser tests only. At landing, the whole browser suite (`npx playwright test`, Chromium and
+WebKit, no retries) ran against this plan on current main, with nothing else landing, in run
+`16973617-dd51-4313-891b-be8e2005229e`: 2593 passed, 131 failed (61 on Chromium, 70 on WebKit), 14 skipped and 6 did not
+run. A fresh-context review found the main cause before the run finished. In product terms:
+
+- New and Templates were renamed for screen readers and tests: New from "new session" to "New session", and Templates
+  from a text button to an icon named "Templates". Tests in files the plan did not touch still look for the old names.
+  This accounts for about 80 of the 131 failures: most of the Templates dialog spec (26 of its 43 tests), template
+  shortcuts and popovers, custom permissions, dialog layout and focus-trap tests, a notification test, and the check
+  that every sidebar control has hover text (which also needs to go back from Hosts to Sessions first). These look like
+  tests not following an intended change.
+- Four sidebar tests the plan rewrote or added fail on both engines: the Hosts panel swap, the host count beside the
+  sort title, the narrow-row layout and renaming a remote host. Run alone afterwards on Chromium, all but the host count
+  failed again (run `cb359043-ca70-41af-ae4f-111d94a7d639`), so those three are not load. These are the plan's own
+  checks of its own design, so either the code or the tests are wrong; which is not established.
+- Eleven multi-host tests fail on each engine. About half wait for host rows or host controls that now live in the Hosts
+  panel, which is closed by default (the host phase table, inline update and uninstall progress). The others (host
+  colors redrawing rows, removing and re-adding a host, an unreachable host going stale, creating a session on a chosen
+  or unreachable host) fail waiting on session rows or time out; why is not established.
+- Tests about the Settings gear and the help menu fail their geometry premises, since the plan moved them into the host
+  strip: the gear beside a long version, the help menu's position, and a tooltip at the top edge.
+- A WebKit test of mouse modes after reattaching needs a terminal wider than 101 columns and got exactly 101: the plan
+  widens the default sidebar from 340 to 396 pixels.
+- Also failing, cause not established: the keyboard-focus colors test (on both engines; the plan changed that spec and
+  adds accent-filled controls), a WebKit test of a host menu closing on a late settings refusal (a spec the plan also
+  changed), and a Chromium test of a delete the supervisor refuses, which expected the session's state to read "exited"
+  and saw "error".
+- Several WebKit-only failures (managed checkouts, the event feed with a host choice, a sort with a host, launch
+  refusal, a wrapped link) came after a shared fake remote host on one test stack became unreachable; three of them
+  report that host as unreachable, the others only time out waiting for terminal output. A failing multi-host test that
+  removes and re-adds a host probably left it that way; these are likely knock-on failures, not separate defects.
+- One failure is the known open flake about a browser tab opened unaware of a takeover. The landing's other checks all
+  passed apart from one known flaky unit test about a hung settings save.
+
+The review also found one sentence in SPEC.md that the plan did not update: the header order is now Trash, Templates,
+New, but SPEC.md still says the Trash button sits immediately left of New.
+
+Each of these needs a judgment between "the test was not updated for an intended change" and "the restyle broke
+something", across a change to the whole sidebar. That is the plan's own work rather than a landing fix.
+
+One design question the plan does not answer, and which the executor needs from you: when a host's setup or update fails
+(or ends with an uncertain result) while the Hosts panel is closed, the strip keeps the host's connection state and
+update badge but shows no sign of the failure. The progress ring disappears and the reason sits in the closed panel,
+which never opens on its own. Before this plan, the failure showed in the always-visible host list.
+
+### What should happen to this plan?
+
+- **Send it back to its executor (recommended).** Answer with: run the whole browser suite on both engines against the
+  stack; update the tests that still use the old New and Templates names or expect host rows without opening Hosts; fix
+  the four failing sidebar tests, or the code they catch; find why the other failures above happen and fix the product
+  or the test; adjust the gear, help-menu, tooltip and terminal-width premises to the new layout; fix the SPEC.md
+  sentence; and say in the report which failures were test updates and which were product fixes. Also say how a failed
+  host setup or update should show while Hosts is closed. Recommended: a warning mark on the host's icon, like the
+  existing unreachable warning dot, that stays until Hosts is opened or a later run of that action succeeds. The
+  alternative is opening Hosts by itself when such a run fails, which replaces the session list without the user asking.
+  The later Steel plans for the session toolbar and dialogs do not wait on this one; the sentence-case plan does.
+- **Land it now and fix the failures afterwards.** Main would carry 60 to 70 failing browser tests per engine until a
+  follow-up lands, and every other plan's landing checks would have to work around them.
+- **Abandon it and re-plan the sidebar.** Only worth it if the approach itself is wrong; nothing here suggests that.
