@@ -494,3 +494,72 @@ fn template_host_pinned(page: &mut Page, form: super::dom::NodeId) -> Option<&'s
     page.click(page.role_in(panel, "button", "cancel"));
     checked
 }
+
+/// Port of `e2e/tests/custom-permissions.spec.ts`, "custom model acceptance
+/// keeps compatible effort with incomplete permission flags": with Claude
+/// and the Custom permission chosen, an unfinished flags draft (empty, or an
+/// unclosed quote) keeps Launch disabled; committing a custom model with
+/// Enter keeps both the pressed effort and the flags draft.
+///
+/// Why: an unfinished permission editor must not make a supported effort
+/// look incompatible with a custom model, and must not be silently
+/// discarded; both drafts stay repairable.
+#[farhelm_testtrace::test]
+async fn a_custom_model_keeps_the_effort_and_an_unfinished_flags_draft() {
+    let helm = FakeHelm::start().await;
+    fixtures::idle_helm(&helm);
+    let mut page = Page::app(&helm);
+    let form = open_launcher(&mut page).await;
+    let harness = page.one_in(form, ".launch-composer-harness-choice");
+    page.click(page.role_in(harness, "button", "Claude"));
+    let permissions = page.one_in(form, ".launch-composer-permissions-choice");
+    page.click(page.role_in(permissions, "button", "custom"));
+    let flags = page
+        .wait_for(".create-session-form .custom-permission-flags")
+        .await;
+    // Claude's default plus five explicit levels use the shared native
+    // dropdown; choosing through it must keep the same draft a short effort
+    // row would.
+    let effort = page.role_in(form, "combobox", "effort");
+    let model = page.role_in(form, "combobox", "model");
+    let launch = page.one_in(form, ".create-session-submit");
+    // Playwright's `toBeDisabled` counts `aria-disabled` too.
+    let launch_disabled = |p: &Page| {
+        p.dom().attr(launch, "disabled").is_some()
+            || p.dom().attr(launch, "aria-disabled") == Some("true")
+    };
+    for (round, draft) in ["", "--mode '"].into_iter().enumerate() {
+        page.input(flags, draft);
+        page.select_option(effort, "high");
+        assert_eq!(page.dom().attr(effort, "value"), Some("high"));
+        assert!(
+            launch_disabled(&page),
+            "an unfinished flags draft keeps Launch disabled"
+        );
+        // A distinct id per round: only a closed model field proves Enter
+        // committed it, and a reused id could pass on the earlier commit.
+        let id = format!("private-permission-test-model-{round}");
+        page.input(model, &id);
+        page.wait_until("the model field open", |p| {
+            (p.dom().attr(model, "aria-expanded") == Some("true")).then_some(())
+        })
+        .await;
+        page.key(model, "Enter");
+        page.wait_until("the model field closed", |p| {
+            (p.dom().attr(model, "aria-expanded") == Some("false")).then_some(())
+        })
+        .await;
+        assert_eq!(page.dom().attr(model, "value"), Some(id.as_str()));
+        assert_eq!(
+            page.dom().attr(effort, "value"),
+            Some("high"),
+            "the effort survives the custom model"
+        );
+        assert_eq!(
+            page.dom().attr(flags, "value"),
+            Some(draft),
+            "the flags draft survives"
+        );
+        assert!(launch_disabled(&page));
+    }
+}

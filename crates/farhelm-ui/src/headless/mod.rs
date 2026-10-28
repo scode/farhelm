@@ -55,6 +55,8 @@ pub mod server;
 mod harness_tests;
 mod hosts_tests;
 mod launcher_tests;
+mod templates_tests;
+mod trash_tests;
 
 use dioxus::core::{ElementId, Event};
 use dioxus::html::{
@@ -310,6 +312,26 @@ impl Page {
             found => panic!(
                 "{}",
                 self.failure(&format!("expected one {selector:?}, found {}", found.len()))
+            ),
+        }
+    }
+
+    /// Exactly one match for `selector` under `scope` that is not hidden:
+    /// Playwright's `:visible`, as far as a DOM without CSS can tell.
+    pub fn one_visible_in(&self, scope: NodeId, selector: &str) -> NodeId {
+        let found: Vec<NodeId> = self
+            .select(scope, selector)
+            .into_iter()
+            .filter(|&n| !self.hidden(n))
+            .collect();
+        match found.as_slice() {
+            [one] => *one,
+            _ => panic!(
+                "{}",
+                self.failure(&format!(
+                    "expected one visible {selector:?}, found {}",
+                    found.len()
+                ))
             ),
         }
     }
@@ -583,6 +605,43 @@ impl Page {
                 SerializedFocusData::default(),
             )));
             self.dispatch(node, name, data);
+            self.render();
+        }
+    }
+
+    /// Choose `value` in a `<select>`: the browser's `input` then `change`,
+    /// both carrying the new value. The option must exist, as Playwright's
+    /// `selectOption` requires, so a renamed or removed choice fails here.
+    ///
+    /// A disabled select refuses, as [`Page::click`] does: a browser never
+    /// lets a person change one, so a port that could would pass where its
+    /// browser original fails.
+    pub fn select_option(&mut self, node: NodeId, value: &str) {
+        assert!(
+            self.dom.is_attached(node),
+            "{}",
+            self.failure("select on a detached node")
+        );
+        assert!(
+            self.dom.attr(node, "disabled").is_none(),
+            "{}",
+            self.failure(&format!(
+                "select on a disabled control: {}",
+                self.describe(node)
+            ))
+        );
+        let offered = self
+            .select(node, "option")
+            .into_iter()
+            .any(|o| self.dom.attr(o, "value") == Some(value));
+        assert!(
+            offered,
+            "{}",
+            self.failure(&format!("no option {value:?} in {}", self.describe(node)))
+        );
+        for name in ["input", "change"] {
+            let data = SerializedFormData::new(value.to_owned(), Vec::new());
+            self.dispatch(node, name, Rc::new(PlatformEventData::new(Box::new(data))));
             self.render();
         }
     }
