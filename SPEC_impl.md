@@ -586,20 +586,39 @@ The two split menus use the shared menu anatomy, focus queue, keyboard handling 
 family per session view. Their absolute below-caret placement follows toolbar layout without a separate async
 measurement lifecycle. Main halves and repeated plain menu choices call the same lifecycle-admission callbacks; opening
 a menu takes no claim. Restart with keeps its independent availability and accessible explanation. The launcher returns
-to the persistent caret rather than its unmounted menu entry. The tab strip shrinks into the remaining width and scrolls
-horizontally. The app's 320px main-pane floor is unchanged; between those widths the row may clip its trailing actions
-rather than wrapping or hiding them. The restart confirmation became a popover anchored under the button that opened it,
-still confirm-in-place with focus on the enabled confirming answer (Cancel while disabled); the consequence sentence
-they lead with is the one line standing between a click and a killed process tree, and a header that kept it in flow
-would have to either wrap or truncate it. Header Replace has a separate anchored confirmation state so it cannot
-accidentally open the interrupted card's confirmation. The top row owns their Escape handler alongside the action
-buttons; keyboard order is top row, terminal, then bottom bar. Everything conditional — a refused restart's prose, the
-last-known-status band and the "helm stopped listing this session" line — is still a full-width band, because a band
-that only appears when it has something to say costs the steady state nothing. These notices, the interrupted card,
-trust hint and tab errors remain between the top row and terminal, followed by the desktop tunnel strip. A classified
-status renders in at most one place: the bottom bar normally, the stale notice's own metadata band for a stale session
-(where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere at all for a session nothing has
-classified yet.
+to the persistent caret rather than its unmounted menu entry. The native tunnel pill has a bounded width beside the
+tabs, outside their terminal-presence condition and stale/inert subtree; together with the action group it stays visible
+at 650px. The tab strip shrinks into the remaining width and scrolls horizontally. The app's 320px main-pane floor is
+unchanged; between those widths the row may clip its trailing actions rather than wrapping or hiding them. The restart
+confirmation became a popover anchored under the button that opened it, still confirm-in-place with focus on the enabled
+confirming answer (Cancel while disabled); the consequence sentence they lead with is the one line standing between a
+click and a killed process tree, and a header that kept it in flow would have to either wrap or truncate it. Header
+Replace has a separate anchored confirmation state so it cannot accidentally open the interrupted card's confirmation.
+The top row owns their Escape handler alongside the action buttons; keyboard order is top row, terminal, then bottom
+bar. Everything conditional — a refused restart's prose, the last-known-status band and the "helm stopped listing this
+session" line — is still a full-width band, because a band that only appears when it has something to say costs the
+steady state nothing. These notices, the interrupted card, trust hint and tab errors remain between the top row and
+terminal. A classified status renders in at most one place: the bottom bar normally, the stale notice's own metadata
+band for a stale session (where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere at all for
+a session nothing has classified yet.
+
+The desktop tunnel owner stays mounted even with no listeners, preserving its controller generation, feed/backstop
+reader and raw terminal-hover metadata bridge. Only its pill disappears at zero listeners. A dedicated teal role in each
+palette distinguishes local listeners from host status; the open disclosure uses the shared accent. Content-sized tabs
+keep the pill beside the last tab at wide widths. With a pill present, tighter horizontal action spacing preserves a
+useful tab scrollport at the 650px floor; only the escaped host field yields within the bounded mapping. Both ports stay
+fixed, and multiple listeners show a count. Its popup uses the shared menu header and separator around an ordinary list
+with native close buttons, not a dynamic command-menu navigation framework. Escape returns focus to the pill; Tab
+leaving and outside-pointer dismissal preserve newer focus. Removing a focused last listener returns to an enabled,
+non-inert Restart caret or bottom-bar copy control.
+
+One synchronous close claim excludes overlapping individual and batch closes. Close all snapshots listener IDs, calls
+the existing close endpoint serially, removes acknowledged successes and attempts the remainder after a refusal, then
+requests an authoritative refresh. Action failures retain the attempted mappings until Dismiss or a later successful
+action; successful reads clear only read failures. Both error channels share one conditional notice inside the open
+list, or anchored below the top row when the list is closed or absent. It survives a vanished pill without taking
+terminal height in the steady state. The popup and notice declare terminal-link coverage; the global tunnel error notice
+and consent controller are unchanged.
 
 An unavailable session uses one accent card over the terminal scrim, sharing Delete's card geometry and spinner.
 `hosts::session_unavailable_cause` maps the existing host read to a stable phrase for both row densities and the card;
@@ -5982,14 +6001,14 @@ card's answer handlers retain its random approval ID.
 
 The approval region stays beside the shell so modal isolation leaves it live. While mounted, its small geometry observer
 follows the actual main-pane rectangle and the terminal area's top, falling back to the top row's bottom when no
-terminal surface is shown. Anchoring below the conditional bands and tunnel strip keeps approval cards from covering
-notices or tunnel chips. This accounts for sidebar width, narrow-window shell scrolling, native top chrome, and
-conditional notices without fixed offsets. Width is capped at 660px with 12px margins; the whole region's height is
-capped at 55% of the pane and at the space remaining below its top. Below 44px of available height it instead uses the
-whole viewport, keeping answer controls scrollable even when session chrome exhausts the pane. Pane, sidebar and chrome
-sizes and direct chrome structure are observed, not terminal output mutations; listeners and observers are released when
-the region leaves the DOM. Sidebar size is an input even at the pane's minimum width, where a resize moves the pane
-without changing its size.
+terminal surface is shown. Anchoring below the top row and conditional bands keeps approval cards from covering those
+in-flow notices. Floating tunnel surfaces independently declare terminal-link coverage. This accounts for sidebar width,
+narrow-window shell scrolling, native top chrome, and conditional notices without fixed offsets. Width is capped at
+660px with 12px margins; the whole region's height is capped at 55% of the pane and at the space remaining below its
+top. Below 44px of available height it instead uses the whole viewport, keeping answer controls scrollable even when
+session chrome exhausts the pane. Pane, sidebar and chrome sizes and direct chrome structure are observed, not terminal
+output mutations; listeners and observers are released when the region leaves the DOM. Sidebar size is an input even at
+the pane's minimum width, where a resize moves the pane without changing its size.
 
 "A GUI is connected" means at least one subscriber to the fleet invalidation feed, which every GUI holds open for its
 whole life and which the cards rely on to appear without a reload. The desktop app's process ends when its window closes

@@ -128,6 +128,9 @@ const REQUIRED_BINDINGS = [
   ...SELECTED_SURFACES.flatMap((bg) => [["--on-fill", bg, 4.5], ["--on-accent-dim", bg, 4.5]]),
   ["--on-fill", "--danger-bg", 4.5],
   ["--on-fill", "--danger-fill-hover", 4.5],
+  // Tunnel mappings are technical text on their own teal surface. That
+  // independent role needs the same readable floor as ordinary chrome.
+  ["--tunnel-fg", "--tunnel-bg", 4.5],
 ];
 
 /**
@@ -294,6 +297,8 @@ const SHIPPED_ROLE_BINDINGS = [
   [".launch-composer-launch-context", "color", "var(--on-accent-dim)"],
   [".claude-trust-band", "background", "var(--bg-2)"],
   [".claude-trust-band-copy strong", "color", "var(--info)"],
+  [".session-tunnel-toggle", "background", "var(--tunnel-bg)"],
+  [".session-tunnel-toggle", "color", "var(--tunnel-fg)"],
 ];
 
 /** Report missing or misrouted role declarations without trusting token names.

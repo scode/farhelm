@@ -3,15 +3,23 @@
 //! The helm remains authoritative. This controller prevents a stale terminal or
 //! expired card from continuing after a warning, and never opens a URL itself:
 //! the native opener belongs to the helm's tunnel operation.
+//!
+//! The session-owned listener pill retains that controller lifetime at zero
+//! listeners and while offline. Its own read and close errors stay separate:
+//! observing a fresh list is not acknowledgement of a failed close.
 
 use dioxus::prelude::*;
 use farhelm_proto::approvals::PendingApproval;
 use futures_channel::oneshot;
 
 use crate::ApiBase;
-use crate::api::{self, SessionTunnels};
+use crate::api::{self, SessionTunnels, TunnelInfo};
 use crate::feed::{fallback_polls_now, fallback_sleep};
+use crate::icons::{ActionGlyph, ActionIcon};
 use crate::list::SharedPreferences;
+use crate::menu_panel::{
+    MenuHeader, MenuSeparator, ROW_MENU_OUTSIDE_RELAY, install_row_menu_outside_dismiss,
+};
 use crate::modal_dialog::{
     DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
 };
@@ -566,17 +574,129 @@ pub(crate) fn TunnelSettings() -> Element {
     }
 }
 
-/// Read and close this session's local resources through the existing feed/backstop discipline.
-/// Kept outside the stale-session inert subtree so offline listeners remain closeable.
+/// Read recovery cannot acknowledge a failed close on the user's behalf.
+/// Both channels share one dismissible notice, including when no pill exists.
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+struct ListenerErrors {
+    read: Option<String>,
+    action: Option<String>,
+}
+
+impl ListenerErrors {
+    /// A fresh list clears only the failed observation, never a close refusal.
+    fn read_succeeded(&mut self) {
+        self.read = None;
+    }
+
+    /// Completing a later action replaces the earlier action's result.
+    fn action_finished(&mut self, failures: Vec<String>) {
+        self.action = (!failures.is_empty()).then(|| failures.join("\n"));
+    }
+}
+
+/// Keep one error copy readable beside the controls that produced it.
+/// The open list contains its notice in its scrollport; closed or absent
+/// pills use the same notice below the top row without spending a steady row.
+#[component]
+fn ListenerErrorNotice(
+    errors: Signal<ListenerErrors>,
+    floating: bool,
+    on_dismiss: EventHandler<()>,
+) -> Element {
+    let errors = errors.read();
+    rsx! {
+        if errors.read.is_some() || errors.action.is_some() {
+            div {
+                class: if floating { "session-tunnel-error" } else { "session-tunnel-error session-tunnel-inline-error" },
+                role: "alert", "data-link-cover": "true",
+                ActionIcon { glyph: ActionGlyph::Warning }
+                div {
+                    if let Some(reason) = errors.read.as_ref() {
+                        p { class: "peer-value", dir: "ltr", "{display_peer(reason)}" }
+                    }
+                    if let Some(reason) = errors.action.as_ref() {
+                        p { class: "peer-value", dir: "ltr", "{display_peer(reason)}" }
+                    }
+                }
+                button { r#type: "button", class: "btn",
+                    onclick: move |_| on_dismiss.call(()), "Dismiss"
+                }
+            }
+        }
+    }
+}
+
+/// Attempt the activated snapshot in order, publishing each successful removal.
+/// A refusal must not prevent later listeners from closing. The injected call
+/// keeps the serial and partial-success contract testable without a native helm.
+async fn close_listeners<F, Fut>(
+    snapshot: Vec<TunnelInfo>,
+    mut close: F,
+    mut removed: impl FnMut(&str),
+) -> Vec<(TunnelInfo, String)>
+where
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    let mut failures = Vec::new();
+    for tunnel in snapshot {
+        match close(tunnel.id.clone()).await {
+            Ok(()) => removed(&tunnel.id),
+            Err(reason) => failures.push((tunnel, reason)),
+        }
+    }
+    failures
+}
+
+/// Return only focus this popup still owns; a newer control or modal always wins.
+/// When the last listener removes its trigger, the stale tab subtree is not a
+/// fallback: use the live Restart caret or an enabled bottom-bar copy control.
+fn return_listener_focus(session: &str, generation: u64, key: &str, removed_id: Option<&str>) {
+    let session = serde_json::to_string(session).unwrap();
+    let key = serde_json::to_string(key).unwrap();
+    let removed = serde_json::to_string(&removed_id).unwrap();
+    document::eval(&format!(
+        r#"requestAnimationFrame(() => {{
+        const key = {key}, removed = {removed};
+        // This existing raw bridge outlives the zero-listener pill, but its
+        // guarded cleanup retires exactly this selected security owner.
+        if (window.farhelmTunnelSessions?.[{session}]?.generation !== {generation}) return;
+        if (document.querySelector('[role="dialog"][aria-modal="true"], [data-host-modal-admitted]')) return;
+        const active = document.activeElement;
+        const owner = active?.closest('[data-row-menu-key]');
+        if (active && active !== document.body) {{
+            if (!owner || !active.closest('.session-tunnel-pill') ||
+                owner.getAttribute('data-row-menu-key') !== key) return;
+            if (removed !== null && active.getAttribute('data-tunnel-id') !== removed) return;
+        }}
+        const usable = el => el && !el.disabled && !el.closest('[inert]') && el.getClientRects().length;
+        const root = [...document.querySelectorAll('.session-tunnel-pill')]
+            .find(el => el.getAttribute('data-row-menu-key') === key);
+        const targets = [root?.querySelector('.session-tunnel-toggle'),
+            document.querySelector('.restart-menu-toggle'),
+            ...document.querySelectorAll('.session-details button')];
+        const target = targets.find(usable);
+        target?.focus({{preventScroll: true}});
+    }});"#
+    ));
+}
+
+/// Read and close session-local listeners without tying them to terminal liveness.
+/// The owner stays mounted beside the tabs at zero listeners and while offline;
+/// only the pill's presentation disappears. Feed, hover metadata and security
+/// generation therefore retain the lifetime they had under the former strip.
 #[component]
 pub(crate) fn TunnelStrip(session: String) -> Element {
     let mut controller = use_context::<TunnelController>();
     let base = use_context::<ApiBase>().0;
     let mut state = use_signal(SessionTunnels::default);
-    let mut error = use_signal(|| None::<String>);
-    let mut closing = use_signal(|| None::<String>);
+    let mut errors = use_signal(ListenerErrors::default);
+    let mut closing = use_signal(|| false);
+    let mut open = use_signal(|| false);
+    let mut focused = use_signal(|| false);
     let surface = use_signal(SurfaceReader::default);
     let generation = use_hook(|| controller.enter_view(&session));
+    let key = format!("header:tunnels:{generation}");
     let read_base = base.clone();
     let read_session = session.clone();
     let read = move || {
@@ -591,11 +711,11 @@ pub(crate) fn TunnelStrip(session: String) -> Element {
                     }
                     controller.preferences.0.write().tunnel_consent = Some(fresh.consent);
                     state.set(fresh);
-                    error.set(None);
+                    errors.write().read_succeeded();
                     true
                 }
                 Err(reason) => {
-                    error.set(Some(reason));
+                    errors.write().read = Some(reason);
                     false
                 }
             }
@@ -642,39 +762,187 @@ pub(crate) fn TunnelStrip(session: String) -> Element {
             "if (window.farhelmTunnelSessions?.[{id}]?.generation === {generation}) delete window.farhelmTunnelSessions[{id}];"
         ));
     });
+    let close_key = key.clone();
+    let close_session = session.clone();
+    let close_popup = use_callback(move |()| {
+        if *open.peek() {
+            open.set(false);
+            if *focused.peek() {
+                return_listener_focus(&close_session, generation, &close_key, None);
+            }
+            focused.set(false);
+        }
+    });
+    let empty_key = key.clone();
+    let empty_session = session.clone();
+    use_effect(move || {
+        if state.read().tunnels.is_empty() {
+            if *open.peek() {
+                open.set(false);
+            }
+            if *focused.peek() {
+                return_listener_focus(&empty_session, generation, &empty_key, None);
+            }
+            focused.set(false);
+        }
+    });
+    let action_key = key.clone();
+    let dismiss_session = session.clone();
+    let on_close = use_callback(move |snapshot: Vec<TunnelInfo>| {
+        // Admission is synchronous: native event delivery may have queued a
+        // second activation before disabled attributes reach the webview.
+        if *closing.peek() || snapshot.is_empty() {
+            return;
+        }
+        closing.set(true);
+        let base = base.clone();
+        let session = session.clone();
+        let request = request.clone();
+        let action_key = action_key.clone();
+        let host = state.peek().host_name.raw().to_owned();
+        let single_id = (snapshot.len() == 1).then(|| snapshot[0].id.clone());
+        spawn(async move {
+            let failures = close_listeners(
+                snapshot,
+                |id| {
+                    let base = base.clone();
+                    let session = session.clone();
+                    async move { api::close_tunnel(&base, &session, &id).await }
+                },
+                |id| {
+                    state.write().tunnels.retain(|tunnel| tunnel.id != id);
+                    // Invalidate reads begun before the acknowledged removal.
+                    controller.changed();
+                },
+            )
+            .await;
+            errors.write().action_finished(
+                failures
+                    .into_iter()
+                    .map(|(tunnel, reason)| {
+                        format!(
+                            ":{} → {host}:{}: {reason}",
+                            tunnel.local_port, tunnel.remote_port
+                        )
+                    })
+                    .collect(),
+            );
+            closing.set(false);
+            request(Trigger::Explicit);
+            if *focused.peek()
+                && let Some(id) = single_id
+            {
+                // The guard checks the live DOM again after render; focus
+                // moved into a newer action is never reclaimed by completion.
+                if !state.peek().tunnels.iter().any(|tunnel| tunnel.id == id) {
+                    return_listener_focus(&session, generation, &action_key, Some(&id));
+                }
+            }
+        });
+    });
+    let shown = state.read().clone();
+    let mapping = shown
+        .tunnels
+        .first()
+        .map(|tunnel| {
+            format!(
+                ":{} → {}:{}",
+                tunnel.local_port,
+                shown.host_name.escaped(),
+                tunnel.remote_port
+            )
+        })
+        .unwrap_or_default();
+    let help = if shown.tunnels.len() == 1 {
+        format!("Open tunnels from this Mac: {mapping}")
+    } else {
+        format!("{} open tunnels from this Mac", shown.tunnels.len())
+    };
+    let focus_key = key.clone();
+    let dismiss_key = key.clone();
+    let dismiss_error = use_callback(move |()| {
+        errors.set(ListenerErrors::default());
+        return_listener_focus(&dismiss_session, generation, &dismiss_key, None);
+    });
     rsx! {
-        if !state.read().tunnels.is_empty() {
-            div { class: "session-tunnels", aria_label: "open tunnels from this Mac",
-                span { "Tunnels from this Mac:" }
-                for tunnel in state.read().tunnels.iter() {
-                    span { key: "{tunnel.id}", class: "session-tunnel-chip",
-                        span { ":{tunnel.local_port} → " }
-                        span { class: "peer-value", dir: "ltr", "{state.read().host_name.escaped()}" }
-                        span { ":{tunnel.remote_port}" }
-                        button { r#type: "button", class: "session-tunnel-close",
-                            aria_label: "close tunnel from local port {tunnel.local_port} to remote port {tunnel.remote_port}",
-                            disabled: closing.read().is_some(), onclick: {
-                                let base = base.clone(); let session = session.clone(); let id = tunnel.id.clone(); let request = request.clone();
-                                move |_| {
-                                    if closing.peek().is_some() { return; }
-                                    closing.set(Some(id.clone()));
-                                    let base = base.clone(); let session = session.clone(); let id = id.clone(); let request = request.clone();
-                                    spawn(async move {
-                                        match api::close_tunnel(&base, &session, &id).await {
-                                            Ok(()) => { state.write().tunnels.retain(|tunnel| tunnel.id != id); error.set(None); controller.changed(); }
-                                            Err(reason) => error.set(Some(reason)),
-                                        }
-                                        closing.set(None); request(Trigger::Explicit);
-                                    });
+        if !shown.tunnels.is_empty() {
+            div { class: "session-tunnel-pill", "data-row-menu-key": key.clone(),
+                // Terminal replay already honors this shared popup focus veto.
+                "data-terminal-keyboard-owner": open(),
+                onfocusin: move |_| focused.set(true),
+                onfocusout: move |_| {
+                    // Internal Tab moves also emit focusout. Consult focus
+                    // after its default handoff, then use the existing relay.
+                    let key = serde_json::to_string(&focus_key).unwrap();
+                    document::eval(&format!(r#"requestAnimationFrame(() => {{
+                        const root = [...document.querySelectorAll('.session-tunnel-pill')]
+                            .find(el => el.getAttribute('data-row-menu-key') === {key});
+                        if (!root || root.contains(document.activeElement)) return;
+                        root.querySelector('.{ROW_MENU_OUTSIDE_RELAY}')?.click();
+                    }});"#));
+                },
+                onkeydown: move |event: KeyboardEvent| {
+                    if event.key() == Key::Escape && !event.is_composing() && *open.peek() {
+                        event.prevent_default(); event.stop_propagation(); close_popup.call(());
+                    }
+                },
+                button { r#type: "button", class: "btn session-tunnel-toggle bar-menu-toggle",
+                    aria_label: help.clone(), aria_expanded: open(), aria_controls: "session-tunnel-panel",
+                    "data-tooltip": help,
+                    onclick: move |_| {
+                        if *open.peek() { close_popup.call(()); }
+                        else { install_row_menu_outside_dismiss(); open.set(true); }
+                    },
+                    ActionIcon { glyph: ActionGlyph::Tunnel }
+                    if shown.tunnels.len() == 1 {
+                        span { class: "session-tunnel-mapping",
+                            span { ":{shown.tunnels[0].local_port} → " }
+                            span { class: "session-tunnel-host peer-value", dir: "ltr", "{shown.host_name.escaped()}" }
+                            span { ":{shown.tunnels[0].remote_port}" }
+                        }
+                    } else { span { class: "session-tunnel-count", "{shown.tunnels.len()} tunnels" } }
+                    ActionIcon { glyph: ActionGlyph::ChevronDown }
+                }
+                button { r#type: "button", class: ROW_MENU_OUTSIDE_RELAY,
+                    hidden: true, tabindex: "-1", "data-row-menu": key.clone(),
+                    onclick: move |_| close_popup.call(()),
+                }
+                if open() {
+                    div { id: "session-tunnel-panel", class: "host-row-menu-panel bar-menu-panel session-tunnel-panel",
+                        role: "group", aria_label: "Open tunnels from this Mac", "data-link-cover": "true",
+                        MenuHeader { title: rsx! { "Tunnels from this Mac" }, summary: rsx! { "Local listeners stay open while the host is offline" } }
+                        ListenerErrorNotice { errors, floating: false, on_dismiss: dismiss_error }
+                        ul { class: "session-tunnel-list",
+                            for tunnel in shown.tunnels.iter() {
+                                li { key: "{tunnel.id}", class: "session-tunnel-row",
+                                    span { class: "session-tunnel-mapping",
+                                        "data-tooltip": format!(":{} → {}:{}", tunnel.local_port, shown.host_name.escaped(), tunnel.remote_port),
+                                        span { ":{tunnel.local_port} → " }
+                                        span { class: "session-tunnel-host peer-value", dir: "ltr", "{shown.host_name.escaped()}" }
+                                        span { ":{tunnel.remote_port}" }
+                                    }
+                                    button { r#type: "button", class: "btn session-tunnel-close",
+                                        "data-tunnel-id": tunnel.id.clone(),
+                                        aria_label: "Close tunnel from local port {tunnel.local_port} to remote port {tunnel.remote_port}",
+                                        "data-tooltip": "Close tunnel", aria_disabled: closing(),
+                                        onclick: { let tunnel = tunnel.clone(); move |_| on_close.call(vec![tunnel.clone()]) },
+                                        ActionIcon { glyph: ActionGlyph::Close }
+                                    }
                                 }
-                            }, "×"
+                            }
+                        }
+                        MenuSeparator {}
+                        button { r#type: "button", class: "btn menu-item session-tunnel-close-all", aria_disabled: closing(),
+                            onclick: { let snapshot = shown.tunnels.clone(); move |_| on_close.call(snapshot.clone()) },
+                            ActionIcon { glyph: ActionGlyph::Close }
+                            if closing() { "Closing…" } else { "Close all" }
                         }
                     }
                 }
             }
         }
-        if let Some(error) = error.read().as_ref() {
-            p { class: "session-tunnel-error", role: "alert", "{display_peer(error)}" }
+        if !open() || shown.tunnels.is_empty() {
+            ListenerErrorNotice { errors, floating: true, on_dismiss: dismiss_error }
         }
     }
 }
@@ -684,6 +952,95 @@ mod tests {
     use super::*;
     use std::future::Future;
     use std::task::{Context, Poll, Waker};
+
+    /// A held first response must prevent the next request from starting;
+    /// failures still permit later attempts and only successes remove rows.
+    /// This distinguishes serial partial progress from concurrent fan-out or
+    /// a fail-fast loop without depending on network timing or sleeps.
+    #[test]
+    fn listener_batch_is_serial_and_keeps_mixed_failures() {
+        use std::cell::RefCell;
+        use std::collections::VecDeque;
+        let snapshot: Vec<_> = ["first", "second", "third"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, id)| TunnelInfo {
+                id: id.into(),
+                local_port: 5000 + index as u16,
+                remote_port: 8000 + index as u16,
+            })
+            .collect();
+        let (first, first_reply) = oneshot::channel();
+        let (second, second_reply) = oneshot::channel();
+        let (third, third_reply) = oneshot::channel();
+        let mut replies = VecDeque::from([first_reply, second_reply, third_reply]);
+        let calls = RefCell::new(Vec::new());
+        let removed = RefCell::new(Vec::new());
+        let mut batch = Box::pin(close_listeners(
+            snapshot,
+            |id| {
+                calls.borrow_mut().push(id);
+                let reply = replies
+                    .pop_front()
+                    .expect("one response per snapshot listener");
+                async move { reply.await.expect("the test owns each response sender") }
+            },
+            |id| removed.borrow_mut().push(id.to_string()),
+        ));
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(batch.as_mut().poll(&mut context).is_pending());
+        assert_eq!(*calls.borrow(), ["first"]);
+        assert!(removed.borrow().is_empty());
+        first.send(Err("first refusal".into())).unwrap();
+        assert!(batch.as_mut().poll(&mut context).is_pending());
+        assert_eq!(*calls.borrow(), ["first", "second"]);
+        assert!(removed.borrow().is_empty());
+        second.send(Ok(())).unwrap();
+        assert!(batch.as_mut().poll(&mut context).is_pending());
+        assert_eq!(*calls.borrow(), ["first", "second", "third"]);
+        assert_eq!(*removed.borrow(), ["second"]);
+        third.send(Err("third refusal".into())).unwrap();
+        let Poll::Ready(failures) = batch.as_mut().poll(&mut context) else {
+            panic!("all responses supplied");
+        };
+        assert_eq!(
+            failures
+                .into_iter()
+                .map(|(tunnel, reason)| (tunnel.id, reason))
+                .collect::<Vec<_>>(),
+            [
+                ("first".into(), "first refusal".into()),
+                ("third".into(), "third refusal".into())
+            ]
+        );
+        assert_eq!(*removed.borrow(), ["second"]);
+    }
+
+    /// A successful refresh is not acknowledgement of a refused close. A later
+    /// successful action resolves an earlier action failure without concealing
+    /// an independent read failure. Native dismissal wiring needs UI evidence.
+    #[test]
+    fn listener_errors_survive_refresh_and_resolve_on_later_action() {
+        let mut errors = ListenerErrors {
+            read: Some("read refused".into()),
+            action: None,
+        };
+        errors.action_finished(vec![
+            "first close refused".into(),
+            "second close refused".into(),
+        ]);
+        errors.read_succeeded();
+        assert_eq!(errors.read, None);
+        assert_eq!(
+            errors.action.as_deref(),
+            Some("first close refused\nsecond close refused")
+        );
+        errors.read = Some("another read refused".into());
+        errors.action_finished(vec!["another close refused".into()]);
+        errors.action_finished(Vec::new());
+        assert_eq!(errors.action, None);
+        assert_eq!(errors.read.as_deref(), Some("another read refused"));
+    }
 
     /// Run `body` against a fresh controller mounted in a probe component.
     ///

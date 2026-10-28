@@ -18,6 +18,7 @@ import {
   stubFeed,
 } from "./helpers/fleet";
 import { openSessionActionMenu, selectSessionActionWith } from "./helpers/session-actions";
+import { mountNativeTunnelPreview } from "./helpers/native-tunnel-preview";
 import { waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { addTab, FAKE_AGENT_INVOCATION, selectTerminal } from "./helpers/terminal-suite";
@@ -42,6 +43,184 @@ const PERSISTENT_ACTION_SELECTORS = [
   ".header-clone",
   ".header-delete",
 ] as const;
+
+/** Both browser engines measure the native-only pill's CSS at its width floor.
+ * Mirrored presentation markup is an explicit visual fixture, not native operation
+ * evidence. It catches WebKit font/flex differences that Chromium appshots
+ * cannot, including long hosts hiding a port or displacing a lifecycle action.
+ */
+test("native tunnel preview keeps ports and actions inside a 650px pane", async ({ page, request }) => {
+  const session = await createSession(request, { title: `tunnel-geometry-${Date.now()}`, invocation: FAKE_AGENT_INVOCATION });
+  try {
+    await page.goto("/");
+    await row(page, session.id).locator(".session-row-open").click();
+    await waitForSessionRevealed(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await page.locator(".app-shell").evaluate((element) => element.classList.add("macos-window"));
+    const main = page.locator(".app-main");
+    const occupied = (await main.boundingBox())!.x;
+    await page.setViewportSize({ width: Math.round(occupied + 650), height: 700 });
+    await page.evaluate(() => document.fonts.ready);
+    const topbar = page.locator(".session-topbar");
+    const frame = (await topbar.boundingBox())!;
+    expect(frame.width, "the fixture measures the actual main pane").toBeCloseTo(650, 0);
+    expect(frame.height).toBe(48);
+    const terminal = (await page.locator(".terminal-panes").boundingBox())!;
+    for (const colorScheme of ["dark", "light"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await expect(page.locator("html")).toHaveAttribute("data-appearance", colorScheme);
+      for (const state of ["one", "one-list", "many", "many-list", "closing", "error", "error-list"] as const) {
+        await mountNativeTunnelPreview(page, state);
+        expect((await topbar.boundingBox())!.height).toBe(frame.height);
+        expect(await page.locator(".terminal-panes").boundingBox(), "conditional tunnel UI adds no row").toEqual(terminal);
+        for (const selector of PERSISTENT_ACTION_SELECTORS) {
+          const control = page.locator(selector);
+          await expect(control).toBeVisible();
+          const box = (await control.boundingBox())!;
+          expect(box.x).toBeGreaterThanOrEqual(frame.x);
+          expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width);
+        }
+        if (state !== "error") {
+          const toggle = page.locator(".session-tunnel-toggle");
+          const pill = (await toggle.boundingBox())!;
+          const tabs = (await page.locator(".tab-strip").boundingBox())!;
+          const selected = (await page.locator(".tab.selected").boundingBox())!;
+          expect(tabs.width, "an ordinary shell tab needs a useful scrollport").toBeGreaterThanOrEqual(112);
+          expect(selected.x).toBeGreaterThanOrEqual(tabs.x - 1);
+          expect(selected.x + selected.width, "the selected tab is readable beside the pill").toBeLessThanOrEqual(tabs.x + tabs.width + 1);
+          expect(pill.x).toBeGreaterThanOrEqual(tabs.x + tabs.width);
+          expect(pill.x + pill.width).toBeLessThanOrEqual((await page.locator(".titlebar-actions").boundingBox())!.x);
+          const ports = toggle.locator(".session-tunnel-mapping > span:not(.session-tunnel-host)");
+          if (state === "one" || state === "one-list") {
+            await expect(ports).toHaveText([":57779 → ", ":44227"]);
+            for (const port of await ports.all()) {
+              const box = (await port.boundingBox())!;
+              expect(box.x).toBeGreaterThanOrEqual(pill.x);
+              expect(box.x + box.width, "a long host must not hide either port").toBeLessThanOrEqual(pill.x + pill.width);
+            }
+            // An overfull host must still have room to paint an honest
+            // abbreviation; a bare clipped letter can look like its full name.
+            const abbreviation = await toggle.locator(".session-tunnel-host").evaluate((element) => {
+              const style = getComputedStyle(element);
+              const context = document.createElement("canvas").getContext("2d")!;
+              context.font = style.font;
+              return {
+                width: element.getBoundingClientRect().width,
+                minimum: context.measureText(`${element.textContent!.slice(0, 1)}…`).width,
+                overflows: element.scrollWidth > element.clientWidth,
+                textOverflow: style.textOverflow,
+              };
+            });
+            expect(abbreviation.overflows, "the long-host fixture actually abbreviates").toBe(true);
+            expect(abbreviation.textOverflow).toBe("ellipsis");
+            expect(abbreviation.width, "the host can paint its first letter and ellipsis").toBeGreaterThanOrEqual(abbreviation.minimum);
+          }
+          if (state === "one-list") {
+            // Token contrast alone cannot catch a shared hover/focus rule
+            // replacing the open pill's fill while leaving inverse text.
+            // Measure the settled CSS state: the normal 100ms transition
+            // could otherwise pass on its readable starting color.
+            await toggle.evaluate((element) => { (element as HTMLElement).style.transition = "none"; });
+            for (const input of ["pointer", "keyboard"] as const) {
+              if (input === "pointer") {
+                await toggle.hover();
+                expect(await toggle.evaluate((element) => element.matches(":hover"))).toBe(true);
+              } else {
+                await page.mouse.move(0, 0);
+                await toggle.focus();
+                await page.keyboard.press("Tab");
+                await page.keyboard.press("Shift+Tab");
+                await expect(toggle).toBeFocused();
+                expect(await toggle.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+              }
+              const contrast = await toggle.evaluate((element) => {
+                const style = getComputedStyle(element);
+                const luminance = (color: string) => {
+                  const channels = color.match(/[\d.]+/g)!.map(Number);
+                  if (channels.length === 4 && channels[3] !== 1) throw new Error("pill contrast requires opaque colors");
+                  const linear = channels.slice(0, 3).map((channel) => {
+                    const value = channel / 255;
+                    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+                  });
+                  return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+                };
+                const values = [luminance(style.color), luminance(style.backgroundColor)].sort((a, b) => b - a);
+                return (values[0] + 0.05) / (values[1] + 0.05);
+              });
+              expect(contrast, `the expanded pill stays readable under ${input} input`).toBeGreaterThanOrEqual(4.5);
+            }
+            await page.keyboard.press("Escape");
+          }
+        }
+        for (const overlay of await page.locator(".session-tunnel-panel, .session-tunnel-error").all()) {
+          const box = (await overlay.boundingBox())!;
+          expect(box.x).toBeGreaterThanOrEqual(0);
+          expect(box.x + box.width).toBeLessThanOrEqual(Math.round(occupied + 650));
+          expect(box.y + box.height).toBeLessThanOrEqual(700);
+        }
+        if (state === "error-list") {
+          const error = page.locator(".session-tunnel-error");
+          await expect(error).toHaveCount(1);
+          await expect(error).toContainText("The tunnel could not be closed");
+          const failure = (await error.boundingBox())!;
+          const firstRow = (await page.locator(".session-tunnel-row").first().boundingBox())!;
+          expect(firstRow.y, "the open list must not cover its own failure notice").toBeGreaterThanOrEqual(failure.y + failure.height);
+        }
+      }
+    }
+    // Real shell selection exercises the wider tab label/close slot. Keep
+    // ordinary user scrolling: selection reveals its own tab, without a
+    // fixture scrollLeft repair or a continuously pinned selected tab.
+    const shell = await addTab(page, 0);
+    for (const colorScheme of ["dark", "light"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await page.setViewportSize({ width: Math.round(occupied + 1200), height: 700 });
+      await mountNativeTunnelPreview(page, "one", "short");
+      const strip = page.locator(".tab-strip");
+      expect(await strip.evaluate((element) => element.scrollWidth <= element.clientWidth), "wide adjacency needs nonoverflowing tabs").toBe(true);
+      const lastTab = (await page.locator(".tab-add").boundingBox())!;
+      const pill = (await page.locator(".session-tunnel-toggle").boundingBox())!;
+      expect(pill.x - lastTab.x - lastTab.width, "the pill follows actual tabs, not empty flex space").toBeCloseTo(6, 0);
+      expect(await page.locator(".session-tunnel-toggle .session-tunnel-host").evaluate((element) => element.scrollWidth <= element.clientWidth),
+        "a normal hostname fits the wider pill").toBe(true);
+      for (const width of [650, 800, 820, 900]) {
+        await page.setViewportSize({ width: Math.round(occupied + width), height: 700 });
+        await selectTerminal(page, shell);
+        await mountNativeTunnelPreview(page, "one");
+        const tabs = (await strip.boundingBox())!;
+        const slot = (await page.locator(`.tab-slot[data-tab-id="${shell}"]`).boundingBox())!;
+        const label = page.locator(`.tab-slot[data-tab-id="${shell}"] .tab`);
+        await expect(label).toHaveClass(/selected/);
+        // Readability concerns the text, not a few pixels of button padding
+        // that native nearest-edge focus scrolling may leave outside.
+        const selected = await label.evaluate((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const box = range.getBoundingClientRect();
+          return { x: box.x, width: box.width };
+        });
+        expect(selected.x).toBeGreaterThanOrEqual(tabs.x - 1);
+        expect(selected.x + selected.width, "selection reveals the readable shell label").toBeLessThanOrEqual(tabs.x + tabs.width + 1);
+        // Native focus reveals the selected button, not its sibling close
+        // button. Both fit this track, but ordinary scrolling/focus may
+        // reveal either; this change does not pin the whole tab slot.
+        expect(slot.width, "the track can accommodate a shell label and its close control").toBeLessThanOrEqual(tabs.width);
+        for (const control of await page.locator('.titlebar-actions button:visible, .session-tunnel-toggle .session-tunnel-mapping > span:not(.session-tunnel-host)').all()) {
+          const box = (await control.boundingBox())!;
+          expect(box.x).toBeGreaterThanOrEqual(occupied);
+          expect(box.x + box.width, `all persistent controls and both ports fit a ${width}px pane`).toBeLessThanOrEqual(occupied + width);
+        }
+      }
+    }
+  } catch (error) {
+    // Framework screenshots happen after finally. Retain the failed geometry
+    // while this owned session still exists, before cleanup changes selection.
+    await test.info().attach("tunnel-geometry-at-failure", { body: await page.screenshot(), contentType: "image/png" });
+    throw error;
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
 
 test(
   "tabs and actions share one top row above the terminal and details stay below it",
