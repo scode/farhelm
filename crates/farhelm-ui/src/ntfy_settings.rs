@@ -47,6 +47,7 @@ fn server_origin_changed(saved: &str, draft: &str) -> bool {
 /// modal dismissal, but component state is touched only while mounted; the saved
 /// token is never seeded into a password field or preference queue.
 /// Priority segments edit this same draft; selecting one never saves or sends.
+/// Its heading is subordinate to the surrounding Notifications panel.
 #[component]
 pub(crate) fn NtfySettings() -> Element {
     let base = use_context::<ApiBase>().0;
@@ -89,7 +90,7 @@ pub(crate) fn NtfySettings() -> Element {
 
     rsx! {
         section { class: "host-settings-section ntfy-settings", aria_label: "ntfy alerts",
-            h3 { class: "host-settings-section-title", "ntfy alerts" }
+            h4 { class: "host-settings-section-title", "ntfy alerts" }
             p { class: "host-settings-help",
                 "Send a session's title and host when it waits for you. Applies to every window using this helm. In the desktop app, keep the window open."
             }

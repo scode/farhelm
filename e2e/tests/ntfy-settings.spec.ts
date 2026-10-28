@@ -70,11 +70,11 @@ test("ntfy settings explicitly save, refuse, preserve and clear a token", async 
       const saveBox = (await save.boundingBox())!;
       if (width <= 560) expect(testBox.y + testBox.height).toBeLessThanOrEqual(saveBox.y);
       else expect(testBox.x + testBox.width).toBeLessThanOrEqual(saveBox.x);
-      await expect(save).toHaveCSS("font-size", await dialog.getByRole("button", { name: "close", exact: true })
+      await expect(save).toHaveCSS("font-size", await dialog.getByRole("button", { name: "Close", exact: true })
         .evaluate((element) => getComputedStyle(element).fontSize));
       await section.screenshot({ path: testInfo.outputPath(`ntfy-settings-${width}.png`) });
     }
-    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await openSettings(page, "notifications");
     await expect(topic).toHaveValue("browser-alerts");
     await expect(password).toHaveValue("");
@@ -190,7 +190,7 @@ test("ntfy send test reports outcome while leaving unsaved fields alone", async 
   await expect(server).toHaveValue("http://127.0.0.1:1");
   await expect(token).toHaveValue("unsaved-browser-token");
   expect(sends).toBe(2);
-  await page.getByRole("dialog", { name: "settings", exact: true }).getByRole("button", { name: "close", exact: true }).click();
+  await page.getByRole("dialog", { name: "settings", exact: true }).getByRole("button", { name: "Close", exact: true }).click();
   await openSettings(page, "notifications");
   await expect(topic).toBeEditable();
   await expect(topic).toHaveValue(savedTopic);

@@ -51,17 +51,36 @@ pub(crate) const DIALOG_SELECTOR: &str = r#".app-settings-dialog[role="dialog"]"
 pub(crate) const RETURN_FOCUS: &str =
     "document.querySelector('.app-settings-toggle')?.focus({ preventScroll: true });";
 
-/// Navigation and panel IDs share these closed keys; app follows updater availability.
+/// Stable panel keys preserve draft and focus ownership; labels are presentation.
+/// The App entry still follows updater availability rather than platform alone.
 const SETTINGS_SECTIONS: [(&str, &str); 8] = [
-    ("sessions", "sessions"),
+    ("sessions", "Sessions"),
     ("appearance", "Appearance"),
-    ("hosts", "hosts"),
-    ("terminal", "terminal"),
-    ("checkouts", "checkouts"),
-    ("agent-trust", "agent trust"),
-    ("notifications", "notifications"),
-    ("app", "app"),
+    ("hosts", "Hosts"),
+    ("terminal", "Terminal"),
+    ("checkouts", "Checkouts"),
+    ("agent-trust", "Agent trust"),
+    ("notifications", "Notifications"),
+    ("app", "App"),
 ];
+
+/// Reuse the shared decorative marks without giving navigation another focus stop.
+/// Section keys remain the existing closed list; neither icons nor visible names
+/// choose which mounted panel owns a draft or an outstanding save.
+fn settings_section_icon(section: &str) -> Element {
+    use crate::icons::{ActionGlyph, ActionIcon, BellIcon, FolderIcon};
+    match section {
+        "sessions" => rsx! { ActionIcon { glyph: ActionGlyph::Sessions } },
+        "appearance" => rsx! { ActionIcon { glyph: ActionGlyph::Appearance } },
+        "hosts" => rsx! { ActionIcon { glyph: ActionGlyph::Hosts } },
+        "terminal" => rsx! { ActionIcon { glyph: ActionGlyph::Terminal } },
+        "checkouts" => rsx! { FolderIcon {} },
+        "agent-trust" => rsx! { ActionIcon { glyph: ActionGlyph::AgentTrust } },
+        "notifications" => rsx! { BellIcon { loud: false } },
+        "app" => rsx! { ActionIcon { glyph: ActionGlyph::App } },
+        _ => unreachable!("Settings icons use only the declared section keys"),
+    }
+}
 
 /// Hand focus to the newly revealed content after a section or narrow back click.
 ///
@@ -298,11 +317,11 @@ pub(crate) fn SettingsDialog(
                     }
                 },
                 HostDialogHeader {
-                    title: rsx! { "settings" },
+                    title: rsx! { "Settings" },
                     tile: rsx! {
                         crate::icons::SettingsIcon {}
                     },
-                    summary: "for every host on this helm, and for this device",
+                    summary: "For every host on this helm, and for this device",
                     dismiss_label: "close settings",
                     dismiss_tooltip: "close settings; unsaved fields are discarded",
                     on_dismiss: move |_| on_close.call(()),
@@ -323,7 +342,10 @@ pub(crate) fn SettingsDialog(
                                     sections_open.set(false);
                                     focus_settings_content(false);
                                 },
-                                "{label}"
+                                span { class: "settings-section-icon", aria_hidden: "true",
+                                    {settings_section_icon(key)}
+                                }
+                                span { "{label}" }
                             }
                         }
                     }
@@ -336,7 +358,7 @@ pub(crate) fn SettingsDialog(
                                 sections_open.set(true);
                                 focus_settings_content(true);
                             },
-                            "‹ settings"
+                            "‹ Settings"
                         }
                         section {
                             id: "settings-sessions",
@@ -346,7 +368,7 @@ pub(crate) fn SettingsDialog(
                             h3 {
                                 class: "host-settings-section-title",
                                 tabindex: "-1",
-                                "sessions"
+                                "Sessions"
                             }
                             div { class: "setting-group",
                                 label {
@@ -475,7 +497,7 @@ pub(crate) fn SettingsDialog(
                             h3 {
                                 class: "host-settings-section-title",
                                 tabindex: "-1",
-                                "hosts"
+                                "Hosts"
                             }
                             p { class: "host-settings-help",
                                 "The host choices apply to every host on this helm. Other open clients pick them up when they reload."
@@ -547,7 +569,7 @@ pub(crate) fn SettingsDialog(
                             h3 {
                                 class: "host-settings-section-title",
                                 tabindex: "-1",
-                                "terminal"
+                                "Terminal"
                             }
                             p { class: "host-settings-help",
                                 "Clicking a web link in a terminal: this choice applies to every client of this helm. Other open clients pick it up when they reload. This web-link choice does not change file downloads."
@@ -588,7 +610,7 @@ pub(crate) fn SettingsDialog(
                             h3 {
                                 class: "host-settings-section-title",
                                 tabindex: "-1",
-                                "checkouts"
+                                "Checkouts"
                             }
                             crate::checkout_root::CheckoutRootField {
                                 note: "Managed checkouts are cloned into this folder on every host. ~ means each host's own home folder. A missing folder is created on first use. A host given its own folder from the command line keeps that folder. Save an empty field to clear it.",
@@ -605,7 +627,7 @@ pub(crate) fn SettingsDialog(
                             h3 {
                                 class: "host-settings-section-title",
                                 tabindex: "-1",
-                                "agent trust"
+                                "Agent trust"
                             }
                             crate::claude_trust::ClaudeTrustSettings {}
                             crate::workspace_trust::WorkspaceTrustSettings { agent: crate::workspace_trust::TrustAgent::Codex }
@@ -620,7 +642,7 @@ pub(crate) fn SettingsDialog(
                             h3 {
                                 class: "host-settings-section-title",
                                 tabindex: "-1",
-                                "notifications"
+                                "Notifications"
                             }
                             crate::sounds::SoundSettings {}
                             crate::ntfy_settings::NtfySettings {}
@@ -634,7 +656,7 @@ pub(crate) fn SettingsDialog(
                                 h3 {
                                     class: "host-settings-section-title",
                                     tabindex: "-1",
-                                    "app"
+                                    "App"
                                 }
                                 p { class: "host-settings-help",
                                     "This one belongs to this Farhelm app on this Mac."
@@ -694,9 +716,9 @@ pub(crate) fn SettingsDialog(
                     // its footer names it.
                     span { class: "dialog-footer-hint",
                         if cfg!(native_desktop) {
-                            "Most choices save immediately. Ntfy alerts, checkout fields and file types use save."
+                            "Most choices save immediately; ntfy alerts, checkout fields and file types use save."
                         } else {
-                            "Most choices save immediately. Ntfy alerts and checkout fields use save."
+                            "Most choices save immediately; ntfy alerts and checkout fields use save."
                         }
                     }
                     crate::modal_dialog::DialogActions {
@@ -705,7 +727,7 @@ pub(crate) fn SettingsDialog(
                             class: "btn btn-neutral app-settings-close",
                             "data-tooltip": "close settings; unsaved fields are discarded",
                             onclick: move |_| on_close.call(()),
-                            "close"
+                            "Close"
                         }
                     }
                 }

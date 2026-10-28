@@ -340,7 +340,7 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   // changing the viewport used by the rest of this dialog walk.
   const settingsViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 800 });
-  const back = settings.getByRole("button", { name: "‹ settings", exact: true });
+  const back = settings.getByRole("button", { name: "‹ Settings", exact: true });
   await expect(back).toBeVisible();
   await expectCovered(page, "settings phone pane", ".app-settings-dialog", 3);
   await back.click();

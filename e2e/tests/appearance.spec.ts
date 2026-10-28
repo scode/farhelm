@@ -275,7 +275,7 @@ test("all appearance choices update live while the mounted terminal stays dark",
       expect(state.bodyBacking.background).toBe(expected.ground);
       expect(state.title.color).toBe(expected.primary);
       expect(state.label.color).toBe(expected.primary);
-      expect(state.heading.color).toBe(expected.secondary);
+      expect(state.heading.color).toBe(expected.primary);
       expect(state.help.color).toBe(expected.secondary);
       expect(state.footerHelp.color).toBe(expected.secondary);
     }

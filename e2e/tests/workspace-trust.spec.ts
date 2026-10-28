@@ -173,7 +173,7 @@ test("managed-checkout trust switches persist independently of Claude's legacy r
     const legacySave = await request.put("/api/checkout-claude-trust", { data: { enabled: true } });
     expect(legacySave.ok(), await legacySave.text()).toBe(true);
     expect((await trustState(request, "claude")).enabled).toBe(true);
-    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await page.reload();
     await openSettings(page, "agent trust");
     for (const choice of choices) await expect(choice).toBeChecked();
@@ -242,7 +242,7 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
       await expect(field.getByRole("alert")).toContainText("fixture trust read refusal");
       await expect(page.locator(".build-skew")).toHaveCount(0);
       await expect(toggle).toBeDisabled();
-      await dialog.getByRole("button", { name: "close", exact: true }).click();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
       await expect(surface).toHaveAttribute("data-enabled", "");
       await expect(band).toHaveCount(0);
 
@@ -276,18 +276,18 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
           "the matching switch is scrolled into the dialog viewport",
         ).toBe(true);
         if (width === 390) {
-          await expect(dialog.getByRole("button", { name: "‹ settings", exact: true })).toBeVisible();
+          await expect(dialog.getByRole("button", { name: "‹ Settings", exact: true })).toBeVisible();
           await expect(dialog.getByRole("navigation", { name: "settings sections", exact: true })).toBeHidden();
-          await dialog.getByRole("button", { name: "close", exact: true }).click();
+          await dialog.getByRole("button", { name: "Close", exact: true }).click();
           await openSettings(page);
           await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
           await expect(dialog.locator('.app-settings-panel[aria-label="agent trust"]')).toBeHidden();
-          await dialog.getByRole("button", { name: "close", exact: true }).click();
+          await dialog.getByRole("button", { name: "Close", exact: true }).click();
         }
       }
       await toggle.check();
       await expect.poll(async () => (await trustState(request, harness)).enabled).toBe(true);
-      await dialog.getByRole("button", { name: "close", exact: true }).click();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
       await expect(band).toHaveCount(0);
       await openSettings(page);
       await expect(dialog.locator('.app-settings-panel[aria-label="sessions"]')).toBeVisible();
@@ -295,7 +295,7 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
       await expect(toggle).toBeChecked();
       await toggle.uncheck();
       await expect.poll(async () => (await trustState(request, harness)).enabled).toBe(false);
-      await dialog.getByRole("button", { name: "close", exact: true }).click();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
       await expect(band).toBeVisible();
 
       await expect(page.locator(".tab-slot")).toHaveCount(0);
@@ -365,7 +365,7 @@ for (const { harness, name } of AGENTS.filter((agent) => agent.harness !== "pi")
         exact: true,
       }).check();
       await expect.poll(async () => (await trustState(request, harness)).hint_dismissed).toBe(false);
-      await dialog.getByRole("button", { name: "close", exact: true }).click();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
       await expect(band).toBeVisible();
       await expect(bandFor(other, harness)).toBeVisible();
     } catch (error) {

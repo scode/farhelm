@@ -182,7 +182,7 @@ test.describe("device sounds", () => {
     await selectSettingsSection(page, "notifications");
     await expect(dialog.getByRole("checkbox", { name: "session waiting", exact: true })).not.toBeChecked();
     await expect(dialog.getByRole("checkbox", { name: "turn finished", exact: true })).toBeChecked();
-    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await chooseHost(page, String(f.remote.id));
     await applied(page, f.session.id, null);
     f.data.approvals = [f.ask("sound-approval")]; f.feed.notify(7);

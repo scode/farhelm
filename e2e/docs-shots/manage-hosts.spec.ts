@@ -119,7 +119,7 @@ test("app settings", async ({ page, request }) => {
   const dialog = page.getByRole("dialog", { name: "settings", exact: true });
   await expect(dialog).toBeVisible();
   const sections = dialog.getByRole("navigation", { name: "settings sections", exact: true });
-  await sections.getByRole("button", { name: "hosts", exact: true }).click();
+  await sections.getByRole("button", { name: "Hosts", exact: true }).click();
   const hosts = dialog.getByRole("region", { name: "hosts", exact: true });
   await expect(hosts).toBeVisible();
   await director.callout(
