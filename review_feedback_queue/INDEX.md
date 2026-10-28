@@ -633,3 +633,30 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`native-confirmation-reopen-paint-order-source-gap.md`](native-confirmation-reopen-paint-order-source-gap.md) — A
   pre-existing retained Delete flyout is focusable while unmeasured; an ordinary native sequence accepting an unseen
   answer remains unestablished.
+
+- [`tunnel-spacing-shrinks-confirmation-buttons.md`](tunnel-spacing-shrinks-confirmation-buttons.md) — When the tunnel
+  pill appears, Restart, Replace and Delete confirmation buttons also become narrower.
+
+- [`session-navigation-interrupts-close-all.md`](session-navigation-interrupts-close-all.md) — Switching sessions while
+  Close all waits for a response leaves later tunnel listeners open without attempting their closure or reporting that
+  the batch was interrupted.
+
+- [`request-cards-cover-tunnel-controls.md`](request-cards-cover-tunnel-controls.md) — A waiting agent request can cover
+  the opened tunnel list and prevent pointer access to overlapping close controls. Exact native overlap geometry remains
+  unmeasured, and specification coverage is ambiguous.
+
+- [`tunnel-error-covers-approval-disclosure.md`](tunnel-error-covers-approval-disclosure.md) — A floating tunnel error
+  can paint over an agent request's approval facts while its answer handlers remain enabled. A concrete harmful approval
+  layout is **unverified after investigation**.
+
+- [`plan-deferral-survives-replacement-question.md`](plan-deferral-survives-replacement-question.md) — After the
+  maintainer answers one large plan question, a later ordinary question from that plan can remain excluded from
+  automatic handling. Whether the operational-artifact exclusion covers this workflow defect is ambiguous.
+
+- [`stale-plan-answer-clears-new-question.md`](stale-plan-answer-clears-new-question.md) — A delayed answer can be
+  attached to a plan's replacement question and make that plan eligible again, even when the new question was reserved
+  for the maintainer. Actual unauthorized execution is unestablished.
+
+- [`landing-baseline-delays-new-block.md`](landing-baseline-delays-new-block.md) — A plan question raised during a
+  landing round can wait another 110 minutes before automatic handling. Whether the operational-artifact exclusion
+  covers this scheduling defect is ambiguous.

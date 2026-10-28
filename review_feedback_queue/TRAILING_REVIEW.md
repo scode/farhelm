@@ -1,10 +1,56 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `9b19f8d754bf7658761ef246cfda0ea8397f4f21`
+Last reviewed commit: `d64ae3a81547729100529d210d3ea50434ff933d`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
+
+## Review through d64ae3a8
+
+Reviewed range: `9b19f8d754bf7658761ef246cfda0ea8397f4f21..d64ae3a81547729100529d210d3ea50434ff933d`, eleven commits.
+The exclusive checkpoint and inclusive main tip were fetched and pinned, with ancestry verified. The recording-time
+fetch found the same main, checkpoint and coverage sources. No later commit is claimed reviewed.
+
+The review is **complete** under the persistent-review protocol. All 67 individual commit/path patches, including
+intermediate changes and deleted text, were assigned once across eight bounded functional groups and reconstructed
+exactly from Git. Two fresh independent auditors checked potentially highest exclusions, including withdrawn and
+prose-only candidates. Each assignment remained below 2,000 lines and 64 KiB. Surrounding source and specification
+context were inspected selectively; no assigned patch text remains unread.
+
+All ten reviewer identities used Codex `gpt-6-astra`, high reasoning. Each completed initial review, later-turn
+synthesis and a separate credible final empty discovery search on the same identity: 30 actual turns, ten synthesis
+turns and ten discovery passes. Final discovery produced no new verified or investigated-uncertain findings. No
+recording or independent-exclusion step remains unresolved.
+
+Seven new records are retained, all **other**. Six have source-established defects or conditional mechanisms:
+interrupted Close all, narrowed confirmation buttons, request cards covering tunnel controls, obsolete plan-question
+deferrals, stale answers consuming replacement questions, and delayed block handling. The seventh, a floating tunnel
+error covering approval facts, remains **unverified after investigation** as a harmful approval path. Native overlap and
+hit testing were not measured. The confirmed stale-answer mutation also retains its unestablished downstream
+authorization harm; executor instructions are not mechanical enforcement. These stronger consequences are not counted as
+separate defects. Possible specification or operational-artifact coverage remains explicit where ambiguous. No new
+security or user-work loss route was established, and no existing record is extended or removed.
+
+Independent exclusions remain narrow: shared render-bound action callbacks and stable session identity, captured
+listener IDs checked against their session, and closed-literal visual fixture HTML. The native Delete paint-order
+concern is an exact duplicate of an existing investigated uncertainty, which remains open. Failed-command report
+accounting matches the explicit operational-artifact discard. None of these dispositions is a blanket subsystem-safety
+verdict.
+
+Private evidence is retained under run `6b8af8f0-1a32-459b-89e9-6cea539af957`. `completion.md` is the compact record;
+`completion.json` preserves assignments, manifests, session identities, actual turns, replies, progress and delivery
+audits. `finding-events.json` and `dispositions.json` retain all sixteen reviewer-local finding identities and their
+revisions/withdrawals, independent verdicts and queue mappings. Ten latest open and six withdrawn identities include
+duplicates and audit verdicts, not sixteen distinct bugs. Rejected clipped reads earned no credit; complete supported
+packets supply all mandatory delivery. No manual transcript fallback was needed. Delivery proves neither attention nor
+understanding, correctness or exhaustiveness.
+
+This was source-only. No product/runtime suite, browser/native experiment, vendor-agent turn or live-installation action
+ran, and no historical runtime pass was reused. Version-matched dependency source was inspected statically. Validation
+covers changed Markdown, whitespace, queue/index consistency, record fields, exact patch assignment and instruction
+pointers. No fixes, triage decisions or plan actions were executed. This checkpoint proposal stays in a draft PR for
+separate manual merging; writing it does not advance main.
 
 ## Review through 9b19f8d7
 
