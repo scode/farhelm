@@ -38,11 +38,13 @@ and whatever the harness's own defaults encourage.
 Every fork goes one of two ways instead. A decision only the maintainer can make (the goal file's unattended fallback,
 or a landing conflict that needs a design choice) is a block: write the question per
 `plans/.agents/maintainer-writing.md`, "Writing for the maintainer", and run `queue block`, which puts it where the
-review flow finds it and notifies. Everything else is the agent's to decide: take the option that best fits the plan,
-its Decisions and the specs, log it as a DECISION, and carry on. Things the maintainer should know, optional extras, and
-possible follow-ups are not questions either. They go into the report's "things you should know" and "open questions and
-possible follow-ups" sections (or the monitor's landing notes), written as statements the maintainer can act on during
-review. An optional idea is never a reason to stop, ask, or block.
+review flow finds it and notifies. The landing monitor then answers it on the maintainer's behalf unless the question is
+huge, and records each judgment call as a near-term TODO entry for the maintainer to revisit
+(`plans/.agents/landing.md`, "Answering blocks"). Everything else is the agent's to decide: take the option that best
+fits the plan, its Decisions and the specs, log it as a DECISION, and carry on. Things the maintainer should know,
+optional extras, and possible follow-ups are not questions either. They go into the report's "things you should know"
+and "open questions and possible follow-ups" sections (or the monitor's landing notes), written as statements the
+maintainer can act on during review. An optional idea is never a reason to stop, ask, or block.
 
 The one question these flows ask in conversation is whether to carry on without notifications when the ntfy topic file
 is missing (`plans/AGENTS.md`, "Notifications"), at the start of a flow, before any claim, while the maintainer who
@@ -103,9 +105,9 @@ never for something the maintainer did themselves (releasing a claim, stopping a
 went through, for an error that is still being retried, or for anything else that is only for their information. The
 agent that discovers the condition sends it: an executor for a plan it blocks or a problem that stops it
 (`plans/.agents/executing.md`, "Executing one plan", and `plans/.agents/watching.md`, "Drain and keep monitoring"), the
-monitor for a landing it blocks or cannot finish, a problem that stops it, and what it sees in `queue status`
-(`plans/.agents/landing.md`, "Landing: "monitor for complete plans", "land the complete plans""). Each place in
-`plans/.agents/` that says to notify is such a condition.
+monitor for a block it leaves for the maintainer, a landing it cannot finish, a problem that stops it, and what it sees
+in `queue status` (`plans/.agents/landing.md`, "Landing: "monitor for complete plans", "land the complete plans""). Each
+place in `plans/.agents/` that says to notify is such a condition.
 
 When an executor's flow or the monitor starts, check that the file exists without reading it, with
 `test -f ~/.farhelm-ntfy-topic`. If it does not, tell the maintainer the file name and ask whether to carry on without
@@ -249,7 +251,8 @@ Before reading the monitor log, read these in full:
   what an executor's claim means)
 - `plans/.agents/close-reset.md`
 - `plans/.agents/maintainer-writing.md`
-- `AGENTS.md`, "Unattended runs", "Talking to the user", "Agent scratch space" and "Tests and validation" (root)
+- `AGENTS.md`, "Unattended runs", "Talking to the user", "Agent scratch space", "TODO.md and FLAKES.md" and "Tests and
+  validation" (root)
 - `.agents/careful-rebase.md`
 - `.agents/validation.md`
 - `.agents/test-evidence.md`

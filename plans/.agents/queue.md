@@ -63,7 +63,7 @@ else's change: handle it as exit 10.
 | `stop-landing <slug> --claim ID`                          | landing → complete                      | the claim holder, giving the landing back  |
 | `landed <slug> --claim ID --merged N[,N...] --notes FILE` | landing → `REPORTS.md`                  | the claim holder, once every PR merged     |
 | `release <slug>`                                          | in-flight → pending, landing → complete | only when the maintainer asks              |
-| `answer <slug> --decision FILE`                           | blocked → pending                       | a review session                           |
+| `answer <slug> --decision FILE`                           | blocked → pending                       | a review session, or the landing monitor   |
 | `follow-up <slug> --decision FILE`                        | `REPORTS.md` → pending, first in line   | a review session                           |
 | `approve <slug>`                                          | `REPORTS.md` → gone                     | a review session                           |
 | `abandon <slug> [--dependents block\|drop-dep]`           | pending, blocked or complete → gone     | a review session, on the maintainer's word |

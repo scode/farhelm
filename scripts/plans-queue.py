@@ -1222,7 +1222,10 @@ def wake_check(gh: GitHub, baseline: str, ref: str, role: str = "executor") -> b
     A lander wakes when a plan is complete now with a report it was not complete with at the baseline. Comparing the
     report, not just the state, matters when the baseline is older than the last delivery: a plan that was complete at
     the baseline, landed, came back through a follow-up and was delivered again is complete in both snapshots, but its
-    report is new, and nothing else would wake the monitor for it.
+    report is new, and nothing else would wake the monitor for it. It also wakes when a plan is blocked now that was not
+    blocked at the baseline, because the monitor answers blocks on the maintainer's behalf
+    (`plans/.agents/landing.md`, "Answering blocks"). A block it leaves for the maintainer is blocked at the next
+    baseline too, so it does not wake the monitor again.
     """
     if role not in WAKE_ROLES:
         raise Usage(f"unknown wake role {role!r}")
@@ -1239,8 +1242,10 @@ def wake_check(gh: GitHub, baseline: str, ref: str, role: str = "executor") -> b
     new, new_problems = parse_index(after.read(INDEX_PATH))
     if role == "lander":
         was_complete = {(e.slug, before.files.get(report_path(e.slug))) for e in old.entries if e.state == "complete"}
+        was_blocked = {e.slug for e in old.entries if e.state == "blocked"}
         return any(
-            e.state == "complete" and (e.slug, after.files.get(report_path(e.slug))) not in was_complete
+            (e.state == "complete" and (e.slug, after.files.get(report_path(e.slug))) not in was_complete)
+            or (e.state == "blocked" and e.slug not in was_blocked)
             for e in new.entries
         )
     if old_problems != new_problems:
