@@ -5,6 +5,11 @@
 //! until the user chooses save. API writes keep the existing last-write-wins
 //! contract; name checks prevent an ordinary new/rename/undo from replacing a
 //! template the user did not open.
+//!
+//! The shared frame does not split scrolling ownership: the dialog root keeps
+//! the complete list/editor and its busy keyboard entry. Actions remain local
+//! to the selected editor. Header Close and responsive Back both use the same
+//! draft-departure guard, whose Save default is independent of answer order.
 
 use super::shared::HostOption;
 use crate::ApiBase;
@@ -19,7 +24,10 @@ use crate::menu_panel::{
     handle_menu_key, install_row_menu_outside_dismiss, measurement_outcome, record_menu_item_focus,
     remember_menu_item, session_menu_placement_style, use_menu_instance,
 };
-use crate::modal_dialog::{DialogFocus, DialogHandle, ModalDialog, RecoveryDelay, RecoveryFocus};
+use crate::modal_dialog::{
+    DialogActions, DialogFocus, DialogFooter, DialogHandle, DialogHeader, ModalDialog,
+    RecoveryDelay, RecoveryFocus,
+};
 use crate::ops::{ConfirmSlot, ConfirmToken, use_confirm_slot};
 use crate::peer::{DetailPart, PeerText, display_peer};
 use dioxus::prelude::*;
@@ -2264,10 +2272,20 @@ pub(super) fn TemplatesDialog(
                         else { depart.call(Departure::Close); }
                     }
                 },
-                div { class: "templates-header",
-                    h2 { class: "host-settings-title", "templates" }
-                    button { r#type: "button", class: "btn btn-neutral templates-close", disabled, "data-tooltip": "close templates; unsaved changes ask before leaving", onclick: move |_| depart.call(Departure::Close), "close" }
+                DialogHeader {
+                    class: "templates-header",
+                    title: rsx! { "Templates" },
+                    summary: rsx! { "Saved edits to combine in the session launcher" },
+                    tile: rsx! { crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Templates } },
+                    close: rsx! {
+                        button { r#type: "button", class: "dialog-close templates-close", disabled,
+                            aria_label: "Close templates", "data-tooltip": "Close templates; unsaved changes ask before leaving",
+                            onclick: move |_| depart.call(Departure::Close), "×" }
+                    },
                 }
+                // This is content padding, not another scroll owner. The root's
+                // busy keyboard-entry contract covers both responsive views.
+                div { class: "templates-content",
                 p { class: "host-settings-help templates-help",
                     "A template is a named set of launcher edits. In New session, type tl:name to apply one; it changes only the fields it sets. Templates stack, the later one winning: tl:my-claude then tl:webbuilder starts Claude in a managed checkout of acme/web on build-box. ⚡ marks the template {quick_launch_chord} launches directly; a number key launches its template with {number_launch_chord}. A number key can hold a partial template; press {sequence_chord} and then several keys to combine them, Enter to launch."
                 }
@@ -2376,24 +2394,26 @@ pub(super) fn TemplatesDialog(
                                 }
                             }
                             p { class: "templates-hint", "Fields not shown are left as is. Another template can supply choices this one leaves out." }
-                            footer { class: "templates-editor-footer",
+                            DialogFooter { class: "templates-editor-footer",
                                 if let Some(shown)=prompt.clone() {
                                     div { class: "templates-departure", role: "status",
-                                        onmounted: move |_| { document::eval("requestAnimationFrame(() => { const prompt = document.querySelector('.templates-departure'); prompt?.scrollIntoView({block: 'nearest'}); prompt?.querySelector('.templates-save-leave')?.focus({preventScroll: true}); })"); },
+                                        // Reveal the footer's padding too: focusing only the answer
+                                        // leaves Save against the phone scrollport's bottom edge.
+                                        onmounted: move |_| { document::eval("requestAnimationFrame(() => { const prompt = document.querySelector('.templates-departure'); prompt?.closest('.templates-editor-footer')?.scrollIntoView({block: 'end'}); prompt?.querySelector('.templates-save-leave')?.focus({preventScroll: true}); })"); },
                                         p { "Save these changes before leaving?" }
-                                        div { class: "templates-actions",
-                                            button { r#type: "button", class: "btn btn-primary templates-save-leave", disabled, "data-tooltip": "save these changes, then continue", onclick: { let shown=shown.clone(); move |_| save.call(Some(shown.clone())) }, "save" }
-                                            button { r#type: "button", class: "btn btn-neutral templates-discard", disabled, "data-tooltip": "discard these changes, then continue", onclick: { let names=names.clone(); let shown=shown.clone(); move |_| { if let Some(action)=answer_discard(&mut leave_prompt,&shown,busy()) { leave_editor(action,draft,baseline,previous,opened,leave_prompt,error,names.clone(),on_close) } } }, "discard" }
-                                            button { r#type: "button", class: "btn btn-neutral templates-keep-editing", disabled, "data-tooltip": "stay here with the unsaved draft", onclick: move |_| { if answer_keep_editing(&mut leave_prompt,&shown,busy()) { focus_template_control(".templates-name"); } }, "keep editing" }
+                                        DialogActions { class: "templates-actions",
+                                            button { r#type: "button", class: "btn btn-neutral templates-keep-editing", disabled, "data-tooltip": "stay here with the unsaved draft", onclick: { let shown=shown.clone(); move |_| { if answer_keep_editing(&mut leave_prompt,&shown,busy()) { focus_template_control(".templates-name"); } } }, "Keep editing" }
+                                            button { r#type: "button", class: "btn btn-neutral templates-discard", disabled, "data-tooltip": "discard these changes, then continue", onclick: { let names=names.clone(); let shown=shown.clone(); move |_| { if let Some(action)=answer_discard(&mut leave_prompt,&shown,busy()) { leave_editor(action,draft,baseline,previous,opened,leave_prompt,error,names.clone(),on_close) } } }, "Discard" }
+                                            button { r#type: "button", class: "btn btn-primary templates-save-leave", disabled, "data-tooltip": "save these changes, then continue", onclick: move |_| save.call(Some(shown.clone())), "Save" }
                                         }
                                     }
                                 } else {
-                                    div { class: "templates-actions",
+                                    DialogActions { class: "templates-actions",
                                         if previous().is_some() {
-                                            button { r#type: "button", class: "btn btn-neutral templates-duplicate", disabled: disabled || templates.pending(), "data-tooltip": "open a new unsaved copy with a free name", onclick: move |_| depart.call(Departure::Duplicate), "duplicate" }
+                                            button { r#type: "button", class: "btn btn-neutral templates-duplicate", disabled: disabled || templates.pending(), "data-tooltip": "open a new unsaved copy with a free name", onclick: move |_| depart.call(Departure::Duplicate), "Duplicate" }
                                             TemplateDeleteButtons { kind: delete_kind, disabled: disabled || templates.pending(), on_delete: delete }
                                         }
-                                        button { r#type: "button", class: "btn btn-primary templates-save", disabled, "data-tooltip": "save the template's name, switch and shown fields", onclick: move |_| save.call(None), "save" }
+                                        button { r#type: "button", class: "btn btn-primary templates-save", disabled, "data-tooltip": "save the template's name, switch and shown fields", onclick: move |_| save.call(None), "Save" }
                                     }
                                 }
                             }
@@ -2414,6 +2434,7 @@ pub(super) fn TemplatesDialog(
                         span { "Deleted {display_peer(&value.template.name)}." }
                         button { r#type: "button", class: "btn btn-neutral templates-undo", disabled, "data-tooltip": "restore the deleted template if its old name is still free", onclick: restore, "undo" }
                     }
+                }
                 }
             }
         }

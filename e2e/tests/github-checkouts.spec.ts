@@ -1532,7 +1532,7 @@ test("trash count and cue follow the final reference, including another client",
     await expect(observer.locator(".checkout-trash-button")).toHaveAttribute("data-count", "1");
     expect(await observer.evaluate(() => (window as any).__trashCue)).toEqual({flight: 0, wiggle: 0});
     await page.locator(".checkout-trash-button").click();
-    const dialog = page.getByRole("dialog", {name: "trash", exact: true});
+    const dialog = page.getByRole("dialog", {name: "Trash", exact: true});
     const band = dialog.locator(`.checkout-trash-host[data-host-id="${host}"]`);
     await expect(band.locator(".checkout-trash-entry")).toHaveCount(1);
     await expect(band.locator(".trash-host-delete")).toBeEnabled();
@@ -1590,7 +1590,7 @@ test("trash global confirmation freezes archives and reports preserved recovery 
     await page.goto("/");
     await expect(page.locator(".checkout-trash-button")).toHaveAttribute("data-count", "1");
     await page.locator(".checkout-trash-button").click();
-    const dialog = page.getByRole("dialog", {name: "trash", exact: true});
+    const dialog = page.getByRole("dialog", {name: "Trash", exact: true});
     const unreachable = dialog.locator(`.checkout-trash-host[data-host-id="${down}"]`);
     await expect(unreachable).toHaveClass(/unreachable/);
     await expect(unreachable).toContainText("not reachable");
@@ -1691,7 +1691,7 @@ test("single trash delete removes one real archive and preserves its neighbour",
     expect(selected).toBeTruthy();
     await page.goto("/");
     await page.locator(".checkout-trash-button").click();
-    const dialog = page.getByRole("dialog", {name: "trash", exact: true});
+    const dialog = page.getByRole("dialog", {name: "Trash", exact: true});
     const band = dialog.locator(`.checkout-trash-host[data-host-id="${host}"]`);
     const button = band.getByRole("button", {name: `delete ${selected.name} permanently`, exact: true});
     await expect(button).toBeEnabled();

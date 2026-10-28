@@ -492,9 +492,11 @@ test("restart with can answer the YOLO question by restarting guarded", async ({
     expect(restarts[0]).toMatchObject({ with: { permissions: "yolo" } });
     await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
     const guarded = confirmation.locator(".yolo-launch-guarded");
-    await expect(guarded).toHaveText("start guarded session instead");
+    await expect(guarded).toHaveText("Start guarded session instead");
     await expect(guarded).toHaveClass(/\bbtn-primary\b/);
-    await expect(confirmation.locator("button").first()).toHaveClass(/\byolo-launch-guarded\b/);
+    await expect(confirmation.locator(".dialog-actions button")).toHaveText([
+      "Cancel", "Start guarded session instead", "Start, and don't ask again on this host", "Start YOLO session anyway",
+    ]);
     await guarded.click();
 
     await expect.poll(() => restarts.length).toBe(2);

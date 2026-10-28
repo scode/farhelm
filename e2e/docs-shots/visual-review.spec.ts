@@ -9,7 +9,8 @@
  * held action, with the real helm publishing progress and controlled failures.
  */
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
-import { hostRowByName, openHostMenu, openRowMenu, patchPreferences, readPreferences, showHostsPanel, showSessionsPanel } from "../tests/helpers/fleet";
+import { hostRowByName, listHosts, openHostMenu, openRowMenu, patchPreferences, readPreferences, showHostsPanel, showSessionsPanel } from "../tests/helpers/fleet";
+import { chooseLauncherHost } from "../tests/helpers/host-picker";
 import { openSettings, selectSettingsSection } from "../tests/helpers/settings";
 import { attachSession, waitForTermText } from "../tests/helpers/term";
 import { waitForSessionRevealed } from "../tests/helpers/terminal-readiness";
@@ -25,7 +26,7 @@ import { shot as captureShot, type CropOptions } from "./shot";
 import { readFleet } from "./stage-docs";
 import { chooseStatus } from "../tests/helpers/list-header";
 import { chooseHost, hostChoice } from "../tests/helpers/host-rail";
-import { mountNativeTunnelPreview } from "../tests/helpers/native-tunnel-preview";
+import { mountNativeTunnelConsentPreview, mountNativeTunnelPreview } from "../tests/helpers/native-tunnel-preview";
 
 // A focused PR needs its changed states, rather than every unchanged surface.
 // Each selection retains the same script, fleet, shot helper and cleanup.
@@ -37,6 +38,7 @@ const toolbarOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "session-toolbar
 const tunnelOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "session-tunnels";
 const settingsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "settings";
 const menusOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "menus";
+const dialogsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "dialogs";
 
 /** Photograph native-only chrome with the goal's explicit CSS-only fallback.
  * The ordinary staged web app supplies the surrounding frame and terminals.
@@ -490,6 +492,158 @@ async function scrollToEnd(root: Locator) {
       }
     }
   });
+}
+
+/** Photograph changed dialog frames and answers, cancelling every operation.
+ * Rename's refusal is real: a newline is an invalid title, whereas an empty
+ * title is legal. Templates only edits an unsaved draft. YOLO stops at the
+ * helm's real consent refusal, with the owned host's asking policy verified
+ * first; no affirmative answer or successful launch belongs in this capture.
+ */
+async function dialogShots(page: Page, request: APIRequestContext, scenario: Scenario, name: string, includePhone: boolean) {
+  const viewport = page.viewportSize()!;
+  const window = [page.locator("body")];
+  const row = rowOf(page, scenario, (session) => session.status === "idle" && session.seen === false);
+  const id = await row.getAttribute("data-session-id");
+  if (!id) throw new Error("Rename review needs its staged session identity");
+  await openRowMenu(row);
+  await row.locator(".session-row-rename").click();
+  const rename = page.locator(".rename-dialog");
+  await expect(rename.locator(".rename-input")).toBeFocused();
+  await shot(page, `${name}-rename`, window, { pad: 0 });
+  await rename.locator(".rename-input").fill("review\ninvalid");
+  const [refusal] = await Promise.all([
+    page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith(`/api/sessions/${encodeURIComponent(id)}/rename`)),
+    rename.locator(".rename-submit").click(),
+  ]);
+  expect(refusal.status(), "the supervisor rejects the control character without renaming").toBe(400);
+  await expect(rename.locator(".rename-error")).toBeVisible();
+  await shot(page, `${name}-rename-refusal`, window, { pad: 0 });
+  if (includePhone) {
+    await page.setViewportSize({ width: 390, height: 320 });
+    await insideViewport(page, rename.locator(".dialog-header"));
+    await insideViewport(page, rename.locator(".dialog-footer"));
+    await shot(page, `${name}-rename-phone-refusal`, window, { pad: 0 });
+    await scrollToEnd(rename);
+    await insideViewport(page, rename.locator(".rename-input"));
+    await shot(page, `${name}-rename-phone-refusal-end`, window, { pad: 0 });
+    await page.setViewportSize(viewport);
+  }
+  await rename.locator(".rename-cancel").click();
+  await expect(rename).toBeHidden();
+
+  await page.locator(".templates-button").click();
+  const templates = page.locator(".templates-dialog");
+  await expect(templates.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+  await templates.locator(".templates-row").filter({ has: page.getByText("codex-deep", { exact: true }) }).click();
+  await expect(templates.locator(".templates-name")).toHaveValue("codex-deep");
+  await expect(templates.locator(".templates-name")).toBeFocused();
+  // A neutral editor shot must retire the name field's delayed focus tooltip,
+  // not merely park the pointer while that field still owns focus.
+  await templates.focus();
+  await expect(templates).toBeFocused();
+  await shot(page, `${name}-template-editor`, window, { pad: 0 });
+  await templates.locator(".templates-name").fill("codex-deep-unsaved");
+  await templates.locator(".templates-close").click();
+  await expect(templates.locator(".templates-save-leave")).toBeFocused();
+  await shot(page, `${name}-template-leave-question`, window, { pad: 0 });
+  await templates.locator(".templates-keep-editing").click();
+  await expect(templates.locator(".templates-name")).toHaveValue("codex-deep-unsaved");
+  await expect(templates.locator(".templates-name")).toBeFocused();
+  if (includePhone) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await templates.focus();
+    await expect(templates).toBeFocused();
+    await shot(page, `${name}-template-editor-phone`, window, { pad: 0 });
+    await templates.locator(".templates-close").click();
+    await expect(templates.locator(".templates-save-leave")).toBeFocused();
+    await expect(templates.locator(".templates-editor-footer")).toBeInViewport({ ratio: 0.99 });
+    await shot(page, `${name}-template-leave-question-phone`, window, { pad: 0 });
+  } else await templates.locator(".templates-close").click();
+  await templates.locator(".templates-discard").click();
+  await expect(templates).toBeHidden();
+  await page.setViewportSize(viewport);
+
+  await page.locator(".checkout-trash-button").click();
+  const trash = page.locator(".checkout-trash-dialog");
+  await expect(trash.locator(".checkout-trash-entry")).toHaveCount(3);
+  for (const button of await trash.locator(".trash-entry-delete").all()) await expect(button).toBeEnabled();
+  await expect(trash.locator(".dialog-footer")).toHaveCount(0);
+  await shot(page, `${name}-trash`, window, { pad: 0 });
+  await trash.locator(".trash-delete-all").click();
+  // The existing inline question initially focuses its enabled main answer.
+  // Photograph that handoff, then cancel without sending a delete request.
+  await expect(trash.locator(".trash-confirm-submit")).toBeFocused();
+  await shot(page, `${name}-trash-confirmation`, window, { pad: 0 });
+  await trash.locator(".trash-confirm-cancel").click();
+  await expect(trash.locator(".trash-confirm-cancel")).toBeHidden();
+  if (includePhone) {
+    await page.setViewportSize({ width: 390, height: 520 });
+    // Resizing arms Trash's existing row-movement guard. Photograph its
+    // resting controls only after that guard releases them again.
+    for (const button of await trash.locator(".trash-entry-delete").all()) {
+      await expect(button).toBeEnabled();
+      await expect(button).toHaveCSS("opacity", "1");
+    }
+    await shot(page, `${name}-trash-phone`, window, { pad: 0 });
+    await page.setViewportSize(viewport);
+  }
+  await page.keyboard.press("Escape");
+  await expect(trash).toBeHidden();
+
+  const local = (await listHosts(request)).find((host) => host.kind === "local");
+  expect(local?.yolo_without_asking, "the staged host must ask before a YOLO launch").toBe(false);
+  const launcher = await openLauncher(page);
+  await chooseLauncherHost(launcher.getByRole("combobox", { name: "host", exact: true }), String(local!.id));
+  await launcher.getByLabel("folder", { exact: true }).fill("~");
+  await launcher.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  await launcher.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  const [yoloRefusal] = await Promise.all([
+    page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/api/sessions")),
+    launcher.locator(".create-session-submit").click(),
+  ]);
+  expect(yoloRefusal.status(), "the helm refuses the unconfirmed launch").toBe(409);
+  const question = launcher.locator(".yolo-confirmation");
+  await expect(question.locator(".yolo-cancel")).toBeFocused();
+  await insideViewport(page, question);
+  await shot(page, `${name}-yolo-question`, window, { pad: 0 });
+  if (includePhone) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await insideViewport(page, question);
+    await shot(page, `${name}-yolo-question-phone`, window, { pad: 0 });
+  }
+  await question.locator(".yolo-cancel").click();
+  await expect(question).toBeHidden();
+  await launcher.locator(".launch-composer-cancel").click();
+  await expect(launcher).toBeHidden();
+  await page.setViewportSize(viewport);
+
+  // The consent controller is desktop-only. This established preview route
+  // shows its exact frame/copy, with native callbacks explicitly untested here.
+  try {
+    for (const saving of [false, true]) {
+      await mountNativeTunnelConsentPreview(page, saving);
+      const consent = page.locator(".tunnel-consent-dialog");
+      await insideViewport(page, consent.locator(".dialog-header"));
+      await insideViewport(page, consent.locator(".dialog-footer"));
+      await shot(page, `${name}-tunnel-consent${saving ? "-saving" : ""}`, window, { pad: 0 });
+    }
+    if (includePhone) {
+      await page.setViewportSize({ width: 390, height: 520 });
+      await mountNativeTunnelConsentPreview(page);
+      const consent = page.locator(".tunnel-consent-dialog");
+      const body = consent.locator(".dialog-body");
+      await insideViewport(page, consent.locator(".dialog-header"));
+      await insideViewport(page, consent.locator(".dialog-footer"));
+      expect(await body.evaluate((element) => element.scrollHeight > element.clientHeight), "the warning must genuinely scroll in a short phone frame").toBe(true);
+      await shot(page, `${name}-tunnel-consent-phone`, window, { pad: 0 });
+      await scrollToEnd(consent);
+      await shot(page, `${name}-tunnel-consent-phone-end`, window, { pad: 0 });
+    }
+  } finally {
+    await page.evaluate(() => document.querySelectorAll("[data-tunnel-consent-preview]").forEach((element) => element.remove()));
+    await page.setViewportSize(viewport);
+  }
 }
 
 /** Reach a checked switch with real Tab input so the visible focus ring is real.
@@ -979,6 +1133,10 @@ for (const colorScheme of ["dark", "light"] as const) {
         if (menusOnly) {
           await menuShots(page, request, scenario, name);
           await hostHintShots(page, request, scenario, name);
+          return;
+        }
+        if (dialogsOnly) {
+          await dialogShots(page, request, scenario, name, width === "main-650");
           return;
         }
         const row = rowOf(page, scenario, (session) => session.status === "idle" && session.seen === false);

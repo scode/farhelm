@@ -315,7 +315,7 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
     await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(b);
     await dialog.locator(".templates-row-name").getByText(b, { exact: true }).click();
     await dialog.locator(".templates-name").fill(renamed);
-    await dialog.getByRole("button", { name: "save", exact: true }).click();
+    await dialog.getByRole("button", { name: "Save", exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "0": renamed });
     await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(renamed);
     await dialog.getByRole("button", { name: "delete", exact: true }).click();
@@ -1872,7 +1872,20 @@ test("model suggestions and phone departure controls remain reachable", async ({
     await dialog.locator(".templates-close").click();
     const prompt = dialog.locator(".templates-departure");
     await expect(prompt).toBeInViewport();
+    // Native scroll rounding may clip a fractional footer border. Save must
+    // still have real space below it, not sit against the scrollport edge.
+    await expect(dialog.locator(".templates-editor-footer")).toBeInViewport({ ratio: 0.99 });
+    const dialogBox = (await dialog.boundingBox())!;
+    const saveBox = (await dialog.locator(".templates-save-leave").boundingBox())!;
+    expect(dialogBox.y + dialogBox.height - saveBox.y - saveBox.height).toBeGreaterThanOrEqual(12);
     await expect(dialog.locator(".templates-save-leave")).toBeFocused();
+    await expect(prompt.locator(".dialog-actions button")).toHaveText(["Keep editing", "Discard", "Save"]);
+    // The question keeps its affirmative initial focus, while backward Tab
+    // follows the visual answers rather than their former reverse order.
+    await page.keyboard.press("Shift+Tab");
+    await expect(dialog.locator(".templates-discard")).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(dialog.locator(".templates-keep-editing")).toBeFocused();
     await dialog.locator(".templates-keep-editing").click();
     await expect(prompt).toHaveCount(0);
     await expect(dialog.locator(".templates-name")).toBeFocused();

@@ -46,7 +46,8 @@ installTerminalSuiteHooks({ tabSweep: true });
 /** Rename shows the exact title's hidden characters, in the current title and
  * in the field it seeds, without changing the stored title: the field starts
  * escaped so an agent-set title cannot hide characters from the user who edits
- * it. A peer-authored refusal uses the same isolated display rule. */
+ * it. A peer-authored refusal uses the same isolated display rule. A short
+ * phone frame must keep Close and both answers reachable beside that draft. */
 test("rename exposes peer title and refusal characters and seeds an escaped draft", async ({ page, request }) => {
   const title = `rename-peer-${Date.now()}\u202Etitle\u200B`;
   const shown = title.replace("\u202E", "<U+202E>").replace("\u200B", "<U+200B>");
@@ -55,6 +56,7 @@ test("rename exposes peer title and refusal characters and seeds an escaped draf
     await fulfillAsHelm(route, { status: 400, contentType: "text/plain", body: "refused \u202Ehost\u200B" });
   });
   try {
+    await page.setViewportSize({ width: 390, height: 320 });
     await page.goto("/");
     const row = page.locator(`[data-session-id="${session.id}"]`);
     await expect(row.locator(".session-title")).toHaveText(shown);
@@ -67,6 +69,10 @@ test("rename exposes peer title and refusal characters and seeds an escaped draf
     await expect(current).toHaveAttribute("dir", "ltr");
     expect(await current.evaluate((node) => getComputedStyle(node).unicodeBidi)).toBe("isolate");
     await expect(draft).toHaveValue(shown);
+    await expect(draft).toBeFocused();
+    await expect(dialog.locator(".dialog-header .rename-close")).toBeInViewport({ ratio: 1 });
+    await expect(dialog.locator(".dialog-footer .rename-cancel")).toBeInViewport({ ratio: 1 });
+    await expect(dialog.locator(".dialog-footer .rename-submit")).toBeInViewport({ ratio: 1 });
     await draft.fill(`${title}-edited`);
     await draft.press("Enter");
     const error = dialog.locator(".rename-error .peer-value");
@@ -74,6 +80,8 @@ test("rename exposes peer title and refusal characters and seeds an escaped draf
     await expect(error).toHaveAttribute("dir", "ltr");
     expect(await error.evaluate((node) => getComputedStyle(node).unicodeBidi)).toBe("isolate");
     await expect(draft).toHaveValue(`${title}-edited`);
+    await expect(dialog.locator(".dialog-footer .rename-cancel")).toBeInViewport({ ratio: 1 });
+    await expect(dialog.locator(".dialog-footer .rename-submit")).toBeInViewport({ ratio: 1 });
     const response = await request.get(`/api/sessions/${encodeURIComponent(session.id)}`);
     expect(response.ok()).toBe(true);
     expect((await response.json()).title).toBe(title);

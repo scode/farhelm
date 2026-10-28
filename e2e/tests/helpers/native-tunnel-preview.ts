@@ -55,3 +55,28 @@ export async function mountNativeTunnelPreview(page: Page, state: TunnelPreviewS
     topbar.insertBefore(holder, actions);
   }, { state, host });
 }
+
+/** Mirror the desktop-only consent frame for ordinary visual review.
+ * Like the pill preview above, this contains closed fixture copy and native
+ * controls, with no product callbacks or synthetic API answers. It establishes
+ * CSS geometry and contrast only. Native controller tests and compilation
+ * establish opening ownership and the pending-save dismissal guard.
+ */
+export async function mountNativeTunnelConsentPreview(page: Page, saving = false) {
+  await page.evaluate((saving) => {
+    document.querySelectorAll("[data-tunnel-consent-preview]").forEach((element) => element.remove());
+    const backdrop = document.createElement("div");
+    backdrop.className = "host-settings-backdrop tunnel-consent-backdrop";
+    backdrop.dataset.tunnelConsentPreview = String(saving);
+    backdrop.setAttribute("role", "presentation");
+    const disabled = saving ? " disabled" : "";
+    // These classes and words mirror TunnelLayer/DialogHeader/DialogFooter.
+    // No modal installer or click handler is substituted for the native app.
+    backdrop.innerHTML = `<div class="tunnel-consent-dialog host-dialog-framed" role="dialog" aria-modal="true" aria-labelledby="tunnel-consent-heading" tabindex="-1">
+      <div class="dialog-header host-settings-header"><div class="dialog-tile host-settings-mark" aria-hidden="true"><svg class="action-glyph" data-glyph="tunnel" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5.5 8.5l3-3M5 5l1.8-1.8a2.8 2.8 0 0 1 4 4L9 9M5 5 3.2 6.8a2.8 2.8 0 0 0 4 4L9 9"></path></svg></div><div class="dialog-heading host-settings-heading"><h2 class="dialog-title host-settings-title"><span id="tunnel-consent-heading">Allow tunnels from remote sessions?</span></h2><div class="dialog-summary host-settings-summary">Remote pages share this Mac's local browser trust</div></div><button type="button" class="dialog-close tunnel-close" aria-label="Close tunnel warning" data-tooltip="Close without allowing tunnels"${disabled}>×</button></div>
+      <div class="dialog-body host-settings-body" role="region" aria-label="tunnel security warning" tabindex="0"><p><strong>A remote page opened through a tunnel runs at 127.0.0.1 on this Mac. It can read cookies set by other services on 127.0.0.1; different ports do not keep those cookies separate.</strong></p><p>Your browser treats it as a local page, so its private-network checks do not apply. Any program on this Mac can connect to an open tunnel.</p><p>Ordinary links from other 127.0.0.1 pages into the standalone Farhelm helm are refused.</p><p>Allow this only for remote pages you trust. You can turn tunnels off in Settings, which closes every open tunnel.</p></div>
+      <div class="dialog-footer host-settings-footer"><div class="dialog-actions host-dialog-answers"><button type="button" class="btn btn-neutral tunnel-cancel"${disabled}>Cancel</button><button type="button" class="btn btn-primary tunnel-allow"${disabled}>${saving ? "Saving…" : "Allow tunnels"}</button></div></div>
+    </div>`;
+    document.body.append(backdrop);
+  }, saving);
+}

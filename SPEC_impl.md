@@ -471,7 +471,7 @@ overlay card's edge, and the deleting row takes no tint or edge of its own, whic
 it usually already is. Action buttons use three deliberate tiers on the shared ghost `.btn` base: `.btn-primary` is the
 normal periwinkle affirmative, `.btn-neutral` is the quiet secondary treatment, and `.btn-danger` is reserved for
 destructive confirmations. A permanent answer uses the outlined form of its one-off tier: the YOLO confirmation's
-"start, and don't ask again on this host" and host removal's "remove, don't ask again" keep the danger color, while host
+"Start, and don't ask again on this host" and host removal's "remove, don't ask again" keep the danger color, while host
 setup's "set up, don't ask again" keeps the primary color. Each leaves its one-off action as the filled choice. The
 maintainer chose (2026-09-30) not to make a permanent answer the filled one that draws the reflex click. The host row's
 inline update action is another deliberate outlined treatment: amber (`--warn`) for an optional update and red
@@ -518,6 +518,20 @@ navigation in each caller. Dialog header, body and footer presentation preserves
 owner. The shared action row keeps Cancel, any outlined permanent answer and the ordinary main action in that order,
 including when a narrow window stacks them. Disabled filled actions return to a quiet raised surface with readable text
 rather than fading the affirmative fill.
+
+Rename and tunnel consent use that shared header, bounded scroll body and pinned answer footer. Their header Close uses
+the same live cancellation guard as Cancel; tunnel consent also retains the rendered warning's opening token and refuses
+dismissal during its acknowledged consent write. Native Tab follows header Close, body fields or keyboard scroll entry,
+then Cancel and the main answer; their existing initial focus remains unchanged. Rename retains one native form around
+its body and footer, so moving Save does not create another submission path. Inline YOLO shares only the action row:
+Cancel, optional guarded start, outlined permanent YOLO and the filled one-time answer. It gains no modal frame or
+header Close.
+
+Templates keeps its existing root scroll owner and selected editor's local footer, using the same shared heading and
+action presentation. The leave question reads Keep editing, Discard, Save but still focuses Save when it opens. Its
+single header Close continues through the draft-departure guard. Trash keeps its deliberate pinned-header exception:
+shared title and surface styling, with totals, progress, Delete all and Close together above the archive scroll body,
+and no footer or extra icon-tile height.
 
 Nothing on screen may redraw on its own more than 10 times per second. "On its own" means an indicator or decoration
 that moves, fades, spins, or blinks while nothing about the state it shows has changed; drawing new content because new

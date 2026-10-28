@@ -1,9 +1,10 @@
 //! The rename editor's draft and keyboard semantics.
 //!
-//! `RenameForm` owns only the native textarea behavior: a caller supplies
-//! an escaped draft and its raw seed. Untouched submission preserves the seed;
-//! edits are submitted verbatim. `RenameDialog`
-//! gives the list that field a stable modal parent, leaving requests,
+//! `RenameForm` keeps the native textarea and submission together with their
+//! scroll body and answer footer. A caller supplies an escaped draft and its
+//! raw seed. Untouched submission preserves the seed; edits are submitted
+//! verbatim. `RenameDialog` gives the list that field a stable modal parent
+//! and a shared heading, leaving requests,
 //! optimistic paint, and response ownership in `ListView`.
 //!
 //! What is deliberately NOT here: any notion of a valid title. The draft
@@ -11,7 +12,10 @@
 //! in the supervisor (see `api::rename_session`).
 
 use crate::list::PeerTitle;
-use crate::modal_dialog::{DialogFocus, DialogHandle, FocusAdmission, InitialFocus, ModalDialog};
+use crate::modal_dialog::{
+    DialogActions, DialogFocus, DialogFooter, DialogHandle, DialogHeader, FocusAdmission,
+    InitialFocus, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
+};
 use crate::peer::{DetailPart, PeerLine};
 use dioxus::prelude::*;
 
@@ -77,6 +81,10 @@ pub(crate) const fn dialog_handle(generation: u64) -> DialogHandle {
 /// `aria-disabled`; a click-submitted request keeps focus on the action the
 /// user chose. The event handlers remain the authority because a rerender is
 /// not synchronous with the event that started the request.
+///
+/// The form contains the scroll body and footer so native submission still has
+/// one owner. `children` carries the caller's authoritative title and refusals;
+/// those may grow without moving the draft or hiding the footer answers.
 #[component]
 pub(crate) fn RenameForm(
     mut draft: Signal<String>,
@@ -93,6 +101,8 @@ pub(crate) fn RenameForm(
     submit_disabled: bool,
     on_submit: EventHandler<String>,
     on_cancel: EventHandler<()>,
+    generation: u64,
+    children: Element,
 ) -> Element {
     let mut edited = use_signal(|| false);
     let enter_seed = raw_seed.clone();
@@ -107,82 +117,98 @@ pub(crate) fn RenameForm(
                 if busy_now.call(()) || submit_disabled {
                     return;
                 }
-                on_submit.call(crate::list::submitted_field(&draft(), edited(), Some(&raw_seed)));
+                on_submit
+                    .call(crate::list::submitted_field(&draft(), edited(), Some(&raw_seed)));
             },
-            textarea {
-                class: "rename-input",
-                aria_label: "new session title",
-                rows: "1",
-                // A textarea does not submit its form on Enter, so the
-                // single-line behavior is implemented here: Enter submits
-                // and never inserts a line break, which is what leaves the
-                // multi-line case reachable only by pasting — see this
-                // component's docs for why that case must survive.
-                //
-                // Except mid-COMPOSITION, where the same key means
-                // "accept the candidate I am looking at" to every IME
-                // there is. Submitting there would send a half-composed
-                // title — and, worse, would do it on the keystroke a
-                // Japanese or Chinese typist uses to finish nearly every
-                // word, making the field unusable rather than merely
-                // surprising. The composing keydown is left entirely
-                // alone (no `prevent_default` either), so the IME's own
-                // handling of it is untouched.
-                onkeydown: move |evt| {
-                    if evt.key() == Key::Enter && !evt.is_composing() {
-                        evt.prevent_default();
-                        if busy_now.call(()) || submit_disabled {
-                            return;
+            ScrollRegion {
+                class: "dialog-body rename-body",
+                handle: dialog_handle(generation),
+                selector: ".rename-body",
+                name: "session title",
+                recovery: RecoveryFocus::new(".rename-input", None, true, RecoveryDelay::OneFrame),
+                {children}
+                textarea {
+                    class: "rename-input",
+                    aria_label: "new session title",
+                    rows: "1",
+                    // A textarea does not submit its form on Enter, so the
+                    // single-line behavior is implemented here: Enter submits
+                    // and never inserts a line break, which is what leaves the
+                    // multi-line case reachable only by pasting — see this
+                    // component's docs for why that case must survive.
+                    //
+                    // Except mid-COMPOSITION, where the same key means
+                    // "accept the candidate I am looking at" to every IME
+                    // there is. Submitting there would send a half-composed
+                    // title — and, worse, would do it on the keystroke a
+                    // Japanese or Chinese typist uses to finish nearly every
+                    // word, making the field unusable rather than merely
+                    // surprising. The composing keydown is left entirely
+                    // alone (no `prevent_default` either), so the IME's own
+                    // handling of it is untouched.
+                    onkeydown: move |evt| {
+                        if evt.key() == Key::Enter && !evt.is_composing() {
+                            evt.prevent_default();
+                            if busy_now.call(()) || submit_disabled {
+                                return;
+                            }
+                            on_submit
+                                .call(
+                                    crate::list::submitted_field(&draft(), edited(), Some(&enter_seed)),
+                                );
                         }
-                        on_submit.call(crate::list::submitted_field(&draft(), edited(), Some(&enter_seed)));
-                    }
-                },
-                autocomplete: "off",
-                autocorrect: "off",
-                autocapitalize: "none",
-                spellcheck: "false",
-                // Native autofocus handles first insertion. The dialog's
-                // mount handoff also covers later editors in a document
-                // where the browser has already consumed autofocus.
-                autofocus: true,
-                value: "{draft}",
-                readonly: busy,
-                oninput: move |evt| {
-                    // A renderer can deliver an input event queued just
-                    // before `readonly` reached the DOM. The submitted
-                    // snapshot must remain the visible draft until the
-                    // request answers, so the handler carries the same gate.
-                    if !busy_now.call(()) {
-                        edited.set(true);
-                        draft.set(evt.value());
-                    }
-                },
+                    },
+                    autocomplete: "off",
+                    autocorrect: "off",
+                    autocapitalize: "none",
+                    spellcheck: "false",
+                    // Native autofocus handles first insertion. The dialog's
+                    // mount handoff also covers later editors in a document
+                    // where the browser has already consumed autofocus.
+                    autofocus: true,
+                    value: "{draft}",
+                    readonly: busy,
+                    oninput: move |evt| {
+                        // A renderer can deliver an input event queued just
+                        // before `readonly` reached the DOM. The submitted
+                        // snapshot must remain the visible draft until the
+                        // request answers, so the handler carries the same gate.
+                        if !busy_now.call(()) {
+                            edited.set(true);
+                            draft.set(evt.value());
+                        }
+                    },
+                }
             }
-            button {
-                r#type: "submit",
-                class: "btn btn-primary rename-submit",
-                "data-tooltip": "save the new title",
-                disabled: submit_disabled,
-                aria_disabled: if busy { "true" },
-                onclick: move |evt| {
-                    if busy_now.call(()) {
-                        evt.prevent_default();
+            DialogFooter {
+                DialogActions {
+                    button {
+                        r#type: "button",
+                        class: "btn btn-neutral rename-cancel",
+                        "data-tooltip": "cancel: keep the current title",
+                        disabled: busy,
+                        onclick: move |_| {
+                            if busy_now.call(()) {
+                                return;
+                            }
+                            on_cancel.call(());
+                        },
+                        "Cancel"
                     }
-                },
-                "save"
-            }
-            button {
-                r#type: "button",
-                class: "btn btn-neutral rename-cancel",
-                "data-tooltip": "cancel: keep the current title",
-                disabled: busy,
-                onclick: move |_| {
-                    if busy_now.call(()) {
-                        return;
+                    button {
+                        r#type: "submit",
+                        class: "btn btn-primary rename-submit",
+                        "data-tooltip": "save the new title",
+                        disabled: submit_disabled,
+                        aria_disabled: if busy { "true" },
+                        onclick: move |evt| {
+                            if busy_now.call(()) {
+                                evt.prevent_default();
+                            }
+                        },
+                        "Save"
                     }
-                    on_cancel.call(());
-                },
-                "cancel"
+                }
             }
         }
     }
@@ -199,6 +225,9 @@ pub(crate) fn RenameForm(
 /// same session is a different focus and draft owner. The product UI refuses
 /// reopening while a request is pending, but the result boundary does not
 /// rely on that reachability rule for safety.
+/// Header Close and footer Cancel share the generation-bound dismissal. Their
+/// native order is Close, draft, Cancel, Save; the initial handoff still belongs
+/// to the textarea rather than the first sequential target.
 #[component]
 pub(crate) fn RenameDialog(
     draft: Signal<String>,
@@ -221,75 +250,99 @@ pub(crate) fn RenameDialog(
 ) -> Element {
     let raw_seed = current_title.clone();
     rsx! {
-        div {
-            class: "rename-dialog-backdrop",
-            role: "presentation",
-        ModalDialog {
-            handle: dialog_handle(generation),
-            focus: DialogFocus {
-                initial_focus: InitialFocus::Handoff {
-                    selector: ".rename-input".into(),
-                    select_all: naming,
-                    captured_opener: shortcut.then_some("__farhelmSessionRenameOpener"),
-                    // Native autofocus may be spent after an earlier editor.
-                    // Naming still owns a handoff; ordinary Rename yields to
-                    // an outside control chosen before delayed mount work.
-                    admission: if naming {
-                        FocusAdmission::Always
-                    } else {
-                        FocusAdmission::DocumentOrOpener { selector: ".session-row-rename".into() }
+        div { class: "rename-dialog-backdrop", role: "presentation",
+            ModalDialog {
+                handle: dialog_handle(generation),
+                focus: DialogFocus {
+                    initial_focus: InitialFocus::Handoff {
+                        selector: ".rename-input".into(),
+                        select_all: naming,
+                        captured_opener: shortcut.then_some("__farhelmSessionRenameOpener"),
+                        // Native autofocus may be spent after an earlier editor.
+                        // Naming still owns a handoff; ordinary Rename yields to
+                        // an outside control chosen before delayed mount work.
+                        admission: if naming {
+                            FocusAdmission::Always
+                        } else {
+                            FocusAdmission::DocumentOrOpener {
+                                selector: ".session-row-rename".into(),
+                            }
+                        },
                     },
+                    escape_target: Some(".rename-cancel".into()),
+                    main_action: None,
+                    gap: false,
                 },
-                escape_target: Some(".rename-cancel".into()),
-                main_action: None,
-                // Rename retains native gap clicks and has no container action;
-                // trapping and page isolation do not imply either policy.
-                gap: false,
-            },
-            class: "rename-dialog",
-            "data-rename-generation": "{generation}",
-            role: "dialog",
-            aria_modal: "true",
-            aria_label: "rename session",
-            // The shared boundary can park focus here after an empty-space
-            // click or lost control, without adding a sequential Tab stop.
-            tabindex: "-1",
-            // Focusout followed by focusin is an internal transition and
-            // ends owned. A move outside has no matching focusin and ends
-            // unowned. Busy controls stay focusable, so the render itself
-            // cannot manufacture the external case.
-            onfocusin: move |_| focus_owned.set(true),
-            onfocusout: move |_| focus_owned.set(false),
-            on_escape: move |evt: KeyboardEvent| {
-                // Escape accepts or dismisses candidates while an IME is
-                // composing. Treating that key as dialog cancellation would
-                // abandon the draft on an ordinary composition keystroke.
-                if !evt.is_composing() && !busy_now.call(()) {
-                    on_cancel.call(generation);
+                class: "rename-dialog",
+                "data-rename-generation": "{generation}",
+                role: "dialog",
+                aria_modal: "true",
+                aria_label: "rename session",
+                // The shared boundary can park focus here after an empty-space
+                // click or lost control, without adding a sequential Tab stop.
+                tabindex: "-1",
+                // Focusout followed by focusin is an internal transition and
+                // ends owned. A move outside has no matching focusin and ends
+                // unowned. Busy controls stay focusable, so the render itself
+                // cannot manufacture the external case.
+                onfocusin: move |_| focus_owned.set(true),
+                onfocusout: move |_| focus_owned.set(false),
+                on_escape: move |evt: KeyboardEvent| {
+                    // Escape accepts or dismisses candidates while an IME is
+                    // composing. Treating that key as dialog cancellation would
+                    // abandon the draft on an ordinary composition keystroke.
+                    if !evt.is_composing() && !busy_now.call(()) {
+                        on_cancel.call(generation);
+                    }
+                },
+                DialogHeader {
+                    title: rsx! { "Rename session" },
+                    summary: rsx! { "Change this session's title" },
+                    close: rsx! {
+                        button {
+                            r#type: "button",
+                            class: "dialog-close rename-close",
+                            aria_label: "Close rename",
+                            "data-tooltip": "Close rename; keep the current title",
+                            disabled: busy,
+                            onclick: move |_| {
+                                if !busy_now.call(()) {
+                                    on_cancel.call(generation);
+                                }
+                            },
+                            "×"
+                        }
+                    },
                 }
-            },
-            PeerTitle { class: "rename-current-title", title: crate::peer::PeerText::from(current_title), quoted: false }
-            if unavailable {
-                p {
-                    class: "rename-unavailable",
-                    "this session is no longer available; copy the draft or cancel"
+                RenameForm {
+                    draft,
+                    raw_seed,
+                    busy,
+                    busy_now,
+                    submit_disabled: unavailable,
+                    generation,
+                    on_submit: move |title| on_submit.call((generation, title)),
+                    on_cancel: move |_| on_cancel.call(generation),
+                    PeerTitle {
+                        class: "rename-current-title",
+                        title: crate::peer::PeerText::from(current_title),
+                        quoted: false,
+                    }
+                    if unavailable {
+                        p { class: "rename-unavailable",
+                            "this session is no longer available; copy the draft or cancel"
+                        }
+                    }
+                    if let Some(error) = error {
+                        // Refusals can quote peer values just as titles can. Keep the
+                        // display escaping separate from the raw editable draft.
+                        PeerLine {
+                            class: "rename-error".to_string(),
+                            parts: vec![DetailPart::peer(error)],
+                        }
+                    }
                 }
             }
-            if let Some(error) = error {
-                // Refusals can quote peer values just as titles can. Keep the
-                // display escaping separate from the raw editable draft.
-                PeerLine { class: "rename-error".to_string(), parts: vec![DetailPart::peer(error)] }
-            }
-            RenameForm {
-                draft,
-                raw_seed,
-                busy,
-                busy_now,
-                submit_disabled: unavailable,
-                on_submit: move |title| on_submit.call((generation, title)),
-                on_cancel: move |_| on_cancel.call(generation),
-            }
-        }
         }
     }
 }

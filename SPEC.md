@@ -785,13 +785,15 @@ agent choice is independent of that destination:
   launcher first; the list summary mentions it. Newline and tab remain editable. Invisible formatting is shown escaped
   and read-only, retaining its raw value through unrelated saves; removing and adding the field replaces it.
   Incompatible fields stay visible and prevent saving until corrected or removed. Saving is explicit; leaving an unsaved
-  draft asks save, discard, or keep editing. Template names are unique; duplicate opens an unsaved copy with a free
-  name. A workspace-trust field in an older template remains readable but is ignored when applied and omitted on every
-  save, including duplicate and delete undo. Delete takes effect immediately and offers undo inside the dialog for about
-  ten seconds; undo refuses if its old name has been taken. For a stored template that fails current save rules, the
-  control says "delete permanently" before deletion and no undo is offered. The label the user saw decides: a click on
-  "delete permanently" never offers undo, and a click on plain "delete" always does, even if the template list changed
-  in between. Closing the dialog ends its undo notice.
+  draft asks Keep editing, Discard, or Save in that reading order, with initial focus still on Save. Its shared header
+  supplies Close; the complete editor keeps scrolling within the dialog, including its editor-local action footer.
+  Template names are unique; duplicate opens an unsaved copy with a free name. A workspace-trust field in an older
+  template remains readable but is ignored when applied and omitted on every save, including duplicate and delete undo.
+  Delete takes effect immediately and offers undo inside the dialog for about ten seconds; undo refuses if its old name
+  has been taken. For a stored template that fails current save rules, the control says "delete permanently" before
+  deletion and no undo is offered. The label the user saw decides: a click on "delete permanently" never offers undo,
+  and a click on plain "delete" always does, even if the template list changed in between. Closing the dialog ends its
+  undo notice.
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Cmd+P on macOS or Ctrl+Shift+P elsewhere
   starts it directly in the browser and desktop app when no dialog is open, without showing the launcher on success.
   While the session launcher is the only visible dialog, the same chord applies its template to that draft and leaves
@@ -945,7 +947,9 @@ refused request retries an earlier attempt whose outcome is unknown (a lost repl
 started the session, which a guarded launch, being a new request, would duplicate, so the confirmation says the launch
 may already have started instead. The `farhelm` command line has no override: a request from inside a session is an
 agent's, and agents follow their own rule under Agent-spawned sessions, whatever the request claims. A plain restart
-relaunches the session's own stored launch and needs no YOLO confirmation again. Plain Replace, agent clone and
+relaunches the session's own stored launch and needs no YOLO confirmation again. The question stays inline and has no
+header Close: its answers read Cancel, the guarded option when offered, the outlined permanent YOLO answer, then the
+filled one-time YOLO answer. Tab follows that same order; Cancel keeps initial focus. Plain Replace, agent clone and
 inherited spawn also copy the stored command; pre-upgrade no-flag sessions therefore remain own-setting, with plain
 Replace asking on hosts that ask before YOLO launches and agent copies refused there. Clone, Replace with and Restart
 with compile new choices and get the guarded flags. Remote hosts must be updated after this protocol change before
@@ -1242,7 +1246,10 @@ A list rename opens in a modal editor owned by the list rather than by the row-a
 reorder, filter, or temporarily fail without moving its textarea, so its draft, selection, composition, and source
 session identity stay intact. A successful rename closes that editor; a refusal leaves its draft and error visible for
 correction. A complete, authoritative listing that no longer contains the source disables submission without discarding
-the draft, because a filtered, truncated, failed, or stale listing is not proof that the session disappeared.
+the draft, because a filtered, truncated, failed, or stale listing is not proof that the session disappeared. The editor
+has a shared title and Close header, a scrolling body containing the current title, draft and refusal, and a Cancel/Save
+footer. Tab follows Close, the title field, Cancel, Save; initial focus remains on the title field. Close uses the same
+cancellation and busy-state rules as Cancel.
 
 Quick launch uses the same editor in naming mode after creation, without holding up agent startup. Only that mode
 selects the whole initial name and treats an unchanged submission as keeping the default without a request. Saving,

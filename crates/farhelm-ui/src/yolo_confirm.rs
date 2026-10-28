@@ -39,6 +39,8 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::modal_dialog::DialogActions;
+
 use dioxus::prelude::*;
 use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
 
@@ -218,12 +220,15 @@ fn focus_cancel(instance: u64, only_if_lost: bool) {
 /// `busy` disables every answer while either step of a confirmed launch
 /// is in flight. `error` is the reason a "don't ask again" failed at its
 /// first step, shown with the question so the user can pick again.
-/// `confirm_submits` makes both YOLO answers form submit buttons, for the
-/// launcher, whose resubmit is its surrounding form's own submit; otherwise
-/// they call their handlers. A supplied guarded handler owns its draft change
+/// `confirm_submits` opts both YOLO answers into native form submission; false
+/// leaves resubmission entirely to the caller's handlers, as current callers
+/// require for their opening-bound retries. A supplied guarded handler owns its draft change
 /// and resubmission, including rejecting a stale opening before any mutation.
 /// `may_have_started` is for a refused retry of an attempt whose outcome is
 /// unknown: the question then cannot say that nothing has been started.
+/// Answers follow native reading order: Cancel, optional guarded start,
+/// permanent YOLO, then one-time YOLO. This stays inline; the shared action
+/// row adds no modal boundary or additional close target.
 #[component]
 pub(crate) fn YoloConfirmation(
     ask: YoloAsk,
@@ -294,7 +299,15 @@ pub(crate) fn YoloConfirmation(
                     parts: vec![DetailPart::peer(error)],
                 }
             }
-            div { class: "yolo-confirmation-actions",
+            DialogActions { class: "yolo-confirmation-actions",
+                button {
+                    r#type: "button",
+                    class: "btn btn-neutral yolo-cancel",
+                    "data-tooltip": "cancel: go back without starting anything",
+                    disabled: busy,
+                    onclick: move |_| on_cancel.call(()),
+                    "Cancel"
+                }
                 if let Some(on_launch_guarded) = on_launch_guarded {
                     button {
                         r#type: "button",
@@ -302,7 +315,17 @@ pub(crate) fn YoloConfirmation(
                         "data-tooltip": "start this session in guarded mode instead, where the agent's own safety checks stay on",
                         disabled: busy,
                         onclick: move |_| on_launch_guarded.call(()),
-                        "start guarded session instead"
+                        "Start guarded session instead"
+                    }
+                }
+                if ask.host.is_some() {
+                    button {
+                        r#type: start_type,
+                        class: "btn btn-danger btn-outline yolo-confirm-stop-asking",
+                        "data-tooltip": "start it, and start YOLO sessions on this host without asking from now on",
+                        disabled: busy,
+                        onclick: move |_| on_confirm_and_stop_asking.call(()),
+                        "Start, and don't ask again on this host"
                     }
                 }
                 button {
@@ -311,25 +334,7 @@ pub(crate) fn YoloConfirmation(
                     "data-tooltip": "start the session in YOLO mode, where the agent acts without asking",
                     disabled: busy,
                     onclick: move |_| on_confirm.call(()),
-                    "start YOLO session anyway"
-                }
-                if ask.host.is_some() {
-                    button {
-                        r#type: start_type,
-                        class: "btn yolo-confirm-stop-asking",
-                        "data-tooltip": "start it, and start YOLO sessions on this host without asking from now on",
-                        disabled: busy,
-                        onclick: move |_| on_confirm_and_stop_asking.call(()),
-                        "start, and don't ask again on this host"
-                    }
-                }
-                button {
-                    r#type: "button",
-                    class: "btn btn-neutral yolo-cancel",
-                    "data-tooltip": "cancel: go back without starting anything",
-                    disabled: busy,
-                    onclick: move |_| on_cancel.call(()),
-                    "cancel"
+                    "Start YOLO session anyway"
                 }
             }
         }
