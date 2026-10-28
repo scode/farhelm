@@ -158,7 +158,7 @@ test("host-colored terminal frame follows local appearance and Settings", async 
     await expect(switcher).not.toBeChecked();
     await switcher.setChecked(true);
     await expect.poll(async () => (await readPreferences(request)).color_terminal_frames).toBe(true);
-    await settings.getByRole("button", { name: "close", exact: true }).click();
+    await settings.getByRole("button", { name: "Close", exact: true }).click();
     await expect(panes).toHaveAttribute("data-colored-frame", "true");
     const red = await page.locator(`.host-row[data-host-id="${local.id}"] .host-kind-icon`)
       .evaluate((element) => getComputedStyle(element).color);
@@ -173,7 +173,7 @@ test("host-colored terminal frame follows local appearance and Settings", async 
     await expect(panes).toHaveAttribute("data-colored-frame", "true");
     await gear.click();
     await expect(switcher).toBeChecked();
-    await settings.getByRole("button", { name: "close", exact: true }).click();
+    await settings.getByRole("button", { name: "Close", exact: true }).click();
 
     await openHostMenu(page.locator(`.host-row[data-host-id="${local.id}"]`));
     await page.locator(".host-settings").click();
@@ -193,7 +193,7 @@ test("host-colored terminal frame follows local appearance and Settings", async 
     await gear.click();
     await switcher.setChecked(false);
     await expect.poll(async () => (await readPreferences(request)).color_terminal_frames).toBe(false);
-    await settings.getByRole("button", { name: "close", exact: true }).click();
+    await settings.getByRole("button", { name: "Close", exact: true }).click();
     await expect(panes).toHaveAttribute("data-colored-frame", "false");
     await expect(terminal).toHaveCSS("box-shadow", "none");
     await expect(viewport).toHaveCSS("background-color", surface);

@@ -287,7 +287,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
     await expect(settings.locator("#session-confirmations-help")).toContainText("YOLO, host and trash");
     await toggle.check();
     await expect.poll(async () => (await readPreferences(request)).skip_session_confirmations).toBe(true);
-    await settings.getByRole("button", { name: "close", exact: true }).click();
+    await settings.getByRole("button", { name: "Close", exact: true }).click();
 
     const first = await createSession(request, { title: "skip-row-delete" });
     owned.add(first.id);
@@ -406,7 +406,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
     await expect(toggle).toBeChecked();
     await toggle.uncheck();
     await expect.poll(async () => (await readPreferences(request)).skip_session_confirmations).toBe(false);
-    await settings.getByRole("button", { name: "close", exact: true }).click();
+    await settings.getByRole("button", { name: "Close", exact: true }).click();
     await page.locator(".header-delete").click();
     await expect(page.locator(".header-delete-confirm")).toBeVisible();
     await page.locator(".header-delete-confirm .btn-neutral").click();

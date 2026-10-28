@@ -149,7 +149,7 @@ test("browser Delete chord yields to a visible modal and an ordinary text field"
     await page.getByRole("button", { name: "settings", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     await expect(dialog).toBeVisible();
-    const close = dialog.getByRole("button", { name: "close", exact: true });
+    const close = dialog.getByRole("button", { name: "Close", exact: true });
     await close.focus();
     await expect(close).toBeFocused();
     await page.keyboard.press("Control+Shift+Backspace");
@@ -309,7 +309,7 @@ test("browser Rename chord edits the filtered open session and returns live term
     await page.getByRole("button", { name: "settings", exact: true }).click();
     const settings = page.getByRole("dialog", { name: "settings", exact: true });
     await expect(settings).toBeVisible();
-    const close = settings.getByRole("button", { name: "close", exact: true });
+    const close = settings.getByRole("button", { name: "Close", exact: true });
     await close.evaluate((node) => {
       const button = node as HTMLButtonElement;
       button.addEventListener("keydown", (event) => {

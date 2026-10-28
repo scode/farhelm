@@ -1,7 +1,7 @@
 import { expect } from "./evidence";
 import type { Locator, Page } from "@playwright/test";
 
-/** Names match accessible navigation and panel labels; App requires a desktop updater. */
+/** Stable panel names survive presentation changes; App requires a desktop updater. */
 export type SettingsSection =
   | "sessions"
   | "Appearance"
@@ -11,6 +11,21 @@ export type SettingsSection =
   | "agent trust"
   | "notifications"
   | "app";
+
+/** Navigation and headings use sentence case; panel identifiers keep their old names.
+ * Keeping this distinction here lets callers select a section without coupling
+ * draft-preservation tests to its visible spelling.
+ */
+export const settingsSectionLabels: Record<SettingsSection, string> = {
+  sessions: "Sessions",
+  Appearance: "Appearance",
+  hosts: "Hosts",
+  terminal: "Terminal",
+  checkouts: "Checkouts",
+  "agent trust": "Agent trust",
+  notifications: "Notifications",
+  app: "App",
+};
 
 /** Select through the same navigation at desktop and phone widths.
  * Only visibility is awaited: callers also exercise locked initial reads and
@@ -23,9 +38,9 @@ export async function selectSettingsSection(page: Page, section: SettingsSection
   if (await panel.isVisible()) return panel;
   const navigation = dialog.getByRole("navigation", { name: "settings sections", exact: true });
   if (!await navigation.isVisible()) {
-    await dialog.getByRole("button", { name: "‹ settings", exact: true }).click();
+    await dialog.getByRole("button", { name: "‹ Settings", exact: true }).click();
   }
-  await navigation.getByRole("button", { name: section, exact: true }).click();
+  await navigation.getByRole("button", { name: settingsSectionLabels[section], exact: true }).click();
   await expect(panel).toBeVisible();
   return panel;
 }

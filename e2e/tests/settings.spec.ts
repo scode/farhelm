@@ -10,7 +10,7 @@ import { routeGate } from "./helpers/route-gate";
 import { drainedRoute } from "./helpers/drained-route";
 import { requireHelmBuild } from "./helpers/helm-build";
 import { attachSession } from "./helpers/term";
-import { openSettings, selectSettingsSection, type SettingsSection } from "./helpers/settings";
+import { openSettings, selectSettingsSection, settingsSectionLabels, type SettingsSection } from "./helpers/settings";
 import type { APIRequestContext, Page, Request, Route } from "@playwright/test";
 import { request as independentRequest } from "@playwright/test";
 import { harnessAuthorizationHeaders } from "./helpers/device-auth";
@@ -78,7 +78,7 @@ test("settings focus stays on its painted fill and descriptions stay with their 
           if (distance.between !== null) expect(distance.between).toBeGreaterThan(distance.within);
         }
         await selectSettingsSection(page, "checkouts");
-        const close = dialog.getByRole("button", { name: "close", exact: true });
+        const close = dialog.getByRole("button", { name: "Close", exact: true });
         for (const field of [".checkout-root-field", ".checkout-post-clone-field"]) {
           await expect(dialog.locator(field).locator("input, textarea")).toBeEditable();
           const save = dialog.locator(field).getByRole("button", { name: "save", exact: true });
@@ -427,7 +427,7 @@ for (const hint of [
       await reached.wait();
       await expect(toggle).not.toBeChecked();
       await expect(toggle).toBeEnabled();
-      await dialog.getByRole("button", { name: "close", exact: true }).click();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
       await expect(dialog).toHaveCount(0);
       const reopenedRead = page.waitForResponse((reply) => reply.request().method() === "GET"
         && new URL(reply.url()).pathname === hint.endpoint);
@@ -595,7 +595,7 @@ test("settings frame-color rollback survives closing before failure", async ({ p
     await expect(toggle).toBeEnabled();
     await expect(panes).toHaveAttribute("data-colored-frame", "true");
     expect((await readPreferences(request)).color_terminal_frames).toBe(false);
-    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await expect(dialog).toHaveCount(0);
     release.release();
     await expect(panes).toHaveAttribute("data-colored-frame", "false");
@@ -668,7 +668,7 @@ test("prepared checkout settings preserve saved choices across reads, refusals a
     await expect(field.getByRole("alert")).toContainText("fixture initial read refusal");
     await expect(toggle).toBeDisabled();
     mode = "normal";
-    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await openSettings(page, "checkouts");
     await expect(toggle).toBeEnabled();
     await expect(toggle).toBeChecked();
@@ -696,7 +696,7 @@ test("prepared checkout settings preserve saved choices across reads, refusals a
     await selectSettingsSection(page, "sessions");
     await selectSettingsSection(page, "checkouts");
     await expect(toggle).toBeDisabled();
-    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await openSettings(page, "checkouts");
     await expect(toggle).toBeDisabled();
     expect(await read(), "held write has not reached persistence").toEqual({ enabled: true });
@@ -708,7 +708,7 @@ test("prepared checkout settings preserve saved choices across reads, refusals a
     await toggle.check();
     await expect.poll(read).toEqual({ enabled: true });
     await expect(toggle).toBeEnabled();
-    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await openSettings(page, "checkouts");
     await expect(toggle).toBeChecked();
     await expect(toggle).toBeEnabled();
@@ -843,7 +843,7 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
   const dialog = page.getByRole("dialog", { name: "settings", exact: true });
   const body = dialog.locator(".host-settings-body");
   const dismiss = dialog.getByRole("button", { name: "close settings", exact: true });
-  const close = dialog.getByRole("button", { name: "close", exact: true });
+  const close = dialog.getByRole("button", { name: "Close", exact: true });
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 560 });
     await gear.click();
@@ -905,10 +905,13 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
   await expect(gear).toBeFocused();
 });
 
-/** Section changes reveal one mounted pane and move focus to its heading.
+/** Icon-and-label navigation keeps full names and moves focus to one mounted pane.
  * Phone navigation must use the real list/back path, reset body scrolling,
  * and forget its selection on close. Mounted hidden controls are checked
  * separately from visible panes so a missing section cannot pass the sweep.
+ * Computed heading case catches transforms that conceal the displayed label;
+ * Notifications' groups remain subordinate to its navigation target, while
+ * neither heading level becomes visually smaller than the field labels.
  */
 test("settings navigation keeps mounted panes and follows the narrow list path", async ({ page, browserName }) => {
   await page.setViewportSize({ width: 1280, height: 560 });
@@ -917,17 +920,21 @@ test("settings navigation keeps mounted panes and follows the narrow list path",
   const navigation = dialog.getByRole("navigation", { name: "settings sections", exact: true });
   const body = dialog.locator(".host-settings-body");
   const panels = dialog.locator("section.app-settings-panel");
-  await expect(navigation.getByRole("button")).toHaveText(webSettingsSections);
-  await expect(navigation.getByRole("button", { name: "app", exact: true })).toHaveCount(0);
+  await expect(navigation.getByRole("button")).toHaveText(webSettingsSections.map(section => settingsSectionLabels[section]));
+  await expect(navigation.getByRole("button", { name: "App", exact: true })).toHaveCount(0);
   await expect(panels).toHaveCount(webSettingsSections.length);
   await expect(dialog.getByRole("checkbox", { includeHidden: true })).toHaveCount(18);
   await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
   for (const section of webSettingsSections) {
     const panel = await selectSettingsSection(page, section);
     await expect(dialog.locator("section.app-settings-panel:visible")).toHaveCount(1);
-    await expect(panel.locator(":scope > h3")).toHaveText(section);
+    await expect(panel.locator(":scope > h3")).toHaveText(settingsSectionLabels[section]);
     await expect(panel.locator(":scope > h3")).toHaveAttribute("tabindex", "-1");
-    const button = navigation.getByRole("button", { name: section, exact: true });
+    await expect(panel.locator(":scope > h3")).toHaveCSS("text-transform", "none");
+    const button = navigation.getByRole("button", { name: settingsSectionLabels[section], exact: true });
+    const icon = button.locator('.settings-section-icon[aria-hidden="true"] > svg');
+    await expect(icon).toBeVisible();
+    await expect(icon).toHaveCSS("color", await button.evaluate(el => getComputedStyle(el).color));
     await expect(button).toHaveAttribute("aria-pressed", "true");
     await expect(button).toHaveAttribute("aria-controls", (await panel.getAttribute("id"))!);
     // The longest section name must fit its own column rather than forcing
@@ -944,11 +951,28 @@ test("settings navigation keeps mounted panes and follows the narrow list path",
   const notifications = await selectSettingsSection(page, "notifications");
   await expect(notifications.getByRole("region", { name: "sounds", exact: true })).toBeVisible();
   await expect(notifications.getByRole("region", { name: "ntfy alerts", exact: true })).toBeVisible();
+  for (const name of ["Sounds", "ntfy alerts"]) {
+    const heading = notifications.getByRole("heading", { name, level: 4, exact: true });
+    await expect(heading).toBeVisible();
+    await expect(heading).toHaveCSS("text-transform", "none");
+    const sizes = await heading.evaluate(el => {
+      const group = el.closest("section")!;
+      const label = group.querySelector("label")!;
+      const panelTitle = el.closest(".app-settings-panel")!.querySelector(":scope > h3")!;
+      return {
+        group: parseFloat(getComputedStyle(el).fontSize),
+        label: parseFloat(getComputedStyle(label).fontSize),
+        panel: parseFloat(getComputedStyle(panelTitle).fontSize),
+      };
+    });
+    expect(sizes.group, `${name} must head its labels visually as well as semantically`).toBeGreaterThanOrEqual(sizes.label);
+    expect(sizes.panel, "the navigation target heads its subordinate groups").toBeGreaterThan(sizes.group);
+  }
 
   // Plain buttons use the browser's normal Tab order. WebKit deliberately
   // skips buttons under its default Tab policy; no extra tab stops compensate.
   if (browserName !== "webkit") {
-    const sessions = navigation.getByRole("button", { name: "sessions", exact: true });
+    const sessions = navigation.getByRole("button", { name: "Sessions", exact: true });
     const appearance = navigation.getByRole("button", { name: "Appearance", exact: true });
     await sessions.focus();
     await expect(sessions).toBeFocused();
@@ -961,7 +985,7 @@ test("settings navigation keeps mounted panes and follows the narrow list path",
   await selectSettingsSection(page, "agent trust");
   await page.setViewportSize({ width: 390, height: 560 });
   await expect(navigation).toBeHidden();
-  const back = dialog.getByRole("button", { name: "‹ settings", exact: true });
+  const back = dialog.getByRole("button", { name: "‹ Settings", exact: true });
   await expect(back).toBeVisible();
   expect(await body.evaluate(el => el.scrollHeight > el.clientHeight), "agent trust must overflow before testing scroll reset").toBe(true);
   await body.evaluate(el => { el.scrollTop = el.scrollHeight; });
@@ -970,7 +994,7 @@ test("settings navigation keeps mounted panes and follows the narrow list path",
   await expect(navigation).toBeVisible();
   await expect(dialog.locator("section.app-settings-panel:visible")).toHaveCount(0);
   await expect(back).toBeHidden();
-  const trustButton = navigation.getByRole("button", { name: "agent trust", exact: true });
+  const trustButton = navigation.getByRole("button", { name: "Agent trust", exact: true });
   await expect(trustButton).toBeFocused();
   // Back supplies a native focus origin in both engines, including WebKit's
   // button-skipping Tab policy. Enter must activate this ordinary button.
@@ -980,13 +1004,13 @@ test("settings navigation keeps mounted panes and follows the narrow list path",
   await expect(trust.locator(":scope > h3")).toBeFocused();
   await expect.poll(() => body.evaluate(el => el.scrollTop)).toBe(0);
   await back.click();
-  await navigation.getByRole("button", { name: "checkouts", exact: true }).click();
+  await navigation.getByRole("button", { name: "Checkouts", exact: true }).click();
   await expect(dialog.locator('section.app-settings-panel[aria-label="checkouts"] > h3')).toBeFocused();
   await expect(navigation).toBeHidden();
   await page.setViewportSize({ width: 1280, height: 560 });
   await expect(navigation).toBeVisible();
   await expect(dialog.locator('section.app-settings-panel[aria-label="checkouts"]')).toBeVisible();
-  await dialog.getByRole("button", { name: "close", exact: true }).click();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 560 });
   await openSettings(page);
   await expect(dialog.locator('section.app-settings-panel[aria-label="sessions"]')).toBeVisible();
@@ -1012,7 +1036,7 @@ test("quick-launch naming defaults on and its settings switch persists independe
       await gear.click();
       await expect(naming).toBeChecked({ checked: value !== false });
       expect((await readPreferences(request)).name_session_on_quick_launch ?? null).toBe(value);
-      await dialog.getByRole("button", { name: "close", exact: true }).click();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
     }
     await gear.click();
     await expect(naming).not.toBeChecked();
@@ -1020,7 +1044,7 @@ test("quick-launch naming defaults on and its settings switch persists independe
       await naming.setChecked(value);
       await expect.poll(async () => (await readPreferences(request)).name_session_on_quick_launch).toBe(value);
       expect((await readPreferences(request)).skip_session_confirmations).toBe(previous.skip_session_confirmations);
-      await dialog.getByRole("button", { name: "close", exact: true }).click();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
       await page.reload();
       await gear.click();
       await expect(naming).toBeChecked({ checked: value });
@@ -1119,7 +1143,7 @@ test("settings saves and clears the all-hosts post-clone command", async ({ page
         await field.scrollIntoViewIfNeeded();
         await dialog.screenshot({ path: testInfo.outputPath("post-clone-empty.png") });
       }
-      await dialog.getByRole("button", { name: "close", exact: true }).click();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
       expect(await read()).toEqual({ command: value });
     }
     await openSettings(page, "checkouts");
@@ -1166,7 +1190,7 @@ test("settings saves and clears the all-hosts post-clone command", async ({ page
       expect(fieldBounds).not.toBeNull();
       expect(inputBounds!.x + inputBounds!.width).toBeLessThanOrEqual(fieldBounds!.x + fieldBounds!.width + 1);
     }
-    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await openSettings(page, "checkouts");
     await expect(command).toBeEditable();
     await expect(command).toHaveValue(chosen);
@@ -1174,7 +1198,7 @@ test("settings saves and clears the all-hosts post-clone command", async ({ page
     await save.click();
     await expect(field.getByRole("status")).toHaveText("post-clone command saved");
     expect(await read()).toEqual({ command: null });
-    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await openSettings(page, "checkouts");
     await expect(command).toBeEditable();
     await expect(command).toHaveValue("");
@@ -1241,7 +1265,7 @@ test("post-clone commands with carriage returns refuse edits but can be cleared"
       await save.click();
       await expect(field.getByRole("status")).toHaveText("post-clone command saved");
       expect(await readPostClone(request)).toEqual({ command: "printf 'ordinary'" });
-      await dialog.getByRole("button", { name: "close", exact: true }).click();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
     }
   } finally {
     // Even an assertion during a save cannot let its late PUT undo restoration.
@@ -1455,7 +1479,7 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
       expect(fieldBounds).not.toBeNull();
       expect(inputBounds!.x + inputBounds!.width).toBeLessThanOrEqual(fieldBounds!.x + fieldBounds!.width + 1);
     }
-    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await openSettings(page, "checkouts");
     await expect(folder).toHaveValue(chosen);
     await expect(folder).toBeEditable();
@@ -1463,7 +1487,7 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
     await save.click();
     await expect(field.getByRole("status")).toHaveText("checkout folder saved");
     expect(await read()).toEqual({ root: null });
-    await dialog.getByRole("button", { name: "close", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await openSettings(page, "checkouts");
     await expect(folder).toBeEditable();
     await expect(folder).toHaveValue("");
@@ -1522,7 +1546,7 @@ test("checkout drafts survive switching sections and are discarded on close", as
     expect(await readPostClone(request)).toEqual(previousCommand);
     expect(writes).toHaveLength(0);
   }
-  await dialog.getByRole("button", { name: "close", exact: true }).click();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await openSettings(page);
   await expect(dialog.locator('section.app-settings-panel[aria-label="sessions"]')).toBeVisible();
   await selectSettingsSection(page, "checkouts");
@@ -1704,7 +1728,7 @@ test("settings reverses a permanent removal answer without reloading", async ({ 
     await expect(toggle).not.toBeChecked();
     await expect(settings.locator("#host-remove-preference-help")).toContainText("asks before forgetting");
     await expect.poll(async () => (await readPreferences(request)).skip_host_remove_confirmation).toBe(false);
-    await settings.getByRole("button", { name: "close", exact: true }).click();
+    await settings.getByRole("button", { name: "Close", exact: true }).click();
     await expect(gear).toBeFocused();
 
     const third = hostRowByName(page, names[2]);
@@ -1718,7 +1742,7 @@ test("settings reverses a permanent removal answer without reloading", async ({ 
     await openSettings(page, "hosts");
     await toggle.check();
     await expect.poll(async () => (await readPreferences(request)).skip_host_remove_confirmation).toBe(true);
-    await settings.getByRole("button", { name: "close", exact: true }).click();
+    await settings.getByRole("button", { name: "Close", exact: true }).click();
     await openHostMenu(third);
     await third.locator(".host-remove").click();
     await expect(third).toHaveCount(0);
@@ -1932,7 +1956,7 @@ test("settings gear stays clickable in the rail beside a long version in narrow 
         // Retain the narrow modal for visual inspection alongside geometry evidence.
         await page.screenshot({ path: testInfo.outputPath("settings-narrow.png") });
       }
-      await dialog.getByRole("button", { name: "close", exact: true }).click();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
       await expect(gear).toBeFocused();
     }
   }

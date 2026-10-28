@@ -198,6 +198,7 @@ pub(crate) fn SessionSounds(
 /// controls deliberately send no helm preference writes.
 /// The section owns its label so app settings can group it alongside helm
 /// and updater choices without changing the audio asset's mount contract.
+/// Notifications supplies the panel heading; this device-only group is a subsection.
 #[component]
 pub(crate) fn SoundSettings() -> Element {
     rsx! {
@@ -209,7 +210,7 @@ pub(crate) fn SoundSettings() -> Element {
                     let _ = document::eval("while (!window.farhelmSounds) { await new Promise(r => setTimeout(r, 50)); } window.farhelmSounds.mountSettings();").await;
                 });
             },
-            h3 { class: "host-settings-section-title", "sounds" }
+            h4 { class: "host-settings-section-title", "Sounds" }
             p { class: "host-settings-help", "These choices apply only to this device. The session open in an active window stays quiet." }
             for (kind, label, default, help) in [
                 ("waiting", "session waiting", true, "play a bell when a session starts waiting for your answer"),

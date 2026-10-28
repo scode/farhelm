@@ -27,14 +27,15 @@ import { chooseStatus } from "../tests/helpers/list-header";
 import { chooseHost, hostChoice } from "../tests/helpers/host-rail";
 import { mountNativeTunnelPreview } from "../tests/helpers/native-tunnel-preview";
 
-// A sidebar-only PR needs its changed states, rather than every unchanged
-// foundation dialog. The same script, fleet, shot helper and cleanup still run.
+// A focused PR needs its changed states, rather than every unchanged surface.
+// Each selection retains the same script, fleet, shot helper and cleanup.
 const sidebarHeaderOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-header";
 const sidebarStatusOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-status";
 const sidebarRailOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-rail";
 const sidebarWarningOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "sidebar-warning";
 const toolbarOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "session-toolbar";
 const tunnelOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "session-tunnels";
+const settingsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "settings";
 
 /** Photograph native-only chrome with the goal's explicit CSS-only fallback.
  * The ordinary staged web app supplies the surrounding frame and terminals.
@@ -271,6 +272,151 @@ async function keyboardFocusSwitch(page: Page, dialog: Locator, input: Locator) 
   await expect(input).toBeChecked();
   await expect(input).toBeEnabled();
   await keyboardFocusControl(page, dialog, input);
+}
+
+/** Show every web Settings pane without saving the illustrative checkout drafts.
+ * Both the full review and the Settings-only selection use this sequence, so
+ * palette, focus and long-content evidence cannot drift between capture modes.
+ * App remains native-only; no updater seam is introduced to photograph it.
+ */
+async function settingsShots(page: Page, name: string, includePhone: boolean) {
+  const window = [page.locator("body")];
+  const settings = await openSettings(page);
+  await expect(settings.locator(".app-settings-navigation button")).toHaveCount(7);
+  for (const part of [".host-settings-header", ".host-settings-footer", ".app-settings-close"]) {
+    await insideViewport(page, settings.locator(part));
+  }
+  await expect(settings.getByRole("checkbox", { name: "skip session confirmations", exact: true })).not.toBeChecked();
+  await shot(page, `${name}-settings`, window, { pad: 0 });
+  const namingSwitch = settings.getByRole("checkbox", { name: "name sessions on quick launch", exact: true });
+  await keyboardFocusSwitch(page, settings, namingSwitch);
+  await focusedShot(page, `${name}-settings-focused`, namingSwitch, settings);
+  await expect(namingSwitch).toBeChecked();
+  await expect(namingSwitch).toBeEnabled();
+  const selectedSection = settings.locator('.app-settings-navigation button[aria-pressed="true"]');
+  await keyboardFocusControl(page, settings, selectedSection);
+  await focusedShot(page, `${name}-settings-navigation-focused`, selectedSection, settings);
+  await expect(selectedSection).toHaveAttribute("aria-pressed", "true");
+  // Show the device choice's real default, without changing the stored palette.
+  await selectSettingsSection(page, "Appearance");
+  await expect(settings.getByRole("radio", { name: "System", exact: true })).toBeChecked();
+  await shot(page, `${name}-settings-appearance`, window, { pad: 0 });
+  const terminalSettings = await selectSettingsSection(page, "terminal");
+  const terminalChoices = terminalSettings.getByRole("radiogroup", { name: "Terminal web links", exact: true });
+  await expect(terminalChoices.getByRole("radio")).toHaveCount(3);
+  await expect(terminalChoices.locator('input[type="radio"]:checked')).toHaveCount(1);
+  for (const choice of await terminalChoices.getByRole("radio").all()) await expect(choice).toBeEnabled();
+  await expect(terminalChoices.locator(".terminal-link-description")).toHaveCount(3);
+  await terminalChoices.scrollIntoViewIfNeeded();
+  await shot(page, `${name}-settings-terminal`, window, { pad: 0 });
+  // API readback alone does not establish this mounted client's off state.
+  const hostChoices = await selectSettingsSection(page, "hosts");
+  for (const choice of await hostChoices.getByRole("checkbox").all()) {
+    await expect(choice).toBeEnabled();
+    await expect(choice).not.toBeChecked();
+  }
+  await expect(hostChoices.getByRole("checkbox")).toHaveCount(2);
+  await shot(page, `${name}-settings-hosts`, window, { pad: 0 });
+  const trust = await selectSettingsSection(page, "agent trust");
+  // Enabling these real resources would affect future launches, not just pixels.
+  for (const key of ["claude", "codex", "muse", "pi"]) {
+    await expect(trust.locator(`#checkout-${key}-trust input`).first()).toBeEnabled();
+  }
+  await expect(trust.locator(".app-settings-error")).toHaveCount(0);
+  await trust.getByRole("heading", { name: "Agent trust", exact: true }).scrollIntoViewIfNeeded();
+  await shot(page, `${name}-settings-agent-trust`, window, { pad: 0 });
+  await scrollToEnd(settings.locator(".host-settings-body"));
+  await expect(trust.locator("#checkout-pi-trust input").first()).toBeInViewport();
+  await shot(page, `${name}-settings-agent-trust-end`, window, { pad: 0 });
+  const notifications = await selectSettingsSection(page, "notifications");
+  const sounds = notifications.getByRole("region", { name: "sounds", exact: true });
+  await expect.poll(() => page.evaluate(() => typeof (globalThis as typeof globalThis & {
+    farhelmSounds?: { mountSettings?: unknown };
+  }).farhelmSounds?.mountSettings), { message: "the real sound asset is available for its mounted controls" }).toBe("function");
+  await expect(sounds.locator('[data-sound-event="waiting"]')).toBeChecked();
+  await expect(sounds.locator('[data-sound-event="approval"]')).toBeChecked();
+  await expect(sounds.locator('[data-sound-event="finished"]')).not.toBeChecked();
+  const ntfy = notifications.locator(".ntfy-settings");
+  await expect(ntfy.locator('input[type="url"]')).toHaveCSS("font-family", /JetBrains Mono/);
+  await expect(ntfy.getByRole("checkbox", { name: "send ntfy alerts", exact: true })).toBeEnabled();
+  await expect(ntfy.getByRole("checkbox", { name: "send ntfy alerts", exact: true })).not.toBeChecked();
+  await sounds.scrollIntoViewIfNeeded();
+  await shot(page, `${name}-settings-notifications`, window, { pad: 0 });
+  await scrollToEnd(settings.locator(".host-settings-body"));
+  await expect(ntfy.getByRole("button", { name: "save", exact: true })).toBeInViewport();
+  await shot(page, `${name}-settings-notifications-end`, window, { pad: 0 });
+  // Unsaved directory/command examples expose the mono fields beside Inter
+  // labels without changing checkout configuration or running a command.
+  await selectSettingsSection(page, "checkouts");
+  await settings.locator(".checkout-root-field input").fill("~/work/checkouts");
+  await settings.locator(".checkout-post-clone-field textarea").fill("cargo fetch --locked");
+  await expect(settings.locator("#checkout-spare input")).toBeEnabled();
+  await shot(page, `${name}-settings-checkouts`, window, { pad: 0 });
+  const checkoutSave = settings.locator(".checkout-root-field .btn-primary");
+  await expect(checkoutSave).not.toHaveAttribute("aria-disabled", "true");
+  await keyboardFocusControl(page, settings, checkoutSave);
+  await focusedShot(page, `${name}-primary-focused`, checkoutSave, settings);
+  if (includePhone) await phoneSettingsShots(page, settings, name.replace(/-main-650$/, "-phone"));
+  await page.keyboard.press("Escape");
+  await expect(settings).toBeHidden();
+}
+
+/** Exercise Settings' actual phone breakpoint, which main-650 does not reach.
+ * Long panes must scroll inside the pinned frame; Back returns native focus
+ * to the selected list button, and Enter reopens its pane at the top. Both
+ * palettes use real controls and the same owned fleet, without saving drafts.
+ */
+async function phoneSettingsShots(page: Page, settings: Locator, name: string) {
+  const ordinaryViewport = page.viewportSize()!;
+  try {
+    await page.setViewportSize({ width: 390, height: 560 });
+    const navigation = settings.getByRole("navigation", { name: "settings sections", exact: true });
+    const back = settings.getByRole("button", { name: "‹ Settings", exact: true });
+    const body = settings.locator(".host-settings-body");
+    const close = settings.getByRole("button", { name: "Close", exact: true });
+    for (const section of ["agent trust", "notifications"] as const) {
+      const panel = await selectSettingsSection(page, section);
+      const heading = panel.locator(":scope > h3");
+      await expect(heading).toBeFocused();
+      await expect(navigation).toBeHidden();
+      await expect(back).toBeVisible();
+      await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0);
+      expect(await body.evaluate(element => element.scrollHeight > element.clientHeight),
+        "the real phone pane must overflow before its scroll and frame checks").toBe(true);
+      const header = settings.locator(".host-settings-header");
+      const footer = settings.locator(".host-settings-footer");
+      for (const control of [header, footer, close, back]) await insideViewport(page, control);
+      const frame = { header: await header.boundingBox(), footer: await footer.boundingBox() };
+      const slug = section.replace(" ", "-");
+      await shot(page, `${name}-settings-${slug}`, [page.locator("body")], { pad: 0 });
+      await scrollToEnd(body);
+      await expect.poll(() => body.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+      const lastControl = section === "agent trust"
+        ? panel.locator("#checkout-pi-trust input").first()
+        : panel.locator(".ntfy-settings").getByRole("button", { name: "save", exact: true });
+      await expect(lastControl).toBeInViewport();
+      expect(await header.boundingBox(), "scrolling preserves the pinned Settings header").toEqual(frame.header);
+      expect(await footer.boundingBox(), "scrolling preserves the pinned Settings footer").toEqual(frame.footer);
+      await insideViewport(page, close);
+      await shot(page, `${name}-settings-${slug}-end`, [page.locator("body")], { pad: 0 });
+      await keyboardFocusControl(page, settings, back);
+      await back.press("Enter");
+      await expect(navigation).toBeVisible();
+      await expect(settings.locator("section.app-settings-panel:visible")).toHaveCount(0);
+      await expect(back).toBeHidden();
+      const selected = navigation.locator('button[aria-pressed="true"]');
+      await expect(selected).toBeFocused();
+      expect(await selected.evaluate(element => element.matches(":focus-visible")), "Back preserves keyboard modality at its list target").toBe(true);
+      await insideViewport(page, close);
+      await focusedShot(page, `${name}-settings-${slug}-list-focused`, selected, settings);
+      await selected.press("Enter");
+      await expect(heading).toBeFocused();
+      await expect(navigation).toBeHidden();
+      await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0);
+    }
+  } finally {
+    await page.setViewportSize(ordinaryViewport);
+  }
 }
 
 /** Open only the actual web Help menu, whose five items need no updater seam.
@@ -546,6 +692,7 @@ for (const colorScheme of ["dark", "light"] as const) {
      * The main-pane measurement keeps the narrow case meaningful when a later
      * plan widens the sidebar for the host rail. Native controls and real menus
      * remain visible in a full-window capture; no review overlay hides defects.
+     * Settings adds its phone breakpoint once per palette after main-650.
      */
     test(`${colorScheme} ${width}`, async ({ page, request }) => {
       await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
@@ -593,6 +740,12 @@ for (const colorScheme of ["dark", "light"] as const) {
         await page.evaluate(() => document.fonts.ready.then(() => undefined));
         await expect(page.locator(".session-details")).toBeVisible();
         await expect(page.locator(".build-skew")).toHaveCount(0);
+        const name = `visual-review/${colorScheme}-${width}`;
+        const window = [page.locator("body")];
+        if (settingsOnly) {
+          await settingsShots(page, name, width === "main-650");
+          return;
+        }
         const row = rowOf(page, scenario, (session) => session.status === "idle" && session.seen === false);
         const hostName = row.locator(".session-row-meta .session-host");
         await expect(hostName).toHaveText("gpu-1");
@@ -611,8 +764,6 @@ for (const colorScheme of ["dark", "light"] as const) {
           return gap;
         });
         expect(Math.abs(hostGap), "the short host and colon have no empty width floor").toBeLessThan(1);
-        const name = `visual-review/${colorScheme}-${width}`;
-        const window = [page.locator("body")];
         if (tunnelOnly) {
           // Matches the established window-chrome fixture. The native title
           // band itself remains a source-only review on this Linux web build.
@@ -846,87 +997,7 @@ for (const colorScheme of ["dark", "light"] as const) {
         await page.keyboard.press("Escape");
         await expect(menu).toBeHidden();
 
-        const settings = await openSettings(page);
-        await expect(settings.getByRole("checkbox", { name: "skip session confirmations", exact: true })).not.toBeChecked();
-        await shot(page, `${name}-settings`, window, { pad: 0 });
-        const namingSwitch = settings.getByRole("checkbox", { name: "name sessions on quick launch", exact: true });
-        await keyboardFocusSwitch(page, settings, namingSwitch);
-        await focusedShot(page, `${name}-settings-focused`, namingSwitch, settings);
-        await expect(namingSwitch).toBeChecked();
-        await expect(namingSwitch).toBeEnabled();
-        const selectedSection = settings.locator('.app-settings-navigation button[aria-pressed="true"]');
-        await keyboardFocusControl(page, settings, selectedSection);
-        await focusedShot(page, `${name}-settings-navigation-focused`, selectedSection, settings);
-        await expect(selectedSection).toHaveAttribute("aria-pressed", "true");
-        // The device choice is a new surface. Show its real default rather than
-        // seeding a preference or substituting styled controls for the product.
-        await selectSettingsSection(page, "Appearance");
-        await expect(settings.getByRole("radio", { name: "System", exact: true })).toBeChecked();
-        await shot(page, `${name}-settings-appearance`, window, { pad: 0 });
-        // The described native radios are a separate shared-control surface.
-        // Observe the real saved choice without changing click ownership for
-        // the fleet's mounted terminals or adding another preference seed.
-        const terminalSettings = await selectSettingsSection(page, "terminal");
-        const terminalChoices = terminalSettings.getByRole("radiogroup", { name: "Terminal web links", exact: true });
-        await expect(terminalChoices.getByRole("radio")).toHaveCount(3);
-        await expect(terminalChoices.locator('input[type="radio"]:checked')).toHaveCount(1);
-        for (const choice of await terminalChoices.getByRole("radio").all()) await expect(choice).toBeEnabled();
-        await expect(terminalChoices.locator(".terminal-link-description")).toHaveCount(3);
-        await terminalChoices.scrollIntoViewIfNeeded();
-        await shot(page, `${name}-settings-terminal`, window, { pad: 0 });
-        // A readback at the API does not prove this client adopted the seed.
-        // Observe both actual off-state inputs before any host question opens.
-        const hostChoices = await selectSettingsSection(page, "hosts");
-        for (const choice of await hostChoices.getByRole("checkbox").all()) {
-          await expect(choice).toBeEnabled();
-          await expect(choice).not.toBeChecked();
-        }
-        await expect(hostChoices.getByRole("checkbox")).toHaveCount(2);
-        await shot(page, `${name}-settings-hosts`, window, { pad: 0 });
-        const trust = await selectSettingsSection(page, "agent trust");
-        // All four resources are real reads; enabling the managed-trust choices
-        // here would alter future launches rather than merely reveal styling.
-        for (const key of ["claude", "codex", "muse", "pi"]) {
-          await expect(trust.locator(`#checkout-${key}-trust input`).first()).toBeEnabled();
-        }
-        await expect(trust.locator(".app-settings-error")).toHaveCount(0);
-        await trust.getByRole("heading", { name: "agent trust", exact: true }).scrollIntoViewIfNeeded();
-        await shot(page, `${name}-settings-agent-trust`, window, { pad: 0 });
-        await scrollToEnd(settings.locator(".host-settings-body"));
-        await expect(trust.locator("#checkout-pi-trust input").first()).toBeInViewport();
-        await shot(page, `${name}-settings-agent-trust-end`, window, { pad: 0 });
-        const notifications = await selectSettingsSection(page, "notifications");
-        const sounds = notifications.getByRole("region", { name: "sounds", exact: true });
-        await expect.poll(() => page.evaluate(() => typeof (globalThis as typeof globalThis & {
-          farhelmSounds?: { mountSettings?: unknown };
-        }).farhelmSounds?.mountSettings), { message: "the real sound asset is available for its mounted controls" }).toBe("function");
-        await expect(sounds.locator('[data-sound-event="waiting"]')).toBeChecked();
-        await expect(sounds.locator('[data-sound-event="approval"]')).toBeChecked();
-        await expect(sounds.locator('[data-sound-event="finished"]')).not.toBeChecked();
-        const ntfy = notifications.locator(".ntfy-settings");
-        await expect(ntfy.locator('input[type="url"]')).toHaveCSS("font-family", /JetBrains Mono/);
-        await expect(ntfy.getByRole("checkbox", { name: "send ntfy alerts", exact: true })).toBeEnabled();
-        await expect(ntfy.getByRole("checkbox", { name: "send ntfy alerts", exact: true })).not.toBeChecked();
-        await sounds.scrollIntoViewIfNeeded();
-        await shot(page, `${name}-settings-notifications`, window, { pad: 0 });
-        await scrollToEnd(settings.locator(".host-settings-body"));
-        await expect(ntfy.getByRole("button", { name: "save", exact: true })).toBeInViewport();
-        await shot(page, `${name}-settings-notifications-end`, window, { pad: 0 });
-        // Directory and command fields must keep their mono role beside Inter
-        // labels. The ordinary sessions panel alone does not exercise that split.
-        await selectSettingsSection(page, "checkouts");
-        // Unsaved examples reveal the fields' actual glyphs without changing
-        // checkout configuration or running a command on the staged hosts.
-        await settings.locator(".checkout-root-field input").fill("~/work/checkouts");
-        await settings.locator(".checkout-post-clone-field textarea").fill("cargo fetch --locked");
-        await expect(settings.locator("#checkout-spare input")).toBeEnabled();
-        await shot(page, `${name}-settings-checkouts`, window, { pad: 0 });
-        const checkoutSave = settings.locator(".checkout-root-field .btn-primary");
-        await expect(checkoutSave).not.toHaveAttribute("aria-disabled", "true");
-        await keyboardFocusControl(page, settings, checkoutSave);
-        await focusedShot(page, `${name}-primary-focused`, checkoutSave, settings);
-        await page.keyboard.press("Escape");
-        await expect(settings).toBeHidden();
+        await settingsShots(page, name, width === "main-650");
 
         const remote = scenario.hosts.find((host) => host.kind === "remote");
         if (!remote) throw new Error("the visual review needs a staged remote host");

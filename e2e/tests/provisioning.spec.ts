@@ -1548,7 +1548,7 @@ test("a permanent setup answer is reversible through settings after the next add
   await toggle.uncheck();
   await expect(settings.locator("#host-setup-preference-help")).toContainText("asks before doing it");
   await expect.poll(async () => (await readPreferences(request)).skip_host_setup_confirmation).toBe(false);
-  await settings.getByRole("button", { name: "close", exact: true }).click();
+  await settings.getByRole("button", { name: "Close", exact: true }).click();
   await probeRemote(page, third);
   await expect(page.locator(".provisioning-plan")).toBeVisible();
   await expect(page.getByText(`undo "don't ask again" with the gear at the top of the sidebar`)).toBeVisible();
@@ -1557,7 +1557,7 @@ test("a permanent setup answer is reversible through settings after the next add
   await openSettings(page, "hosts");
   await toggle.check();
   await expect.poll(async () => (await readPreferences(request)).skip_host_setup_confirmation).toBe(true);
-  await settings.getByRole("button", { name: "close", exact: true }).click();
+  await settings.getByRole("button", { name: "Close", exact: true }).click();
   await page.locator(".host-rail-add").click();
   await page.locator(".add-host-ssh").fill(third);
   await page.locator(".add-host-submit").click();
@@ -1590,7 +1590,7 @@ async function expectSetupStillAsks(page: Page): Promise<void> {
     settings.getByRole("checkbox", { name: "set up new hosts without asking", exact: true }),
     "the setup question is still asked",
   ).not.toBeChecked();
-  await settings.getByRole("button", { name: "close", exact: true }).click();
+  await settings.getByRole("button", { name: "Close", exact: true }).click();
 }
 
 /**
