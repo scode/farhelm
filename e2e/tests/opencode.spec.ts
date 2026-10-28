@@ -1,4 +1,5 @@
 import { expect, test } from "./helpers/evidence";
+import { fillLauncherFolder } from "./helpers/launcher";
 
 /**
  * OpenCode's optional model must stay inside the existing composer rows.
@@ -24,7 +25,7 @@ test("OpenCode keeps composer controls while offering default and explicit Zen m
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  await fillLauncherFolder(form, "/tmp");
   const harness = form.locator(".launch-composer-harness-choice");
   await harness.getByRole("button", { name: "Codex", exact: true }).click();
   await form.locator(".launch-composer-effort-choice").getByRole("button", { name: "high", exact: true }).click();
@@ -111,7 +112,7 @@ test("typing a model never switches the selected harness, and bare OpenCode name
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  await fillLauncherFolder(form, "/tmp");
   const harness = form.locator(".launch-composer-harness-choice");
   const model = form.locator(".launch-composer-model-choice").getByRole("combobox", { name: "model", exact: true });
 

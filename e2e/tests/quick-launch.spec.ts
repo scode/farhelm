@@ -973,7 +973,7 @@ test("hidden preparation isolates keys and a queued Replace with requires Launch
     await expect(form).toBeVisible();
     gate.release();
     await expect(form.getByLabel("name (optional)")).toHaveValue(`${name}-source`);
-    await expect(form.locator(".create-session-submit")).toContainText("replace");
+    await expect(form.locator(".create-session-submit")).toHaveText("Replace");
     await expect(form.locator(".create-session-submit")).toBeEnabled();
     expect(bodies).toHaveLength(0);
     await form.locator(".create-session-submit").click();

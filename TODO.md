@@ -224,15 +224,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the spec's injected sessions use ids without the host-entry prefix #2368 made mandatory, so the UI's background
   session reads get 400s, and one completing at the click re-renders the card (FLAKES.md, 2026-10-20).
 
-- **Takeover new tab never shows Detached.** The Chromium test
-  `a-tab-opened-unaware-of-a-takeover-does-not-take-the-session-back` in `e2e/tests/terminal-reconnect.spec.ts` failed
-  in full browser run `13808999-b14a-44ef-a7df-b547a8419a62`: after a takeover, the losing view's newly opened tab kept
-  an empty banner for 20 seconds instead of "Detached". It failed once in ten exact repetitions on that tip
-  (`ac532d81-0b4c-4999-98ab-2abf6e8ec1de`) and four times in fifteen on unmodified main `e6b50141`, one worker
-  (`8d57653f-2ced-4f0d-a6ad-c669a11d4995`), each failure running into the same 20-second wait. The spec and the terminal
-  code it covers changed on main that day (#2368, #2403, #2411); the cause is unknown and the failing traces have not
-  been examined (FLAKES.md, 2026-10-20).
-
 - **Same-source Replace menu fails to open after YOLO cancellation.**
   `plain Replace keeps a newer same-source key after old header YOLO cancellation` in `e2e/tests/replace.spec.ts` failed
   in WebKit waiting five seconds for the source row's menu in browser run `d01a19ad-811c-4dae-90b8-2c22a70ab473`.

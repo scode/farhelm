@@ -698,7 +698,9 @@ test("header actions stay ordered, copy full values, and open the right flows", 
 
     await selectSessionActionWith(page, "Replace");
     await expect(form).toBeVisible();
-    await expect(form.locator(".create-session-submit")).toHaveText(/^replace\s+local \(this machine\) · \/tmp$/);
+    await expect(form.locator(".create-session-submit")).toHaveText("Replace");
+    await expect(form.locator(".create-session-submit")).toHaveAccessibleName(/^replace Command · local \(this machine\) · \/tmp$/);
+    await expect(form.locator(".launch-composer-launch-context")).toHaveText(/^Command · local \(this machine\) · \/tmp$/);
     await form.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
   } finally {

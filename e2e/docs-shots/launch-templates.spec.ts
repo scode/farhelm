@@ -79,7 +79,8 @@ test("edit form", async ({ page, request }) => {
   await expect(dialog.locator(".templates-editor-heading h3")).toHaveText("edit template");
   await expect(dialog.getByLabel("agent type", { exact: true })).toHaveValue("codex");
   await expect(dialog.locator(".templates-model")).toHaveValue("gpt-6.1-sol");
-  await expect(dialog.getByLabel("effort", { exact: true })).toHaveValue("high");
+  await expect(dialog.getByRole("group", { name: "effort", exact: true })
+    .getByRole("button", { name: "high", exact: true })).toHaveAttribute("aria-pressed", "true");
   // Focus the dialog itself so the name field's help does not enter the crop.
   await dialog.focus();
   await expect(dialog).toBeFocused();
@@ -119,6 +120,9 @@ test("apply in the launcher", async ({ page, request }) => {
 });
 
 test("applied in turn", async ({ page, request }) => {
+  // Keep the complete footer and both callouts within the docs column;
+  // clipping a wide launcher from the left would cut off compact Launch.
+  await page.setViewportSize({ width: 930, height: 1100 });
   const { director } = await open(page, request);
   const form = await openLauncher(page);
   // The stacking case the page describes: one template picks the agent and
@@ -127,18 +131,21 @@ test("applied in turn", async ({ page, request }) => {
   await applyTemplate(form, "tl:api", "api-repo");
   const submit = form.locator(".create-session-submit");
   const summary = form.locator(".launch-composer-summary");
-  await expect(submit).toContainText("build-box");
+  const target = form.locator(".launch-composer-launch-context");
+  await expect(target).toContainText("build-box");
+  await expect(target).toContainText("~/src/api");
+  await expect(submit).toHaveAccessibleName(/build-box.*~\/src\/api/);
   await expect(summary).toContainText("gpt-6.1-sol");
   await director.callout(
-    submit,
+    target,
     "After codex-deep, then api-repo: Codex from the first, build-box and ~/src/api from the second.",
-    { side: "left" },
+    { side: "top", dx: -50 },
   );
   await director.callout(summary, "The model and effort codex-deep set. Change anything before you launch.", {
-    side: "left",
-    dy: 100,
+    side: "top",
+    dx: 350,
   });
-  await shot(page, `${PAGE}/applied`, [submit, summary], { maxWidth: 930 });
+  await shot(page, `${PAGE}/applied`, [target, submit, summary], { maxWidth: 930 });
 });
 
 /**

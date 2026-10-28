@@ -952,7 +952,7 @@ test("replace with pre-fills clone's form from the source, and editing the harne
     // destructive half of what pressing it will do.
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwd);
     await expect(form.getByLabel("name (optional)")).toHaveValue(title);
-    await expect(form.locator(".create-session-submit")).toContainText("replace");
+    await expect(form.locator(".create-session-submit")).toHaveText("Replace");
 
     // Replace with has the same shell as New and Clone: switching launch
     // modes cannot change the fixed source destination or its editable name.
@@ -1085,7 +1085,7 @@ async function openReplaceWith(page: Page, sourceId: string, badge: RegExp) {
   await sourceRow.locator(".session-row-replace-with").click();
   const form = page.locator('.create-session-form[role="dialog"]');
   await expect(form).toBeVisible();
-  await expect(form.locator(".create-session-submit")).toContainText("replace");
+  await expect(form.locator(".create-session-submit")).toHaveText("Replace");
   await expect(form.locator(".create-session-submit")).toBeEnabled();
   return form;
 }
@@ -1210,7 +1210,7 @@ test("replace with keeps a source restarted while its launcher showed nothing al
     await feed.waitForConnection(1);
     feed.notify(1);
     const form = await openReplaceWith(page, source.id, /exited/);
-    await expect(form.locator(".launch-composer-replace-warning")).toBeEmpty();
+    await expect(form.locator(".launch-composer-replace-warning")).toHaveCount(0);
     // Setup reads must retire before the restart, so nothing the page reads
     // afterwards can carry the restarted state into the launcher.
     await waitForFeedReadersSettled(page);
@@ -1219,7 +1219,7 @@ test("replace with keeps a source restarted while its launcher showed nothing al
     expect(restarted.ok(), `restarting the source: ${await restarted.text()}`).toBe(true);
     await waitForListedState(request, source.id, "live");
     // Premise: the launcher still shows the state it opened on.
-    await expect(form.locator(".launch-composer-replace-warning")).toBeEmpty();
+    await expect(form.locator(".launch-composer-replace-warning")).toHaveCount(0);
 
     const { body, response } = await pressReplace(page, form, source.id);
     expect(response.ok(), "the source's delete must be refused").toBe(false);
@@ -1268,7 +1268,7 @@ test("replace with's warning follows a source restarted while the launcher is op
     feed.notify(1);
     const form = await openReplaceWith(page, source.id, /exited/);
     const warning = form.locator(".launch-composer-replace-warning");
-    await expect(warning).toBeEmpty();
+    await expect(warning).toHaveCount(0);
     await expect(form.locator(".create-session-submit")).not.toHaveAttribute("aria-describedby", /./);
 
     const restarted = await request.post(`/api/sessions/${encodeURIComponent(source.id)}/restart`, { data: {} });
@@ -1276,6 +1276,9 @@ test("replace with's warning follows a source restarted while the launcher is op
     await waitForListedState(request, source.id, "live");
     feed.notify(2);
     await expect(warning).toContainText("still running — replacing kills the agent", { timeout: 20_000 });
+    const warningId = await warning.getAttribute("id");
+    expect(warningId, "the mounted warning must be addressable by the action it describes").toBeTruthy();
+    await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-describedby", warningId!);
 
     const { body, response } = await pressReplace(page, form, source.id);
     expect(response.ok(), `replace with: ${await response.text()}`).toBe(true);

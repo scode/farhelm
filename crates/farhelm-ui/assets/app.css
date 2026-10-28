@@ -4023,7 +4023,7 @@ a:any-link,
   color: var(--warn);
 }
 
-/* Restart holds its destination in the launcher's normal two-column layout.
+/* Restart holds its destination above the launcher's editable choice rows.
    Paths still wrap: holding a value must not hide it behind a fixed-width
    label or restore the removed dialog's separate size and spacing rules. */
 .launch-composer-held-context {
@@ -4032,9 +4032,16 @@ a:any-link,
 }
 
 .launch-composer-held-context > p {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 6px 12px;
   margin: 0 0 8px;
+  color: var(--fg-1);
+  font-size: 12px;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
+.launch-composer-held-context > p > .peer-value { min-width: 0; color: var(--fg-0); font-size: 13px; }
 
 .launch-composer-restart-warning,
 .launch-composer-folder-warning,
@@ -5821,20 +5828,13 @@ a:any-link,
 
 /* ===== Create dialog ============================================== */
 
-/* Create dialog (PLAN_M2.md step 8): an inline form toggled from the
-   session heading, not a modal library — see the design note in lib.rs's
-   `CreateSessionForm` doc. Kept visually close to the row/badge styling
-   above it rather than introducing a new visual language for one form. */
+/* One form owns the launch draft, inline editors and pinned submit action.
+   The shared modal boundary owns isolation; the frame below only arranges
+   the header, scrolling fields and footer. */
 .create-session-form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 14px;
-  margin: 0 14px 10px;
-  /* A form is a thing that appeared over the list, so it takes the
-     floating level; at the sidebar's own level it would be a rounded
-     rectangle with nothing inside it to see. Its fields stay --bg-0,
-     which is what makes them read as wells cut into this card. */
+  gap: 0;
   background: var(--bg-2);
   border-radius: var(--radius-md);
 }
@@ -5893,11 +5893,8 @@ a:any-link,
   color: var(--danger);
 }
 
-/* The mockup makes this a 960px dialog with two useful columns once a 1000px
-   viewport can hold it and its required margins. One 6/8/12px radius scale
-   and Launch as the only saturated fill keep the denser surface coherent:
-   the shape removes the scrolling and wasted label columns the maintainer
-   called out without turning a one-action composer into a wizard. */
+/* Keep the content-sized launcher within the viewport. Only its fields and
+   bounded action notices scroll; the title and ordinary actions stay put. */
 .launch-composer-backdrop {
   position: fixed;
   z-index: 40;
@@ -5913,11 +5910,6 @@ a:any-link,
 .launch-composer-backdrop.quick-launch-pending { background: transparent; }
 .launch-composer-backdrop .create-session-form[hidden] { display: none; }
 
-/* Content-sized rather than a fixed box: Launch and Cancel lead the composer,
-   no recents band is reserved, and no advanced disclosure adds a hidden
-   region. Stretching it to a stable height would reintroduce empty space. The
-   viewport is still the hard ceiling — `max-height` plus `overflow: auto`
-   scrolls a genuinely long draft rather than pushing Launch off screen. */
 .launch-composer-backdrop .create-session-form {
   display: flex;
   flex-direction: column;
@@ -5928,17 +5920,16 @@ a:any-link,
   box-sizing: border-box;
   max-height: calc(100dvh - 2 * var(--dialog-vertical-margin));
   margin: 0;
-  padding: 24px;
-  overflow: auto;
+  padding: 0;
+  overflow: hidden;
   background: var(--bg-2);
   border: 1px solid var(--border-dialog);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-dialog);
 }
 
-/* The two-column launcher now includes a one-time prompt and trust choices.
-   Keep a 24px desktop margin instead of spending five percent of the window
-   above and below it; the ordinary populated form must fit at 1440×900. */
+/* Leave room for populated launch rows rather than spending five percent
+   of a desktop window above and below the dialog. */
 @media (min-width: 1000px) {
   .launch-composer-backdrop { --dialog-vertical-margin: 24px; }
 }
@@ -5949,18 +5940,20 @@ a:any-link,
    rule. Initial styling is readable even when entrance starts paused. */
 .permission-escalation-banner {
   position: sticky;
-  top: -24px;
+  top: 0;
   z-index: 4;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  margin: -24px -24px 16px;
-  padding: 16px 24px;
+  margin: 0;
+  padding: 12px;
   border-bottom: 3px solid var(--danger);
   background: color-mix(in srgb, var(--danger) 20%, var(--bg-2));
   color: var(--fg-0);
   animation: permission-banner-slide 200ms ease-out, permission-banner-lifetime 8s linear;
+  font-size: 13px;
+  line-height: 1.5;
 }
 .partial-template-banner {
   margin: 0 0 16px;
@@ -5971,14 +5964,16 @@ a:any-link,
   color: var(--fg-0);
 }
 .partial-template-banner strong { display: block; margin-bottom: 6px; }
-.permission-escalation-banner > span { flex: 1 1 320px; font-weight: 600; }
+.permission-escalation-banner > span { flex: 1 1 240px; min-width: 0; font-weight: 600; }
+.permission-escalation-banner > .action-glyph { flex: 0 0 14px; align-self: flex-start; margin-top: 3px; color: var(--danger); }
 .permission-escalation-banner:hover,
 .permission-escalation-banner:focus-within { animation-play-state: paused; }
 @keyframes permission-banner-slide { from { transform: translateY(-12px); } to { transform: translateY(0); } }
 @keyframes permission-banner-lifetime { from { opacity: 1; } to { opacity: 1; } }
 .create-session-form[data-permission-escalation] .launch-composer-permissions-choice {
   outline: 4px solid var(--danger);
-  outline-offset: 4px;
+  /* The body's padding has room for the stroke; an inset covers the label. */
+  outline-offset: 0;
   animation: permission-outline-odd 2.5s ease-out forwards;
 }
 /* Alternate names restart the highlight without remounting focused controls. */
@@ -5990,19 +5985,8 @@ a:any-link,
   .create-session-form[data-permission-escalation] .launch-composer-permissions-choice { animation: none; }
 }
 
-/* The eyebrow names this transient launcher without competing with its
-   first action: small caps above the row, never a heading that pushes Launch
-   down. */
-.launch-composer-topbar {
-  margin-bottom: 8px;
-}
-
-/* The label's type comes from the shared section-label rule beside
-   `.session-heading`. What is the composer's own is the layout: each label
-   heads a group of controls, and a hairline runs from the label to the
-   group's right edge so the groups read as ruled sections of one panel
-   without a box around each. The rule is a pseudo-element because it is
-   decoration: it adds nothing to the label's text or accessible name. */
+/* Templates keeps its existing stacked control labels. The launcher scopes
+   the same controls into a label/field grid without changing their owner. */
 .launch-composer-section-label {
   display: flex;
   align-items: center;
@@ -6026,70 +6010,118 @@ a:any-link,
   content: none;
 }
 
-/* Reset shares the action row but sits at its far end: it clears the launch
-   choices (never the host or folder that make up the destination), and a
-   clearing action next to Launch would read as a peer of it.
-
-   It wears the neutral tier (`.btn-neutral`) so it reads as a button at
-   rest. It used to be bare grey text that only underlined on hover, which
-   left nothing to say it was clickable until the pointer found it. Distance
-   and size now carry "secondary" instead of invisibility: it sits apart from
-   Launch and Cancel and stays smaller than both, so it still cannot be
-   mistaken for one of the row's two decisions. The tier supplies colour,
-   border, and hover; this rule supplies only placement and size. */
-.launch-composer-reset {
-  margin-left: auto;
-  min-height: 32px;
-  padding: 0 12px;
-  font-size: 12px;
-}
-
 .launch-composer-recents,
 .launch-composer-browser {
   display: grid;
   gap: 8px;
 }
 
-/* A 1000px viewport is the first place the 960px dialog keeps its promised
-   40px breathing room. Below it, two narrow columns make host controls and
-   segmented choices harder to use than the single-column fallback. */
+.create-session-form .launch-composer-body {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 48px;
+  box-sizing: border-box;
+}
+.create-session-form .dialog-tile .action-icon { width: 22px; height: 22px; }
+
+/* Destination comes before launch choices in both reading and native Tab
+   order. No visual reordering or duplicate controls are needed. */
 .launch-composer-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 20px 32px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
 }
 
-/* Each column carries its section rhythm itself: its children used to
-   be direct children of the form and inherited its flex gap, and a plain
-   wrapper would let harness, model, and the segmented pair touch. The
-   columns stretch to equal height, so `align-content: start` keeps the
-   shorter one's sections at the top instead of spreading them to fill. */
 .launch-composer-column-destination,
 .launch-composer-column-choices {
   display: grid;
   align-content: start;
-  gap: 20px;
+  min-width: 0;
+  gap: 12px;
 }
 
-/* Conversation and initial-prompt fields add sections to the choices side.
-   WebKit wraps their help text more readily than Chromium, so keep the
-   section rhythm compact enough for the populated 900px-tall dialog without
-   hiding fields or shrinking controls. */
-.launch-composer-column-choices {
-  gap: 5px;
+.create-session-form .launch-composer-row,
+.create-session-form .launch-composer-choice,
+.create-session-form .launch-composer-repository-field,
+.create-session-form .launch-composer-name {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  align-items: start;
+  min-width: 0;
+  gap: 6px 12px;
 }
-.launch-composer-column-choices .launch-composer-choice {
-  gap: 6px;
+.create-session-form .launch-composer-choice > label {
+  display: contents;
 }
-.launch-composer-column-choices .launch-composer-section-label {
+.create-session-form .launch-composer-choice > :not(.launch-composer-section-label):not(label),
+.create-session-form .launch-composer-choice > label > :not(.launch-composer-section-label),
+.create-session-form .launch-composer-name-taken {
+  grid-column: 2;
+  min-width: 0;
+}
+.create-session-form .launch-composer-choice-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.create-session-form .launch-composer-section-label,
+.launch-composer-row-label {
   margin-bottom: 0;
+  color: var(--fg-1);
+  font-size: 12px;
+  letter-spacing: normal;
+  text-transform: none;
 }
+.create-session-form .launch-composer-section-label { display: block; }
+.create-session-form .launch-composer-section-label::first-letter { text-transform: uppercase; }
+.create-session-form .launch-composer-choice .launch-composer-section-label,
+.launch-composer-row-label {
+  padding-top: 8px;
+}
+.create-session-form .launch-composer-section-label::after {
+  content: none;
+}
+.create-session-form .launch-composer-destination > .launch-composer-section-label {
+  color: var(--fg-0);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Field-owned notes follow the existing 104px label and 12px column gap.
+   Keep their DOM order: a held permission explanation is still owned by the
+   shared controls rather than visually reordered across unrelated fields. */
+.create-session-form .launch-command-hint,
+.create-session-form .launch-command-resume-choice,
+.create-session-form .launch-command-error,
+.create-session-form #launcher-folder-problem,
+.create-session-form .launch-composer-destination > .launch-composer-repository-note,
+.create-session-form .launch-composer-checkout-explanation,
+.create-session-form .launch-composer-column-choices > .launch-composer-choice-error,
+.create-session-form .launch-composer-held-context > .launch-composer-folder-warning {
+  margin-left: 116px;
+}
+
+/* Reuse the checkout editor's label association and save operation. Only its
+   launcher presentation joins the surrounding destination rows. */
+.create-session-form .checkout-root-field {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 6px 12px;
+  align-items: start;
+}
+.create-session-form .checkout-root-field > .checkout-root-label { display: contents; }
+.create-session-form .checkout-root-field > .checkout-root-label > span { padding-top: 8px; }
+.create-session-form .checkout-root-field > .checkout-root-label > input,
+.create-session-form .checkout-root-field > :not(.checkout-root-label) { grid-column: 2; min-width: 0; }
+.create-session-form .checkout-root-field > button { justify-self: start; }
 
 /* The structured destination is one fact split across host and folder. Keep
    its controls compact so browsing history remains context, not a second
    picker competing with the typed path. */
 .launch-composer-destination {
   display: grid;
+  min-width: 0;
   gap: 8px;
 }
 
@@ -6101,6 +6133,7 @@ a:any-link,
   flex-wrap: wrap;
   gap: 8px 12px;
   align-items: center;
+  min-width: 0;
 }
 
 .launch-composer-destination-row .create-session-host {
@@ -6204,10 +6237,6 @@ a:any-link,
 .launch-composer-recents {
   display: grid;
   gap: 8px;
-  /* The form's inherited 8px flex gap plus this 12px margin preserves the
-     20px section rhythm below a band that is absent entirely when history
-     has no matches. */
-  margin-bottom: 12px;
 }
 
 .launch-composer-recent-slots {
@@ -6242,9 +6271,8 @@ a:any-link,
   color: var(--on-fill);
 }
 
-/* The command tab's fields sit directly in the choices column, so its grid
-   gap spaces them; the YOLO question is a fieldset, whose default border and
-   padding would draw a box nothing else in the dialog has. */
+/* Preserve the native radio group and its legend while lining the choice
+   up with the other fields. Space and arrows remain browser behavior. */
 .launch-command-yolo {
   display: flex;
   flex-wrap: wrap;
@@ -6255,8 +6283,22 @@ a:any-link,
 }
 
 .launch-command-yolo > legend {
+  float: left;
+  width: 104px;
+  margin-right: 12px;
   padding: 0;
   margin-bottom: 4px;
+  color: var(--fg-1);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.create-session-form .launch-command-yolo > label,
+.create-session-form .launch-command-resume-choice {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
 }
 
 .launch-command-hint {
@@ -6319,10 +6361,12 @@ a:any-link,
   color: var(--fg-1);
   font-size: 0.85rem;
 }
+.create-session-form .named-conversation-choice p,
+.create-session-form .initial-prompt-choice p { margin: 0; font-size: 12px; line-height: 1.5; }
+.create-session-form .initial-prompt-clear { justify-self: start; }
 
-/* A first message is prose. Start compact enough to keep the populated
-   launcher within a 900px-tall window; vertical resizing still gives longer
-   drafts room without widening the right column or making Enter submit. */
+/* A first message is prose. It can grow vertically inside the scrolling
+   body without widening the field column or making Enter submit. */
 .initial-prompt {
   resize: vertical;
   min-height: 80px;
@@ -6415,6 +6459,12 @@ a:any-link,
   color: var(--fg-0);
   font-size: 14px;
   font-weight: 600;
+}
+.create-session-form .launch-composer-harness-choice .launch-composer-options > button {
+  min-height: 36px;
+  padding-inline: 12px;
+  font-size: 13px;
+  font-weight: 400;
 }
 
 /* A current catalog can reject an exact snapshot recorded by an earlier
@@ -6915,16 +6965,99 @@ a:any-link,
   visibility: visible;
 }
 
-/* The first controls answer the maintainer's complaint directly: Launch says
-   what it will do, Cancel remains available beside it, and Reset is distant
-   enough not to compete with either. Long launch context is truncated below;
-   trailing actions may wrap rather than widening the modal at intermediate
-   widths. */
-.launch-composer-actions {
+/* The footer never scrolls with the fields. Its status region can give up
+   height, while the complete summary text and ordinary actions remain mounted.
+   A long refusal or YOLO explanation must not make a short card exceed its cap. */
+.create-session-form .launch-composer-footer {
   display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  min-height: 0;
+  max-height: calc((100dvh - 2 * var(--dialog-vertical-margin)) * .55);
+  box-sizing: border-box;
+  gap: 8px;
+}
+.launch-composer-footer-row {
+  display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  min-width: 0;
+  gap: 8px 16px;
+}
+.launch-composer-footer-summary {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 100%;
+}
+.launch-composer-footer-summary > div {
+  /* Anchor hover help and callouts to the text, while long targets still
+   * truncate within the space left by the pinned actions. */
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.create-session-form .launch-composer-actions {
+  flex-shrink: 0;
+  max-width: 100%;
+}
+.create-session-form .launch-composer-actions .btn {
+  min-height: 34px;
+  align-self: auto;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+.launch-composer-notices {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 24dvh;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  /* Keep the native cue when content overflows, without reserving empty
+     space beside a short notice. Overlay platforms still choose its paint. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--fg-1) var(--bg-1);
+}
+.launch-composer-notices[tabindex="0"]:focus-visible {
+  outline-offset: -2px;
+}
+.launch-composer-notices > :first-child { margin-top: 0; }
+.launch-composer-notices > :last-child { margin-bottom: 0; }
+/* Native nearest scrolling must reveal the answer's outer focus ring too,
+   including at fractional WebKit scroll edges in a short notice viewport. */
+.launch-composer-notices .yolo-confirmation-actions .btn { scroll-margin-block: 4px; }
+
+/* Compact chrome leaves usable field space at the shortest heights. Action
+   wrapping also applies above this range; ordinary phone button stacks can
+   otherwise consume the footer cap before a whole YOLO answer fits. */
+@media (max-height: 480px) {
+  .create-session-form .dialog-header { padding: 10px 16px; gap: 10px; }
+  .create-session-form .dialog-tile { flex-basis: 32px; height: 32px; }
+  .create-session-form .dialog-summary { margin-top: 2px; font-size: 11px; }
+  .create-session-form .launch-composer-body { padding-block: 8px; }
+  .create-session-form .launch-composer-footer { padding: 8px 16px; gap: 6px; }
+  .create-session-form .launch-composer-footer-row { gap: 4px 12px; }
+  .create-session-form .launch-composer-actions .btn {
+    min-height: 28px;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+}
+
+/* Keep ordinary 34px buttons and typography at intermediate phone heights.
+   Two native action rows leave the existing notice scrollport enough height
+   to reveal each answer and its focus ring, including just above 480px. */
+@media (max-height: 480px), (max-width: 560px) and (max-height: 600px) {
+  .create-session-form .launch-composer-actions.dialog-actions {
+    flex-direction: row;
+    align-items: center;
+    width: auto;
+    gap: 4px 8px;
+  }
+  .create-session-form .launch-composer-actions .btn { width: auto; }
 }
 
 /* The save checklist is a review of one snapshot. Long relayed choices must
@@ -6940,6 +7073,10 @@ a:any-link,
 .save-template-panel p {
   margin: 0;
 }
+.create-session-form .save-template-panel > label { gap: 6px; }
+.create-session-form .save-template-panel > p { font-size: 12px; line-height: 1.5; }
+.create-session-form .save-template-panel > p:where(:not(.save-template-error)) { color: var(--fg-1); }
+.create-session-form .save-template-panel > label + p { color: var(--fg-0); font-size: 13px; font-weight: 600; }
 
 .save-template-name {
   display: block;
@@ -7013,58 +7150,10 @@ a:any-link,
   overflow-wrap: anywhere;
 }
 
-/* Launch shares the primary fill; only its larger, contextual label needs
-   composer-specific geometry. The hover rule retains that tier rather than
-   using the lighter accent text color as a background. */
-.launch-composer-actions .create-session-submit {
-  /* A flex row rather than inline text on purpose: the context span below
-     hides its overflow for the ellipsis, and an inline-block with hidden
-     overflow takes its BOTTOM EDGE as its baseline (CSS 2 §10.8.1), which
-     sat the bold verb visibly lower than the lighter context beside it.
-     That rule is specific to inline formatting; a flex item's baseline is
-     its first line's text baseline whatever its overflow, so aligning the
-     two items by baseline puts the verb on the context's first line — and
-     keeps it there on a phone, where the context wraps to a second line
-     below. The flex container also drops the markup's inter-node space,
-     so `gap` is the whole of the spacing between the two. */
-  display: inline-flex;
-  align-items: baseline;
-  gap: 12px;
-  align-self: auto;
-  max-width: 100%;
-  min-width: 0;
-  /* The vertical padding is what centers the label. `align-items: baseline`
-     (needed, see above) packs both items against the TOP of the line, so
-     with `min-height` alone and no vertical padding the label sat in the
-     upper half of a 44px button. The padding is whatever is left of 44px
-     after one 20px line and the two 1.5px borders (a button sizes by its
-     border box), so Launch stays exactly as tall as Cancel beside it;
-     `min-height` remains as the floor. */
-  min-height: 44px;
-  padding: calc((44px - 20px - 3px) / 2) 18px;
-  line-height: 20px;
-  border: 1.5px solid var(--accent-edge);
-  border-radius: var(--radius-sm);
-  background: var(--accent-fill);
-  color: var(--on-fill);
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.launch-composer-actions .create-session-submit:hover:not([aria-disabled="true"]),
-.launch-composer-actions .create-session-submit:focus-visible:not([aria-disabled="true"]) {
-  background: var(--accent-fill-hover);
-}
-
 /* Refused launch attempts stay reachable to explain themselves; their grey
    presentation must not depend on native disabled, which swallows submission. */
 .launch-composer-actions .create-session-submit[aria-disabled="true"] {
   cursor: not-allowed;
-}
-/* The launch context has its own inverse role while the action is filled.
-   Retire that child color too when the unavailable owner becomes neutral. */
-.launch-composer-actions .create-session-submit[aria-disabled="true"] .launch-composer-launch-context {
-  color: var(--fg-2);
 }
 
 .launch-composer-refusal {
@@ -7102,39 +7191,17 @@ a:any-link,
   color: var(--danger);
 }
 
-/* The context is what the button will do, in a lighter weight than the verb;
-   capped and ellipsized so a deep folder path cannot grow the button past
-   the row (see `.launch-composer-actions`). The phone-width media query
-   lifts the single-line rule (the cap stays, and is what makes the text
-   wrap there), where the row wraps anyway. */
+/* The contextual label now belongs to the quiet footer hint. Its full text
+   remains accessible and the primary also names the operation and target. */
 .launch-composer-launch-context {
-  /* A flex item of the button (see `.create-session-submit`); `min-width`
-     is what lets it shrink to the ellipsis instead of widening the row. */
   min-width: 0;
-  max-width: 34ch;
-  overflow: hidden;
-  color: var(--on-accent-dim);
+  color: var(--fg-1);
+  font-size: 12px;
   font-weight: 400;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.launch-composer-cancel {
-  min-height: 44px;
-  padding: 0 18px;
-  border-width: 1px;
-  border-radius: var(--radius-sm);
-  font-size: 14px;
 }
 
 .launch-composer-danger {
   color: var(--danger);
-}
-
-@media (max-width: 999px) {
-  .launch-composer-columns {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 560px) {
@@ -7142,18 +7209,34 @@ a:any-link,
     padding-inline: 8px;
   }
 
-  .launch-composer-backdrop .create-session-form {
-    padding: 16px;
-  }
+  .create-session-form .dialog-header,
+  .create-session-form .launch-composer-body,
+  .create-session-form .launch-composer-footer { padding-inline: 16px; }
 
-  /* The banner bleeds to the dialog's edges by its padding, which is 16px
-     here rather than 24px; the wider offsets would scroll the dialog
-     sideways and clip the banner's top. */
-  .permission-escalation-banner {
-    top: -16px;
-    margin: -16px -16px 16px;
-    padding-inline: 16px;
-  }
+  .create-session-form .launch-composer-row,
+  .create-session-form .launch-composer-choice,
+  .create-session-form .launch-composer-repository-field,
+  .create-session-form .launch-composer-name { grid-template-columns: minmax(0, 1fr); }
+  .create-session-form .launch-composer-choice > :not(.launch-composer-section-label):not(label),
+  .create-session-form .launch-composer-choice > label > :not(.launch-composer-section-label),
+  .create-session-form .launch-composer-name-taken { grid-column: 1; }
+  .create-session-form .launch-composer-choice .launch-composer-section-label,
+  .launch-composer-row-label { padding-top: 0; }
+  .launch-command-yolo > legend { float: none; width: auto; margin-right: 0; }
+
+  .create-session-form .launch-composer-held-context > p,
+  .create-session-form .checkout-root-field { grid-template-columns: minmax(0, 1fr); }
+  .create-session-form .checkout-root-field > .checkout-root-label > span { padding-top: 0; }
+  .create-session-form .checkout-root-field > .checkout-root-label > input,
+  .create-session-form .checkout-root-field > :not(.checkout-root-label) { grid-column: 1; }
+  .create-session-form .launch-command-hint,
+  .create-session-form .launch-command-resume-choice,
+  .create-session-form .launch-command-error,
+  .create-session-form #launcher-folder-problem,
+  .create-session-form .launch-composer-destination > .launch-composer-repository-note,
+  .create-session-form .launch-composer-checkout-explanation,
+  .create-session-form .launch-composer-column-choices > .launch-composer-choice-error,
+  .create-session-form .launch-composer-held-context > .launch-composer-folder-warning { margin-left: 0; }
 
   /* A phone's row is about 40ch wide: no room for four cells and a hint.
      The host is the cell to drop, because it is the same string in every
@@ -7171,27 +7254,6 @@ a:any-link,
     display: none;
   }
 
-  /* Reset is secondary, so a narrow row lets it wrap to the trailing line
-     instead of squeezing the launch decision into an unreadable button.
-     Reset gets no full-line flex basis here: now that it is a bordered
-     button, that would stretch it across the dialog. Wrapping alone moves
-     it down when the row runs out of room, and its own `margin-left: auto`
-     keeps it flush right on that line. */
-  .launch-composer-actions {
-    flex-wrap: wrap;
-  }
-
-  /* On a phone the row already wraps (Reset drops to its own line), so the
-     launch context may wrap too: reading the whole destination beats an
-     ellipsis when there is no second column of controls to protect. This
-     reverses the base rule's single-line cap on purpose. */
-  .launch-composer-launch-context {
-    white-space: normal;
-    /* The button's UA style centres text; a wrapped context would otherwise
-       show an indented first line over a wider second one beside the verb.
-       Flush lines read as one label continuing under itself. */
-    text-align: start;
-  }
 }
 
 /* ===== Session view: restart and banners ========================= */

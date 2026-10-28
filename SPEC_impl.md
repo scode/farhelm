@@ -519,6 +519,17 @@ owner. The shared action row keeps Cancel, any outlined permanent answer and the
 including when a narrow window stacks them. Disabled filled actions return to a quiet raised surface with readable text
 rather than fading the affirmative fill.
 
+The session launcher uses that frame around its existing form root and draft. Its labeled destination and launch-choice
+rows share one scrolling body; the inline save-template editor stays there. A pinned footer separates the complete
+target and agent-choice summaries from the compact main-action label, whose accessible name still includes its target.
+Refusals, destructive warnings and the current inline YOLO question occupy an adjacent, bounded `ScrollRegion` only
+while they exist. Its native controls supply keyboard entry, or the shared region supplies one when it has no usable
+control. The action row never scrolls with the fields or yields its height to a long notice. Phone widths stack field
+labels and use the shared action order; short windows compact and wrap the launcher actions to keep fields and notices
+reachable. Frame wrappers do not change Enter handling, captured consent, asynchronous operation guards or modal focus
+ownership. Initial focus stays on search for ordinary creates and Cancel for Restart; sequential Tab follows the new
+header, body and footer reading order.
+
 Rename and tunnel consent use that shared header, bounded scroll body and pinned answer footer. Their header Close uses
 the same live cancellation guard as Cancel; tunnel consent also retains the rendered warning's opening token and refuses
 dismissal during its acknowledged consent write. Native Tab follows header Close, body fields or keyboard scroll entry,

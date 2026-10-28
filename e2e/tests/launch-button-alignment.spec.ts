@@ -1,75 +1,79 @@
 /**
- * The launch button carries two texts of different weights — the bold verb
- * and the lighter host/folder context — and they must read as one line. The
- * context hides its overflow for its ellipsis, and an inline-block with
- * hidden overflow takes its bottom edge as its baseline (CSS 2 §10.8.1),
- * which once sat the verb visibly lower than the context (5 px at desktop
- * width). This pins the fixed layout with a measurement, not a screenshot:
- * the verb's text and the context's first text line share a vertical centre
- * within a pixel at desktop width, and at phone width the wrapped context
- * lines start flush rather than centred inside their box.
+ * Launch context belongs beside a compact primary in a pinned footer.
+ * An overflowing real draft distinguishes that layout from whole-form
+ * scrolling: moving the fields must not move the summary or its actions.
  */
 import { expect, test } from "./helpers/evidence";
 import { type Locator, type Page } from "@playwright/test";
 
-/** Vertical centres of the verb's text and of the context's FIRST text line, plus the first line's left edge. */
-async function measure(button: Locator) {
-  return button.evaluate((el) => {
-    const span = el.querySelector(".launch-composer-launch-context") as HTMLElement;
-    const textNode = Array.from(el.childNodes).find(
-      (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim() === "launch",
-    ) as Text;
-    const verbRange = document.createRange();
-    verbRange.selectNodeContents(textNode);
-    const verb = verbRange.getBoundingClientRect();
-    const ctxRange = document.createRange();
-    ctxRange.selectNodeContents(span);
-    // One client rect per inline fragment (the context holds several
-    // spans), so lines are the distinct rows those fragments sit on.
-    const fragments = Array.from(ctxRange.getClientRects()).filter((r) => r.width > 0);
-    const rows = new Map<number, DOMRect[]>();
-    for (const r of fragments) {
-      const key = Math.round(r.top);
-      rows.set(key, [...(rows.get(key) ?? []), r]);
-    }
-    const firstRow = [...rows.entries()].sort((a, b) => a[0] - b[0])[0][1];
-    const firstTop = Math.min(...firstRow.map((r) => r.top));
-    const firstBottom = Math.max(...firstRow.map((r) => r.bottom));
-    return {
-      verbMid: (verb.top + verb.bottom) / 2,
-      firstLineMid: (firstTop + firstBottom) / 2,
-      firstLineLeft: Math.min(...firstRow.map((r) => r.left)),
-      spanContentLeft: span.getBoundingClientRect().left,
-      lineCount: rows.size,
-    };
-  });
-}
-
-async function openComposer(page: Page): Promise<Locator> {
+/** Populate both the command fields and inline snapshot editor so the body really overflows. */
+async function openTallComposer(page: Page): Promise<Locator> {
   await page.goto("/");
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
-  await expect(form).toBeVisible();
-  await form.getByLabel("folder", { exact: true }).fill("/home/someone/git/farhelm");
+  await expect(form.locator('.launch-composer-search input[role="combobox"]')).toBeFocused();
+  await form.getByLabel("folder", { exact: true }).fill("/work/projects/a-long-folder-name-for-launch-summary");
+  await form.getByLabel("folder", { exact: true }).press("Escape");
+  await expect(form.getByRole("listbox", { name: "folders" })).toHaveCount(0);
+  await form.getByRole("tab", { name: "command", exact: true }).click();
+  await form.getByLabel("agent command", { exact: true }).fill("claude {farhelm_args}");
+  await form.getByRole("radio", { name: "no", exact: true }).check();
+  await form.getByRole("combobox", { name: "agent type", exact: true }).selectOption("claude");
+  await form.locator(".launch-command-resume-toggle").check();
+  await form.getByLabel("resume command", { exact: true }).fill("claude --resume {conversation} {farhelm_args}");
+  await form.locator(".launch-composer-save-template").click();
+  await expect(form.locator(".save-template-name")).toBeFocused();
   return form;
 }
 
-test("the launch verb sits on the context's first line at desktop width", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
-  const form = await openComposer(page);
-  const button = form.locator(".create-session-submit");
-  await expect(button).toBeVisible();
-  const m = await measure(button);
-  expect(m.lineCount, "the context stays on one line at desktop width").toBe(1);
-  expect(Math.abs(m.verbMid - m.firstLineMid), "verb and context must share a vertical centre").toBeLessThan(1.5);
-});
+/** Both side-by-side and stacked hints must stay clear of the action hit targets. */
+async function expectSeparateSummary(form: Locator) {
+  const summary = await form.locator(".launch-composer-footer-summary").boundingBox();
+  const actions = await form.locator(".launch-composer-actions").boundingBox();
+  expect(summary, "the complete summary has a bounded footer box").not.toBeNull();
+  expect(actions, "the action row has its own box").not.toBeNull();
+  expect(
+    summary!.y + summary!.height <= actions!.y + 1 ||
+      summary!.x + summary!.width <= actions!.x + 1,
+    "the summary sits above or beside actions without covering them",
+  ).toBe(true);
+}
 
-test("a wrapped context starts flush beside the verb at phone width", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  const form = await openComposer(page);
-  const button = form.locator(".create-session-submit");
-  await expect(button).toBeVisible();
-  const m = await measure(button);
-  expect(Math.abs(m.verbMid - m.firstLineMid), "the verb aligns to the context's first line").toBeLessThan(1.5);
-  expect(Math.abs(m.firstLineLeft - m.spanContentLeft), "the first line must not be centred inside its box").toBeLessThan(1.5);
-});
+for (const viewport of [
+  { width: 1280, height: 540 },
+  { width: 390, height: 844 },
+  { width: 360, height: 300 },
+]) {
+  /** A long command draft cannot scroll its only launch/cancel controls out of reach. */
+  test(`launcher summary and actions stay pinned at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const form = await openTallComposer(page);
+    const body = form.locator(".launch-composer-body");
+    const footer = form.locator(".launch-composer-footer");
+    const primary = form.locator(".create-session-submit");
+    await expect(primary).toHaveText("Launch");
+    await expect(primary).toHaveAccessibleName(/^launch Command · .+ · \/work\/projects\/a-long-folder-name-for-launch-summary$/);
+    await expect(footer.locator(".launch-composer-launch-context")).toContainText("Command · ");
+    await expect(footer.locator(".launch-composer-summary")).toHaveCount(0);
+    expect(await body.evaluate((node) => node.clientHeight > 0 && node.scrollHeight > node.clientHeight + 1),
+      "the populated body's own scrollport must overflow before testing pinning").toBe(true);
+
+    await body.evaluate((node) => { node.scrollTop = 0; });
+    await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBe(0);
+    await expectSeparateSummary(form);
+    const before = (await footer.boundingBox())!;
+    for (const selector of [".launch-composer-cancel", ".launch-composer-save-template", ".create-session-submit"]) {
+      await expect(form.locator(selector)).toBeInViewport({ ratio: 1 });
+    }
+
+    await body.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+    await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+    const after = (await footer.boundingBox())!;
+    expect(Math.abs(after.y - before.y), "scrolling fields must not move the footer").toBeLessThan(1);
+    expect(Math.abs(after.height - before.height), "scrolling fields must not resize the footer").toBeLessThan(1);
+    await expectSeparateSummary(form);
+    for (const selector of [".launch-composer-cancel", ".launch-composer-save-template", ".create-session-submit"]) {
+      await expect(form.locator(selector)).toBeInViewport({ ratio: 1 });
+    }
+  });
+}

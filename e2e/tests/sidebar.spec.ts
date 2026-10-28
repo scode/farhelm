@@ -4,6 +4,7 @@ import { chooseLauncherHost, launcherHostOptions } from "./helpers/host-picker";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { resolveToken as tokenColor } from "./helpers/color";
 import { requireHelmBuild } from "./helpers/helm-build";
+import { fillLauncherFolder } from "./helpers/launcher";
 /**
  * The two-pane shell itself (BUGS_BURNDOWN.md issue 5): the properties the
  * sidebar redesign claims but no interaction test proves on its own —
@@ -180,18 +181,20 @@ test("the sidebar app bar explains the helm and window builds", async ({ page, r
   const forced = "9.9.9-forced-helm";
   expect(forced).not.toBe(stamp);
 
-  await forceBuildSkew(page, forced);
-  await page.goto("/");
-  const version = await waitForVersionReadout(page, request, forced);
-  await expect(version).toHaveAttribute(
-    "data-tooltip",
-    `The helm runs Farhelm ${forced}; this window is a development build of Farhelm.`,
-  );
-
-  // Mounting host rows can leave provisioning reads inside route.fetch even
-  // after the version is visible. Drain those handlers before removing the
-  // interception pattern, or their later fulfill races an already handled route.
-  await page.unrouteAll({ behavior: "wait" });
+  const stopSkew = await forceBuildSkew(page, forced);
+  const version = page.locator(".app-version");
+  try {
+    await page.goto("/");
+    await waitForVersionReadout(page, request, forced);
+    await expect(version).toHaveAttribute(
+      "data-tooltip",
+      `The helm runs Farhelm ${forced}; this window is a development build of Farhelm.`,
+    );
+  } finally {
+    // Reads can outlive the visible build stamp. Drain our callback work
+    // before restoring replies, including when the skew assertion fails.
+    await stopSkew();
+  }
   await page.goto("/");
   await waitForVersionReadout(page, request, stamp);
   await expect(version).toHaveAttribute(
@@ -447,28 +450,31 @@ test("macOS header controls stay clear of native buttons while the shell scrolls
  * when a narrow window pins the app bar independently of horizontal scroll.
  */
 test("macOS header leaves the build mismatch notice readable", async ({ page }) => {
-  await forceBuildSkew(page, "9.9.9-header-layout");
-  await page.goto("/");
-  const notice = page.locator(".build-skew");
-  const bar = page.locator(".app-bar");
-  await expect(notice).toContainText("9.9.9-header-layout");
-  await page.locator(".window-root").evaluate((element) => element.classList.add("macos-root"));
-  await page.locator(".app-shell").evaluate((element) => element.classList.add("macos-window"));
-  for (const width of [900, 400]) {
-    await page.setViewportSize({ width, height: 500 });
-    const barBox = await bar.boundingBox();
-    const noticeBox = await notice.boundingBox();
-    expect(barBox).not.toBeNull();
-    expect(noticeBox).not.toBeNull();
-    expect(noticeBox!.y).toBeGreaterThanOrEqual(48);
-    expect(noticeBox!.y).toBeGreaterThanOrEqual(barBox!.y + barBox!.height);
-    expect(noticeBox!.x).toBeGreaterThanOrEqual(0);
-    expect(noticeBox!.x + noticeBox!.width).toBeLessThanOrEqual(width);
-    const shellBox = await page.locator(".app-shell").boundingBox();
-    expect(shellBox).not.toBeNull();
-    expect(shellBox!.y).toBeGreaterThanOrEqual(noticeBox!.y + noticeBox!.height);
+  const stopSkew = await forceBuildSkew(page, "9.9.9-header-layout");
+  try {
+    await page.goto("/");
+    const notice = page.locator(".build-skew");
+    const bar = page.locator(".app-bar");
+    await expect(notice).toContainText("9.9.9-header-layout");
+    await page.locator(".window-root").evaluate((element) => element.classList.add("macos-root"));
+    await page.locator(".app-shell").evaluate((element) => element.classList.add("macos-window"));
+    for (const width of [900, 400]) {
+      await page.setViewportSize({ width, height: 500 });
+      const barBox = await bar.boundingBox();
+      const noticeBox = await notice.boundingBox();
+      expect(barBox).not.toBeNull();
+      expect(noticeBox).not.toBeNull();
+      expect(noticeBox!.y).toBeGreaterThanOrEqual(48);
+      expect(noticeBox!.y).toBeGreaterThanOrEqual(barBox!.y + barBox!.height);
+      expect(noticeBox!.x).toBeGreaterThanOrEqual(0);
+      expect(noticeBox!.x + noticeBox!.width).toBeLessThanOrEqual(width);
+      const shellBox = await page.locator(".app-shell").boundingBox();
+      expect(shellBox).not.toBeNull();
+      expect(shellBox!.y).toBeGreaterThanOrEqual(noticeBox!.y + noticeBox!.height);
+    }
+  } finally {
+    await stopSkew();
   }
-  await page.unrouteAll({ behavior: "wait" });
 });
 
 /**
@@ -6432,7 +6438,8 @@ test("composer destination block keeps host, browse, folder, and grouped choices
   await expect(name).toBeVisible();
   const hostLabel = await host.locator("bdi").textContent();
   expect(hostLabel, "the host picker must show its committed label before it is checked").toBeTruthy();
-  await expect(browse).toContainText(hostLabel!.trim());
+  await expect(host).toHaveAttribute("data-host-id", String(local));
+  await expect(browse).toHaveText("Browse");
   // The controls can separate at phone width, but each label must stay
   // centered in its own control rather than riding the text baseline.
   for (const width of [1024, 540]) {
@@ -6440,8 +6447,11 @@ test("composer destination block keeps host, browse, folder, and grouped choices
     const centers = await destination.evaluate((node) => {
       const selector = node.querySelector(".create-session-host")!;
       const button = node.querySelector<HTMLButtonElement>('button[aria-label="browse this path"]')!;
-      const label = button.firstElementChild!;
       const buttonBox = button.getBoundingClientRect();
+      // Browse is compact text now, so measure its rendered text rather
+      // than assuming an extra label element inside the native button.
+      const label = document.createRange();
+      label.selectNodeContents(button);
       const labelBox = label.getBoundingClientRect();
       return {
         selectorHeight: selector.getBoundingClientRect().height,
@@ -6538,8 +6548,9 @@ test("composer folder history tracks edited destinations at narrow width", async
 });
 
 /** Opening folder history must not steal typed-path Enter. Only arrows give
- * an option authority; choosing never launches. Real input, hover and focus
- * transitions also prove the grouped list remains usable on a phone. */
+ * an option authority; choosing never launches. Submission closes suggestions
+ * even after refusal, so the single-column form's next controls stay reachable.
+ * Real input, hover and focus transitions also prove phone usability. */
 test("composer folder dropdown preserves keyboard launch and grouped history", async ({ page, request }, testInfo) => {
   const local = await localHostId(request);
   const prefix = "/fixture/" + "shared-prefix/".repeat(8);
@@ -6598,9 +6609,13 @@ test("composer folder dropdown preserves keyboard launch and grouped history", a
   await folder.fill("/tmp");
   await expect(list).toBeVisible();
   await expect(list.locator('[aria-selected="true"]')).toHaveCount(0);
+  await expect(folder).toBeFocused();
   await expect(form.locator(".create-session-submit")).toBeEnabled();
   await folder.press("Enter");
   await expect(form.locator(".create-session-error")).toContainText("folder dropdown fixture refuses launch");
+  await expect(list, "refused Enter must leave the controls below the folder reachable").toHaveCount(0);
+  await expect(folder).toHaveAttribute("aria-expanded", "false");
+  await expect(folder).toHaveValue("/tmp");
   expect(posts, "Enter without arrow navigation must submit the typed path").toHaveLength(1);
   expect(posts[0]).toMatchObject({ host: local, cwd: "/tmp" });
 
@@ -6808,7 +6823,7 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
     await page.goto("/");
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
-    await form.getByLabel("folder", { exact: true }).fill(cwd);
+    await fillLauncherFolder(form, cwd);
     await form.getByRole("tab", { name: "command", exact: true }).click();
     await form.getByLabel("agent command").fill(FAKE_AGENT);
     await answerYolo(form);
@@ -7406,20 +7421,10 @@ test("composer search keeps active results visible and focus contained", async (
 });
 
 /**
- * A focus trap is only useful when its wrap target remains in the composer's
- * own scroll window. The long, populated fixture makes both boundaries sit
- * outside the opposite scroll position; this checks native Tab in both
- * directions so `preventScroll` cannot quietly turn containment into an
- * invisible focus ring again.
- *
- * The action row leads the dialog, so Launch is now the first focusable node
- * once its harness choice enables it. Reset remains at the end of that row,
- * while name belongs later in the destination block. The last node is instead
- * whatever the trap's own query finds last in DOM order among the visible
- * structured controls (a choice button or the browse button, depending on
- * fixture shape), so this test finds it the same way `install_composer_focus_
- * trap` does rather than hard-coding a control name that used to be true only
- * because Launch happened to render last.
+ * A long populated body must not hide the native trap's endpoints. Header
+ * Close and the footer primary stay visible while the fields scroll, and
+ * native Tab wraps between those concrete controls in both directions.
+ * The overflow premise prevents an empty draft from making pinning vacuous.
  */
 test("composer focus-trap wraps reveal their targets at narrow width", async ({ page, request }) => {
   const long = "/focus-trap/" + "long-destination-segment-".repeat(12);
@@ -7445,6 +7450,8 @@ test("composer focus-trap wraps reveal their targets at narrow width", async ({ 
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   const launch = form.getByRole("button", { name: /^launch\b/ });
+  const close = form.locator(".launch-composer-close");
+  const body = form.locator(".launch-composer-body");
   await form.getByLabel("folder", { exact: true }).fill(long);
   // Typing leaves the folder dropdown open, and at phone width it covers the
   // harness choices below; close it first, as a user would.
@@ -7453,48 +7460,27 @@ test("composer focus-trap wraps reveal their targets at narrow width", async ({ 
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   await expect(form.locator(".launch-composer-recent-slots > button"), "the controlled history must make the composer scrollable").toHaveCount(3);
 
-  // Tag the trap's own last node rather than assuming which control that is:
-  // the same selector and visibility filter `install_composer_focus_trap`
-  // uses, so this test tracks the mechanism instead of one control's name.
-  await form.evaluate((dialog) => {
-    const nodes = [...dialog.querySelectorAll(
-      'button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
-    )].filter((node) => !(node as HTMLElement).hidden && node.getClientRects().length);
-    nodes[nodes.length - 1].setAttribute("data-focus-trap-last-probe", "true");
-  });
-  const last = form.locator('[data-focus-trap-last-probe="true"]');
-  await expect(last).toBeVisible();
-
-  const intersectsViewport = async (control: Locator) => await control.evaluate((node) => {
-    const target = node.getBoundingClientRect();
-    const viewport = node.closest(".create-session-form")!.getBoundingClientRect();
-    return target.top < viewport.bottom && target.bottom > viewport.top;
-  });
-
-  await last.focus();
-  await form.evaluate((node) => { node.scrollTop = node.scrollHeight; });
-  await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
-  await expect(last).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(launch).toBeFocused();
-  await expect.poll(() => intersectsViewport(launch), {
-    message: "Tab wrapping from the last control must reveal Launch in the composer viewport",
-  }).toBe(true);
-
+  expect(await body.evaluate((node) => node.scrollHeight > node.clientHeight + 1),
+    "the populated fields must overflow their own body").toBe(true);
   await launch.focus();
-  await form.evaluate((node) => { node.scrollTop = 0; });
-  await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBe(0);
   await expect(launch).toBeFocused();
+  await body.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+  await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  await page.keyboard.press("Tab");
+  await expect(close).toBeFocused();
+  await expect(close).toBeInViewport({ ratio: 1 });
+
+  await body.evaluate((node) => { node.scrollTop = 0; });
+  await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBe(0);
+  await expect(close).toBeFocused();
   await page.keyboard.press("Shift+Tab");
-  await expect(last).toBeFocused();
-  await expect.poll(() => intersectsViewport(last), {
-    message: "Shift+Tab wrapping from Launch must reveal the last control in the composer viewport",
-  }).toBe(true);
+  await expect(launch).toBeFocused();
+  await expect(launch).toBeInViewport({ ratio: 1 });
 });
 
 /**
- * The composer paints its search, draft summary, history, and destination
- * groups in this order. This follows ordinary browser Tab traversal through
+ * The composer paints search, history and destination before launch choices,
+ * with actions in its footer. This follows ordinary browser Tab traversal through
  * the same real controls, so a future CSS-only reorder cannot make keyboard
  * and assistive reading order disagree with the visible surface.
  */
@@ -7547,22 +7533,19 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
   await expect(recentSlot, "the controlled recent must establish the history traversal premise").toBeVisible();
   await expect(browseButton, "the destination group must expose its browse action").toBeVisible();
   await expect(harnessChoice, "the structured fixture must expose the Harness group").toBeVisible();
-  // Launch is disabled until a harness is chosen, and a disabled control is
-  // skipped entirely by native Tab — it would never receive focus below, so
-  // the reverse-order assertion needs a real harness pick first, exactly as
-  // a person reaching for Launch would have already made one.
+  // Keep a complete agent choice for the footer traversal, independently of
+  // the empty draft's reachable-but-unavailable primary action.
   await harnessChoice.click();
   await search.focus();
   await expect(search).toBeFocused();
-  // The action row sits above search in DOM order. Reverse traversal therefore
-  // reaches its trailing save-as-template action (offered on New and Clone),
-  // then Reset, then Cancel, then Launch; name belongs after the folder block
-  // and is covered by the forward destination sequence.
+  // Reverse from search reaches header Close, wraps to the footer primary,
+  // and walks the remaining footer actions in their reverse reading order.
   const reverseLeadingControls = [
+    form.locator(".launch-composer-close"),
+    form.getByRole("button", { name: /^launch\b/ }),
     form.getByRole("button", { name: "save as template", exact: true }),
     form.getByRole("button", { name: "reset choices", exact: true }),
     form.getByRole("button", { name: "cancel", exact: true }),
-    form.getByRole("button", { name: /^launch\b/ }),
   ];
   for (const control of reverseLeadingControls) {
     await page.keyboard.press("Shift+Tab");
@@ -7648,17 +7631,16 @@ test("composer name field reaches the create request; an empty name sends none",
 });
 
 /**
- * The leading action must say where it will launch before any choice is made:
- * Launch's own label carries the host and folder (as isolated peer runs) and,
- * once chosen, the harness, so the top row answers "what will this do" for a
- * sighted reader and for a screen reader alike. The keyboard half pins that
- * Launch is the first control: Shift+Tab from Cancel lands on it.
+ * The footer must say where it will launch before any choice is made. Its
+ * summary carries isolated host/folder values and the chosen harness, while
+ * the compact primary retains that target in its accessible name. The native
+ * footer order is Cancel, Reset choices, Save as template, then Launch.
  *
  * The host and folder are read from the form first and asserted non-empty so
  * a substring check cannot pass vacuously against an unrendered option or an
  * unseeded folder field.
  */
-test("composer launch button names the chosen harness, host, and folder", async ({ page }) => {
+test("composer footer names the chosen harness, host, and folder", async ({ page }) => {
   await page.goto("/");
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
@@ -7680,14 +7662,17 @@ test("composer launch button names the chosen harness, host, and folder", async 
   await expect(peers.nth(0)).toHaveText(host!.trim());
   await expect(peers.nth(1)).toHaveText(folder);
 
-  // A disabled submit is skipped by native Tab, so the reverse step below
-  // only proves Launch is first once the Codex pick has enabled it.
   await expect(launch).toBeEnabled();
   const cancel = form.getByRole("button", { name: "cancel", exact: true });
-  await cancel.focus();
-  await expect(cancel).toBeFocused();
-  await page.keyboard.press("Shift+Tab");
+  await expect(launch).toHaveAccessibleName(/^launch Codex · /);
+  await launch.focus();
   await expect(launch).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(form.locator(".launch-composer-save-template")).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(form.locator(".launch-composer-reset")).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(cancel).toBeFocused();
 });
 
 /**
@@ -7733,14 +7718,11 @@ test("composer keeps launch and cancel inside the initial viewport at default an
 });
 
 /**
- * A chosen harness and model are the resting desktop case that previously
- * pushed the composer past an ordinary window. This pins the mockup's 960px
- * footprint, proves its content no longer needs the dialog scrollbar at
- * 1440×900, and keeps both responsive column boundaries observable: the full
- * dialog stays side by side at 1000px while 700px returns to one column
- * without making the document horizontally scrollable.
+ * A populated launcher keeps the mockup's 960px footprint while its body
+ * scrolls. Destination precedes launch choices at every width; only the
+ * label/field rows collapse on phones. The dialog must not widen the page.
  */
-test("composer fits a 1440 by 900 window without scrolling once a harness and model are chosen", async ({
+test("composer keeps labeled rows and a bounded body once a harness and model are chosen", async ({
   page,
   request,
 }) => {
@@ -7766,7 +7748,7 @@ test("composer fits a 1440 by 900 window without scrolling once a harness and mo
   }));
   expect(
     dimensions.scrollHeight,
-    `the populated resting composer must fit inside its own viewport: ${JSON.stringify(dimensions)}`,
+    `the frame itself must not overflow its viewport: ${JSON.stringify(dimensions)}`,
   ).toBeLessThanOrEqual(dimensions.clientHeight);
   expect((await form.boundingBox())!.width, "the full-width dialog must match the mockup footprint").toBe(960);
 
@@ -7776,20 +7758,26 @@ test("composer fits a 1440 by 900 window without scrolling once a harness and mo
   // The breakpoint is where the 960px dialog first fits with its margins, so
   // the width must hold here too, not only at 1440.
   expect((await form.boundingBox())!.width, "the dialog keeps its full width at the breakpoint").toBe(960);
-  const sideBySideDestination = (await destination.boundingBox())!;
-  const sideBySideChoices = (await choices.boundingBox())!;
-  expect(sideBySideDestination.y, "the full-width dialog keeps its columns aligned at the breakpoint").toBe(sideBySideChoices.y);
-  expect(sideBySideDestination.x, "the full-width dialog keeps its columns distinct at the breakpoint").toBeLessThan(sideBySideChoices.x);
-
-  await page.setViewportSize({ width: 700, height: 900 });
-  const stackedDestination = (await destination.boundingBox())!;
-  const stackedChoices = (await choices.boundingBox())!;
-  expect(stackedDestination.y, "the narrow dialog must place destination before choices").toBeLessThan(stackedChoices.y);
-  expect(stackedDestination.x, "stacked columns must share one left edge").toBe(stackedChoices.x);
-  expect(
-    await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
-    "the responsive dialog must not widen the document beyond the viewport",
-  ).toBe(true);
+  for (const width of [1000, 700, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const destinationBox = (await destination.boundingBox())!;
+    const choicesBox = (await choices.boundingBox())!;
+    expect(destinationBox.y + destinationBox.height, "destination rows precede launch choices").toBeLessThanOrEqual(choicesBox.y);
+    expect(destinationBox.x, "destination and launch rows share one left edge").toBe(choicesBox.x);
+    const where = destination.locator(".launch-composer-row").first();
+    const labelBox = (await where.locator(".launch-composer-row-label").boundingBox())!;
+    const fieldBox = (await where.locator(".destination-type-control").boundingBox())!;
+    if (width > 560) {
+      expect(labelBox.x + labelBox.width, "wide rows reserve a label column").toBeLessThan(fieldBox.x);
+    } else {
+      expect(labelBox.x, "phone labels and fields share one left edge").toBe(fieldBox.x);
+      expect(labelBox.y + labelBox.height, "phone labels precede their fields").toBeLessThanOrEqual(fieldBox.y);
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+      "the responsive dialog must not widen the document beyond the viewport",
+    ).toBe(true);
+  }
 });
 
 /**

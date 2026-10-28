@@ -990,9 +990,10 @@ test("a-recovering-view-does-not-take-the-session-back-for-a-new-tab", async ({
 // that starts attaching within about one round trip of the takeover has not
 // heard it yet. Its first attach used the displacing route and evicted the
 // window that had just taken control. The notice to this page's agent
-// terminal is dropped in the page here, and its reconnects are slowed to
-// half a minute, so the view stays unaware of the takeover for as long as
-// the test needs; it then opens a tab itself.
+// terminal is dropped in the page here, and only its future agent sockets
+// are withheld, so the view stays unaware until its new tab hears the refusal.
+// Tab retries stay short: its first attach can meet a legitimate lifecycle
+// conflict before reaching the ownership check this case exists to exercise.
 test("a-tab-opened-unaware-of-a-takeover-does-not-take-the-session-back", async ({
   browser,
   timeline,
@@ -1001,8 +1002,8 @@ test("a-tab-opened-unaware-of-a-takeover-does-not-take-the-session-back", async 
 }) => {
   test.setTimeout(120_000);
   await reconnectTimingsFromNextLoad(page, {
-    delaysMs: [30_000, 30_000, 30_000, 30_000, 30_000, 30_000],
-    probeIntervalMs: 30_000,
+    delaysMs: [1_000, 1_000, 1_000, 1_000, 1_000, 1_000],
+    probeIntervalMs: 1_000,
   });
   // Installed before the page loads so the agent's very first socket is
   // covered: its takeover notice never reaches the view.
@@ -1035,6 +1036,7 @@ test("a-tab-opened-unaware-of-a-takeover-does-not-take-the-session-back", async 
   try {
     const own = await openOwnTerminal(page, request, `tab-unaware-of-takeover-${Date.now()}`);
     ownId = own.id;
+    await withholdAgentSockets(page);
 
     const second = await newObservedContext(browser, timeline);
     const page2 = await second.newPage();

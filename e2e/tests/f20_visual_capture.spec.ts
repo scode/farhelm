@@ -97,12 +97,13 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
   ) {
     await page.setViewportSize(viewport);
     const form = await openComposer(page);
+    const body = form.locator(".launch-composer-body");
     await prepare(form);
     if (scroll) {
-      await form.evaluate((node) => { node.scrollTop = node.scrollHeight; });
-      await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+      await body.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+      await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
     }
-    const scrollTop = await form.evaluate((node) => node.scrollTop);
+    const scrollTop = await body.evaluate((node) => node.scrollTop);
     const file = `${viewport.width}x${viewport.height}-${state}.png`;
     await page.screenshot({ path: join(output, file) });
     records.push({ file, viewport, state, ready, scrollTop });
@@ -167,8 +168,8 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
   }, ["three 36px recent rows", "one-line rows truncate long detail without launch"]);
   await capture("explicit-long-folder", narrow, async (form) => {
     await selectExplicit(form);
-    await form.evaluate((node) => { node.scrollTop = 0; });
-    await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBe(0);
+    await form.locator(".launch-composer-body").evaluate((node) => { node.scrollTop = 0; });
+    await expect.poll(() => form.locator(".launch-composer-body").evaluate((node) => node.scrollTop)).toBe(0);
     // The caption claims the explicit choices are visible; prove the draft
     // holds them before the screenshot rather than trusting the clicks.
     await expect(form.locator(".launch-composer-summary")).toHaveText("model: gpt-6-astra · effort: high · permissions: yolo");
@@ -177,38 +178,35 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
   }, ["Codex/Astra/High/YOLO summary", "recent heading and first row at scrollTop 0"]);
   await capture("complete-recent-prefill-upper-strip", narrow, async (form) => {
     await prefillCompleteRecent(form);
-    await form.evaluate((node) => { node.scrollTop = 0; });
-    await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBe(0);
+    await form.locator(".launch-composer-body").evaluate((node) => { node.scrollTop = 0; });
+    await expect.poll(() => form.locator(".launch-composer-body").evaluate((node) => node.scrollTop)).toBe(0);
     await expect(form.locator(".launch-composer-summary")).toHaveText("model: gpt-6-astra · effort: high · permissions: yolo");
     await expect(form.getByText("recent setups", { exact: true })).toBeVisible();
     await expect(form.locator(".launch-composer-recent-slots > button").first()).toBeVisible();
   }, ["complete recent prefill", "recent heading and first row at scrollTop 0"]);
   await capture("focus-wrap-launch-visible", narrow, async (form) => {
-    // Launch no longer renders last — the action row moved to the top of the
-    // dialog — so the wrap boundary is whatever the trap's own query finds
-    // last, found the same way `install_composer_focus_trap` does rather
-    // than assuming a control name.
+    // The approved native order wraps between the header Close and footer
+    // Launch. Overflowing fields must not hide either concrete boundary.
     const launch = form.getByRole("button", { name: /^launch\b/ });
+    const close = form.locator(".launch-composer-close");
+    const body = form.locator(".launch-composer-body");
     await selectExplicit(form);
-    await form.evaluate((dialog) => {
-      const nodes = [...dialog.querySelectorAll(
-        'button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
-      )].filter((node) => !(node as HTMLElement).hidden && node.getClientRects().length);
-      nodes[nodes.length - 1].setAttribute("data-focus-trap-last-probe", "true");
-    });
-    const last = form.locator('[data-focus-trap-last-probe="true"]');
-    await expect(last, "the trap's own last node must be a real focus boundary").toBeVisible();
-    await last.focus();
-    await form.evaluate((node) => { node.scrollTop = node.scrollHeight; });
-    await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+    expect(await body.evaluate((node) => node.scrollHeight > node.clientHeight + 1), "the populated body overflows before measuring wrap").toBe(true);
+    await launch.focus();
+    await expect(launch).toBeFocused();
+    await body.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+    await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
     await page.keyboard.press("Tab");
+    await expect(close).toBeFocused();
+    await expect(close).toBeInViewport({ ratio: 0.99 });
+    await page.keyboard.press("Shift+Tab");
     await expect(launch).toBeFocused();
     await expect.poll(() => launch.evaluate((node) => {
       const target = node.getBoundingClientRect();
       const viewport = node.closest(".create-session-form")!.getBoundingClientRect();
       return target.top < viewport.bottom && target.bottom > viewport.top;
     })).toBe(true);
-  }, ["Tab wraps from the trap's last control", "Launch focused", "wrapped target visible in the composer viewport"]);
+  }, ["Tab wraps Launch to Close and Shift+Tab returns", "Launch focused", "both boundaries visible"]);
   await capture("prefill-default-over-explicit", narrow, async (form) => {
     await selectExplicit(form);
     await prefillSavedDefaults(form);

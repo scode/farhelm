@@ -39,6 +39,7 @@ const tunnelOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "session-tunnels"
 const settingsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "settings";
 const menusOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "menus";
 const dialogsOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "dialogs";
+const launcherOnly = process.env.FARHELM_VISUAL_REVIEW_SCOPE === "launcher";
 
 /** Photograph native-only chrome with the goal's explicit CSS-only fallback.
  * The ordinary staged web app supplies the surrounding frame and terminals.
@@ -494,6 +495,240 @@ async function scrollToEnd(root: Locator) {
   });
 }
 
+/** Review real launcher drafts without admitting a launch or template save.
+ * Populated agent and command forms exercise the pinned footer. The reporting
+ * fixture supplies a real restartable conversation; permission escalation uses
+ * actual agent choices, and every operation ends at Cancel or Undo.
+ */
+async function launcherShots(page: Page, request: APIRequestContext, name: string, includePhone: boolean) {
+  const viewport = page.viewportSize()!;
+  const window = [page.locator("body")];
+  const launcher = await openLauncher(page);
+  // Typed fields can retain keyboard help after the pointer leaves. The
+  // existing gap gesture dismisses it without changing the launcher draft.
+  const capture = async (suffix: string) => {
+    await clickDialogGap(page, launcher);
+    await shot(page, `${name}-${suffix}`, window, { pad: 0 });
+  };
+  // The compact footer keeps the complete target in shared help. Photograph
+  // its real text anchor, including when the phone layout ellipsizes it.
+  const captureTargetHelp = async (suffix: string) => {
+    const target = launcher.locator(".launch-composer-launch-context");
+    await expect(target).not.toHaveAttribute("title", /./);
+    await target.hover();
+    const help = page.locator(".farhelm-tooltip");
+    await expect(help).toBeVisible();
+    await expect(help).toHaveText((await target.getAttribute("data-tooltip"))!);
+    await captureShot(page, `${name}-${suffix}`, window, { pad: 0, keepPointer: true });
+    await page.mouse.move(0, 0);
+    await expect(help).toBeHidden();
+  };
+  const close = async () => {
+    await launcher.locator(".launch-composer-cancel").click();
+    await expect(launcher).toBeHidden();
+  };
+  const populateAgent = async () => {
+    // Scenario history has invented paths; use a real portable destination
+    // so ordinary draft pictures do not start with an unrelated folder error.
+    await launcher.getByLabel("folder", { exact: true }).fill("~");
+    await launcher.getByLabel("folder", { exact: true }).press("Escape");
+    await expect(launcher.getByRole("listbox", { name: "folders" })).toHaveCount(0);
+    await launcher.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+    await launcher.locator(".named-conversation").fill("review-conversation");
+    await launcher.locator(".initial-prompt").fill("Review the session launcher.\nKeep the action footer visible.\nExplain the result.");
+    await expect(launcher.locator(".launch-composer-summary")).toContainText("prompt: 3 lines");
+  };
+  try {
+    await populateAgent();
+    await launcher.locator(".launch-composer-body").evaluate((element) => { element.scrollTop = 0; });
+    await capture("launcher");
+    const footer = launcher.locator(".launch-composer-footer");
+    await insideViewport(page, footer);
+    await captureTargetHelp("launcher-target-tooltip");
+    const pinned = await footer.boundingBox();
+    await scrollToEnd(launcher);
+    expect(await footer.boundingBox(), "scrolling choices must not move the action footer").toEqual(pinned);
+    await capture("launcher-end");
+
+    const wrapper = launcher.locator(".launch-composer-wrapper");
+    await wrapper.fill("with-endpoint 'unfinished");
+    await expect(wrapper).toHaveAttribute("aria-invalid", "true");
+    // A refused folder Enter must clear the floating suggestions above the
+    // next controls. Use the real client refusal without launching a session.
+    await expect(launcher.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "true");
+    const folder = launcher.getByRole("combobox", { name: "folder", exact: true });
+    const folderOptions = launcher.getByRole("listbox", { name: "folders", exact: true });
+    await folder.focus();
+    await expect(folderOptions).toBeVisible();
+    await expect(folderOptions.locator('[aria-selected="true"]')).toHaveCount(0);
+    await shot(page, `${name}-launcher-folder-suggestions`, window, { pad: 0 });
+    await folder.press("Enter");
+    await expect(launcher.locator(".launch-composer-refusal")).toContainText("missing closing quote");
+    await expect(folderOptions).toHaveCount(0);
+    await expect(folder).toHaveAttribute("aria-expanded", "false");
+    await expect(folder).toHaveValue("~");
+    await insideViewport(page, launcher.locator(".launch-composer-refusal"));
+    await capture("launcher-refusal");
+    // The refusal belongs to that attempt until the launcher is dismissed.
+    // Start a fresh valid draft for the independent views that follow it.
+    await close();
+    await openLauncher(page);
+    await populateAgent();
+    await expect(launcher.locator(".launch-composer-refusal")).toHaveCount(0);
+
+    // The staged fleet has no cloned repository. Show the real destination
+    // editor, while ordinary managed-checkout tests cover its preview states.
+    const destination = launcher.getByRole("group", { name: "destination type", exact: true });
+    await destination.getByRole("button", { name: "managed checkout", exact: true }).click();
+    await expect(launcher.getByRole("combobox", { name: "repository", exact: true })).toBeVisible();
+    await capture("launcher-managed-checkout");
+    await destination.getByRole("button", { name: "folder", exact: true }).click();
+
+    await showOmpEffort(page, request, launcher);
+    await capture("launcher-omp-effort");
+    await launcher.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+    await launcher.locator(".launch-composer-harness-choice").getByRole("button", { name: "Pi", exact: true }).click();
+    const banner = launcher.locator(".permission-escalation-banner");
+    await expect(banner).toContainText("Permission changed: Guarded → YOLO");
+    await launcher.locator(".launch-composer-body").evaluate((element) => { element.scrollTop = 0; });
+    // Its animation is also its lifetime. Use the existing screenshot option
+    // and real hover pause, or fast-forwarding would dismiss it before Undo.
+    await banner.locator(":scope > span").hover();
+    await expect(banner).toHaveCSS("animation-play-state", "paused");
+    await expect(page.locator(".farhelm-tooltip")).toBeHidden();
+    await captureShot(page, `${name}-launcher-permission-banner`, window,
+      { pad: 0, keepPointer: true, keepAnimations: true });
+    await expect(banner).toBeVisible();
+    await banner.getByRole("button", { name: "undo", exact: true }).click();
+    await expect(banner).toBeHidden();
+
+    await launcher.getByRole("tab", { name: "command", exact: true }).click();
+    await launcher.getByLabel("agent command", { exact: true }).fill("claude {farhelm_args}");
+    await launcher.getByRole("radio", { name: "no", exact: true }).check();
+    await launcher.getByRole("combobox", { name: "agent type", exact: true }).selectOption("claude");
+    await launcher.locator(".launch-command-resume-toggle").check();
+    await launcher.getByLabel("resume command", { exact: true }).fill("claude --resume {conversation} {farhelm_args}");
+    await capture("launcher-command");
+    await launcher.locator(".launch-composer-save-template").click();
+    const panel = launcher.locator(".save-template-panel");
+    await expect(panel.locator(".save-template-name")).toBeFocused();
+    await capture("launcher-save-template");
+    await panel.locator(".save-template-cancel").click();
+    await expect(panel).toBeHidden();
+    await close();
+
+    const fleet = readFleet();
+    expect(fleet.toolbarReview, "launcher mode review needs the real reporting fixture").toBeDefined();
+    const id = fleet.ids.get(fleet.toolbarReview!.title)!;
+    await attachSession(page, id);
+    await waitForSessionRevealed(page, id);
+    for (const action of ["Replace", "Restart"] as const) {
+      await page.getByRole("button", { name: `${action} options`, exact: true }).click();
+      const item = page.getByRole("menu", { name: action, exact: true }).getByRole("menuitem", { name: `${action} with…`, exact: true });
+      await expect(item).toHaveAttribute("aria-disabled", "false");
+      await item.click();
+      await expect(launcher).toHaveAttribute("data-launcher-mode", action === "Restart" ? "restart" : "replace");
+      await insideViewport(page, launcher.locator(".dialog-footer"));
+      await capture(`launcher-${action.toLowerCase()}`);
+      await close();
+    }
+    if (includePhone) {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await openLauncher(page);
+      await populateAgent();
+      await launcher.locator(".launch-composer-body").evaluate((element) => { element.scrollTop = 0; });
+      await insideViewport(page, launcher.locator(".dialog-header"));
+      await insideViewport(page, launcher.locator(".dialog-footer"));
+      await capture("launcher-phone");
+      await scrollToEnd(launcher);
+      await capture("launcher-phone-end");
+      // A typed draft needs no filesystem or API staging: never Launch it.
+      // Require actual truncation so this view proves why full help matters.
+      const longPath = "~/work/projects/a-long-directory-name-for-launch-summary";
+      const folder = launcher.getByLabel("folder", { exact: true });
+      await folder.fill(longPath);
+      await folder.press("Escape");
+      await expect(launcher.getByRole("listbox", { name: "folders" })).toHaveCount(0);
+      await clickDialogGap(page, launcher);
+      const target = launcher.locator(".launch-composer-launch-context");
+      await expect(target).toContainText(longPath);
+      expect(await target.evaluate((node) => node.scrollWidth > node.clientWidth),
+        "the phone draft must actually ellipsize its long target").toBe(true);
+      await captureTargetHelp("launcher-phone-long-target-tooltip");
+      await close();
+    }
+    await page.setViewportSize(viewport);
+    await launcherYoloShots(page, request, name, includePhone);
+  } finally {
+    if (await launcher.isVisible()) {
+      const panelCancel = launcher.locator(".save-template-cancel");
+      if (await panelCancel.isVisible()) await panelCancel.click();
+      await close();
+    }
+    await page.setViewportSize(viewport);
+  }
+}
+
+/** Photograph the real refusal and both ends of its bounded answer region.
+ * The host must ask first; no affirmative answer is sent. On phones, the
+ * question can scroll while the ordinary launcher actions stay visible.
+ */
+async function launcherYoloShots(page: Page, request: APIRequestContext, name: string, includePhone: boolean) {
+  const viewport = page.viewportSize()!;
+  const window = [page.locator("body")];
+  const local = (await listHosts(request)).find((host) => host.kind === "local");
+  expect(local?.yolo_without_asking, "the staged host must ask before a YOLO launch").toBe(false);
+  const launcher = await openLauncher(page);
+  await launcher.getByRole("tab", { name: "agent", exact: true }).click();
+  await chooseLauncherHost(launcher.getByRole("combobox", { name: "host", exact: true }), String(local!.id));
+  await launcher.getByLabel("folder", { exact: true }).fill("~");
+  await launcher.getByLabel("folder", { exact: true }).press("Escape");
+  await expect(launcher.getByRole("listbox", { name: "folders" })).toHaveCount(0);
+  await launcher.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  await launcher.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  const [refusal] = await Promise.all([
+    page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/api/sessions")),
+    // Native keyboard submission gives the initial safe answer visible
+    // keyboard focus, rather than the pointer modality of a Launch click.
+    launcher.locator(".create-session-submit").press("Enter"),
+  ]);
+  expect(refusal.status(), "the helm refuses the unconfirmed launch").toBe(409);
+  const question = launcher.locator(".yolo-confirmation");
+  const notices = launcher.locator(".launch-composer-notices");
+  await expect(question.locator(".yolo-cancel")).toBeFocused();
+  expect(await question.locator(".yolo-cancel").evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+  await expect(question.locator(".yolo-cancel")).toBeInViewport({ ratio: 0.99 });
+  await insideViewport(page, notices);
+  await focusedShot(page, `${name}-yolo-question-focused`, question.locator(".yolo-cancel"), launcher);
+  await notices.evaluate((element) => { element.scrollTop = 0; });
+  await shot(page, `${name}-yolo-question`, window, { pad: 0 });
+  await scrollToEnd(notices);
+  await shot(page, `${name}-yolo-question-end`, window, { pad: 0 });
+  if (includePhone) {
+    for (const [height, suffix] of [[844, "phone"], [500, "phone-short"]] as const) {
+      await page.setViewportSize({ width: 390, height });
+      if (height === 500) {
+        // The short-phone footer used to leave only a sliver for answers.
+        // Native Tab must reveal the safe answer before its focus photo.
+        await keyboardFocusControl(page, launcher, question.locator(".yolo-cancel"));
+        await expect(question.locator(".yolo-cancel")).toBeInViewport({ ratio: 0.99 });
+        await focusedShot(page, `${name}-yolo-question-${suffix}-focused`, question.locator(".yolo-cancel"), launcher);
+      }
+      await notices.evaluate((element) => { element.scrollTop = 0; });
+      await insideViewport(page, launcher.locator(".launch-composer-footer"));
+      await shot(page, `${name}-yolo-question-${suffix}`, window, { pad: 0 });
+      await scrollToEnd(notices);
+      await expect(question.locator(".yolo-confirm")).toBeInViewport();
+      await shot(page, `${name}-yolo-question-${suffix}-end`, window, { pad: 0 });
+    }
+  }
+  await question.locator(".yolo-cancel").click();
+  await expect(question).toBeHidden();
+  await launcher.locator(".launch-composer-cancel").click();
+  await expect(launcher).toBeHidden();
+  await page.setViewportSize(viewport);
+}
+
 /** Photograph changed dialog frames and answers, cancelling every operation.
  * Rename's refusal is real: a newline is an invalid title, whereas an empty
  * title is legal. Templates only edits an unsaved draft. YOLO stops at the
@@ -590,33 +825,7 @@ async function dialogShots(page: Page, request: APIRequestContext, scenario: Sce
   }
   await page.keyboard.press("Escape");
   await expect(trash).toBeHidden();
-
-  const local = (await listHosts(request)).find((host) => host.kind === "local");
-  expect(local?.yolo_without_asking, "the staged host must ask before a YOLO launch").toBe(false);
-  const launcher = await openLauncher(page);
-  await chooseLauncherHost(launcher.getByRole("combobox", { name: "host", exact: true }), String(local!.id));
-  await launcher.getByLabel("folder", { exact: true }).fill("~");
-  await launcher.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-  await launcher.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
-  const [yoloRefusal] = await Promise.all([
-    page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/api/sessions")),
-    launcher.locator(".create-session-submit").click(),
-  ]);
-  expect(yoloRefusal.status(), "the helm refuses the unconfirmed launch").toBe(409);
-  const question = launcher.locator(".yolo-confirmation");
-  await expect(question.locator(".yolo-cancel")).toBeFocused();
-  await insideViewport(page, question);
-  await shot(page, `${name}-yolo-question`, window, { pad: 0 });
-  if (includePhone) {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await insideViewport(page, question);
-    await shot(page, `${name}-yolo-question-phone`, window, { pad: 0 });
-  }
-  await question.locator(".yolo-cancel").click();
-  await expect(question).toBeHidden();
-  await launcher.locator(".launch-composer-cancel").click();
-  await expect(launcher).toBeHidden();
-  await page.setViewportSize(viewport);
+  await launcherYoloShots(page, request, name, includePhone);
 
   // The consent controller is desktop-only. This established preview route
   // shows its exact frame/copy, with native callbacks explicitly untested here.
@@ -1137,6 +1346,10 @@ for (const colorScheme of ["dark", "light"] as const) {
         }
         if (dialogsOnly) {
           await dialogShots(page, request, scenario, name, width === "main-650");
+          return;
+        }
+        if (launcherOnly) {
+          await launcherShots(page, request, name, width === "main-650");
           return;
         }
         const row = rowOf(page, scenario, (session) => session.status === "idle" && session.seen === false);

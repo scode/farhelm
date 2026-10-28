@@ -35,7 +35,8 @@ use crate::github_checkout::{
 };
 use crate::launch_controls::{DestinationTypeControl, LaunchControls, enter_choice};
 use crate::modal_dialog::{
-    DialogFocus, DialogHandle, DialogRoot, FocusTarget, InitialFocus, ModalDialog,
+    DialogActions, DialogFocus, DialogFooter, DialogHandle, DialogHeader, DialogRoot, FocusTarget,
+    InitialFocus, ModalDialog, RecoveryDelay, RecoveryFocus, ScrollRegion,
 };
 use crate::ops::{ConfirmSlot, ConfirmToken, OpLock, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, PeerText, display_peer};
@@ -3675,12 +3676,9 @@ pub(super) fn CreateSessionForm(
     } else {
         None
     };
-    // The submit button's verb: "replace" for a replace-with prefill,
-    // "launch" for everything else (an ordinary create OR a plain clone),
-    // so the destructive half of what a click does is visible on the
-    // button itself rather than only in a menu item clicked a moment
-    // earlier. `launch-composer-launch-context` beside it is unchanged
-    // either way — the host/folder summary is equally true of both verbs.
+    // Recent setup hints keep their existing compact verb. The footer uses
+    // the same operation with a sentence-case label and a separate target
+    // summary, so replacement and a stop-first restart remain explicit.
     let submit_verb = if restart_mode {
         if restart_stop_first {
             "stop and restart"
@@ -5894,6 +5892,53 @@ pub(super) fn CreateSessionForm(
     // until this launcher closes. Keep one handle while still reading hidden
     // state at the actual mount boundary, after trap setup is submitted.
     let composer_hidden_now = use_callback(move |_| quick_launch_hidden());
+    let loading_setup =
+        pending_initial_action().is_some() || !pending_initial_templates.read().is_empty();
+    let submit_label = if restart_mode {
+        if restart_stop_first {
+            "Stop and restart"
+        } else {
+            "Restart"
+        }
+    } else if is_replace_with {
+        "Replace"
+    } else {
+        "Launch"
+    };
+    // Keep the full target in the accessible action name even when its adjacent
+    // summary truncates visually. Command never names a dormant agent draft.
+    let target_summary = format!(
+        "{}{}{} · {}",
+        if *launch_tab.read() == LaunchTab::Command {
+            "Command · "
+        } else {
+            ""
+        },
+        launch_harness
+            .as_ref()
+            .map(|harness| format!("{harness} · "))
+            .unwrap_or_default(),
+        selected_host_label,
+        summary_folder,
+    );
+    let footer_error = error.read().clone().or_else(|| {
+        launch_attempted()
+            .then_some(launch_refusal)
+            .flatten()
+            .map(str::to_string)
+    });
+    let show_footer_notices = footer_error.is_some()
+        || (restart_mode && restart_stop_first)
+        || (is_replace_with && replace_warning.is_some())
+        || (yolo_refusal
+            .current()
+            .filter(|_| !quick_launch_hidden())
+            .is_some_and(|question| {
+                intent_key
+                    .read()
+                    .as_ref()
+                    .is_some_and(|(key, _)| *key == question.key().refused_key)
+            }));
     rsx! {
         div {
             class: if quick_launch_hidden() { "launch-composer-backdrop quick-launch-pending" } else { "launch-composer-backdrop" },
@@ -5983,8 +6028,41 @@ pub(super) fn CreateSessionForm(
             },
             onsubmit: move |evt: FormEvent| {
                 evt.prevent_default();
+                // A launch attempt finishes folder suggestions even when it
+                // is refused. The single-column form puts controls below the
+                // floating list, so their reachability must not depend on an
+                // engine blurring the folder when the request makes it busy.
+                folder_open.set(false);
+                folder_active.set(None);
                 submit_composer.call(submit_consent);
             },
+            DialogHeader {
+                title: rsx! { if restart_mode { "Restart session" } else if is_replace_with { "Replace session" } else { "New session" } },
+                summary: rsx! { if restart_mode { "Resume this session with different settings" } else if is_replace_with { "Start a new session, then delete the source" } else { "Start an agent or a command on any host" } },
+                tile: rsx! { crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Launch } },
+                close: rsx! { button {
+                    r#type: "button", class: "dialog-close launch-composer-close",
+                    aria_label: "Close session launcher", "data-tooltip": "Close: discard this session setup",
+                    disabled: busy || template_saving(),
+                    onclick: move |_| {
+                        // A queued close cannot unmount the future that claimed
+                        // submission before this render disabled the button.
+                        if !ops.busy_now() && !template_saving() { on_cancel.call(()); }
+                    },
+                    crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Close }
+                } },
+            }
+            ScrollRegion {
+                class: "dialog-body launch-composer-body",
+                handle: COMPOSER_DIALOG, selector: ".launch-composer-body", name: "Session setup",
+                recovery: RecoveryFocus::new(
+                    // A temporarily disabled template name must not let this
+                    // body invent a search-focus choice ahead of panel recovery.
+                    if template_panel().is_some() { ".save-template-name" }
+                    else if restart_mode { ".launch-composer-cancel" } else { ".launch-composer-search input" },
+                    if template_panel().is_some() { None } else { Some(".create-session-submit") },
+                    true, RecoveryDelay::OneFrame,
+                ),
             if partial_template_hint() && pending_initial_templates.read().is_empty() {
                 div { class: "partial-template-banner", role: "alert",
                     onmounted: move |_| {
@@ -6016,6 +6094,7 @@ pub(super) fn CreateSessionForm(
                             permission_escalation.set(None);
                         }
                     },
+                    crate::icons::ActionIcon { glyph: crate::icons::ActionGlyph::Warning }
                     span { "{notice.message}" }
                     button {
                         r#type: "button", class: "btn btn-neutral permission-escalation-undo",
@@ -6052,7 +6131,7 @@ pub(super) fn CreateSessionForm(
             if let Some(message) = preparation_error() {
                 p { class: "create-session-error", role: "alert", "{display_peer(&message)}" }
             }
-            if pending_initial_action().is_some() || !pending_initial_templates.read().is_empty() {
+            if loading_setup {
                 p { role: "status", "loading session setup…" }
                 button {
                     r#type: "button", class: "btn btn-neutral launch-composer-loading-cancel",
@@ -6060,288 +6139,6 @@ pub(super) fn CreateSessionForm(
                     onclick: move |_| on_cancel.call(()), "cancel"
                 }
             } else {
-            div { class: "launch-composer-topbar",
-                span { class: "launch-composer-section-label", if restart_mode { "restart session" } else { "new session" } }
-            }
-            // Launch leads because reaching it was the maintainer's complaint:
-            // it now says exactly which harness and destination it will use.
-            // Name is optional context rather than an action, so its two
-            // surface-specific placements live with their destination fields
-            // below; exactly one copy is mounted at a time.
-            div { class: "launch-composer-actions",
-                button {
-                    r#type: "submit",
-                    class: "btn btn-primary create-session-submit",
-                    "data-tooltip": launch_refusal.unwrap_or(if restart_mode {
-                        if restart_stop_first { "stop and restart: stop the working agent, then relaunch this session with these settings" }
-                        else { "restart: relaunch this session with these settings" }
-                    } else if is_replace_with { "replace: start this session, then delete the old one and its state" } else { "launch: start the session" }),
-                    aria_describedby: if restart_mode && restart_stop_first { Some(RESTART_WARNING_ID) } else { replace_warning.as_ref().map(|_| REPLACE_WARNING_ID) },
-                    // Keep refused attempts reachable: native disabled would
-                    // swallow both a click and implicit Enter before submit can
-                    // say why. The operation guard still prevents another create.
-                    aria_disabled: launch_refusal.is_some(),
-                    "{submit_verb}"
-                    " "
-                    span { class: "launch-composer-launch-context",
-                        if let Some(harness) = &launch_harness {
-                            "{harness} · "
-                        }
-                        span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
-                        " · "
-                        span { class: "peer-value font-mono", dir: "ltr", "{summary_folder}" }
-                    }
-                }
-                button {
-                    r#type: "button",
-                    class: "btn btn-neutral launch-composer-cancel",
-                    // Keep explicit launcher cancellation separate from the
-                    // isolation safety net's innermost-panel Escape target.
-                    "data-template-panel-open": template_panel().is_some().then_some("true"),
-                    "data-tooltip": "cancel: close without starting anything",
-                    disabled: busy || template_saving(),
-                    onclick: move |_| {
-                        // The disabled attribute updates after this event's
-                        // synchronous submit claim. Recheck the shared lock
-                        // here so a queued Cancel cannot unmount the future
-                        // that owns an already accepted create.
-                        if !ops.busy_now() && !template_saving() {
-                            on_cancel.call(());
-                        }
-                    },
-                    "cancel"
-                }
-                if *launch_tab.read() == LaunchTab::Agent {
-                    button {
-                        r#type: "button",
-                        class: "btn btn-neutral launch-composer-reset",
-                        "data-tooltip": if restart_mode { "reset choices: restore the session's stored settings and clear the conversation selector" } else { "reset choices: clear the agent, model and effort; remember permissions and the next agent's wrapper prefix" },
-                        disabled: busy,
-                        onclick: move |_| {
-                            draft.reset_choices(preferences, choice_targets, composer_reset_reason,
-                                composer_search, composer_search_open);
-                        },
-                        "reset choices"
-                    }
-                }
-                if !is_replace_with {
-                    button { r#type: "button", class: "btn btn-neutral launch-composer-save-template",
-                        "data-tooltip": "save as template: keep choices from this setup for another launch",
-                        disabled: busy || template_saving() || template_panel().is_some(),
-                        onclick: move |_| {
-                            // Reopening an already mounted panel would replace
-                            // its candidate while retaining its checkbox draft.
-                            if !draft_transition_allowed(ops) || template_saving() || template_panel().is_some() { return; }
-                            // The command tab retains the agent draft for a
-                            // later switch, but does not save any of it.
-                            if draft.snapshot().tab() == LaunchTab::Agent
-                                && let Err(reason) = wrapper_words(&structured_wrapper()) {
-                                // Not a launch refusal, so it must not read
-                                // "Not launched."; the next launch press
-                                // marks the line as one again.
-                                launch_attempted.set(false);
-                                error.set(Some(reason));
-                                return;
-                            }
-                            let state = launcher_snapshot(&draft.snapshot(), &hosts_for_template_save, selected);
-                            let placement = draft.snapshot();
-                            template_panel.set(Some((super::save_template::Candidate::from_state(&state,
-                                super::save_template::ExplicitChoices {
-                                    host: chosen_host().is_some() && clone_host_state() != CloneHostState::Bound,
-                                    folder: placement.folder_is_explicit(), name: placement.title_edited(),
-                                    permissions: structured_permissions_is_explicit(),
-                                    wrapper: wrapper_is_explicit(),
-                                }), host_label_for_template_save.clone())));
-                        }, "save as template"
-                    }
-                }
-            }
-            if let Some(err) = error.read().clone().or_else(|| {
-                launch_attempted().then_some(launch_refusal).flatten().map(str::to_string)
-            }) {
-                // Refusals are visible beside the action they explain, even
-                // when the rest of the dialog needs scrolling. Helm-owned words
-                // still get the same escaping and directional isolation. A
-                // refused launch is a bordered, announced alert: the plain red
-                // line it used to be was easy to miss (TODO.md, 2026-10-22).
-                // Only a launch press sets `launch_attempted`, which keeps
-                // other errors in this slot from reading "Not launched.".
-                if launch_attempted() {
-                    div { class: "create-session-error launch-composer-refusal launch-composer-refusal-alert", role: "alert",
-                        span { class: "launch-composer-refusal-icon", aria_hidden: "true", "⚠" }
-                        PeerLine {
-                            class: "launch-composer-refusal-text".to_string(),
-                            parts: vec![DetailPart::text(if restart_mode { "Restart error. " } else { "Not launched. " }), DetailPart::peer(err)],
-                        }
-                    }
-                } else {
-                    PeerLine {
-                        class: "create-session-error launch-composer-refusal".to_string(),
-                        parts: vec![DetailPart::peer(err)],
-                    }
-                }
-            }
-            if let Some((candidate, host_label)) = template_panel() {
-                super::save_template::SaveTemplatePanel {
-                    candidate, host_label, catalog: catalog_answer.clone(), saving: template_saving,
-                    on_cancel: move |_| { template_panel.set(None); focus_composer_surface(false); },
-                    on_saved: on_template_saved,
-                }
-            }
-            // "Replace with"'s warning sits directly under the replace button
-            // it qualifies, for the same reason as the YOLO question below:
-            // the button is the confirmation, and a warning out of view would
-            // not be read before the press (SPEC.md "Replace with").
-            // Polite live region: the warning can appear or change while the
-            // launcher stays open, and the replace button names it as its
-            // description, since pressing that button is the confirmation.
-            if restart_mode && restart_stop_first {
-                p { id: RESTART_WARNING_ID, class: "launch-composer-restart-warning", aria_live: "polite", "The agent is working. This action stops it before restarting." }
-            }
-            if is_replace_with {
-                div { id: REPLACE_WARNING_ID, class: "launch-composer-replace-warning", aria_live: "polite",
-                    if let Some(warning) = &replace_warning {
-                        "{warning}"
-                    }
-                }
-            }
-            // The YOLO question sits directly under Launch, where the click
-            // that raised it happened. Rendered after every other section, it
-            // landed below the launcher's visible edge and pressing Launch
-            // seemed to do nothing until the user scrolled.
-            //
-            // Shown only while the draft still holds the refused request's
-            // key: an edit that changes what would launch retires the key,
-            // and with it a question that no longer describes the draft.
-            // Templates retain the whole pair for submit's comparison, so
-            // their completed acceptance separately cancels a changed question.
-            if let Some(question) = yolo_refusal.current().filter(|_| !quick_launch_hidden())
-                && let Some((_, refused_binding)) = intent_key.read().clone().filter(|(key, _)| *key == question.key().refused_key)
-            {
-                crate::yolo_confirm::YoloConfirmation {
-                    ask: question.key().ask.clone(),
-                    may_have_started: question.key().uncertain,
-                    busy,
-                    error: yolo_error(),
-                    // Both YOLO answers submit the form themselves, and only
-                    // once they have taken this opening of the question
-                    // (`answer_launcher_yolo`). As native submit buttons they
-                    // would submit it whether or not the question was still
-                    // open, sending a cancelled draft again.
-                    confirm_submits: false,
-                    // The one-off also disarms any "don't ask again"
-                    // request (`answer_launcher_yolo`): it must never mark
-                    // the host.
-                    on_launch_guarded: {
-                        let question = question.clone();
-                        let refused_binding = refused_binding.clone();
-                        let selection = match &refused_binding.agent {
-                            LaunchIntent::Structured(selection) => Some(selection),
-                            LaunchIntent::Command(_) => None,
-                        };
-                        // What this render shows: the launcher opening the
-                        // question sits in, and the Replace warning above it.
-                        // The answer binds to both (`GuardedSubmitStamp`).
-                        let rendered_opening = *opening_generation.peek();
-                        (question.key().offers_guarded(selection) && draft.snapshot().restart_guarded_changes()).then(|| Callback::new(move |_| {
-                            if !draft.snapshot().restart_guarded_changes() { return; }
-                            let held = intent_key.peek().clone();
-                            let current = held.as_ref()
-                                .filter(|(key, _)| key == &question.key().refused_key)
-                                .and_then(|_| live_yolo_binding());
-                            if !take_launcher_guarded_answer(
-                                &mut yolo_refusal, &question, ops.busy_now(),
-                                rendered_opening, *opening_generation.peek(),
-                                &refused_binding, current.as_ref(),
-                            ) { return; }
-                            yolo_error.set(None);
-                            yolo_confirmed_key.set(None);
-                            yolo_stop_asking.set(None);
-                            choose_permissions.call(Some(LaunchPermission::Guarded));
-                            if draft.snapshot().destination().repo().is_some() {
-                                // The row transition changes the fingerprint
-                                // before render installs its new authority.
-                                // Carry the remaining accepted authority into
-                                // that expected refresh, without reusing its
-                                // preview or the refused YOLO request body.
-                                if let Some(mut authority) = live_preview_authority.peek().clone() {
-                                    authority.agent = preview_agent_now();
-                                    guarded_submit_pending.set(Some(GuardedSubmitStamp::new(
-                                        rendered_opening, authority,
-                                        draft.snapshot().prompt(), draft.snapshot().conversation(),
-                                        replace_guard,
-                                    )));
-                                }
-                            } else {
-                                submit_composer.call(submit_consent);
-                            }
-                        }))
-                    },
-                    // Both "start anyway" answers submit with this render's
-                    // `replace_guard`, the precondition matching the Replace
-                    // warning drawn above the question, by calling
-                    // `submit_composer` directly. Going through the browser
-                    // (`requestSubmit`) would run `onsubmit` as a later
-                    // event with a later render's precondition, which may
-                    // authorize deleting more than the warning the user
-                    // answered said. Nothing is lost by skipping it: the
-                    // form is `novalidate`, so the browser validated nothing
-                    // there, and `submit_composer` keeps every refusal of
-                    // its own and still reads the live draft, whose intent
-                    // key decides whether this consent applies to what is
-                    // sent. The answer also refuses once the launcher has
-                    // moved to another opening (`answer_launcher_yolo`), so
-                    // it never acts on a source the user has moved away
-                    // from.
-                    //
-                    // The `write()` guards are temporaries of the `if`
-                    // condition, dropped before the block runs, which
-                    // matters because `submit_composer` writes
-                    // `yolo_stop_asking` itself.
-                    on_confirm: {
-                        let question = question.clone();
-                        let rendered_opening = *opening_generation.peek();
-                        move |_| {
-                            if answer_launcher_yolo(
-                                &mut yolo_refusal,
-                                &question,
-                                false,
-                                rendered_opening,
-                                *opening_generation.peek(),
-                                &mut yolo_confirmed_key.write(),
-                                &mut yolo_stop_asking.write(),
-                            ) {
-                                submit_composer.call(submit_consent);
-                            }
-                        }
-                    },
-                    on_confirm_and_stop_asking: {
-                        let question = question.clone();
-                        let rendered_opening = *opening_generation.peek();
-                        move |_| {
-                            if answer_launcher_yolo(
-                                &mut yolo_refusal,
-                                &question,
-                                true,
-                                rendered_opening,
-                                *opening_generation.peek(),
-                                &mut yolo_confirmed_key.write(),
-                                &mut yolo_stop_asking.write(),
-                            ) {
-                                submit_composer.call(submit_consent);
-                            }
-                        }
-                    },
-                    on_cancel: move |_| {
-                        // Only this opening: a cancel drawn for an earlier
-                        // question leaves a later one (and its error) alone.
-                        if yolo_refusal.take(&question).is_some() {
-                            if restart_mode { document::eval("document.querySelector('.create-session-form .launch-composer-cancel')?.focus({preventScroll:true})"); }
-                            yolo_error.set(None);
-                        }
-                    },
-                }
-            }
             // Why the last template accepted from search was not applied;
             // nothing from it was (SPEC.md: all or nothing).
             if let Some(message) = template_error() {
@@ -6351,25 +6148,6 @@ pub(super) fn CreateSessionForm(
             // agent type, a model, a folder, or a saved setup; it never
             // manufactures a command from text alone, and it never chooses
             // the command tab itself.
-            if *launch_tab.read() == LaunchTab::Agent {
-                div { class: "launch-composer-summary", aria_live: "polite",
-                    "model: "
-                    span { class: "peer-value", dir: "ltr", "{summary_model}" }
-                    " · effort: {summary_effort} · permissions: "
-                    // Matched on the signal, not on display text, and spelled
-                    // out per variant so every permission reads in the same
-                    // lowercase register as "default": a Debug fallback would
-                    // capitalize a future variant next to these.
-                    if summary_permission == "yolo" {
-                        span { class: "launch-composer-danger", "yolo" }
-                    } else {
-                        "{summary_permission}"
-                    }
-                    if let Some(lines) = summary_prompt_lines {
-                        " · prompt: {lines} lines"
-                    }
-                }
-            }
             // Destination and its optional name are one draft regardless of
             // which launch controls happen to be active below.
             div {
@@ -6841,9 +6619,8 @@ pub(super) fn CreateSessionForm(
             // client-side "helpful" rewrite) — so every input here opts
             // out of every form of text mangling a browser might apply on
             // its own, for whichever of these two reasons applies to it.
-            // The two columns preserve the form's destination-first tab
-            // order in every mode. Only the launch-specific controls in the
-            // choices column change with the launch-kind tab.
+            // Destination rows precede the launch-kind fields in both visual
+            // and native Tab order. Switching tabs only swaps the latter.
             if search_owns_repositories && !show_checkout_root_setup {
                 if let Some(note) = &repository_note {
                     div { class: "launch-composer-repository-note", role: "status", "{display_peer(&note)}" }
@@ -6883,12 +6660,17 @@ pub(super) fn CreateSessionForm(
                         // launch's location reviewable without restoring a second
                         // summary of its choices.
                         div { class: "launch-composer-destination",
-                            span { class: "launch-composer-section-label", "destination" }
+                            span { class: "launch-composer-section-label", "Destination" }
+                            div { class: "launch-composer-row",
+                                span { class: "launch-composer-row-label", "Where" }
                             DestinationTypeControl { managed: checkout_mode, disabled: busy,
                                 on_change: move |managed| {
                                     draft.choose_destination_type(managed, placement_targets, repository_open);
                                 },
                             }
+                            }
+                            div { class: "launch-composer-row",
+                                span { class: "launch-composer-row-label", "Host" }
                             div { class: "launch-composer-destination-row",
                                 {host_select.clone()}
                                 if !checkout_mode {
@@ -6896,6 +6678,7 @@ pub(super) fn CreateSessionForm(
                                         r#type: "button",
                                         disabled: busy || selected.is_none(),
                                         aria_label: "browse this path",
+                                        class: "btn btn-neutral",
                                         "data-tooltip": "browse: list the folders under this path on the host",
                                         onclick: move |_| {
                                             if !draft_transition_allowed(ops) { return; }
@@ -6906,15 +6689,10 @@ pub(super) fn CreateSessionForm(
                                                 live_browse_connection, draft,
                                             );
                                         },
-                                        // Center the whole label as one inline
-                                        // unit when Browse moves below the host
-                                        // selector at narrow widths.
-                                        span {
-                                            "browse folders on "
-                                            span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
-                                        }
+                                        "Browse"
                                     }
                                 }
+                            }
                             }
                             {host_notes.clone()}
                             if show_checkout_root_setup {
@@ -6935,7 +6713,7 @@ pub(super) fn CreateSessionForm(
                                         composer_search_open.set(false);
                                         evt.stop_propagation();
                                     },
-                                    span { class: "launch-composer-section-label", "repository" }
+                                    span { class: "launch-composer-row-label", "Repository" }
                                     input { r#type: "text", role: "combobox", aria_label: "repository", aria_autocomplete: "list",
                                         aria_expanded: !repository_read_only && repository_open(),
                                         aria_controls: (!repository_read_only && repository_open()).then_some("checkout-repository-options"),
@@ -7058,6 +6836,8 @@ pub(super) fn CreateSessionForm(
                                     "Farhelm clones the repository into a new folder named after the session, under this host's checkout folder. When the last session using it is deleted, the folder moves to the trash."
                                 }
                             }
+                            div { class: "launch-composer-row",
+                            span { class: "launch-composer-row-label", "Folder" }
                             div { class: "launch-composer-folder-picker",
                             input {
                                 class: "font-mono",
@@ -7169,6 +6949,7 @@ pub(super) fn CreateSessionForm(
                                 }
                             }
                             }
+                            }
                             if let Some(notice) = folder_notice() {
                                 div { id: "launcher-folder-problem",
                                     PeerLine { class: "launch-composer-folder-problem".to_string(), parts: notice }
@@ -7179,11 +6960,10 @@ pub(super) fn CreateSessionForm(
                             // technology one destination and preserves strict label
                             // lookup.
                             label { class: "launch-composer-name",
-                                // The label stays the accessible wrapper; only its
-                                // text takes the section-label caps, so the styling
-                                // cannot inherit into what the person types.
+                                // Keep the optional-name label associated with its
+                                // single input while the field joins the row grid.
                                 span { class: "launch-composer-name-caption",
-                                    span { class: "launch-composer-section-label", "name (optional)" }
+                                    span { class: "launch-composer-row-label", "Name (optional)" }
                                     if template_base.is_some() {
                                         span { class: "launch-composer-name-policy", "data-tooltip": "this template supplies a base name; Farhelm adds a number when its managed-checkout folder is already taken", "from template · numbered if taken" }
                                     }
@@ -7227,10 +7007,11 @@ pub(super) fn CreateSessionForm(
                         // announcing "tab, 1 of 2" lead people to expect.
                         if !restart_mode {
                         div { class: "launch-kind-tabs", role: "tablist", "aria-label": "launch kind",
-                            for (tab, label) in [(LaunchTab::Agent, "agent"), (LaunchTab::Command, "command")] {
+                            for (tab, label) in [(LaunchTab::Agent, "Agent"), (LaunchTab::Command, "Command")] {
                                 button {
                                     r#type: "button",
                                     role: "tab",
+                                    aria_label: if tab == LaunchTab::Agent { "agent" } else { "command" },
                                     class: if launch_tab() == tab { "launch-kind-tab selected" } else { "launch-kind-tab" },
                                     "data-tooltip": if tab == LaunchTab::Agent { "agent: start a supported agent with its model, effort and permissions" } else { "command: run a command line you type, as written" },
                                     "aria-selected": "{launch_tab() == tab}",
@@ -7269,7 +7050,7 @@ pub(super) fn CreateSessionForm(
                         }
                         if !restart_mode && launch_tab() == LaunchTab::Agent {
                         div { class: "launch-composer-choice launch-composer-harness-choice",
-                            span { class: "launch-composer-section-label", "harness" }
+                            span { class: "launch-composer-section-label", "Harness" }
                             div { class: "launch-composer-options",
                                 for harness in crate::launch_composer::HARNESS_PICKER_ORDER {
                                     button {
@@ -7429,8 +7210,8 @@ pub(super) fn CreateSessionForm(
                         if *launch_tab.read() == LaunchTab::Command {
             // The raw command path: what the session runs, typed as one
             // command line.
-            label {
-                "agent command"
+            label { class: "launch-composer-row launch-command-invocation-field",
+                span { class: "launch-composer-row-label", "Agent command" }
                 input {
                     class: "font-mono",
                     r#type: "text",
@@ -7441,6 +7222,7 @@ pub(super) fn CreateSessionForm(
                     spellcheck: "false",
                     dir: "ltr",
                     value: "{displayed_invocation}", readonly: restart_command_readonly,
+                    aria_label: "agent command",
                     disabled: busy,
                     oninput: move |evt| {
                         draft.edit_invocation(evt.value());
@@ -7489,10 +7271,11 @@ pub(super) fn CreateSessionForm(
             }
             if yolo_changed { p { class: "launch-composer-changed-marker", "● changed" } }
             if !restart_mode {
-            label {
-                "agent type"
+            label { class: "launch-composer-row",
+                span { class: "launch-composer-row-label", "Agent type" }
                 select {
                     class: "launch-command-agent",
+                    aria_label: "agent type",
                         onkeydown: move |event| enter_choice(event, ops.busy_now(), || {}, Some(launch_from_choice)),
                     "data-tooltip": "the agent this command runs, if any, so Farhelm can track and resume it",
                     disabled: busy,
@@ -7521,6 +7304,7 @@ pub(super) fn CreateSessionForm(
                 }
                 if !restart_mode {
                 label {
+                    class: "launch-command-resume-choice",
                     "data-tooltip": "resume: give the command a way to pick its conversation back up after a restart",
                     input {
                         r#type: "checkbox",
@@ -7536,11 +7320,12 @@ pub(super) fn CreateSessionForm(
                 }
                 }
                 if command_resume_on() {
-                    label {
-                        "resume command"
+                    label { class: "launch-composer-row",
+                        span { class: "launch-composer-row-label", "Resume command" }
                         input {
                             r#type: "text",
                             class: "launch-command-resume",
+                            aria_label: "resume command",
                             autocomplete: "off",
                             autocorrect: "off",
                             autocapitalize: "none",
@@ -7636,6 +7421,325 @@ pub(super) fn CreateSessionForm(
                     }
                 }
             }
+            if let Some((candidate, host_label)) = template_panel() {
+                super::save_template::SaveTemplatePanel {
+                    candidate, host_label, catalog: catalog_answer.clone(), saving: template_saving,
+                    on_cancel: move |_| {
+                        template_panel.set(None);
+                        // The editor sits at the body's end. Returning search
+                        // focus must also reveal it, without changing shared
+                        // quiet-focus behavior in other modal handoffs.
+                        document::eval("document.querySelector('.create-session-form[role=\"dialog\"] .launch-composer-body')?.scrollTo({top: 0, behavior: 'instant'});");
+                        focus_composer_surface(false);
+                    },
+                    on_saved: on_template_saved,
+                }
+            }
+            }
+            }
+            // The same form owns the pinned submit and inline editors. Long
+            // action notices scroll separately so neither fields nor actions
+            // are displaced by a refusal or consent explanation.
+            if !loading_setup {
+                DialogFooter { class: "launch-composer-footer",
+                    div { class: "launch-composer-footer-row",
+                        div { class: "dialog-footer-hint launch-composer-footer-summary",
+                            div { class: "launch-composer-launch-context", "data-tooltip": "{target_summary}",
+                                if *launch_tab.read() == LaunchTab::Command { "Command · " }
+                                if let Some(harness) = &launch_harness { "{harness} · " }
+                                span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
+                                " · "
+                                span { class: "peer-value font-mono", dir: "ltr", "{summary_folder}" }
+                            }
+            if *launch_tab.read() == LaunchTab::Agent {
+                div { class: "launch-composer-summary", aria_live: "polite",
+                    "model: "
+                    span { class: "peer-value", dir: "ltr", "{summary_model}" }
+                    " · effort: {summary_effort} · permissions: "
+                    // Matched on the signal, not on display text, and spelled
+                    // out per variant so every permission reads in the same
+                    // lowercase register as "default": a Debug fallback would
+                    // capitalize a future variant next to these.
+                    if summary_permission == "yolo" {
+                        span { class: "launch-composer-danger", "yolo" }
+                    } else {
+                        "{summary_permission}"
+                    }
+                    if let Some(lines) = summary_prompt_lines {
+                        " · prompt: {lines} lines"
+                    }
+                }
+            }
+
+                        }
+                        DialogActions { class: "launch-composer-actions",
+                button {
+                    r#type: "button",
+                    class: "btn btn-neutral launch-composer-cancel",
+                    aria_label: "cancel",
+                    // Keep explicit launcher cancellation separate from the
+                    // isolation safety net's innermost-panel Escape target.
+                    "data-template-panel-open": template_panel().is_some().then_some("true"),
+                    "data-tooltip": "cancel: close without starting anything",
+                    disabled: busy || template_saving(),
+                    onclick: move |_| {
+                        // The disabled attribute updates after this event's
+                        // synchronous submit claim. Recheck the shared lock
+                        // here so a queued Cancel cannot unmount the future
+                        // that owns an already accepted create.
+                        if !ops.busy_now() && !template_saving() {
+                            on_cancel.call(());
+                        }
+                    },
+                    "Cancel"
+                }
+                if *launch_tab.read() == LaunchTab::Agent {
+                    button {
+                        r#type: "button",
+                        class: "btn btn-neutral launch-composer-reset",
+                        aria_label: "reset choices",
+                        "data-tooltip": if restart_mode { "reset choices: restore the session's stored settings and clear the conversation selector" } else { "reset choices: clear the agent, model and effort; remember permissions and the next agent's wrapper prefix" },
+                        disabled: busy,
+                        onclick: move |_| {
+                            draft.reset_choices(preferences, choice_targets, composer_reset_reason,
+                                composer_search, composer_search_open);
+                        },
+                        "Reset choices"
+                    }
+                }
+                if !is_replace_with {
+                    button { r#type: "button", class: "btn launch-composer-save-template",
+                        aria_label: "save as template",
+                        "data-tooltip": "save as template: keep choices from this setup for another launch",
+                        disabled: busy || template_saving() || template_panel().is_some(),
+                        onclick: move |_| {
+                            // Reopening an already mounted panel would replace
+                            // its candidate while retaining its checkbox draft.
+                            if !draft_transition_allowed(ops) || template_saving() || template_panel().is_some() { return; }
+                            // The command tab retains the agent draft for a
+                            // later switch, but does not save any of it.
+                            if draft.snapshot().tab() == LaunchTab::Agent
+                                && let Err(reason) = wrapper_words(&structured_wrapper()) {
+                                // Not a launch refusal, so it must not read
+                                // "Not launched."; the next launch press
+                                // marks the line as one again.
+                                launch_attempted.set(false);
+                                error.set(Some(reason));
+                                return;
+                            }
+                            let state = launcher_snapshot(&draft.snapshot(), &hosts_for_template_save, selected);
+                            let placement = draft.snapshot();
+                            template_panel.set(Some((super::save_template::Candidate::from_state(&state,
+                                super::save_template::ExplicitChoices {
+                                    host: chosen_host().is_some() && clone_host_state() != CloneHostState::Bound,
+                                    folder: placement.folder_is_explicit(), name: placement.title_edited(),
+                                    permissions: structured_permissions_is_explicit(),
+                                    wrapper: wrapper_is_explicit(),
+                                }), host_label_for_template_save.clone())));
+                        }, "Save as template"
+                    }
+                }
+                button {
+                    r#type: "submit",
+                    class: "btn btn-primary create-session-submit",
+                    "data-tooltip": launch_refusal.unwrap_or(if restart_mode {
+                        if restart_stop_first { "stop and restart: stop the working agent, then relaunch this session with these settings" }
+                        else { "restart: relaunch this session with these settings" }
+                    } else if is_replace_with { "replace: start this session, then delete the old one and its state" } else { "launch: start the session" }),
+                    aria_describedby: if restart_mode && restart_stop_first { Some(RESTART_WARNING_ID) } else { replace_warning.as_ref().map(|_| REPLACE_WARNING_ID) },
+                    // Keep refused attempts reachable: native disabled would
+                    // swallow both a click and implicit Enter before submit can
+                    // say why. The operation guard still prevents another create.
+                    aria_disabled: launch_refusal.is_some(),
+                    aria_label: "{submit_verb} {target_summary}",
+                    "{submit_label}"
+                }
+
+                        }
+                    }
+                    if show_footer_notices {
+                        ScrollRegion {
+                            class: "launch-composer-notices",
+                            handle: COMPOSER_DIALOG, selector: ".launch-composer-notices", name: "Launch notices and confirmation",
+                            recovery: RecoveryFocus::new(".create-session-submit", Some(".launch-composer-cancel"), true, RecoveryDelay::OneFrame),
+            if let Some(err) = footer_error.clone() {
+                // Refusals are visible beside the action they explain, even
+                // when the rest of the dialog needs scrolling. Helm-owned words
+                // still get the same escaping and directional isolation. A
+                // refused launch is a bordered, announced alert: the plain red
+                // line it used to be was easy to miss (TODO.md, 2026-10-22).
+                // Only a launch press sets `launch_attempted`, which keeps
+                // other errors in this slot from reading "Not launched.".
+                if launch_attempted() {
+                    div { class: "create-session-error launch-composer-refusal launch-composer-refusal-alert", role: "alert",
+                        span { class: "launch-composer-refusal-icon", aria_hidden: "true", "⚠" }
+                        PeerLine {
+                            class: "launch-composer-refusal-text".to_string(),
+                            parts: vec![DetailPart::text(if restart_mode { "Restart error. " } else { "Not launched. " }), DetailPart::peer(err)],
+                        }
+                    }
+                } else {
+                    PeerLine {
+                        class: "create-session-error launch-composer-refusal".to_string(),
+                        parts: vec![DetailPart::peer(err)],
+                    }
+                }
+            }
+            // These warnings stay beside the pinned action: pressing it is
+            // the confirmation, so the warning must remain in that viewport.
+            // Polite live region: the warning can appear or change while the
+            // launcher stays open, and the replace button names it as its
+            // description, since pressing that button is the confirmation.
+            if restart_mode && restart_stop_first {
+                p { id: RESTART_WARNING_ID, class: "launch-composer-restart-warning", aria_live: "polite", "The agent is working. This action stops it before restarting." }
+            }
+            if is_replace_with {
+                div { id: REPLACE_WARNING_ID, class: "launch-composer-replace-warning", aria_live: "polite",
+                    if let Some(warning) = &replace_warning {
+                        "{warning}"
+                    }
+                }
+            }
+            // Keep the question adjacent to the action that raised it. Its
+            // bounded scroll region can reveal every answer without letting a
+            // long explanation displace the action row or the editable body.
+            //
+            // Shown only while the draft still holds the refused request's
+            // key: an edit that changes what would launch retires the key,
+            // and with it a question that no longer describes the draft.
+            // Templates retain the whole pair for submit's comparison, so
+            // their completed acceptance separately cancels a changed question.
+            if let Some(question) = yolo_refusal.current().filter(|_| !quick_launch_hidden())
+                && let Some((_, refused_binding)) = intent_key.read().clone().filter(|(key, _)| *key == question.key().refused_key)
+            {
+                crate::yolo_confirm::YoloConfirmation {
+                    ask: question.key().ask.clone(),
+                    may_have_started: question.key().uncertain,
+                    busy,
+                    error: yolo_error(),
+                    // Both YOLO answers submit the form themselves, and only
+                    // once they have taken this opening of the question
+                    // (`answer_launcher_yolo`). As native submit buttons they
+                    // would submit it whether or not the question was still
+                    // open, sending a cancelled draft again.
+                    confirm_submits: false,
+                    // The one-off also disarms any "don't ask again"
+                    // request (`answer_launcher_yolo`): it must never mark
+                    // the host.
+                    on_launch_guarded: {
+                        let question = question.clone();
+                        let refused_binding = refused_binding.clone();
+                        let selection = match &refused_binding.agent {
+                            LaunchIntent::Structured(selection) => Some(selection),
+                            LaunchIntent::Command(_) => None,
+                        };
+                        // What this render shows: the launcher opening the
+                        // question sits in, and the Replace warning above it.
+                        // The answer binds to both (`GuardedSubmitStamp`).
+                        let rendered_opening = *opening_generation.peek();
+                        (question.key().offers_guarded(selection) && draft.snapshot().restart_guarded_changes()).then(|| Callback::new(move |_| {
+                            if !draft.snapshot().restart_guarded_changes() { return; }
+                            let held = intent_key.peek().clone();
+                            let current = held.as_ref()
+                                .filter(|(key, _)| key == &question.key().refused_key)
+                                .and_then(|_| live_yolo_binding());
+                            if !take_launcher_guarded_answer(
+                                &mut yolo_refusal, &question, ops.busy_now(),
+                                rendered_opening, *opening_generation.peek(),
+                                &refused_binding, current.as_ref(),
+                            ) { return; }
+                            yolo_error.set(None);
+                            yolo_confirmed_key.set(None);
+                            yolo_stop_asking.set(None);
+                            choose_permissions.call(Some(LaunchPermission::Guarded));
+                            if draft.snapshot().destination().repo().is_some() {
+                                // The row transition changes the fingerprint
+                                // before render installs its new authority.
+                                // Carry the remaining accepted authority into
+                                // that expected refresh, without reusing its
+                                // preview or the refused YOLO request body.
+                                if let Some(mut authority) = live_preview_authority.peek().clone() {
+                                    authority.agent = preview_agent_now();
+                                    guarded_submit_pending.set(Some(GuardedSubmitStamp::new(
+                                        rendered_opening, authority,
+                                        draft.snapshot().prompt(), draft.snapshot().conversation(),
+                                        replace_guard,
+                                    )));
+                                }
+                            } else {
+                                submit_composer.call(submit_consent);
+                            }
+                        }))
+                    },
+                    // Both "start anyway" answers submit with this render's
+                    // `replace_guard`, the precondition matching the Replace
+                    // warning drawn above the question, by calling
+                    // `submit_composer` directly. Going through the browser
+                    // (`requestSubmit`) would run `onsubmit` as a later
+                    // event with a later render's precondition, which may
+                    // authorize deleting more than the warning the user
+                    // answered said. Nothing is lost by skipping it: the
+                    // form is `novalidate`, so the browser validated nothing
+                    // there, and `submit_composer` keeps every refusal of
+                    // its own and still reads the live draft, whose intent
+                    // key decides whether this consent applies to what is
+                    // sent. The answer also refuses once the launcher has
+                    // moved to another opening (`answer_launcher_yolo`), so
+                    // it never acts on a source the user has moved away
+                    // from.
+                    //
+                    // The `write()` guards are temporaries of the `if`
+                    // condition, dropped before the block runs, which
+                    // matters because `submit_composer` writes
+                    // `yolo_stop_asking` itself.
+                    on_confirm: {
+                        let question = question.clone();
+                        let rendered_opening = *opening_generation.peek();
+                        move |_| {
+                            if answer_launcher_yolo(
+                                &mut yolo_refusal,
+                                &question,
+                                false,
+                                rendered_opening,
+                                *opening_generation.peek(),
+                                &mut yolo_confirmed_key.write(),
+                                &mut yolo_stop_asking.write(),
+                            ) {
+                                submit_composer.call(submit_consent);
+                            }
+                        }
+                    },
+                    on_confirm_and_stop_asking: {
+                        let question = question.clone();
+                        let rendered_opening = *opening_generation.peek();
+                        move |_| {
+                            if answer_launcher_yolo(
+                                &mut yolo_refusal,
+                                &question,
+                                true,
+                                rendered_opening,
+                                *opening_generation.peek(),
+                                &mut yolo_confirmed_key.write(),
+                                &mut yolo_stop_asking.write(),
+                            ) {
+                                submit_composer.call(submit_consent);
+                            }
+                        }
+                    },
+                    on_cancel: move |_| {
+                        // Only this opening: a cancel drawn for an earlier
+                        // question leaves a later one (and its error) alone.
+                        if yolo_refusal.take(&question).is_some() {
+                            if restart_mode { document::eval("document.querySelector('.create-session-form .launch-composer-cancel')?.focus({preventScroll:true})"); }
+                            yolo_error.set(None);
+                        }
+                    },
+                }
+            }
+
+                        }
+                    }
+                }
             }
         }
         }

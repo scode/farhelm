@@ -292,9 +292,9 @@ const SHIPPED_ROLE_BINDINGS = [
   [".btn-danger", "background", "var(--danger-bg)"],
   [".btn-danger", "color", "var(--on-fill)"],
   [".btn-neutral:hover:not(:disabled)", "background", "var(--control-hover-bg)"],
-  [".launch-composer-actions .create-session-submit", "background", "var(--accent-fill)"],
-  [".launch-composer-actions .create-session-submit", "color", "var(--on-fill)"],
-  [".launch-composer-launch-context", "color", "var(--on-accent-dim)"],
+  // The compact launch action inherits the primary roles bound above. Its
+  // separate target summary sits on the neutral footer, outside that fill.
+  [".launch-composer-launch-context", "color", "var(--fg-1)"],
   [".claude-trust-band", "background", "var(--bg-2)"],
   [".claude-trust-band-copy strong", "color", "var(--info)"],
   [".session-tunnel-toggle", "background", "var(--tunnel-bg)"],

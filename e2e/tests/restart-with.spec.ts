@@ -57,7 +57,11 @@ async function expectHeldContext(dialog: Locator, agent: string) {
   await expect(context).toContainText("/tmp");
   await expect(context).toContainText(/host/i);
   await expect(dialog.locator(".create-session-submit"))
-    .toHaveText(new RegExp(`^(?:stop and )?restart\\s+${agent} · .+ · /tmp$`, "i"));
+    .toHaveText(/^(?:stop and )?restart$/i);
+  await expect(dialog.locator(".launch-composer-launch-context"))
+    .toContainText(new RegExp(`${agent} · .+ · /tmp$`, "i"));
+  await expect(dialog.locator(".create-session-submit"))
+    .toHaveAccessibleName(new RegExp(`^(?:stop and )?restart (?:Command · )?${agent} · .+ · /tmp$`, "i"));
   await expect(dialog.getByRole("tab")).toHaveCount(0);
   await expect(dialog.locator(".launch-composer-harness-choice")).toHaveCount(0);
   await expect(dialog.locator(".launch-command-agent, .launch-command-resume-toggle")).toHaveCount(0);
@@ -315,7 +319,8 @@ test("restart with shows fixed context and submits one edited resume", async ({ 
     await expect(dialog.locator(".launch-composer-permissions-choice .launch-composer-changed-marker"))
       .toHaveText("● changed · was agent's own setting");
     await expect(submit).toBeEnabled();
-    await expect(submit).toHaveText(/^restart\s+codex · .+ · \/tmp$/i);
+    await expect(submit).toHaveText(/^restart$/i);
+    await expect(submit).toHaveAccessibleName(/^restart codex · .+ · \/tmp$/i);
     await submit.click();
     await expect(dialog).toHaveCount(0);
     expect(bodies, "one consent must send one restart request").toEqual([{
@@ -1676,7 +1681,9 @@ test("restart with choice Enter carries the displayed working-agent confirmation
   await installEnterCatalog(page);
   const bodies = await refuseEnterRestarts(page);
   const dialog = await openInjectedDialog(page);
-  await expect(dialog.locator(".create-session-submit")).toHaveText(/^stop and restart\s+codex · .+ · \/tmp$/i);
+  await expect(dialog.locator(".create-session-submit")).toHaveText(/^stop and restart$/i);
+  await expect(dialog.locator(".create-session-submit")).toHaveAccessibleName(/^stop and restart codex · .+ · \/tmp$/i);
+  await expect(dialog.locator(".launch-composer-launch-context")).toHaveText(/^codex · .+ · \/tmp$/i);
   await expect(dialog.locator(".launch-composer-restart-warning"))
     .toHaveText("The agent is working. This action stops it before restarting.");
   const low = dialog.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true });
@@ -2284,9 +2291,9 @@ test("restart with withdraws working-agent consent when its source exits", async
     const dialog = page.locator(".create-session-form[data-launcher-mode=restart]");
     await expect(dialog.locator(".launch-composer-cancel")).toBeFocused();
     const submit = dialog.locator(".create-session-submit");
-    await expect(submit).toHaveText(/^stop and restart\s+/);
+    await expect(submit).toHaveText(/^stop and restart$/i);
     await stopSession(request, id);
-    await expect(submit).toHaveText(/^restart\s+/, { timeout: 20_000 });
+    await expect(submit).toHaveText(/^restart$/i, { timeout: 20_000 });
     expect(bodies, "the editor has not consented while source state changed").toHaveLength(0);
     await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
     await expect(submit).toBeEnabled();
