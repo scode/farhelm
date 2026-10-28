@@ -161,3 +161,93 @@ The reviewer noted the accepted open-popup overlap and optional elevation stylin
 casing belongs to the next sentence-case plan. Static images establish neither timing nor server refusal, which have
 separate browser evidence, and imply no native callback or AppKit coverage. The other 68 unchanged views retain their
 earlier visual gates.
+
+### Landing
+
+Landed on the third delivery. Settings, menus, confirmations and the session launcher now follow Steel: dialogs share a
+header, a scrolling body and a pinned footer with Cancel first and the main action last; Settings sections have icons;
+command menus describe their actions and group destructive ones; the launcher groups its fields into labeled rows in one
+column, with its target summary and buttons in a footer that stays visible while the fields scroll.
+
+- #2756: Settings navigation icons and consistent headings.
+- #2757: command-menu descriptions and destructive grouping.
+- #2761: shared dialog layout and confirmations.
+- #2762: the restyled session launcher.
+
+#### Decisions made on your behalf
+
+The landing monitor answered this plan's three blocks under your instruction to make the call unless an issue is huge.
+Two of them needed judgment calls; each call is recorded as a near-term TODO entry for you to revisit:
+
+- The dialogs' Tab order follows what is on screen: header Close, the fields, then the footer with Cancel first and the
+  main action last. The inline YOLO question takes the new answer order only. Trash keeps its totals, progress, Delete
+  all and Close in its pinned header instead of a footer.
+- On desktop the open folder suggestions in the launcher now cover the controls below them until dismissed (Escape, Tab
+  or a click outside the list), because the launcher is one column. A click aimed at the agent buttons can instead pick
+  a suggestion such as "local home", which resets the folder to home on the local host; the footer's target shows that
+  before Launch. Accepted for this plan.
+- When Enter in the folder field submits a launch, the folder suggestions close, whether the launch is accepted or
+  refused, so a refused launch leaves the launcher's controls reachable. SPEC.md says so.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing but plan bookkeeping and TODO entries landed since the plan was based, so nothing interacted.
+
+The first landing attempt found 57 browser failures, mostly launcher tests whose clicks the open folder suggestions
+intercepted; the second found one intermittent failure from the same overlap. A fresh-context reviewer read each
+delivery's fixes, found them honest with no assertion weakened, and the final review found nothing that must be fixed.
+On the way the executor also found and fixed a real product bug: at some phone heights the YOLO question's Cancel was
+clipped. It also closed the open flake about a browser tab opened unaware of a takeover (TODO.md's Deflake entry), and
+raised one host-menu test's time budget from 60 to 120 seconds after a single WebKit failure, with no flake entry.
+
+#### Fixes made at landing
+
+None.
+
+#### Things you should know
+
+- A regression of the new close-on-Enter rule would be caught by the regular browser suite only some of the time; the
+  check that catches it every time is in the visual-review screenshot spec, which only runs for visual reviews. A
+  deterministic regular test is a possible follow-up.
+- The executor's explanation of why the suggestions only sometimes stayed open before the fix (whether the engine takes
+  focus off the folder field when the launcher goes busy, which also closes them) fits the evidence but was not shown
+  separately; it is also why the regular suite catches a regression only some of the time.
+- A launcher test no longer guarantees that the launcher fits a 1440×900 window without scrolling; the pinned footer
+  keeps Launch reachable instead. The main YOLO-question test ("a YOLO launch asks first and starts only when
+  confirmed") now runs at six phone heights instead of the default desktop window, so that check no longer runs at
+  desktop size.
+- The docs website's start-a-session and launch-templates pages still describe the old Launch button, and two pages
+  still put the gear "at the top of the sidebar"; they change with "refresh the docs".
+
+#### Checks
+
+This round landed only this plan. On the stack as delivered:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`,
+  `cargo check -p farhelm-desktop`, the check that every test delay states its reason, `dprint check` across the
+  repository, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, the workspace debug
+  build, the UI's release web build and `scripts/check-desktop-assets.sh`: all passed.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `7c95094e-d252-47f0-b87f-93aaf5463bbd`: all 805 passed;
+  its desktop-build tests, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `2b2fa1ef-1b0e-4937-8a86-64dd2e99a263`: all 988 passed. The UI's JavaScript and stylesheet tests (`node --test` in
+  `crates/farhelm-ui/js-tests`), run `d673ef91-973c-4136-bedf-9e4905f0bc3e`: 358 passed.
+- `npx playwright test` in `e2e/` with the launcher-related specs (`sidebar`, `launcher-enter`, `yolo-guard`,
+  `github-checkout-composer`, `remembered-permissions`, `destination-authority`, `goose-pi-composer`, `opencode`,
+  `templates`), on Chromium and WebKit, three workers each with its own helm and supervisors, no retries, run
+  `2eef74e1-8969-4543-896c-08231caa0ee1`: all 556 passed.
+- The formerly intermittent test "composer folder dropdown preserves keyboard launch and grouped history", repeated 10
+  times on each engine, run `f18230dc-8349-41a3-8732-4dd89a1844d0`: all 20 passed.
+- Reused: the whole browser suite on Chromium and WebKit from the previous landing attempt, run
+  `e25b17a4-5f3e-447b-9816-b89164862de2` (2767 passed, 14 skipped by design, 1 failed: the folder test above), on the
+  previous delivery. This delivery differs from it only in the launcher closing the folder suggestions when Enter
+  submits a launch (six lines), a SPEC.md sentence, the changelog draft, the sidebar test and the visual-review
+  screenshot spec; the regular launcher specs ran again above, and the visual-review spec, which checks the new rule
+  every time, ran only in the executor's own checks.
+- Skipped: the rest of the Rust workspace (only the UI crate changed, and only the desktop app depends on it), the
+  desktop smoke tests (the only desktop-only change is the tunnel consent dialog's layout, covered by the desktop-build
+  UI tests above and the desktop app's compile check) and the native Mac app (not runnable here).
+
+The report's checks were the executor's own runs of the changed cases; this landing ran the whole suite at the previous
+delivery and the launcher specs at this one. Nothing else in the executor's report became untrue at landing.
