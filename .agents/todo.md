@@ -12,10 +12,12 @@ condition) are also in `AGENTS.md`, "TODO.md and FLAKES.md", word for word.
 
 `TODO.md` is the maintainer's running list of wanted fixes and features. When a PR addresses an entry, remove that entry
 in the same PR — the file only ever describes what is still wanted. Do not add entries on your own initiative; they are
-the maintainer's. Two narrow exceptions: a deflake run (`deflake/AGENTS.md`) records the flakes it finds as Deflake
-entries, and recording a newly established open flake in `FLAKES.md` adds its Deflake entry. When a Deflake entry is
-removed, remove the matching line in `deflake/known-flakes.txt` in the same PR: the deflake sweep reads that file as its
-exclusion list, so a stale line is a test that never runs again.
+the maintainer's. Three narrow exceptions: a deflake run (`deflake/AGENTS.md`) records the flakes it finds as Deflake
+entries, recording a newly established open flake in `FLAKES.md` adds its Deflake entry, and the plans landing monitor
+records each judgment call it makes when it answers a blocked plan on the maintainer's behalf as a near-term entry
+(`plans/.agents/landing.md`, "Answering blocks"). When a Deflake entry is removed, remove the matching line in
+`deflake/known-flakes.txt` in the same PR: the deflake sweep reads that file as its exclusion list, so a stale line is a
+test that never runs again.
 
 "tldr todo", "what's in the todo", and similar requests mean the FULL list, grouped under the file's own bucket
 headings, in the file's order, one to two sentences per entry: what it is and, when the entry says so, why or the first

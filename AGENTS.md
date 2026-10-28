@@ -196,9 +196,11 @@ under `crates/farhelm-ui/src/icons/`); vendored geometry gets an entry in `THIRD
 ## TODO.md and FLAKES.md
 
 `TODO.md` is the maintainer's running list of wanted fixes and features. When a PR addresses an entry, remove that entry
-in the same PR. Do not add entries on your own initiative. Two narrow exceptions: a deflake run (`deflake/AGENTS.md`)
-records the flakes it finds as Deflake entries, and recording a newly established open flake in `FLAKES.md` adds its
-Deflake entry. When a Deflake entry is removed, remove the matching line in `deflake/known-flakes.txt` in the same PR.
+in the same PR. Do not add entries on your own initiative. Three narrow exceptions: a deflake run (`deflake/AGENTS.md`)
+records the flakes it finds as Deflake entries, recording a newly established open flake in `FLAKES.md` adds its Deflake
+entry, and the plans landing monitor records each judgment call it makes when it answers a blocked plan on the
+maintainer's behalf as a near-term entry (`plans/.agents/landing.md`, "Answering blocks"). When a Deflake entry is
+removed, remove the matching line in `deflake/known-flakes.txt` in the same PR.
 
 Before adding or revising an entry, and before answering any question about what TODO.md currently holds (a "tldr todo"
 included), fetch and rebase the working copy onto the latest main per jjstack: `jj git fetch`, then rebase the

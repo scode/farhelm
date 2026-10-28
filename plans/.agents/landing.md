@@ -1,8 +1,9 @@
 # Landing
 
 The landing monitor: starting and resuming, a landing round with its cross-plan review, blocking or stopping a landing,
-and waiting between rounds. The landing monitor reads it before reading its log, and again at every round boundary
-(`plans/AGENTS.md`, "Flows and reading lists"). The release plan X flow cites its flags.
+answering blocks on the maintainer's behalf, and waiting between rounds. The landing monitor reads it before reading its
+log, and again at every round boundary (`plans/AGENTS.md`, "Flows and reading lists"). The release plan X flow cites its
+flags.
 
 ## Landing: "monitor for complete plans", "land the complete plans"
 
@@ -59,6 +60,10 @@ Apply the clean-main boundary, then run `queue status` and record the main commi
 
 These flags stay up across rounds, so notify for each once (per claim id, or per plan for the second), and keep what has
 been notified in the monitor log.
+
+Answer every `[blocked]` plan the monitor log does not record as left for the maintainer, per
+`plans/.agents/landing.md`, "Answering blocks". Answering takes nothing from the round: a blocked plan is not landed,
+and an answered one goes back to an executor.
 
 If no plan is `[complete]`, the round is over.
 
@@ -120,8 +125,9 @@ When a landing needs a decision only the maintainer can make (a conflict that ne
 without an obvious fix, a PR closed without merging), push nothing that is not consistent, then write the question per
 `plans/.agents/maintainer-writing.md`, "Writing for the maintainer", naming which of the plan's PRs already merged and
 what main now holds of the plan. Have a sub-agent cold-read it as in `plans/.agents/executing.md`, "Executing one plan",
-step 10, write `blocking` to the monitor log, run `queue block <slug> --claim <id> --question <file>`, notify, return to
-a clean `main`, and go on with the next plan.
+step 10, write `blocking` to the monitor log, run `queue block <slug> --claim <id> --question <file>`, return to a clean
+`main`, answer the block per `plans/.agents/landing.md`, "Answering blocks" (which notifies only for a block left for
+the maintainer), and go on with the next plan.
 
 A failure that is not a decision (an expired GitHub login, a disk that is full) is the monitor's own problem: write
 `stopping`, run `queue stop-landing <slug> --claim <id>` if it can still reach GitHub, notify with the reason, write
@@ -140,13 +146,42 @@ as Playwright's per-test timeout or the nextest configuration's slow-test settin
 caps how long a background command may live, use the longest cap it allows and wake well before it, so the cap is never
 what ends the run.
 
+### Answering blocks
+
+The maintainer delegated most blocks to the monitor on 2026-10-28: "unless it's a HUGE issue, make a call and record the
+todo item just like you did so that progress can be unblocked". So a `[blocked]` plan, whether its executor blocked it
+or the monitor did at landing, does not wait for the maintainer unless its question is huge.
+
+A huge question is one whose answer drops or reverses a feature or behavior the maintainer asked for, risks losing user
+data or weakens security, is irreversible or published (a release, a publication, deleting user data), or needs a
+required authorization (`AGENTS.md`, "Unattended runs"), which never becomes the monitor's decision. Leave such a block
+for the maintainer: notify (`plans/AGENTS.md`, "Notifications") and record the slug in the monitor log as left for the
+maintainer.
+
+Answer every other block:
+
+1. Take the option that best fits the plan, its Decisions and the specs; usually that is the Blocked question's
+   recommendation. A landing that failed mainly because tests fail goes back with an instruction to fix them.
+2. Write the decision per `plans/.agents/maintainer-writing.md`, "Writing for the maintainer", and `plans/AGENTS.md`,
+   "Public-repo hygiene": say that the landing monitor answered it on the maintainer's behalf under this section, state
+   each decision in product terms, and say that a later change of mind is a follow-up, not a reason to stop the plan.
+3. Run `queue answer <slug> --decision <file>`. Exit 10 means someone else answered or changed the plan first: leave it.
+4. For every judgment call the answer makes (not for a plain instruction to fix failing tests), add a near-term TODO
+   entry: one entry per call, in TODO.md's `## Near term` section, never another bucket, starting with a bold
+   `**Revisit <the decision>.**` handle and saying what was decided on the maintainer's behalf, on which date, for which
+   plan, and what the alternative was. Land the entries as a TODO-only PR per `jjstack`, on the latest main, with
+   `dprint check TODO.md` as the only check; CI runs only on demand, so land without waiting for checks. Do it from a
+   clean `main` in the monitor's checkout, never while a check run or a landing is using that checkout; until then, keep
+   the pending entries in the monitor log.
+5. Do not notify: nothing waits on the maintainer. Record the answer and the TODO PR in the monitor log.
+
 ### Waiting between rounds
 
 "Monitor for complete plans" waits the way a monitoring executor does (`plans/.agents/watching.md`, "Drain and keep
 monitoring"), with the same watcher run the same way, except for its role, what its exits mean, and a `--max-wait 6600`
 that makes it wake about every 110 minutes even when nothing changed. The executors have no use for that wake-up, but
 the monitor does: it is how a claim that went quiet gets noticed, and how the review flow can tell the monitor is still
-alive.
+alive. The monitor also wakes for a plan that blocks, which it answers (`plans/.agents/landing.md`, "Answering blocks").
 
 Before starting the watcher at the end of a round, measure the checkout with `du -sh` on its directory. If it reports
 more than 50 GB, run `cargo clean` in the checkout and delete the one-off outputs listed in
@@ -160,14 +195,14 @@ checkout and, unlike an executor, prunes nothing between plans; its checkout rea
   its start. If that status still shows a `[complete]` plan with open PRs (one whose landing claim was released during
   the round, or one delivered while it ran), run another round instead of waiting: the watcher only wakes for what
   changes after its baseline, so anything already complete there would wait for an unrelated change. With
-  `--wake-for lander` it exits only when a plan is `[complete]` with a report it did not have at that commit: newly
-  delivered, delivered again after a follow-up, or given back to `[complete]` by a release. Record its task handle and
-  the commit in the monitor log.
+  `--wake-for lander` it exits only when a plan is `[complete]` with a report it did not have at that commit (newly
+  delivered, delivered again after a follow-up, or given back to `[complete]` by a release), or when a plan is
+  `[blocked]` that was not blocked at that commit. Record its task handle and the commit in the monitor log.
 - `changed` (status 0): run a round.
-- `idle` (status 10): run `queue status`. If it shows a `[complete]` plan with open PRs, run a round: the watcher should
-  have woken for it, and this catches any way it did not. Otherwise act on its flags only (as at the start of a round),
-  then start the watcher again with the same commit. This idle wake, about every 110 minutes, is also how a claim that
-  went quiet gets noticed.
+- `idle` (status 10): run `queue status`. If it shows a `[complete]` plan with open PRs, or a `[blocked]` plan not left
+  for the maintainer, run a round: the watcher should have woken for it, and this catches any way it did not. Otherwise
+  act on its flags only (as at the start of a round), then start the watcher again with the same commit. This idle wake,
+  about every 110 minutes, is also how a claim that went quiet gets noticed.
 - `error:` (status 3): if the line mentions HTTP 401 or 403, the GitHub login needs the maintainer; notify, write
   `stopped` with the reason, and stop. Otherwise keep restarting the watcher with `--interval 1800`, still with
   `--max-wait 6600`, until one exits `changed` or `idle`, which also restores the default interval; an outage still
@@ -177,7 +212,7 @@ checkout and, unlike an executor, prunes nothing between plans; its checkout rea
 Rewrite the Status section on every wake, at the end of every round, when stopping, and whenever you check on a long
 validation run, so a landing that takes hours does not look like a dead monitor; when the maintainer says stop, write
 `stopped <time>: stopped by the maintainer`. "Land the complete plans" writes `stopped <time>: one round finished` when
-its round ends, since no watcher follows it. The monitor notifies only for the conditions this section names (a landing
-it blocked, a landing it could not finish, the three `queue status` flags, and monitoring that stopped for any reason
-other than the maintainer), each of which can stop progress until the maintainer acts. A landing that went through is
-not worth a notification; it shows up in `REPORTS.md` for the next review.
+its round ends, since no watcher follows it. The monitor notifies only for the conditions this section names (a block it
+left for the maintainer, a landing it could not finish, the three `queue status` flags, and monitoring that stopped for
+any reason other than the maintainer), each of which can stop progress until the maintainer acts. A landing that went
+through is not worth a notification; it shows up in `REPORTS.md` for the next review.

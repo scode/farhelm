@@ -1203,8 +1203,8 @@ class WakeCheckTest(QueueTestCase):
         self.assertFalse(self.wakes())
 
     def test_the_lander_wakes_only_for_newly_complete_plans(self):
-        """The monitor acts on nothing else, so it sleeps through claims, blocks, answers and its own landing claims."""
-        self.set_index(line("pending", "a"), line("blocked", "b"), line("pending", "w"))
+        """The monitor lands complete plans, so it sleeps through claims, answers and its own landing claims."""
+        self.set_index(line("pending", "a"), line("in-flight 0a1b2c", "b"), line("in-flight 1a2b3c", "w"))
         self.assertFalse(self.wakes("lander"))
         self.fake.land(
             "main",
@@ -1219,6 +1219,17 @@ class WakeCheckTest(QueueTestCase):
         self.assertFalse(self.wakes("lander"))
         self.set_index(line("pending", "a"), line("complete", "b"), line("pending", "w"))
         self.assertFalse(self.wakes("lander"), "complete at the baseline already, so nothing new to land")
+
+    def test_the_lander_wakes_for_newly_blocked_plans(self):
+        """The monitor answers blocks on the maintainer's behalf, so a plan that blocks wakes it. A block it left for
+        the maintainer is already blocked at its next baseline and must not wake it again, and an answer does not."""
+        self.set_index(line("pending", "a"), line("blocked", "b"), line("pending", "w"))
+        self.assertTrue(self.wakes("lander"))
+        self.baseline = self.fake.refs["main"]
+        self.set_index(line("blocked", "a"), line("blocked", "b"), line("pending", "w"))
+        self.assertTrue(self.wakes("lander"), "a second plan blocking is new")
+        self.set_index(line("pending", "a"), line("blocked", "b"), line("pending", "w"))
+        self.assertFalse(self.wakes("lander"), "only the block left at the baseline remains")
 
     def test_the_lander_wakes_for_a_redelivery_complete_at_the_baseline(self):
         """The monitor's baseline can predate the last delivery: a plan complete at the baseline is landed, comes back
