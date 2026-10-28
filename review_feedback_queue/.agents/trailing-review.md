@@ -68,18 +68,25 @@ new commits to review. The closing status banner below, when required, comes aft
 
 ## Closing status banner
 
-Every final trailing-review result and subsequent merge report must end with a loud Markdown banner unless both the
-review fully completed and the saved checkpoint on main reached the pinned review tip. A draft PR proposing an advance
-does not meet the second condition. Merging findings without advancing the checkpoint does not meet it either. If the
-checkpoint already equals the tip and there is nothing new to review, no banner is needed.
+Trailing-review result and merge reports end with a loud Markdown banner only when the review is incomplete or
+checkpoint handling is exceptional; an ordinary draft PR awaiting merge needs no banner.
+
+Use the banner for unread scope, unmet review or recording requirements, a result that omits the checkpoint advance to
+the pinned tip, a requested merge that fails to land that advance, or an explicitly authorized advance despite an
+incomplete review. A completed review with its checkpoint proposal in the draft PR is the normal outcome. The marker
+reaches main when the PR merges; report that publication state plainly without the banner. If the checkpoint already
+equals the tip and there is nothing new to review, no banner is needed.
+
+An investigated uncertainty retained under `persistent-review`'s completion rules does not itself make the review
+incomplete or trigger the banner.
 
 Use this standalone level-two heading, followed by bold status text, as the final block of the response:
 
 ```markdown
 ## TRAILING REVIEW NOT FULLY COMPLETE
 
-**Review: <complete or incomplete, with the remaining gap>. Checkpoint on main: <actual hash and whether the advance is
-unchanged, pending, or explicitly authorized despite an incomplete review>. Next review starts after <actual hash>.**
+**Review: <complete or incomplete, with any remaining gap>. Checkpoint: <the exception, actual saved hash on main and
+any proposed or explicitly authorized advance>. Next review starts after <actual saved hash on main>.**
 ```
 
 State the actual review and checkpoint status separately. An explicitly authorized checkpoint advance does not turn an

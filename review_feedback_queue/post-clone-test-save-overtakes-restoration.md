@@ -7,6 +7,8 @@ Reviewed commit: a54f1697cc32dcc1ab3e5d162a6b059ba3b1b99b
 The new post-clone Save can remain in flight after the test restores its private stack's settings, then overwrite that
 restoration. Adverse scheduling is unmeasured; no production user-work loss is claimed.
 
+A Hosts-panel test has the same ordering gap for its asynchronous sort save, described below.
+
 ## Details
 
 Suggested bucket: **other**. Confidence: Source-only assessment; the established mechanism, contract ambiguity and
@@ -40,3 +42,33 @@ proposed_drop: none. No runtime execution performed.
 
 Provenance: `g270/f1`. These are reviewer-local identities, not additional findings. Proposed drop: none for the
 retained remainder.
+
+## Hosts-panel sort save instance
+
+Reviewed commit: a03f32543bdaed2cbfea9cf33d43335611e071ff
+
+Even successful cleanup of the new panel test can be overtaken by its own GUI sort save.
+`e2e/tests/hosts-panel.spec.ts:25` calls `chooseSort`, which waits for the local menu/control, rather than persistence
+(`helpers/list-header.ts:17–23`). `remember_sort` queues a fire-and-forget preference write
+(`crates/farhelm-ui/src/list/view.rs:453–460,2052–2063`; `api.rs:1462–1505`). Sort is outside the configuration-save
+request barrier (`api.rs:850–854`). The test's independent API client restores the old sort at line `75`, without first
+settling that GUI write (`helpers/fleet.ts:1084–1107`).
+
+The browser's per-field queue does not order its writes against that other client. If the title request remains pending
+until after direct restoration and then reaches the helm, the unconditional field update wins again
+(`farhelm-helm/src/preferences.rs:249–253`; `store.rs:5158–5169,5219–5225`). Admitted writes also survive client
+disconnect (`middleware.rs:51–74`), so page teardown is not an application-level write fence. This does not require the
+store to reorder already-enqueued calls. The mechanism remains at tip `9b19f8d754bf7658761ef246cfda0ea8397f4f21`.
+
+Suggested bucket remains **other**, for private test-state contamination. Confidence: **confirmed conditional source
+ordering gap**. It needs a different inherited sort and a delayed title write that commits after restoration; actual
+request arrival, occurrence and frequency were not measured. No runtime reproduction or product-data loss is claimed.
+Settle the exact owned save before restoring, including failure paths, while attempting cleanup steps independently.
+
+Possible cover: the existing failed-response record describes related named settings, trust and template cases, rather
+than accepting this new Hosts/sort instance. SPEC.md:1493–1496 and SPEC_impl.md:211–229 require shared sort persistence;
+they do not accept fixture contamination. Searches found no exact Planned, unlanded-plan, BUGS, ledger or filter
+coverage. Proposed drop: none. This differs from the no-restoration-attempt instance in
+`checkout-test-skips-new-spare-setting-restoration.md`: no earlier cleanup error is necessary here.
+
+Provenance: trailing-review run `bfd30ff4-8bd3-46a2-9101-56314a921992`, `g016/g016-f3`, found during synthesis.
