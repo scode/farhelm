@@ -109,3 +109,94 @@ defect. Corrections preserved readable tabs, put the pill beside actual tabs on 
 abbreviations honest, and aligned list focus, busy controls and errors with the shared design. The tighter action
 spacing described above was deliberately retained after scope reassessment. The normal full-mapping tooltip may cross
 the sidebar boundary; that minor recommendation was also declined to retain the existing tooltip behavior.
+
+### Landing
+
+Landed with two small fixes at landing. The open session's top row now follows Steel: Restart and Replace are split
+buttons whose menus also offer Restart with and Replace with, the text size buttons start the action group on the right,
+and the desktop app's tunnels moved from their own row above the terminal into a pill beside the terminal tabs, whose
+list closes tunnels one by one or all at once.
+
+- #2753: Restart and Replace menus in the session's top row.
+- #2754: the tunnel pill and its close controls.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing but plan bookkeeping landed since the plan was based. A fresh-context reviewer checked, on purpose, the failure
+that stopped the Steel sidebar's first landing: no test in a file this plan did not touch still looks for a renamed or
+moved toolbar control. The full browser suite confirmed it (below).
+
+While the stack was merging, main gained two trailing-review records (#2752, #2755), documentation only. One finding
+they queued says #2740's approach can hide the link refusal's explanation under an unrelated overlay, such as an agent's
+request card, while a header question is open; the link is still refused. The tunnel fix below uses the same approach,
+so the same trade-off applies to the tunnel failure notice; triaging that finding covers both.
+
+#### Fixes made at landing
+
+- The new tunnel pill shows a tunnel failure as a floating notice that hangs from the top row, drawn above the header's
+  Restart, Replace and Delete questions. If a tunnel failed while one of those questions was open, the notice could
+  cover the question's description of what the answer will do, which the app's layering rules say must never be covered.
+  While a question is open, the notice now drops below it and comes back when the question closes, the same approach
+  #2740 took for the explanation shown when a terminal link click is refused. In the rare case that a tunnel failure is
+  showing, a question is open and a link's destination preview reaches that corner, the lowered notice still counts as
+  covering the preview, so that link click is refused rather than allowed, which errs on the safe side. A second
+  fresh-context reviewer checked the fix.
+- SPEC.md and SPEC_impl.md still said the text size buttons sit at the end of the terminal tab strip; they now say they
+  start the action group on the right, as the new top-row description and the code have them.
+
+#### Things you should know
+
+- While tunnels exist, the tighter spacing in the top row also shrinks the Cancel and confirm buttons of the header
+  questions to 2 pixels of padding. This was found by reading the stylesheet, not seen in a screenshot; a one-line fix
+  (limit the tight spacing to the toolbar's own buttons) would undo it, and it was left for a follow-up because it is
+  cosmetic.
+- An agent's request card can hide part of the open tunnel list or the floating tunnel failure. The plan's specification
+  changes dropped the earlier promise that request cards never cover the tunnel controls; no recorded decision of yours
+  covers that, so it is yours to accept or reverse.
+- In the tunnel list, Close all and Dismiss have no hover text.
+- The tunnel pill was checked through a copy of its desktop markup in the browser and Rust tests; no one clicked the
+  real pill in the desktop app, and the macOS title band was not observed.
+- The docs website's pages on working in a session, approving agent requests and stopping, restarting and resuming still
+  describe the old toolbar; they change with "refresh the docs".
+- Small leftovers for a later cleanup: an unused hidden description of Restart with, a few stale code comments, the
+  layering comment's list, which does not yet name the header menus or the tunnel list, and SPEC_impl.md's list of
+  surfaces that refuse link clicks, which does not name the new tunnel list or tunnel failure notice.
+
+#### Checks
+
+This round landed only this plan. On the stack as delivered:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, the web-target UI lint
+  `cargo clippy -p farhelm-ui --target wasm32-unknown-unknown --features web -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`,
+  `cargo check -p farhelm-desktop`, the check that every test delay states its reason, `dprint check` across the
+  repository, `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` (two warnings, both
+  about citations main already had), the workspace debug build, the UI's release web build and
+  `scripts/check-desktop-assets.sh`: all passed. The workspace lint does not cover the desktop app's own code, so the
+  report's note that the desktop app's all-targets lint fails on an older warning still stands; it was not rerun.
+- The UI's Rust tests, `cargo nextest run -p farhelm-ui`, run `05a68647-25e5-4a06-b724-5c61149a1a1f`: all 805 passed;
+  its desktop-build tests, `cargo nextest run -p farhelm-ui --features desktop`, run
+  `4fddafe1-8de1-45c7-8fd4-5ee3519c4529`: all 988 passed. The UI's JavaScript and stylesheet tests (`node --test` in
+  `crates/farhelm-ui/js-tests`), run `11db1ff3-6a04-4d85-b7a5-3471d82c133f`: 358 passed.
+- `npx playwright test` in `e2e/`, the whole browser suite on Chromium and WebKit, three workers each with its own helm
+  and supervisors, no retries, run `e7ad1ed0-770d-4807-989e-19a89a462326`: 2755 passed, 14 skipped by design (WebKit
+  cannot be granted clipboard access, tests that need a real signed-in Claude, and a Chromium-only pixel comparison),
+  and 1 failed on Chromium, the known open flake in `e2e/tests/terminal-reconnect.spec.ts` about a browser tab opened
+  unaware of a takeover (in FLAKES.md and the Deflake list), in reconnection code this plan does not touch.
+
+After the landing fixes:
+
+- `dprint check` across the repository; the UI's JavaScript and stylesheet tests, run
+  `def570f2-3dbc-4546-be94-924bf3284548`: 358 passed; the UI's release web build.
+- `npx playwright test tests/header.spec.ts tests/terminal-link-clicks.spec.ts` in `e2e/` (the toolbar, its questions
+  and the tunnel pill, and the link-click tests that hold the same layering rule for the link refusal), on Chromium and
+  WebKit, run `786c6981-3d0a-4265-b643-b2f6532104ba`: all 56 passed. No test drives a tunnel failure while a header
+  question is open; the layering fix was checked by reading the page structure and its stylesheet.
+- Reused for the landed version: the Rust tests and the whole browser suite above, run on the stack as delivered (top
+  `9911a1d9`). The landing fixes change only one stylesheet rule and specification text; the rule is covered by the
+  rerun above, and nothing else they touch is executed. Skipped: the rest of the Rust workspace (only the UI crate
+  changed, and only the desktop app depends on it), the desktop smoke tests (no desktop-specific code changed, and they
+  do not inspect the tunnel pill) and the native Mac app (not runnable here).
+
+The report ran selected browser specs; this landing ran the whole suite. Nothing else in the executor's report became
+untrue at landing.
